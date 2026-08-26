@@ -2214,6 +2214,14 @@ app.get('/api/paper/risk-metrics', (_req, res) => {
   res.json({ success: true, data: paperEngine.getRiskMetrics() });
 });
 
+app.post('/api/paper/monte-carlo', express.json(), (req, res) => {
+  const simulations = Math.min(10_000, Math.max(100, Number(req.body?.simulations) || 2000));
+  const tradesPerSim = Math.min(100, Math.max(5, Number(req.body?.tradesPerSim) || 20));
+  const result = paperEngine.runMonteCarlo(simulations, tradesPerSim);
+  if ('error' in result) return res.status(400).json({ success: false, error: result.error });
+  res.json({ success: true, data: result });
+});
+
 app.post('/api/paper/reset', (req, res) => {
   const balance = req.body?.startingBalance || 1000;
   const portfolio = paperEngine.reset(balance);
@@ -2289,7 +2297,7 @@ app.post('/api/ai-runners/stop', express.json(), (req, res) => {
   res.json({ success: true, data: runner });
 });
 
-app.post('/api/ai-runners/tick', express.json(), async (_req, res) => {
+async function tickAllAiRunners(): Promise<Array<{ id: string; actionZh: string }>> {
   const results: Array<{ id: string; actionZh: string }> = [];
   for (const runner of getAiRunners().filter(r => r.status === 'RUNNING')) {
     try {
@@ -2332,8 +2340,48 @@ app.post('/api/ai-runners/tick', express.json(), async (_req, res) => {
       // Predict.fun tick can be added later with radar probability data.
     } catch { /* skip on error */ }
   }
+
+  return results;
+}
+
+app.post('/api/ai-runners/tick', express.json(), async (_req, res) => {
+  const results = await tickAllAiRunners();
   res.json({ success: true, actions: results });
 });
+
+// --- Server-Sent Events: live AI runner updates + auto-tick ---
+const sseClients = new Set<import('express').Response>();
+
+function broadcastSse(event: string, data: unknown) {
+  const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+  for (const client of sseClients) {
+    try { client.write(payload); } catch { sseClients.delete(client); }
+  }
+}
+
+app.get('/api/stream', (req, res) => {
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    Connection: 'keep-alive',
+  });
+  res.write(': connected\n\n');
+  sseClients.add(res);
+  req.on('close', () => sseClients.delete(res));
+});
+
+// Auto-execute AI runners every 60 seconds and push updates to all open pages.
+setInterval(() => {
+  void (async () => {
+    try {
+      const actions = await tickAllAiRunners();
+      broadcastSse('ai-runner-update', {
+        at: new Date().toISOString(),
+        actions,
+      });
+    } catch { /* keep interval alive */ }
+  })();
+}, 60_000);
 
 // --- Backtesting ---
 

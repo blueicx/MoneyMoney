@@ -1813,6 +1813,13 @@
         <div id="paper-stats" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:20px;"></div>
         <div class="section-title" style="margin-top:16px;">📊 风险分析</div>
         <div id="paper-risk-metrics" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:20px;"></div>
+        <div class="section-title" style="margin-top:8px;">📈 权益曲线</div>
+        <div id="paper-equity-chart" style="background:var(--bg-card);border-radius:12px;box-shadow:var(--shadow);padding:16px;margin-bottom:20px;"></div>
+        <div class="section-title" style="margin-top:8px;">🎲 蒙特卡洛风险模拟</div>
+        <div id="paper-monte-carlo" style="background:var(--bg-card);border-radius:12px;box-shadow:var(--shadow);padding:16px;margin-bottom:20px;">
+          <button class="tab active" onclick="runMonteCarlo()">🎲 模拟未来 20 笔交易</button>
+          <div id="monte-carlo-result"></div>
+        </div>
         <div class="section-title" style="margin-top:20px;">当前持仓</div>
         <div id="paper-positions"></div>
         <div class="section-title" style="margin-top:20px;">最近交易</div>
@@ -1867,8 +1874,15 @@
               <option value="30">未来 30 天</option>
             </select>
             <button class="tab active" onclick="loadEventCalendar(true)">🔄 刷新日历</button>
+            <button class="tab" id="event-view-list-btn" onclick="setEventView('list')">📋 列表</button>
+            <button class="tab" id="event-view-month-btn" onclick="setEventView('month')">📅 月历</button>
           </div>
           <div id="event-calendar-summary" class="event-summary"></div>
+          <div id="event-month-nav" style="display:none;align-items:center;gap:10px;margin-bottom:8px;">
+            <button class="tab" onclick="shiftEventMonth(-1)">‹ 上月</button>
+            <strong id="event-month-label" style="font-size:13px;"></strong>
+            <button class="tab" onclick="shiftEventMonth(1)">下月 ›</button>
+          </div>
           <div id="event-calendar-list"><div class="event-loading">正在汇总财报、央行与经济数据…</div></div>
         </div>
 
@@ -3252,7 +3266,19 @@ async function loadAnalysis() {
 // --- Paper Trading ---
 
 // --- AI Paper Runner ---
+let aiRunnerSse = null;
+function initAiRunnerStream() {
+  if (aiRunnerSse) return;
+  try {
+    aiRunnerSse = new EventSource('/api/stream');
+    aiRunnerSse.addEventListener('ai-runner-update', () => {
+      loadAiRunners();
+    });
+  } catch { /* stream optional */ }
+}
+
 async function loadAiRunners() {
+  initAiRunnerStream();
   try {
     const res = await fetch('/api/ai-runners');
     const { data } = await res.json();
@@ -3298,7 +3324,7 @@ async function createAiRunner() {
     if (!body.success) throw new Error(body.error);
     showToast(`✅ 已启动 ${symbolOrMarketId} 跑单`, 'success');
     loadAiRunners();
-  } catch (e: any) { showToast(e.message || '创建失败', 'error'); }
+  } catch (e) { showToast((e && e.message) || '创建失败', 'error'); }
 }
 
 async function tickAiRunners() {
@@ -3307,7 +3333,7 @@ async function tickAiRunners() {
     const res = await fetch('/api/ai-runners/tick', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
     const body = await res.json();
     if (body.actions?.length) {
-      body.actions.forEach((a: any) => showToast(a.actionZh, 'info', 3500));
+      body.actions.forEach((a) => showToast(a.actionZh, 'info', 3500));
     } else showToast('本轮无操作（信号未触发）', 'info', 2000);
     loadAiRunners();
   } catch (e) { showToast('执行失败', 'error'); }
@@ -3317,6 +3343,35 @@ async function stopRunner(id) {
   await fetch('/api/ai-runners/stop', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) });
   showToast('⏹ 已停止跑单', 'info', 1500);
   loadAiRunners();
+}
+
+async function runMonteCarlo() {
+  const resultEl = document.getElementById('monte-carlo-result');
+  resultEl.innerHTML = '<div style="color:var(--text-secondary);font-size:12px;padding:8px 0;">🎲 正在跑 2000 次模拟…</div>';
+  try {
+    const res = await fetch('/api/paper/monte-carlo', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ simulations: 2000, tradesPerSim: 20 }),
+    });
+    const payload = await res.json();
+    if (!payload.success) throw new Error(payload.error || '模拟失败');
+    const d = payload.data;
+    const ddColor = v => v >= 30 ? 'var(--red)' : v >= 15 ? '#b7791f' : 'var(--green)';
+    const retColor = v => v >= 0 ? 'var(--green)' : 'var(--red)';
+    resultEl.innerHTML = `
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin-top:10px;">
+        <div style="text-align:center;"><div style="font-size:10.5px;color:var(--text-secondary);">最大回撤 P50</div><div style="font-size:17px;font-weight:700;color:${ddColor(d.maxDrawdownP50Pct)};">${d.maxDrawdownP50Pct}%</div></div>
+        <div style="text-align:center;"><div style="font-size:10.5px;color:var(--text-secondary);">最大回撤 P95（悲观）</div><div style="font-size:17px;font-weight:700;color:${ddColor(d.maxDrawdownP95Pct)};">${d.maxDrawdownP95Pct}%</div></div>
+        <div style="text-align:center;"><div style="font-size:10.5px;color:var(--text-secondary);">期末收益 P50</div><div style="font-size:17px;font-weight:700;color:${retColor(d.finalReturnP50Pct)};">${d.finalReturnP50Pct > 0 ? '+' : ''}${d.finalReturnP50Pct}%</div></div>
+        <div style="text-align:center;"><div style="font-size:10.5px;color:var(--text-secondary);">期末收益 P95（乐观）</div><div style="font-size:17px;font-weight:700;color:${retColor(d.finalReturnP95Pct)};">${d.finalReturnP95Pct > 0 ? '+' : ''}${d.finalReturnP95Pct}%</div></div>
+        <div style="text-align:center;"><div style="font-size:10.5px;color:var(--text-secondary);">重创概率(≥30%)</div><div style="font-size:17px;font-weight:700;color:${d.ruinProbabilityPct > 20 ? 'var(--red)' : d.ruinProbabilityPct > 5 ? '#b7791f' : 'var(--green)'};">${d.ruinProbabilityPct}%</div></div>
+        <div style="text-align:center;"><div style="font-size:10.5px;color:var(--text-secondary);">当前权益</div><div style="font-size:17px;font-weight:700;">$${d.currentEquityUsd.toFixed(2)}</div></div>
+      </div>
+      <p style="font-size:11px;color:var(--text-secondary);margin-top:8px;line-height:1.5;">${safeNewsText(d.noteZh)} 样本：${d.sampleTrades} 笔已平仓交易 × ${d.simulations} 次模拟。</p>`;
+  } catch (e) {
+    resultEl.innerHTML = `<div style="color:var(--red);font-size:12px;padding:8px 0;">${safeNewsText(e.message)}</div>`;
+  }
 }
 
 async function loadPaperPortfolio() {
@@ -3395,6 +3450,62 @@ async function loadPaperPortfolio() {
         riskEl.innerHTML = '<div style="color:var(--text-secondary);font-size:13px;padding:10px;">暂无已平仓交易数据</div>';
       }
     } catch (e) { console.error('Risk metrics error:', e); }
+
+    // Equity curve chart
+    try {
+      const eqEl = document.getElementById('paper-equity-chart');
+      const eqRes = await fetch('/api/paper/risk-metrics');
+      const eqPayload = await eqRes.json();
+      const curve = (eqPayload.data && eqPayload.data.equityCurve) ? eqPayload.data.equityCurve : [];
+      if (curve.length >= 2) {
+        const W = 720, H = 200, PAD_L = 52, PAD_R = 16, PAD_T = 14, PAD_B = 26;
+        const eqs = curve.map((c) => c.equity);
+        let lo = Math.min(...eqs), hi = Math.max(...eqs);
+        const pad = (hi - lo) * 0.08 || 1;
+        lo -= pad; hi += pad;
+        const xAt = (i) => PAD_L + (i / (curve.length - 1)) * (W - PAD_L - PAD_R);
+        const yAt = (v) => PAD_T + (1 - (v - lo) / (hi - lo)) * (H - PAD_T - PAD_B);
+        const pts = curve.map((c, i) => `${xAt(i).toFixed(1)},${yAt(c.equity).toFixed(1)}`).join(' ');
+        const up = curve[curve.length - 1].equity >= curve[0].equity;
+        const lineColor = up ? 'var(--green)' : 'var(--red)';
+        const gradId = 'eqGrad' + Date.now();
+        const areaPts = `${PAD_L},${(H - PAD_B)} ${pts} ${(W - PAD_R)},${H - PAD_B}`;
+        // Y-axis gridlines: 4 ticks
+        let gridLines = '';
+        for (let g = 0; g <= 4; g++) {
+          const v = lo + ((hi - lo) * g) / 4;
+          const y = yAt(v).toFixed(1);
+          gridLines += `<line x1="${PAD_L}" y1="${y}" x2="${W - PAD_R}" y2="${y}" stroke="var(--border)" stroke-width="0.6" stroke-dasharray="3,3"/><text x="${PAD_L - 6}" y="${parseFloat(y) + 3.5}" text-anchor="end" font-size="9.5" fill="var(--text-secondary)">$${v.toFixed(v >= 1000 ? 0 : 2)}</text>`;
+        }
+        // Mark max & min points
+        const maxEq = Math.max(...eqs), minEq = Math.min(...eqs);
+        const maxI = eqs.indexOf(maxEq), minI = eqs.indexOf(minEq);
+        eqEl.innerHTML = `
+          <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block;" preserveAspectRatio="xMidYMid meet">
+            <defs><linearGradient id="${gradId}" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stop-color="${up ? 'rgba(34,197,94,0.22)' : 'rgba(239,68,68,0.20)'}"/>
+              <stop offset="100%" stop-color="rgba(128,128,128,0.02)"/>
+            </linearGradient></defs>
+            ${gridLines}
+            <polygon points="${areaPts}" fill="url(#${gradId})"/>
+            <polyline points="${pts}" fill="none" stroke="${lineColor}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+            <circle cx="${xAt(maxI)}" cy="${yAt(maxEq)}" r="3.5" fill="var(--green)" stroke="var(--bg-card)" stroke-width="1.5"/>
+            <text x="${Math.min(xAt(maxI) + 7, W - 60)}" y="${yAt(maxEq) - 6}" font-size="9.5" fill="var(--green)" font-weight="600">峰值 $${maxEq.toFixed(2)}</text>
+            <circle cx="${xAt(minI)}" cy="${yAt(minEq)}" r="3.5" fill="var(--red)" stroke="var(--bg-card)" stroke-width="1.5"/>
+            <text x="${Math.min(xAt(minI) + 7, W - 70)}" y="${yAt(minEq) + 13}" font-size="9.5" fill="var(--red)" font-weight="600">谷值 $${minEq.toFixed(2)}</text>
+          </svg>
+          <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text-secondary);margin-top:6px;">
+            <span>起始 $${curve[0].equity.toFixed(2)}</span>
+            <span style="color:${up ? 'var(--green)' : 'var(--red)'};font-weight:700;">最新 $${curve[curve.length-1].equity.toFixed(2)}（${up ? '+' : ''}${(((curve[curve.length-1].equity / curve[0].equity) - 1) * 100).toFixed(2)}%）</span>
+          </div>`;
+      } else if (curve.length === 1) {
+        eqEl.innerHTML = `<div style="color:var(--text-secondary);font-size:12px;">仅 1 个数据点：$${curve[0].equity.toFixed(2)}，完成一笔平仓后开始绘制曲线。</div>`;
+      } else {
+        eqEl.innerHTML = '<div style="color:var(--text-secondary);font-size:13px;padding:10px;">暂无已平仓交易数据</div>';
+      }
+    } catch (e) { console.error('Equity curve error:', e); }
+
+    // Monte Carlo block (button rendered in HTML, result on demand)
 
     // Open positions
     const posEl = document.getElementById('paper-positions');
@@ -3534,7 +3645,21 @@ function drawEquityChart(curve) {
 }
 
 // --- News ---
-const eventCalendarState = { loading: false, cache: null, cacheAt: 0 };
+const eventCalendarState = { loading: false, cache: null, cacheAt: 0, viewMode: 'list', monthOffset: 0 };
+
+function setEventView(mode) {
+  eventCalendarState.viewMode = mode;
+  const isMonth = mode === 'month';
+  document.getElementById('event-view-list-btn').classList.toggle('active', !isMonth);
+  document.getElementById('event-view-month-btn').classList.toggle('active', isMonth);
+  document.getElementById('event-month-nav').style.display = isMonth ? 'flex' : 'none';
+  if (eventCalendarState.cache) renderEventCalendar(eventCalendarState.cache);
+}
+
+function shiftEventMonth(delta) {
+  eventCalendarState.monthOffset += delta;
+  if (eventCalendarState.cache) renderEventCalendar(eventCalendarState.cache);
+}
 
 function eventImpactColor(impact) {
   return { high: 'var(--red)', medium: 'orange', low: 'var(--green)', holiday: 'var(--text-secondary)' }[impact] || 'var(--text-secondary)';
@@ -3578,6 +3703,18 @@ function renderEventCalendar(data) {
   const highCount = events.filter(item => item.impact === 'high').length;
   const earningsCount = events.filter(item => item.category === 'earnings').length;
   const centralBankCount = events.filter(item => item.category === 'central-bank').length;
+
+  if (eventCalendarState.viewMode === 'month') {
+    summaryEl.innerHTML = `
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <span class="briefing-chip">${events.length} 个事件</span>
+        <span class="briefing-chip">🔴 ${highCount} 高影响</span>
+        <span class="briefing-chip">💼 ${earningsCount} 财报</span>
+        <span class="briefing-chip">🏦 ${centralBankCount} 央行</span>
+      </div>`;
+    listEl.innerHTML = renderEventMonthGrid(events);
+    return;
+  }
 
   summaryEl.innerHTML = `
     <div style="display:flex;gap:8px;flex-wrap:wrap;">
@@ -3625,6 +3762,52 @@ function renderEventCalendar(data) {
   }
   html += '</div></div>';
   listEl.innerHTML = html;
+}
+
+function renderEventMonthGrid(events) {
+  const now = new Date();
+  const target = new Date(now.getFullYear(), now.getMonth() + eventCalendarState.monthOffset, 1);
+  const year = target.getFullYear();
+  const month = target.getMonth();
+  document.getElementById('event-month-label').textContent = `${year} 年 ${month + 1} 月`;
+  const byDay = new Map();
+  for (const item of events) {
+    const d = new Date(item.date);
+    if (d.getFullYear() === year && d.getMonth() === month) {
+      const day = d.getDate();
+      if (!byDay.has(day)) byDay.set(day, []);
+      byDay.get(day).push(item);
+    }
+  }
+  const firstWeekday = (new Date(year, month, 1).getDay() + 6) % 7; // Monday=0
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const todayKey = `${now.getFullYear()}-${now.getMonth()}-${now.getDate()}`;
+  const weekdayNames = ['一', '二', '三', '四', '五', '六', '日'];
+  const headRow = weekdayNames.map(n => `<th style="padding:6px;font-size:10.5px;color:var(--text-secondary);font-weight:600;">${n}</th>`).join('');
+  let cells = '';
+  for (let i = 0; i < firstWeekday; i++) cells += '<td style="border:none;"></td>';
+  for (let day = 1; day <= daysInMonth; day++) {
+    const dayEvents = byDay.get(day) || [];
+    const isToday = `${year}-${month}-${day}` === todayKey;
+    const chips = dayEvents.slice(0, 3).map(e =>
+      `<div title="${safeNewsText(e.titleZh || e.title)}" style="font-size:9px;padding:1.5px 4px;border-radius:4px;margin-top:2px;background:${eventImpactColor(e.impact)};color:white;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${eventCategoryIcon(e.category)} ${beijingTime(e.date)}</div>`
+    ).join('');
+    const more = dayEvents.length > 3 ? `<div style="font-size:8.5px;color:var(--text-secondary);margin-top:1px;">+${dayEvents.length - 3}</div>` : '';
+    cells += `
+      <td style="vertical-align:top;padding:4px;border:1px solid var(--border);min-height:64px;height:64px;background:${isToday ? 'var(--bg-secondary)' : 'transparent'};">
+        <div style="font-size:11px;font-weight:${isToday ? '800' : '500'};color:${isToday ? 'var(--blue,#3b82f6)' : 'var(--text)'};">${day}${isToday ? ' ·今天' : ''}</div>
+        ${chips}${more}
+      </td>`;
+    const isRowEnd = (firstWeekday + day) % 7 === 0;
+    if (isRowEnd && day < daysInMonth) cells += '</tr><tr>';
+  }
+  const trailing = (7 - ((firstWeekday + daysInMonth) % 7)) % 7;
+  for (let i = 0; i < trailing; i++) cells += '<td style="border:none;"></td>';
+  return `
+    <table style="border-collapse:collapse;width:100%;table-layout:fixed;">
+      <thead><tr>${headRow}</tr></thead>
+      <tbody><tr>${cells}</tr></tbody>
+    </table>`;
 }
 
 async function loadEventCalendar(force = false) {
@@ -5993,6 +6176,31 @@ async function loadCrossAssetCorrelation() {
       <div style="font-size:12px;line-height:1.55;margin-bottom:9px;">
         ${safeNewsText(d.summaryZh)}<br>建议：${safeNewsText(d.advisorBiasZh)} <strong style="color:${signalColor};">环境加分 ${d.regimeBoost > 0 ? '+' : ''}${safeNewsText(d.regimeBoost)}</strong>
       </div>
+      ${(() => {
+        const mx = d.correlationMatrix;
+        if (!mx || !mx.labels || mx.labels.length < 2) return '';
+        const cell = (v) => {
+          const a = Math.min(Math.abs(v), 1);
+          const color = v >= 0 ? `rgba(34,197,94,${(a * 0.75).toFixed(2)})` : `rgba(239,68,68,${(a * 0.75).toFixed(2)})`;
+          return `<td style="background:${color};color:${a > 0.45 ? 'white' : 'var(--text)'};text-align:center;padding:5px 4px;font-size:10px;font-weight:600;border:1px solid var(--bg-card);min-width:44px;">${v.toFixed(2)}</td>`;
+        };
+        const headRow = `<tr><th style="padding:4px 6px;font-size:9.5px;color:var(--text-secondary);"></th>${mx.labels.map(l => `<th style="padding:4px 6px;font-size:10px;color:var(--text-secondary);">${safeNewsText(l.nameZh)}</th>`).join('')}</tr>`;
+        const bodyRows = mx.values.map((row, i) =>
+          `<tr><td style="padding:4px 6px;font-size:10.5px;font-weight:600;white-space:nowrap;">${safeNewsText(mx.labels[i].nameZh)}</td>${row.map(v => cell(v)).join('')}</tr>`
+        ).join('');
+        return `
+          <div class="section-title" style="margin-top:14px;">🔥 相关性热力图（30 日）</div>
+          <div style="overflow-x:auto;">
+            <table style="border-collapse:collapse;width:100%;max-width:720px;">
+              ${headRow}${bodyRows}
+            </table>
+          </div>
+          <div style="display:flex;gap:12px;align-items:center;margin-top:6px;font-size:10.5px;color:var(--text-secondary);">
+            <span>红 = 负相关</span>
+            <span style="width:80px;height:8px;border-radius:99px;background:linear-gradient(to right,rgba(239,68,68,0.75),rgba(200,200,200,0.15),rgba(34,197,94,0.75));"></span>
+            <span>绿 = 正相关</span>
+          </div>`;
+      })()}
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:8px;">${cards}</div>
       <small style="display:block;margin-top:8px;color:var(--text-secondary);">来源：Binance 公共日线 + Nasdaq 公共 ETF 历史 · 30 日收益窗 · 更新于 ${new Date(d.generatedAt).toLocaleTimeString('zh-CN')}</small>`;
   } catch (e) {

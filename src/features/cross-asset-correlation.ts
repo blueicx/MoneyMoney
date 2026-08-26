@@ -44,6 +44,10 @@ export interface CrossAssetCorrelationResult {
   summaryZh: string;
   advisorBiasZh: string;
   regimeBoost: number;
+  correlationMatrix: {
+    labels: Array<{ symbol: string; nameZh: string }>;
+    values: number[][];
+  };
 }
 
 interface PriceBar {
@@ -375,6 +379,21 @@ export async function getCrossAssetCorrelationRadar(): Promise<CrossAssetCorrela
     (painfulNames.length ? `重点压力：${painfulNames.join('、')}。` : '') +
     (correlatedNames.length ? `${correlatedNames.join('、')}与美股高度联动。` : '');
 
+  // Pairwise correlation matrix (same 30-day window as rows)
+  const returnMaps = fulfilled.map(item => ({
+    label: { symbol: item.target.symbol, nameZh: item.target.nameZh },
+    returns: dailyReturns(item.bars),
+  }));
+  const correlationMatrix = {
+    labels: returnMaps.map(r => r.label),
+    values: returnMaps.map(a =>
+      returnMaps.map(b => {
+        const pair = alignedReturns(a.returns, b.returns, 30);
+        return round(correlation(pair.left, pair.right), 2);
+      }),
+    ),
+  };
+
   const latestTime = Math.max(...fulfilled.map(item => item.bars[item.bars.length - 1].time));
   const value: CrossAssetCorrelationResult = {
     generatedAt: new Date().toISOString(),
@@ -396,6 +415,7 @@ export async function getCrossAssetCorrelationRadar(): Promise<CrossAssetCorrela
     summaryZh,
     advisorBiasZh,
     regimeBoost,
+    correlationMatrix,
   };
   cache = { ts: Date.now(), value };
   return value;

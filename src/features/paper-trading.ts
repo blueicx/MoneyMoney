@@ -179,6 +179,74 @@ export class PaperTradingEngine {
     return portfolio;
   }
 
+  /**
+   * Monte Carlo portfolio risk simulation.
+   * Bootstrap-resamples historical per-trade PnL to project future
+   * max-drawdown distribution over the next `tradesPerSim` trades.
+   */
+  runMonteCarlo(simulations = 2000, tradesPerSim = 20): {
+    simulations: number;
+    tradesPerSim: number;
+    sampleTrades: number;
+    currentEquityUsd: number;
+    maxDrawdownP5Pct: number;
+    maxDrawdownP50Pct: number;
+    maxDrawdownP95Pct: number;
+    finalReturnP5Pct: number;
+    finalReturnP50Pct: number;
+    finalReturnP95Pct: number;
+    ruinProbabilityPct: number;
+    noteZh: string;
+  } | { error: string } {
+    const closed = portfolio.positions
+      .filter(p => p.status === 'CLOSED' && typeof p.pnlUsd === 'number');
+    if (closed.length < 5) {
+      return { error: '至少需要 5 笔已平仓交易才能跑蒙特卡洛模拟' };
+    }
+    const pnls = closed.map(p => p.pnlUsd!);
+    const currentEquity = portfolio.startingBalance + pnls.reduce((s, v) => s + v, 0);
+    // Scale sampled PnL to current equity so projections stay proportional.
+    const scaleFactor = Math.max(currentEquity, 1) / Math.max(portfolio.startingBalance, 1);
+
+    const ddResults: number[] = [];
+    const finalReturns: number[] = [];
+    let ruinCount = 0;
+    for (let sim = 0; sim < simulations; sim++) {
+      let equity = currentEquity;
+      let peak = equity;
+      let maxDd = 0;
+      for (let t = 0; t < tradesPerSim; t++) {
+        const sampled = pnls[Math.floor(Math.random() * pnls.length)] * scaleFactor;
+        equity += sampled;
+        if (equity > peak) peak = equity;
+        if (peak > 0) {
+          const dd = ((peak - equity) / peak) * 100;
+          if (dd > maxDd) maxDd = dd;
+        }
+      }
+      ddResults.push(maxDd);
+      finalReturns.push(((equity / currentEquity) - 1) * 100);
+      if (maxDd >= 30) ruinCount++;
+    }
+    ddResults.sort((a, b) => a - b);
+    finalReturns.sort((a, b) => a - b);
+    const pct = (arr: number[], p: number) => arr[Math.min(arr.length - 1, Math.floor(arr.length * p))] ?? 0;
+    return {
+      simulations,
+      tradesPerSim,
+      sampleTrades: pnls.length,
+      currentEquityUsd: Math.round(currentEquity * 100) / 100,
+      maxDrawdownP5Pct: Math.round(pct(ddResults, 0.05) * 10) / 10,
+      maxDrawdownP50Pct: Math.round(pct(ddResults, 0.5) * 10) / 10,
+      maxDrawdownP95Pct: Math.round(pct(ddResults, 0.95) * 10) / 10,
+      finalReturnP5Pct: Math.round(pct(finalReturns, 0.05) * 10) / 10,
+      finalReturnP50Pct: Math.round(pct(finalReturns, 0.5) * 10) / 10,
+      finalReturnP95Pct: Math.round(pct(finalReturns, 0.95) * 10) / 10,
+      ruinProbabilityPct: Math.round((ruinCount / simulations) * 1000) / 10,
+      noteZh: '按历史每笔盈亏随机重排，模拟未来 20 笔交易的最大回撤分布。30% 回撤视为「重创线」。',
+    };
+  }
+
   getPortfolio(): PaperPortfolio & { openPositionsValue: number; equity: number; winRate: number } {
     const openPositions = portfolio.positions.filter(p => p.status === 'OPEN');
     const openValue = openPositions.reduce((s, p) => s + p.quantity * p.entryPrice, 0);
