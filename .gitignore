@@ -80,3 +80,4 @@ radar-smoke-test.cjs
 ui-*.cjs
 ui-*.png
 data/risk-history.json
+release/core/data/
