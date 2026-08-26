@@ -210,6 +210,29 @@
       border-radius: 10px;
       box-shadow: var(--shadow);
     }
+    .nav-group-bar {
+      display: flex; gap: 4px; margin-bottom: 6px; padding: 4px;
+      background: var(--bg-card); border-radius: 10px; box-shadow: var(--shadow);
+      overflow-x: auto; scrollbar-width: thin;
+    }
+    .nav-group-btn {
+      flex: 0 0 auto; white-space: nowrap; padding: 10px 18px;
+      border: none; background: transparent; color: var(--text-secondary);
+      font-size: 14px; font-weight: 600; cursor: pointer; border-radius: 8px;
+      transition: all .15s;
+    }
+    .nav-group-btn:hover { background: rgba(128,128,128,.08); color: var(--text-primary); }
+    .nav-group-btn.active { background: var(--purple); color: white; }
+    .nav-sub-bar {
+      display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 16px; padding: 4px 4px;
+      background: var(--bg-card); border-radius: 8px; border: 1px solid var(--border);
+    }
+    .nav-sub-btn {
+      padding: 7px 14px; border: none; background: transparent; color: var(--text-secondary);
+      font-size: 12.5px; cursor: pointer; border-radius: 6px; transition: all .12s;
+    }
+    .nav-sub-btn:hover { background: rgba(128,128,128,.08); color: var(--text-primary); }
+    .nav-sub-btn.active { background: var(--purple-light, rgba(139,92,246,.15)); color: var(--purple); font-weight: 600; }
     .tab {
       flex: 0 0 auto;
       white-space: nowrap;
@@ -1700,25 +1723,8 @@
 
   <div class="layout">
     <main class="main">
-      <div class="tabs">
-        <button class="tab active" onclick="showTab('markets', this)">市场</button>
-        <button class="tab" onclick="showTab('positions', this)">持仓</button>
-        <button class="tab" onclick="showTab('orders', this)">订单</button>
-        <button class="tab" onclick="showTab('analysis', this)">📊 分析</button>
-        <button class="tab" onclick="showTab('paper', this)">📈 模拟盘</button>
-        <button class="tab" onclick="showTab('backtest', this)">🧪 回测</button>
-        <button class="tab" onclick="showTab('news', this)">📰 新闻</button>
-        <button class="tab" onclick="showTab('settings', this)">⚙️ 设置</button>
-        <button class="tab" onclick="showTab('binance', this)">🏦 币安</button>
-        <button class="tab" onclick="showTab('stocks', this)">📈 股票</button>
-        <button class="tab" onclick="showTab('options', this)">🎯 期权</button>
-        <button class="tab" onclick="showTab('radar', this)">🌐 预测雷达</button>
-        <button class="tab" onclick="showTab('risk', this)">🛡 风险总览</button>
-        <button class="tab" onclick="showTab('alerts', this)">🔔 预警</button>
-        <button class="tab" onclick="showTab('whales', this)">🐋 巨鲸</button>
-        <button class="tab" onclick="showTab('strategies', this)">⚔️ 策略</button>
-        <button class="tab" onclick="showTab('journal', this)">📝 日志</button>
-      </div>
+      <div id="nav-group-bar" class="nav-group-bar"></div>
+      <div id="nav-sub-bar" class="nav-sub-bar"></div>
       <!-- Market Overview Bar -->
       <div id="market-overview" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;padding:12px 14px;background:var(--bg-card);border-radius:12px;border:1px solid var(--border);overflow-x:auto;">
         <span class="skl" style="min-width:100px;height:36px;"></span>
@@ -8034,12 +8040,49 @@ document.addEventListener('keydown', event => {
   if (event.key === 'Enter') { event.preventDefault(); runGlobalSearchItem(globalSearchState.active); }
 });
 
+// --- Grouped Navigation ---
+const NAV_GROUPS = [
+  { id: 'home',    label: '🏠 首页',   tabs: [{ id: 'markets', label: '🎯 Predict.fun' }] },
+  { id: 'trade',   label: '📈 交易',   tabs: [{ id: 'binance', label: '🏦 币安' }, { id: 'stocks', label: '📈 股票·宏观' }, { id: 'options', label: '🎯 期权' }, { id: 'positions', label: '📋 持仓' }, { id: 'orders', label: '📄 订单' }] },
+  { id: 'research',label: '🌐 研究',   tabs: [{ id: 'radar', label: '🌐 预测雷达' }, { id: 'news', label: '📰 新闻日历' }, { id: 'whales', label: '🐋 巨鲸监控' }, { id: 'backtest', label: '🧪 回测' }, { id: 'strategies', label: '⚔️ 策略对比' }] },
+  { id: 'risk',    label: '🛡 风控',   tabs: [{ id: 'analysis', label: '📊 智能助手' }, { id: 'risk', label: '🛡 风险总览' }, { id: 'alerts', label: '🔔 预警' }, { id: 'paper', label: '📈 模拟盘' }, { id: 'journal', label: '📝 日志复盘' }] },
+  { id: 'system',  label: '⚙️ 系统',   tabs: [{ id: 'settings', label: '⚙️ 设置' }] },
+];
+let activeNavGroup = 'home';
+
+function renderNavGroups() {
+  const bar = document.getElementById('nav-group-bar');
+  if (!bar) return;
+  bar.innerHTML = NAV_GROUPS.map(g =>
+    `<button class="nav-group-btn${g.id === activeNavGroup ? ' active' : ''}" onclick="switchNavGroup('${g.id}')">${g.label}</button>`
+  ).join('');
+}
+
+function switchNavGroup(groupId) {
+  activeNavGroup = groupId;
+  renderNavGroups();
+  renderNavSubTabs();
+  const group = NAV_GROUPS.find(g => g.id === groupId);
+  if (group && group.tabs.length) showTab(group.tabs[0].id);
+}
+
+function renderNavSubTabs() {
+  const bar = document.getElementById('nav-sub-bar');
+  if (!bar) return;
+  const group = NAV_GROUPS.find(g => g.id === activeNavGroup);
+  if (!group) return;
+  bar.innerHTML = group.tabs.map(t =>
+    `<button class="nav-sub-btn" data-tab="${t.id}" onclick="showTab('${t.id}', this)">${t.label}</button>`
+  ).join('');
+}
+
 function showTab(tab, clicked) {
   document.querySelectorAll('.tab').forEach((t) => t.classList.remove('active'));
   const button = clicked || [...document.querySelectorAll('.tabs .tab')].find(item => (item.getAttribute('onclick') || '').includes(`'${tab}'`));
   if (button) button.classList.add('active');
   document.querySelectorAll('.tab-content').forEach((c) => c.classList.remove('active'));
   document.getElementById(tab + '-tab').classList.add('active');
+  document.querySelectorAll('.nav-sub-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
   document.querySelectorAll('.mnav-btn').forEach(button => button.classList.toggle('active', button.dataset.tab === tab));
 
   if (tab === 'positions') loadPositions();
@@ -9296,6 +9339,8 @@ document.getElementById('sell-modal').addEventListener('click', (e) => {
 });
 
 loadAll();
+renderNavGroups();
+renderNavSubTabs();
 loadMarketOverview();
 loadResearchBriefing();
 initializeDashboardCollapses();
