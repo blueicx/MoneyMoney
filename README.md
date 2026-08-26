@@ -1,10 +1,27 @@
-# 💰 MoneyMoney Trading Bot
+<div align="center">
 
-> 多市场交易机器人与 Web 仪表盘 | Multi-market trading bot & web dashboard
+<img src="src/web/public/icon.svg" width="96" alt="MoneyMoney Logo" />
 
+# MoneyMoney
+
+**多市场研究工作台 · 预测雷达 · 智能交易仪表盘**
+
+一个面向个人研究者的多市场工具箱：预测市场、加密货币、美股与宏观事件，
+汇聚在同一块玻璃拟态面板里。
+
+[![Author](https://img.shields.io/badge/Author-%E5%90%B4%E5%AE%B6%E5%B8%8C%EF%BC%88WJX%EF%BC%89-blue)](https://github.com/blueicx)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.3-blue)
 ![Node](https://img.shields.io/badge/Node-18+-green)
 ![License](https://img.shields.io/badge/License-MIT-yellow)
+
+---
+
+</div>
+
+## 为什么叫 MoneyMoney
+
+取自钱落进账户的那声轻响，也时刻提醒自己：
+**先懂风险，再谈收益；先做研究，再做决定。**
 
 ---
 
@@ -346,7 +363,9 @@ TELEGRAM_CHAT_ID=      # Telegram chat ID (optional)
 
 ### License
 
-MIT © 2024-2026 吴家希（WJX）
+MIT © 2024-2026 **吴家希（WJX）**
+
+> 作者：吴家希（WJX） · GitHub [@blueicx](https://github.com/blueicx)
 
 ### Risk Notice / 风险提示
 
