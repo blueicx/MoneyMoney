@@ -1,0 +1,51 @@
+{
+  "startingBalance": 1000,
+  "cashBalance": 1005,
+  "positions": [
+    {
+      "id": "pp_1787392188719_eb3jjz",
+      "marketId": 1,
+      "marketTitle": "Test",
+      "outcomeIndex": 0,
+      "outcomeName": "YES",
+      "side": "BUY",
+      "entryPrice": 0.5,
+      "quantity": 100,
+      "entryTime": "2026-08-22T09:49:48.719Z",
+      "status": "CLOSED",
+      "exitPrice": 0.55,
+      "exitTime": "2026-08-22T09:50:09.753Z",
+      "pnlUsd": 5,
+      "pnlPct": 10
+    }
+  ],
+  "tradeLog": [
+    {
+      "id": "tl_1787392209753",
+      "marketId": 1,
+      "marketTitle": "Test",
+      "action": "SELL",
+      "outcomeName": "YES",
+      "price": 0.55,
+      "quantity": 100,
+      "timestamp": "2026-08-22T09:50:09.753Z",
+      "reason": "Close | PnL: +$5.00 (10.0%)"
+    },
+    {
+      "id": "tl_1787392188719",
+      "marketId": 1,
+      "marketTitle": "Test",
+      "action": "BUY",
+      "outcomeName": "YES",
+      "price": 0.5,
+      "quantity": 100,
+      "timestamp": "2026-08-22T09:49:48.719Z",
+      "reason": "test"
+    }
+  ],
+  "totalPnl": 5.000000000000007,
+  "winsCount": 1,
+  "lossesCount": 0,
+  "maxDrawdownPct": 0,
+  "peakEquity": 1005
+}

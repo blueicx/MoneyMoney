@@ -1,0 +1,81 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Environment files (NEVER commit!)
+.env
+.env.local
+.env.*.local
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Test coverage
+coverage/
+
+# TypeScript cache
+*.tsbuildinfo
+
+# Windows artifacts
+nul
+
+# Package manager
+pnpm-lock.yaml
+yarn.lock
+
+# Generated UI screenshots
+_ui-*.png
+_forecast-lab-smoke.png
+
+# Local dispatch/debug scratch files
+.superpowers/*
+!.superpowers/dispatch-progress.md
+release/assistant-journal.json
+release/core/assistant-journal.json
+release/core/*.json
+release/core/*.cache.json
+data/assistant-journal.json
+data/predict-categories-cache.json
+data/prediction-radar-snapshot.json
+data/prediction-history.json
+data/forecast-lab.json
+data/*.cache.json
+data/settings.json
+data/us-directory-cache.json
+kalshi-openapi.yaml
+
+# Local research captures and smoke scripts
+cookies.txt
+bing-wecom.html
+google-wecom.html
+doc-app.js
+doc-chunk.js
+doc-vendors.js
+doc*.html
+doc*.json
+gj-audit.*
+gj-binary.json
+gj*.html
+gjpage*.html
+kalshi-series.json
+metaculus.json
+radar-*.png
+radar-*.json
+radar-smoke-test.cjs
+ui-*.cjs
+ui-*.png

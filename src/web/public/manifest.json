@@ -1,0 +1,18 @@
+{
+  "name": "MoneyMoney Trading Bot",
+  "short_name": "MoneyMoney",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f8f7ff",
+  "theme_color": "#7c3aed",
+  "description": "AI-powered prediction market trading bot",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
+
