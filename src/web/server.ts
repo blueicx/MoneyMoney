@@ -2252,10 +2252,87 @@ app.get('/api/paper/trades', (req, res) => {
 
 // --- Kelly Criterion ---
 
+import {
+  createAiRunner, stopAiRunner, getAiRunners,
+  runnerOpenPosition, runnerClosePosition,
+  summarizeRunner,
+} from '../features/ai-paper-runner';
+
 app.post('/api/kelly', (req, res) => {
   const { probability, price, bankroll, fraction } = req.body;
   const result = kellySizer.calculate(probability, price, bankroll || 1000, fraction);
   res.json({ success: true, data: result });
+});
+
+// --- AI Paper Runner ---
+
+app.get('/api/ai-runners', (_req, res) => {
+  const runners = getAiRunners().map(r => ({ ...r, summary: summarizeRunner(r) }));
+  res.json({ success: true, data: runners });
+});
+
+app.post('/api/ai-runners/create', express.json(), (req, res) => {
+  const { venue, symbolOrMarketId, title, budgetUsd } = req.body ?? {};
+  if (!venue || !symbolOrMarketId || !budgetUsd || typeof budgetUsd !== 'number' || budgetUsd < 1) {
+    return res.status(400).json({ success: false, error: '请填写平台、标的和金额（≥$1）' });
+  }
+  try {
+    const runner = createAiRunner(venue, String(symbolOrMarketId), String(title || symbolOrMarketId), budgetUsd);
+    res.json({ success: true, data: runner });
+  } catch (e: any) { res.status(400).json({ success: false, error: e.message }); }
+});
+
+app.post('/api/ai-runners/stop', express.json(), (req, res) => {
+  const { id } = req.body ?? {};
+  const runner = id ? stopAiRunner(String(id)) : null;
+  if (!runner) return res.status(404).json({ success: false, error: '未找到跑单或已停止' });
+  res.json({ success: true, data: runner });
+});
+
+app.post('/api/ai-runners/tick', express.json(), async (_req, res) => {
+  const results: Array<{ id: string; actionZh: string }> = [];
+  for (const runner of getAiRunners().filter(r => r.status === 'RUNNING')) {
+    try {
+      if (runner.venue === 'Binance') {
+        const symbol = runner.symbolOrMarketId.toUpperCase();
+        const klineRes = await fetch(
+          `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=1h&limit=20`,
+          { signal: AbortSignal.timeout(8_000) },
+        );
+        if (!klineRes.ok) continue;
+        const klines = (await klineRes.json()) as unknown[][];
+        const closes = klines.map(k => Number(k[4]));
+        if (closes.length < 15) continue;
+
+        // Simple RSI(14)
+        let gains = 0, losses = 0;
+        for (let i = 1; i < 15; i++) {
+          const diff = closes[closes.length - i] - closes[closes.length - i - 1];
+          if (diff > 0) gains += diff; else losses += Math.abs(diff);
+        }
+        const rs = gains / (losses || 1e-9);
+        const rsi = 100 - 100 / (1 + rs);
+        const price = closes[closes.length - 1];
+        const sma10 = closes.slice(-10).reduce((a, b) => a + b, 0) / 10;
+        const aboveSma = price > sma10;
+
+        const openPos = runner.positions.find(p => p.status === 'OPEN');
+        if (!openPos && rsi < 32 && runner.cashUsd > 5) {
+          const qty = Math.floor(runner.cashUsd * 0.95 / price * 1000) / 1000;
+          if (qty > 0) {
+            runnerOpenPosition(runner.id, price, qty, 'LONG', `RSI ${rsi.toFixed(0)} 超卖，价格${aboveSma ? '在' : '低于'}SMA10`);
+            results.push({ id: runner.id, actionZh: `BUY ${qty} @ ${price.toFixed(2)} (RSI=${rsi.toFixed(0)})` });
+          }
+        } else if (openPos && (rsi > 68 || !aboveSma)) {
+          const pnl = runnerClosePosition(runner.id, openPos.id, price,
+            rsi > 68 ? `RSI ${rsi.toFixed(0)} 超买` : '跌破 SMA10 止损');
+          results.push({ id: runner.id, actionZh: `SELL @ ${price.toFixed(2)} PnL=${pnl?.toFixed(2) ?? '?'}` });
+        }
+      }
+      // Predict.fun tick can be added later with radar probability data.
+    } catch { /* skip on error */ }
+  }
+  res.json({ success: true, actions: results });
 });
 
 // --- Backtesting ---

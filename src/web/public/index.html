@@ -233,6 +233,22 @@
     }
     .nav-sub-btn:hover { background: rgba(128,128,128,.08); color: var(--text-primary); }
     .nav-sub-btn.active { background: var(--purple-light, rgba(139,92,246,.15)); color: var(--purple); font-weight: 600; }
+    #mm-toast-container {
+      position: fixed; bottom: 20px; right: 20px; z-index: 99999;
+      display: flex; flex-direction: column; gap: 8px; pointer-events: none;
+    }
+    .mm-toast {
+      padding: 10px 18px; border-radius: 10px; font-size: 13px; font-weight: 500;
+      background: var(--bg-card, rgba(30,30,40,.9)); color: var(--text-primary, #eee);
+      border: 1px solid var(--border, rgba(128,128,128,.3));
+      box-shadow: 0 4px 16px rgba(0,0,0,.25);
+      opacity: 0; transform: translateY(12px); transition: all .25s ease;
+      backdrop-filter: blur(12px); pointer-events: auto;
+    }
+    .mm-toast.show { opacity: 1; transform: translateY(0); }
+    .mm-toast.success { border-left: 3px solid var(--green, #22c55e); }
+    .mm-toast.error   { border-left: 3px solid var(--red, #ef4444); }
+    .mm-toast.info    { border-left: 3px solid var(--purple, #7c3aed); }
     .tab {
       flex: 0 0 auto;
       white-space: nowrap;
@@ -1725,6 +1741,8 @@
     <main class="main">
       <div id="nav-group-bar" class="nav-group-bar"></div>
       <div id="nav-sub-bar" class="nav-sub-bar"></div>
+      <div id="mm-toast-container"></div>
+      <button id="theme-toggle-btn" onclick="toggleTheme()" title="切换深色/浅色" style="position:fixed;top:14px;right:18px;z-index:9999;width:38px;height:38px;border-radius:50%;border:1px solid var(--border);background:var(--bg-card);backdrop-filter:blur(10px);cursor:pointer;font-size:17px;display:flex;align-items:center;justify-content:center;box-shadow:var(--shadow);transition:transform .15s;" onmouseover="this.style.transform='scale(1.1)'" onmouseout="this.style.transform='scale(1)'">🌙</button>
       <!-- Market Overview Bar -->
       <div id="market-overview" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;padding:12px 14px;background:var(--bg-card);border-radius:12px;border:1px solid var(--border);overflow-x:auto;">
         <span class="skl" style="min-width:100px;height:36px;"></span>
@@ -1799,6 +1817,19 @@
         <div id="paper-positions"></div>
         <div class="section-title" style="margin-top:20px;">最近交易</div>
         <div id="paper-trades"></div>
+        <div class="section-title" style="margin-top:24px;">🤖 AI 模拟跑单</div>
+        <p style="font-size:11.5px;color:var(--text-secondary);margin-bottom:10px;">设定金额，选一个币安交易对，AI 会自动用 RSI 策略模拟开平仓。独立账本，不影响手动模拟盘。</p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px;">
+          <select id="ai-runner-venue" style="padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);font-size:12px;">
+            <option value="Binance">🏦 币安</option>
+            <option value="Predict.fun" disabled>🎯 Predict.fun（即将支持）</option>
+          </select>
+          <input id="ai-runner-symbol" placeholder="如 BTCUSDT" style="width:120px;padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);font-size:12px;text-transform:uppercase;" />
+          <input id="ai-runner-budget" type="number" placeholder="预算 $" min="1" step="1" style="width:90px;padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);font-size:12px;" />
+          <button class="tab active" onclick="createAiRunner()" style="padding:7px 16px;font-size:12.5px;">▶ 启动</button>
+          <button class="tab" onclick="tickAiRunners()" style="padding:7px 14px;font-size:12.5px;">⚡ 执行一轮</button>
+        </div>
+        <div id="ai-runners-list"></div>
       </div>
 
       <!-- Backtest Tab -->
@@ -3219,6 +3250,75 @@ async function loadAnalysis() {
 
 
 // --- Paper Trading ---
+
+// --- AI Paper Runner ---
+async function loadAiRunners() {
+  try {
+    const res = await fetch('/api/ai-runners');
+    const { data } = await res.json();
+    const el = document.getElementById('ai-runners-list');
+    if (!el) return;
+    if (!data || !data.length) {
+      el.innerHTML = '<div style="color:var(--text-secondary);font-size:12.5px;padding:8px;">暂无跑单；填好标的和金额后点「启动」。</div>';
+      return;
+    }
+    el.innerHTML = data.map(r => {
+      const s = r.summary || {};
+      const pnlColor = (s.totalPnlUsd ?? 0) >= 0 ? 'var(--green)' : 'var(--red)';
+      return `
+      <div style="background:var(--bg-card);border-radius:12px;padding:14px;margin-bottom:10px;box-shadow:var(--shadow);font-size:12.5px;">
+        <div style="display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap;">
+          <span style="font-weight:700;">${r.status === 'RUNNING' ? '🟢' : '⏹'} ${safeNewsText(r.title)}</span>
+          <span style="color:${pnlColor};font-weight:700;">${(s.totalPnlUsd ?? 0) >= 0 ? '+' : ''}$${s.totalPnlUsd?.toFixed(2) ?? '0.00'}</span>
+        </div>
+        <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:6px;color:var(--text-secondary);font-size:11.5px;">
+          <span>预算 $${r.budgetUsd}</span><span>权益 $${s.equityUsd?.toFixed(2) ?? '—'}</span>
+          <span>已平仓 ${s.closedCount ?? 0}</span><span>胜率 ${s.winRatePct ?? 0}%</span>
+          ${s.unrealizedPct != null ? `<span>浮盈 ${s.unrealizedPct >= 0 ? '+' : ''}${s.unrealizedPct}%</span>` : ''}
+        </div>
+        ${(r.trades || []).slice(0, 3).map(t => `<div style="margin-top:4px;font-size:11px;color:var(--text-secondary);">${t.action === 'BUY' ? '🟢' : '🔴'} ${t.side || ''} @ ${t.price} — ${safeNewsText(t.reasonZh)}</div>`).join('')}
+        ${r.status === 'RUNNING' ? `<button onclick="stopRunner('${r.id}')" style="margin-top:8px;padding:4px 14px;border-radius:8px;border:none;background:var(--red-light);color:var(--red);font-size:11px;cursor:pointer;">⏹ 停止</button>` : ''}
+      </div>`;
+    }).join('');
+  } catch (e) {}
+}
+
+async function createAiRunner() {
+  const venue = document.getElementById('ai-runner-venue').value;
+  const symbolOrMarketId = document.getElementById('ai-runner-symbol').value.trim().toUpperCase();
+  const budgetUsd = Number(document.getElementById('ai-runner-budget').value);
+  if (!symbolOrMarketId) { showToast('请填写标的', 'error'); return; }
+  if (!budgetUsd || budgetUsd < 1) { showToast('预算至少 $1', 'error'); return; }
+  try {
+    const res = await fetch('/api/ai-runners/create', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ venue, symbolOrMarketId, title: `${venue} · ${symbolOrMarketId}`, budgetUsd }),
+    });
+    const body = await res.json();
+    if (!body.success) throw new Error(body.error);
+    showToast(`✅ 已启动 ${symbolOrMarketId} 跑单`, 'success');
+    loadAiRunners();
+  } catch (e: any) { showToast(e.message || '创建失败', 'error'); }
+}
+
+async function tickAiRunners() {
+  showToast('⚡ 正在执行一轮...', 'info', 1500);
+  try {
+    const res = await fetch('/api/ai-runners/tick', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    const body = await res.json();
+    if (body.actions?.length) {
+      body.actions.forEach((a: any) => showToast(a.actionZh, 'info', 3500));
+    } else showToast('本轮无操作（信号未触发）', 'info', 2000);
+    loadAiRunners();
+  } catch (e) { showToast('执行失败', 'error'); }
+}
+
+async function stopRunner(id) {
+  await fetch('/api/ai-runners/stop', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) });
+  showToast('⏹ 已停止跑单', 'info', 1500);
+  loadAiRunners();
+}
+
 async function loadPaperPortfolio() {
   try {
     const res = await fetch('/api/paper/portfolio');
@@ -7060,7 +7160,8 @@ async function saveNote(id) {
     });
     noteEl.style.borderColor = 'var(--green)';
     setTimeout(() => { if (noteEl) noteEl.style.borderColor = ''; }, 1200);
-  } catch (e) {}
+    showToast('✅ 复盘笔记已保存', 'success');
+  } catch (e) { showToast('❌ 保存失败', 'error'); }
 }
 
 function safeAttr(text) { return String(text ?? '').replace(/[^a-zA-Z0-9_-]/g, ''); }
@@ -8041,6 +8142,45 @@ document.addEventListener('keydown', event => {
 });
 
 // --- Grouped Navigation ---
+function initTheme() {
+  const saved = localStorage.getItem('mm-theme');
+  if (saved === 'dark') {
+    document.documentElement.setAttribute('data-theme', 'dark');
+    const btn = document.getElementById('theme-toggle-btn');
+    if (btn) btn.textContent = '☀️';
+  }
+}
+
+function toggleTheme() {
+  const root = document.documentElement;
+  const isDark = root.getAttribute('data-theme') === 'dark';
+  if (isDark) {
+    root.removeAttribute('data-theme');
+    localStorage.setItem('mm-theme', 'light');
+    showToast('☀️ 已切换到浅色主题', 'info', 1500);
+  } else {
+    root.setAttribute('data-theme', 'dark');
+    localStorage.setItem('mm-theme', 'dark');
+    showToast('🌙 已切换到深色主题', 'info', 1500);
+  }
+  const btn = document.getElementById('theme-toggle-btn');
+  if (btn) btn.textContent = isDark ? '🌙' : '☀️';
+}
+
+function showToast(message, type = 'info', durationMs = 2500) {
+  const container = document.getElementById('mm-toast-container');
+  if (!container) return;
+  const toast = document.createElement('div');
+  toast.className = `mm-toast ${type}`;
+  toast.textContent = message;
+  container.appendChild(toast);
+  requestAnimationFrame(() => requestAnimationFrame(() => toast.classList.add('show')));
+  setTimeout(() => {
+    toast.classList.remove('show');
+    setTimeout(() => toast.remove(), 300);
+  }, durationMs);
+}
+
 const NAV_GROUPS = [
   { id: 'home',    label: '🏠 首页',   tabs: [{ id: 'markets', label: '🎯 Predict.fun' }] },
   { id: 'trade',   label: '📈 交易',   tabs: [{ id: 'binance', label: '🏦 币安' }, { id: 'stocks', label: '📈 股票·宏观' }, { id: 'options', label: '🎯 期权' }, { id: 'positions', label: '📋 持仓' }, { id: 'orders', label: '📄 订单' }] },
@@ -8060,6 +8200,7 @@ function renderNavGroups() {
 
 function switchNavGroup(groupId) {
   activeNavGroup = groupId;
+  try { localStorage.setItem('mm-last-group', groupId); } catch (e) {}
   renderNavGroups();
   renderNavSubTabs();
   const group = NAV_GROUPS.find(g => g.id === groupId);
@@ -8077,6 +8218,7 @@ function renderNavSubTabs() {
 }
 
 function showTab(tab, clicked) {
+  try { localStorage.setItem('mm-last-tab', tab); } catch (e) {}
   document.querySelectorAll('.tab').forEach((t) => t.classList.remove('active'));
   const button = clicked || [...document.querySelectorAll('.tabs .tab')].find(item => (item.getAttribute('onclick') || '').includes(`'${tab}'`));
   if (button) button.classList.add('active');
@@ -8087,7 +8229,7 @@ function showTab(tab, clicked) {
 
   if (tab === 'positions') loadPositions();
   if (tab === 'orders') loadOrders();
-  if (tab === 'paper') loadPaperPortfolio();
+if (tab === 'paper') { loadPaperPortfolio(); loadAiRunners(); }
   if (tab === 'analysis') loadTradeAssistant();
   if (tab === 'news') loadNews();
   if (tab === 'settings') {loadSettings();loadConnectionInfo();loadSourceHealth();}
@@ -9339,8 +9481,20 @@ document.getElementById('sell-modal').addEventListener('click', (e) => {
 });
 
 loadAll();
+initTheme();
 renderNavGroups();
-renderNavSubTabs();
+// Restore last visited tab from localStorage.
+(function restoreLastTab() {
+  const saved = localStorage.getItem('mm-last-tab');
+  const savedGroup = localStorage.getItem('mm-last-group');
+  if (savedGroup && NAV_GROUPS.some(g => g.id === savedGroup)) activeNavGroup = savedGroup;
+  renderNavGroups();
+  renderNavSubTabs();
+  if (saved && document.getElementById(saved + '-tab')) {
+    showTab(saved);
+    return;
+  }
+})();
 loadMarketOverview();
 loadResearchBriefing();
 initializeDashboardCollapses();
