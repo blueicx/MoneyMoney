@@ -54,6 +54,8 @@ export interface AssistantPaperTrade {
   pnlPct?: number;
   rMultiple?: number;
   closeReason: string;
+  noteZh?: string;
+  tags?: string[];
 }
 
 export interface AssistantGroupStats {
@@ -236,6 +238,46 @@ export function getAssistantCalibration(): AssistantCalibrationStats {
 
 export function getAssistantJournalTrades(): AssistantPaperTrade[] {
   return load().trades;
+}
+
+export interface DailyLossBreaker {
+  triggered: boolean;
+  realizedR: number;
+  closedToday: number;
+  messageZh: string | null;
+}
+
+const DAILY_LOSS_R_LIMIT = -2;
+
+export function getDailyLossBreaker(): DailyLossBreaker {
+  const state = load();
+  const today = new Date().toISOString().slice(0, 10);
+  const todayClosed = state.trades.filter(t =>
+    t.status === 'CLOSED'
+    && t.closedAt
+    && t.closedAt.slice(0, 10) === today
+    && typeof t.rMultiple === 'number',
+  );
+  const realizedR = round(todayClosed.reduce((sum, t) => sum + (t.rMultiple || 0), 0), 2);
+  const triggered = realizedR <= DAILY_LOSS_R_LIMIT;
+  return {
+    triggered,
+    realizedR,
+    closedToday: todayClosed.length,
+    messageZh: triggered
+      ? `日亏熔断已触发：今日已结算 ${todayClosed.length} 笔，累计 ${realizedR.toFixed(1)}R ≤ ${DAILY_LOSS_R_LIMIT}R。新信号信心将降至 40% 以下，建议暂停开新仓。`
+      : null,
+  };
+}
+
+export function saveTradeNote(id: string, noteZh: string, tags: string[]): boolean {
+  const state = load();
+  const trade = state.trades.find(t => t.id === id);
+  if (!trade) return false;
+  trade.noteZh = noteZh.trim() || undefined;
+  trade.tags = tags.map(t => t.trim()).filter(Boolean);
+  save(state);
+  return true;
 }
 
 function round(value: number, digits = 2): number {

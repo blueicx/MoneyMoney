@@ -61,8 +61,8 @@ import { getAiMarketCommentary } from '../features/ai-commentary';
 import { buildPortfolioRiskOverview } from '../features/risk-overview';
 import { getRiskHistory, recordRiskHistory } from '../features/risk-history';
 import { buildDailyResearchBriefing } from '../features/research-briefing';
-import { getAssistantCalibration, getAssistantJournalTrades } from '../features/assistant-journal';
-import { exportJournalCsv, exportPaperCsv, exportCalibrationCsv } from '../features/data-export';
+import { getAssistantCalibration, getAssistantJournalTrades, saveTradeNote } from '../features/assistant-journal';
+import { exportJournalCsv, exportPaperCsv, exportCalibrationCsv, exportForecastLabCsv } from '../features/data-export';
 import { generateAssistantReport } from '../features/trade-assistant';
 import { getSourceHealth } from '../features/source-health';
 import { testNotificationChannels } from '../features/notification-channels';
@@ -1867,6 +1867,12 @@ app.get('/api/export/calibration', (_req, res) => {
   res.send(exportCalibrationCsv());
 });
 
+app.get('/api/export/forecast-lab', (_req, res) => {
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', 'attachment; filename="moneymoney-forecast-lab.csv"');
+  res.send(exportForecastLabCsv());
+});
+
 app.get('/api/export/radar', async (_req, res) => {
   try {
     const radar = await getPredictionRadar('', 500);
@@ -2024,6 +2030,35 @@ app.post('/api/strategies/reset', (req, res) => {
 
 app.get('/api/journal', (req, res) => {
   res.json({ success: true, data: tradeJournal.get(50) });
+});
+
+app.post('/api/journal/note', express.json(), (req, res) => {
+  const { id, noteZh, tags } = req.body ?? {};
+  if (!id || typeof id !== 'string') {
+    return res.status(400).json({ success: false, error: '缺少交易 ID' });
+  }
+  const ok = saveTradeNote(id, typeof noteZh === 'string' ? noteZh : '', Array.isArray(tags) ? tags.map(String) : []);
+  if (!ok) return res.status(404).json({ success: false, error: '未找到该笔交易' });
+  res.json({ success: true });
+});
+
+app.get('/api/journal/trades', (_req, res) => {
+  const trades = getAssistantJournalTrades();
+  res.json({ success: true, data: trades.map(t => ({
+    id: t.id,
+    venue: t.venue,
+    symbol: t.symbol,
+    title: t.title,
+    direction: t.direction,
+    result: t.result,
+    rMultiple: t.rMultiple,
+    confidencePct: t.confidencePct,
+    openedAt: t.openedAt,
+    closedAt: t.closedAt ?? '',
+    status: t.status,
+    noteZh: t.noteZh ?? '',
+    tags: t.tags ?? [],
+  })) });
 });
 
 // --- Binance Portfolio ---

@@ -39,6 +39,7 @@ import { getTreasuryYields, type TreasuryYields } from './treasury-yields';
 import { getSectorRotationSnapshot, type SectorRotationSnapshot } from './sector-rotation';
 import {
   syncAssistantJournal,
+  getDailyLossBreaker,
   type AssistantGroupStats,
   type AssistantJournalSummary,
 } from './assistant-journal';
@@ -1919,6 +1920,18 @@ export async function generateAssistantReport(): Promise<AssistantReport> {
   applyVolatilityTermToOptions(preReport);
   applyRegimeToOptions(preReport);
   applyEventRiskGuard(preReport);
+
+  // 日亏熔断：如果今天已实现亏损超过阈值，降低所有新信号信心并加警告。
+  const dailyBreaker = getDailyLossBreaker();
+  if (dailyBreaker.triggered) {
+    warnings.push(dailyBreaker.messageZh!);
+    for (const action of [...cryptoActions, ...stockActions, ...macroActions, ...predictionPicks, ...optionActions]) {
+      if (action.action !== 'WAIT') {
+        action.confidencePct = Math.min(action.confidencePct, 38);
+        action.reasons.push(`日亏熔断生效中（今日 ${dailyBreaker.realizedR.toFixed(1)}R），信心已强制压低。`);
+      }
+    }
+  }
 
   const reminders = [
     ...cryptoActions,

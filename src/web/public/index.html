@@ -2496,6 +2496,10 @@
       <div id="journal-tab" class="tab-content">
         <div class="section-title">📝 交易日志</div>
         <div id="journal-list"></div>
+        <div class="section-title" style="margin-top:18px;">📋 信号复盘笔记</div>
+        <p style="font-size:11px;color:var(--text-secondary);margin-bottom:8px;">给助手跟踪的信号写复盘笔记和标签，帮助总结经验。</p>
+        <div id="review-notes-filter" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;"></div>
+        <div id="review-notes-list"></div>
       </div>
 
     </main>
@@ -6992,6 +6996,70 @@ async function loadJournal() {
 }
 
 
+// --- Signal Review Notes ---
+let reviewNotesCache = [];
+let reviewNotesTagFilter = '';
+
+async function loadReviewNotes() {
+  try {
+    const res = await fetch('/api/journal/trades');
+    const { data } = await res.json();
+    reviewNotesCache = data || [];
+    renderReviewNotes();
+  } catch (e) {}
+}
+
+function renderReviewNotes() {
+  const listEl = document.getElementById('review-notes-list');
+  const filterEl = document.getElementById('review-notes-filter');
+  if (!listEl) return;
+  const allTags = [...new Set(reviewNotesCache.flatMap(t => t.tags || []))].sort();
+  filterEl.innerHTML = allTags.length
+    ? '<span style="font-size:11px;color:var(--text-secondary);align-self:center;">按标签：</span>' +
+      allTags.map(tag => `<button onclick="filterReviewNotes('${tag.replace(/'/g, "\\'")}')" style="padding:3px 10px;border-radius:99px;font-size:11px;border:1px solid var(--border);cursor:pointer;background:${reviewNotesTagFilter === tag ? 'var(--purple)' : 'var(--bg-card)'};color:${reviewNotesTagFilter === tag ? 'white' : 'var(--text-secondary)'};">${safeNewsText(tag)}</button>`).join('') +
+      (reviewNotesTagFilter ? `<button onclick="filterReviewNotes('')" style="padding:3px 10px;border-radius:99px;font-size:11px;border:1px solid var(--border);cursor:pointer;background:var(--bg-card);color:var(--text-secondary);">✕ 清除</button>` : '')
+    : '';
+  let rows = reviewNotesCache;
+  if (reviewNotesTagFilter) rows = rows.filter(t => (t.tags || []).includes(reviewNotesTagFilter));
+  if (!rows.length) {
+    listEl.innerHTML = '<div style="color:var(--text-secondary);font-size:13px;">暂无信号记录；助手生成新信号后会出现在这里。</div>';
+    return;
+  }
+  listEl.innerHTML = rows.slice(0, 50).map(t => `
+    <div style="background:var(--bg-card);border-radius:10px;padding:12px 14px;margin-bottom:8px;box-shadow:var(--shadow);font-size:12px;">
+      <div style="display:flex;justify-content:space-between;gap:8px;align-items:center;min-width:0;">
+        <span style="font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${safeNewsText(t.title)}">${safeNewsText(t.venue)} · ${safeNewsText(t.symbol)} · ${safeNewsText(t.direction)} ${t.result !== 'PENDING' ? `· <strong style="color:${t.result === 'WIN' ? 'var(--green)' : t.result === 'LOSS' ? 'var(--red)' : 'inherit'}">${safeNewsText(t.result)}${t.rMultiple != null ? ` ${(t.rMultiple >= 0 ? '+' : '')}${t.rMultiple}R` : ''}</strong>` : ''}</span>
+        <span style="color:var(--text-secondary);font-size:10.5px;flex-shrink:0;">${new Date(t.openedAt).toLocaleDateString()}${t.closedAt ? ` → ${new Date(t.closedAt).toLocaleDateString()}` : ''}</span>
+      </div>
+      ${(t.tags || []).length ? `<div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:5px;">${t.tags.map(tag => `<span style="background:var(--bg-card);border-radius:99px;padding:2px 7px;font-size:10px;color:var(--text-secondary);">${safeNewsText(tag)}</span>`).join('')}</div>` : ''}
+      <textarea id="note-input-${safeAttr(t.id)}" placeholder="写复盘笔记：为什么进？结果如何？学到什么？" style="width:100%;margin-top:6px;padding:6px 8px;border-radius:8px;border:1px solid var(--border);background:var(--bg-primary);color:var(--text-primary);font-size:11.5px;resize:vertical;min-height:36px;" rows="${Math.max(1, Math.ceil((t.noteZh || '').length / 40))}">${safeNewsText(t.noteZh)}</textarea>
+      <div style="display:flex;gap:6px;justify-content:flex-end;margin-top:4px;">
+        <input id="tags-input-${safeAttr(t.id)}" placeholder="标签，逗号分隔" value="${safeNewsText((t.tags || []).join(', '))}" style="flex:1;padding:5px 8px;border-radius:8px;border:1px solid var(--border);background:var(--bg-primary);color:var(--text-primary);font-size:11px;" />
+        <button onclick="saveNote('${safeAttr(t.id)}')" style="padding:4px 14px;border-radius:8px;border:none;background:var(--purple);color:white;font-size:11px;cursor:pointer;font-weight:600;">保存</button>
+      </div>
+    </div>`).join('');
+}
+
+function filterReviewNotes(tag) { reviewNotesTagFilter = tag; renderReviewNotes(); }
+
+async function saveNote(id) {
+  const noteEl = document.getElementById(`note-input-${id}`);
+  const tagsEl = document.getElementById(`tags-input-${id}`);
+  if (!noteEl) return;
+  try {
+    await fetch('/api/journal/note', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, noteZh: noteEl.value, tags: tagsEl?.value?.split(/[,，]/).map(s => s.trim()).filter(Boolean) || [] }),
+    });
+    noteEl.style.borderColor = 'var(--green)';
+    setTimeout(() => { if (noteEl) noteEl.style.borderColor = ''; }, 1200);
+  } catch (e) {}
+}
+
+function safeAttr(text) { return String(text ?? '').replace(/[^a-zA-Z0-9_-]/g, ''); }
+
+
 // --- Notification Center ---
 let notifOpen = false;
 function toggleNotifPanel(e) {
@@ -7988,7 +8056,8 @@ function showTab(tab, clicked) {
   if (tab === 'alerts') loadAlerts();
   if (tab === 'whales') loadWhales();
   if (tab === 'strategies') loadStrategies();
-  if (tab === 'journal') loadJournal();
+if (tab === 'journal') loadJournal();
+if (tab === 'journal') loadReviewNotes();
 }
 
 // --- Cross-platform Prediction Radar ---

@@ -88,3 +88,28 @@ export function exportCalibrationCsv(): string {
     '更新时间', '预测区间', '数量', '平均预测%', '实际命中%', '区间Brier', '整体Brier', 'LogLoss',
   ], rows);
 }
+
+export function exportForecastLabCsv(): string {
+  const file = readJson<{ resolved?: any[] }>('forecast-lab.json', { resolved: [] });
+  const rows = (file.resolved || []).flatMap((item: any) =>
+    (item.snapshots || []).map((snap: any) => [
+      item.key,
+      item.platform,
+      item.title,
+      item.titleZh ?? '',
+      item.groupZh ?? item.group ?? '',
+      snap.t,
+      snap.model ?? '',
+      snap.market ?? '',
+      snap.consensus ?? '',
+      snap.confidence ?? '',
+      item.outcome,
+      item.resolvedAt,
+    ]),
+  );
+  return toCsv([
+    '案例Key', '平台', '标题', '中文标题', '分类',
+    '快照时间', '系统概率', '市场价', '共识概率', '信心',
+    '结果', '结算时间',
+  ], rows);
+}

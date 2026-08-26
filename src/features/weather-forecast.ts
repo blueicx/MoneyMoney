@@ -31,6 +31,9 @@ export interface WeatherForecast {
   precipitationMm?: number[];
   snowfallCm?: number[];
   windGustKmh?: number[];
+  /** Cross-member standard deviation per day (only when ensemble data is available). */
+  ensembleSpreadC?: number[];
+  ensembleMembers?: number;
 }
 
 export interface WeatherForecastEvidence {
@@ -195,8 +198,10 @@ export function referenceWeatherProbability(
   forecast: WeatherForecast,
   dayIndex: number,
 ): number {
-  const sigma = 2 + Math.min(2, dayIndex) * 0.25;
   const at = Math.max(0, Math.min(forecast.dates.length - 1, dayIndex));
+  const sigma = forecast.ensembleSpreadC?.[at] != null && forecast.ensembleSpreadC[at] > 0.3
+    ? clamp(forecast.ensembleSpreadC[at], 0.5, 6)
+    : 2 + Math.min(2, dayIndex) * 0.25;
 
   if (question.metric === 'temperature_max' && question.valueC != null) {
     const value = forecast.temperatureMaxC?.[at];
@@ -259,10 +264,74 @@ async function getForecast(location: ParsedWeatherQuestion): Promise<WeatherFore
   const cached = FORECAST_CACHE.get(cacheKey);
   if (cached && cached.expiresAt > Date.now()) return cached.value;
 
+  const dailyVars = 'temperature_2m_max,temperature_2m_min,precipitation_sum,snowfall_sum,wind_gusts_10m_max';
+
+  // Try ensemble first (31-member GFS); fall back to deterministic if unavailable.
+  try {
+    const ensParams = new URLSearchParams({
+      latitude: String(location.latitude),
+      longitude: String(location.longitude),
+      daily: dailyVars,
+      timezone: 'auto',
+      forecast_days: '7',
+      models: 'gfs_seamless',
+      ensemble: 'true',
+    });
+    const ensPayload = await getJson(`https://ensemble-api.open-meteo.com/v1/ensemble?${ensParams}`);
+    const ensDaily = ensPayload?.daily;
+    if (Array.isArray(ensDaily?.time)) {
+      const dates: string[] = ensDaily.time;
+      const memberCount = Array.isArray(ensDaily.temperature_2m_max) ? ensDaily.temperature_2m_max.length : 0;
+      if (memberCount >= 3) {
+        const meanOf = (variable: unknown): number[] | undefined => {
+          if (!Array.isArray(variable)) return undefined;
+          return dates.map((_, dayIndex) => {
+            let sum = 0; let count = 0;
+            for (const member of variable) {
+              const v = (member as unknown[])?.[dayIndex];
+              if (typeof v === 'number' && Number.isFinite(v)) { sum += v; count++; }
+            }
+            return count > 0 ? sum / count : NaN;
+          });
+        };
+        const spreadOf = (variable: unknown): number[] => {
+          if (!Array.isArray(variable)) return dates.map(() => 2);
+          return dates.map((_, dayIndex) => {
+            const vals: number[] = [];
+            for (const member of variable) {
+              const v = (member as unknown[])?.[dayIndex];
+              if (typeof v === 'number' && Number.isFinite(v)) vals.push(v);
+            }
+            if (vals.length < 2) return 2;
+            const m = vals.reduce((a, b) => a + b, 0) / vals.length;
+            return Math.sqrt(vals.reduce((s, v) => s + (v - m) ** 2, 0) / vals.length);
+          });
+        };
+        const tempMaxMean = meanOf(ensDaily.temperature_2m_max);
+        if (!tempMaxMean || tempMaxMean.some(v => !Number.isFinite(v))) throw new Error('bad ensemble payload');
+        const value: WeatherForecast = {
+          dates,
+          temperatureMaxC: tempMaxMean.map(v => Math.round(v * 10) / 10),
+          temperatureMinC: meanOf(ensDaily.temperature_2m_min)?.map(v => Math.round(v * 10) / 10),
+          precipitationMm: meanOf(ensDaily.precipitation_sum)?.map(v => Math.round(v * 100) / 100),
+          snowfallCm: meanOf(ensDaily.snowfall_sum)?.map(v => Math.round(v * 100) / 100),
+          windGustKmh: meanOf(ensDaily.wind_gusts_10m_max)?.map(v => Math.round(v * 10) / 10),
+          ensembleSpreadC: spreadOf(ensDaily.temperature_2m_max).map(v => Math.round(v * 100) / 100),
+          ensembleMembers: memberCount,
+        };
+        FORECAST_CACHE.set(cacheKey, { value, expiresAt: Date.now() + FORECAST_TTL_MS });
+        return value;
+      }
+    }
+  } catch {
+    // Fall through to deterministic.
+  }
+
+  // Deterministic fallback (existing behaviour).
   const params = new URLSearchParams({
     latitude: String(location.latitude),
     longitude: String(location.longitude),
-    daily: 'temperature_2m_max,temperature_2m_min,precipitation_sum,snowfall_sum,wind_gusts_10m_max',
+    daily: dailyVars,
     timezone: 'auto',
     forecast_days: '7',
   });
@@ -341,7 +410,7 @@ function buildEvidence(
     location: question.location,
     metricZh,
     targetZh: `${operator}${question.displayValue}${question.unit}${question.date ? ` @ ${question.date}` : ''}`,
-    forecastZh: formatValue(question.metric, pickForecastValue(question, forecast, dayIndex), question),
+    forecastZh: `${formatValue(question.metric, pickForecastValue(question, forecast, dayIndex), question)}${forecast.ensembleMembers ? `（${forecast.ensembleMembers} 组集合预报均值）` : ''}`,
     referenceProbability: Number(probability.toFixed(3)),
     confidence: Math.round(confidence),
     judgmentZh: `${stance}：系统参考 ${refPct.toFixed(0)}%，市场价 ${yesPct.toFixed(0)}%。`,
