@@ -18,6 +18,16 @@ import { DataCollector } from '../analysis/collector';
 import { AnalysisEngine } from '../analysis/engine';
 import { paperEngine } from '../features/paper-trading';
 import { telegram } from '../features/telegram';
+import {
+  TelegramInteractionBot,
+  type TelegramCallbackHandler,
+  type TelegramCommandHandler,
+  type TelegramCommandResult,
+  type TelegramInlineKeyboardMarkup,
+  type TelegramReply,
+  escapeTelegramHtml,
+  parseAllowedChatIds,
+} from '../features/telegram-bot';
 import { priceTracker } from '../features/price-tracker';
 import { kellySizer, backtester } from '../features/kelly-backtest';
 import { pushNotification } from '../features/notifications';
@@ -67,13 +77,28 @@ import { generateAssistantReport } from '../features/trade-assistant';
 import { getSourceHealth } from '../features/source-health';
 import { testNotificationChannels } from '../features/notification-channels';
 import { riskPatrol } from '../features/risk-patrol';
+import {
+  addResearchNote,
+  addResearchSnapshot,
+  getResearchEntry,
+  listResearchEntries,
+  summarizeResearchEntry,
+  upsertResearchEntry,
+} from '../features/research-workspace';
+import {
+  getAutomationJobs,
+  getAutomationOverview,
+  saveAutomationRun,
+} from '../features/automation-ops';
 import type { Category } from '../types';
 import QRCode from 'qrcode';
 import os from 'os';
 import { parseRssItems } from '../utils/rss';
 
 const app = express();
-app.use(cors());
+// The dashboard is local-first. Same-origin browser requests work normally;
+// cross-origin callers must be explicitly enabled by the deployment layer.
+app.use(cors({ origin: false }));
 app.use(express.json());
 
 // Compress large text responses (the single-file dashboard is ~400KB raw).
@@ -1755,6 +1780,7 @@ app.get('/api/analysis', async (req, res) => {
 // Cross-market assistant: transparent reminders, not autonomous live orders.
 let lastAdvisorReport: Awaited<ReturnType<typeof generateAssistantReport>> | null = null;
 let advisorReportRefreshing = false;
+let telegramInteractionBot: TelegramInteractionBot | null = null;
 
 function refreshAdvisorReportInBackground(): void {
   if (advisorReportRefreshing) return;
@@ -1767,6 +1793,218 @@ function refreshAdvisorReportInBackground(): void {
     .finally(() => {
       advisorReportRefreshing = false;
     });
+}
+
+const TELEGRAM_HELP = [
+  '<b>MoneyMoney 交互机器人</b>',
+  '',
+  '/status  查看服务与配置状态',
+  '/risk    查看模拟盘风险摘要',
+  '/signals 查看最近一份助手信号',
+  '/paper   查看模拟持仓与盈亏',
+  '/research 查看研究工作区',
+  '/ops     查看自动化任务状态',
+  '/test    测试机器人回复链路',
+  '',
+  '当前命令仅查询或测试，不会触发真实下单。',
+].join('\n');
+
+function formatTelegramNumber(value: number, digits = 2): string {
+  return Number.isFinite(value) ? value.toFixed(digits) : '-';
+}
+
+function telegramKeyboard(page: 'home' | 'status' | 'risk' | 'signals' | 'paper' | 'research' | 'ops' | 'test'): TelegramInlineKeyboardMarkup {
+  if (page === 'home') {
+    return {
+      inline_keyboard: [
+        [
+          { text: '🏠 总览', callback_data: 'menu:home' },
+          { text: '📊 风险中心', callback_data: 'view:risk' },
+        ],
+        [
+          { text: '📡 最新信号', callback_data: 'view:signals' },
+          { text: '📒 模拟盘', callback_data: 'view:paper' },
+        ],
+        [
+          { text: '🔬 研究工作区', callback_data: 'view:research' },
+          { text: '⚙ 自动化状态', callback_data: 'view:ops' },
+        ],
+        [
+          { text: '🔔 通知测试', callback_data: 'action:test' },
+          { text: '🔄 刷新', callback_data: 'action:refresh' },
+        ],
+      ],
+    };
+  }
+  return {
+    inline_keyboard: [[
+      { text: '🔄 刷新', callback_data: page === 'test' ? 'action:test' : `view:${page}` },
+      { text: '◀ 返回主菜单', callback_data: 'menu:home' },
+    ]],
+  };
+}
+
+function telegramReply(text: string, page: Parameters<typeof telegramKeyboard>[0]): TelegramReply {
+  return { text, replyMarkup: telegramKeyboard(page) };
+}
+
+function getTelegramCommandHandlers(): Record<string, TelegramCommandHandler> {
+  const rawHandlers: Record<string, TelegramCommandHandler> = {
+    start: () => `${TELEGRAM_HELP}\n\n已连接。发送 /help 查看命令。`,
+    help: () => TELEGRAM_HELP,
+    status: () => {
+      const settings = settingsManager.get();
+      const jobs = getAutomationOverview();
+      return [
+        '<b>系统状态</b>',
+        `模式：${escapeTelegramHtml(config.network === 'testnet' ? '测试网' : '主网配置')}`,
+        `运行：${telegramInteractionBot?.isRunning ? '交互轮询运行中' : '仅出站/未启动'}`,
+        `出站通知：${telegram.isConfigured && settings.telegramEnabled ? '已启用' : '未启用'}`,
+        `模拟盘：${settings.paperTradingEnabled ? '已启用' : '未启用'}`,
+        `自动化：${jobs.enabledJobs}/${jobs.totalJobs} 个任务启用，累计 ${jobs.totalRuns} 次运行`,
+        '',
+        '提示：行情和预测数据是否最新，取决于对应数据源的认证与可用性。',
+      ].join('\n');
+    },
+    risk: () => {
+      const portfolio = paperEngine.getPortfolio();
+      const metrics = paperEngine.getRiskMetrics();
+      return [
+        '<b>模拟盘风险摘要</b>',
+        `权益：$${formatTelegramNumber(portfolio.equity)}`,
+        `未实现盈亏：${portfolio.unrealizedPnl >= 0 ? '+' : ''}$${formatTelegramNumber(portfolio.unrealizedPnl)}`,
+        `已实现盈亏：${portfolio.totalPnl >= 0 ? '+' : ''}$${formatTelegramNumber(portfolio.totalPnl)}`,
+        `胜率：${formatTelegramNumber(metrics.winRate * 100, 1)}%（${metrics.totalTrades} 笔已平仓）`,
+        `最大回撤：${formatTelegramNumber(metrics.maxDrawdownPct, 1)}%`,
+        `VaR95：$${formatTelegramNumber(metrics.var95Usd)}`,
+        '',
+        '以上为本地模拟盘统计，不代表实时市场或真实账户风险。',
+      ].join('\n');
+    },
+    signals: () => {
+      if (!lastAdvisorReport) {
+        refreshAdvisorReportInBackground();
+        return '助手报告尚未准备好，已在后台刷新。稍后再次发送 /signals。';
+      }
+      const groups = [
+        ...lastAdvisorReport.cryptoActions,
+        ...lastAdvisorReport.stockActions,
+        ...lastAdvisorReport.macroActions,
+        ...lastAdvisorReport.sectorActions,
+        ...lastAdvisorReport.predictionPicks,
+        ...lastAdvisorReport.optionActions,
+      ];
+      const actionable = groups.filter(action => action.action !== 'WAIT').slice(0, 8);
+      if (!actionable.length) return `<b>最近信号</b>\n当前没有非 WAIT 建议。\n市场状态：${escapeTelegramHtml(lastAdvisorReport.regime.labelZh)}`;
+      return [
+        `<b>最近信号</b> · ${escapeTelegramHtml(lastAdvisorReport.regime.labelZh)}`,
+        ...actionable.map((action, index) => `${index + 1}. ${escapeTelegramHtml(action.title || action.symbol)}：<b>${escapeTelegramHtml(action.actionZh)}</b> · 置信度 ${formatTelegramNumber(action.confidencePct, 0)}%`),
+        '',
+        '信号仅作研究提醒，不会由机器人自动下单。',
+      ].join('\n');
+    },
+    paper: () => {
+      const portfolio = paperEngine.getPortfolio();
+      const positions = paperEngine.getOpenPositions();
+      const lines = positions.slice(0, 8).map(position => {
+        const current = position.currentPrice ?? position.entryPrice;
+        const pnl = (current - position.entryPrice) * position.quantity;
+        return `· ${escapeTelegramHtml(position.marketTitle)} | ${escapeTelegramHtml(position.outcomeName)} | ${pnl >= 0 ? '+' : ''}$${formatTelegramNumber(pnl)}`;
+      });
+      return [
+        '<b>模拟盘</b>',
+        `权益：$${formatTelegramNumber(portfolio.equity)} · 现金：$${formatTelegramNumber(portfolio.cashBalance)}`,
+        `持仓：${positions.length} · 总盈亏：${portfolio.totalPnl >= 0 ? '+' : ''}$${formatTelegramNumber(portfolio.totalPnl)}`,
+        ...(lines.length ? ['', ...lines] : ['', '暂无开放模拟持仓。']),
+        '',
+        '这里只展示 paper trading，不连接真实下单。',
+      ].join('\n');
+    },
+    research: () => {
+      const entries = listResearchEntries(6);
+      if (!entries.length) return '<b>研究工作区</b>\n暂无研究条目。';
+      return [
+        '<b>研究工作区</b>',
+        ...entries.map((entry, index) => {
+          const summary = summarizeResearchEntry(entry);
+          const edge = summary.edgePct == null ? '-' : `${summary.edgePct >= 0 ? '+' : ''}${summary.edgePct.toFixed(1)}pp`;
+          return `${index + 1}. ${escapeTelegramHtml(summary.title)} · ${escapeTelegramHtml(summary.status)} · edge ${edge}`;
+        }),
+        '',
+        '研究条目来自本地工作区，需结合来源新鲜度自行判断。',
+      ].join('\n');
+    },
+    ops: () => {
+      const jobs = getAutomationJobs();
+      const overview = getAutomationOverview();
+      return [
+        '<b>自动化任务</b>',
+        `启用 ${overview.enabledJobs}/${overview.totalJobs} · 运行 ${overview.totalRuns} · 失败 ${overview.failedRuns}`,
+        ...jobs.map(job => `· ${escapeTelegramHtml(job.nameZh)}：${escapeTelegramHtml(job.lastStatus)}（${escapeTelegramHtml(job.lastMessage)}）`),
+        '',
+        'Telegram 目前只读展示任务状态，不远程触发任务。',
+      ].join('\n');
+    },
+    test: () => '✅ 交互机器人回复链路正常。',
+  };
+  const handlers: Record<string, TelegramCommandHandler> = {};
+  for (const [command, handler] of Object.entries(rawHandlers)) {
+    handlers[command] = async (context) => {
+      const result = await handler(context);
+      if (typeof result !== 'string') return result;
+      const page = command === 'start' || command === 'help'
+        ? 'home'
+        : command as Parameters<typeof telegramKeyboard>[0];
+      return telegramReply(result, page);
+    };
+  }
+  return handlers;
+}
+
+function getTelegramCallbackHandlers(commandHandlers: Record<string, TelegramCommandHandler>): Record<string, TelegramCallbackHandler> {
+  const mapping: Record<string, string> = {
+    'menu:home': 'help',
+    'view:status': 'status',
+    'view:risk': 'risk',
+    'view:signals': 'signals',
+    'view:paper': 'paper',
+    'view:research': 'research',
+    'view:ops': 'ops',
+    'action:test': 'test',
+    'action:refresh': 'help',
+  };
+  const handlers: Record<string, TelegramCallbackHandler> = {};
+  for (const [callbackData, command] of Object.entries(mapping)) {
+    handlers[callbackData] = async (context) => commandHandlers[command]({
+      chatId: context.chatId,
+      command,
+      args: [],
+      message: context.message,
+      update: context.update,
+    });
+  }
+  return handlers;
+}
+
+function startTelegramInteractionBot(): void {
+  if (process.env.TELEGRAM_POLLING_ENABLED !== 'true') return;
+  const allowedChatIds = parseAllowedChatIds(process.env.TELEGRAM_ALLOWED_CHAT_IDS, process.env.TELEGRAM_CHAT_ID);
+  if (!process.env.TELEGRAM_BOT_TOKEN || allowedChatIds.size === 0) {
+    console.warn('  [telegram] polling enabled but token or allowed Chat ID is missing');
+    return;
+  }
+  const commandHandlers = getTelegramCommandHandlers();
+  telegramInteractionBot = new TelegramInteractionBot({
+    token: process.env.TELEGRAM_BOT_TOKEN,
+    proxyUrl: process.env.TELEGRAM_PROXY_URL,
+    allowedChatIds,
+    handlers: commandHandlers,
+    callbackHandlers: getTelegramCallbackHandlers(commandHandlers),
+    unknownCallbackHandler: async () => telegramReply('按钮已过期，请返回主菜单。', 'home'),
+    logger: console,
+  });
+  telegramInteractionBot.start();
+  console.log(`  [telegram] interactive polling started (${allowedChatIds.size} allowed chat${allowedChatIds.size === 1 ? '' : 's'})`);
 }
 
 app.get('/api/advisor', async (_req, res) => {
@@ -2098,6 +2336,7 @@ app.get('/api/overview', async (req, res) => {
         },
         recentTrades,
         settings: { autoTradeEnabled: settings.autoTradeEnabled, paperTradingEnabled: settings.paperTradingEnabled },
+        automation: getAutomationOverview(),
         timestamp: new Date().toISOString(),
       }
     });
@@ -2129,7 +2368,7 @@ app.get('/api/connection-info', async (req, res) => {
       }
     }
 
-    const url = `http://${lanIp}:3000`;
+    const url = `http://${lanIp}:${config.appPort}`;
     const qrDataUrl = await QRCode.toDataURL(url, { width: 300, margin: 1 });
 
     res.json({ success: true, data: { lanIp, url, qrCode: qrDataUrl } });
@@ -2197,6 +2436,47 @@ async function getFreshExternal<T>(key: string, ttlMs: number, loader: () => Pro
 
 app.get('/api/notifications', (req, res) => {
   res.json({ success: true, data: getNotifications() });
+});
+
+// --- Research Workspace ---
+
+app.get('/api/research', (req, res) => {
+  const entries = listResearchEntries(Number(req.query.limit) || 50);
+  res.json({ success: true, data: entries.map(entry => ({ ...entry, summary: summarizeResearchEntry(entry) })) });
+});
+
+app.get('/api/research/:id', (req, res) => {
+  const entry = getResearchEntry(String(req.params.id));
+  if (!entry) return res.status(404).json({ success: false, error: '研究对象不存在' });
+  res.json({ success: true, data: { ...entry, summary: summarizeResearchEntry(entry) } });
+});
+
+app.post('/api/research', (req, res) => {
+  try {
+    const { subjectType, subjectId, title, thesis, tags, id } = req.body || {};
+    if (!['prediction', 'crypto', 'stock', 'macro'].includes(subjectType) || !String(subjectId || '').trim() || !String(title || '').trim()) {
+      return res.status(400).json({ success: false, error: '请填写有效的研究类型、标识和标题' });
+    }
+    const entry = upsertResearchEntry({ id, subjectType, subjectId, title, thesis, tags: Array.isArray(tags) ? tags : [] });
+    res.json({ success: true, data: { ...entry, summary: summarizeResearchEntry(entry) } });
+  } catch (error: any) { res.status(400).json({ success: false, error: error.message }); }
+});
+
+app.post('/api/research/:id/note', (req, res) => {
+  try {
+    const entry = addResearchNote(String(req.params.id), req.body?.text, Array.isArray(req.body?.tags) ? req.body.tags : []);
+    if (!entry) return res.status(404).json({ success: false, error: '研究对象不存在' });
+    res.json({ success: true, data: { ...entry, summary: summarizeResearchEntry(entry) } });
+  } catch (error: any) { res.status(400).json({ success: false, error: error.message }); }
+});
+
+app.post('/api/research/:id/snapshot', (req, res) => {
+  try {
+    const snapshot = { ...req.body, capturedAt: req.body?.capturedAt || new Date().toISOString(), sources: Array.isArray(req.body?.sources) ? req.body.sources : [] };
+    const entry = addResearchSnapshot(String(req.params.id), snapshot);
+    if (!entry) return res.status(404).json({ success: false, error: '研究对象不存在' });
+    res.json({ success: true, data: { ...entry, summary: summarizeResearchEntry(entry) } });
+  } catch (error: any) { res.status(400).json({ success: false, error: error.message }); }
 });
 
 app.post('/api/notifications/mark-read', (req, res) => {
@@ -2349,6 +2629,49 @@ app.post('/api/ai-runners/tick', express.json(), async (_req, res) => {
   res.json({ success: true, actions: results });
 });
 
+// --- Automation Operations ---
+
+app.get('/api/ops', (_req, res) => {
+  const jobs = getAutomationJobs();
+  res.json({ success: true, data: { jobs, overview: getAutomationOverview() } });
+});
+
+async function runAutomationJob(jobId: string): Promise<{ message: string }> {
+  switch (jobId) {
+    case 'radar-refresh':
+      await warmPredictionRadarCache();
+      return { message: '预测雷达缓存刷新完成' };
+    case 'risk-patrol':
+      await riskPatrol.runOnce({ push: false });
+      return { message: '持仓风险巡检完成' };
+    case 'assistant-refresh': {
+      lastAdvisorReport = await generateAssistantReport();
+      return { message: '智能助手报告刷新完成' };
+    }
+    case 'ai-runners': {
+      const actions = await tickAllAiRunners();
+      return { message: actions.length ? `AI 模拟跑单完成，产生 ${actions.length} 个动作` : 'AI 模拟跑单完成，无新动作' };
+    }
+    default:
+      throw new Error('未知自动化任务');
+  }
+}
+
+app.post('/api/ops/run/:jobId', async (req, res) => {
+  const jobId = String(req.params.jobId) as Parameters<typeof saveAutomationRun>[0];
+  const startedAt = new Date().toISOString();
+  try {
+    const result = await runAutomationJob(jobId);
+    const finishedAt = new Date().toISOString();
+    saveAutomationRun(jobId, { status: 'SUCCESS', message: result.message, startedAt, finishedAt });
+    res.json({ success: true, data: { jobId, message: result.message, finishedAt } });
+  } catch (error: any) {
+    const finishedAt = new Date().toISOString();
+    try { saveAutomationRun(jobId, { status: 'FAILED', message: error.message, startedAt, finishedAt }); } catch { /* invalid job id */ }
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 // --- Server-Sent Events: live AI runner updates + auto-tick ---
 const sseClients = new Set<import('express').Response>();
 
@@ -2439,6 +2762,19 @@ app.post('/api/telegram/test', async (req, res) => {
   res.json({ success: sent, message: sent ? '测试消息已发送！' : 'Telegram 未配置或发送失败' });
 });
 
+app.get('/api/telegram/status', (_req, res) => {
+  res.json({
+    success: true,
+    data: {
+      configured: telegram.isConfigured,
+      pollingEnabled: process.env.TELEGRAM_POLLING_ENABLED === 'true',
+      pollingRunning: telegramInteractionBot?.isRunning || false,
+      allowedChatCount: parseAllowedChatIds(process.env.TELEGRAM_ALLOWED_CHAT_IDS, process.env.TELEGRAM_CHAT_ID).size,
+      offset: telegramInteractionBot?.offset ?? null,
+    },
+  });
+});
+
 // --- Notification Channel Test ---
 
 app.post('/api/notification-channels/test', async (_req, res) => {
@@ -2471,8 +2807,8 @@ async function main() {
   }
 
 
-  const PORT = 3000;
-  const server = app.listen(PORT, '0.0.0.0', () => {
+  const PORT = config.appPort;
+  const server = app.listen(PORT, config.appHost, () => {
     console.log(`  ╔══════════════════════════════════════════════╗`);
     console.log(`  ║  💰 MONEYMONEY TRADING DASHBOARD                   ║`);
     console.log(`  ╠══════════════════════════════════════════════╣`);
@@ -2482,6 +2818,7 @@ async function main() {
     riskPatrol.start();
     // Pre-fetch radar data so the first click on the tab is already warm.
     void warmPredictionRadarCache();
+    startTelegramInteractionBot();
   });
 
   server.on('error', (err: any) => {
@@ -2489,7 +2826,7 @@ async function main() {
       console.error(`\n  ❌ Port ${PORT} is already in use!`);
       console.error('  Try: taskkill /F /IM node.exe\n');
     } else {
-      console.error('  Server error:', err.message);
+    console.error('  Server error:', err.message);
     }
     process.exit(1);
   });
@@ -2497,6 +2834,7 @@ async function main() {
   // Keep process alive
   process.on('SIGINT', () => {
     console.log('\n  Shutting down...');
+    telegramInteractionBot?.stop();
     server.close();
     process.exit(0);
   });
