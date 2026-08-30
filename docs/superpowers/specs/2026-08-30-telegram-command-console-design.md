@@ -2,11 +2,11 @@
 
 ## 目标
 
-在现有 Telegram 文字命令机器人之上增加一个易用的按钮式指令台。用户打开机器人后可以通过 Inline Keyboard 浏览总览、风险、信号、模拟盘、研究、自动化和通知测试；原有文字命令继续可用。
+在现有 Telegram 文字命令机器人之上增加一个易用的底部功能菜单。用户打开机器人后可以通过 Reply Keyboard 浏览总览、风险、信号、模拟盘、研究、自动化和通知测试；原有文字命令继续可用。
 
 ## 推荐形态：混合式指令台
 
-采用“固定主菜单 + 查询结果页操作按钮 + 文字命令”的混合模式：
+采用“固定底部主菜单 + 文字命令”的混合模式：
 
 ```text
 🏠 总览       📊 风险中心
@@ -15,29 +15,22 @@
 🔔 通知测试   ❓ 帮助
 ```
 
-每个结果页底部提供：
-
-```text
-🔄 刷新       ◀ 返回主菜单
-```
-
-选择理由：按钮适合日常查看，文字命令适合快速输入和自动化；两者共用同一批查询处理器，不复制业务逻辑。
+选择理由：底部菜单符合常见 Telegram 机器人使用习惯，文字命令适合快速输入和自动化；两者共用同一批查询处理器，不复制业务逻辑。
 
 ## 范围
 
-### 主菜单动作
+### 底部菜单动作
 
-| callback 数据 | 行为 |
+| 菜单文本 | 行为 |
 |---|---|
-| `menu:home` | 显示主菜单 |
-| `view:status` | 服务、配置、轮询状态 |
-| `view:risk` | 模拟盘风险摘要 |
-| `view:signals` | 最近一份助手信号 |
-| `view:paper` | 模拟持仓与盈亏 |
-| `view:research` | 研究工作区摘要 |
-| `view:ops` | 自动化任务状态 |
-| `action:test` | 发送交互链路测试结果 |
-| `action:refresh` | 重新显示当前页面 |
+| `🏠 总览` | 显示帮助与菜单 |
+| `📊 风险中心` | 模拟盘风险摘要 |
+| `📡 最新信号` | 最近一份助手信号 |
+| `📒 模拟盘` | 模拟持仓与盈亏 |
+| `🔬 研究工作区` | 研究工作区摘要 |
+| `⚙ 自动化状态` | 自动化任务状态 |
+| `🔔 通知测试` | 发送交互链路测试结果 |
+| `❓ 帮助` | 显示帮助与菜单 |
 
 ### 安全边界
 
@@ -46,32 +39,33 @@
 - 第一版不提供真实下单、提现、私钥、风险参数修改或远程执行自动化任务。
 - 模拟盘未来若增加操作，必须使用独立的二次确认流程，不能直接复用查询按钮。
 
+旧版本消息中可能仍存在 Inline Keyboard callback；核心仍兼容这些回调，但新消息统一发送底部 Reply Keyboard。
+
 ## 架构与数据流
 
 ```text
-Telegram callback_query
+Telegram message（来自底部菜单）
         │
         ▼
 TelegramInteractionBot
-  ├─ 校验 callback 所属 chat
-  ├─ answerCallbackQuery 清除 Telegram 加载状态
-  ├─ 解析固定 callback 数据
+  ├─ 校验 Chat ID
+  ├─ 匹配固定菜单文本
   └─ 调用共享 CommandView handler
         │
         ├─ 生成 HTML 文本
-        └─ 生成 InlineKeyboard markup
+        └─ 附带 ReplyKeyboard markup
                 │
                 ▼
           sendMessage(reply)
 ```
 
-核心 Telegram transport 增加三项能力：
+核心 Telegram transport 使用以下能力：
 
-1. `getUpdates` 同时接收 `callback_query`。
-2. `answerCallbackQuery` 确认按钮点击已收到。
-3. `sendMessage` 接受可选 `reply_markup`，发送内联键盘。
+1. `getUpdates` 接收普通 `message` 更新。
+2. `sendMessage` 接受 `reply_markup`，发送持久底部键盘。
+3. 继续兼容旧 Inline Keyboard 的 `callback_query` 更新。
 
-按钮点击采用“回复新消息”而不是依赖编辑原消息。这样与现有文本回复路径一致，故障时更容易重试，也不会因为历史消息状态导致菜单失效。
+底部菜单点击后由 Telegram 作为普通文本消息发送，机器人按固定文本映射到对应查询处理器，并在回复中继续携带底部菜单。
 
 ## 处理器边界
 
@@ -82,7 +76,7 @@ TelegramInteractionBot
 
 ## 错误处理
 
-- 未授权 callback 静默忽略，不发送任何信息。
+- 未授权菜单消息或 callback 静默忽略，不发送任何信息。
 - 未知或过期 callback 只返回一个安全提示，并提供返回主菜单按钮。
 - `answerCallbackQuery` 失败不应让 Web 服务退出；后续回复失败只记录不含 Token 的短错误。
 - 查询数据源失败时显示“当前数据不可用/稍后重试”，不伪造实时行情。
@@ -92,11 +86,11 @@ TelegramInteractionBot
 新增测试覆盖：
 
 - 主菜单键盘包含全部固定动作。
-- `/start` 和 `/help` 返回带键盘的主菜单。
-- 授权 callback 会先确认 callback，再发送对应页面。
-- 未授权 callback 不会发送回复。
+- `/start` 和 `/help` 返回带底部键盘的主菜单。
+- 授权菜单文本会发送对应页面并保留底部键盘。
+- 旧 Inline Keyboard callback 仍会先确认 callback，再发送对应页面。
 - 未知 callback 不会触发任何业务操作，并返回安全错误页。
-- `callback_query` 的 update 会推进 offset，重复 update 不重复处理。
+- 更新会推进 offset，重复 update 不重复处理。
 - 原有文字命令、出站通知和全量测试不回归。
 
-完成标准：`npm test`、`npm run build` 通过；本地 Web 服务启动后，在 Telegram 点击主菜单至少验证 `/start`、风险、模拟盘、返回和刷新五条路径。
+完成标准：`npm test`、`npm run build` 通过；本地 Web 服务启动后，在 Telegram 发送 `/start` 并点击风险、模拟盘、研究、帮助四个底部菜单项。

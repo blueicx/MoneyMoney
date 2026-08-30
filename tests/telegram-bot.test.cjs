@@ -157,3 +157,29 @@ test('ignores unauthorized callbacks and answers unknown callbacks safely', asyn
   assert.deepEqual(answered, [{ callbackQueryId: 'callback-unknown', text: '无法识别的按钮' }]);
   assert.deepEqual(sent, [{ chatId: 'allowed', text: '按钮已过期', replyMarkup: undefined }]);
 });
+
+test('routes a bottom keyboard label as a menu action and preserves the keyboard', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'telegram-bot-'));
+  const sent = [];
+  const menu = { keyboard: [[{ text: '📊 风险中心' }]], is_persistent: true, resize_keyboard: true };
+  const bot = new TelegramInteractionBot({
+    allowedChatIds: ['allowed'],
+    stateFile: path.join(tempDir, 'state.json'),
+    transport: {
+      async getUpdates() { return []; },
+      async sendMessage(chatId, text, replyMarkup) { sent.push({ chatId, text, replyMarkup }); },
+    },
+    handlers: {},
+    textHandlers: {
+      '📊 风险中心': async () => ({ text: 'risk', replyMarkup: menu }),
+    },
+  });
+
+  const result = await bot.handleUpdate({
+    update_id: 30,
+    message: { chat: { id: 'allowed', type: 'private' }, text: '📊 风险中心' },
+  });
+
+  assert.equal(result.handled, true);
+  assert.deepEqual(sent, [{ chatId: 'allowed', text: 'risk', replyMarkup: menu }]);
+});

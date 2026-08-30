@@ -22,8 +22,7 @@ import {
   TelegramInteractionBot,
   type TelegramCallbackHandler,
   type TelegramCommandHandler,
-  type TelegramCommandResult,
-  type TelegramInlineKeyboardMarkup,
+  type TelegramReplyKeyboardMarkup,
   type TelegramReply,
   escapeTelegramHtml,
   parseAllowedChatIds,
@@ -1813,39 +1812,32 @@ function formatTelegramNumber(value: number, digits = 2): string {
   return Number.isFinite(value) ? value.toFixed(digits) : '-';
 }
 
-function telegramKeyboard(page: 'home' | 'status' | 'risk' | 'signals' | 'paper' | 'research' | 'ops' | 'test'): TelegramInlineKeyboardMarkup {
-  if (page === 'home') {
-    return {
-      inline_keyboard: [
-        [
-          { text: '🏠 总览', callback_data: 'menu:home' },
-          { text: '📊 风险中心', callback_data: 'view:risk' },
-        ],
-        [
-          { text: '📡 最新信号', callback_data: 'view:signals' },
-          { text: '📒 模拟盘', callback_data: 'view:paper' },
-        ],
-        [
-          { text: '🔬 研究工作区', callback_data: 'view:research' },
-          { text: '⚙ 自动化状态', callback_data: 'view:ops' },
-        ],
-        [
-          { text: '🔔 通知测试', callback_data: 'action:test' },
-          { text: '🔄 刷新', callback_data: 'action:refresh' },
-        ],
-      ],
-    };
-  }
-  return {
-    inline_keyboard: [[
-      { text: '🔄 刷新', callback_data: page === 'test' ? 'action:test' : `view:${page}` },
-      { text: '◀ 返回主菜单', callback_data: 'menu:home' },
-    ]],
-  };
-}
+const TELEGRAM_BOTTOM_MENU: TelegramReplyKeyboardMarkup = {
+  keyboard: [
+    [{ text: '🏠 总览' }, { text: '📊 风险中心' }],
+    [{ text: '📡 最新信号' }, { text: '📒 模拟盘' }],
+    [{ text: '🔬 研究工作区' }, { text: '⚙ 自动化状态' }],
+    [{ text: '🔔 通知测试' }, { text: '❓ 帮助' }],
+  ],
+  is_persistent: true,
+  resize_keyboard: true,
+  one_time_keyboard: false,
+  input_field_placeholder: '选择功能或输入命令',
+};
 
-function telegramReply(text: string, page: Parameters<typeof telegramKeyboard>[0]): TelegramReply {
-  return { text, replyMarkup: telegramKeyboard(page) };
+const TELEGRAM_MENU_COMMANDS: Record<string, string> = {
+  '🏠 总览': 'help',
+  '📊 风险中心': 'risk',
+  '📡 最新信号': 'signals',
+  '📒 模拟盘': 'paper',
+  '🔬 研究工作区': 'research',
+  '⚙ 自动化状态': 'ops',
+  '🔔 通知测试': 'test',
+  '❓ 帮助': 'help',
+};
+
+function telegramReply(text: string): TelegramReply {
+  return { text, replyMarkup: TELEGRAM_BOTTOM_MENU };
 }
 
 function getTelegramCommandHandlers(): Record<string, TelegramCommandHandler> {
@@ -1952,10 +1944,7 @@ function getTelegramCommandHandlers(): Record<string, TelegramCommandHandler> {
     handlers[command] = async (context) => {
       const result = await handler(context);
       if (typeof result !== 'string') return result;
-      const page = command === 'start' || command === 'help'
-        ? 'home'
-        : command as Parameters<typeof telegramKeyboard>[0];
-      return telegramReply(result, page);
+      return telegramReply(result);
     };
   }
   return handlers;
@@ -1994,13 +1983,18 @@ function startTelegramInteractionBot(): void {
     return;
   }
   const commandHandlers = getTelegramCommandHandlers();
+  const textHandlers: Record<string, TelegramCommandHandler> = {};
+  for (const [label, command] of Object.entries(TELEGRAM_MENU_COMMANDS)) {
+    textHandlers[label] = commandHandlers[command];
+  }
   telegramInteractionBot = new TelegramInteractionBot({
     token: process.env.TELEGRAM_BOT_TOKEN,
     proxyUrl: process.env.TELEGRAM_PROXY_URL,
     allowedChatIds,
     handlers: commandHandlers,
+    textHandlers,
     callbackHandlers: getTelegramCallbackHandlers(commandHandlers),
-    unknownCallbackHandler: async () => telegramReply('按钮已过期，请返回主菜单。', 'home'),
+    unknownCallbackHandler: async () => telegramReply('按钮已过期，请发送 /start 重新打开功能菜单。'),
     logger: console,
   });
   telegramInteractionBot.start();

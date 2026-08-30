@@ -53,9 +53,24 @@ export interface TelegramInlineKeyboardMarkup {
   inline_keyboard: TelegramInlineKeyboardButton[][];
 }
 
+export interface TelegramReplyKeyboardButton {
+  text: string;
+}
+
+export interface TelegramReplyKeyboardMarkup {
+  keyboard: TelegramReplyKeyboardButton[][];
+  is_persistent?: boolean;
+  resize_keyboard?: boolean;
+  one_time_keyboard?: boolean;
+  input_field_placeholder?: string;
+  selective?: boolean;
+}
+
+export type TelegramReplyMarkup = TelegramInlineKeyboardMarkup | TelegramReplyKeyboardMarkup;
+
 export interface TelegramReply {
   text: string;
-  replyMarkup?: TelegramInlineKeyboardMarkup;
+  replyMarkup?: TelegramReplyMarkup;
 }
 
 export interface TelegramCallbackContext {
@@ -72,7 +87,7 @@ export type TelegramCallbackHandler = (context: TelegramCallbackContext) => Tele
 
 export interface TelegramTransport {
   getUpdates(offset: number, timeoutSeconds: number): Promise<TelegramUpdate[]>;
-  sendMessage(chatId: string, text: string, replyMarkup?: TelegramInlineKeyboardMarkup): Promise<void>;
+  sendMessage(chatId: string, text: string, replyMarkup?: TelegramReplyMarkup): Promise<void>;
   answerCallbackQuery(callbackQueryId: string, text?: string): Promise<void>;
 }
 
@@ -81,6 +96,7 @@ export interface TelegramInteractionBotOptions {
   proxyUrl?: string;
   allowedChatIds: Iterable<string> | string;
   handlers: Record<string, TelegramCommandHandler>;
+  textHandlers?: Record<string, TelegramCommandHandler>;
   callbackHandlers?: Record<string, TelegramCallbackHandler>;
   unknownCallbackHandler?: TelegramCallbackHandler;
   transport?: TelegramTransport;
@@ -148,7 +164,7 @@ class TelegramApiTransport implements TelegramTransport {
     return response.result || [];
   }
 
-  async sendMessage(chatId: string, text: string, replyMarkup?: TelegramInlineKeyboardMarkup): Promise<void> {
+  async sendMessage(chatId: string, text: string, replyMarkup?: TelegramReplyMarkup): Promise<void> {
     await this.callApi('sendMessage', {
       chat_id: chatId,
       text,
@@ -210,6 +226,7 @@ class TelegramApiTransport implements TelegramTransport {
 export class TelegramInteractionBot {
   private readonly allowedChatIds: Set<string>;
   private readonly handlers: Record<string, TelegramCommandHandler>;
+  private readonly textHandlers: Record<string, TelegramCommandHandler>;
   private readonly callbackHandlers: Record<string, TelegramCallbackHandler>;
   private readonly unknownCallbackHandler?: TelegramCallbackHandler;
   private readonly transport: TelegramTransport;
@@ -225,6 +242,7 @@ export class TelegramInteractionBot {
       ? parseAllowedChatIds(options.allowedChatIds)
       : new Set([...options.allowedChatIds].map(String));
     this.handlers = options.handlers;
+    this.textHandlers = options.textHandlers || {};
     this.callbackHandlers = options.callbackHandlers || {};
     this.unknownCallbackHandler = options.unknownCallbackHandler;
     this.transport = options.transport || new TelegramApiTransport(options.token || '', options.proxyUrl || '');
@@ -294,14 +312,16 @@ export class TelegramInteractionBot {
     if (!message.text) return { handled: false, reason: 'no_text_message' };
 
     const parsed = parseTelegramCommand(message.text);
-    if (!parsed) return { handled: false, reason: 'not_a_command' };
-    const handler = this.handlers[parsed.command] || this.handlers.help;
-    if (!handler) return { handled: false, reason: 'unknown_command' };
+    const textHandler = this.textHandlers[message.text.trim()];
+    const command = parsed?.command || '';
+    const args = parsed?.args || [];
+    const handler = parsed ? (this.handlers[command] || this.handlers.help) : textHandler;
+    if (!handler) return { handled: false, reason: parsed ? 'unknown_command' : 'not_a_command' };
 
     const reply = await handler({
       chatId,
-      command: parsed.command,
-      args: parsed.args,
+      command,
+      args,
       message,
       update,
     });
