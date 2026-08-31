@@ -89,6 +89,9 @@
 | ⚡ 分区懒加载 | 预测分类卡片按可视区域加载统计与盘口，股票研究分区展开才拉取数据；市场盘口短缓存去重，减少接口排队 |
 | 🖥️ 桌面客户端 | `MoneyMoney.exe` 托盘启动器：无黑窗启动、重复打开只唤起面板 |
 | 🧪 模拟盘 | 无风险纸面交易与日志记录，含夏普比率、盈亏比、VaR 95%、期望收益、赔率比等风险分析面板 |
+| 🏠 风险指挥台 | 将风险等级、模拟资产、VaR、助手警醒、预测分歧与临近截止事件集中到首页行动台，保留当前玻璃拟态主题 |
+| 📚 研究证据工作台 | 为市场、资产和主题保存研究状态、来源快照与研究笔记，形成可持续复盘的本地证据链 |
+| ⚙️ 自动化运营台 | 查看雷达刷新、风险巡检、助手刷新和 AI 模拟运行任务的状态、最近运行结果，并支持手动重跑 |
 
 ### 快速开始
 
@@ -118,10 +121,13 @@ npm run web        # 打开 http://localhost:3000
 ### Metaculus / OpenRouter / Bark 可选配置
 
 - **Metaculus**：在 Metaculus 账号设置里生成 API Token，写入 `.env`：`METACULUS_API_TOKEN=...`。未配置时雷达仍会用其他平台继续工作。
-- **OpenRouter**：在 OpenRouter 创建 Key 后写入 `.env`：`OPENROUTER_API_KEY=...`。可另填 `OPENROUTER_MODEL=...` 与 `OPENROUTER_BASE_URL=https://openrouter.ai/api/v1`。
+- **OpenRouter**：在 OpenRouter 创建 Key 后写入 `.env`：`OPENROUTER_API_KEY=...`。可用 `OPENROUTER_API_URL=...` 指向完整的 OpenAI-compatible `/chat/completions` 接口；留空时使用官方地址，也兼容旧的 `OPENROUTER_BASE_URL`。
+- **Groq**：如需启用市场分析链路，填写 `GROQ_API_KEY=...`；可用 `GROQ_API_URL=...` 自定义完整接口，模型由 `GROQ_MODEL=...` 控制。
 - **iPhone Bark**：安装 Bark 后复制它的推送 URL 中的 device key，写入 `.env`：`BARK_DEVICE_KEY=...`。之后可在设置页测试全部通知通道。
 
 ### Telegram 高胜率推送
+
+完整的私聊、群组、频道 Chat ID 获取方式与排错清单见 [`docs/telegram-setup.md`](docs/telegram-setup.md)。
 
 1. 在 Telegram 搜索 `@BotFather`，发送 `/newbot` 创建机器人并复制 Bot Token。
 2. 先给你的机器人发送一条任意消息；用浏览器或 `curl` 调用 `https://api.telegram.org/bot<TOKEN>/getUpdates` 找到 `chat.id`。
@@ -130,7 +136,7 @@ npm run web        # 打开 http://localhost:3000
    `TELEGRAM_CHAT_ID=...`
    可选：`HIGH_SUCCESS_WIN_RATE=65`
    若本机直连 Telegram 超时，另填 `TELEGRAM_PROXY_URL=http://127.0.0.1:10808`（端口以你的代理软件为准）。
-4. 重启 MoneyMoney，设置页保持「Telegram 通知」开启；点击「发送测试消息」确认连通。之后助手每次刷新发现新的高胜率信号会自动推送。
+4. 若要接收指令，在 `.env` 追加 `TELEGRAM_POLLING_ENABLED=true` 和 `TELEGRAM_ALLOWED_CHAT_IDS=你的ChatID`，然后重启 MoneyMoney。发送 `/start` 后，输入框下方会出现功能菜单；支持总览、风险、信号详情、市场搜索、事件日历、数据源健康、模拟盘二次确认、提醒订阅、历史表现和自然语言快捷查询。所有交易动作仅限本地模拟盘。
 
 ### 企业微信高胜率推送
 
@@ -281,7 +287,8 @@ Core market and research data comes primarily from keyless free APIs; the predic
 ### Optional Metaculus / OpenRouter / Bark Setup
 
 - **Metaculus**: create an API token from your account settings and set `METACULUS_API_TOKEN=...`. Without it, the radar still works from other platforms.
-- **OpenRouter**: create a key and set `OPENROUTER_API_KEY=...`; optionally set `OPENROUTER_MODEL=...` and `OPENROUTER_BASE_URL=https://openrouter.ai/api/v1`.
+- **OpenRouter**: set `OPENROUTER_API_KEY=...`; optionally set `OPENROUTER_API_URL=...` to a complete OpenAI-compatible `/chat/completions` endpoint. The official URL is used when blank, and the legacy `OPENROUTER_BASE_URL` is still supported.
+- **Groq**: set `GROQ_API_KEY=...` to enable the market-analysis chain; optionally set `GROQ_API_URL=...` and choose `GROQ_MODEL=...`.
 - **iPhone Bark**: install Bark, copy its device key from the push URL, and set `BARK_DEVICE_KEY=...`. Test all channels from Settings.
 
 ### Telegram High Win-Rate Push
@@ -293,7 +300,7 @@ Core market and research data comes primarily from keyless free APIs; the predic
    `TELEGRAM_CHAT_ID=...`
    Optional: `HIGH_SUCCESS_WIN_RATE=65`
    If Telegram is unreachable directly, add `TELEGRAM_PROXY_URL=http://127.0.0.1:10808` (use your local proxy port).
-4. Restart MoneyMoney, keep "Telegram Notifications" enabled, and use the dashboard test button. New high win-rate advisor signals are then pushed automatically.
+4. To receive commands, also set `TELEGRAM_POLLING_ENABLED=true` and `TELEGRAM_ALLOWED_CHAT_IDS=<your chat id>`, then restart MoneyMoney. Send `/start` to show the persistent menu. It covers overview, risk, signal details, market search, events, source health, paper-trading confirmation, subscriptions, history, and natural-language shortcuts. Trading actions remain local paper trading only.
 
 ### WeCom High Win-Rate Push
 
@@ -354,12 +361,17 @@ workdir=E:\MYC\predict-fun-trader
 Copy `.env.example` to `.env` and fill in your keys (all optional for read-only mode):
 
 ```
-PREDICT_PRIVATE_KEY=   # Predict.fun wallet private key
+PRIVATE_KEY=           # Predict.fun wallet private key
 BINANCE_API_KEY=       # Binance API key
-BINANCE_SECRET=        # Binance secret
+BINANCE_API_SECRET=    # Binance secret
 TELEGRAM_BOT_TOKEN=    # Telegram bot token (optional)
 TELEGRAM_CHAT_ID=      # Telegram chat ID (optional)
+TELEGRAM_POLLING_ENABLED=false
+TELEGRAM_ALLOWED_CHAT_IDS=
+TELEGRAM_ADMIN_CHAT_IDS=
 ```
+
+本地默认只监听 `127.0.0.1:3000`。如需在手机或局域网设备打开 PWA，可在 `.env` 中设置 `APP_HOST=0.0.0.0`，并按需修改 `APP_PORT`；这只改变监听地址，不会开启真实交易。
 
 ### License
 

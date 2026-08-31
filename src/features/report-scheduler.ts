@@ -10,6 +10,11 @@ import { newsFeed, settingsManager } from './news-settings';
 export class ReportScheduler {
   private interval: NodeJS.Timeout | null = null;
   private lastReportDate: string = '';
+  private dailyReportEnabled = () => true;
+
+  setDailyReportEnabledChecker(checker: () => boolean): void {
+    this.dailyReportEnabled = checker;
+  }
 
   start(): void {
     if (this.interval) return;
@@ -30,13 +35,13 @@ export class ReportScheduler {
     const hour = now.getHours();
 
     // Send at 08:00 local time once per day
-    if (hour === 8 && this.lastReportDate !== today) {
+    if (hour === 8 && this.lastReportDate !== today && this.dailyReportEnabled()) {
       this.lastReportDate = today;
       this.sendDailyReport();
     }
   }
 
-  async sendDailyReport(): Promise<string> {
+  async buildDailyReport(): Promise<string> {
     const portfolio = paperEngine.getPortfolio();
     const settings = settingsManager.get();
     const correlations = priceTracker.allCorrelations();
@@ -71,6 +76,11 @@ export class ReportScheduler {
       });
     }
 
+    return report;
+  }
+
+  async sendDailyReport(): Promise<string> {
+    const report = await this.buildDailyReport();
     await telegram.notifyDailyReport(report);
     return report;
   }

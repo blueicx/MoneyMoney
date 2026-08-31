@@ -1,11 +1,15 @@
 import { DATA_ROOT } from '../utils/paths';
+import { resolveChatCompletionsUrl } from './ai-endpoint';
 // ============================================
 // AI ANALYSIS (Groq free API) + REDDIT SENTIMENT
 // ============================================
 
 const GROQ_API_KEY = process.env.GROQ_API_KEY || '';
 const GROQ_MODEL = process.env.GROQ_MODEL || 'llama-3.3-70b-versatile';
-const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
+export function resolveGroqApiUrl(explicitUrl = process.env.GROQ_API_URL, baseUrl = process.env.GROQ_BASE_URL): string {
+  return resolveChatCompletionsUrl(explicitUrl, baseUrl, 'https://api.groq.com/openai/v1');
+}
+const GROQ_URL = resolveGroqApiUrl();
 
 export class LLMAnalyzer {
 

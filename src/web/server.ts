@@ -89,6 +89,12 @@ import {
   getAutomationOverview,
   saveAutomationRun,
 } from '../features/automation-ops';
+import {
+  parsePriceAlertArgs,
+  routeNaturalLanguage,
+  sparkline,
+  telegramCommandCenterStore,
+} from '../features/telegram-command-center';
 import type { Category } from '../types';
 import QRCode from 'qrcode';
 import os from 'os';
@@ -1780,6 +1786,8 @@ app.get('/api/analysis', async (req, res) => {
 let lastAdvisorReport: Awaited<ReturnType<typeof generateAssistantReport>> | null = null;
 let advisorReportRefreshing = false;
 let telegramInteractionBot: TelegramInteractionBot | null = null;
+let telegramPriceMonitor: NodeJS.Timeout | null = null;
+let telegramSlowMonitor: NodeJS.Timeout | null = null;
 
 function refreshAdvisorReportInBackground(): void {
   if (advisorReportRefreshing) return;
@@ -1797,15 +1805,29 @@ function refreshAdvisorReportInBackground(): void {
 const TELEGRAM_HELP = [
   '<b>MoneyMoney 交互机器人</b>',
   '',
+  '/today   今日总览（行情、风险、事件）',
   '/status  查看服务与配置状态',
   '/risk    查看模拟盘风险摘要',
   '/signals 查看最近一份助手信号',
-  '/paper   查看模拟持仓与盈亏',
+  '/signal  查看单条信号详情，例如 /signal 1',
+  '/search  搜索预测市场，例如 /search election',
+  '/events  查看未来 7 天事件日历',
+  '/sources 查看数据源健康',
+  '/history 查看风险历史与表现',
+  '/paper   查看模拟盘；开平仓需二次确认',
   '/research 查看研究工作区',
   '/ops     查看自动化任务状态',
+  '/alerts  查看或修改通知订阅',
+  '/alert   创建价格提醒，例如 /alert BTC above 120000',
+  '/strategies 查看 AI 模拟策略',
+  '/ask     自然语言快捷查询，例如 /ask 看一下风险',
+  '/chart   查看风险趋势火花线',
+  '/audit   查看自己的操作审计',
+  '/whoami  查看当前 Chat ID',
+  '/web     获取本地面板地址',
   '/test    测试机器人回复链路',
   '',
-  '当前命令仅查询或测试，不会触发真实下单。',
+  '所有交易指令仅作用于本地模拟盘，不会触发真实下单。',
 ].join('\n');
 
 function formatTelegramNumber(value: number, digits = 2): string {
@@ -1815,8 +1837,11 @@ function formatTelegramNumber(value: number, digits = 2): string {
 const TELEGRAM_BOTTOM_MENU: TelegramReplyKeyboardMarkup = {
   keyboard: [
     [{ text: '🏠 总览' }, { text: '📊 风险中心' }],
-    [{ text: '📡 最新信号' }, { text: '📒 模拟盘' }],
-    [{ text: '🔬 研究工作区' }, { text: '⚙ 自动化状态' }],
+    [{ text: '📋 今日总览' }, { text: '📡 最新信号' }],
+    [{ text: '🔎 搜索市场' }, { text: '📅 事件日历' }],
+    [{ text: '📒 模拟盘' }, { text: '🔬 研究工作区' }],
+    [{ text: '🩺 数据源健康' }, { text: '📈 历史表现' }],
+    [{ text: '🔔 提醒设置' }, { text: '⚙ 自动化状态' }],
     [{ text: '🔔 通知测试' }, { text: '❓ 帮助' }],
   ],
   is_persistent: true,
@@ -1828,9 +1853,15 @@ const TELEGRAM_BOTTOM_MENU: TelegramReplyKeyboardMarkup = {
 const TELEGRAM_MENU_COMMANDS: Record<string, string> = {
   '🏠 总览': 'help',
   '📊 风险中心': 'risk',
+  '📋 今日总览': 'today',
   '📡 最新信号': 'signals',
+  '🔎 搜索市场': 'search',
+  '📅 事件日历': 'events',
   '📒 模拟盘': 'paper',
   '🔬 研究工作区': 'research',
+  '🩺 数据源健康': 'sources',
+  '📈 历史表现': 'history',
+  '🔔 提醒设置': 'alerts',
   '⚙ 自动化状态': 'ops',
   '🔔 通知测试': 'test',
   '❓ 帮助': 'help',
@@ -1840,10 +1871,83 @@ function telegramReply(text: string): TelegramReply {
   return { text, replyMarkup: TELEGRAM_BOTTOM_MENU };
 }
 
+function telegramActions() {
+  if (!lastAdvisorReport) return [];
+  return [
+    ...lastAdvisorReport.cryptoActions,
+    ...lastAdvisorReport.stockActions,
+    ...lastAdvisorReport.macroActions,
+    ...lastAdvisorReport.sectorActions,
+    ...lastAdvisorReport.predictionPicks,
+    ...lastAdvisorReport.optionActions,
+  ];
+}
+
+function telegramAdminChatIds(): Set<string> {
+  if (process.env.TELEGRAM_ADMIN_CHAT_IDS?.trim()) return parseAllowedChatIds(process.env.TELEGRAM_ADMIN_CHAT_IDS);
+  return parseAllowedChatIds(process.env.TELEGRAM_ALLOWED_CHAT_IDS, process.env.TELEGRAM_CHAT_ID);
+}
+
+function isTelegramAdmin(chatId: string): boolean {
+  const configured = telegramAdminChatIds();
+  return configured.size === 0 || configured.has(String(chatId));
+}
+
+function localDashboardUrl(): string {
+  if (config.appHost !== '0.0.0.0') return `http://localhost:${config.appPort}`;
+  const interfaces = os.networkInterfaces();
+  const address = Object.values(interfaces).flat().find(item => item && item.family === 'IPv4' && !item.internal)?.address;
+  return `http://${address || 'localhost'}:${config.appPort}`;
+}
+
+function formatTelegramPreferences(chatId: string): string {
+  const prefs = telegramCommandCenterStore.getPreferences(chatId).notifications;
+  const mark = (value: boolean) => value ? '✅' : '⛔';
+  const alerts = telegramCommandCenterStore.listPriceAlerts(chatId).filter(item => !item.triggered);
+  return [
+    '<b>提醒与订阅</b>',
+    `${mark(prefs.signals)} 信号更新`,
+    `${mark(prefs.dailyReport)} 每日报告`,
+    `${mark(prefs.riskAlerts)} 风险预警`,
+    `${mark(prefs.events)} 事件提醒`,
+    `${mark(prefs.priceAlerts)} 价格提醒`,
+    `${mark(settingsManager.get().telegramEnabled)} 全局出站通知`,
+    '',
+    alerts.length ? '<b>价格提醒</b>' : '暂无价格提醒。',
+    ...alerts.slice(0, 8).map(item => `· ${item.id} · ${item.symbol} ${item.direction === 'ABOVE' ? '≥' : '≤'} ${item.price}`),
+    '',
+    '用法：/alerts signals on|off；/alerts all on|off；/alert BTC above 120000；/alert off <id>',
+  ].join('\n');
+}
+
 function getTelegramCommandHandlers(): Record<string, TelegramCommandHandler> {
   const rawHandlers: Record<string, TelegramCommandHandler> = {
     start: () => `${TELEGRAM_HELP}\n\n已连接。发送 /help 查看命令。`,
     help: () => TELEGRAM_HELP,
+    today: async () => {
+      const [prices, calendar] = await Promise.allSettled([
+        binanceFeed.getMultiplePrices(['BTCUSDT', 'ETHUSDT']),
+        getUpcomingEventCalendar(7),
+      ]);
+      const portfolio = paperEngine.getPortfolio();
+      const history = getRiskHistory(24);
+      const priceMap = prices.status === 'fulfilled' ? prices.value : {};
+      const priceLines = Object.values(priceMap).map(item => `· ${item.symbol}: $${formatTelegramNumber(item.price, item.price >= 100 ? 2 : 4)}`);
+      const events = calendar.status === 'fulfilled' ? calendar.value.events.slice(0, 3) : [];
+      return [
+        '<b>今日总览</b>',
+        `模拟盘权益：$${formatTelegramNumber(portfolio.equity)} · 持仓 ${paperEngine.getOpenPositions().length}`,
+        `总盈亏：${portfolio.totalPnl >= 0 ? '+' : ''}$${formatTelegramNumber(portfolio.totalPnl)} · 风险趋势：${escapeTelegramHtml(history.trend.headlineZh)}`,
+        '',
+        '<b>加密行情</b>',
+        ...(priceLines.length ? priceLines : ['· 行情暂不可用']),
+        '',
+        '<b>近期事件</b>',
+        ...(events.length ? events.map(event => `· ${escapeTelegramHtml(event.date.slice(0, 16))} ${escapeTelegramHtml(event.titleZh || event.title)} · ${escapeTelegramHtml(event.impact)}`) : ['· 暂无事件或日历暂不可用']),
+        '',
+        lastAdvisorReport ? `助手状态：${escapeTelegramHtml(lastAdvisorReport.regime.labelZh)} · 更新于 ${escapeTelegramHtml(lastAdvisorReport.generatedAt)}` : '助手状态：后台尚未生成最新报告',
+      ].join('\n');
+    },
     status: () => {
       const settings = settingsManager.get();
       const jobs = getAutomationOverview();
@@ -1873,20 +1977,85 @@ function getTelegramCommandHandlers(): Record<string, TelegramCommandHandler> {
         '以上为本地模拟盘统计，不代表实时市场或真实账户风险。',
       ].join('\n');
     },
+    signal: ({ args }) => {
+      if (!lastAdvisorReport) {
+        refreshAdvisorReportInBackground();
+        return '助手报告尚未准备好，已在后台刷新。稍后再次发送 /signal 1。';
+      }
+      const actions = telegramActions().filter(action => action.action !== 'WAIT');
+      const index = Math.max(1, Number(args[0] || 1)) - 1;
+      const action = actions[index];
+      if (!action) return actions.length ? `未找到第 ${index + 1} 条信号，共 ${actions.length} 条。发送 /signals 查看列表。` : '暂无可展开的非 WAIT 信号。';
+      return [
+        `<b>信号详情 #${index + 1}</b>`,
+        `${escapeTelegramHtml(action.title || action.symbol)} · ${escapeTelegramHtml(action.venue)}`,
+        `动作：<b>${escapeTelegramHtml(action.actionZh)}</b> · 置信度 ${formatTelegramNumber(action.confidencePct, 1)}%`,
+        action.probabilityPct == null ? '' : `概率：${formatTelegramNumber(action.probabilityPct, 1)}%`,
+        action.entry == null ? '' : `入场：${formatTelegramNumber(action.entry, 4)} · 止损：${formatTelegramNumber(action.stopLoss ?? NaN, 4)} · 止盈：${formatTelegramNumber(action.takeProfit ?? NaN, 4)}`,
+        `建议风险：${formatTelegramNumber(action.suggestedRiskPct, 1)}% · 周期：${escapeTelegramHtml(action.horizon)}`,
+        '',
+        '<b>依据</b>',
+        ...action.reasons.slice(0, 6).map(reason => `· ${escapeTelegramHtml(reason)}`),
+        '',
+        '该信号仅作研究提醒，不构成投资建议，也不会自动下单。',
+      ].filter(Boolean).join('\n');
+    },
+    search: ({ args }) => {
+      const query = args.join(' ').trim().toLowerCase();
+      if (!query) return '用法：/search <关键词>\n例如：/search election 或 /search BTC';
+      const radar = getCachedPredictionRadarSlice('', 240);
+      const matches = radar?.markets.filter(item => `${item.title} ${item.titleZh || ''} ${item.category} ${item.platform}`.toLowerCase().includes(query)).slice(0, 8) || [];
+      if (!matches.length) return `没有在本地预测市场快照中找到“${escapeTelegramHtml(query)}”。可先打开网页面板刷新雷达。`;
+      return [
+        `<b>市场搜索</b> · ${escapeTelegramHtml(query)}`,
+        ...matches.map((item, index) => `${index + 1}. ${escapeTelegramHtml(item.titleZh || item.title)}\n   ${escapeTelegramHtml(item.platform)} · ${formatTelegramNumber(item.yesPrice * 100, 1)}% · 流动性 $${formatTelegramNumber(item.liquidity, 0)}`),
+        '',
+        '结果来自本地预测雷达快照；详情可在网页面板查看。',
+      ].join('\n');
+    },
+    events: async () => {
+      try {
+        const calendar = await getUpcomingEventCalendar(7);
+        return [
+          `<b>未来 7 天事件日历</b> · ${calendar.count} 项${calendar.stale ? ' · 使用缓存' : ''}`,
+          ...calendar.events.slice(0, 10).map(event => `· ${escapeTelegramHtml(event.date.slice(0, 16))} · ${escapeTelegramHtml(event.impact)} · ${escapeTelegramHtml(event.titleZh || event.title)}`),
+          ...(calendar.warnings.length ? ['', ...calendar.warnings.map(item => `⚠️ ${escapeTelegramHtml(item)}`)] : []),
+        ].join('\n');
+      } catch (error) {
+        return `事件日历暂时不可用：${escapeTelegramHtml(error instanceof Error ? error.message : '未知错误')}`;
+      }
+    },
+    sources: async () => {
+      try {
+        const report = await getSourceHealth();
+        return [
+          `<b>数据源健康</b> · 在线 ${report.online}/${report.total} · 可选已配置 ${report.configuredOptional}`,
+          ...report.items.map(item => `${item.ok ? '✅' : '⚠️'} ${escapeTelegramHtml(item.name)} · ${escapeTelegramHtml(item.detail)}${item.latencyMs == null ? '' : ` · ${item.latencyMs}ms`}`),
+        ].join('\n');
+      } catch (error) {
+        return `数据源检查失败：${escapeTelegramHtml(error instanceof Error ? error.message : '未知错误')}`;
+      }
+    },
+    history: () => {
+      const portfolio = paperEngine.getPortfolio();
+      const metrics = paperEngine.getRiskMetrics();
+      const history = getRiskHistory(72);
+      return [
+        '<b>历史表现与风险趋势</b>',
+        `风险：${escapeTelegramHtml(history.trend.headlineZh)}`,
+        `趋势：${sparkline(history.points.map(point => point.riskScore))} · ${escapeTelegramHtml(history.trend.detailZh)}`,
+        `已平仓：${metrics.totalTrades} · 胜率：${formatTelegramNumber(metrics.winRate * 100, 1)}% · 盈亏因子：${formatTelegramNumber(metrics.profitFactor, 2)}`,
+        `最大回撤：${formatTelegramNumber(portfolio.maxDrawdownPct, 1)}% · VaR95：$${formatTelegramNumber(metrics.var95Usd)}`,
+        '',
+        '统计仅针对本地模拟盘，历史结果不代表未来表现。',
+      ].join('\n');
+    },
     signals: () => {
       if (!lastAdvisorReport) {
         refreshAdvisorReportInBackground();
         return '助手报告尚未准备好，已在后台刷新。稍后再次发送 /signals。';
       }
-      const groups = [
-        ...lastAdvisorReport.cryptoActions,
-        ...lastAdvisorReport.stockActions,
-        ...lastAdvisorReport.macroActions,
-        ...lastAdvisorReport.sectorActions,
-        ...lastAdvisorReport.predictionPicks,
-        ...lastAdvisorReport.optionActions,
-      ];
-      const actionable = groups.filter(action => action.action !== 'WAIT').slice(0, 8);
+      const actionable = telegramActions().filter(action => action.action !== 'WAIT').slice(0, 8);
       if (!actionable.length) return `<b>最近信号</b>\n当前没有非 WAIT 建议。\n市场状态：${escapeTelegramHtml(lastAdvisorReport.regime.labelZh)}`;
       return [
         `<b>最近信号</b> · ${escapeTelegramHtml(lastAdvisorReport.regime.labelZh)}`,
@@ -1895,7 +2064,31 @@ function getTelegramCommandHandlers(): Record<string, TelegramCommandHandler> {
         '信号仅作研究提醒，不会由机器人自动下单。',
       ].join('\n');
     },
-    paper: () => {
+    paper: ({ chatId, args }) => {
+      if (args[0] === 'open') {
+        const marketId = Number(args[1]);
+        const outcome = String(args[2] || '').toLowerCase();
+        const outcomeIndex = outcome === 'no' ? 1 : 0;
+        const price = Number(args[3]);
+        const amountUsd = Number(args[4]);
+        if (!Number.isInteger(marketId) || !['yes', 'no'].includes(outcome) || !Number.isFinite(price) || !Number.isFinite(amountUsd) || price <= 0 || price > 1 || amountUsd <= 0) {
+          return '用法：/paper open <市场ID> <yes|no> <价格0-1> <金额USD>\n这是模拟盘操作，确认前不会写入持仓。';
+        }
+        const market = getCachedPredictionRadarSlice('', 240)?.markets.find(item => String(item.id) === String(marketId));
+        const pending = telegramCommandCenterStore.createPendingAction(chatId, {
+          type: 'paper_open', marketId, outcomeIndex: outcomeIndex as 0 | 1,
+          outcomeName: outcomeIndex === 0 ? 'YES' : 'NO', price, amountUsd,
+        });
+        return `⚠️ 请确认模拟开仓\n市场：${escapeTelegramHtml(market?.titleZh || market?.title || `市场 ${marketId}`)}\n方向：${outcomeIndex === 0 ? 'YES' : 'NO'} · 价格 ${price} · 金额 $${amountUsd}\n\n确认：/confirm ${pending.nonce}\n取消：/cancel`;
+      }
+      if (args[0] === 'close') {
+        const positionId = args[1] || '';
+        const exitPrice = Number(args[2]);
+        const position = paperEngine.getOpenPositions().find(item => item.id === positionId);
+        if (!position || !Number.isFinite(exitPrice) || exitPrice <= 0 || exitPrice > 1) return '用法：/paper close <持仓ID> <平仓价格0-1>';
+        const pending = telegramCommandCenterStore.createPendingAction(chatId, { type: 'paper_close', positionId, price: exitPrice });
+        return `⚠️ 请确认模拟平仓\n${escapeTelegramHtml(position.marketTitle)} · ${escapeTelegramHtml(position.outcomeName)}\n价格：${exitPrice}\n\n确认：/confirm ${pending.nonce}\n取消：/cancel`;
+      }
       const portfolio = paperEngine.getPortfolio();
       const positions = paperEngine.getOpenPositions();
       const lines = positions.slice(0, 8).map(position => {
@@ -1910,17 +2103,33 @@ function getTelegramCommandHandlers(): Record<string, TelegramCommandHandler> {
         ...(lines.length ? ['', ...lines] : ['', '暂无开放模拟持仓。']),
         '',
         '这里只展示 paper trading，不连接真实下单。',
+        '',
+        '模拟开仓：/paper open <市场ID> <yes|no> <价格> <金额>；平仓：/paper close <持仓ID> <价格>。',
       ].join('\n');
     },
-    research: () => {
+    research: ({ args }) => {
       const entries = listResearchEntries(6);
       if (!entries.length) return '<b>研究工作区</b>\n暂无研究条目。';
+      if (args[0]) {
+        const selected = getResearchEntry(args[0]) || entries[Number(args[0]) - 1];
+        if (!selected) return '未找到该研究条目。发送 /research 查看列表。';
+        const summary = summarizeResearchEntry(selected);
+        return [
+          `<b>研究详情</b> · ${escapeTelegramHtml(summary.title)}`,
+          `状态：${escapeTelegramHtml(summary.status)} · 最新：${escapeTelegramHtml(summary.latestAt)}`,
+          `市场概率：${summary.marketProbabilityPct == null ? '-' : `${summary.marketProbabilityPct}%`} · 模型概率：${summary.modelProbabilityPct == null ? '-' : `${summary.modelProbabilityPct}%`}`,
+          `论点：${escapeTelegramHtml(selected.thesis || '未填写')}`,
+          '',
+          selected.notes.length ? '<b>最新笔记</b>' : '暂无研究笔记。',
+          ...selected.notes.slice(0, 5).map(note => `· ${escapeTelegramHtml(note.text)}`),
+        ].join('\n');
+      }
       return [
         '<b>研究工作区</b>',
         ...entries.map((entry, index) => {
           const summary = summarizeResearchEntry(entry);
           const edge = summary.edgePct == null ? '-' : `${summary.edgePct >= 0 ? '+' : ''}${summary.edgePct.toFixed(1)}pp`;
-          return `${index + 1}. ${escapeTelegramHtml(summary.title)} · ${escapeTelegramHtml(summary.status)} · edge ${edge}`;
+          return `${index + 1}. ${escapeTelegramHtml(summary.title)} · ${escapeTelegramHtml(summary.status)} · edge ${edge} · /research ${index + 1}`;
         }),
         '',
         '研究条目来自本地工作区，需结合来源新鲜度自行判断。',
@@ -1937,6 +2146,92 @@ function getTelegramCommandHandlers(): Record<string, TelegramCommandHandler> {
         'Telegram 目前只读展示任务状态，不远程触发任务。',
       ].join('\n');
     },
+    alerts: ({ chatId, args }) => {
+      const key = String(args[0] || '').toLowerCase();
+      const value = String(args[1] || '').toLowerCase();
+      if (!key) return formatTelegramPreferences(chatId);
+      if (!['on', 'off'].includes(value)) return '用法：/alerts signals|daily|risk|events|price|all on|off';
+      const enabled = value === 'on';
+      if (key === 'all') {
+        settingsManager.update({ telegramEnabled: enabled });
+        telegramCommandCenterStore.updatePreferences(chatId, { notifications: {
+          signals: enabled, dailyReport: enabled, riskAlerts: enabled, events: enabled, priceAlerts: enabled,
+        } });
+      } else {
+        const field = ({ signals: 'signals', daily: 'dailyReport', risk: 'riskAlerts', events: 'events', price: 'priceAlerts' } as Record<string, keyof ReturnType<typeof telegramCommandCenterStore.getPreferences>['notifications']>)[key];
+        if (!field) return '用法：/alerts signals|daily|risk|events|price|all on|off';
+        telegramCommandCenterStore.updatePreferences(chatId, { notifications: { [field]: enabled } });
+      }
+      telegramCommandCenterStore.recordAudit(chatId, 'alerts_update', `${key}=${value}`);
+      return `已更新提醒设置：${key} ${value === 'on' ? '开启' : '关闭'}\n\n${formatTelegramPreferences(chatId)}`;
+    },
+    alert: ({ chatId, args }) => {
+      if (args[0] === 'off') {
+        const removed = args[1] ? telegramCommandCenterStore.removePriceAlert(chatId, args[1]) : false;
+        return removed ? '✅ 价格提醒已删除。' : '未找到该提醒。用 /alerts 查看提醒 ID。';
+      }
+      const parsed = parsePriceAlertArgs(args);
+      if (!parsed) return '用法：/alert BTC above 120000\n或：/alert ETH below 2500\n删除：/alert off <提醒ID>';
+      const created = telegramCommandCenterStore.createPriceAlert(chatId, parsed);
+      telegramCommandCenterStore.updatePreferences(chatId, { notifications: { priceAlerts: true } });
+      telegramCommandCenterStore.recordAudit(chatId, 'price_alert_create', `${created.symbol} ${created.direction} ${created.price}`);
+      return `✅ 已创建价格提醒：${created.symbol} ${created.direction === 'ABOVE' ? '≥' : '≤'} ${created.price}\n提醒 ID：${created.id}`;
+    },
+    confirm: ({ chatId, args }) => {
+      const pending = args[0] ? telegramCommandCenterStore.consumePendingAction(chatId, args[0]) : null;
+      if (!pending) return '确认码不存在、已使用或已过期。请重新发送模拟盘操作。';
+      if (pending.type === 'paper_open') {
+        const result = paperEngine.openPosition(
+          pending.marketId || 0,
+          getCachedPredictionRadarSlice('', 240)?.markets.find(item => String(item.id) === String(pending.marketId))?.titleZh || `市场 ${pending.marketId}`,
+          pending.outcomeIndex || 0,
+          pending.outcomeName || 'YES', pending.price || 0, pending.amountUsd || 0, 'Telegram 二次确认',
+        );
+        telegramCommandCenterStore.recordAudit(chatId, 'paper_open_confirm', result.message);
+        return result.success ? `✅ ${escapeTelegramHtml(result.message)}` : `❌ ${escapeTelegramHtml(result.message)}`;
+      }
+      const result = paperEngine.closePosition(pending.positionId || '', pending.price || 0);
+      telegramCommandCenterStore.recordAudit(chatId, 'paper_close_confirm', result.message);
+      return result.success ? `✅ ${escapeTelegramHtml(result.message)}` : `❌ ${escapeTelegramHtml(result.message)}`;
+    },
+    cancel: ({ chatId }) => {
+      const cancelled = telegramCommandCenterStore.cancelPendingAction(chatId);
+      return cancelled ? '已取消待确认的模拟盘操作。' : '当前没有待确认操作。';
+    },
+    strategies: () => {
+      const runners = getAiRunners();
+      if (!runners.length) return '<b>AI 模拟策略</b>\n暂无策略账户。可在网页面板创建。';
+      return [
+        '<b>AI 模拟策略</b>',
+        ...runners.slice(0, 8).map(runner => {
+          const summary = summarizeRunner(runner);
+          return `· ${escapeTelegramHtml(runner.title)} · ${runner.status} · 权益 $${formatTelegramNumber(summary.equityUsd)} · PnL ${summary.totalPnlUsd >= 0 ? '+' : ''}$${formatTelegramNumber(summary.totalPnlUsd)}`;
+        }),
+        '',
+        'Telegram 只读展示策略账户，不在此处启动或停止策略。',
+      ].join('\n');
+    },
+    ask: ({ chatId, args, message, update }) => {
+      const input = args.join(' ');
+      const route = routeNaturalLanguage(input);
+      if (!route) return '我目前支持：风险、信号、事件、持仓、研究、数据源、今日总览、提醒、历史。\n例如：/ask 帮我看一下风险';
+      const handler = rawHandlers[route];
+      return handler ? handler({ chatId, command: route, args: [], message, update }) : '暂不支持该查询。';
+    },
+    chart: () => {
+      const history = getRiskHistory(72);
+      return `<b>风险趋势</b>\n${sparkline(history.points.map(point => point.riskScore))}\n${escapeTelegramHtml(history.trend.headlineZh)}\n${escapeTelegramHtml(history.trend.detailZh)}`;
+    },
+    audit: ({ chatId }) => {
+      if (!isTelegramAdmin(chatId)) return '无权限查看审计记录。';
+      const entries = telegramCommandCenterStore.listAudits(undefined, 12);
+      return entries.length
+        ? ['<b>最近操作审计</b>', ...entries.map(item => `· ${escapeTelegramHtml(item.at.slice(0, 19))} · chat ${escapeTelegramHtml(item.chatId)} · ${escapeTelegramHtml(item.action)} · ${escapeTelegramHtml(item.detail)}`)].join('\n')
+        : '<b>最近操作审计</b>\n暂无记录。';
+    },
+    whoami: ({ chatId }) => `当前 Chat ID：<code>${escapeTelegramHtml(chatId)}</code>\n已在允许列表中。`,
+    web: () => `本地面板：${escapeTelegramHtml(localDashboardUrl())}\n如果手机无法打开，请将 APP_HOST 设为 0.0.0.0，并确保手机与电脑在同一局域网。`,
+    daily: async () => reportScheduler.buildDailyReport(),
     test: () => '✅ 交互机器人回复链路正常。',
   };
   const handlers: Record<string, TelegramCommandHandler> = {};
@@ -1999,6 +2294,82 @@ function startTelegramInteractionBot(): void {
   });
   telegramInteractionBot.start();
   console.log(`  [telegram] interactive polling started (${allowedChatIds.size} allowed chat${allowedChatIds.size === 1 ? '' : 's'})`);
+}
+
+const telegramSignalPushes = new Set<string>();
+const telegramEventPushes = new Set<string>();
+
+async function monitorTelegramPriceAlerts(): Promise<void> {
+  if (!telegramInteractionBot) return;
+  const alerts = telegramCommandCenterStore.listPriceAlerts().filter(item => !item.triggered);
+  if (!alerts.length) return;
+  const prices = await binanceFeed.getMultiplePrices([...new Set(alerts.map(item => item.symbol))]);
+  for (const alert of alerts) {
+    const preference = telegramCommandCenterStore.getPreferences(alert.chatId).notifications;
+    const ticker = prices[alert.symbol];
+    if (!preference.priceAlerts || !ticker) continue;
+    const hit = alert.direction === 'ABOVE' ? ticker.price >= alert.price : ticker.price <= alert.price;
+    if (!hit) continue;
+    const triggered = telegramCommandCenterStore.markPriceAlertTriggered(alert.id);
+    if (!triggered) continue;
+    telegramCommandCenterStore.recordAudit(alert.chatId, 'price_alert_triggered', `${alert.symbol} ${ticker.price}`);
+    await telegramInteractionBot.sendToChat(alert.chatId, telegramReply(`🔔 <b>价格提醒触发</b>\n${alert.symbol} 当前 $${formatTelegramNumber(ticker.price, 4)}，已${alert.direction === 'ABOVE' ? '达到' : '跌至'} $${formatTelegramNumber(alert.price, 4)}`));
+  }
+}
+
+async function monitorTelegramSlowAlerts(): Promise<void> {
+  if (!telegramInteractionBot) return;
+  const chats = parseAllowedChatIds(process.env.TELEGRAM_ALLOWED_CHAT_IDS, process.env.TELEGRAM_CHAT_ID);
+  const portfolio = paperEngine.getPortfolio();
+  const metrics = paperEngine.getRiskMetrics();
+  for (const chatId of chats) {
+    const notifications = telegramCommandCenterStore.getPreferences(chatId).notifications;
+    if (notifications.riskAlerts && portfolio.maxDrawdownPct >= 10) {
+      const key = `risk:${new Date().toISOString().slice(0, 10)}:${chatId}`;
+      if (!telegramCommandCenterStore.listAudits(chatId, 100).some(item => item.action === 'risk_alert' && item.detail === key)) {
+        telegramCommandCenterStore.recordAudit(chatId, 'risk_alert', key);
+        await telegramInteractionBot.sendToChat(chatId, telegramReply(`⚠️ <b>模拟盘风险预警</b>\n最大回撤已达 ${formatTelegramNumber(portfolio.maxDrawdownPct, 1)}%，VaR95 $${formatTelegramNumber(metrics.var95Usd)}。建议先检查集中度和临近截止仓位。`));
+      }
+    }
+    const signalKey = `${chatId}:${lastAdvisorReport?.generatedAt || ''}`;
+    if (notifications.signals && lastAdvisorReport && !telegramSignalPushes.has(signalKey)) {
+      const actionable = telegramActions().filter(item => item.action !== 'WAIT').slice(0, 3);
+      if (actionable.length) {
+        await telegramInteractionBot.sendToChat(chatId, telegramReply([
+          '<b>📡 新助手信号</b>',
+          ...actionable.map(item => `· ${escapeTelegramHtml(item.title || item.symbol)} · ${escapeTelegramHtml(item.actionZh)} · ${formatTelegramNumber(item.confidencePct, 0)}%`),
+          '', '发送 /signals 查看完整列表。',
+        ].join('\n')));
+        telegramSignalPushes.add(signalKey);
+      }
+    }
+    if (notifications.events) {
+      try {
+        const calendar = await getUpcomingEventCalendar(2);
+        for (const event of calendar.events.filter(item => item.impact === 'high')) {
+          const eventKey = `${chatId}:${event.date}:${event.title}`;
+          const hours = (new Date(event.date).getTime() - Date.now()) / 3_600_000;
+          if (hours >= 0 && hours <= 24 && !telegramEventPushes.has(eventKey)) {
+            telegramEventPushes.add(eventKey);
+            await telegramInteractionBot.sendToChat(chatId, telegramReply(`📅 <b>高影响事件提醒</b>\n${escapeTelegramHtml(event.titleZh || event.title)}\n时间：${escapeTelegramHtml(event.date)}\n来源：${escapeTelegramHtml(event.source)}`));
+          }
+        }
+      } catch {}
+    }
+  }
+}
+
+function startTelegramCommandCenterMonitor(): void {
+  if (!telegramInteractionBot) return;
+  if (!telegramPriceMonitor) telegramPriceMonitor = setInterval(() => { void monitorTelegramPriceAlerts().catch(() => {}); }, 60_000);
+  if (!telegramSlowMonitor) telegramSlowMonitor = setInterval(() => { void monitorTelegramSlowAlerts().catch(() => {}); }, 10 * 60_000);
+}
+
+function stopTelegramCommandCenterMonitor(): void {
+  if (telegramPriceMonitor) clearInterval(telegramPriceMonitor);
+  if (telegramSlowMonitor) clearInterval(telegramSlowMonitor);
+  telegramPriceMonitor = null;
+  telegramSlowMonitor = null;
 }
 
 app.get('/api/advisor', async (_req, res) => {
@@ -2769,6 +3140,19 @@ app.get('/api/telegram/status', (_req, res) => {
   });
 });
 
+app.get('/api/telegram/command-center', (_req, res) => {
+  const alerts = telegramCommandCenterStore.listPriceAlerts().filter(item => !item.triggered);
+  res.json({
+    success: true,
+    data: {
+      chats: parseAllowedChatIds(process.env.TELEGRAM_ALLOWED_CHAT_IDS, process.env.TELEGRAM_CHAT_ID).size,
+      activePriceAlerts: alerts.length,
+      auditRecords: telegramCommandCenterStore.listAudits(undefined, 200).length,
+      monitor: { price: !!telegramPriceMonitor, slow: !!telegramSlowMonitor },
+    },
+  });
+});
+
 // --- Notification Channel Test ---
 
 app.post('/api/notification-channels/test', async (_req, res) => {
@@ -2813,6 +3197,12 @@ async function main() {
     // Pre-fetch radar data so the first click on the tab is already warm.
     void warmPredictionRadarCache();
     startTelegramInteractionBot();
+    reportScheduler.setDailyReportEnabledChecker(() => {
+      const chats = parseAllowedChatIds(process.env.TELEGRAM_ALLOWED_CHAT_IDS, process.env.TELEGRAM_CHAT_ID);
+      return chats.size === 0 || [...chats].some(chatId => telegramCommandCenterStore.getPreferences(chatId).notifications.dailyReport);
+    });
+    reportScheduler.start();
+    startTelegramCommandCenterMonitor();
   });
 
   server.on('error', (err: any) => {
@@ -2828,6 +3218,8 @@ async function main() {
   // Keep process alive
   process.on('SIGINT', () => {
     console.log('\n  Shutting down...');
+    stopTelegramCommandCenterMonitor();
+    reportScheduler.stop();
     telegramInteractionBot?.stop();
     server.close();
     process.exit(0);

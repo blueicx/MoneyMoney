@@ -1,8 +1,12 @@
 import type { PredictionRadar } from './prediction-radar';
+import { resolveChatCompletionsUrl } from './ai-endpoint';
 
 const OPENROUTER_API_KEY = (process.env.OPENROUTER_API_KEY || '').trim();
 const OPENROUTER_MODEL = (process.env.OPENROUTER_MODEL || 'minimax/minimax-m3:free').trim();
-const OPENROUTER_URL = `${(process.env.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1').trim().replace(/\/+$/, '')}/chat/completions`;
+export function resolveOpenRouterApiUrl(explicitUrl = process.env.OPENROUTER_API_URL, baseUrl = process.env.OPENROUTER_BASE_URL): string {
+  return resolveChatCompletionsUrl(explicitUrl, baseUrl, 'https://openrouter.ai/api/v1');
+}
+const OPENROUTER_URL = resolveOpenRouterApiUrl();
 const FALLBACK_MODELS = [
   'nvidia/nemotron-3-super-120b-a12b:free',
   'google/gemma-4-31b-it:free',

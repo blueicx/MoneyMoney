@@ -56,7 +56,11 @@ data/prediction-history.json
 data/forecast-lab.json
 data/*.cache.json
 data/settings.json
+data/telegram-bot-state.json
+data/telegram-command-center.json
 data/us-directory-cache.json
+data/research-workspace.json
+data/automation-ops.json
 kalshi-openapi.yaml
 
 # Local research captures and smoke scripts

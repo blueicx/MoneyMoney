@@ -14,6 +14,7 @@ export interface PaperPosition {
   outcomeName: string;
   side: 'BUY' | 'SELL';
   entryPrice: number;
+  currentPrice?: number;
   quantity: number;
   entryTime: string;
   exitPrice?: number;
@@ -50,6 +51,32 @@ export interface PaperPortfolio {
 import { DATA_ROOT } from '../utils/paths';
 const DATA_DIR = DATA_ROOT;
 const PORTFOLIO_FILE = path.join(DATA_DIR, 'paper-portfolio.json');
+
+export function validatePaperOrderInput(input: { price: unknown; amountUsd: unknown }): { ok: boolean; error?: string } {
+  const price = Number(input.price);
+  const amountUsd = Number(input.amountUsd);
+  if (!Number.isFinite(price) || price <= 0 || price > 1) return { ok: false, error: '价格必须大于 0 且不超过 1' };
+  if (!Number.isFinite(amountUsd) || amountUsd <= 0) return { ok: false, error: '金额必须大于 0' };
+  return { ok: true };
+}
+
+export function calculatePaperPortfolioValue(p: PaperPortfolio): {
+  openPositionsValue: number;
+  equity: number;
+  unrealizedPnl: number;
+} {
+  const openPositionsValue = p.positions
+    .filter(position => position.status === 'OPEN')
+    .reduce((sum, position) => sum + position.quantity * (position.currentPrice ?? position.entryPrice), 0);
+  const openCost = p.positions
+    .filter(position => position.status === 'OPEN')
+    .reduce((sum, position) => sum + position.quantity * position.entryPrice, 0);
+  return {
+    openPositionsValue: Math.round(openPositionsValue * 100) / 100,
+    equity: Math.round((p.cashBalance + openPositionsValue) * 100) / 100,
+    unrealizedPnl: Math.round((openPositionsValue - openCost) * 100) / 100,
+  };
+}
 
 function ensureDataDir(): void {
   if (!fs.existsSync(DATA_DIR)) {
@@ -247,10 +274,8 @@ export class PaperTradingEngine {
     };
   }
 
-  getPortfolio(): PaperPortfolio & { openPositionsValue: number; equity: number; winRate: number } {
-    const openPositions = portfolio.positions.filter(p => p.status === 'OPEN');
-    const openValue = openPositions.reduce((s, p) => s + p.quantity * p.entryPrice, 0);
-    const equity = portfolio.cashBalance + openValue;
+  getPortfolio(): PaperPortfolio & { openPositionsValue: number; equity: number; unrealizedPnl: number; winRate: number } {
+    const { openPositionsValue: openValue, equity, unrealizedPnl } = calculatePaperPortfolioValue(portfolio);
     const closed = portfolio.positions.filter(p => p.status === 'CLOSED');
     const winRate = closed.length > 0 ? portfolio.winsCount / closed.length : 0;
 
@@ -265,7 +290,7 @@ export class PaperTradingEngine {
       savePortfolio(portfolio);
     }
 
-    return { ...portfolio, openPositionsValue: openValue, equity, winRate };
+    return { ...portfolio, openPositionsValue: openValue, equity, unrealizedPnl, winRate };
   }
 
   /**
@@ -280,6 +305,8 @@ export class PaperTradingEngine {
     amountUsd: number,
     reason: string = ''
   ): { success: boolean; message: string; position?: PaperPosition } {
+    const validation = validatePaperOrderInput({ price, amountUsd });
+    if (!validation.ok) return { success: false, message: validation.error || '模拟订单参数无效' };
     const qty = Math.floor(amountUsd / price);
     if (qty <= 0) return { success: false, message: '金额低于该价格可交易的最小数量' };
     if (amountUsd > portfolio.cashBalance) return { success: false, message: `模拟余额不足（可用 $${portfolio.cashBalance.toFixed(2)}）` };
@@ -292,6 +319,7 @@ export class PaperTradingEngine {
       outcomeName,
       side: 'BUY',
       entryPrice: price,
+      currentPrice: price,
       quantity: qty,
       entryTime: new Date().toISOString(),
       status: 'OPEN',
@@ -317,6 +345,7 @@ export class PaperTradingEngine {
    * Close a position at current market price
    */
   closePosition(positionId: string, exitPrice: number): { success: boolean; message: string; pnl?: number } {
+    if (!Number.isFinite(exitPrice) || exitPrice <= 0 || exitPrice > 1) return { success: false, message: '平仓价格必须大于 0 且不超过 1' };
     const pos = portfolio.positions.find(p => p.id === positionId && p.status === 'OPEN');
     if (!pos) return { success: false, message: '未找到持仓，或已平仓' };
 
@@ -326,6 +355,7 @@ export class PaperTradingEngine {
     const pnlPct = (pnl / cost) * 100;
 
     pos.exitPrice = exitPrice;
+    pos.currentPrice = exitPrice;
     pos.exitTime = new Date().toISOString();
     pos.status = 'CLOSED';
     pos.pnlUsd = parseFloat(pnl.toFixed(4));
@@ -351,6 +381,19 @@ export class PaperTradingEngine {
 
     savePortfolio(portfolio);
     return { success: true, message: `已平仓 ${pos.outcomeName} | 盈亏: ${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)}`, pnl };
+  }
+
+  markToMarket(currentPrices: Map<number, { yesPrice: number; noPrice: number }>): void {
+    let changed = false;
+    for (const position of portfolio.positions.filter(item => item.status === 'OPEN')) {
+      const prices = currentPrices.get(position.marketId);
+      const price = prices ? (position.outcomeIndex === 0 ? prices.yesPrice : prices.noPrice) : undefined;
+      if (price != null && Number.isFinite(price) && price > 0 && price <= 1) {
+        position.currentPrice = price;
+        changed = true;
+      }
+    }
+    if (changed) savePortfolio(portfolio);
   }
 
   /**

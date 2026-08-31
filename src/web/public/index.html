@@ -1177,7 +1177,13 @@
       .mobile-nav { display: flex; }
       .layout { padding-bottom: 70px !important; }
       .main { padding: 12px !important; }
-      .header { padding: 10px 14px !important; flex-wrap: wrap; }
+      body { overflow-x: hidden; }
+      .header { padding: 10px 14px !important; flex-direction: column; align-items: stretch; gap: 8px; min-width: 0; box-sizing: border-box; }
+      .logo { min-width: 0; font-size: 17px; }
+      .header-right { width: 100%; min-width: 0; flex-wrap: wrap; justify-content: flex-end; gap: 5px; }
+      .header-right .refresh-btn { padding: 6px 8px; font-size: 11px; }
+      .wallet-chip { max-width: 92px; padding: 6px 8px; }
+      .balance-chip { padding: 6px 10px; font-size: 12px; }
       .tabs { overflow-x: auto; width: 100%; margin-bottom: 12px !important; }
       .tab { white-space: nowrap; font-size: 13px !important; padding: 8px 14px !important; }
       .sidebar { display: none !important; }
@@ -1752,7 +1758,18 @@
         <span class="skl" style="min-width:100px;height:36px;"></span>
       </div>
 
-      <div id="markets-tab" class="tab-content active">
+      <!-- Command Center Tab -->
+      <div id="command-tab" class="tab-content active">
+        <div class="section-title">🏠 风险指挥台</div>
+        <div id="command-center" class="glass-card" style="padding:18px;border-radius:20px;margin-bottom:18px;">
+          <div style="color:var(--text-secondary);font-size:13px;">正在汇总风险、研究和自动化状态...</div>
+        </div>
+        <div id="command-actions" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px;margin-bottom:18px;"></div>
+        <div class="section-title" style="margin-top:14px;">🧭 研究与运行状态</div>
+        <div id="command-workstreams" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;"></div>
+      </div>
+
+      <div id="markets-tab" class="tab-content">
         <div class="section-title">开放事件</div>
         <div id="research-briefing" class="research-briefing">
           <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;">
@@ -2551,6 +2568,31 @@
         <p style="font-size:11px;color:var(--text-secondary);margin-bottom:8px;">给助手跟踪的信号写复盘笔记和标签，帮助总结经验。</p>
         <div id="review-notes-filter" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;"></div>
         <div id="review-notes-list"></div>
+      </div>
+
+      <!-- Research Workspace Tab -->
+      <div id="research-tab" class="tab-content">
+        <div class="section-title">📚 研究证据工作台</div>
+        <div class="glass-card" style="padding:16px;border-radius:18px;margin-bottom:16px;">
+          <div style="font-weight:800;margin-bottom:8px;">新建研究对象</div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;">
+            <select id="research-subject-type" style="padding:8px;border-radius:9px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);">
+              <option value="prediction">🎯 预测市场</option><option value="crypto">₿ 加密资产</option><option value="stock">📈 股票</option><option value="macro">🌐 宏观</option>
+            </select>
+            <input id="research-subject-id" placeholder="标识，如 BTCUSDT / 42" style="padding:8px;border-radius:9px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);">
+            <input id="research-title" placeholder="研究标题" style="padding:8px;border-radius:9px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);">
+          </div>
+          <textarea id="research-thesis" placeholder="当前假设 / 主要矛盾（可选）" rows="2" style="width:100%;margin-top:8px;padding:8px;border-radius:9px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);resize:vertical;"></textarea>
+          <button class="tab active" onclick="createResearchEntryUi()" style="margin-top:8px;">＋ 建立研究卡</button>
+        </div>
+        <div id="research-workspace-list"><div class="empty-tip">正在读取研究对象...</div></div>
+      </div>
+
+      <!-- Automation Operations Tab -->
+      <div id="ops-tab" class="tab-content">
+        <div class="section-title">⚙️ 自动化运营台</div>
+        <div id="ops-overview" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:16px;"></div>
+        <div id="ops-jobs" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;"></div>
       </div>
 
     </main>
@@ -7476,6 +7518,138 @@ async function loadOverview() {
   } catch (e) {}
 }
 
+// --- Unified Command Center / Research Workspace / Automation Ops ---
+function commandMetric(label, value, note, color = 'var(--text)') {
+  return `<div class="glass-card" style="padding:14px;border-radius:15px;"><div style="font-size:11px;color:var(--text-secondary);">${safeNewsText(label)}</div><div style="font-size:22px;font-weight:850;color:${color};margin-top:4px;">${safeNewsText(value)}</div><div style="font-size:11px;color:var(--text-secondary);margin-top:3px;">${safeNewsText(note || '')}</div></div>`;
+}
+
+async function loadCommandCenter() {
+  const host = document.getElementById('command-center');
+  const actions = document.getElementById('command-actions');
+  const streams = document.getElementById('command-workstreams');
+  if (!host || !actions || !streams) return;
+  host.innerHTML = '<div style="color:var(--text-secondary);font-size:13px;">正在汇总风险、研究和自动化状态...</div>';
+  try {
+    const [riskRes, opsRes] = await Promise.all([
+      fetch('/api/risk/overview', { cache: 'no-store' }),
+      fetch('/api/ops', { cache: 'no-store' }),
+    ]);
+    const riskBody = await riskRes.json();
+    const opsBody = await opsRes.json();
+    if (!riskBody.success) throw new Error(riskBody.error || '风险总览暂不可用');
+    const risk = riskBody.data;
+    const ops = opsBody.data || { overview: {}, jobs: [] };
+    const level = risk.levelZh || '观察';
+    const levelColor = level === '危险' ? 'var(--red)' : level === '偏高' ? '#d97706' : level === '观察' ? '#b7791f' : 'var(--green)';
+    host.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;">
+        <div><div style="font-size:11px;color:var(--text-secondary);letter-spacing:.08em;">TODAY / RISK COMMAND</div><div style="font-size:30px;font-weight:900;color:${levelColor};margin-top:5px;">${safeNewsText(level)}</div><div style="font-size:12px;color:var(--text-secondary);margin-top:3px;">${safeNewsText(risk.commandSummaryZh || '等待更多市场证据')}</div></div>
+        <div style="text-align:right;font-size:11px;color:var(--text-secondary);">更新时间<br><strong style="color:var(--text);">${safeNewsText(new Date().toLocaleTimeString())}</strong></div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-top:16px;">
+        ${commandMetric('市场风险分', risk.marketRiskScore ?? '—', '跨资产背景')}
+        ${commandMetric('模拟敞口', '$' + (risk.simulatedExposureUsd ?? 0), (risk.openPositionCount ?? 0) + ' 个开放仓位')}
+        ${commandMetric('临近截止', risk.expiringSoonCount ?? 0, '需要优先复核', risk.expiringSoonCount ? '#b7791f' : 'var(--green)')}
+        ${commandMetric('自动化失败', ops.overview.failedRuns ?? 0, (ops.overview.totalRuns ?? 0) + ' 次运行', ops.overview.failedRuns ? 'var(--red)' : 'var(--green)')}
+      </div>`;
+
+    const cautions = (risk.cautions || []).slice(0, 4);
+    actions.innerHTML = cautions.length ? cautions.map(item => `
+      <div class="glass-card" style="padding:14px;border-radius:15px;border-left:3px solid ${item.severity === 'high' ? 'var(--red)' : '#b7791f'};">
+        <div style="font-weight:800;font-size:13px;">${safeNewsText(item.titleZh || item.title || '风险提醒')}</div>
+        <div style="font-size:11.5px;color:var(--text-secondary);line-height:1.55;margin-top:6px;">${safeNewsText(item.adviceZh || item.detailZh || '')}</div>
+      </div>`).join('') : '<div class="glass-card" style="padding:14px;border-radius:15px;color:var(--text-secondary);font-size:12px;">当前没有高优先级风险提醒。</div>';
+
+    const jobs = (ops.jobs || []).slice(0, 4);
+    streams.innerHTML = jobs.map(job => {
+      const statusColor = job.lastStatus === 'FAILED' ? 'var(--red)' : job.lastStatus === 'SUCCESS' ? 'var(--green)' : 'var(--text-secondary)';
+      return `<div class="glass-card" style="padding:14px;border-radius:15px;"><div style="display:flex;justify-content:space-between;gap:8px;"><strong>${safeNewsText(job.nameZh)}</strong><span style="font-size:10px;color:${statusColor};">${safeNewsText(job.lastStatus)}</span></div><div style="font-size:11px;color:var(--text-secondary);margin-top:7px;">${safeNewsText(job.descriptionZh)}</div><div style="font-size:10.5px;color:var(--text-secondary);margin-top:8px;">${safeNewsText(job.cadenceZh)} · ${safeNewsText(job.lastMessage)}</div></div>`;
+    }).join('');
+  } catch (error) {
+    host.innerHTML = `<div style="color:var(--red);font-size:12px;">指挥台暂时不可用：${safeNewsText(error.message)}</div>`;
+  }
+}
+
+function renderResearchEntryUi(entry) {
+  const s = entry.summary || {};
+  const edge = s.edgePct == null ? '—' : `${s.edgePct >= 0 ? '+' : ''}${s.edgePct}%`;
+  const edgeColor = s.edgePct == null ? 'var(--text-secondary)' : s.edgePct >= 0 ? 'var(--green)' : 'var(--red)';
+  const snapshots = (entry.snapshots || []).slice().reverse().slice(0, 3).map(item => `<div style="padding:8px 0;border-top:1px dashed var(--border);font-size:11px;color:var(--text-secondary);">${safeNewsText(new Date(item.capturedAt).toLocaleString())} · 市场 ${item.marketProbability == null ? '—' : Math.round(item.marketProbability * 100) + '%'} · 模型 ${item.modelProbability == null ? '—' : Math.round(item.modelProbability * 100) + '%'} · 来源 ${(item.sources || []).length}</div>`).join('');
+  const notes = (entry.notes || []).slice(0, 3).map(note => `<div style="padding:7px 0;border-top:1px dashed var(--border);font-size:11px;line-height:1.5;">${safeNewsText(note.text)} <span style="color:var(--purple);">${note.tags.map(safeNewsText).join(' ')}</span></div>`).join('');
+  return `<article class="glass-card" style="padding:16px;border-radius:17px;margin-bottom:12px;"><div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;"><div><div style="font-size:10px;color:var(--text-secondary);letter-spacing:.06em;">${safeNewsText(entry.subjectType)} · ${safeNewsText(entry.subjectId)}</div><h3 style="margin:5px 0 4px;font-size:16px;">${safeNewsText(entry.title)}</h3><div style="font-size:12px;color:var(--text-secondary);">${safeNewsText(entry.thesis || '尚未填写研究假设')}</div></div><span style="font-size:10px;padding:4px 8px;border-radius:99px;background:var(--purple-light);color:var(--purple);">${safeNewsText(entry.status)}</span></div><div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-top:13px;"><div><div style="font-size:10px;color:var(--text-secondary);">市场概率</div><b>${s.marketProbabilityPct == null ? '—' : s.marketProbabilityPct + '%'}</b></div><div><div style="font-size:10px;color:var(--text-secondary);">模型概率</div><b>${s.modelProbabilityPct == null ? '—' : s.modelProbabilityPct + '%'}</b></div><div><div style="font-size:10px;color:var(--text-secondary);">模型优势</div><b style="color:${edgeColor};">${edge}</b></div><div><div style="font-size:10px;color:var(--text-secondary);">证据/笔记</div><b>${s.sourceCount || 0} / ${s.noteCount || 0}</b></div></div><details style="margin-top:12px;"><summary style="cursor:pointer;color:var(--purple);font-size:12px;">查看快照与笔记</summary><div style="margin-top:8px;">${snapshots || '<div style="font-size:11px;color:var(--text-secondary);">暂无概率快照</div>'}${notes || '<div style="font-size:11px;color:var(--text-secondary);margin-top:8px;">暂无复盘笔记</div>'}</div></details><div style="display:flex;gap:8px;margin-top:12px;"><button class="tab" onclick="addResearchNoteUi('${safeNewsText(entry.id)}')">＋ 写笔记</button><button class="tab" onclick="addResearchSnapshotUi('${safeNewsText(entry.id)}')">＋ 记录快照</button></div></article>`;
+}
+
+async function loadResearchWorkspace() {
+  const host = document.getElementById('research-workspace-list');
+  if (!host) return;
+  host.innerHTML = '<div class="empty-tip">正在读取研究对象...</div>';
+  try {
+    const res = await fetch('/api/research?limit=80', { cache: 'no-store' });
+    const body = await res.json();
+    if (!body.success) throw new Error(body.error || '研究对象读取失败');
+    host.innerHTML = body.data.length ? body.data.map(renderResearchEntryUi).join('') : '<div class="empty-tip">还没有研究对象。可以从上方建立第一张研究卡。</div>';
+  } catch (error) { host.innerHTML = `<div class="empty-tip" style="color:var(--red);">${safeNewsText(error.message)}</div>`; }
+}
+
+async function createResearchEntryUi() {
+  const subjectType = document.getElementById('research-subject-type')?.value;
+  const subjectId = document.getElementById('research-subject-id')?.value.trim();
+  const title = document.getElementById('research-title')?.value.trim();
+  const thesis = document.getElementById('research-thesis')?.value.trim();
+  if (!subjectId || !title) return showToast('请填写研究标识和标题', 'error');
+  const res = await fetch('/api/research', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ subjectType, subjectId, title, thesis }) });
+  const body = await res.json();
+  if (!body.success) return showToast(body.error || '建立研究卡失败', 'error');
+  ['research-subject-id', 'research-title', 'research-thesis'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+  showToast('研究卡已建立', 'success');
+  loadResearchWorkspace();
+}
+
+async function addResearchNoteUi(id) {
+  const text = window.prompt('写下这次研究笔记：');
+  if (!text?.trim()) return;
+  const res = await fetch(`/api/research/${encodeURIComponent(id)}/note`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) });
+  const body = await res.json();
+  showToast(body.success ? '笔记已保存' : (body.error || '保存失败'), body.success ? 'success' : 'error');
+  if (body.success) loadResearchWorkspace();
+}
+
+async function addResearchSnapshotUi(id) {
+  const market = window.prompt('市场概率（0-1，可留空）：', '');
+  const model = window.prompt('模型概率（0-1，可留空）：', '');
+  const parse = value => value.trim() === '' ? undefined : Number(value);
+  const payload = { marketProbability: parse(market || ''), modelProbability: parse(model || ''), sources: [{ name: '手动记录', status: 'unknown', capturedAt: new Date().toISOString() }] };
+  const res = await fetch(`/api/research/${encodeURIComponent(id)}/snapshot`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+  const body = await res.json();
+  showToast(body.success ? '快照已记录' : (body.error || '记录失败'), body.success ? 'success' : 'error');
+  if (body.success) loadResearchWorkspace();
+}
+
+async function loadOpsConsole() {
+  const jobsEl = document.getElementById('ops-jobs');
+  const overviewEl = document.getElementById('ops-overview');
+  if (!jobsEl || !overviewEl) return;
+  jobsEl.innerHTML = '<div class="empty-tip">正在读取自动化状态...</div>';
+  try {
+    const res = await fetch('/api/ops', { cache: 'no-store' });
+    const body = await res.json();
+    if (!body.success) throw new Error(body.error || '自动化状态读取失败');
+    const d = body.data;
+    const o = d.overview;
+    overviewEl.innerHTML = [commandMetric('任务总数', o.totalJobs, '已启用 ' + o.enabledJobs), commandMetric('累计运行', o.totalRuns, '全部记录'), commandMetric('失败次数', o.failedRuns, '需要复核', o.failedRuns ? 'var(--red)' : 'var(--green)')].join('');
+    jobsEl.innerHTML = d.jobs.map(job => { const color = job.lastStatus === 'FAILED' ? 'var(--red)' : job.lastStatus === 'SUCCESS' ? 'var(--green)' : 'var(--text-secondary)'; return `<div class="glass-card" style="padding:16px;border-radius:17px;"><div style="display:flex;justify-content:space-between;gap:8px;"><strong>${safeNewsText(job.nameZh)}</strong><span style="font-size:10px;color:${color};">${safeNewsText(job.lastStatus)}</span></div><p style="font-size:11.5px;color:var(--text-secondary);line-height:1.55;">${safeNewsText(job.descriptionZh)}</p><div style="font-size:10.5px;color:var(--text-secondary);">${safeNewsText(job.cadenceZh)} · ${safeNewsText(job.lastMessage)}</div><button class="tab active" onclick="runOpsJob('${safeNewsText(job.id)}')" style="margin-top:12px;padding:7px 12px;">▶ 立即运行</button></div>`; }).join('');
+  } catch (error) { jobsEl.innerHTML = `<div class="empty-tip" style="color:var(--red);">${safeNewsText(error.message)}</div>`; }
+}
+
+async function runOpsJob(jobId) {
+  showToast('正在运行自动化任务...', 'info');
+  const res = await fetch(`/api/ops/run/${encodeURIComponent(jobId)}`, { method: 'POST' });
+  const body = await res.json();
+  showToast(body.success ? body.data.message : (body.error || '自动化任务失败'), body.success ? 'success' : 'error', 3500);
+  loadOpsConsole();
+  loadCommandCenter();
+}
+
 
 async function loadAll(retryCount = 0, forceCategories = false) {
   loadOverview();
@@ -8390,11 +8564,11 @@ function showToast(message, type = 'info', durationMs = 2500) {
 }
 
 const NAV_GROUPS = [
-  { id: 'home',    label: '🏠 首页',   tabs: [{ id: 'markets', label: '🎯 Predict.fun' }] },
+  { id: 'home',    label: '🏠 首页',   tabs: [{ id: 'command', label: '🏠 指挥台' }, { id: 'markets', label: '🎯 Predict.fun' }] },
   { id: 'trade',   label: '📈 交易',   tabs: [{ id: 'binance', label: '🏦 币安' }, { id: 'stocks', label: '📈 股票·宏观' }, { id: 'options', label: '🎯 期权' }, { id: 'positions', label: '📋 持仓' }, { id: 'orders', label: '📄 订单' }] },
-  { id: 'research',label: '🌐 研究',   tabs: [{ id: 'radar', label: '🌐 预测雷达' }, { id: 'news', label: '📰 新闻日历' }, { id: 'whales', label: '🐋 巨鲸监控' }, { id: 'backtest', label: '🧪 回测' }, { id: 'strategies', label: '⚔️ 策略对比' }] },
+  { id: 'research',label: '🌐 研究',   tabs: [{ id: 'research', label: '📚 证据工作台' }, { id: 'radar', label: '🌐 预测雷达' }, { id: 'news', label: '📰 新闻日历' }, { id: 'whales', label: '🐋 巨鲸监控' }, { id: 'backtest', label: '🧪 回测' }, { id: 'strategies', label: '⚔️ 策略对比' }] },
   { id: 'risk',    label: '🛡 风控',   tabs: [{ id: 'analysis', label: '📊 智能助手' }, { id: 'risk', label: '🛡 风险总览' }, { id: 'alerts', label: '🔔 预警' }, { id: 'paper', label: '📈 模拟盘' }, { id: 'journal', label: '📝 日志复盘' }] },
-  { id: 'system',  label: '⚙️ 系统',   tabs: [{ id: 'settings', label: '⚙️ 设置' }] },
+  { id: 'system',  label: '⚙️ 系统',   tabs: [{ id: 'ops', label: '⚙️ 自动化运营' }, { id: 'settings', label: '⚙️ 设置' }] },
 ];
 let activeNavGroup = 'home';
 
@@ -8436,6 +8610,7 @@ function showTab(tab, clicked) {
   document.querySelectorAll('.mnav-btn').forEach(button => button.classList.toggle('active', button.dataset.tab === tab));
 
   if (tab === 'positions') loadPositions();
+  if (tab === 'command') loadCommandCenter();
   if (tab === 'orders') loadOrders();
 if (tab === 'paper') { loadPaperPortfolio(); loadAiRunners(); }
   if (tab === 'analysis') loadTradeAssistant();
@@ -8450,7 +8625,9 @@ if (tab === 'paper') { loadPaperPortfolio(); loadAiRunners(); }
   if (tab === 'whales') loadWhales();
   if (tab === 'strategies') loadStrategies();
 if (tab === 'journal') loadJournal();
-if (tab === 'journal') loadReviewNotes();
+  if (tab === 'journal') loadReviewNotes();
+  if (tab === 'research') loadResearchWorkspace();
+  if (tab === 'ops') loadOpsConsole();
 }
 
 // --- Cross-platform Prediction Radar ---
@@ -9689,6 +9866,7 @@ document.getElementById('sell-modal').addEventListener('click', (e) => {
 });
 
 loadAll();
+loadCommandCenter();
 initTheme();
 renderNavGroups();
 // Restore last visited tab from localStorage.
@@ -9740,7 +9918,7 @@ initializeDashboardCollapses();
 
 <!-- Mobile Bottom Navigation -->
     <nav class="mobile-nav" id="mobile-nav">
-      <button class="mnav-btn active" data-tab="markets" onclick="mobileTab('markets')"><span>📊</span><small>市场</small></button>
+      <button class="mnav-btn active" data-tab="command" onclick="mobileTab('command')"><span>🏠</span><small>指挥台</small></button>
       <button class="mnav-btn" data-tab="radar" onclick="mobileTab('radar')"><span>🌐</span><small>雷达</small></button>
       <button class="mnav-btn" data-tab="paper" onclick="mobileTab('paper')"><span>📈</span><small>模拟</small></button>
       <button class="mnav-btn" data-tab="analysis" onclick="mobileTab('analysis')"><span>🧠</span><small>分析</small></button>

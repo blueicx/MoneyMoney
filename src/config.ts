@@ -42,6 +42,11 @@ export const config = {
   network: (process.env.NETWORK || 'mainnet') as 'mainnet' | 'testnet',
   predictAccount: process.env.PREDICT_ACCOUNT || undefined,
 
+  // Local dashboard binding. Keep localhost as the safe default; set
+  // APP_HOST=0.0.0.0 only when the phone/PWA needs LAN access.
+  appHost: process.env.APP_HOST || '127.0.0.1',
+  appPort: parseInt(process.env.APP_PORT || '3000'),
+
   // Trading Settings
   defaultSlippageBps: parseInt(process.env.DEFAULT_SLIPPAGE_BPS || '200'),
   orderExpirationSeconds: parseInt(process.env.ORDER_EXPIRATION_SECONDS || '3600'),

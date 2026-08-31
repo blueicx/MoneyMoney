@@ -1,6 +1,6 @@
 # MoneyMoney Telegram 机器人配置
 
-更新日期：2026-08-30
+更新日期：2026-08-31
 
 本文是针对本项目 `E:\MYC\predict-fun-trader` 的配置说明。项目支持 Telegram Bot API 出站通知，以及可选的本地长轮询指令交互。
 
@@ -82,6 +82,8 @@ TELEGRAM_BOT_TOKEN=123456789:replace_with_real_token
 TELEGRAM_CHAT_ID=123456789
 TELEGRAM_POLLING_ENABLED=false
 TELEGRAM_ALLOWED_CHAT_IDS=
+# 可选：/audit 管理员白名单；留空时使用上面的允许列表
+TELEGRAM_ADMIN_CHAT_IDS=
 ```
 
 然后重启 MoneyMoney：
@@ -92,6 +94,22 @@ npm run web
 ```
 
 本项目在进程启动时读取 `TELEGRAM_BOT_TOKEN`、`TELEGRAM_CHAT_ID` 和 `TELEGRAM_PROXY_URL`，所以只修改 `.env` 而不重启，运行中的进程不会更新配置。
+
+## AI 接口自定义
+
+项目的 AI 点评和市场分析均支持自定义 API Key 与 OpenAI-compatible 完整接口 URL：
+
+```dotenv
+OPENROUTER_API_KEY=你的密钥
+OPENROUTER_API_URL=https://你的中转站/v1/chat/completions
+OPENROUTER_MODEL=minimax/minimax-m3:free
+
+GROQ_API_KEY=你的密钥
+GROQ_API_URL=https://你的中转站/v1/chat/completions
+GROQ_MODEL=llama-3.3-70b-versatile
+```
+
+`*_API_URL` 优先级最高；如果留空，OpenRouter 和 Groq 使用各自官方地址。OpenRouter 还兼容已有的 `OPENROUTER_BASE_URL`。修改后必须重启服务。密钥只放在本机 `.env`，不要提交到 Git。
 
 ## 开启接收指令
 
@@ -104,23 +122,46 @@ TELEGRAM_ALLOWED_CHAT_IDS=你的 Chat ID
 
 然后重启 `npm run web`。项目会在 Web 服务内启动 `getUpdates` 长轮询，收到命令后回复到同一个 Chat。也可以省略 `TELEGRAM_ALLOWED_CHAT_IDS`，让它回退使用已有的 `TELEGRAM_CHAT_ID`；生产环境建议显式填写白名单。
 
-支持的首批命令：
+支持的命令：
 
 ```text
 /start     初始化并显示帮助
 /help      显示帮助
 /status    服务、通知和自动化状态
+/today     今日总览：行情、风险、事件
 /risk      模拟盘风险摘要
 /signals   最近一份助手信号
-/paper     模拟持仓与盈亏
+/signal 1  查看第 1 条信号详情
+/search q  搜索本地预测市场快照
+/events    未来 7 天事件日历
+/sources   数据源健康
+/history   风险历史与模拟表现
+/paper     模拟持仓；开平仓需二次确认
 /research  研究工作区摘要
 /ops       自动化任务状态
+/alerts    查看或修改通知订阅
+/alert BTC above 120000  创建价格提醒
+/strategies AI 模拟策略状态
+/ask 风险  自然语言快捷查询
+/chart     风险趋势火花线
+/audit     管理员查看操作审计
+/whoami    查看当前 Chat ID
+/web       获取本地面板地址
 /test      测试回复链路
 ```
 
-这些命令目前只读或测试，不会触发真实下单、提现或风险参数修改。轮询 offset 保存在 `data/telegram-bot-state.json`，该文件已被 Git 忽略。
+模拟盘操作示例：
 
-发送 `/start` 后，Telegram 输入框下方会出现持久功能菜单。点击「风险中心」「最新信号」「模拟盘」「研究工作区」或「自动化状态」即可查看对应页面；文字命令仍然可以继续使用。
+```text
+/paper open 123 yes 0.42 20
+/confirm ABC123
+/paper close pp_... 0.55
+/cancel
+```
+
+确认码只有短时间有效，且每个聊天只保留一个待确认动作。所有操作只写入本地模拟盘，轮询 offset 保存在 `data/telegram-bot-state.json`，命令中心状态保存在 `data/telegram-command-center.json`；两者均已被 Git 忽略。
+
+发送 `/start` 后，Telegram 输入框下方会出现持久功能菜单。菜单覆盖总览、风险、信号、搜索、事件、模拟盘、研究、数据源、历史、提醒和自动化状态；文字命令仍然可以继续使用。价格提醒、风险预警和高影响事件提醒由本地服务后台检查，服务停止期间不会补发离线期间的提醒。
 
 ## 第四步：在项目里测试
 
@@ -183,6 +224,8 @@ curl.exe -s -X POST "https://api.telegram.org/bot<TOKEN>/deleteWebhook"
 
 - 交互机器人默认关闭；只有显式设置 `TELEGRAM_POLLING_ENABLED=true` 才会启动。
 - 交互命令只读或测试，不提供真实下单、提现或修改风险参数能力。
+- `/paper` 的开平仓仅为本地 paper trading，并且必须经过 `/confirm` 二次确认。
+- `/web` 提供的是本地面板地址；手机访问需要 `APP_HOST=0.0.0.0`、同一局域网和 Windows 防火墙放行，Telegram 不会替你建立公网 HTTPS Web App。
 - 不需要给 MoneyMoney 配置公网域名或 webhook。
 - 不要把交易私钥、Telegram token 放到前端、截图或公开仓库。
 - Telegram 通知只发送信号与状态，不代表自动交易已经开启；真实交易和模拟交易开关仍由 MoneyMoney 设置独立控制。

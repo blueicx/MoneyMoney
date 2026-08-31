@@ -280,6 +280,12 @@ export class TelegramInteractionBot {
     return handled;
   }
 
+  /** Send a direct interactive reply without exposing the transport to callers. */
+  async sendToChat(chatId: string, reply: TelegramCommandResult): Promise<void> {
+    if (!this.allowedChatIds.has(String(chatId))) return;
+    await this.sendReply(String(chatId), reply);
+  }
+
   async handleUpdate(update: TelegramUpdate): Promise<{ handled: boolean; reason: string }> {
     if (!Number.isInteger(update.update_id)) return { handled: false, reason: 'invalid_update' };
     if (update.update_id < this.nextOffset) return { handled: false, reason: 'duplicate_update' };
