@@ -300,7 +300,9 @@ Core market and research data comes primarily from keyless free APIs; the predic
    `TELEGRAM_CHAT_ID=...`
    Optional: `HIGH_SUCCESS_WIN_RATE=65`
    If Telegram is unreachable directly, add `TELEGRAM_PROXY_URL=http://127.0.0.1:10808` (use your local proxy port).
-4. To receive commands, also set `TELEGRAM_POLLING_ENABLED=true` and `TELEGRAM_ALLOWED_CHAT_IDS=<your chat id>`, then restart MoneyMoney. Send `/start` to show the persistent menu. It covers overview, risk, signal details, market search, events, source health, paper-trading confirmation, subscriptions, history, and natural-language shortcuts. Trading actions remain local paper trading only.
+4. To receive commands, also set `TELEGRAM_POLLING_ENABLED=true` and `TELEGRAM_ALLOWED_CHAT_IDS=<your chat id>`, then restart MoneyMoney. Send `/start` to show the persistent menu. It covers overview, risk, signal details, market search, events, source health, paper-trading confirmation, subscriptions, history, natural-language shortcuts, watchlists, advanced alerts, signal explanations, research notes, paper-trading review, and scheduled digests. Trading actions remain local paper trading only.
+
+   Personal trading-console commands include `/watchlist`, `/watch add <market>`, `/watch remove <market>`, `/alerts`, `/alert smart ...`, `/explain <market>`, `/portfolio`, `/positions`, `/close <position>`, `/reset`, `/review`, `/export`, `/note <text>`, `/journal`, `/journal ai`, `/digest`, `/digest on`, `/digest off`, `/digest time HH:mm`, and `/health`. Account-changing operations remain confirmation-protected and are written to the local audit log.
 
 ### WeCom High Win-Rate Push
 
