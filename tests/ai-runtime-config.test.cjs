@@ -3,10 +3,10 @@ const test = require('node:test');
 const { getAiRuntimeConfig, getAiConfigurationStatus, testAiConnection } = require('../dist/features/ai-runtime-config');
 
 const env = {
-  OPENROUTER_API_KEY: 'openrouter-secret',
+  OPENROUTER_API_KEY: 'test_key',
   OPENROUTER_API_URL: 'https://env.example/v1/chat/completions',
   OPENROUTER_MODEL: 'env-model',
-  GROQ_API_KEY: 'groq-secret',
+  GROQ_API_KEY: 'test_key',
   GROQ_API_URL: 'https://groq.example/v1',
   GROQ_MODEL: 'groq-env-model',
 };
@@ -23,7 +23,7 @@ test('runtime AI config prefers saved URL/model overrides and normalizes endpoin
 
   assert.equal(openRouter.apiUrl, 'https://custom.example/v1/chat/completions');
   assert.equal(openRouter.model, 'custom-model');
-  assert.equal(openRouter.apiKey, 'openrouter-secret');
+  assert.equal(openRouter.apiKey, 'test_key');
   assert.equal(groq.apiUrl, 'https://groq.example/v1/chat/completions');
   assert.equal(groq.model, 'groq-env-model');
 });
@@ -67,6 +67,6 @@ test('connection test never returns the API key and sends it only in the request
   assert.equal(result.success, true);
   assert.equal(result.model, 'test-model');
   assert.equal(Object.hasOwn(result, 'apiKey'), false);
-  assert.equal(request.init.headers.authorization, 'Bearer groq-secret');
+  assert.equal(request.init.headers.authorization, 'Bearer test_key');
   assert.equal(request.url, 'https://groq.example/v1/chat/completions');
 });

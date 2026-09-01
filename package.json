@@ -6,7 +6,7 @@
   "scripts": {
     "build": "tsc && node scripts/copy-web-assets.js",
     "start": "node dist/index.js",
-    "test": "node --test tests",
+    "test": "node --test tests/*.test.cjs",
     "dev": "ts-node src/index.ts",
     "trade": "ts-node src/index.ts",
     "live": "ts-node src/commands/dashboard.ts",
@@ -71,11 +71,12 @@
   },
   "pkg": {
     "assets": [
-      "dist/web/public/**/*"
+      "dist/web/public/**/*",
+      "node_modules/better-sqlite3/build/Release/better_sqlite3.node"
     ],
     "targets": [
-      "node20-win-x64"
+      "node24-win-x64"
     ],
-    "outputPath": "release/MoneyMoneyCore.exe"
+    "outputPath": "release/core/MoneyMoneyCore.exe"
   }
 }

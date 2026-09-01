@@ -89,3 +89,7 @@ ui-*.cjs
 ui-*.png
 data/risk-history.json
 release/core/data/
+release/core/*.sqlite
+release/core/*.sqlite-*
+release/core/migration-backups/
+release/core/MoneyMoneyCore-previous-*.exe
