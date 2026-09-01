@@ -2297,8 +2297,9 @@ function getTelegramCommandHandlers(): Record<string, TelegramCommandHandler> {
         return m ? `${i+1}. ${escapeTelegramHtml(m.titleZh || m.title)}\n   ID ${escapeTelegramHtml(String(m.id))} · ${escapeTelegramHtml(m.platform)}` : `${i+1}. 市场 ${escapeTelegramHtml(id)}`;
       })];
       const kb = ids.slice(0, 8).map(id => {
-        const short = String(id).slice(0,12);
-        return [{ text: `移除 ${short}`, callback_data: `watch:remove:${id}` }, { text: `解释`, callback_data: `explain:${id}` }, { text: `开仓`, callback_data: `paper:pick:${id}` }];
+        const m = telegramFindMarket(id);
+        const label = String(m?.titleZh || m?.title || id).slice(0,8);
+        return [{ text: `移除 ${label}`, callback_data: `watch:remove:${id}` }, { text: `解释`, callback_data: `explain:${id}` }, { text: `开仓`, callback_data: `paper:pick:${id}` }];
       });
       return telegramInlineReply(lines.join('\n'), kb);
     },
@@ -2500,26 +2501,38 @@ function getTelegramCommandHandlers(): Record<string, TelegramCommandHandler> {
         '该信号仅作研究提醒，不构成投资建议，也不会自动下单。',
       ].filter(Boolean).join('\n');
     },
-        search: ({ args }) => {
+        search: async ({ args }) => {
       const query = args.join(' ').trim().toLowerCase();
       if (!query) {
-        const hot = [['BTC','search:q:BTC'],['ETH','search:q:ETH'],['election','search:q:election'],['AI','search:q:AI']];
+        const hot = [['BTC','search:q:BTC'],['ETH','search:q:ETH'],['NVDA','search:q:NVDA'],['AAPL','search:q:AAPL'],['election','search:q:election'],['AI','search:q:AI']];
         return telegramInlineReply('<b>\u641c\u7d22\u5e02\u573a</b>\n\u8f93\u5165\u5173\u952e\u8bcd\u641c\u7d22\uff0c\u6216\u70b9\u51fb\u70ed\u95e8\u8bcd\u5feb\u901f\u641c\u7d22', hot.map(([label,data])=>[{ text: label, callback_data: data }]));
       }
       const radar = getCachedPredictionRadarSlice('', 240);
       const matches = radar?.markets.filter(item => `${item.title} ${item.titleZh || ''} ${item.category} ${item.platform}`.toLowerCase().includes(query)).slice(0, 8) || [];
-      if (!matches.length) return `\u6ca1\u6709\u5728\u672c\u5730\u9884\u6d4b\u5e02\u573a\u5feb\u7167\u4e2d\u627e\u5230\u201c${escapeTelegramHtml(query)}\u201d\u3002\u53ef\u5148\u6253\u5f00\u7f51\u9875\u9762\u677f\u5237\u65b0\u96f7\u8fbe\u3002`;
-      const lines = [
-        `<b>\u5e02\u573a\u641c\u7d22</b> \u00b7 ${escapeTelegramHtml(query)}`,
+      let stockLines: string[] = [];
+      let stockKb: TelegramInlineKeyboardButton[][] = [];
+      try {
+        const tRaw = await fetchTencentText('https://smartbox.gtimg.cn/s3/?v=2&q='+encodeURIComponent(query)+'&t=all', 6000);
+        const tList = parseTencentSearch(tRaw).slice(0,4);
+        if(tList.length){
+          stockLines = tList.map((it, idx)=> `${idx+1}. ${escapeTelegramHtml(it.zhName||it.name||it.code)} (${escapeTelegramHtml(it.code)}) · ${escapeTelegramHtml(it.market||'')} ${it.price?(' ¥'+formatTelegramNumber(it.price,2)):''}`);
+          stockKb = tList.map((it)=> [{ text: `${String(it.zhName||it.name).slice(0,8)} 行情`, callback_data: `stock:view:${it.code}` }]);
+        }
+      } catch {}
+      if (!matches.length && !stockLines.length) return `\u6ca1\u6709\u5728\u672c\u5730\u9884\u6d4b\u5e02\u573a\u5feb\u7167\u4e2d\u627e\u5230\u201c${escapeTelegramHtml(query)}\u201d\u3002\u53ef\u5148\u6253\u5f00\u7f51\u9875\u9762\u677f\u5237\u65b0\u96f7\u8fbe\u3002`;
+      const radarLines = matches.length ? [
+        `<b>\u5e02\u573a\u641c\u7d22</b> \u00b7 ${escapeTelegramHtml(query)} \u00b7 \u9884\u6d4b ${matches.length}`,
         ...matches.map((item, index) => `${index + 1}. ${escapeTelegramHtml(item.titleZh || item.title)}\n   ID ${escapeTelegramHtml(item.id)} \u00b7 ${escapeTelegramHtml(item.platform)} \u00b7 YES ${formatTelegramNumber(item.yesPrice * 100, 1)}% \u00b7 \u6d41\u52a8\u6027 ${formatTelegramNumber(item.liquidity, 0)}`),
-        '',
-        '\u7ed3\u679c\u6765\u81ea\u672c\u5730\u9884\u6d4b\u96f7\u8fbe\u5feb\u7167\uff1b\u70b9\u51fb\u6309\u94ae\u53ef\u5feb\u901f\u52a0\u5165\u81ea\u9009/\u89e3\u91ca/\u5f00\u4ed3\u3002',
-      ].join('\n');
-      const kb: TelegramInlineKeyboardButton[][] = [];
+      ] : [];
+      const stockHeader = stockLines.length ? [`<b>\u80a1\u7968/\u671f\u6743</b> \u00b7 ${escapeTelegramHtml(query)}`, ...stockLines] : [];
+      const allLines = [...radarLines, ...(radarLines.length && stockHeader.length ? [''] : []), ...stockHeader, '', (matches.length? '\u9884\u6d4b\u7ed3\u679c\u6765\u81ea\u96f7\u8fbe\u5feb\u7167\uff1b' : '') + (stockLines.length? '\u80a1\u7968\u884c\u60c5\u6765\u81ea\u817e\u8baf\u884c\u60c5\uff1b':'') + '\u70b9\u51fb\u6309\u94ae\u53ef\u5feb\u901f\u52a0\u5165\u81ea\u9009/\u89e3\u91ca/\u5f00\u4ed3/\u67e5\u770b\u884c\u60c5\u3002'].join('\n');
+      const kb = [];
       for(const item of matches){
-        kb.push([{ text: `\u52a0\u81ea\u9009 ${String(item.id).slice(0,10)}`, callback_data: `watch:add:${item.id}` }, { text: `\u89e3\u91ca`, callback_data: `explain:${item.id}` }, { text: `\u5f00\u4ed3`, callback_data: `paper:pick:${item.id}` }]);
+        kb.push([{ text: `\u52a0\u81ea\u9009 ${String(item.titleZh || item.title).slice(0,8)}`, callback_data: `watch:add:${item.id}` }, { text: `\u89e3\u91ca`, callback_data: `explain:${item.id}` }, { text: `\u5f00\u4ed3`, callback_data: `paper:pick:${item.id}` }]);
       }
-      return telegramInlineReply(lines, kb);
+      for(const row of stockKb) kb.push(row);
+      if(!kb.length) return telegramReply(allLines || '\u6682\u65e0\u7ed3\u679c');
+      return telegramInlineReply(allLines, kb);
     },
     events: async () => {
       try {
@@ -2629,7 +2642,7 @@ function getTelegramCommandHandlers(): Record<string, TelegramCommandHandler> {
       const closeRows: TelegramInlineKeyboardButton[][] = positions.slice(0,4).map(p=>[{ text: `\u5e73\u4ed3 ${String(p.id).slice(0,8)}`, callback_data: `paper:close:pick:${p.id}` }]);
       return telegramInlineReply(text, [...pickRows, ...closeRows]);
     },
-    research: ({ args }) => {
+    research: async ({ args }) => {
       const entries = listResearchEntries(6);
       if (!entries.length) return '<b>研究工作区</b>\n暂无研究条目。';
       if (args[0]) {
@@ -2965,8 +2978,18 @@ ${escapeTelegramHtml(position.marketTitle)} · ${escapeTelegramHtml(position.out
         const matches = radar?.markets.filter(item => `${item.title} ${item.titleZh || ''} ${item.category} ${item.platform}`.toLowerCase().includes(q)).slice(0, 8) || [];
         if (!matches.length) return telegramReply(`没有找到“${escapeTelegramHtml(q)}” 的结果`);
         const lines = [`<b>市场搜索</b> · ${escapeTelegramHtml(q)}`, ...matches.map((item, idx) => `${idx + 1}. ${escapeTelegramHtml(item.titleZh || item.title)}\n   ID ${escapeTelegramHtml(item.id)}`)];
-        const kb = matches.map(item=>[{ text: `加自选 ${String(item.id).slice(0,10)}`, callback_data: `watch:add:${item.id}` }, { text: `解释`, callback_data: `explain:${item.id}` }, { text: `开仓`, callback_data: `paper:pick:${item.id}` }]);
+        const kb = matches.map(item=>[{ text: `加自选 ${String(item.titleZh || item.title).slice(0,8)}`, callback_data: `watch:add:${item.id}` }, { text: `解释`, callback_data: `explain:${item.id}` }, { text: `开仓`, callback_data: `paper:pick:${item.id}` }]);
         return telegramInlineReply(lines.join('\n'), kb);
+      }
+      if (data.startsWith('stock:view:')) {
+        const code = data.slice('stock:view:'.length);
+        try {
+          const raw = await fetchTencentText(`https://qt.gtimg.cn/q=${encodeURIComponent(code)}`, 6000);
+          const m = raw.match(/v_[^=]*="([^"]+)"/);
+          if(!m) return telegramReply(`\u672a\u627e\u5230 ${escapeTelegramHtml(code)} \u884c\u60c5`);
+          const txt = [`<b>\u80a1\u7968\u884c\u60c5</b> ${escapeTelegramHtml(code)}`, `\u539f\u59cb: ${escapeTelegramHtml(m[1].slice(0,200))}`].join('\n');
+          return telegramReply(txt);
+        } catch(e){ return telegramReply(`\u884c\u60c5\u83b7\u53d6\u5931\u8d25: ${escapeTelegramHtml(String(e))}`); }
       }
       if (data.startsWith('pending:confirm:')) {
         const nonce = data.slice('pending:confirm:'.length);

@@ -1773,7 +1773,7 @@
       <div class="balance-chip" id="balance-display" title="USDT 余额">$0.00</div>
     </div>
   </header>
-  <div id="sec-banner" style="display:none;margin:12px 16px;padding:10px 14px;border-radius:12px;background:color-mix(in srgb, #ef4444 10%, transparent);border:1px solid color-mix(in srgb, #ef4444 16%, transparent);color:#b91c1c;font-size:12px;line-height:1.6;">â ï¸ å½åä½¿ç¨é»è®¤è´¦å· <code>admin / admin123</code>ï¼è¯·å°½å¿«å¨ <code>.env</code> ä¸­ä¿®æ¹ <code>MONEYMONEY_LOGIN_USER</code>/<code>MONEYMONEY_LOGIN_PASS</code> å¹¶éå¯æå¡</div>
+  <div id="sec-banner" style="display:none;margin:12px 16px;padding:10px 14px;border-radius:12px;background:color-mix(in srgb, #ef4444 10%, transparent);border:1px solid color-mix(in srgb, #ef4444 16%, transparent);color:#b91c1c;font-size:12px;line-height:1.6;">⚠️ 当前使用默认账号 <code>admin / admin123</code>，请尽快在 <code>.env</code> 中修改 <code>MONEYMONEY_LOGIN_USER</code>/<code>MONEYMONEY_LOGIN_PASS</code> 并重启服务</div>
   <script>(function(){ fetch('/api/auth/status').then(r=>r.json()).then(j=>{ if(j && j.data && j.data.isDefault){ const b=document.getElementById('sec-banner'); if(b) b.style.display='block'; } }).catch(()=>{}); })();</script>
 
   <div id="global-search-overlay" class="global-search-overlay" onclick="if(event.target===this)closeGlobalSearch()">
