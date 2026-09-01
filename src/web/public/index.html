@@ -1850,6 +1850,11 @@
           </select>
           <input id="ai-runner-symbol" placeholder="如 BTCUSDT" style="width:120px;padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);font-size:12px;text-transform:uppercase;" />
           <input id="ai-runner-budget" type="number" placeholder="预算 $" min="1" step="1" style="width:90px;padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);font-size:12px;" />
+          <input id="ai-runner-max-trade" type="number" placeholder="单笔上限 $" min="1" step="1" style="width:92px;padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);font-size:12px;" />
+          <input id="ai-runner-max-positions" type="number" placeholder="最大持仓" min="1" step="1" value="1" style="width:82px;padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);font-size:12px;" />
+          <input id="ai-runner-daily-loss" type="number" placeholder="日损上限 $" min="1" step="1" style="width:92px;padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);font-size:12px;" />
+          <input id="ai-runner-max-dd" type="number" placeholder="回撤上限 %" min="1" max="100" step="1" value="20" style="width:88px;padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);font-size:12px;" />
+          <input id="ai-runner-cooldown" type="number" placeholder="冷却分钟" min="0" step="1" value="15" style="width:82px;padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);font-size:12px;" />
           <button class="tab active" onclick="createAiRunner()" style="padding:7px 16px;font-size:12.5px;">▶ 启动</button>
           <button class="tab" onclick="tickAiRunners()" style="padding:7px 14px;font-size:12.5px;">⚡ 执行一轮</button>
         </div>
@@ -3342,10 +3347,16 @@ async function loadAiRunners() {
         <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:6px;color:var(--text-secondary);font-size:11.5px;">
           <span>预算 $${r.budgetUsd}</span><span>权益 $${s.equityUsd?.toFixed(2) ?? '—'}</span>
           <span>已平仓 ${s.closedCount ?? 0}</span><span>胜率 ${s.winRatePct ?? 0}%</span>
+          <span>单笔≤$${r.policy?.maxTradeUsd ?? '—'}</span><span>持仓≤${r.policy?.maxPositions ?? '—'}</span><span>日损≤$${r.policy?.maxDailyLossUsd ?? '—'}</span>
           ${s.unrealizedPct != null ? `<span>浮盈 ${s.unrealizedPct >= 0 ? '+' : ''}${s.unrealizedPct}%</span>` : ''}
         </div>
+        ${r.circuitBreakerReason ? `<div style="margin-top:7px;color:var(--red);font-size:11px;">🛑 ${safeNewsText(r.circuitBreakerReason)}</div>` : ''}
         ${(r.trades || []).slice(0, 3).map(t => `<div style="margin-top:4px;font-size:11px;color:var(--text-secondary);">${t.action === 'BUY' ? '🟢' : '🔴'} ${t.side || ''} @ ${t.price} — ${safeNewsText(t.reasonZh)}</div>`).join('')}
-        ${r.status === 'RUNNING' ? `<button onclick="stopRunner('${r.id}')" style="margin-top:8px;padding:4px 14px;border-radius:8px;border:none;background:var(--red-light);color:var(--red);font-size:11px;cursor:pointer;">⏹ 停止</button>` : ''}
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;">
+          ${r.status === 'RUNNING' ? `<button onclick="pauseRunner('${r.id}')" style="padding:4px 12px;border-radius:8px;border:none;background:var(--red-light);color:var(--red);font-size:11px;cursor:pointer;">⏸ 暂停</button>` : `<button onclick="resumeRunner('${r.id}')" style="padding:4px 12px;border-radius:8px;border:none;background:var(--green-light);color:var(--green);font-size:11px;cursor:pointer;">▶ 恢复</button>`}
+          ${r.circuitBreakerReason ? `<button onclick="resetRunnerCircuit('${r.id}')" style="padding:4px 12px;border-radius:8px;border:none;background:color-mix(in srgb, var(--yellow) 14%, transparent);color:var(--yellow);font-size:11px;cursor:pointer;">♻ 清除熔断</button>` : ''}
+          <button onclick="stopRunner('${r.id}')" style="padding:4px 12px;border-radius:8px;border:none;background:var(--bg-secondary);color:var(--text-secondary);font-size:11px;cursor:pointer;">⏹ 停止</button>
+        </div>
       </div>`;
     }).join('');
   } catch (e) {}
@@ -3355,12 +3366,17 @@ async function createAiRunner() {
   const venue = document.getElementById('ai-runner-venue').value;
   const symbolOrMarketId = document.getElementById('ai-runner-symbol').value.trim().toUpperCase();
   const budgetUsd = Number(document.getElementById('ai-runner-budget').value);
+  const maxTradeUsd = Number(document.getElementById('ai-runner-max-trade').value) || Math.max(1, budgetUsd * 0.25);
+  const maxPositions = Number(document.getElementById('ai-runner-max-positions').value) || 1;
+  const maxDailyLossUsd = Number(document.getElementById('ai-runner-daily-loss').value) || Math.max(1, budgetUsd * 0.1);
+  const maxDrawdownPct = Number(document.getElementById('ai-runner-max-dd').value) || 20;
+  const cooldownMinutes = Number(document.getElementById('ai-runner-cooldown').value) || 15;
   if (!symbolOrMarketId) { showToast('请填写标的', 'error'); return; }
   if (!budgetUsd || budgetUsd < 1) { showToast('预算至少 $1', 'error'); return; }
   try {
     const res = await fetch('/api/ai-runners/create', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ venue, symbolOrMarketId, title: `${venue} · ${symbolOrMarketId}`, budgetUsd }),
+      body: JSON.stringify({ venue, symbolOrMarketId, title: `${venue} · ${symbolOrMarketId}`, budgetUsd, policy: { maxTradeUsd, maxPositions, maxDailyLossUsd, maxDrawdownPct, cooldownMinutes } }),
     });
     const body = await res.json();
     if (!body.success) throw new Error(body.error);
@@ -7518,6 +7534,25 @@ async function loadOverview() {
   } catch (e) {}
 }
 
+async function pauseRunner(id) {
+  await fetch('/api/ai-runners/pause', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) });
+  showToast('⏸ 策略已暂停', 'info', 1500); loadAiRunners();
+}
+
+async function resumeRunner(id) {
+  const res = await fetch('/api/ai-runners/resume', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) });
+  const body = await res.json();
+  if (!body.success) { showToast(body.error || '策略仍处于熔断状态', 'error'); return; }
+  showToast('▶ 策略已恢复', 'success', 1500); loadAiRunners();
+}
+
+async function resetRunnerCircuit(id) {
+  const res = await fetch('/api/ai-runners/reset-circuit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) });
+  const body = await res.json();
+  if (!body.success) { showToast(body.error || '清除熔断失败', 'error'); return; }
+  showToast('♻ 已清除熔断，策略保持停止', 'info', 1800); loadAiRunners();
+}
+
 // --- Unified Command Center / Research Workspace / Automation Ops ---
 function commandMetric(label, value, note, color = 'var(--text)') {
   return `<div class="glass-card" style="padding:14px;border-radius:15px;"><div style="font-size:11px;color:var(--text-secondary);">${safeNewsText(label)}</div><div style="font-size:22px;font-weight:850;color:${color};margin-top:4px;">${safeNewsText(value)}</div><div style="font-size:11px;color:var(--text-secondary);margin-top:3px;">${safeNewsText(note || '')}</div></div>`;
@@ -9928,7 +9963,22 @@ initializeDashboardCollapses();
       <button class="mnav-btn" data-tab="settings" onclick="mobileTab('settings')"><span>⚙️</span><small>设置</small></button>
     </nav>
 
-    <script>
+<script>
+// LAN mode API authentication: open the dashboard once with ?access_token=...
+// and keep the token only in localStorage. The server never receives it in logs.
+(function installApiAccessToken() {
+  const params = new URLSearchParams(location.search);
+  const fromUrl = params.get('access_token');
+  if (fromUrl) { localStorage.setItem('moneymoney_access_token', fromUrl); params.delete('access_token'); history.replaceState({}, '', location.pathname + (params.toString() ? '?' + params : '') + location.hash); }
+  const token = localStorage.getItem('moneymoney_access_token');
+  if (!token || !window.fetch) return;
+  const nativeFetch = window.fetch.bind(window);
+  window.fetch = (input, init = {}) => {
+    const headers = new Headers(init.headers || {});
+    headers.set('Authorization', 'Bearer ' + token);
+    return nativeFetch(input, { ...init, headers });
+  };
+})();
     // --- Theme Toggle ---
     function toggleTheme() {
       const body = document.documentElement;

@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { DATA_ROOT, ensureDir } from '../utils/paths';
+import { stateStore } from '../storage/sqlite-state';
 
 export type ResearchSubjectType = 'prediction' | 'crypto' | 'stock' | 'macro';
 export type ResearchStatus = 'WATCHING' | 'ACTIVE' | 'RESOLVED' | 'ARCHIVED';
@@ -65,6 +66,8 @@ function makeId(): string { return `research_${Date.now()}_${Math.random().toStr
 
 function loadEntries(): ResearchEntry[] {
   ensureDir(DATA_ROOT);
+  const stored = stateStore.get<ResearchEntry[]>('research-workspace');
+  if (Array.isArray(stored)) return stored;
   try {
     const parsed = JSON.parse(fs.readFileSync(RESEARCH_FILE, 'utf8'));
     return Array.isArray(parsed) ? parsed : [];
@@ -73,7 +76,7 @@ function loadEntries(): ResearchEntry[] {
 
 function saveEntries(entries: ResearchEntry[]): void {
   ensureDir(DATA_ROOT);
-  fs.writeFileSync(RESEARCH_FILE, JSON.stringify(entries.slice(0, 500), null, 2), 'utf8');
+  stateStore.set('research-workspace', entries.slice(0, 500), 1);
 }
 
 export function createResearchEntry(input: {

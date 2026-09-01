@@ -1,5 +1,6 @@
 import { getPredictionRadar } from './prediction-radar';
 import { aiCommentaryConfigured } from './ai-commentary';
+import { ResilientDataSourceAdapter, type SourceStatus } from '../data/source-adapter';
 
 export interface SourceHealthItem {
   id: string;
@@ -10,6 +11,8 @@ export interface SourceHealthItem {
   latencyMs: number | null;
   detail: string;
   checkedAt: string;
+  status?: SourceStatus;
+  expiresAt?: string;
 }
 
 export interface SourceHealthReport {
@@ -41,24 +44,40 @@ async function timedJson(
   timeoutMs = 5_000,
   init: RequestInit = {},
 ): Promise<{ ok: boolean; latencyMs: number; payload?: any; error?: Error }> {
-  const startedAt = Date.now();
-  try {
-    const response = await fetch(url, {
-      ...init,
-      headers: {
-        accept: 'application/json',
-        'user-agent': 'MoneyMoney/1.0 (+https://github.com/blueicx/MoneyMoney)',
-        ...(init.headers || {}),
+  const key = `${url}:${init.method || 'GET'}:${String(init.body || '')}`;
+  let adapter = jsonAdapters.get(key);
+  if (!adapter) {
+    adapter = new ResilientDataSourceAdapter<any>({
+      id: key,
+      group: 'health-check',
+      timeoutMs,
+      retries: 2,
+      fetcher: async (_input, signal) => {
+        const response = await fetch(url, {
+          ...init,
+          headers: {
+            accept: 'application/json',
+            'user-agent': 'MoneyMoney/1.0 (+https://github.com/blueicx/MoneyMoney)',
+            ...(init.headers || {}),
+          },
+          signal,
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        return response.json();
       },
-      signal: AbortSignal.timeout(timeoutMs),
     });
-    const latencyMs = Date.now() - startedAt;
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    return { ok: true, latencyMs, payload: await response.json() };
-  } catch (error) {
-    return { ok: false, latencyMs: Date.now() - startedAt, error: error as Error };
+    jsonAdapters.set(key, adapter);
   }
+  const snapshot = await adapter.fetch();
+  return {
+    ok: snapshot.status === 'fresh' || snapshot.status === 'stale',
+    latencyMs: snapshot.latencyMs || 0,
+    payload: snapshot.data,
+    error: snapshot.error ? new Error(snapshot.error) : undefined,
+  };
 }
+
+const jsonAdapters = new Map<string, ResilientDataSourceAdapter<any>>();
 
 function radarItem(
   name: string,
@@ -79,6 +98,8 @@ function radarItem(
       ? (state.count > 0 ? `${state.count} 个市场` : '连接成功，暂无开放市场')
       : friendlyError(state.error),
     checkedAt: state.checkedAt || new Date().toISOString(),
+    status: unconfigured ? 'unconfigured' : state.ok ? 'fresh' : 'failed',
+    expiresAt: new Date(Date.now() + 30_000).toISOString(),
   };
 }
 
@@ -117,6 +138,8 @@ async function buildSourceHealth(): Promise<SourceHealthReport> {
         ? `正常 · ${Number(predict.payload?.data?.categories?.totalCount || 0)} 个事件`
         : friendlyError(predict.error),
       checkedAt,
+      status: predict.ok ? 'fresh' : 'failed',
+      expiresAt: new Date(Date.now() + 30_000).toISOString(),
     },
     {
       id: 'binance-public',
@@ -126,6 +149,8 @@ async function buildSourceHealth(): Promise<SourceHealthReport> {
       latencyMs: binance.latencyMs,
       detail: binance.ok ? '正常' : friendlyError(binance.error),
       checkedAt,
+      status: binance.ok ? 'fresh' : 'failed',
+      expiresAt: new Date(Date.now() + 30_000).toISOString(),
     },
     {
       id: 'open-meteo',
@@ -135,6 +160,8 @@ async function buildSourceHealth(): Promise<SourceHealthReport> {
       latencyMs: openMeteo.latencyMs,
       detail: openMeteo.ok ? '预报接口正常' : friendlyError(openMeteo.error),
       checkedAt,
+      status: openMeteo.ok ? 'fresh' : 'failed',
+      expiresAt: new Date(Date.now() + 30_000).toISOString(),
     },
     {
       id: 'openrouter',
@@ -145,6 +172,8 @@ async function buildSourceHealth(): Promise<SourceHealthReport> {
       latencyMs: null,
       detail: aiConfigured ? '已配置；实际生成时检查模型可用性' : '未配置 OPENROUTER_API_KEY',
       checkedAt,
+      status: aiConfigured ? 'fresh' : 'unconfigured',
+      expiresAt: new Date(Date.now() + 30_000).toISOString(),
     },
   ];
 

@@ -159,7 +159,7 @@ TELEGRAM_ALLOWED_CHAT_IDS=你的 Chat ID
 /cancel
 ```
 
-确认码只有短时间有效，且每个聊天只保留一个待确认动作。所有操作只写入本地模拟盘，轮询 offset 保存在 `data/telegram-bot-state.json`，命令中心状态保存在 `data/telegram-command-center.json`；两者均已被 Git 忽略。
+确认码只有短时间有效，且每个聊天只保留一个待确认动作。所有操作只写入本地模拟盘；重要状态默认保存在 `data/moneymoney.sqlite`，首次启动会从旧 JSON 导入并在 `data/migration-backups/` 留下带时间戳备份。Telegram 轮询 offset 仍保存在 `data/telegram-bot-state.json`，运行时状态文件均已被 Git 忽略。
 
 发送 `/start` 后，Telegram 输入框下方会出现持久功能菜单。菜单覆盖总览、风险、信号、搜索、事件、模拟盘、研究、数据源、历史、提醒和自动化状态；文字命令仍然可以继续使用。价格提醒、风险预警和高影响事件提醒由本地服务后台检查，服务停止期间不会补发离线期间的提醒。
 
@@ -225,7 +225,8 @@ curl.exe -s -X POST "https://api.telegram.org/bot<TOKEN>/deleteWebhook"
 - 交互机器人默认关闭；只有显式设置 `TELEGRAM_POLLING_ENABLED=true` 才会启动。
 - 交互命令只读或测试，不提供真实下单、提现或修改风险参数能力。
 - `/paper` 的开平仓仅为本地 paper trading，并且必须经过 `/confirm` 二次确认。
-- `/web` 提供的是本地面板地址；手机访问需要 `APP_HOST=0.0.0.0`、同一局域网和 Windows 防火墙放行，Telegram 不会替你建立公网 HTTPS Web App。
+- `/web` 提供的是本地面板地址；手机访问需要 `APP_HOST=0.0.0.0`、`MONEYMONEY_ACCESS_TOKEN`、同一局域网和 Windows 防火墙放行。首次打开面板时使用 `/?access_token=你的令牌`，之后 API 请求会自动带认证头；Telegram 不会替你建立公网 HTTPS Web App。
+- AI 模拟跑单默认关闭。需要先设置 `AI_PAPER_TRADING_ENABLED=true`，并在策略中设置单笔上限、预算、最大持仓、日损、回撤和冷却；真实交易执行器仍保持 disabled。
 - 不需要给 MoneyMoney 配置公网域名或 webhook。
 - 不要把交易私钥、Telegram token 放到前端、截图或公开仓库。
 - Telegram 通知只发送信号与状态，不代表自动交易已经开启；真实交易和模拟交易开关仍由 MoneyMoney 设置独立控制。

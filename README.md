@@ -373,7 +373,11 @@ TELEGRAM_ALLOWED_CHAT_IDS=
 TELEGRAM_ADMIN_CHAT_IDS=
 ```
 
-本地默认只监听 `127.0.0.1:3000`。如需在手机或局域网设备打开 PWA，可在 `.env` 中设置 `APP_HOST=0.0.0.0`，并按需修改 `APP_PORT`；这只改变监听地址，不会开启真实交易。
+本地默认只监听 `127.0.0.1:3000`。如需在手机或局域网设备打开 PWA，可在 `.env` 中设置 `APP_HOST=0.0.0.0`，并同时设置 `MONEYMONEY_ACCESS_TOKEN=一段随机长令牌`；浏览器首次访问使用 `/?access_token=令牌`，页面会将令牌保存在本机浏览器并为 API 请求自动加上认证头。LAN 模式未配置令牌时服务不会启动。这只改变监听地址，不会开启真实交易。
+
+AI 模拟跑单默认关闭。只有显式设置 `AI_PAPER_TRADING_ENABLED=true` 后，Web/Telegram 才能启动 AI 纸面策略；每个策略都有单笔金额、策略预算、最大持仓、单日亏损、最大回撤、数据新鲜度和冷却限制，触发后会自动停止。真实交易执行器仍保持 disabled。
+
+重要状态默认使用 SQLite。升级或迁移前可运行 `npm run state:backup` 创建本地备份；恢复时使用 `npm run state:restore -- data/backups/备份目录名`。备份目录已被 Git 忽略。
 
 ### License
 

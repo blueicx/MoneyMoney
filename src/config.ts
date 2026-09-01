@@ -46,6 +46,10 @@ export const config = {
   // APP_HOST=0.0.0.0 only when the phone/PWA needs LAN access.
   appHost: process.env.APP_HOST || '127.0.0.1',
   appPort: parseInt(process.env.APP_PORT || '3000'),
+  lanMode: process.env.MONEYMONEY_LAN_MODE === 'true'
+    || !['127.0.0.1', 'localhost', '::1', '[::1]'].includes((process.env.APP_HOST || '127.0.0.1').trim().toLowerCase()),
+  accessToken: process.env.MONEYMONEY_ACCESS_TOKEN || '',
+  aiPaperTradingEnabled: process.env.AI_PAPER_TRADING_ENABLED === 'true',
 
   // Trading Settings
   defaultSlippageBps: parseInt(process.env.DEFAULT_SLIPPAGE_BPS || '200'),
@@ -80,6 +84,10 @@ export function validateConfig(): void {
 
   if (!config.privateKey) {
     errors.push('PRIVATE_KEY is required');
+  }
+
+  if (config.lanMode && !config.accessToken) {
+    errors.push('MONEYMONEY_ACCESS_TOKEN is required when LAN mode is enabled');
   }
 
   if (errors.length > 0) {

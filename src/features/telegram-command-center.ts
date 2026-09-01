@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { stateStore } from '../storage/sqlite-state';
 
 export interface TelegramNotificationPreferences {
   signals: boolean;
@@ -217,8 +218,12 @@ function minutesOfDay(value: string): number {
 
 export class TelegramCommandCenterStore {
   private state: TelegramCommandCenterState;
+  private readonly useSqlite: boolean;
+  private readonly stateFile: string;
 
-  constructor(private readonly stateFile = path.resolve('data/telegram-command-center.json')) {
+  constructor(stateFile?: string) {
+    this.useSqlite = !stateFile;
+    this.stateFile = stateFile || path.resolve('data/telegram-command-center.json');
     this.state = this.load();
   }
 
@@ -461,6 +466,15 @@ export class TelegramCommandCenterStore {
     this.state.audits.unshift(entry);
     this.state.audits = this.state.audits.slice(0, 200);
     this.save();
+    if (this.useSqlite) {
+      stateStore.appendAudit({
+        id: entry.id,
+        chatId: entry.chatId,
+        action: entry.action,
+        detail: entry.detail,
+        at: entry.at,
+      });
+    }
     return { ...entry };
   }
 
@@ -472,6 +486,24 @@ export class TelegramCommandCenterStore {
   }
 
   private load(): TelegramCommandCenterState {
+    if (this.useSqlite) {
+      const stored = stateStore.get<Partial<TelegramCommandCenterState>>('telegram-command-center');
+      if (stored) {
+        return {
+          ...emptyState(),
+          ...stored,
+          version: 2,
+          preferences: stored.preferences || {},
+          priceAlerts: Array.isArray(stored.priceAlerts) ? stored.priceAlerts : [],
+          smartAlerts: Array.isArray(stored.smartAlerts) ? stored.smartAlerts : [],
+          watchlists: stored.watchlists || {},
+          policies: stored.policies || {},
+          journal: Array.isArray(stored.journal) ? stored.journal : [],
+          pending: Array.isArray(stored.pending) ? stored.pending : [],
+          audits: Array.isArray(stored.audits) ? stored.audits : [],
+        };
+      }
+    }
     try {
       const parsed = JSON.parse(fs.readFileSync(this.stateFile, 'utf8')) as Partial<TelegramCommandCenterState>;
       const version = Number((parsed as { version?: number }).version);
@@ -493,6 +525,10 @@ export class TelegramCommandCenterStore {
   }
 
   private save(): void {
+    if (this.useSqlite) {
+      stateStore.set('telegram-command-center', this.state, 2);
+      return;
+    }
     fs.mkdirSync(path.dirname(this.stateFile), { recursive: true });
     const temp = `${this.stateFile}.tmp`;
     fs.writeFileSync(temp, JSON.stringify(this.state, null, 2), 'utf8');

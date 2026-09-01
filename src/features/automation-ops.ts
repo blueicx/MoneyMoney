@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { DATA_ROOT, ensureDir } from '../utils/paths';
+import { stateStore } from '../storage/sqlite-state';
 
 export type AutomationJobId = 'radar-refresh' | 'risk-patrol' | 'assistant-refresh' | 'ai-runners';
 export type AutomationRunStatus = 'RUNNING' | 'SUCCESS' | 'FAILED';
@@ -53,6 +54,11 @@ export function defaultAutomationJobs(): AutomationJob[] {
 
 function loadJobs(): AutomationJob[] {
   ensureDir(DATA_ROOT);
+  const stored = stateStore.get<AutomationJob[]>('automation-ops');
+  if (Array.isArray(stored)) {
+    const defaults = defaultAutomationJobs();
+    return defaults.map(item => ({ ...item, ...(stored.find(saved => saved.id === item.id) || {}) }));
+  }
   try {
     const parsed = JSON.parse(fs.readFileSync(OPS_FILE, 'utf8'));
     if (!Array.isArray(parsed)) return defaultAutomationJobs();
@@ -63,7 +69,7 @@ function loadJobs(): AutomationJob[] {
 
 function saveJobs(jobs: AutomationJob[]): void {
   ensureDir(DATA_ROOT);
-  fs.writeFileSync(OPS_FILE, JSON.stringify(jobs, null, 2), 'utf8');
+  stateStore.set('automation-ops', jobs, 1);
 }
 
 export function getAutomationJobs(): AutomationJob[] { return loadJobs(); }

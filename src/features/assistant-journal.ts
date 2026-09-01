@@ -8,6 +8,7 @@ import fs from 'fs';
 import path from 'path';
 import { api } from '../api';
 import { binanceFeed } from './binance';
+import { stateStore } from '../storage/sqlite-state';
 import { getMacroCurrentPrices } from './macro-market';
 import { getSectorCurrentPrices } from './sector-rotation';
 import { pushNotification } from './notifications';
@@ -168,6 +169,8 @@ const MAX_TRADES = 500;
 
 function load(): JournalFile {
   ensureDir(DATA_ROOT);
+  const stored = stateStore.get<JournalFile>('assistant-journal');
+  if (stored && Array.isArray(stored.trades)) return { version: 1, trades: stored.trades };
   if (fs.existsSync(JOURNAL_FILE)) {
     try {
       const parsed = JSON.parse(fs.readFileSync(JOURNAL_FILE, 'utf8')) as JournalFile;
@@ -180,7 +183,7 @@ function load(): JournalFile {
 
 function save(state: JournalFile): void {
   ensureDir(DATA_ROOT);
-  fs.writeFileSync(JOURNAL_FILE, JSON.stringify(state, null, 2));
+  stateStore.set('assistant-journal', state, 1);
 }
 
 export function getAssistantCalibration(): AssistantCalibrationStats {

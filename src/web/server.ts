@@ -11,7 +11,7 @@ import fs from 'fs';
 import path from 'path';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
-import { config, validateConfig } from '../config';
+import { config } from '../config';
 import { api } from '../api';
 import { tradingEngine } from '../trading';
 import { DataCollector } from '../analysis/collector';
@@ -76,6 +76,10 @@ import { generateAssistantReport } from '../features/trade-assistant';
 import { getSourceHealth } from '../features/source-health';
 import { testNotificationChannels } from '../features/notification-channels';
 import { riskPatrol } from '../features/risk-patrol';
+import { createAccessMiddleware, validateAccessConfiguration } from './access-control';
+import { stateStore, getStorageHealth } from '../storage/sqlite-state';
+import { paperTradingExecutor } from '../features/trading-executor';
+import { logger } from '../utils/logger';
 import {
   addResearchNote,
   addResearchSnapshot,
@@ -108,6 +112,36 @@ const app = express();
 // cross-origin callers must be explicitly enabled by the deployment layer.
 app.use(cors({ origin: false }));
 app.use(express.json());
+app.use('/api', createAccessMiddleware({
+  enabled: config.lanMode,
+  token: config.accessToken,
+  maxRequests: 180,
+}));
+app.use('/api', (req, res, next) => {
+  const isWrite = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method);
+  const isHealthEndpoint = req.path === '/health' || req.path.startsWith('/health/');
+  if (isWrite && !isHealthEndpoint && !getStorageHealth().ok) {
+    res.status(503).json({
+      success: false,
+      error: '状态存储不可用，系统已进入只读模式',
+      requestId: res.getHeader('X-Request-Id') || null,
+      storage: getStorageHealth(),
+    });
+    return;
+  }
+  next();
+});
+app.use((req, res, next) => {
+  const startedAt = Date.now();
+  res.on('finish', () => logger.info('http_request', {
+    requestId: res.getHeader('X-Request-Id') || null,
+    method: req.method,
+    path: req.path,
+    status: res.statusCode,
+    latencyMs: Date.now() - startedAt,
+  }));
+  next();
+});
 
 // Compress large text responses (the single-file dashboard is ~400KB raw).
 app.use((req, res, next) => {
@@ -152,7 +186,29 @@ app.use(express.static(path.join(__dirname, 'public'), {
 
 // Lightweight identity check used by the desktop launcher.
 app.get('/api/health', (_req, res) => {
-  res.json({ ok: true, app: 'MoneyMoney' });
+  res.json({
+    ok: true,
+    app: 'MoneyMoney',
+    mode: config.privateKey ? 'paper-only-wallet-readonly' : 'view-only',
+    binding: config.appHost,
+    lanProtected: config.lanMode,
+    storage: getStorageHealth(),
+  });
+});
+
+app.get('/api/health/live', (_req, res) => {
+  res.json({ ok: true, app: 'MoneyMoney', status: 'alive' });
+});
+
+app.get('/api/health/readiness', async (_req, res) => {
+  try {
+    const sources = await getSourceHealth();
+    const storage = getStorageHealth();
+    const ready = storage.ok && sources.items.some(item => item.ok || item.configured);
+    res.status(ready ? 200 : 503).json({ ok: ready, status: ready ? 'ready' : 'degraded', storage, sources });
+  } catch (error) {
+    res.status(503).json({ ok: false, status: 'failed', error: error instanceof Error ? error.message : String(error) });
+  }
 });
 
 type CategorySnapshot = { data: Category[]; fetchedAt?: string };
@@ -1708,13 +1764,8 @@ app.get('/api/wallet', async (req, res) => {
 });
 
 // Set approvals (required before trading)
-app.post('/api/approvals', async (req, res) => {
-  try {
-    await tradingEngine.setApprovals();
-    res.json({ success: true });
-  } catch (error: any) {
-    res.json({ success: false, error: error.message });
-  }
+app.post('/api/approvals', async (_req, res) => {
+  res.status(403).json({ success: false, error: '真实交易执行器已禁用；当前仅支持纸面交易' });
 });
 
 // Get market by ID
@@ -1728,48 +1779,17 @@ app.get('/api/markets/:id', async (req, res) => {
 });
 
 // Place order
-app.post('/api/trade', async (req, res) => {
-  try {
-    const { marketId, side, outcomeIndex, orderType, price, quantity } = req.body;
-
-    // Get market info
-    const marketRes = await api.getMarketById(marketId);
-    const market = marketRes.data;
-
-    let hash: string;
-
-    if (orderType === 'LIMIT') {
-      hash = await tradingEngine.createLimitOrder({
-        market,
-        side,
-        outcomeIndex,
-        pricePerShare: price,
-        quantity
-      });
-    } else {
-      hash = await tradingEngine.createMarketOrder({
-        market,
-        side,
-        outcomeIndex,
-        quantity
-      });
-    }
-
-    res.json({ success: true, data: { hash } });
-  } catch (error: any) {
-    res.json({ success: false, error: error.message });
-  }
+app.post('/api/trade', async (_req, res) => {
+  res.status(403).json({ success: false, error: '真实交易执行器已禁用；请使用 /api/paper/preview 和 /api/paper/open' });
 });
 
 // Cancel order
-app.post('/api/orders/cancel', async (req, res) => {
-  try {
-    const { orderIds } = req.body;
-    await tradingEngine.cancelOrders(orderIds);
-    res.json({ success: true });
-  } catch (error: any) {
-    res.json({ success: false, error: error.message });
-  }
+app.post('/api/orders/cancel', async (_req, res) => {
+  res.status(403).json({ success: false, error: '真实交易执行器已禁用' });
+});
+
+app.get('/api/real-trading/status', (_req, res) => {
+  res.json({ success: true, data: { enabled: false, reason: '当前版本只允许纸面交易，真实下单/审批/撤单均已禁用' } });
 });
 
 // Market analysis endpoint
@@ -2500,17 +2520,42 @@ function getTelegramCommandHandlers(): Record<string, TelegramCommandHandler> {
       const cancelled = telegramCommandCenterStore.cancelPendingAction(chatId);
       return cancelled ? '已取消待确认的模拟盘操作。' : '当前没有待确认操作。';
     },
-    strategies: () => {
+    strategies: ({ args }) => {
+      const action = String(args[0] || 'list').toLowerCase();
+      const targetId = String(args[1] || '');
+      if (action === 'pause' && targetId) {
+        const runner = pauseAiRunner(targetId, 'Telegram 手动暂停');
+        return runner ? `✅ 已暂停策略：${escapeTelegramHtml(runner.title)}` : '未找到策略。';
+      }
+      if (action === 'resume' && targetId) {
+        const runner = resumeAiRunner(targetId);
+        return runner ? `✅ 已恢复策略：${escapeTelegramHtml(runner.title)}` : '未找到策略，或仍处于熔断状态。';
+      }
+      if (action === 'reset-circuit' && targetId) {
+        const runner = resetAiRunnerCircuit(targetId);
+        return runner ? `✅ 已清除策略熔断标记，当前保持停止：${escapeTelegramHtml(runner.title)}` : '未找到策略。';
+      }
+      if (action === 'start') {
+        if (!config.aiPaperTradingEnabled) return 'AI 自动纸面交易默认关闭，请先设置 AI_PAPER_TRADING_ENABLED=true。';
+        const venue = String(args[1] || '') as 'Binance' | 'Predict.fun';
+        const symbol = String(args[2] || '');
+        const budget = Number(args[3]);
+        if (!['Binance', 'Predict.fun'].includes(venue) || !symbol || !Number.isFinite(budget) || budget < 1) return '用法：/strategies start Binance BTCUSDT 100';
+        const runner = createAiRunner(venue, symbol, symbol, budget);
+        return `✅ 已启动 AI 纸面策略：${escapeTelegramHtml(runner.id)}
+标的：${escapeTelegramHtml(runner.symbolOrMarketId)} · 预算：$${formatTelegramNumber(runner.budgetUsd)}
+暂停：/strategies pause ${escapeTelegramHtml(runner.id)}`;
+      }
       const runners = getAiRunners();
       if (!runners.length) return '<b>AI 模拟策略</b>\n暂无策略账户。可在网页面板创建。';
       return [
         '<b>AI 模拟策略</b>',
         ...runners.slice(0, 8).map(runner => {
           const summary = summarizeRunner(runner);
-          return `· ${escapeTelegramHtml(runner.title)} · ${runner.status} · 权益 $${formatTelegramNumber(summary.equityUsd)} · PnL ${summary.totalPnlUsd >= 0 ? '+' : ''}$${formatTelegramNumber(summary.totalPnlUsd)}`;
+          return `· ${escapeTelegramHtml(runner.title)} · ${runner.status} · 权益 $${formatTelegramNumber(summary.equityUsd)} · PnL ${summary.totalPnlUsd >= 0 ? '+' : ''}$${formatTelegramNumber(summary.totalPnlUsd)}\n  限额：单笔 $${formatTelegramNumber(runner.policy.maxTradeUsd)} · 持仓 ${runner.policy.maxPositions} · 日损 $${formatTelegramNumber(runner.policy.maxDailyLossUsd)}${runner.circuitBreakerReason ? `\n  熔断：${escapeTelegramHtml(runner.circuitBreakerReason)}` : ''}`;
         }),
         '',
-        'Telegram 只读展示策略账户，不在此处启动或停止策略。',
+        '启动：/strategies start Binance BTCUSDT 100\n暂停：/strategies pause <策略ID>\n恢复：/strategies resume <策略ID>\n清除熔断：/strategies reset-circuit <策略ID>',
       ].join('\n');
     },
     ask: ({ chatId, args, message, update }) => {
@@ -3261,14 +3306,34 @@ app.post('/api/paper/reset', (req, res) => {
   res.json({ success: true, data: paperEngine.getPortfolio() });
 });
 
+app.post('/api/paper/preview', async (req, res) => {
+  try {
+    const { marketId, marketTitle, outcomeIndex, outcomeName, price, amountUsd, reason } = req.body ?? {};
+    const result = await paperTradingExecutor.previewOpen({ marketId: Number(marketId), marketTitle: String(marketTitle || ''), outcomeIndex: Number(outcomeIndex) as 0 | 1, outcomeName: String(outcomeName || ''), price: Number(price), amountUsd: Number(amountUsd), reason: String(reason || '') });
+    res.json({ success: result.allowed, data: result });
+  } catch (e: any) { res.status(400).json({ success: false, error: e.message }); }
+});
+
+app.get('/api/trading/capabilities', (_req, res) => {
+  res.json({ success: true, data: { mode: 'paper', paper: true, real: false, viewOnly: !config.privateKey, aiPaperTrading: config.aiPaperTradingEnabled } });
+});
+
 app.post('/api/paper/open', async (req, res) => {
   try {
     const { marketId, marketTitle, outcomeIndex, outcomeName, price, amountUsd, reason } = req.body;
-    const result = paperEngine.openPosition(marketId, marketTitle, outcomeIndex, outcomeName, price, amountUsd, reason || 'Manual');
+    const idempotencyKey = String(req.headers['idempotency-key'] || req.body?.idempotencyKey || '').trim();
+    if (idempotencyKey) {
+      const previous = stateStore.getIdempotent<any>(`paper-open:${idempotencyKey}`);
+      if (previous) return res.json(previous);
+    }
+    const result = await paperTradingExecutor.open({ marketId: Number(marketId), marketTitle: String(marketTitle || ''), outcomeIndex: Number(outcomeIndex) as 0 | 1, outcomeName: String(outcomeName || ''), price: Number(price), amountUsd: Number(amountUsd), reason: String(reason || 'Manual'), idempotencyKey });
     if (result.success && settingsManager.get().telegramEnabled) {
       await telegram.notifyTrade('BUY', `${outcomeName} on "${marketTitle}" @ ${price} | ${amountUsd}`);
     }
-    res.json({ success: result.success, message: result.message });
+    const response = { success: result.success, message: result.message, mode: result.mode, positionId: result.positionId };
+    if (idempotencyKey) stateStore.setIdempotent(`paper-open:${idempotencyKey}`, response);
+    if (result.success) stateStore.appendAudit({ id: `web-paper-open-${idempotencyKey || Date.now()}`, action: 'paper_open', detail: result.message });
+    res.json(response);
   } catch (e: any) {
     res.json({ success: false, message: e.message });
   }
@@ -3277,11 +3342,19 @@ app.post('/api/paper/open', async (req, res) => {
 app.post('/api/paper/close', async (req, res) => {
   try {
     const { positionId, exitPrice } = req.body;
-    const result = paperEngine.closePosition(positionId, exitPrice);
+    const idempotencyKey = String(req.headers['idempotency-key'] || req.body?.idempotencyKey || '').trim();
+    if (idempotencyKey) {
+      const previous = stateStore.getIdempotent<any>(`paper-close:${idempotencyKey}`);
+      if (previous) return res.json(previous);
+    }
+    const result = await paperTradingExecutor.close({ positionId: String(positionId), exitPrice: Number(exitPrice), idempotencyKey });
     if (result.success && settingsManager.get().telegramEnabled) {
       await telegram.notifyTrade('SELL', `Closed position | ${result.message}`);
     }
-    res.json({ success: result.success, message: result.message });
+    const response = { success: result.success, message: result.message, mode: result.mode, pnl: result.pnl };
+    if (idempotencyKey) stateStore.setIdempotent(`paper-close:${idempotencyKey}`, response);
+    if (result.success) stateStore.appendAudit({ id: `web-paper-close-${idempotencyKey || Date.now()}`, action: 'paper_close', detail: result.message });
+    res.json(response);
   } catch (e: any) {
     res.json({ success: false, message: e.message });
   }
@@ -3296,8 +3369,9 @@ app.get('/api/paper/trades', (req, res) => {
 import {
   createAiRunner, stopAiRunner, getAiRunners,
   runnerOpenPosition, runnerClosePosition,
-  summarizeRunner,
+  summarizeRunner, updateAiRunnerPolicy, pauseAiRunner, resumeAiRunner, resetAiRunnerCircuit,
 } from '../features/ai-paper-runner';
+import { ResilientDataSourceAdapter } from '../data/source-adapter';
 
 app.post('/api/kelly', (req, res) => {
   const { probability, price, bankroll, fraction } = req.body;
@@ -3313,15 +3387,66 @@ app.get('/api/ai-runners', (_req, res) => {
 });
 
 app.post('/api/ai-runners/create', express.json(), (req, res) => {
+  if (!config.aiPaperTradingEnabled) return res.status(403).json({ success: false, error: 'AI 自动纸面交易默认关闭，请先设置 AI_PAPER_TRADING_ENABLED=true' });
   const { venue, symbolOrMarketId, title, budgetUsd } = req.body ?? {};
   if (!venue || !symbolOrMarketId || !budgetUsd || typeof budgetUsd !== 'number' || budgetUsd < 1) {
     return res.status(400).json({ success: false, error: '请填写平台、标的和金额（≥$1）' });
   }
   try {
-    const runner = createAiRunner(venue, String(symbolOrMarketId), String(title || symbolOrMarketId), budgetUsd);
+    const runner = createAiRunner(venue, String(symbolOrMarketId), String(title || symbolOrMarketId), budgetUsd, req.body?.policy);
     res.json({ success: true, data: runner });
   } catch (e: any) { res.status(400).json({ success: false, error: e.message }); }
 });
+
+app.post('/api/ai-runners/policy', express.json(), (req, res) => {
+  const { id, policy } = req.body ?? {};
+  const runner = id && policy ? updateAiRunnerPolicy(String(id), policy) : null;
+  if (!runner) return res.status(404).json({ success: false, error: '未找到策略' });
+  res.json({ success: true, data: runner });
+});
+
+app.post('/api/ai-runners/pause', express.json(), (req, res) => {
+  const { id, reason } = req.body ?? {};
+  const runner = id ? pauseAiRunner(String(id), String(reason || '手动暂停')) : null;
+  if (!runner) return res.status(404).json({ success: false, error: '未找到策略' });
+  res.json({ success: true, data: runner });
+});
+
+app.post('/api/ai-runners/resume', express.json(), (req, res) => {
+  const { id } = req.body ?? {};
+  const runner = id ? resumeAiRunner(String(id)) : null;
+  if (!runner) return res.status(404).json({ success: false, error: '未找到策略或仍处于熔断状态' });
+  res.json({ success: true, data: runner });
+});
+
+app.post('/api/ai-runners/reset-circuit', express.json(), (req, res) => {
+  const { id } = req.body ?? {};
+  const runner = id ? resetAiRunnerCircuit(String(id)) : null;
+  if (!runner) return res.status(404).json({ success: false, error: '未找到策略' });
+  res.json({ success: true, data: runner });
+});
+
+const runnerKlineAdapters = new Map<string, ResilientDataSourceAdapter<unknown[][]>>();
+function getRunnerKlineAdapter(symbol: string): ResilientDataSourceAdapter<unknown[][]> {
+  const key = symbol.toUpperCase();
+  let adapter = runnerKlineAdapters.get(key);
+  if (!adapter) {
+    adapter = new ResilientDataSourceAdapter<unknown[][]>({
+      id: `binance-klines-${key}`,
+      group: 'ai-runner-market-data',
+      ttlMs: 60_000,
+      timeoutMs: 8_000,
+      retries: 2,
+      fetcher: async (_input, signal) => {
+        const response = await fetch(`https://api.binance.com/api/v3/klines?symbol=${key}&interval=1h&limit=20`, { signal });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        return await response.json() as unknown[][];
+      },
+    });
+    runnerKlineAdapters.set(key, adapter);
+  }
+  return adapter;
+}
 
 app.post('/api/ai-runners/stop', express.json(), (req, res) => {
   const { id } = req.body ?? {};
@@ -3331,17 +3456,15 @@ app.post('/api/ai-runners/stop', express.json(), (req, res) => {
 });
 
 async function tickAllAiRunners(): Promise<Array<{ id: string; actionZh: string }>> {
+  if (!config.aiPaperTradingEnabled) return [];
   const results: Array<{ id: string; actionZh: string }> = [];
   for (const runner of getAiRunners().filter(r => r.status === 'RUNNING')) {
     try {
       if (runner.venue === 'Binance') {
         const symbol = runner.symbolOrMarketId.toUpperCase();
-        const klineRes = await fetch(
-          `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=1h&limit=20`,
-          { signal: AbortSignal.timeout(8_000) },
-        );
-        if (!klineRes.ok) continue;
-        const klines = (await klineRes.json()) as unknown[][];
+        const snapshot = await getRunnerKlineAdapter(symbol).fetch();
+        if (!snapshot.data) continue;
+        const klines = snapshot.data;
         const closes = klines.map(k => Number(k[4]));
         if (closes.length < 15) continue;
 
@@ -3358,7 +3481,8 @@ async function tickAllAiRunners(): Promise<Array<{ id: string; actionZh: string 
         const aboveSma = price > sma10;
 
         const openPos = runner.positions.find(p => p.status === 'OPEN');
-        if (!openPos && rsi < 32 && runner.cashUsd > 5) {
+        const freshEnough = snapshot.status === 'fresh' && Date.now() - Date.parse(snapshot.fetchedAt) <= runner.policy.minFreshnessMs;
+        if (!openPos && freshEnough && rsi < 32 && runner.cashUsd > 5) {
           const qty = Math.floor(runner.cashUsd * 0.95 / price * 1000) / 1000;
           if (qty > 0) {
             runnerOpenPosition(runner.id, price, qty, 'LONG', `RSI ${rsi.toFixed(0)} 超卖，价格${aboveSma ? '在' : '低于'}SMA10`);
@@ -3559,18 +3683,12 @@ app.post('/api/report/daily', async (req, res) => {
 async function main() {
   const hasWallet = !!config.privateKey;
 
-  if (hasWallet) {
-    validateConfig();
-  }
+  const accessErrors = validateAccessConfiguration(config.appHost, config.lanMode, config.accessToken);
+  if (accessErrors.length) throw new Error(accessErrors.join('; '));
 
-
-  if (hasWallet) {
-    console.log('\n  Initializing trading engine...');
-    await tradingEngine.initialize();
-    console.log('  Ready!\n');
-  } else {
-    console.log('\n  Running in VIEW-ONLY mode (no wallet configured)\n');
-  }
+  console.log(hasWallet
+    ? '\n  Wallet configured for read-only inspection; real trading executor is DISABLED.\n'
+    : '\n  Running in VIEW-ONLY mode (no wallet configured)\n');
 
 
   const PORT = config.appPort;

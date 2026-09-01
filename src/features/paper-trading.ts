@@ -5,6 +5,7 @@
 import fs from 'fs';
 import path from 'path';
 import { config } from '../config';
+import { stateStore } from '../storage/sqlite-state';
 
 export interface PaperPosition {
   id: string;
@@ -100,6 +101,8 @@ function defaultPortfolio(): PaperPortfolio {
 
 function loadPortfolio(): PaperPortfolio {
   ensureDataDir();
+  const stored = stateStore.get<PaperPortfolio>('paper-portfolio');
+  if (stored) return stored;
   if (fs.existsSync(PORTFOLIO_FILE)) {
     try {
       return JSON.parse(fs.readFileSync(PORTFOLIO_FILE, 'utf8'));
@@ -110,12 +113,20 @@ function loadPortfolio(): PaperPortfolio {
 
 function savePortfolio(p: PaperPortfolio): void {
   ensureDataDir();
-  fs.writeFileSync(PORTFOLIO_FILE, JSON.stringify(p, null, 2));
+  stateStore.set('paper-portfolio', p, 1);
 }
 
 let portfolio = loadPortfolio();
 
 export class PaperTradingEngine {
+
+  previewOpen(marketId: number, price: number, amountUsd: number): { ok: boolean; message: string } {
+    const validation = validatePaperOrderInput({ price, amountUsd });
+    if (!validation.ok) return { ok: false, message: validation.error || '模拟订单参数无效' };
+    if (amountUsd > portfolio.cashBalance) return { ok: false, message: `模拟余额不足（可用 $${portfolio.cashBalance.toFixed(2)}）` };
+    if (!Number.isFinite(marketId)) return { ok: false, message: '市场 ID 无效' };
+    return { ok: true, message: '模拟订单参数有效' };
+  }
 
   /**
    * Portfolio risk analytics computed from closed positions.

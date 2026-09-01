@@ -55,6 +55,10 @@ data/prediction-radar-snapshot.json
 data/prediction-history.json
 data/forecast-lab.json
 data/*.cache.json
+data/moneymoney.sqlite
+data/moneymoney.sqlite-*
+data/migration-backups/
+data/backups/
 data/settings.json
 data/telegram-bot-state.json
 data/telegram-command-center.json

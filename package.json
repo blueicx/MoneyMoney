@@ -19,7 +19,11 @@
     "example:mm": "ts-node src/examples/market-maker.ts",
     "web": "ts-node src/web/server.ts",
     "analyze": "ts-node src/analysis/analyze.ts",
-    "analyze:watch": "ts-node src/analysis/analyze.ts --watch"
+    "analyze:watch": "ts-node src/analysis/analyze.ts --watch",
+    "security:scan": "node scripts/secret-scan.cjs",
+    "smoke:web": "node scripts/web-smoke.cjs",
+    "state:backup": "node scripts/state-backup.cjs",
+    "state:restore": "node scripts/state-backup.cjs restore"
   },
   "keywords": [
     "predict.fun",
@@ -32,6 +36,7 @@
   "license": "MIT",
   "dependencies": {
     "@predictdotfun/sdk": "^1.2.4",
+    "better-sqlite3": "^12.11.1",
     "chalk": "^4.1.2",
     "cli-table3": "^0.6.5",
     "cors": "^2.8.5",
@@ -47,6 +52,7 @@
     "@capacitor/android": "^8.5.0",
     "@capacitor/cli": "^7.6.8",
     "@capacitor/core": "^8.5.0",
+    "@types/better-sqlite3": "^9.6.0",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
     "@types/inquirer": "^8.2.10",
