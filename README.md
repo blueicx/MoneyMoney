@@ -121,8 +121,8 @@ npm run web        # 打开 http://localhost:3000
 ### Metaculus / OpenRouter / Bark 可选配置
 
 - **Metaculus**：在 Metaculus 账号设置里生成 API Token，写入 `.env`：`METACULUS_API_TOKEN=...`。未配置时雷达仍会用其他平台继续工作。
-- **OpenRouter**：在 OpenRouter 创建 Key 后写入 `.env`：`OPENROUTER_API_KEY=...`。可用 `OPENROUTER_API_URL=...` 指向完整的 OpenAI-compatible `/chat/completions` 接口；留空时使用官方地址，也兼容旧的 `OPENROUTER_BASE_URL`。
-- **Groq**：如需启用市场分析链路，填写 `GROQ_API_KEY=...`；可用 `GROQ_API_URL=...` 自定义完整接口，模型由 `GROQ_MODEL=...` 控制。
+- **OpenRouter**：在 OpenRouter 创建 Key 后写入 `.env`：`OPENROUTER_API_KEY=...`。启动后可直接在“设置 → AI 模型接口”填写自定义 URL 和模型；也支持用 `OPENROUTER_API_URL`、`OPENROUTER_MODEL` 配置，且兼容旧的 `OPENROUTER_BASE_URL`。
+- **Groq**：如需启用市场分析链路，填写 `GROQ_API_KEY=...`；启动后可在“设置 → AI 模型接口”填写自定义 URL 和模型，也支持用 `GROQ_API_URL`、`GROQ_MODEL` 配置。
 - **iPhone Bark**：安装 Bark 后复制它的推送 URL 中的 device key，写入 `.env`：`BARK_DEVICE_KEY=...`。之后可在设置页测试全部通知通道。
 
 ### Telegram 高胜率推送

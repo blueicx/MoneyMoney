@@ -1,12 +1,10 @@
 import type { PredictionRadar } from './prediction-radar';
+import { getAiRuntimeConfig } from './ai-runtime-config';
 import { resolveChatCompletionsUrl } from './ai-endpoint';
 
-const OPENROUTER_API_KEY = (process.env.OPENROUTER_API_KEY || '').trim();
-const OPENROUTER_MODEL = (process.env.OPENROUTER_MODEL || 'minimax/minimax-m3:free').trim();
 export function resolveOpenRouterApiUrl(explicitUrl = process.env.OPENROUTER_API_URL, baseUrl = process.env.OPENROUTER_BASE_URL): string {
   return resolveChatCompletionsUrl(explicitUrl, baseUrl, 'https://openrouter.ai/api/v1');
 }
-const OPENROUTER_URL = resolveOpenRouterApiUrl();
 const FALLBACK_MODELS = [
   'nvidia/nemotron-3-super-120b-a12b:free',
   'google/gemma-4-31b-it:free',
@@ -44,10 +42,11 @@ function buildPrompt(radar: PredictionRadar): string {
 }
 
 async function callOpenRouter(model: string, prompt: string): Promise<string> {
-  const res = await fetch(OPENROUTER_URL, {
+  const runtime = getAiRuntimeConfig('openrouter');
+  const res = await fetch(runtime.apiUrl, {
     method: 'POST',
     headers: {
-      authorization: `Bearer ${OPENROUTER_API_KEY}`,
+      authorization: `Bearer ${runtime.apiKey}`,
       'content-type': 'application/json',
       'http-referer': 'https://github.com/blueicx/MoneyMoney',
       'x-title': 'MoneyMoney',
@@ -74,7 +73,7 @@ async function callOpenRouter(model: string, prompt: string): Promise<string> {
 }
 
 export function aiCommentaryConfigured(): boolean {
-  return !!OPENROUTER_API_KEY;
+  return getAiRuntimeConfig('openrouter').configured;
 }
 
 export async function getAiMarketCommentary(radar: PredictionRadar, force = false): Promise<{
@@ -84,7 +83,8 @@ export async function getAiMarketCommentary(radar: PredictionRadar, force = fals
   updatedAt: string;
   cached: boolean;
 }> {
-  if (!OPENROUTER_API_KEY) {
+  const runtime = getAiRuntimeConfig('openrouter');
+  if (!runtime.configured) {
     return {
       configured: false,
       analysis: '未配置 OPENROUTER_API_KEY。请在本机 .env 中填写 OpenRouter 密钥。',
@@ -118,7 +118,7 @@ export async function getAiMarketCommentary(radar: PredictionRadar, force = fals
   pending = (async () => {
     const prompt = buildPrompt(radar);
     let lastError = '';
-    for (const model of [OPENROUTER_MODEL, ...FALLBACK_MODELS.filter(item => item !== OPENROUTER_MODEL)]) {
+    for (const model of [runtime.model, ...FALLBACK_MODELS.filter(item => item !== runtime.model)]) {
       try {
         const value = await callOpenRouter(model, prompt);
         cache = { value, model, createdAt: new Date().toISOString(), signature };

@@ -59,7 +59,7 @@ export class NewsFeed {
 }
 
 // --- Strategy Settings ---
-interface StrategySettings {
+export interface StrategySettings {
   confidenceThreshold: number;
   stopLossPct: number;
   takeProfitPct: number;
@@ -72,6 +72,10 @@ interface StrategySettings {
   paperTradingEnabled: boolean;
   telegramEnabled: boolean;
   autoTradeEnabled: boolean;
+  openRouterApiUrl: string;
+  openRouterModel: string;
+  groqApiUrl: string;
+  groqModel: string;
 }
 
 const SETTINGS_FILE = path.join(DATA_ROOT, 'settings.json');
@@ -90,6 +94,10 @@ function defaultSettings(): StrategySettings {
     paperTradingEnabled: true,
     telegramEnabled: false,
     autoTradeEnabled: false,
+    openRouterApiUrl: '',
+    openRouterModel: '',
+    groqApiUrl: '',
+    groqModel: '',
   };
 }
 
@@ -110,7 +118,20 @@ export class SettingsManager {
   }
 
   update(partial: Partial<StrategySettings>): StrategySettings {
-    this.settings = { ...this.settings, ...partial };
+    const allowed = new Set<keyof StrategySettings>([
+      'confidenceThreshold', 'stopLossPct', 'takeProfitPct', 'maxDailyTrades', 'maxPositionPct',
+      'kellyFraction', 'momentumLookback', 'spreadMaxBps', 'sentimentWeight', 'paperTradingEnabled',
+      'telegramEnabled', 'autoTradeEnabled', 'openRouterApiUrl', 'openRouterModel', 'groqApiUrl', 'groqModel',
+    ]);
+    const safePatch = Object.fromEntries(Object.entries(partial).filter(([key]) => allowed.has(key as keyof StrategySettings))) as Partial<StrategySettings>;
+    for (const key of ['openRouterApiUrl', 'openRouterModel', 'groqApiUrl', 'groqModel'] as const) {
+      if (key in safePatch) {
+        const value = safePatch[key];
+        if (typeof value !== 'string') delete safePatch[key];
+        else safePatch[key] = value.trim().slice(0, 500);
+      }
+    }
+    this.settings = { ...this.settings, ...safePatch };
     fs.writeFileSync(SETTINGS_FILE, JSON.stringify(this.settings, null, 2));
     return { ...this.settings };
   }

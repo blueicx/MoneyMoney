@@ -109,7 +109,7 @@ GROQ_API_URL=https://你的中转站/v1/chat/completions
 GROQ_MODEL=llama-3.3-70b-versatile
 ```
 
-`*_API_URL` 优先级最高；如果留空，OpenRouter 和 Groq 使用各自官方地址。OpenRouter 还兼容已有的 `OPENROUTER_BASE_URL`。修改后必须重启服务。密钥只放在本机 `.env`，不要提交到 Git。
+启动 Web 后也可以打开“设置 → AI 模型接口”填写两条链路的 URL 和模型，保存后立即生效。API Key 仍只放在本机 `.env`，设置页只显示“已配置/未配置”，不会回显或保存密钥；不要提交到 Git。若通过 `.env` 修改 URL、模型或 Key，则需要重启服务。
 
 ## 开启接收指令
 

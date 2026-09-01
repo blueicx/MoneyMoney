@@ -67,6 +67,7 @@ import { getPredictionHistory } from '../features/prediction-history';
 import { getForecastLabReport, resolveForecastCase } from '../features/forecast-lab';
 import { calculatePredictionPosition } from '../features/prediction-position-sizer';
 import { aiCommentaryConfigured, getAiMarketCommentary } from '../features/ai-commentary';
+import { getAiConfigurationStatus, testAiConnection, type AiChain } from '../features/ai-runtime-config';
 import { buildPortfolioRiskOverview } from '../features/risk-overview';
 import { getRiskHistory, recordRiskHistory } from '../features/risk-history';
 import { buildDailyResearchBriefing } from '../features/research-briefing';
@@ -3619,17 +3620,28 @@ app.get('/api/news', async (req, res) => {
 // --- Settings ---
 
 app.get('/api/settings', (req, res) => {
-  res.json({ success: true, data: settingsManager.get() });
+  const data = settingsManager.get();
+  res.json({ success: true, data, ai: getAiConfigurationStatus(data) });
 });
 
 app.post('/api/settings', (req, res) => {
   const updated = settingsManager.update(req.body);
-  res.json({ success: true, data: updated });
+  res.json({ success: true, data: updated, ai: getAiConfigurationStatus(updated) });
 });
 
 app.post('/api/settings/reset', (req, res) => {
   const reset = settingsManager.reset();
-  res.json({ success: true, data: reset });
+  res.json({ success: true, data: reset, ai: getAiConfigurationStatus(reset) });
+});
+
+app.post('/api/ai/test', async (req, res) => {
+  const chain = String(req.body?.chain || '').toLowerCase() as AiChain;
+  if (chain !== 'openrouter' && chain !== 'groq') {
+    res.status(400).json({ success: false, error: 'chain 必须是 openrouter 或 groq' });
+    return;
+  }
+  const result = await testAiConnection(chain);
+  res.status(result.success ? 200 : 400).json({ success: result.success, data: result });
 });
 
 // --- Telegram Test ---

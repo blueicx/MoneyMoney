@@ -1,34 +1,33 @@
 import { DATA_ROOT } from '../utils/paths';
+import { getAiRuntimeConfig } from './ai-runtime-config';
 import { resolveChatCompletionsUrl } from './ai-endpoint';
 // ============================================
 // AI ANALYSIS (Groq free API) + REDDIT SENTIMENT
 // ============================================
 
-const GROQ_API_KEY = process.env.GROQ_API_KEY || '';
-const GROQ_MODEL = process.env.GROQ_MODEL || 'llama-3.3-70b-versatile';
 export function resolveGroqApiUrl(explicitUrl = process.env.GROQ_API_URL, baseUrl = process.env.GROQ_BASE_URL): string {
   return resolveChatCompletionsUrl(explicitUrl, baseUrl, 'https://api.groq.com/openai/v1');
 }
-const GROQ_URL = resolveGroqApiUrl();
 
 export class LLMAnalyzer {
 
   get isConfigured(): boolean {
-    return !!GROQ_API_KEY;
+    return getAiRuntimeConfig('groq').configured;
   }
 
   async analyze(prompt: string, systemPrompt?: string): Promise<string | null> {
-    if (!GROQ_API_KEY) return null;
+    const runtime = getAiRuntimeConfig('groq');
+    if (!runtime.configured) return null;
 
     try {
-      const res = await fetch(GROQ_URL, {
+      const res = await fetch(runtime.apiUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${GROQ_API_KEY}`,
+          'Authorization': `Bearer ${runtime.apiKey}`,
         },
         body: JSON.stringify({
-          model: GROQ_MODEL,
+          model: runtime.model,
           messages: [
             { role: 'system', content: systemPrompt || 'You are a crypto prediction market analyst. Be concise and actionable.' },
             { role: 'user', content: prompt },
