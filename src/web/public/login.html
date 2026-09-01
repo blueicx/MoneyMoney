@@ -95,14 +95,10 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;b
     localStorage.setItem('mm-theme', nxt);
     toggle.textContent = nxt==='dark' ? '☀️ 浅色' : '🌙 深色';
   });
-  // 已登录则跳仪表盘
-  const token = localStorage.getItem('mm_token');
-  if(token){
-    fetch('/api/auth/me', {headers:{'Authorization':'Bearer '+token}}).then(r=>{
-      if(r.ok){ const qs=new URLSearchParams(location.search); const nxt=qs.get('next'); location.href=nxt ? decodeURIComponent(nxt) : '/'; }
-      else if(r.status===401){ localStorage.removeItem('mm_token'); }
-    }).catch(()=>{});
-  }
+  // 已登录则跳仪表盘（以 Cookie 为主）
+  fetch('/api/auth/status', {credentials:'include'}).then(r=>r.json()).then(d=>{
+    if(d && d.data && d.data.loggedIn){ const qs=new URLSearchParams(location.search); const nxt=qs.get('next'); location.href=nxt ? decodeURIComponent(nxt) : '/'; }
+  }).catch(()=>{});
   pass.addEventListener('keyup', (e)=>{
     const caps = e.getModifierState && e.getModifierState('CapsLock');
     document.getElementById('capsHint').style.display = caps ? 'inline' : 'none';
@@ -116,7 +112,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;b
     if(!p){ pass.focus(); showError('请输入密码'); return; }
     btn.disabled=true; btn.textContent='登录中…';
     try{
-      const res= await fetch('/api/auth/login', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({username:u, password:p})});
+      const res= await fetch('/api/auth/login', {method:'POST', headers:{'Content-Type':'application/json'}, credentials:'include', body: JSON.stringify({username:u, password:p})});
       const data= await res.json().catch(()=>({}));
       if(res.status===429){ const ra=data.retryAfter||60; throw new Error('尝试过于频繁，请 '+ra+' 秒后再试'); }
       if(!res.ok || !data.success){ throw new Error(data.error || '登录失败'); }

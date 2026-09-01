@@ -1705,52 +1705,55 @@
     }
   </style>
 <script>
-// MoneyMoney 登录守卫：未登录则跳 /login，自动为 fetch 加 token
-(function(){
-  window.mm_isLoggedIn = !!localStorage.getItem('mm_token');
-  const token = localStorage.getItem('mm_token');
-  const onLoginPage = location.pathname === '/login';
-  if(!token && !onLoginPage && location.pathname !== '/api/auth/login'){
-    // 允许直接访问 /login
-    const isRoot = location.pathname === '/' || location.pathname.startsWith('/api');
-    if(isRoot) { location.href = '/login?next=' + encodeURIComponent(location.pathname + location.search); return; }
-  }
-  // 为所有 /api 请求自动附加 Authorization
-  const origFetch = window.fetch;
-  window.fetch = function(input, init){
-    init = init || {};
-    init.headers = init.headers || {};
-    // 兼容 Headers 实例与普通对象
-    let url = typeof input === 'string' ? input : (input && input.url) || '';
-    if(url && url.includes('/api/') && !url.includes('/api/auth/login') && !url.includes('/api/auth/me')){
-      const t = localStorage.getItem('mm_token');
-      if(t){
-        if(init.headers instanceof Headers){ init.headers.set('Authorization', 'Bearer ' + t); }
-        else if(typeof init.headers === 'object'){ init.headers['Authorization'] = 'Bearer ' + t; }
-      }
-    }
-    return origFetch(input, init).then(res=>{
-      if(res.status===401 && url.includes('/api/')){
-        // token 失效则回登录
-        localStorage.removeItem('mm_token');
-        if(location.pathname !== '/login') location.href='/login?next='+encodeURIComponent(location.pathname);
-      }
-      return res;
-    });
-  };
-  // 暴露登出
-  // æ´é²ç»åº（二次确认）
-  window.mmLogout = function(){
-    if(!confirm('确定退出登录？')) return;
-    fetch('/api/auth/logout', {method:'POST'}).finally(()=>{
-      localStorage.removeItem('mm_token');
-      localStorage.removeItem('mm_user');
-      window.mm_isLoggedIn=false;
-      document.cookie='mm_token=; Path=/; Max-Age=0; SameSite=Lax';
-      location.href='/login';
-    });
-  };
-  window.mmIsLoggedIn = function(){ return window.mm_isLoggedIn && !!localStorage.getItem('mm_token'); };
+// MoneyMoney 登录守卫：以 Cookie(HttpOnly) 为主，localStorage 兼容；统一 credentials:include
+(function(){
+  window.mm_isLoggedIn = false;
+  const origFetch = window.fetch;
+  window.fetch = function(input, init){
+    init = init || {};
+    if(!init.credentials) init.credentials = 'include';
+    let url = typeof input === 'string' ? input : (input && input.url) || '';
+    if(url && url.includes('/api/') && !url.includes('/api/auth/login')){
+      const t = localStorage.getItem('mm_token');
+      if(t){
+        if(init.headers instanceof Headers){ if(!init.headers.has('Authorization')) init.headers.set('Authorization','Bearer '+t); }
+        else { init.headers = init.headers || {}; if(!init.headers['Authorization'] && !init.headers['authorization']) init.headers['Authorization']='Bearer '+t; }
+      }
+    }
+    return origFetch(input, init).then(function(res){
+      if(res.status===401 && url.includes('/api/')){
+        localStorage.removeItem('mm_token');
+        if(location.pathname !== '/login'){
+          location.href='/login?next='+encodeURIComponent(location.pathname+location.search);
+        }
+      }
+      return res;
+    });
+  };
+  const onLoginPage = location.pathname === '/login';
+  fetch('/api/auth/status', {credentials:'include'}).then(function(r){return r.json();}).then(function(d){
+    const logged = !!(d && d.data && d.data.loggedIn);
+    window.mm_isLoggedIn = logged;
+    if(!logged && !onLoginPage && location.pathname === '/'){
+      location.href='/login?next='+encodeURIComponent(location.pathname+location.search);
+    }
+    if(logged && onLoginPage){
+      const qs=new URLSearchParams(location.search); const nxt=qs.get('next');
+      location.href=nxt ? decodeURIComponent(nxt) : '/';
+    }
+  }).catch(function(){});
+  // 暴露登出（二次确认）
+  window.mmLogout = function(){
+    if(!confirm('确定退出登录？')) return;
+    fetch('/api/auth/logout', {method:'POST', credentials:'include'}).finally(function(){
+      localStorage.removeItem('mm_token');
+      localStorage.removeItem('mm_user');
+      window.mm_isLoggedIn=false;
+      document.cookie='mm_token=; Path=/; Max-Age=0; SameSite=Lax';
+      location.href='/login';
+    });
+  };
+  window.mmIsLoggedIn = function(){ return !!window.mm_isLoggedIn; };
 })();
 </script>
 </head>
