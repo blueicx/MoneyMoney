@@ -236,6 +236,8 @@ export class TelegramInteractionBot {
   private nextOffset = 0;
   private running = false;
   private loopPromise: Promise<void> | null = null;
+  private lastPollError: string | null = null;
+  private lastPollAt: string | null = null;
 
   constructor(options: TelegramInteractionBotOptions) {
     this.allowedChatIds = typeof options.allowedChatIds === 'string'
@@ -258,6 +260,14 @@ export class TelegramInteractionBot {
 
   get offset(): number {
     return this.nextOffset;
+  }
+
+  get lastError(): string | null {
+    return this.lastPollError;
+  }
+
+  get lastPollTime(): string | null {
+    return this.lastPollAt;
   }
 
   start(): void {
@@ -348,8 +358,12 @@ export class TelegramInteractionBot {
     while (this.running) {
       try {
         await this.pollOnce();
+        this.lastPollAt = new Date().toISOString();
+        this.lastPollError = null;
       } catch (error) {
-        this.logger.error(`[telegram] polling failed: ${error instanceof Error ? error.message : 'unknown error'}`);
+        this.lastPollError = error instanceof Error ? error.message : 'unknown error';
+        this.lastPollAt = new Date().toISOString();
+        this.logger.error(`[telegram] polling failed: ${this.lastPollError}`);
         await new Promise((resolve) => setTimeout(resolve, 1_000));
       }
     }

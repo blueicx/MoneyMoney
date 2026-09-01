@@ -450,6 +450,18 @@ export class TelegramCommandCenterStore {
     return { ...pending };
   }
 
+  countPendingActions(chatId?: string): number {
+    if (chatId == null) return this.state.pending.length;
+    return this.state.pending.filter(item => item.chatId === String(chatId)).length;
+  }
+
+  listPendingActions(chatId?: string): TelegramPendingAction[] {
+    const now = Date.now();
+    const active = this.state.pending.filter(item => new Date(item.expiresAt).getTime() > now);
+    const filtered = chatId == null ? active : active.filter(item => item.chatId === String(chatId));
+    return filtered.map(item => ({ ...item }));
+  }
+
   cancelPendingAction(chatId: string): boolean {
     const before = this.state.pending.length;
     this.state.pending = this.state.pending.filter(item => item.chatId !== String(chatId));
