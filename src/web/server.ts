@@ -194,8 +194,7 @@ app.get('/', (_req, res) => {
 // --- MoneyMoney 登录鉴权（与 LAN token 共存） ---
 app.get('/login', (req, res) => {
   res.setHeader('Cache-Control', 'no-cache');
-  // 已登录则回首页（避免重复登录）
-  try { const tok = extractAuthToken(req as any); if (tok && verifyLoginToken(tok)) { res.redirect('/'); return; } } catch {}
+  // 登录已禁用：不再自动 redirect 跳回首页（保留 /login 直达）
   fs.promises.readFile(path.join(__dirname, 'public', 'login.html'))
     .then(html => { res.type('html'); res.send(html); })
     .catch(() => res.status(500).send('Login page missing'));
@@ -241,14 +240,8 @@ app.get('/api/auth/status', (req, res) => {
   const payload = tok ? verifyLoginToken(tok) : null;
   res.json({ success: true, data: { isDefault: isDefaultLoginCredentials(), isJwtDefault: isJwtSecretDefault(), loggedIn: !!payload, user: payload?.user || null, tokenExpiryMs: config.loginTokenExpiryMs } });
 });
- // 需要登录保护的 API（登录相关除外）—— 若配置了登录账号，则除 health 外均需鉴权
-app.use('/api', (req, res, next) => {
-  // 白名单
-  if (req.path.startsWith('/auth/') || req.path === '/health' || req.path === '/health/live' || req.path === '/health/readiness') return next();
-  // 若未配置登录（极端情况），跳过
-  if (!config.loginUser || !config.loginPass) return next();
-  return (requireAuth as any)(req, res, next);
-});
+ // 登录已禁用：所有 /api 直接放行，不再强制鉴权（/login 仍保留但不拦截）
+app.use('/api', (req, res, next) => { return next(); });
 
 app.use(express.static(path.join(__dirname, 'public'), {
   setHeaders: (res) => res.setHeader('Cache-Control', 'no-store'),
@@ -4150,3 +4143,6 @@ main().catch(err => {
   process.exit(1);
 
 });
+
+
+

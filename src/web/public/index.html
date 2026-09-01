@@ -1705,13 +1705,13 @@
     }
   </style>
 <script>
-// MoneyMoney 登录守卫：以 Cookie(HttpOnly) 为主，localStorage 兼容；统一 credentials:include
+// 登录已禁用：不再强制跳 /login，保留兼容
 (function(){
-  window.mm_isLoggedIn = false;
+  window.mm_isLoggedIn = true;
   const origFetch = window.fetch;
   window.fetch = function(input, init){
     init = init || {};
-    if(!init.credentials) init.credentials = 'include';
+    if(!init.credentials) init.credentials='include';
     let url = typeof input === 'string' ? input : (input && input.url) || '';
     if(url && url.includes('/api/') && !url.includes('/api/auth/login')){
       const t = localStorage.getItem('mm_token');
@@ -1720,40 +1720,10 @@
         else { init.headers = init.headers || {}; if(!init.headers['Authorization'] && !init.headers['authorization']) init.headers['Authorization']='Bearer '+t; }
       }
     }
-    return origFetch(input, init).then(function(res){
-      if(res.status===401 && url.includes('/api/')){
-        localStorage.removeItem('mm_token');
-        if(location.pathname !== '/login'){
-          location.href='/login?next='+encodeURIComponent(location.pathname+location.search);
-        }
-      }
-      return res;
-    });
+    return origFetch(input, init);
   };
-  const onLoginPage = location.pathname === '/login';
-  fetch('/api/auth/status', {credentials:'include'}).then(function(r){return r.json();}).then(function(d){
-    const logged = !!(d && d.data && d.data.loggedIn);
-    window.mm_isLoggedIn = logged;
-    if(!logged && !onLoginPage && location.pathname === '/'){
-      location.href='/login?next='+encodeURIComponent(location.pathname+location.search);
-    }
-    if(logged && onLoginPage){
-      const qs=new URLSearchParams(location.search); const nxt=qs.get('next');
-      location.href=nxt ? decodeURIComponent(nxt) : '/';
-    }
-  }).catch(function(){});
-  // 暴露登出（二次确认）
-  window.mmLogout = function(){
-    if(!confirm('确定退出登录？')) return;
-    fetch('/api/auth/logout', {method:'POST', credentials:'include'}).finally(function(){
-      localStorage.removeItem('mm_token');
-      localStorage.removeItem('mm_user');
-      window.mm_isLoggedIn=false;
-      document.cookie='mm_token=; Path=/; Max-Age=0; SameSite=Lax';
-      location.href='/login';
-    });
-  };
-  window.mmIsLoggedIn = function(){ return !!window.mm_isLoggedIn; };
+  window.mmLogout = function(){ if(!confirm('确定退出登录？')) return; fetch('/api/auth/logout',{method:'POST',credentials:'include'}).finally(function(){ localStorage.removeItem('mm_token'); localStorage.removeItem('mm_user'); location.href='/'; }); };
+  window.mmIsLoggedIn = function(){ return true; };
 })();
 </script>
 </head>
@@ -10152,3 +10122,4 @@ function mobileTab(tab) {
   </body>
 </html>
 
+
