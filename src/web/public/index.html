@@ -1703,7 +1703,21 @@
         background: color-mix(in srgb, var(--bg-card) 88%, var(--bg)) !important;
       }
     }
-  </style>
+  
+    .layout.sidebar-collapsed { grid-template-columns: 1fr 0 !important; }
+    .layout.sidebar-collapsed .sidebar { opacity:0; pointer-events:none; overflow:hidden; border-left:none; }
+    .sidebar { position:relative; transition: opacity .2s ease; }
+    .sidebar-toggle { position:absolute; top:50%; left:-14px; transform:translateY(-50%); width:28px; height:56px; border:1px solid var(--border); border-right:none; background:var(--bg-card); border-radius:10px 0 0 10px; cursor:pointer; display:flex; align-items:center; justify-content:center; font-size:14px; color:var(--text-secondary); z-index:5; box-shadow:-2px 2px 8px rgba(0,0,0,.08); }
+    .sidebar-toggle:hover { color:var(--purple); background:var(--bg-secondary); }
+    .sidebar-header { position:relative; display:flex; align-items:center; justify-content:space-between; gap:12px; }
+    .sidebar-header-main { flex:1; }
+    .sidebar-collapse-btn { width:32px; height:32px; border:1px solid var(--border); background:var(--bg-secondary); border-radius:8px; cursor:pointer; display:flex; align-items:center; justify-content:center; font-size:14px; color:var(--text-secondary); flex-shrink:0; transition:all .15s; }
+    .sidebar-collapse-btn:hover { border-color:var(--purple); color:var(--purple); background:var(--bg-card); }
+    .sidebar-expand-fab { position:fixed; right:0; top:50%; transform:translateY(-50%); width:28px; height:72px; background:var(--bg-card); border:1px solid var(--border); border-right:none; border-radius:10px 0 0 10px; display:none; align-items:center; justify-content:center; cursor:pointer; font-size:14px; color:var(--purple); box-shadow:-2px 4px 12px rgba(0,0,0,.12); z-index:99; }
+    .sidebar-expand-fab:hover { background:var(--purple); color:white; border-color:var(--purple); }
+    .layout.sidebar-collapsed .sidebar-expand-fab { display:flex !important; }
+    .layout { transition: grid-template-columns .28s ease; }
+    </style>
 <script>
 // 登录已禁用：不再强制跳 /login，保留兼容
 (function(){
@@ -1747,7 +1761,35 @@
     </div>
   </header>
   <div id="sec-banner" style="display:none;margin:12px 16px;padding:10px 14px;border-radius:12px;background:color-mix(in srgb, #ef4444 10%, transparent);border:1px solid color-mix(in srgb, #ef4444 16%, transparent);color:#b91c1c;font-size:12px;line-height:1.6;">⚠️ 当前使用默认账号 <code>admin / admin123</code>，请尽快在 <code>.env</code> 中修改 <code>MONEYMONEY_LOGIN_USER</code>/<code>MONEYMONEY_LOGIN_PASS</code> 并重启服务</div>
-  <script>(function(){ /* 登录已禁用：不再显示默认账号警告 */ })();</script>
+  <script>/* 登录已禁用：不再显示默认账号警告 */</script>
+  <script>
+(function(){
+  const KEY="mm_sidebar_collapsed";
+  window.toggleSidebar = function(){
+    const layout = document.querySelector(".layout");
+    if(!layout) return;
+    const collapsed = layout.classList.toggle("sidebar-collapsed");
+    try{ localStorage.setItem(KEY, collapsed ? "1" : "0"); }catch{}
+    const edge = document.getElementById("sidebar-edge-toggle");
+    if(edge){ edge.textContent = collapsed ? "›" : "‹"; edge.title = collapsed ? "展开侧栏" : "收起侧栏"; }
+  };
+  (function init(){
+    try{
+      if(localStorage.getItem(KEY)==="1"){
+        const l=document.querySelector(".layout");
+        if(l) l.classList.add("sidebar-collapsed");
+      }
+    }catch{}
+    document.addEventListener("DOMContentLoaded", function(){
+      try{
+        const c = localStorage.getItem(KEY)==="1";
+        const e=document.getElementById("sidebar-edge-toggle");
+        if(e){ e.textContent = c ? "›" : "‹"; e.title = c ? "展开侧栏" : "收起侧栏"; }
+      }catch{}
+    });
+  })();
+})();
+  </script>
 
   <div id="global-search-overlay" class="global-search-overlay" onclick="if(event.target===this)closeGlobalSearch()">
     <div class="global-search-panel" role="dialog" aria-modal="true" aria-label="全局搜索">
@@ -2627,10 +2669,14 @@
 
     </main>
 
-    <aside class="sidebar">
-      <div class="sidebar-header">
-        <div class="sidebar-title" id="sidebar-title">选择事件</div>
-        <div class="sidebar-subtitle" id="sidebar-subtitle">点击事件查看结果</div>
+    <aside class="sidebar" id="app-sidebar">
+      <button class="sidebar-toggle" id="sidebar-edge-toggle" onclick="toggleSidebar()" title="收起侧栏">‹</button>
+      <div class="sidebar-header">
+        <div class="sidebar-header-main">
+          <div class="sidebar-title" id="sidebar-title">选择事件</div>
+        <div class="sidebar-subtitle" id="sidebar-subtitle">点击事件查看结果</div>
+        </div>
+        <button class="sidebar-collapse-btn" onclick="toggleSidebar()" title="收起侧栏，全屏查看左侧">⤢</button>
       </div>
       <div class="sidebar-content">
         <div id="no-selection" class="no-selection">
@@ -2639,9 +2685,10 @@
         </div>
         <div id="outcomes-container" style="display:none"></div>
       </div>
-    </aside>
-  </div>
-
+    </aside>
+    <button class="sidebar-expand-fab" id="sidebar-expand-fab" onclick="toggleSidebar()" title="展开侧栏">›</button>
+  </div>
+
   <div id="toast" class="toast"></div>
 
   <!-- Wallet Setup Modal -->
