@@ -1,6 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
+import { curlCommand } from '../utils/platform-command';
+import { buildTelegramBottomMenu } from '../web/telegram-menu';
 
 const TELEGRAM_API = 'https://api.telegram.org';
 const MAX_MESSAGE_LENGTH = 4096;
@@ -71,6 +73,7 @@ export type TelegramReplyMarkup = TelegramInlineKeyboardMarkup | TelegramReplyKe
 export interface TelegramReply {
   text: string;
   replyMarkup?: TelegramReplyMarkup;
+  replyKeyboard?: 'menu';
 }
 
 export interface TelegramCallbackContext {
@@ -199,7 +202,7 @@ class TelegramApiTransport implements TelegramTransport {
   }
 
   private async callApiWithCurl<T>(url: string, body: Record<string, unknown>, timeoutMs: number): Promise<TelegramApiResponse<T>> {
-    const command = process.platform === 'win32' ? 'curl.exe' : 'curl';
+    const command = curlCommand();
     const maxTimeSeconds = Math.max(5, Math.ceil(timeoutMs / 1000));
     const args = [
       '--silent', '--show-error', '--location', '--max-time', String(maxTimeSeconds),
@@ -348,9 +351,12 @@ export class TelegramInteractionBot {
   private async sendReply(chatId: string, reply: TelegramCommandResult): Promise<void> {
     if (reply === undefined || reply === '') return;
     const normalized = typeof reply === 'string' ? { text: reply } : reply;
+    const replyMarkup = normalized.replyKeyboard === 'menu'
+      ? buildTelegramBottomMenu(chatId)
+      : normalized.replyMarkup;
     const parts = splitTelegramMessage(normalized.text);
     for (const part of parts) {
-      await this.transport.sendMessage(chatId, part, normalized.replyMarkup);
+      await this.transport.sendMessage(chatId, part, replyMarkup);
     }
   }
 

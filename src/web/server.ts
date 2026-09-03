@@ -31,11 +31,11 @@ import {
   type TelegramCallbackHandler,
   type TelegramCommandHandler,
   type TelegramInlineKeyboardButton,
-  type TelegramReplyKeyboardMarkup,
   type TelegramReply,
   escapeTelegramHtml,
   parseAllowedChatIds,
 } from '../features/telegram-bot';
+import { moveTelegramMenuPage } from './telegram-menu';
 import { priceTracker } from '../features/price-tracker';
 import { kellySizer, backtester } from '../features/kelly-backtest';
 import { pushNotification } from '../features/notifications';
@@ -92,6 +92,7 @@ import { isDefaultLoginCredentials, isJwtSecretDefault } from '../config';
 import { stateStore, getStorageHealth } from '../storage/sqlite-state';
 import { paperTradingExecutor } from '../features/trading-executor';
 import { logger } from '../utils/logger';
+import { curlCommand } from '../utils/platform-command';
 import {
   addResearchNote,
   addResearchSnapshot,
@@ -181,7 +182,17 @@ app.use('/api', (_req, res, next) => {
   next();
 });
 // Serve the main page before static middleware so it goes through compression.
-app.get('/', (_req, res) => {
+app.get('/', (req, res) => {
+  try {
+    const token = extractAuthToken(req as any);
+    if (!token || !verifyLoginToken(token)) {
+      res.redirect('/login?next=' + encodeURIComponent(req.originalUrl || '/'));
+      return;
+    }
+  } catch {
+    res.redirect('/login?next=' + encodeURIComponent(req.originalUrl || '/'));
+    return;
+  }
   res.setHeader('Cache-Control', 'no-cache');
   fs.promises.readFile(path.join(__dirname, 'public', 'index.html'))
     .then(html => {
@@ -194,7 +205,13 @@ app.get('/', (_req, res) => {
 // --- MoneyMoney 登录鉴权（与 LAN token 共存） ---
 app.get('/login', (req, res) => {
   res.setHeader('Cache-Control', 'no-cache');
-  // 登录已禁用：不再自动 redirect 跳回首页（保留 /login 直达）
+  try {
+    const token = extractAuthToken(req as any);
+    if (token && verifyLoginToken(token)) {
+      res.redirect('/');
+      return;
+    }
+  } catch {}
   fs.promises.readFile(path.join(__dirname, 'public', 'login.html'))
     .then(html => { res.type('html'); res.send(html); })
     .catch(() => res.status(500).send('Login page missing'));
@@ -240,8 +257,14 @@ app.get('/api/auth/status', (req, res) => {
   const payload = tok ? verifyLoginToken(tok) : null;
   res.json({ success: true, data: { isDefault: isDefaultLoginCredentials(), isJwtDefault: isJwtSecretDefault(), loggedIn: !!payload, user: payload?.user || null, tokenExpiryMs: config.loginTokenExpiryMs } });
 });
- // 登录已禁用：所有 /api 直接放行，不再强制鉴权（/login 仍保留但不拦截）
-app.use('/api', (req, res, next) => { return next(); });
+// 需要登录保护的 API（登录相关与健康检查除外）。
+app.use('/api', (req, res, next) => {
+  if (req.path.startsWith('/auth/') || req.path === '/health' || req.path === '/health/live' || req.path === '/health/readiness') {
+    next();
+    return;
+  }
+  requireAuth(req, res, next);
+});
 
 app.use(express.static(path.join(__dirname, 'public'), {
   setHeaders: (res) => res.setHeader('Cache-Control', 'no-store'),
@@ -653,7 +676,7 @@ async function getUsStockDirectory(): Promise<UsDirectoryRecord[]> {
     // Nasdaq challenges Node fetch on some networks, while system curl passes.
     // The download is about 2MB, so maxBuffer must leave enough headroom.
     const { stdout } = await execFileAsync(
-      'curl.exe',
+      curlCommand(),
       [
         '--fail', '--silent', '--show-error', '--max-time', '20',
         '-A', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 MoneyMoney/1.0',
@@ -2059,25 +2082,6 @@ function buildPaperAmountRows(marketId: string, side: string): TelegramInlineKey
   return rows;
 }
 
-const TELEGRAM_BOTTOM_MENU: TelegramReplyKeyboardMarkup = {
-  keyboard: [
-    [{ text: '🏠 总览' }, { text: '📊 风险中心' }],
-    [{ text: '📋 今日总览' }, { text: '📡 最新信号' }],
-    [{ text: '🔎 搜索市场' }, { text: '📅 事件日历' }],
-    [{ text: '⭐ 自选市场' }, { text: '🧠 信号解释' }],
-    [{ text: '📒 模拟盘' }, { text: '🔬 研究工作区' }],
-    [{ text: '📚 交易复盘' }, { text: '📝 研究日志' }],
-    [{ text: '🩺 数据源健康' }, { text: '📈 历史表现' }],
-    [{ text: '🔔 提醒设置' }, { text: '🗓 定时摘要' }],
-    [{ text: '⚙ 自动化状态' }, { text: '🩺 系统状态' }],
-    [{ text: '🔔 通知测试' }, { text: '❓ 帮助' }],
-  ],
-  is_persistent: true,
-  resize_keyboard: true,
-  one_time_keyboard: false,
-  input_field_placeholder: '选择功能或输入命令',
-};
-
 const TELEGRAM_MENU_COMMANDS: Record<string, string> = {
   '🏠 总览': 'help',
   '📊 风险中心': 'risk',
@@ -2099,6 +2103,11 @@ const TELEGRAM_MENU_COMMANDS: Record<string, string> = {
   '🩺 系统状态': 'health',
   '🔔 通知测试': 'test',
   '❓ 帮助': 'help',
+  '⬅ 上一页': 'menu_prev',
+  '菜单 1/3': 'menu_page',
+  '菜单 2/3': 'menu_page',
+  '菜单 3/3': 'menu_page',
+  '下一页 ➡': 'menu_next',
 };
 
 function telegramPendingReply(text: string, nonce: string): TelegramReply {
@@ -2108,7 +2117,7 @@ function telegramPendingReply(text: string, nonce: string): TelegramReply {
   };
 }
 function telegramReply(text: string): TelegramReply {
-  return { text, replyMarkup: TELEGRAM_BOTTOM_MENU };
+  return { text, replyKeyboard: 'menu' };
 }
 
 function telegramActions() {
@@ -2280,6 +2289,15 @@ async function buildTelegramDigest(chatId: string): Promise<string> {
 
 function getTelegramCommandHandlers(): Record<string, TelegramCommandHandler> {
   const rawHandlers: Record<string, TelegramCommandHandler> = {
+    menu_prev: ({ chatId }) => {
+      moveTelegramMenuPage(chatId, -1);
+      return telegramReply('已切换到上一页菜单。');
+    },
+    menu_next: ({ chatId }) => {
+      moveTelegramMenuPage(chatId, 1);
+      return telegramReply('已切换到下一页菜单。');
+    },
+    menu_page: () => telegramReply('当前菜单页。'),
     start: () => `${TELEGRAM_HELP}\n\n已连接。发送 /help 查看命令。`,
     help: () => TELEGRAM_HELP,
     watchlist: ({ chatId }) => {
