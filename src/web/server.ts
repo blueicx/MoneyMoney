@@ -36,6 +36,7 @@ import {
   parseAllowedChatIds,
 } from '../features/telegram-bot';
 import { moveTelegramMenuPage } from './telegram-menu';
+import { buildTelegramStockSearchRows, isTelegramWatchableStockId } from './telegram-search';
 import { priceTracker } from '../features/price-tracker';
 import { kellySizer, backtester } from '../features/kelly-backtest';
 import { pushNotification } from '../features/notifications';
@@ -1990,33 +1991,41 @@ function refreshAdvisorReportInBackground(): void {
 const TELEGRAM_HELP = [
   '<b>MoneyMoney 交互机器人</b>',
   '',
+  '<b>快捷指令表</b>',
+  '',
+  '<b>市场与风险</b>',
   '/today   今日总览（行情、风险、事件）',
   '/status  查看服务与配置状态',
   '/risk    查看模拟盘风险摘要',
   '/signals 查看最近一份助手信号',
   '/signal  查看单条信号详情，例如 /signal 1',
-  '/search  搜索预测市场，例如 /search election',
+  '/search  同时搜索预测市场和股票，例如 /search AAPL 或 election',
   '/events  查看未来 7 天事件日历',
   '/sources 查看数据源健康',
   '/history 查看风险历史与表现',
-  '/paper   查看模拟盘；开平仓需二次确认',
-  '/research 查看研究工作区',
-  '/ops     查看自动化任务状态',
-  '/alerts  查看或修改通知订阅',
-  '/alert   创建价格提醒，例如 /alert BTC above 120000',
-  '/watchlist 查看自选市场；/watch add|remove &lt;市场ID&gt;',
+  '',
+  '<b>自选与模拟盘</b>',
+  '/watchlist 查看自选市场和股票；/watch add|remove &lt;ID&gt;',
   '/explain 解释当前信号，例如 /explain 1',
   '/portfolio 查看模拟盘账户总览',
   '/positions 查看或关闭当前持仓',
   '/close    请求模拟平仓，例如 /close &lt;持仓ID&gt; &lt;价格&gt;',
   '/reset    请求重置模拟账户（需二次确认）',
   '/review   查看模拟交易复盘',
-  '/export   查看最近模拟交易记录',
+  '',
+  '<b>研究、提醒与自动化</b>',
+  '/research 查看研究工作区',
   '/note     记录研究笔记，例如 /note 观察到概率变化',
   '/journal  查看研究和交易日志',
+  '/alerts  查看或修改通知订阅',
+  '/alert   创建价格提醒，例如 /alert BTC above 120000',
   '/digest   查看或配置定时摘要',
-  '/health   查看 Telegram、行情、AI 和数据源健康',
+  '/ops     查看自动化任务状态',
   '/strategies 查看 AI 模拟策略',
+  '',
+  '<b>工具与诊断</b>',
+  '/export   查看最近模拟交易记录',
+  '/health   查看 Telegram、行情、AI 和数据源健康',
   '/ask     自然语言快捷查询，例如 /ask 看一下风险',
   '/chart   查看风险趋势火花线',
   '/audit   查看自己的操作审计',
@@ -2181,13 +2190,25 @@ function telegramFindMarket(marketId: string) {
   return telegramRadarMarkets().find(item => String(item.id) === String(marketId));
 }
 
+function telegramWatchLabel(marketId: string, market?: any): string {
+  if (market) return String(market.titleZh || market.title || marketId);
+  const normalized = String(marketId || '');
+  return isTelegramWatchableStockId(normalized)
+    ? normalized.replace(/^(us|hk|sh|sz|bj)/i, '').toUpperCase()
+    : normalized;
+}
+
 function formatTelegramWatchlist(chatId: string): string {
   const ids = telegramCommandCenterStore.listWatchlist(chatId);
   if (!ids.length) return '<b>⭐ 自选市场</b>\n暂无自选市场。\n用法：/watch add &lt;市场ID&gt;，市场 ID 可从 /search 结果或网页面板获取。';
   const lines = ids.map((id, index) => {
     const market = telegramFindMarket(id);
-    if (!market) return (index + 1) + '. 市场 ' + escapeTelegramHtml(id) + ' · 当前快照未找到';
-    return (index + 1) + '. ' + escapeTelegramHtml(market.titleZh || market.title) + '\n   ' + escapeTelegramHtml(market.platform) + ' · YES ' + formatTelegramNumber(market.yesPrice * 100, 1) + '% · 模型 ' + formatTelegramNumber(market.modelProbability * 100, 1) + '%\n   /explain ' + escapeTelegramHtml(String(market.id));
+    if (!market) {
+      return isTelegramWatchableStockId(id)
+        ? (index + 1) + '. 股票 ' + escapeTelegramHtml(telegramWatchLabel(id)) + ' · ' + escapeTelegramHtml(id)
+        : (index + 1) + '. 市场 ' + escapeTelegramHtml(id) + ' · 当前快照未找到';
+    }
+    return (index + 1) + '. ' + escapeTelegramHtml(telegramWatchLabel(String(market.id), market)) + '\n   ' + escapeTelegramHtml(market.platform) + ' · YES ' + formatTelegramNumber(market.yesPrice * 100, 1) + '% · 模型 ' + formatTelegramNumber(market.modelProbability * 100, 1) + '%\n   /explain ' + escapeTelegramHtml(String(market.id));
   });
   return ['<b>⭐ 自选市场</b>', ...lines, '', '添加：/watch add &lt;市场ID&gt; · 删除：/watch remove &lt;市场ID&gt;'].join('\n');
 }
@@ -2319,13 +2340,13 @@ function getTelegramCommandHandlers(): Record<string, TelegramCommandHandler> {
       if (!parsed) return '用法：/watch add &lt;市场ID&gt; 或 /watch remove &lt;市场ID&gt;；查看：/watchlist';
       if (parsed.action === 'list') return formatTelegramWatchlist(chatId);
       const market = telegramFindMarket(parsed.marketId || '');
-      if (parsed.action === 'add' && !market) return '未找到该市场。请先用 /search &lt;关键词&gt; 确认市场 ID。';
+      if (parsed.action === 'add' && !market && !isTelegramWatchableStockId(parsed.marketId || '')) return '未找到该市场。请先用 /search &lt;关键词&gt; 确认市场 ID。';
       const changed = parsed.action === 'add'
         ? telegramCommandCenterStore.addWatchlistMarket(chatId, parsed.marketId || '')
         : telegramCommandCenterStore.removeWatchlistMarket(chatId, parsed.marketId || '');
       telegramCommandCenterStore.recordAudit(chatId, 'watchlist_update', parsed.action + ':' + parsed.marketId);
       return changed
-        ? (parsed.action === 'add' ? '✅ 已加入自选：' : '✅ 已移出自选：') + escapeTelegramHtml(market?.titleZh || market?.title || parsed.marketId)
+        ? (parsed.action === 'add' ? '✅ 已加入自选：' : '✅ 已移出自选：') + escapeTelegramHtml(telegramWatchLabel(parsed.marketId || '', market))
         : (parsed.action === 'add' ? '该市场已经在自选列表中。' : '该市场不在自选列表中。');
     },
     portfolio: () => formatTelegramPortfolio(),
@@ -2527,7 +2548,7 @@ function getTelegramCommandHandlers(): Record<string, TelegramCommandHandler> {
         const tList = parseTencentSearch(tRaw).slice(0,4);
         if(tList.length){
           stockLines = tList.map((it, idx)=> `${idx+1}. ${escapeTelegramHtml(it.zhName||it.name||it.code)} (${escapeTelegramHtml(it.code)}) · ${escapeTelegramHtml(it.market||'')} ${it.price?(' ¥'+formatTelegramNumber(it.price,2)):''}`);
-          stockKb = tList.map((it)=> [{ text: `${String(it.zhName||it.name).slice(0,8)} 行情`, callback_data: `stock:view:${it.code}` }]);
+          stockKb = buildTelegramStockSearchRows(tList);
         }
       } catch {}
       if (!matches.length && !stockLines.length) return `\u6ca1\u6709\u5728\u672c\u5730\u9884\u6d4b\u5e02\u573a\u5feb\u7167\u4e2d\u627e\u5230\u201c${escapeTelegramHtml(query)}\u201d\u3002\u53ef\u5148\u6253\u5f00\u7f51\u9875\u9762\u677f\u5237\u65b0\u96f7\u8fbe\u3002`;
@@ -2965,10 +2986,10 @@ ${escapeTelegramHtml(position.marketTitle)} · ${escapeTelegramHtml(position.out
       if (data.startsWith('watch:add:')) {
         const mid = data.slice('watch:add:'.length);
         const m = telegramFindMarket(mid);
-        if(!m) return telegramReply('未找到该市场');
+        if (!m && !isTelegramWatchableStockId(mid)) return telegramReply('未找到该市场');
         const changed = telegramCommandCenterStore.addWatchlistMarket(ctx.chatId, mid);
         telegramCommandCenterStore.recordAudit(ctx.chatId, 'watchlist_update', 'add:'+mid);
-        return telegramReply(changed ? `✅ 已加入自选：${escapeTelegramHtml(m.titleZh || m.title)}` : '该市场已在自选中');
+        return telegramReply(changed ? `✅ 已加入自选：${escapeTelegramHtml(telegramWatchLabel(mid, m))}` : '该市场已在自选中');
       }
       if (data.startsWith('watch:remove:')) {
         const mid = data.slice('watch:remove:'.length);
