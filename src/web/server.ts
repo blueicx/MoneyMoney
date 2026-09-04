@@ -4161,7 +4161,7 @@ app.get('/api/telegram/command-center', (_req, res) => {
       chats: parseAllowedChatIds(process.env.TELEGRAM_ALLOWED_CHAT_IDS, process.env.TELEGRAM_CHAT_ID).size,
       activePriceAlerts: alerts.length,
       auditRecords: telegramCommandCenterStore.listAudits(undefined, 200).length,
-      monitor: { price: !!telegramPriceMonitor, slow: !!telegramSlowMonitor },
+      monitor: { price: !!telegramPriceMonitor, event: !!telegramEventMonitor, slow: !!telegramSlowMonitor },
     },
   });
 });
