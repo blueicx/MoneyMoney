@@ -109,7 +109,11 @@ GROQ_API_URL=https://你的中转站/v1/chat/completions
 GROQ_MODEL=llama-3.3-70b-versatile
 ```
 
-启动 Web 后也可以打开“设置 → AI 模型接口”填写两条链路的 URL 和模型，保存后立即生效。API Key 仍只放在本机 `.env`，设置页只显示“已配置/未配置”，不会回显或保存密钥；不要提交到 Git。若通过 `.env` 修改 URL、模型或 Key，则需要重启服务。
+启动 Web 后可以打开“设置 → AI 模型接口”，直接填写 URL、模型和 API Key。Key 使用密码框输入，服务器保存在独立的受保护凭据文件中，设置页只显示“已配置/未配置”，不会回显密钥。
+
+同一设置页的“Telegram 机器人”区域可以填写 Bot Token、默认 Chat ID、允许交互的 Chat ID、管理员 Chat ID 和代理 URL，并开启接收指令。保存后机器人会自动重新加载，无需手动重启；留空的字段保持原值。
+
+网页输入的密钥不会写入普通 `settings.json`，也不要提交凭据文件或把密钥写入 Git。若使用 `.env` 配置，仍然支持 `OPENROUTER_API_KEY`、`GROQ_API_KEY` 和 Telegram 变量作为初始回退值。
 
 ## 开启接收指令
 

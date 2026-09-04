@@ -2,9 +2,9 @@
 // TELEGRAM NOTIFICATIONS
 // ============================================
 
-const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
-const CHAT_ID = process.env.TELEGRAM_CHAT_ID || '';
-const PROXY_URL = process.env.TELEGRAM_PROXY_URL || '';
+import { curlCommand } from '../utils/platform-command';
+import { getRuntimeTelegramConfig } from '../config/runtime-secrets';
+
 const { execFile } = require('child_process');
 
 let lastNotificationTime = 0;
@@ -13,23 +13,25 @@ const MIN_INTERVAL_MS = 30000; // Don't spam more than once per 30s
 export class TelegramNotifier {
 
   get isConfigured(): boolean {
-    return !!(BOT_TOKEN && CHAT_ID);
+    const { botToken, chatId } = getRuntimeTelegramConfig();
+    return !!(botToken && chatId);
   }
 
   async send(message: string): Promise<boolean> {
-    if (!this.isConfigured) return false;
+    const { botToken, chatId, proxyUrl } = getRuntimeTelegramConfig();
+    if (!botToken || !chatId) return false;
 
     const now = Date.now();
     if (now - lastNotificationTime < MIN_INTERVAL_MS) return false;
     lastNotificationTime = now;
 
     const payload = JSON.stringify({
-      chat_id: CHAT_ID,
+      chat_id: chatId,
       text: message,
       parse_mode: 'HTML',
     });
     try {
-      const res = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+      const res = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: payload,
@@ -39,15 +41,15 @@ export class TelegramNotifier {
     } catch {
       // Some regions cannot reach Telegram directly. A local HTTP proxy can be
       // supplied without changing the dashboard code.
-      if (!PROXY_URL) return false;
+      if (!proxyUrl) return false;
       return await new Promise<boolean>((resolve) => {
-        const command = process.platform === 'win32' ? 'curl.exe' : 'curl';
+        const command = curlCommand();
         const args = [
           '--silent', '--show-error', '--location', '--max-time', '25',
-          '--request', 'POST', `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`,
+          '--request', 'POST', `https://api.telegram.org/bot${botToken}/sendMessage`,
           '--header', 'Content-Type: application/json',
           '--data', payload,
-          '--proxy', PROXY_URL,
+          '--proxy', proxyUrl,
         ];
         execFile(command, args, { windowsHide: true, timeout: 28_000 }, (error: Error | null, stdout: string | Buffer) => {
           if (error) { resolve(false); return; }

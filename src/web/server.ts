@@ -17,6 +17,7 @@ import path from 'path';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { config } from '../config';
+import { getRuntimeTelegramConfig, parseChatIds, runtimeSecrets } from '../config/runtime-secrets';
 import { api } from '../api';
 
 import { tradingEngine } from '../trading';
@@ -2149,8 +2150,9 @@ function telegramActions() {
 }
 
 function telegramAdminChatIds(): Set<string> {
-  if (process.env.TELEGRAM_ADMIN_CHAT_IDS?.trim()) return parseAllowedChatIds(process.env.TELEGRAM_ADMIN_CHAT_IDS);
-  return parseAllowedChatIds(process.env.TELEGRAM_ALLOWED_CHAT_IDS, process.env.TELEGRAM_CHAT_ID);
+  const telegramConfig = getRuntimeTelegramConfig();
+  if (telegramConfig.adminChatIds.trim()) return new Set(parseChatIds(telegramConfig.adminChatIds));
+  return new Set(parseChatIds(telegramConfig.allowedChatIds, telegramConfig.chatId));
 }
 
 function isTelegramAdmin(chatId: string): boolean {
@@ -2916,9 +2918,10 @@ function getTelegramCallbackHandlers(commandHandlers: Record<string, TelegramCom
 }
 
 function startTelegramInteractionBot(): void {
-  if (process.env.TELEGRAM_POLLING_ENABLED !== 'true') return;
-  const allowedChatIds = parseAllowedChatIds(process.env.TELEGRAM_ALLOWED_CHAT_IDS, process.env.TELEGRAM_CHAT_ID);
-  if (!process.env.TELEGRAM_BOT_TOKEN || allowedChatIds.size === 0) {
+  const telegramConfig = getRuntimeTelegramConfig();
+  if (!telegramConfig.pollingEnabled) return;
+  const allowedChatIds = new Set(parseChatIds(telegramConfig.allowedChatIds, telegramConfig.chatId));
+  if (!telegramConfig.botToken || allowedChatIds.size === 0) {
     console.warn('  [telegram] polling enabled but token or allowed Chat ID is missing');
     return;
   }
@@ -2928,8 +2931,8 @@ function startTelegramInteractionBot(): void {
     textHandlers[label] = commandHandlers[command];
   }
   telegramInteractionBot = new TelegramInteractionBot({
-    token: process.env.TELEGRAM_BOT_TOKEN,
-    proxyUrl: process.env.TELEGRAM_PROXY_URL,
+    token: telegramConfig.botToken,
+    proxyUrl: telegramConfig.proxyUrl,
     allowedChatIds,
     handlers: commandHandlers,
     textHandlers,
@@ -3060,6 +3063,14 @@ ${escapeTelegramHtml(position.marketTitle)} · ${escapeTelegramHtml(position.out
   console.log(`  [telegram] interactive polling started (${allowedChatIds.size} allowed chat${allowedChatIds.size === 1 ? '' : 's'})`);
 }
 
+function reloadTelegramIntegration(): void {
+  stopTelegramCommandCenterMonitor();
+  telegramInteractionBot?.stop();
+  telegramInteractionBot = null;
+  startTelegramInteractionBot();
+  startTelegramCommandCenterMonitor();
+}
+
 const telegramSignalPushes = new Set<string>();
 const telegramEventReminderStages = new Map<string, EventReminderThreshold | null>();
 const telegramEventResultStates = new Map<string, boolean>();
@@ -3117,7 +3128,8 @@ async function monitorTelegramSmartAlerts(): Promise<void> {
 
 async function monitorTelegramDigests(): Promise<void> {
   if (!telegramInteractionBot) return;
-  const chats = parseAllowedChatIds(process.env.TELEGRAM_ALLOWED_CHAT_IDS, process.env.TELEGRAM_CHAT_ID);
+  const telegramConfig = getRuntimeTelegramConfig();
+  const chats = new Set(parseChatIds(telegramConfig.allowedChatIds, telegramConfig.chatId));
   const now = new Date();
   const minute = String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0');
   const day = now.toISOString().slice(0, 10);
@@ -3170,7 +3182,8 @@ function eventAlertKey(chatId: string, event: { date: string; title: string }): 
 
 async function monitorTelegramEventAlerts(): Promise<void> {
   if (!telegramInteractionBot) return;
-  const chats = [...parseAllowedChatIds(process.env.TELEGRAM_ALLOWED_CHAT_IDS, process.env.TELEGRAM_CHAT_ID)]
+  const telegramConfig = getRuntimeTelegramConfig();
+  const chats = [...new Set(parseChatIds(telegramConfig.allowedChatIds, telegramConfig.chatId))]
     .filter(chatId => telegramCommandCenterStore.getPreferences(chatId).notifications.events);
   if (!chats.length) return;
   let calendar;
@@ -3247,7 +3260,8 @@ async function monitorTelegramPriceAlerts(): Promise<void> {
 
 async function monitorTelegramSlowAlerts(): Promise<void> {
   if (!telegramInteractionBot) return;
-  const chats = parseAllowedChatIds(process.env.TELEGRAM_ALLOWED_CHAT_IDS, process.env.TELEGRAM_CHAT_ID);
+  const telegramConfig = getRuntimeTelegramConfig();
+  const chats = new Set(parseChatIds(telegramConfig.allowedChatIds, telegramConfig.chatId));
   const portfolio = paperEngine.getPortfolio();
   const metrics = paperEngine.getRiskMetrics();
   for (const chatId of chats) {
@@ -4110,7 +4124,7 @@ app.get('/api/news', async (req, res) => {
 
 app.get('/api/settings', (req, res) => {
   const data = settingsManager.get();
-  res.json({ success: true, data, ai: getAiConfigurationStatus(data) });
+  res.json({ success: true, data, ai: getAiConfigurationStatus(data), telegram: runtimeSecrets.status() });
 });
 
 app.post('/api/settings', (req, res) => {
@@ -4121,6 +4135,35 @@ app.post('/api/settings', (req, res) => {
 app.post('/api/settings/reset', (req, res) => {
   const reset = settingsManager.reset();
   res.json({ success: true, data: reset, ai: getAiConfigurationStatus(reset) });
+});
+
+app.get('/api/settings/secrets', (_req, res) => {
+  res.json({
+    success: true,
+    ai: getAiConfigurationStatus(settingsManager.get()),
+    telegram: runtimeSecrets.status(),
+  });
+});
+
+app.post('/api/settings/secrets', (req, res) => {
+  const body = req.body || {};
+  const patch: Record<string, string | boolean> = {};
+  const fields = [
+    'openrouterApiKey', 'groqApiKey', 'telegramBotToken', 'telegramChatId',
+    'telegramAllowedChatIds', 'telegramAdminChatIds', 'telegramProxyUrl',
+  ] as const;
+  for (const field of fields) {
+    if (typeof body[field] === 'string' && body[field].trim()) patch[field] = body[field];
+  }
+  if (typeof body.telegramPollingEnabled === 'boolean') patch.telegramPollingEnabled = body.telegramPollingEnabled;
+  runtimeSecrets.update(patch);
+  const updated = settingsManager.get();
+  reloadTelegramIntegration();
+  res.json({
+    success: true,
+    ai: getAiConfigurationStatus(updated),
+    telegram: runtimeSecrets.status(),
+  });
 });
 
 app.post('/api/ai/test', async (req, res) => {
@@ -4141,24 +4184,26 @@ app.post('/api/telegram/test', async (req, res) => {
 });
 
 app.get('/api/telegram/status', (_req, res) => {
+  const telegramConfig = getRuntimeTelegramConfig();
   res.json({
     success: true,
     data: {
       configured: telegram.isConfigured,
-      pollingEnabled: process.env.TELEGRAM_POLLING_ENABLED === 'true',
+      pollingEnabled: telegramConfig.pollingEnabled,
       pollingRunning: telegramInteractionBot?.isRunning || false,
-      allowedChatCount: parseAllowedChatIds(process.env.TELEGRAM_ALLOWED_CHAT_IDS, process.env.TELEGRAM_CHAT_ID).size,
+      allowedChatCount: parseChatIds(telegramConfig.allowedChatIds, telegramConfig.chatId).length,
       offset: telegramInteractionBot?.offset ?? null,
     },
   });
 });
 
 app.get('/api/telegram/command-center', (_req, res) => {
+  const telegramConfig = getRuntimeTelegramConfig();
   const alerts = telegramCommandCenterStore.listPriceAlerts().filter(item => !item.triggered);
   res.json({
     success: true,
     data: {
-      chats: parseAllowedChatIds(process.env.TELEGRAM_ALLOWED_CHAT_IDS, process.env.TELEGRAM_CHAT_ID).size,
+      chats: parseChatIds(telegramConfig.allowedChatIds, telegramConfig.chatId).length,
       activePriceAlerts: alerts.length,
       auditRecords: telegramCommandCenterStore.listAudits(undefined, 200).length,
       monitor: { price: !!telegramPriceMonitor, event: !!telegramEventMonitor, slow: !!telegramSlowMonitor },
@@ -4213,7 +4258,8 @@ async function main() {
     void warmPredictionRadarCache();
     startTelegramInteractionBot();
     reportScheduler.setDailyReportEnabledChecker(() => {
-      const chats = parseAllowedChatIds(process.env.TELEGRAM_ALLOWED_CHAT_IDS, process.env.TELEGRAM_CHAT_ID);
+      const telegramConfig = getRuntimeTelegramConfig();
+      const chats = new Set(parseChatIds(telegramConfig.allowedChatIds, telegramConfig.chatId));
       return chats.size === 0 || [...chats].some(chatId => telegramCommandCenterStore.getPreferences(chatId).notifications.dailyReport);
     });
     reportScheduler.start();

@@ -1,5 +1,6 @@
 import { settingsManager, type StrategySettings } from './news-settings';
 import { resolveChatCompletionsUrl } from './ai-endpoint';
+import { getRuntimeAiKey } from '../config/runtime-secrets';
 
 export type AiChain = 'openrouter' | 'groq';
 
@@ -66,10 +67,10 @@ export function getAiRuntimeConfig(
 
   return {
     chain,
-    apiKey: trim(env[defaults.key]),
+    apiKey: getRuntimeAiKey(chain, undefined, env),
     apiUrl: resolveChatCompletionsUrl(explicitUrl, baseUrl, defaults.apiUrl),
     model,
-    configured: Boolean(trim(env[defaults.key])),
+    configured: Boolean(getRuntimeAiKey(chain, undefined, env)),
   };
 }
 

@@ -1719,9 +1719,9 @@
     .layout { transition: grid-template-columns .28s ease; }
     </style>
 <script>
-// 登录已禁用：不再强制跳 /login，保留兼容
+// MoneyMoney 登录守卫：以 Cookie(HttpOnly) 为主，localStorage 兼容；统一 credentials:include
 (function(){
-  window.mm_isLoggedIn = true;
+  window.mm_isLoggedIn = false;
   const origFetch = window.fetch;
   window.fetch = function(input, init){
     init = init || {};
@@ -1734,11 +1734,31 @@
         else { init.headers = init.headers || {}; if(!init.headers['Authorization'] && !init.headers['authorization']) init.headers['Authorization']='Bearer '+t; }
       }
     }
-    return origFetch(input, init);
+    return origFetch(input, init).then(function(res){
+      if(res.status===401 && url.includes('/api/')){
+        localStorage.removeItem('mm_token');
+        if(location.pathname !== '/login'){
+          location.href='/login?next='+encodeURIComponent(location.pathname+location.search);
+        }
+      }
+      return res;
+    });
   };
-  window.mmLogout = function(){ if(!confirm('确定退出登录？')) return; fetch('/api/auth/logout',{method:'POST',credentials:'include'}).finally(function(){ localStorage.removeItem('mm_token'); localStorage.removeItem('mm_user'); location.href='/'; }); };
-  window.mmIsLoggedIn = function(){ return true; };
-})();
+  const onLoginPage = location.pathname === '/login';
+  fetch('/api/auth/status', {credentials:'include'}).then(function(r){return r.json();}).then(function(d){
+    const logged = !!(d && d.data && d.data.loggedIn);
+    window.mm_isLoggedIn = logged;
+    if(!logged && !onLoginPage && location.pathname === '/'){
+      location.href='/login?next='+encodeURIComponent(location.pathname+location.search);
+    }
+    if(logged && onLoginPage){
+      const qs=new URLSearchParams(location.search); const nxt=qs.get('next');
+      location.href=nxt ? decodeURIComponent(nxt) : '/';
+    }
+  }).catch(function(){});
+  window.mmLogout = function(){ if(!confirm('确定退出登录？')) return; fetch('/api/auth/logout',{method:'POST',credentials:'include'}).finally(function(){ localStorage.removeItem('mm_token'); localStorage.removeItem('mm_user'); window.mm_isLoggedIn=false; document.cookie='mm_token=; Path=/; Max-Age=0; SameSite=Lax'; location.href='/login'; }); };
+  window.mmIsLoggedIn = function(){ return !!window.mm_isLoggedIn; };
+})();
 </script>
 </head>
 <body>
@@ -1992,9 +2012,10 @@
           </div>
           <div id="source-health-panel" style="margin-top:12px;">正在读取最近一次数据源状态...</div>
         </div>
-        <div id="settings-form" style="max-width:500px;"></div>
-        <div id="ai-settings-form" style="max-width:760px;margin-top:30px;"></div>
-        <div class="section-title" style="margin-top:30px;">📱 连接手机</div>
+        <div id="settings-form" style="max-width:500px;"></div>
+        <div id="ai-settings-form" style="max-width:760px;margin-top:30px;"></div>
+        <div id="telegram-settings-form" style="max-width:760px;margin-top:30px;"></div>
+        <div class="section-title" style="margin-top:30px;">📱 连接手机</div>
         <div style="max-width:500px;background:var(--bg-card);border-radius:14px;padding:20px;box-shadow:var(--shadow);">
           <p style="font-size:13px;color:var(--text-secondary);margin-bottom:12px;">请确保手机和电脑在同一 Wi-Fi 网络，然后扫描二维码：</p>
           <div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap;">
@@ -4029,16 +4050,17 @@ async function loadCorrelations() {
 
 // --- Settings ---
 let settingsLoaded = false;
-async function loadSettings() {
-  if (settingsLoaded) return;
-  try {
-    const res = await fetch('/api/settings');
-    const body = await res.json();
-    renderSettingsForm(body.data || {});
-    renderAiSettingsForm(body.ai || {});
-    settingsLoaded = true;
-  } catch (e) {}
-}
+async function loadSettings() {
+  if (settingsLoaded) return;
+  try {
+    const res = await fetch('/api/settings');
+    const body = await res.json();
+    renderSettingsForm(body.data || {});
+    renderAiSettingsForm(body.ai || {});
+    renderTelegramSettingsForm(body.telegram || {});
+    settingsLoaded = true;
+  } catch (e) {}
+}
 
 function renderSettingsForm(s) {
   const fields = [
@@ -4074,7 +4096,7 @@ function renderSettingsForm(s) {
   "<button class=\"tab\" style=\"margin-top:12px;\" onclick=\"resetSettings()\">\u21A9 \u6062\u590D\u9ED8\u8BA4\u8BBE\u7F6E</button>";
 }
 
-function renderAiSettingsForm(ai) {
+function renderAiSettingsForm(ai) {
   const openrouter = ai.openrouter || {};
   const groq = ai.groq || {};
   const card = (chain, title, icon, item) => `
@@ -4089,23 +4111,96 @@ function renderAiSettingsForm(ai) {
         </label>
         <label style="font-size:11px;color:var(--text-secondary);">模型名称
           <input id="ai-${chain}-model" value="${safeNewsText(item.model || '')}" placeholder="例如：gpt-4o-mini" style="display:block;width:100%;box-sizing:border-box;margin-top:5px;padding:9px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg-secondary);color:var(--text-primary);">
-        </label>
-      </div>
-      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:12px;">
-        <button class="tab active" onclick="saveAiSettings('${chain}')">💾 保存配置</button>
-        <button class="tab" onclick="testAiProvider('${chain}')">🔌 测试连接</button>
+        </label>
+      </div>
+      <label style="display:block;font-size:11px;color:var(--text-secondary);margin-top:12px;">API Key（输入后保存；页面不会回显）
+        <input type="password" id="ai-${chain}-key" value="" placeholder="${item.configured ? '已配置；输入新密钥可替换' : '粘贴 API Key'}" autocomplete="new-password" style="display:block;width:100%;box-sizing:border-box;margin-top:5px;padding:9px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg-secondary);color:var(--text-primary);">
+      </label>
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:12px;">
+        <button class="tab active" onclick="saveAiSettings('${chain}')">💾 保存配置</button>
+        <button class="tab" onclick="saveAiKey('${chain}')">🔐 保存 API Key</button>
+        <button class="tab" onclick="testAiProvider('${chain}')">🔌 测试连接</button>
         <span id="ai-${chain}-result" style="font-size:11px;color:var(--text-secondary);"></span>
       </div>
-      <div style="font-size:11px;color:var(--text-secondary);line-height:1.6;margin-top:10px;">API Key 只从本机 .env 读取，网页不会显示或保存密钥。URL 留空时使用官方默认端点；保存后立即生效，无需重启。</div>
+      <div style="font-size:11px;color:var(--text-secondary);line-height:1.6;margin-top:10px;">密钥保存在服务器独立凭据文件中，页面只显示“已配置”；URL 留空时使用官方默认端点，保存后立即生效。</div>
     </div>`;
   document.getElementById('ai-settings-form').innerHTML =
     '<div class="section-title" style="margin-top:0;">🤖 AI 模型接口</div>' +
     '<div style="font-size:12px;color:var(--text-secondary);margin:-6px 0 12px;">为两条 AI 链路选择自定义 OpenAI-compatible API 和模型。</div>' +
     card('openrouter', '市场点评链路 · OpenRouter / 兼容接口', '🧠', openrouter) +
     card('groq', '市场分析链路 · Groq / 兼容接口', '📊', groq);
-}
-
-async function saveAiSettings(chain) {
+}
+
+function renderTelegramSettingsForm(tg) {
+  const field = (id, label, placeholder, type) =>
+    '<label style="display:block;font-size:11px;color:var(--text-secondary);">' + label +
+    '<input id="' + id + '" type="' + (type || 'text') + '" value="" placeholder="' + placeholder +
+    '" autocomplete="new-password" style="display:block;width:100%;box-sizing:border-box;margin-top:5px;padding:9px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg-secondary);color:var(--text-primary);">' +
+    '</label>';
+  const status = tg.telegramConfigured ? 'Telegram 凭据已配置' : 'Telegram 凭据未配置';
+  document.getElementById('telegram-settings-form').innerHTML =
+    '<div class="section-title" style="margin-top:0;">📱 Telegram 机器人</div>' +
+    '<div class="glass-card" style="padding:18px;border-radius:20px;margin-bottom:14px;">' +
+    '<div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:12px;">' +
+    '<div style="font-weight:700;">机器人连接与通知</div>' +
+    '<span style="font-size:11px;color:' + (tg.telegramConfigured ? 'var(--green)' : 'var(--text-secondary)') + ';">' + status + '</span></div>' +
+    '<div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px;">' +
+    field('telegram-bot-token', 'Bot Token（留空表示不修改）', '从 @BotFather 获取', 'password') +
+    field('telegram-chat-id', '默认 Chat ID（留空表示不修改）', '例如：123456789', 'text') +
+    field('telegram-allowed-chat-ids', '允许交互的 Chat ID（可用逗号分隔）', '留空表示不修改', 'text') +
+    field('telegram-admin-chat-ids', '管理员 Chat ID（可选）', '留空表示不修改', 'text') +
+    field('telegram-proxy-url', '代理 URL（可选）', '例如：http://127.0.0.1:7890', 'text') +
+    '</div>' +
+    '<label style="display:flex;align-items:center;gap:8px;font-size:12px;margin-top:12px;">' +
+    '<input id="telegram-polling-enabled" type="checkbox" ' + (tg.telegramPollingEnabled ? 'checked' : '') + '> 开启机器人接收指令</label>' +
+    '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:12px;">' +
+    '<button class="tab active" onclick="saveTelegramSettings()">💾 保存 Telegram 配置</button>' +
+    '<button class="tab" onclick="testTelegramSettings()">🔌 发送测试消息</button>' +
+    '<span id="telegram-settings-result" style="font-size:11px;color:var(--text-secondary);"></span></div>' +
+    '<div style="font-size:11px;color:var(--text-secondary);line-height:1.6;margin-top:10px;">Token 使用密码框输入，服务器只返回配置状态，不会回显密钥。保存后机器人会自动重新加载。</div>' +
+    '</div>';
+}
+
+async function saveTelegramSettings() {
+  const body = { telegramPollingEnabled: document.getElementById('telegram-polling-enabled').checked };
+  const fields = ['telegram-bot-token', 'telegram-chat-id', 'telegram-allowed-chat-ids', 'telegram-admin-chat-ids', 'telegram-proxy-url'];
+  const names = ['telegramBotToken', 'telegramChatId', 'telegramAllowedChatIds', 'telegramAdminChatIds', 'telegramProxyUrl'];
+  fields.forEach((id, index) => {
+    const value = document.getElementById(id).value.trim();
+    if (value) body[names[index]] = value;
+  });
+  const resultEl = document.getElementById('telegram-settings-result');
+  resultEl.style.color = 'var(--text-secondary)';
+  resultEl.textContent = '⏳ 保存中...';
+  try {
+    const res = await fetch('/api/settings/secrets', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const data = await res.json();
+    if (!data.success) throw new Error(data.error || '保存失败');
+    renderAiSettingsForm(data.ai || {});
+    renderTelegramSettingsForm(data.telegram || {});
+    document.getElementById('telegram-settings-result').textContent = '✅ 已保存并立即生效';
+  } catch (error) {
+    resultEl.textContent = '❌ ' + (error.message || '保存失败');
+    resultEl.style.color = 'var(--red)';
+  }
+}
+
+async function testTelegramSettings() {
+  const resultEl = document.getElementById('telegram-settings-result');
+  resultEl.style.color = 'var(--text-secondary)';
+  resultEl.textContent = '⏳ 正在发送...';
+  try {
+    const res = await fetch('/api/telegram/test', { method: 'POST' });
+    const data = await res.json();
+    resultEl.textContent = data.success ? '✅ 测试消息已发送' : '❌ ' + (data.message || '发送失败');
+    resultEl.style.color = data.success ? 'var(--green)' : 'var(--red)';
+  } catch (error) {
+    resultEl.textContent = '❌ ' + (error.message || '发送失败');
+    resultEl.style.color = 'var(--red)';
+  }
+}
+
+async function saveAiSettings(chain) {
   const prefix = chain === 'openrouter' ? 'openRouter' : 'groq';
   const resultEl = document.getElementById(`ai-${chain}-result`);
   const body = {
@@ -4123,9 +4218,34 @@ async function saveAiSettings(chain) {
     resultEl.textContent = `❌ ${error.message || '保存失败'}`;
     resultEl.style.color = 'var(--red)';
   }
-}
-
-async function testAiProvider(chain) {
+}
+
+async function saveAiKey(chain) {
+  const input = document.getElementById('ai-' + chain + '-key');
+  const resultEl = document.getElementById('ai-' + chain + '-result');
+  const key = input.value.trim();
+  if (!key) {
+    resultEl.textContent = '请输入 API Key';
+    resultEl.style.color = 'var(--red)';
+    return;
+  }
+  resultEl.style.color = 'var(--text-secondary)';
+  resultEl.textContent = '⏳ 保存中...';
+  const field = chain === 'openrouter' ? 'openrouterApiKey' : 'groqApiKey';
+  try {
+    const res = await fetch('/api/settings/secrets', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ [field]: key }) });
+    const data = await res.json();
+    if (!data.success) throw new Error(data.error || '保存失败');
+    renderAiSettingsForm(data.ai || {});
+    renderTelegramSettingsForm(data.telegram || {});
+    document.getElementById('ai-' + chain + '-result').textContent = '✅ API Key 已保存并立即生效';
+  } catch (error) {
+    resultEl.textContent = '❌ ' + (error.message || '保存失败');
+    resultEl.style.color = 'var(--red)';
+  }
+}
+
+async function testAiProvider(chain) {
   const resultEl = document.getElementById(`ai-${chain}-result`);
   resultEl.style.color = 'var(--text-secondary)';
   resultEl.textContent = '⏳ 正在测试接口...';
