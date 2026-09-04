@@ -3197,6 +3197,8 @@ async function monitorTelegramEventAlerts(): Promise<void> {
           ));
           telegramEventReminderStages.set(key, reminder.stage);
         } catch {}
+      } else if (reminder.stage !== previousStage && reminder.stage !== null && !reminder.shouldSend) {
+        telegramEventReminderStages.set(key, reminder.stage);
       } else if (reminder.stage !== previousStage && reminder.stage === null) {
         telegramEventReminderStages.set(key, null);
       }
