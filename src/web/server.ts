@@ -67,6 +67,12 @@ import { getEconomicIndicators } from '../features/economic-indicators';
 import { getTreasuryYields } from '../features/treasury-yields';
 import { getEarningsCalendar } from '../features/earnings-calendar';
 import { getUpcomingEventCalendar } from '../features/event-calendar';
+import {
+  classifyEventResult,
+  compareEventValues,
+  decideEventReminder,
+  type EventReminderThreshold,
+} from '../features/event-alerts';
 import { getCrossAssetRisk } from '../features/cross-asset-risk';
 import { getMarketRegime } from '../features/market-regime';
 import { getSupportResistance } from '../features/support-resistance';
@@ -1972,6 +1978,7 @@ let telegramInteractionBot: TelegramInteractionBot | null = null;
 let telegramPriceMonitor: NodeJS.Timeout | null = null;
 let telegramSlowMonitor: NodeJS.Timeout | null = null;
 let telegramDigestMonitor: NodeJS.Timeout | null = null;
+let telegramEventMonitor: NodeJS.Timeout | null = null;
 const telegramRateLimit = new Map<string, number[]>();
 function isTelegramRateLimited(chatId: string): boolean {const now=Date.now();const list=telegramRateLimit.get(String(chatId))||[];const recent=list.filter((t: number)=>now-t<60000);if(recent.length>=10){telegramRateLimit.set(String(chatId),recent);return true;}recent.push(now);telegramRateLimit.set(String(chatId),recent);return false;}
 
@@ -3054,7 +3061,9 @@ ${escapeTelegramHtml(position.marketTitle)} · ${escapeTelegramHtml(position.out
 }
 
 const telegramSignalPushes = new Set<string>();
-const telegramEventPushes = new Set<string>();
+const telegramEventReminderStages = new Map<string, EventReminderThreshold | null>();
+const telegramEventResultStates = new Map<string, boolean>();
+const telegramEventResultPushes = new Set<string>();
 const telegramDigestPushes = new Set<string>();
 const telegramSourceStates = new Map<string, boolean>();
 let consecutivePollFail = 0;
@@ -3137,6 +3146,84 @@ async function monitorTelegramSourceRecovery(chatId: string): Promise<void> {
   }
 }
 
+function eventReminderThresholdLabel(stage: EventReminderThreshold): string {
+  return stage >= 60 ? `${stage / 60}小时` : `${stage}分钟`;
+}
+
+function eventCountdownLabel(minutesUntil: number): string {
+  return minutesUntil >= 60
+    ? `${formatTelegramNumber(minutesUntil / 60, 1)}小时`
+    : `${Math.max(0, Math.round(minutesUntil))}分钟`;
+}
+
+function eventResultComparisonLabel(comparison: ReturnType<typeof compareEventValues>): string {
+  return ({ above: '高于预期', below: '低于预期', inline: '符合预期', unknown: '缺少可比预期' })[comparison];
+}
+
+function eventResultDirectionLabel(direction: ReturnType<typeof classifyEventResult>): string {
+  return ({ bullish: '偏利好', bearish: '偏利空', neutral: '方向不明' })[direction];
+}
+
+function eventAlertKey(chatId: string, event: { date: string; title: string }): string {
+  return `${chatId}:${event.date}:${event.title}`;
+}
+
+async function monitorTelegramEventAlerts(): Promise<void> {
+  if (!telegramInteractionBot) return;
+  const chats = [...parseAllowedChatIds(process.env.TELEGRAM_ALLOWED_CHAT_IDS, process.env.TELEGRAM_CHAT_ID)]
+    .filter(chatId => telegramCommandCenterStore.getPreferences(chatId).notifications.events);
+  if (!chats.length) return;
+  let calendar;
+  try {
+    calendar = await getUpcomingEventCalendar(2);
+  } catch {
+    return;
+  }
+  const highImpactEvents = calendar.events.filter(event => event.impact === 'high');
+  for (const chatId of chats) {
+    const suppressed = telegramAlertSuppressed(chatId);
+    for (const event of highImpactEvents) {
+      const key = eventAlertKey(chatId, event);
+      const minutesUntil = (new Date(event.date).getTime() - Date.now()) / 60_000;
+      const initialized = telegramEventReminderStages.has(key);
+      const previousStage = telegramEventReminderStages.get(key) ?? null;
+      const reminder = decideEventReminder(minutesUntil, previousStage, initialized);
+      if (!initialized) {
+        telegramEventReminderStages.set(key, reminder.stage);
+      } else if (reminder.shouldSend && reminder.stage !== null && !suppressed) {
+        try {
+          await telegramInteractionBot.sendToChat(chatId, telegramReply(
+            `📅 <b>高影响事件提醒</b>\n${formatEventLineZh(event)}\n提醒节点：提前 ${eventReminderThresholdLabel(reminder.stage)}\n距离：${eventCountdownLabel(minutesUntil)}`,
+          ));
+          telegramEventReminderStages.set(key, reminder.stage);
+        } catch {}
+      } else if (reminder.stage !== previousStage && reminder.stage === null) {
+        telegramEventReminderStages.set(key, null);
+      }
+
+      const hasActual = Boolean(event.actual);
+      const previousHasActual = telegramEventResultStates.get(key);
+      if (previousHasActual === undefined) {
+        telegramEventResultStates.set(key, hasActual);
+        continue;
+      }
+      if (!previousHasActual && hasActual && !telegramEventResultPushes.has(key) && !suppressed) {
+        const comparison = compareEventValues(event.actual, event.forecast);
+        const direction = classifyEventResult(event.title, comparison);
+        try {
+          await telegramInteractionBot.sendToChat(chatId, telegramReply(
+            `📊 <b>高影响事件结果</b>\n${escapeTelegramHtml(event.titleZh || event.title)}\n实际值：${escapeTelegramHtml(event.actual || '未知')} · 预期值：${escapeTelegramHtml(event.forecast || '未提供')}\n结果：${eventResultComparisonLabel(comparison)} · 判断：${eventResultDirectionLabel(direction)}`,
+          ));
+          telegramEventResultPushes.add(key);
+          telegramEventResultStates.set(key, true);
+        } catch {}
+      } else if (!hasActual) {
+        telegramEventResultStates.set(key, false);
+      }
+    }
+  }
+}
+
 async function monitorTelegramPriceAlerts(): Promise<void> {
   if (!telegramInteractionBot) return;
   const alerts = telegramCommandCenterStore.listPriceAlerts().filter(item => !item.triggered);
@@ -3184,19 +3271,6 @@ async function monitorTelegramSlowAlerts(): Promise<void> {
         telegramSignalPushes.add(signalKey);
       }
     }
-    if (notifications.events) {
-      try {
-        const calendar = await getUpcomingEventCalendar(2);
-        for (const event of calendar.events.filter(item => item.impact === 'high')) {
-          const eventKey = `${chatId}:${event.date}:${event.title}`;
-          const hours = (new Date(event.date).getTime() - Date.now()) / 3_600_000;
-          if (hours >= 0 && hours <= 24 && !telegramEventPushes.has(eventKey)) {
-            telegramEventPushes.add(eventKey);
-            await telegramInteractionBot.sendToChat(chatId, telegramReply(`📅 <b>高影响事件提醒</b>\n${formatEventLineZh(event)}\n\u8ddd\u79bb\uFF1A${formatTelegramNumber(hours, 1)}\u5c0f\u65f6`));;
-          }
-        }
-      } catch {}
-    }
   }
 }
 
@@ -3204,6 +3278,7 @@ function startTelegramCommandCenterMonitor(): void {
   if (!telegramInteractionBot) return;
   if (!telegramPriceMonitor) telegramPriceMonitor = setInterval(() => { void monitorTelegramPriceAlerts().catch(() => {}); }, 60_000);
   if (!telegramDigestMonitor) telegramDigestMonitor = setInterval(() => { void monitorTelegramDigests().catch(() => {}); }, 60_000);
+  if (!telegramEventMonitor) telegramEventMonitor = setInterval(() => { void monitorTelegramEventAlerts().catch(() => {}); }, 60_000);
   if (!telegramSlowMonitor) telegramSlowMonitor = setInterval(() => { void Promise.all([monitorTelegramSlowAlerts(), monitorTelegramSmartAlerts()]).catch(() => {}); }, 10 * 60_000);
 }
 
@@ -3211,9 +3286,11 @@ function stopTelegramCommandCenterMonitor(): void {
   if (telegramPriceMonitor) clearInterval(telegramPriceMonitor);
   if (telegramSlowMonitor) clearInterval(telegramSlowMonitor);
   if (telegramDigestMonitor) clearInterval(telegramDigestMonitor);
+  if (telegramEventMonitor) clearInterval(telegramEventMonitor);
   telegramPriceMonitor = null;
   telegramSlowMonitor = null;
   telegramDigestMonitor = null;
+  telegramEventMonitor = null;
 }
 
 app.get('/api/advisor', async (_req, res) => {
