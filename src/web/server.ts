@@ -2557,11 +2557,17 @@ function getTelegramCommandHandlers(): Record<string, TelegramCommandHandler> {
         '该信号仅作研究提醒，不构成投资建议，也不会自动下单。',
       ].filter(Boolean).join('\n');
     },
-        search: async ({ args }) => {
+    search: async ({ args }) => {
       const query = args.join(' ').trim().toLowerCase();
       if (!query) {
         const hot = [['BTC','search:q:BTC'],['ETH','search:q:ETH'],['NVDA','search:q:NVDA'],['AAPL','search:q:AAPL'],['election','search:q:election'],['AI','search:q:AI']];
         return telegramInlineReply('<b>\u641c\u7d22\u5e02\u573a</b>\n\u8f93\u5165\u5173\u952e\u8bcd\u641c\u7d22\uff0c\u6216\u70b9\u51fb\u70ed\u95e8\u8bcd\u5feb\u901f\u641c\u7d22', hot.map(([label,data])=>[{ text: label, callback_data: data }]));
+      }
+      const unified = await unifiedInstrumentService.search(query).catch(() => []);
+      if (unified.length) {
+        const lines = [`<b>统一标的搜索</b> · ${escapeTelegramHtml(query)}`, ...unified.slice(0, 8).map((item, index) => `${index + 1}. ${escapeTelegramHtml(item.title)}\n   ${escapeTelegramHtml(item.id)} · ${escapeTelegramHtml(item.subtitle || '')}${item.price == null ? '' : ` · ${formatTelegramNumber(item.price, item.type === 'prediction' ? 3 : 4)}`}`)];
+        const kb = unified.slice(0, 8).map(item => [{ text: `加自选 ${String(item.title).slice(0, 8)}`, callback_data: `watch:add:${item.id}` }, { text: '查看详情', callback_data: `unified:show:${item.id}` }]);
+        return telegramInlineReply(lines.join('\n'), kb);
       }
       const radar = getCachedPredictionRadarSlice('', 240);
       const matches = radar?.markets.filter(item => `${item.title} ${item.titleZh || ''} ${item.category} ${item.platform}`.toLowerCase().includes(query)).slice(0, 8) || [];
@@ -3008,19 +3014,30 @@ ${escapeTelegramHtml(position.marketTitle)} · ${escapeTelegramHtml(position.out
 ${escapeTelegramHtml(position.marketTitle)} · ${escapeTelegramHtml(position.outcomeName)}
 价格：${price}`, pending.nonce);
       }
+      if (data.startsWith('unified:show:')) {
+        const id = data.slice('unified:show:'.length);
+        const [type, venue, ...symbolParts] = id.split(':');
+        if (!['stock', 'crypto', 'prediction'].includes(type) || !symbolParts.length) return telegramReply('统一标的 ID 无效');
+        const detail = await unifiedInstrumentService.overview({ id, type: type as any, venue, symbol: symbolParts.join(':'), title: '', aliases: [] }).catch(() => null);
+        if (!detail) return telegramReply('标的详情暂不可用');
+        const q = detail.quote || detail.marketData || {};
+        return telegramReply(`<b>标的详情</b>\n${escapeTelegramHtml(detail.instrument.title)}\n${escapeTelegramHtml(detail.instrument.id)}\n价格/概率：${escapeTelegramHtml(String((q as any).price ?? (q as any).yesPrice ?? '暂无'))}\nAI：${escapeTelegramHtml(detail.analysis.text.slice(0, 500))}`);
+      }
       if (data.startsWith('watch:add:')) {
         const mid = data.slice('watch:add:'.length);
         const m = telegramFindMarket(mid);
-        if (!m && !isTelegramWatchableStockId(mid)) return telegramReply('未找到该市场');
+        const canonical = mid.includes(':') ? mid : (isTelegramWatchableStockId(mid) ? `stock:us:${mid.replace(/^us/i, '')}` : `prediction:predictfun:${mid}`);
+        if (!m && !isTelegramWatchableStockId(mid) && !/^(stock|crypto|prediction):/i.test(mid)) return telegramReply('未找到该市场');
         const changed = telegramCommandCenterStore.addWatchlistMarket(ctx.chatId, mid);
-        unifiedAlertStore.addWatchlist(isTelegramWatchableStockId(mid) ? `stock:us:${mid.replace(/^(us)/i, '')}` : `prediction:predictfun:${mid}`);
+        unifiedAlertStore.addWatchlist(canonical);
         telegramCommandCenterStore.recordAudit(ctx.chatId, 'watchlist_update', 'add:'+mid);
         return telegramReply(changed ? `✅ 已加入自选：${escapeTelegramHtml(telegramWatchLabel(mid, m))}` : '该市场已在自选中');
       }
       if (data.startsWith('watch:remove:')) {
         const mid = data.slice('watch:remove:'.length);
         const changed = telegramCommandCenterStore.removeWatchlistMarket(ctx.chatId, mid);
-        unifiedAlertStore.removeWatchlist(isTelegramWatchableStockId(mid) ? `stock:us:${mid.replace(/^(us)/i, '')}` : `prediction:predictfun:${mid}`);
+        const canonical = mid.includes(':') ? mid : (isTelegramWatchableStockId(mid) ? `stock:us:${mid.replace(/^us/i, '')}` : `prediction:predictfun:${mid}`);
+        unifiedAlertStore.removeWatchlist(canonical);
         telegramCommandCenterStore.recordAudit(ctx.chatId, 'watchlist_update', 'remove:'+mid);
         return telegramReply(changed ? `✅ 已移出自选：${escapeTelegramHtml(mid)}` : '该市场不在自选中');
       }
