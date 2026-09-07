@@ -2857,10 +2857,10 @@ function getTelegramCommandHandlers(): Record<string, TelegramCommandHandler> {
       }
       if (action === 'start') {
         if (!config.aiPaperTradingEnabled) return 'AI 自动纸面交易默认关闭，请先设置 AI_PAPER_TRADING_ENABLED=true。';
-        const venue = String(args[1] || '') as 'Binance' | 'Predict.fun';
+        const venue = String(args[1] || '') as 'Binance' | 'Predict.fun' | 'Stocks';
         const symbol = String(args[2] || '');
         const budget = Number(args[3]);
-        if (!['Binance', 'Predict.fun'].includes(venue) || !symbol || !Number.isFinite(budget) || budget < 1) return '用法：/strategies start Binance BTCUSDT 100';
+        if (!['Binance', 'Predict.fun', 'Stocks'].includes(venue) || !symbol || !Number.isFinite(budget) || budget < 1) return '用法：/strategies start [Stocks|Binance|Predict.fun] [代码] [预算] (例如: /strategies start Stocks AAPL 100)';
         const runner = createAiRunner(venue, symbol, symbol, budget);
         telegramCommandCenterStore.recordAudit(chatId, 'strategies_start', runner.id + ':' + venue + ':' + symbol);
         return `✅ 已启动 AI 纸面策略：${escapeTelegramHtml(runner.id)}
@@ -2876,7 +2876,7 @@ function getTelegramCommandHandlers(): Record<string, TelegramCommandHandler> {
           return `· ${escapeTelegramHtml(runner.title)} · ${runner.status} · 权益 $${formatTelegramNumber(summary.equityUsd)} · PnL ${summary.totalPnlUsd >= 0 ? '+' : ''}$${formatTelegramNumber(summary.totalPnlUsd)}\n  限额：单笔 $${formatTelegramNumber(runner.policy.maxTradeUsd)} · 持仓 ${runner.policy.maxPositions} · 日损 $${formatTelegramNumber(runner.policy.maxDailyLossUsd)}${runner.circuitBreakerReason ? `\n  熔断：${escapeTelegramHtml(runner.circuitBreakerReason)}` : ''}`;
         }),
         '',
-        '启动：/strategies start Binance BTCUSDT 100\n暂停：/strategies pause <策略ID>\n恢复：/strategies resume <策略ID>\n清除熔断：/strategies reset-circuit <策略ID>',
+        '启动：/strategies start [Stocks|Binance|Predict.fun] [代码] [预算]\n暂停：/strategies pause <策略ID>\n恢复：/strategies resume <策略ID>\n清除熔断：/strategies reset-circuit <策略ID>',
       ].join('\n');
     },
     ask: ({ chatId, args, message, update }) => {
