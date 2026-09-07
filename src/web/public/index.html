@@ -8945,7 +8945,7 @@ function renderInstrumentDetail(data) {
   window.mm_currentInstrument = instrument;
   const actions = window.mm_isGuest
     ? '<span class="briefing-chip">访客模式：只读</span>'
-    : '<button class="tab active" onclick="addCurrentInstrumentToWatchlist()">⭐ 加入自选</button><button class="tab" onclick="showTab(\'alerts\');closeInstrumentDetail()">🔔 设置提醒</button><button class="tab" onclick="showTab(\'paper\');closeInstrumentDetail()">📈 模拟交易</button>';
+    : '<button class="tab active" onclick="addCurrentInstrumentToWatchlist()">⭐ 加入自选</button><button class="tab" onclick="showTab(\'alerts\');closeInstrumentDetail()">🔔 设置提醒</button><button class="tab" onclick="startAiRunnerFromInstrument()">🤖 AI 跑单</button><button class="tab" onclick="showTab(\'paper\');closeInstrumentDetail()">📈 模拟交易</button>';
   const quote = data.quote || data.marketData || {};
   const quoteEntries = Object.entries(quote).filter(([key]) => ['symbol','price','change24hPct','changePct','yesPrice','noPrice','modelProbability','high24h','low24h'].includes(key));
   const sourceRows = Object.entries(data.sourceStatus || {}).map(([key, value]) => `<span class="briefing-chip">${instrumentDetailEscape(key)} · ${value === 'ok' ? '正常' : value === 'stale' ? '过期' : '不可用'}</span>`).join('');
@@ -8969,6 +8969,22 @@ async function addCurrentInstrumentToWatchlist() {
     if (!body.success) throw new Error(body.error || '加入自选失败');
     if (typeof window.showToast === 'function') window.showToast('已加入统一自选', 'success');
   } catch (error) { if (typeof window.showToast === 'function') window.showToast(error.message || '加入自选失败', 'error'); }
+}
+
+function startAiRunnerFromInstrument() {
+  const instrument = window.mm_currentInstrument;
+  if (!instrument?.id) return;
+  const venue = instrument.type === 'stock' ? 'Stocks' : instrument.type === 'crypto' ? 'Binance' : 'Predict.fun';
+  const symbol = instrument.type === 'prediction' ? (instrument.marketId || instrument.symbol) : instrument.symbol;
+  closeInstrumentDetail();
+  showTab('paper');
+  setTimeout(() => {
+    const venueEl = document.getElementById('ai-runner-venue');
+    const symbolEl = document.getElementById('ai-runner-symbol');
+    if (venueEl) venueEl.value = venue;
+    if (symbolEl) { symbolEl.value = symbol || ''; symbolEl.focus(); }
+    if (typeof window.showToast === 'function') window.showToast(`已带入 ${instrument.title || symbol}，请填写预算后启动 AI 跑单`, 'info');
+  }, 80);
 }
 
 async function openUnifiedInstrument(instrument) {
