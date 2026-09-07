@@ -2609,6 +2609,12 @@ function getTelegramCommandHandlers(): Record<string, TelegramCommandHandler> {
         if(tList.length){
           stockLines = tList.map((it, idx)=> `${idx+1}. ${escapeTelegramHtml(it.zhName||it.name||it.code)} (${escapeTelegramHtml(it.code)}) · ${escapeTelegramHtml(it.market||'')} ${it.price?(' ¥'+formatTelegramNumber(it.price,2)):''}`);
           stockKb = buildTelegramStockSearchRows(tList);
+          for (let i = 0; i < tList.length; i++) {
+            if (tList[i].market === '美股' || String(tList[i].code).startsWith('us')) {
+              const ticker = String(tList[i].exchangeSymbol || tList[i].code).replace(/^us/i, '').replace(/\.[A-Z]+$/i, '').toUpperCase();
+              if (ticker && stockKb[i]) stockKb[i].push({ text: '查看详情', callback_data: 'unified:show:stock:us:' + ticker });
+            }
+          }
         }
       } catch {}
       if (!matches.length && !stockLines.length) return `\u6ca1\u6709\u5728\u672c\u5730\u9884\u6d4b\u5e02\u573a\u5feb\u7167\u4e2d\u627e\u5230\u201c${escapeTelegramHtml(query)}\u201d\u3002\u53ef\u5148\u6253\u5f00\u7f51\u9875\u9762\u677f\u5237\u65b0\u96f7\u8fbe\u3002`;
@@ -2620,7 +2626,7 @@ function getTelegramCommandHandlers(): Record<string, TelegramCommandHandler> {
       const allLines = [...radarLines, ...(radarLines.length && stockHeader.length ? [''] : []), ...stockHeader, '', (matches.length? '\u9884\u6d4b\u7ed3\u679c\u6765\u81ea\u96f7\u8fbe\u5feb\u7167\uff1b' : '') + (stockLines.length? '\u80a1\u7968\u884c\u60c5\u6765\u81ea\u817e\u8baf\u884c\u60c5\uff1b':'') + '\u70b9\u51fb\u6309\u94ae\u53ef\u5feb\u901f\u52a0\u5165\u81ea\u9009/\u89e3\u91ca/\u5f00\u4ed3/\u67e5\u770b\u884c\u60c5\u3002'].join('\n');
       const kb = [];
       for(const item of matches){
-        kb.push([{ text: `\u52a0\u81ea\u9009 ${String(item.titleZh || item.title).slice(0,8)}`, callback_data: `watch:add:${item.id}` }, { text: `\u89e3\u91ca`, callback_data: `explain:${item.id}` }, { text: `\u5f00\u4ed3`, callback_data: `paper:pick:${item.id}` }]);
+        kb.push([{ text: `\u52a0\u81ea\u9009 ${String(item.titleZh || item.title).slice(0,8)}`, callback_data: `watch:add:${item.id}` }, { text: `\u89e3\u91ca`, callback_data: `explain:${item.id}` }, { text: `\u5f00\u4ed3`, callback_data: `paper:pick:${item.id}` }, { text: `查看详情`, callback_data: `unified:show:prediction:predictfun:${item.id}` }]);
       }
       for(const row of stockKb) kb.push(row);
       if(!kb.length) return telegramReply(allLines || '\u6682\u65e0\u7ed3\u679c');

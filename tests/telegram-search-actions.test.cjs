@@ -28,3 +28,9 @@ test('stock search rows contain both watchlist and quote actions', () => {
     { text: 'Apple In 行情', callback_data: 'stock:view:usAAPL' },
   ]]);
 });
+
+test('unified search fallbacks contain detail buttons', () => {
+  assert.match(server, /unified:show:prediction:predictfun:\$\{item\.id\}/);
+  assert.match(server, /unified:show:stock:us:' \+ ticker/);
+  assert.match(server, /const ticker = String\(tList\[i\]\.exchangeSymbol \|\| tList\[i\]\.code\)/);
+});
