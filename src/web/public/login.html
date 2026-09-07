@@ -21,6 +21,8 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;b
 .btn{width:100%;margin-top:22px;padding:12px;border:none;border-radius:12px;background:var(--purple);color:#fff;font-size:15px;font-weight:700;cursor:pointer;transition:var(--transition);box-shadow:0 8px 20px rgba(124,58,237,.28)}
 .btn:hover{background:var(--purple-dark);transform:translateY(1px)}
 .btn:disabled{opacity:.6;cursor:not-allowed;transform:none}
+.btn-guest{background:transparent;color:var(--purple);border:1px solid color-mix(in srgb, var(--purple) 45%, var(--border));box-shadow:none;margin-top:10px}
+.btn-guest:hover{background:var(--purple-light);color:var(--purple-dark)}
 .error{margin-top:14px;padding:10px 12px;border-radius:10px;background:color-mix(in srgb, var(--red) 12%, transparent);border:1px solid color-mix(in srgb, var(--red) 18%, transparent);color:var(--red);font-size:13px;display:none}
 .error.show{display:block}
 .hint{margin-top:16px;text-align:center;font-size:12px;color:var(--text-secondary);line-height:1.6}
@@ -53,6 +55,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;b
     <div class="pw-wrap"><input class="input" id="password" name="password" type="password" placeholder="默认 admin123" required><button type="button" class="pw-toggle" id="pwToggle" aria-label="显示密码" title="显示/隐藏密码">👁️</button></div>
     <div class="error" id="errorBox" role="alert" aria-live="polite" tabindex="-1"></div>
     <button class="btn" id="submitBtn" type="submit">登录</button>
+    <button class="btn btn-guest" id="guestBtn" type="button">👀 访客进入（只读）</button>
   </form>
   <div class="hint">
     默认账号 <code>admin / admin123</code><br>
@@ -63,7 +66,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;b
 <script>
 (function(){
   const $ = (s)=>document.querySelector(s);
-  const form=$('#loginForm'), user=$('#username'), pass=$('#password'), err=$('#errorBox'), btn=$('#submitBtn');
+  const form=$('#loginForm'), user=$('#username'), pass=$('#password'), err=$('#errorBox'), btn=$('#submitBtn'), guestBtn=$('#guestBtn');
   const pwToggle=$('#pwToggle'), expiredBanner=$('#expiredBanner'), defaultBanner=$('#defaultBanner');
   // 显示过期提示 / 默认账号提示
   (function(){
@@ -105,6 +108,24 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;b
   });
   function showError(msg){ err.textContent=msg; err.classList.add('show'); err.setAttribute('role','alert'); err.focus && err.focus(); }
   function clearError(){ err.textContent=''; err.classList.remove('show'); }
+  function goNext(){ const next = new URLSearchParams(location.search).get('next') || '/'; location.href = next; }
+  async function enterAsGuest(){
+    clearError();
+    guestBtn.disabled=true; guestBtn.textContent='进入中…';
+    try{
+      const res=await fetch('/api/auth/guest', {method:'POST', credentials:'include'});
+      const data=await res.json().catch(()=>({}));
+      if(res.status===429){ const ra=data.retryAfter||60; throw new Error('尝试过于频繁，请 '+ra+' 秒后再试'); }
+      if(!res.ok || !data.success) throw new Error(data.error || '访客进入失败');
+      localStorage.setItem('mm_token', data.token);
+      localStorage.setItem('mm_user', data.user);
+      localStorage.setItem('mm_role', data.role || 'guest');
+      document.cookie = 'mm_token='+encodeURIComponent(data.token)+'; Path=/; SameSite=Lax';
+      goNext();
+    }catch(ex){ showError(ex.message || '网络错误'); }
+    finally{ guestBtn.disabled=false; guestBtn.textContent='👀 访客进入（只读）'; }
+  }
+  guestBtn.addEventListener('click', enterAsGuest);
   form.addEventListener('submit', async (e)=>{
     e.preventDefault(); clearError();
     const u=user.value.trim(), p=pass.value;
@@ -118,10 +139,10 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;b
       if(!res.ok || !data.success){ throw new Error(data.error || '登录失败'); }
       localStorage.setItem('mm_token', data.token);
       localStorage.setItem('mm_user', data.user);
+      localStorage.setItem('mm_role', data.role || 'admin');
       // 同时写 cookie 便于直接访问受保护资源
       document.cookie = 'mm_token='+encodeURIComponent(data.token)+'; Path=/; SameSite=Lax';
-      const next = new URLSearchParams(location.search).get('next') || '/';
-      location.href = next;
+      goNext();
     }catch(ex){ showError(ex.message || '网络错误'); } finally { btn.disabled=false; btn.textContent='登录'; }
   });
 })();

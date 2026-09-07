@@ -1717,11 +1717,22 @@
     .sidebar-expand-fab:hover { background:var(--purple); color:white; border-color:var(--purple); }
     .layout.sidebar-collapsed .sidebar-expand-fab { display:flex !important; }
     .layout { transition: grid-template-columns .28s ease; }
-    </style>
+    body.guest-mode #guest-banner { display:block; }
+    body.guest-mode .guest-admin-only { display:none !important; }
+    </style>
 <script>
 // MoneyMoney 登录守卫：以 Cookie(HttpOnly) 为主，localStorage 兼容；统一 credentials:include
 (function(){
   window.mm_isLoggedIn = false;
+  window.mm_isGuest = false;
+  window.mmApplyGuestMode = function(){
+    const apply = function(){
+      document.body.classList.toggle('guest-mode', !!window.mm_isGuest);
+      if(typeof window.renderNavGroups === 'function') window.renderNavGroups();
+      if(typeof window.renderNavSubTabs === 'function') window.renderNavSubTabs();
+    };
+    if(document.body) apply(); else document.addEventListener('DOMContentLoaded', apply, {once:true});
+  };
   const origFetch = window.fetch;
   window.fetch = function(input, init){
     init = init || {};
@@ -1741,6 +1752,11 @@
           location.href='/login?next='+encodeURIComponent(location.pathname+location.search);
         }
       }
+      if(res.status===403 && url.includes('/api/') && window.mm_isGuest){
+        res.clone().json().then(function(data){
+          if(data && data.code==='GUEST_READ_ONLY' && typeof window.showToast==='function') window.showToast(data.error || '访客模式仅支持只读浏览','error');
+        }).catch(function(){});
+      }
       return res;
     });
   };
@@ -1748,6 +1764,8 @@
   fetch('/api/auth/status', {credentials:'include'}).then(function(r){return r.json();}).then(function(d){
     const logged = !!(d && d.data && d.data.loggedIn);
     window.mm_isLoggedIn = logged;
+    window.mm_isGuest = logged && d.data.role === 'guest';
+    window.mmApplyGuestMode();
     if(!logged && !onLoginPage && location.pathname === '/'){
       location.href='/login?next='+encodeURIComponent(location.pathname+location.search);
     }
@@ -1756,7 +1774,7 @@
       location.href=nxt ? decodeURIComponent(nxt) : '/';
     }
   }).catch(function(){});
-  window.mmLogout = function(){ if(!confirm('确定退出登录？')) return; fetch('/api/auth/logout',{method:'POST',credentials:'include'}).finally(function(){ localStorage.removeItem('mm_token'); localStorage.removeItem('mm_user'); window.mm_isLoggedIn=false; document.cookie='mm_token=; Path=/; Max-Age=0; SameSite=Lax'; location.href='/login'; }); };
+  window.mmLogout = function(){ if(!confirm('确定退出登录？')) return; fetch('/api/auth/logout',{method:'POST',credentials:'include'}).finally(function(){ localStorage.removeItem('mm_token'); localStorage.removeItem('mm_user'); localStorage.removeItem('mm_role'); window.mm_isLoggedIn=false; window.mm_isGuest=false; document.cookie='mm_token=; Path=/; Max-Age=0; SameSite=Lax'; location.href='/login'; }); };
   window.mmIsLoggedIn = function(){ return !!window.mm_isLoggedIn; };
 })();
 </script>
@@ -1772,7 +1790,7 @@
       <button class="refresh-btn" onclick="toggleNotifPanel(event)" id="notif-bell" title="通知" style="position:relative;">🔔<span id="notif-badge" style="position:absolute;top:-4px;right:-4px;background:var(--red);color:white;font-size:9px;min-width:16px;height:16px;border-radius:8px;display:none;align-items:center;justify-content:center;font-weight:700;"></span></button>
       <button class="refresh-btn" onclick="toggleTheme()" id="theme-toggle" title="深色 / 浅色模式">🌙</button>
       <button class="refresh-btn" onclick="refresh()">↻ 刷新</button>
-      <button class="refresh-btn" onclick="showWalletModal()" title="钱包设置">⚙️ 设置</button>
+      <button class="refresh-btn guest-admin-only" onclick="showWalletModal()" title="钱包设置">⚙️ 设置</button>
       <a id="wallet-link" href="#" target="_blank" class="wallet-chip" title="点击在 BscScan 查看">
         <span class="dot"></span>
         <span id="wallet-address">...</span>
@@ -1780,7 +1798,8 @@
       <div class="balance-chip" id="balance-display" title="USDT 余额">$0.00</div>
     </div>
   </header>
-  <div id="sec-banner" style="display:none;margin:12px 16px;padding:10px 14px;border-radius:12px;background:color-mix(in srgb, #ef4444 10%, transparent);border:1px solid color-mix(in srgb, #ef4444 16%, transparent);color:#b91c1c;font-size:12px;line-height:1.6;">⚠️ 当前使用默认账号 <code>admin / admin123</code>，请尽快在 <code>.env</code> 中修改 <code>MONEYMONEY_LOGIN_USER</code>/<code>MONEYMONEY_LOGIN_PASS</code> 并重启服务</div>
+  <div id="guest-banner" style="display:none;margin:12px 16px;padding:10px 14px;border-radius:12px;background:color-mix(in srgb, #2563eb 10%, transparent);border:1px solid color-mix(in srgb, #2563eb 18%, transparent);color:#1d4ed8;font-size:12px;line-height:1.6;">👀 访客模式 · 只读浏览：市场、行情、新闻和分析可查看，配置、通知与交易功能已隐藏</div>
+  <div id="sec-banner" style="display:none;margin:12px 16px;padding:10px 14px;border-radius:12px;background:color-mix(in srgb, #ef4444 10%, transparent);border:1px solid color-mix(in srgb, #ef4444 16%, transparent);color:#b91c1c;font-size:12px;line-height:1.6;">⚠️ 当前使用默认账号 <code>admin / admin123</code>，请尽快在 <code>.env</code> 中修改 <code>MONEYMONEY_LOGIN_USER</code>/<code>MONEYMONEY_LOGIN_PASS</code> 并重启服务</div>
   <script>/* 登录已禁用：不再显示默认账号警告 */</script>
   <script>
 (function(){
@@ -8858,19 +8877,20 @@ function showToast(message, type = 'info', durationMs = 2500) {
   }, durationMs);
 }
 
-const NAV_GROUPS = [
+const NAV_GROUPS = [
   { id: 'home',    label: '🏠 首页',   tabs: [{ id: 'command', label: '🏠 指挥台' }, { id: 'markets', label: '🎯 Predict.fun' }] },
   { id: 'trade',   label: '📈 交易',   tabs: [{ id: 'binance', label: '🏦 币安' }, { id: 'stocks', label: '📈 股票·宏观' }, { id: 'options', label: '🎯 期权' }, { id: 'positions', label: '📋 持仓' }, { id: 'orders', label: '📄 订单' }] },
   { id: 'research',label: '🌐 研究',   tabs: [{ id: 'research', label: '📚 证据工作台' }, { id: 'radar', label: '🌐 预测雷达' }, { id: 'news', label: '📰 新闻日历' }, { id: 'whales', label: '🐋 巨鲸监控' }, { id: 'backtest', label: '🧪 回测' }, { id: 'strategies', label: '⚔️ 策略对比' }] },
   { id: 'risk',    label: '🛡 风控',   tabs: [{ id: 'analysis', label: '📊 智能助手' }, { id: 'risk', label: '🛡 风险总览' }, { id: 'alerts', label: '🔔 预警' }, { id: 'paper', label: '📈 模拟盘' }, { id: 'journal', label: '📝 日志复盘' }] },
   { id: 'system',  label: '⚙️ 系统',   tabs: [{ id: 'ops', label: '⚙️ 自动化运营' }, { id: 'settings', label: '⚙️ 设置' }] },
-];
-let activeNavGroup = 'home';
+];
+const GUEST_ADMIN_TABS = new Set(['positions', 'orders', 'paper', 'journal', 'ops', 'settings']);
+let activeNavGroup = 'home';
 
 function renderNavGroups() {
   const bar = document.getElementById('nav-group-bar');
   if (!bar) return;
-  bar.innerHTML = NAV_GROUPS.map(g =>
+  bar.innerHTML = NAV_GROUPS.filter(g => !(window.mm_isGuest && g.id === 'system')).map(g =>
     `<button class="nav-group-btn${g.id === activeNavGroup ? ' active' : ''}" onclick="switchNavGroup('${g.id}')">${g.label}</button>`
   ).join('');
 }
@@ -8889,12 +8909,16 @@ function renderNavSubTabs() {
   if (!bar) return;
   const group = NAV_GROUPS.find(g => g.id === activeNavGroup);
   if (!group) return;
-  bar.innerHTML = group.tabs.map(t =>
-    `<button class="nav-sub-btn" data-tab="${t.id}" onclick="showTab('${t.id}', this)">${t.label}</button>`
-  ).join('');
-}
-
-function showTab(tab, clicked) {
+  bar.innerHTML = group.tabs.filter(t => !(window.mm_isGuest && GUEST_ADMIN_TABS.has(t.id))).map(t =>
+    `<button class="nav-sub-btn${GUEST_ADMIN_TABS.has(t.id) ? ' guest-admin-only' : ''}" data-tab="${t.id}" onclick="showTab('${t.id}', this)">${t.label}</button>`
+  ).join('');
+}
+
+function showTab(tab, clicked) {
+  if (window.mm_isGuest && GUEST_ADMIN_TABS.has(tab)) {
+    if (typeof window.showToast === 'function') window.showToast('访客模式仅支持只读浏览', 'error');
+    return;
+  }
   try { localStorage.setItem('mm-last-tab', tab); } catch (e) {}
   document.querySelectorAll('.tab').forEach((t) => t.classList.remove('active'));
   const button = clicked || [...document.querySelectorAll('.tabs .tab')].find(item => (item.getAttribute('onclick') || '').includes(`'${tab}'`));

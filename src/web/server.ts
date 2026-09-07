@@ -95,7 +95,7 @@ import { getSourceHealth } from '../features/source-health';
 import { testNotificationChannels } from '../features/notification-channels';
 import { riskPatrol } from '../features/risk-patrol';
 import { createAccessMiddleware, validateAccessConfiguration } from './access-control';
-import { createLoginToken, verifyLoginToken, createLoginRateLimiter, extractAuthToken, requireAuth, safeEqual, blacklistToken, buildAuthCookie, buildClearCookie } from './auth';
+import { createLoginToken, verifyLoginToken, createLoginRateLimiter, extractAuthToken, requireAuth, safeEqual, blacklistToken, buildAuthCookie, buildClearCookie, GUEST_TOKEN_EXPIRY_MS, isGuestRequestAllowed } from './auth';
 import { isDefaultLoginCredentials, isJwtSecretDefault } from '../config';
 import { stateStore, getStorageHealth } from '../storage/sqlite-state';
 import { paperTradingExecutor } from '../features/trading-executor';
@@ -236,7 +236,13 @@ app.post('/api/auth/login', loginRateLimiter, (req, res) => {
   const token = createLoginToken(u);
   // 同步写 cookie
   res.setHeader('Set-Cookie', buildAuthCookie(token, req as any));
-  res.json({ success: true, token, user: u, expiresInMs: config.loginTokenExpiryMs });
+  res.json({ success: true, token, user: u, role: 'admin', expiresInMs: config.loginTokenExpiryMs });
+});
+
+app.post('/api/auth/guest', loginRateLimiter, (req, res) => {
+  const token = createLoginToken('guest', 'guest', GUEST_TOKEN_EXPIRY_MS);
+  res.setHeader('Set-Cookie', buildAuthCookie(token, req as any, GUEST_TOKEN_EXPIRY_MS));
+  res.json({ success: true, token, user: 'guest', role: 'guest', expiresInMs: GUEST_TOKEN_EXPIRY_MS });
 });
 
 app.get('/api/auth/me', (req, res) => {
@@ -246,12 +252,12 @@ app.get('/api/auth/me', (req, res) => {
   if (!payload) return res.status(401).json({ success: false, error: '登录已过期' });
   // 滑动续期：剩余 <2h 则重签（P3）
   const remain = payload.exp - Date.now();
-  if (remain < 2 * 60 * 60 * 1000) {
-    const newToken = createLoginToken(payload.user);
+  if (payload.role !== 'guest' && remain < 2 * 60 * 60 * 1000) {
+    const newToken = createLoginToken(payload.user, payload.role);
     res.setHeader('Set-Cookie', buildAuthCookie(newToken, req as any));
-    return res.json({ success: true, user: payload.user, exp: Date.now() + config.loginTokenExpiryMs, token: newToken, renewed: true });
+    return res.json({ success: true, user: payload.user, role: payload.role, exp: Date.now() + config.loginTokenExpiryMs, token: newToken, renewed: true });
   }
-  res.json({ success: true, user: payload.user, exp: payload.exp });
+  res.json({ success: true, user: payload.user, role: payload.role, exp: payload.exp });
 });
 
 app.post('/api/auth/logout', (req, res) => {
@@ -263,12 +269,18 @@ app.post('/api/auth/logout', (req, res) => {
 app.get('/api/auth/status', (req, res) => {
   const tok = extractAuthToken(req as any);
   const payload = tok ? verifyLoginToken(tok) : null;
-  res.json({ success: true, data: { isDefault: isDefaultLoginCredentials(), isJwtDefault: isJwtSecretDefault(), loggedIn: !!payload, user: payload?.user || null, tokenExpiryMs: config.loginTokenExpiryMs } });
+  res.json({ success: true, data: { isDefault: isDefaultLoginCredentials(), isJwtDefault: isJwtSecretDefault(), loggedIn: !!payload, user: payload?.user || null, role: payload?.role || null, tokenExpiryMs: payload?.role === 'guest' ? GUEST_TOKEN_EXPIRY_MS : config.loginTokenExpiryMs } });
 });
 // 需要登录保护的 API（登录相关与健康检查除外）。
 app.use('/api', (req, res, next) => {
   if (req.path.startsWith('/auth/') || req.path === '/health' || req.path === '/health/live' || req.path === '/health/readiness') {
     next();
+    return;
+  }
+  const token = extractAuthToken(req as any);
+  const payload = token ? verifyLoginToken(token) : null;
+  if (payload?.role === 'guest' && !isGuestRequestAllowed(req.method, req.path)) {
+    res.status(403).json({ success: false, error: '访客模式仅支持只读浏览', code: 'GUEST_READ_ONLY' });
     return;
   }
   requireAuth(req, res, next);
