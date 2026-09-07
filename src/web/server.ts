@@ -2335,7 +2335,7 @@ async function buildTelegramDigest(chatId: string): Promise<string> {
   return lines.join('\n');
 }
 
-function getTelegramCommandHandlers(): Record<string, TelegramCommandHandler> {
+export function getTelegramCommandHandlers(): Record<string, TelegramCommandHandler> {
   const rawHandlers: Record<string, TelegramCommandHandler> = {
     menu_prev: ({ chatId }) => {
       moveTelegramMenuPage(chatId, -1);
@@ -2428,7 +2428,7 @@ function getTelegramCommandHandlers(): Record<string, TelegramCommandHandler> {
       return `<b>🧪 策略回测</b> · ${escapeTelegramHtml(stats.strategyName)}\n范围：${marketIdInput ? `市场 ${escapeTelegramHtml(marketIdInput)}` : '全部市场'}\n交易数：${stats.totalTrades} · 胜率：${formatTelegramNumber(stats.winRate * 100, 1)}%\n收益：${formatTelegramNumber(stats.totalReturnPct, 2)}% · 最大回撤：${formatTelegramNumber(stats.maxDrawdownPct, 2)}%\nSharpe：${formatTelegramNumber(stats.sharpeRatio, 2)} · 平均持仓：${formatTelegramNumber(stats.avgHoldMinutes, 1)} 分钟`;
     },
     watchlist: ({ chatId }) => {
-      const ids = telegramCommandCenterStore.listWatchlist(chatId);
+      const ids = [...new Set([...unifiedAlertStore.listWatchlist(), ...telegramCommandCenterStore.listWatchlist(chatId)])];
       if (!ids.length) return '<b>⭐ 自选市场</b>\n暂无自选市场。\n用法：发送 /search 搜索后点“加自选”。';
       const lines = ['<b>⭐ 自选市场</b>', ...ids.map((id, i) => {
         const m = telegramFindMarket(id);
@@ -2437,7 +2437,28 @@ function getTelegramCommandHandlers(): Record<string, TelegramCommandHandler> {
       const kb = ids.slice(0, 8).map(id => {
         const m = telegramFindMarket(id);
         const label = String(m?.titleZh || m?.title || id).slice(0,8);
-        return [{ text: `移除 ${label}`, callback_data: `watch:remove:${id}` }, { text: `解释`, callback_data: `explain:${id}` }, { text: `开仓`, callback_data: `paper:pick:${id}` }];
+
+        let canonicalId: string | null = null;
+        if (/^(stock:us|crypto:binance|prediction:predictfun):/.test(id)) {
+          canonicalId = id;
+        } else if (isTelegramWatchableStockId(id)) {
+          canonicalId = `stock:us:${id.replace(/^us/i, '')}`;
+        } else if (m) {
+          canonicalId = `prediction:predictfun:${id}`;
+        }
+
+        const row: TelegramInlineKeyboardButton[] = [
+          { text: `移除 ${label}`, callback_data: `watch:remove:${id}` }
+        ];
+
+        if (canonicalId) {
+          row.push({ text: '查看详情', callback_data: `unified:show:${canonicalId}` });
+        }
+
+        row.push({ text: `解释`, callback_data: `explain:${id}` });
+        row.push({ text: `开仓`, callback_data: `paper:pick:${id}` });
+
+        return row;
       });
       return telegramInlineReply(lines.join('\n'), kb);
     },
@@ -4634,13 +4655,9 @@ async function main() {
 
 
 
-main().catch(err => {
-
-  console.error('  ❌ Startup error:', err.message);
-
-  process.exit(1);
-
-});
-
-
-
+if (require.main === module) {
+  main().catch(err => {
+    console.error('  ❌ Startup error:', err.message);
+    process.exit(1);
+  });
+}
