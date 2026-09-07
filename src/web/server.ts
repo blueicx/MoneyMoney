@@ -85,6 +85,8 @@ import { getForecastLabReport, resolveForecastCase } from '../features/forecast-
 import { calculatePredictionPosition } from '../features/prediction-position-sizer';
 import { aiCommentaryConfigured, getAiMarketCommentary } from '../features/ai-commentary';
 import { getAiConfigurationStatus, testAiConnection, type AiChain } from '../features/ai-runtime-config';
+import { unifiedInstrumentService, normalizeInstrumentRef, type InstrumentType } from '../features/unified-instruments';
+import { unifiedAlertStore } from '../features/unified-alerts';
 import { buildPortfolioRiskOverview } from '../features/risk-overview';
 import { getRiskHistory, recordRiskHistory } from '../features/risk-history';
 import { buildDailyResearchBriefing } from '../features/research-briefing';
@@ -2220,7 +2222,7 @@ function telegramWatchLabel(marketId: string, market?: any): string {
 }
 
 function formatTelegramWatchlist(chatId: string): string {
-  const ids = telegramCommandCenterStore.listWatchlist(chatId);
+  const ids = [...new Set([...unifiedAlertStore.listWatchlist(), ...telegramCommandCenterStore.listWatchlist(chatId)])];
   if (!ids.length) return '<b>⭐ 自选市场</b>\n暂无自选市场。\n用法：/watch add &lt;市场ID&gt;，市场 ID 可从 /search 结果或网页面板获取。';
   const lines = ids.map((id, index) => {
     const market = telegramFindMarket(id);
@@ -3010,12 +3012,14 @@ ${escapeTelegramHtml(position.marketTitle)} · ${escapeTelegramHtml(position.out
         const m = telegramFindMarket(mid);
         if (!m && !isTelegramWatchableStockId(mid)) return telegramReply('未找到该市场');
         const changed = telegramCommandCenterStore.addWatchlistMarket(ctx.chatId, mid);
+        unifiedAlertStore.addWatchlist(isTelegramWatchableStockId(mid) ? `stock:us:${mid.replace(/^(us)/i, '')}` : `prediction:predictfun:${mid}`);
         telegramCommandCenterStore.recordAudit(ctx.chatId, 'watchlist_update', 'add:'+mid);
         return telegramReply(changed ? `✅ 已加入自选：${escapeTelegramHtml(telegramWatchLabel(mid, m))}` : '该市场已在自选中');
       }
       if (data.startsWith('watch:remove:')) {
         const mid = data.slice('watch:remove:'.length);
         const changed = telegramCommandCenterStore.removeWatchlistMarket(ctx.chatId, mid);
+        unifiedAlertStore.removeWatchlist(isTelegramWatchableStockId(mid) ? `stock:us:${mid.replace(/^(us)/i, '')}` : `prediction:predictfun:${mid}`);
         telegramCommandCenterStore.recordAudit(ctx.chatId, 'watchlist_update', 'remove:'+mid);
         return telegramReply(changed ? `✅ 已移出自选：${escapeTelegramHtml(mid)}` : '该市场不在自选中');
       }
@@ -4138,6 +4142,70 @@ app.get('/api/settings', (req, res) => {
   const data = settingsManager.get();
   res.json({ success: true, data, ai: getAiConfigurationStatus(data), telegram: runtimeSecrets.status() });
 });
+
+// Canonical cross-asset entry points. Existing /api/stock, /api/binance and
+// /api/markets routes stay intact; these routes provide one stable contract.
+app.get('/api/instruments/search', async (req, res) => {
+  try {
+    const q = String(req.query.q || '').trim();
+    if (!q) return res.json({ success: true, data: [] });
+    const data = await unifiedInstrumentService.search(q);
+    res.json({ success: true, data, fetchedAt: new Date().toISOString() });
+  } catch (error: any) {
+    res.status(502).json({ success: false, error: error?.message || '统一搜索暂不可用', data: [] });
+  }
+});
+
+app.get('/api/instruments/:type/:venue/:symbol/overview', async (req, res) => {
+  try {
+    const type = String(req.params.type).toLowerCase() as InstrumentType;
+    if (!['stock', 'crypto', 'prediction'].includes(type)) return res.status(400).json({ success: false, error: '不支持的标的类型' });
+    const instrument = normalizeInstrumentRef({ type, venue: String(req.params.venue), symbol: decodeURIComponent(String(req.params.symbol)), title: String(req.query.title || ''), aliases: [] });
+    const data = await unifiedInstrumentService.overview(instrument);
+    res.json({ success: true, data });
+  } catch (error: any) {
+    res.status(502).json({ success: false, error: error?.message || '标的详情暂不可用' });
+  }
+});
+
+app.get('/api/instruments/:type/:venue/:symbol/timeline', async (req, res) => {
+  try {
+    const type = String(req.params.type).toLowerCase() as InstrumentType;
+    if (!['stock', 'crypto', 'prediction'].includes(type)) return res.status(400).json({ success: false, error: '不支持的标的类型' });
+    const instrument = normalizeInstrumentRef({ type, venue: String(req.params.venue), symbol: decodeURIComponent(String(req.params.symbol)), title: String(req.query.title || ''), aliases: [] });
+    const data = await unifiedInstrumentService.timeline(instrument);
+    res.json({ success: true, data });
+  } catch (error: any) {
+    res.status(502).json({ success: false, error: error?.message || '标的时间线暂不可用' });
+  }
+});
+
+// Shared web/Telegram state. The current deployment intentionally has one
+// owner; ownerId remains explicit so a future multi-user migration is local.
+app.get('/api/watchlist', (_req, res) => res.json({ success: true, data: unifiedAlertStore.listWatchlist(), ownerId: 'admin' }));
+app.post('/api/watchlist', (req, res) => {
+  const instrumentId = String(req.body?.instrumentId || '').trim();
+  if (!instrumentId) return res.status(400).json({ success: false, error: '缺少标的 ID' });
+  res.json({ success: true, data: unifiedAlertStore.addWatchlist(instrumentId), ownerId: 'admin' });
+});
+app.delete('/api/watchlist/:instrumentId', (req, res) => res.json({ success: true, data: unifiedAlertStore.removeWatchlist(decodeURIComponent(req.params.instrumentId)), ownerId: 'admin' }));
+
+app.get('/api/alert-rules', (_req, res) => res.json({ success: true, data: unifiedAlertStore.listRules(), ownerId: 'admin' }));
+app.post('/api/alert-rules', (req, res) => {
+  try {
+    const rule = unifiedAlertStore.createRule({ ...(req.body || {}), ownerId: 'admin' });
+    res.status(201).json({ success: true, data: rule });
+  } catch (error: any) { res.status(400).json({ success: false, error: error?.message || '提醒规则无效' }); }
+});
+app.patch('/api/alert-rules/:id', (req, res) => {
+  try {
+    const rule = unifiedAlertStore.updateRule(String(req.params.id), req.body || {});
+    if (!rule) return res.status(404).json({ success: false, error: '提醒规则不存在' });
+    res.json({ success: true, data: rule });
+  } catch (error: any) { res.status(400).json({ success: false, error: error?.message || '提醒规则无效' }); }
+});
+app.delete('/api/alert-rules/:id', (req, res) => res.json({ success: unifiedAlertStore.removeRule(String(req.params.id)) }));
+app.get('/api/alerts/history', (req, res) => res.json({ success: true, data: unifiedAlertStore.listHistory(Number(req.query.limit) || 100) }));
 
 app.post('/api/settings', (req, res) => {
   const updated = settingsManager.update(req.body);

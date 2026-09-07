@@ -1841,7 +1841,17 @@
     </div>
   </div>
 
-    <!-- News Ticker -->
+  <div id="instrument-detail-overlay" class="global-search-overlay" onclick="if(event.target===this)closeInstrumentDetail()">
+    <div class="global-search-panel" style="max-width:980px;max-height:82vh;overflow:auto;" role="dialog" aria-modal="true" aria-label="标的详情">
+      <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;padding:18px 20px;border-bottom:1px solid var(--border);">
+        <div><strong id="instrument-detail-title" style="font-size:18px;">标的详情</strong><div id="instrument-detail-sub" style="font-size:11px;color:var(--text-secondary);margin-top:4px;"></div></div>
+        <button class="global-search-kbd" onclick="closeInstrumentDetail()">ESC</button>
+      </div>
+      <div id="instrument-detail-content" style="padding:18px;"></div>
+    </div>
+  </div>
+
+    <!-- News Ticker -->
     <div class="news-ticker" id="news-ticker">
       <div class="news-ticker-inner" id="ticker-content">
         <span class="ticker-item">加载新闻中...</span>
@@ -8723,28 +8733,26 @@ async function runGlobalSearchNow() {
   }
 
   const cached = globalSearchState.cache.get(query.toLowerCase());
-  const stockPromise = cached?.stock ? Promise.resolve(cached.stock)
-    : fetch('/api/stock/search?q=' + encodeURIComponent(query)).then(res => res.json()).catch(() => null);
-  const radarPromise = cached?.radar ? Promise.resolve(cached.radar)
-    : fetch('/api/prediction-radar?cachedOnly=1&limit=12&query=' + encodeURIComponent(query)).then(res => res.json()).catch(() => null);
+  const unifiedPromise = cached?.unified ? Promise.resolve(cached.unified)
+    : fetch('/api/instruments/search?q=' + encodeURIComponent(query)).then(res => res.json()).catch(() => null);
 
   renderGlobalSearchResults([{ label: '本机匹配', items: localGlobalSearch(query).map(item => ({ ...item, badge: item.kind === 'page' ? '页面' : '功能' })) }], '正在搜索...');
-  const [stockBody, radarBody] = await Promise.all([stockPromise, radarPromise]);
+  const unifiedBody = await unifiedPromise;
   if (request !== globalSearchState.request) return;
 
-  const stocks = stockBody?.success && Array.isArray(stockBody.data) ? stockBody.data.slice(0, 6) : [];
-  const predictions = radarBody?.success && Array.isArray(radarBody.data?.markets) ? radarBody.data.markets.slice(0, 6) : [];
-  globalSearchState.cache.set(query.toLowerCase(), { stock: stockBody, radar: radarBody });
+  const instruments = unifiedBody?.success && Array.isArray(unifiedBody.data) ? unifiedBody.data.slice(0, 12) : [];
+  const predictions = [];
+  globalSearchState.cache.set(query.toLowerCase(), { unified: unifiedBody });
   if (globalSearchState.cache.size > 60) globalSearchState.cache.delete(globalSearchState.cache.keys().next().value);
 
-  const stockItems = stocks.map(stock => ({
-    kind: 'stock',
-    title: stock.name,
-    sub: `${stock.code}${stock.market ? ' · ' + stock.market : ''}`,
-    badge: '股票',
-    symbol: stock.code,
-    name: stock.name,
-    exchangeSymbol: stock.exchangeSymbol,
+  const stockItems = instruments.map(item => ({
+    kind: 'instrument',
+    title: item.title,
+    sub: `${item.id}${item.subtitle ? ' · ' + item.subtitle : ''}${item.price != null ? ' · ' + item.price : ''}`,
+    badge: item.type === 'stock' ? '股票' : item.type === 'crypto' ? '加密' : '预测',
+    symbol: item.symbol,
+    name: item.title,
+    exchangeSymbol: item.symbol,
   }));
   const predictionItems = predictions.map(market => ({
     kind: 'prediction',
@@ -8755,7 +8763,7 @@ async function runGlobalSearchNow() {
   }));
   renderGlobalSearchResults([
     { label: '功能与页面', items: localGlobalSearch(query).map(item => ({ ...item, badge: item.kind === 'page' ? '页面' : '功能' })) },
-    { label: '股票', items: stockItems },
+    { label: '统一标的', items: stockItems },
     { label: '预测市场', items: predictionItems },
   ]);
 }
@@ -8775,7 +8783,7 @@ function openGlobalSearch() {
   setTimeout(() => input.focus(), 30);
 }
 
-function closeGlobalSearch() {
+function closeGlobalSearch() {
   document.getElementById('global-search-overlay')?.classList.remove('open');
 }
 
@@ -8796,7 +8804,12 @@ async function runGlobalSearchItem(index) {
     item.action();
     return;
   }
-  if (item.kind === 'stock') {
+  if (item.kind === 'instrument') {
+    openUnifiedInstrument(item.instrument);
+    return;
+  }
+
+  if (item.kind === 'stock') {
     showTab('stocks');
     setTimeout(() => {
       const result = { code: item.symbol, name: item.name, exchangeSymbol: item.exchangeSymbol };
@@ -8912,6 +8925,51 @@ function renderNavSubTabs() {
   bar.innerHTML = group.tabs.filter(t => !(window.mm_isGuest && GUEST_ADMIN_TABS.has(t.id))).map(t =>
     `<button class="nav-sub-btn${GUEST_ADMIN_TABS.has(t.id) ? ' guest-admin-only' : ''}" data-tab="${t.id}" onclick="showTab('${t.id}', this)">${t.label}</button>`
   ).join('');
+}
+
+function closeInstrumentDetail() {
+  document.getElementById('instrument-detail-overlay')?.classList.remove('open');
+}
+
+function instrumentDetailEscape(value) { return globalSearchEscape(value); }
+
+function renderInstrumentDetail(data) {
+  const instrument = data.instrument || {};
+  const title = document.getElementById('instrument-detail-title');
+  const sub = document.getElementById('instrument-detail-sub');
+  const content = document.getElementById('instrument-detail-content');
+  if (!title || !sub || !content) return;
+  title.textContent = instrument.title || instrument.symbol || '标的详情';
+  sub.textContent = `${instrument.id || ''} · ${data.freshness?.status === 'fresh' ? '数据新鲜' : data.freshness?.status === 'stale' ? '数据可能过期' : '数据暂不可用'}`;
+  const quote = data.quote || data.marketData || {};
+  const quoteEntries = Object.entries(quote).filter(([key]) => ['symbol','price','change24hPct','changePct','yesPrice','noPrice','modelProbability','high24h','low24h'].includes(key));
+  const sourceRows = Object.entries(data.sourceStatus || {}).map(([key, value]) => `<span class="briefing-chip">${instrumentDetailEscape(key)} · ${value === 'ok' ? '正常' : value === 'stale' ? '过期' : '不可用'}</span>`).join('');
+  const eventRows = (data.events || []).slice(0, 6).map(item => `<div style="padding:8px 0;border-bottom:1px solid var(--border);"><strong>${instrumentDetailEscape(item.titleZh || item.title)}</strong><div style="font-size:11px;color:var(--text-secondary);">${instrumentDetailEscape(item.date)} · ${instrumentDetailEscape(item.impact)}${item.actual ? ` · 结果 ${instrumentDetailEscape(item.actual)}` : ''}</div></div>`).join('') || '<div style="color:var(--text-secondary);">暂无事件</div>';
+  const newsRows = (data.news || []).slice(0, 6).map(item => `<div style="padding:8px 0;border-bottom:1px solid var(--border);"><a href="${instrumentDetailEscape(item.url || '#')}" target="_blank" rel="noreferrer">${instrumentDetailEscape(item.title)}</a><div style="font-size:11px;color:var(--text-secondary);">${instrumentDetailEscape(item.source)} · ${instrumentDetailEscape(item.publishedAt)}</div></div>`).join('') || '<div style="color:var(--text-secondary);">暂无相关新闻</div>';
+  content.innerHTML = `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;">${quoteEntries.map(([key, value]) => `<span class="briefing-chip">${instrumentDetailEscape(key)} <strong>${instrumentDetailEscape(typeof value === 'number' ? Number(value).toFixed(4) : value)}</strong></span>`).join('')}</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;">${sourceRows}</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px;">
+      <section class="glass-card" style="padding:14px;"><strong>🧠 AI 分析</strong><p style="white-space:pre-wrap;line-height:1.6;margin-top:8px;color:var(--text-secondary);">${instrumentDetailEscape(data.analysis?.text || '暂不可用')}</p></section>
+      <section class="glass-card" style="padding:14px;"><strong>📅 事件</strong><div style="margin-top:8px;">${eventRows}</div></section>
+      <section class="glass-card" style="padding:14px;"><strong>📰 新闻</strong><div style="margin-top:8px;">${newsRows}</div></section>
+    </div>`;
+}
+
+async function openUnifiedInstrument(instrument) {
+  const overlay = document.getElementById('instrument-detail-overlay');
+  const content = document.getElementById('instrument-detail-content');
+  if (!overlay || !content || !instrument) return;
+  overlay.classList.add('open');
+  content.innerHTML = '<div style="padding:30px;text-align:center;color:var(--text-secondary);">正在加载统一详情、事件、新闻和 AI 分析…</div>';
+  const url = `/api/instruments/${encodeURIComponent(instrument.type)}/${encodeURIComponent(instrument.venue)}/${encodeURIComponent(instrument.symbol)}/overview`;
+  try {
+    const response = await fetch(url);
+    const body = await response.json();
+    if (!body.success) throw new Error(body.error || '加载失败');
+    renderInstrumentDetail(body.data);
+  } catch (error) {
+    content.innerHTML = `<div style="padding:24px;color:var(--red);">${instrumentDetailEscape(error.message || '详情加载失败')}</div>`;
+  }
 }
 
 function showTab(tab, clicked) {
