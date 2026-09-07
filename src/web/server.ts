@@ -2045,6 +2045,7 @@ const TELEGRAM_HELP = [
   '/digest   查看或配置定时摘要',
   '/ops     查看自动化任务状态',
   '/strategies 查看 AI 模拟策略',
+  '/backtest   运行策略回测，例如 /backtest momentum 1234',
   '',
   '<b>工具与诊断</b>',
   '/export   查看最近模拟交易记录',
