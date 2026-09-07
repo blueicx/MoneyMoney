@@ -2024,6 +2024,7 @@ const TELEGRAM_HELP = [
   '/signal  查看单条信号详情，例如 /signal 1',
   '/search  同时搜索预测市场和股票，例如 /search AAPL 或 election',
   '/detail  查看统一标的详情，例如 /detail stock:us:AAPL',
+  '/timeline 查看统一标的时间线，例如 /timeline stock:us:AAPL',
   '/events  查看未来 7 天事件日历',
   '/sources 查看数据源健康',
   '/history 查看风险历史与表现',
@@ -2357,6 +2358,25 @@ function getTelegramCommandHandlers(): Record<string, TelegramCommandHandler> {
       if (!detailInfo) return '标的详情暂不可用';
       const q = detailInfo.quote || detailInfo.marketData || {};
       return `<b>标的详情</b>\n${escapeTelegramHtml(detailInfo.instrument.title)}\n${escapeTelegramHtml(detailInfo.instrument.id)}\n价格/概率：${escapeTelegramHtml(String((q as any).price ?? (q as any).yesPrice ?? '暂无'))}\nAI：${escapeTelegramHtml(detailInfo.analysis.text.slice(0, 500))}`;
+    },
+    timeline: async ({ args }) => {
+      const id = String(args[0] || '').trim();
+      const [type, venue, ...symbolParts] = id.split(':');
+      if (!id || !['stock', 'crypto', 'prediction'].includes(type) || !venue || !symbolParts.join(':').trim()) {
+        return '用法：/timeline <InstrumentRef>\n支持 stock:us:AAPL、crypto:binance:BTCUSDT、prediction:predictfun:<marketId>';
+      }
+      const data = await unifiedInstrumentService.timeline({ id, type: type as any, venue, symbol: symbolParts.join(':'), title: '', aliases: [] }).catch(() => null);
+      if (!data) return '时间线数据暂不可用';
+      const items = data.items.slice(0, 10);
+      if (items.length === 0) return `<b>时间线</b>\n${escapeTelegramHtml(data.instrument.title)}\n${escapeTelegramHtml(data.instrument.id)}\n\n暂无相关事件或新闻。`;
+
+      const lines = items.map(item => {
+        const time = (String(item.at || '')).slice(0, 10);
+        const title = String(item.title || '');
+        const source = String(item.source || item.kind || '');
+        return `· ${escapeTelegramHtml(time)} · [${escapeTelegramHtml(source)}] ${escapeTelegramHtml(title)}`;
+      });
+      return `<b>时间线</b>\n${escapeTelegramHtml(data.instrument.title)}\n${escapeTelegramHtml(data.instrument.id)}\n\n${lines.join('\n')}`;
     },
     backtest: ({ args }) => {
       const first = String(args[0] || '').trim();
