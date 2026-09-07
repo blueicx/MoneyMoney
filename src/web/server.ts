@@ -2023,6 +2023,7 @@ const TELEGRAM_HELP = [
   '/signals 查看最近一份助手信号',
   '/signal  查看单条信号详情，例如 /signal 1',
   '/search  同时搜索预测市场和股票，例如 /search AAPL 或 election',
+  '/detail  查看统一标的详情，例如 /detail stock:us:AAPL',
   '/events  查看未来 7 天事件日历',
   '/sources 查看数据源健康',
   '/history 查看风险历史与表现',
@@ -2346,6 +2347,17 @@ function getTelegramCommandHandlers(): Record<string, TelegramCommandHandler> {
     menu_page: () => telegramReply('当前菜单页。'),
     start: () => `${TELEGRAM_HELP}\n\n已连接。发送 /help 查看命令。`,
     help: () => TELEGRAM_HELP,
+    detail: async ({ args }) => {
+      const id = String(args[0] || '').trim();
+      const [type, venue, ...symbolParts] = id.split(':');
+      if (!id || !['stock', 'crypto', 'prediction'].includes(type) || !venue || !symbolParts.join(':').trim()) {
+        return '用法：/detail <InstrumentRef>\n支持 stock:us:AAPL、crypto:binance:BTCUSDT、prediction:predictfun:<marketId>';
+      }
+      const detailInfo = await unifiedInstrumentService.overview({ id, type: type as any, venue, symbol: symbolParts.join(':'), title: '', aliases: [] }).catch(() => null);
+      if (!detailInfo) return '标的详情暂不可用';
+      const q = detailInfo.quote || detailInfo.marketData || {};
+      return `<b>标的详情</b>\n${escapeTelegramHtml(detailInfo.instrument.title)}\n${escapeTelegramHtml(detailInfo.instrument.id)}\n价格/概率：${escapeTelegramHtml(String((q as any).price ?? (q as any).yesPrice ?? '暂无'))}\nAI：${escapeTelegramHtml(detailInfo.analysis.text.slice(0, 500))}`;
+    },
     backtest: ({ args }) => {
       const first = String(args[0] || '').trim();
       const second = String(args[1] || '').trim();
