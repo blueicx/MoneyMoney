@@ -2045,7 +2045,7 @@ const TELEGRAM_HELP = [
   '/digest   查看或配置定时摘要',
   '/ops     查看自动化任务状态',
   '/strategies 查看 AI 模拟策略',
-  '/backtest   只读策略回测，例如 /backtest momentum 1234',
+  '/backtest   只读策略回测，例如 /backtest momentum 1234 或 /backtest compare 1234',
   '',
   '<b>工具与诊断</b>',
   '/export   查看最近模拟交易记录',
@@ -2357,6 +2357,26 @@ function getTelegramCommandHandlers(): Record<string, TelegramCommandHandler> {
         'mean-reversion': 'meanReversion',
       };
       const firstKey = first.toLowerCase();
+
+      if (firstKey === 'compare') {
+        const compareMarketIdInput = second;
+        const compareMarketId = /^\d+$/.test(compareMarketIdInput) ? parseInt(compareMarketIdInput, 10) : undefined;
+        if (compareMarketIdInput && compareMarketId == null) {
+          return '用法：/backtest compare [市场ID]\n只读查看策略对比，不会创建交易。';
+        }
+
+        const statsMom = backtester.runMomentumBacktest(10, 0.03, 5, 1000, compareMarketId);
+        const statsMr = backtester.runMeanReversionBacktest(10, 0.03, 5, 1000, compareMarketId);
+
+        if (statsMom.totalTrades === 0 && statsMr.totalTrades === 0) {
+           return `${compareMarketIdInput ? `市场 ${escapeTelegramHtml(compareMarketIdInput)}` : '当前范围'}暂无足够历史数据进行回测。`;
+        }
+
+        const formatStats = (s: any) => `${escapeTelegramHtml(s.strategyName)}: 收益 ${formatTelegramNumber(s.totalReturnPct, 2)}%, 胜率 ${formatTelegramNumber(s.winRate * 100, 1)}%, 最大回撤 ${formatTelegramNumber(s.maxDrawdownPct, 2)}%, Sharpe ${formatTelegramNumber(s.sharpeRatio, 2)}`;
+
+        return `<b>⚖️ 策略对比回测</b>\n范围：${compareMarketIdInput ? `市场 ${escapeTelegramHtml(compareMarketIdInput)}` : '全部市场'}\n${formatStats(statsMom)}\n${formatStats(statsMr)}`;
+      }
+
       const strategy = aliases[firstKey] || 'momentum';
       const firstIsMarketId = /^\d+$/.test(first);
       const marketIdInput = firstIsMarketId ? first : second;

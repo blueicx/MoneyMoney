@@ -19,4 +19,7 @@ test('Telegram backtest command covers default, aliases, market ID, and read-onl
   assert.match(server, /stats\.sharpeRatio/);
   assert.match(server, /只读策略回测/);
   assert.match(server, /不会创建交易/);
+  assert.match(server, /firstKey === 'compare'/);
+  assert.match(server, /策略对比回测/);
+  assert.match(server, /\/backtest compare 1234/);
 });
