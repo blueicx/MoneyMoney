@@ -4270,7 +4270,10 @@ app.get('/api/backtest', (req, res) => {
   const lookback = parseInt(req.query.lookback as string) || 10;
   const threshold = parseFloat(req.query.threshold as string) || 0.03;
   const holding = parseInt(req.query.holding as string) || 5;
-  const result = backtester.runMomentumBacktest(lookback, threshold, holding);
+  const strategy = String(req.query.strategy || 'momentum');
+  const result = strategy === 'meanReversion'
+    ? backtester.runMeanReversionBacktest(lookback, threshold, holding)
+    : backtester.runMomentumBacktest(lookback, threshold, holding);
   res.json({ success: true, data: result });
 });
 

@@ -1979,7 +1979,8 @@
 
       <!-- Backtest Tab -->
       <div id="backtest-tab" class="tab-content">
-        <div class="section-title">🧪 策略回测</div>
+        <div class="section-title">🧪 策略回测</div>
+        <label style="font-size:13px;display:inline-flex;align-items:center;gap:6px;margin-bottom:12px;">策略: <select id="bt-strategy" style="padding:4px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);"><option value="momentum">📈 动量</option><option value="meanReversion">↔️ 均值回归</option></select></label>
         <div style="display:flex;gap:12px;margin-bottom:20px;flex-wrap:wrap;align-items:center;">
           <label style="font-size:13px;">回看周期: <input type="number" id="bt-lookback" value="10" min="3" max="50" style="width:50px;padding:4px;border-radius:6px;border:1px solid var(--border);"></label>
           <label style="font-size:13px;">触发阈值: <input type="number" id="bt-threshold" value="0.03" step="0.01" min="0.01" max="0.2" style="width:60px;padding:4px;border-radius:6px;border:1px solid var(--border);"></label>
@@ -3739,14 +3740,15 @@ async function closePaperPosition(positionId, currentPrice) {
 
 // --- Backtest ---
 async function runBacktest() {
-  const lookback = document.getElementById('bt-lookback').value;
+  const strategy = document.getElementById('bt-strategy').value;
+  const lookback = document.getElementById('bt-lookback').value;
   const threshold = document.getElementById('bt-threshold').value;
   const holding = document.getElementById('bt-holding').value;
   const resultsEl = document.getElementById('backtest-results');
   resultsEl.innerHTML = "<div style=\"text-align:center;padding:20px;\">\u23F3 \u6B63\u5728\u8FD0\u884C\u56DE\u6D4B...</div>";
 
   try {
-    const res = await fetch(`/api/backtest?lookback=${lookback}&threshold=${threshold}&holding=${holding}`);
+    const res = await fetch(`/api/backtest?strategy=${encodeURIComponent(strategy)}&lookback=${lookback}&threshold=${threshold}&holding=${holding}`);
     const { data: r } = await res.json();
 
     if (r.totalTrades === 0) {

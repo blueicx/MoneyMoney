@@ -99,6 +99,29 @@ export class Backtester {
     holdingPeriodPoints: number = 5,
     startingBalance: number = 1000
   ): BacktestResult {
+    return this.runStrategyBacktest('momentum', lookbackPoints, threshold, holdingPeriodPoints, startingBalance);
+  }
+
+  /**
+   * Run a mean-reversion backtest on recorded YES/NO price history.
+   * A sharp move is faded instead of followed.
+   */
+  runMeanReversionBacktest(
+    lookbackPoints: number = 10,
+    threshold: number = 0.03,
+    holdingPeriodPoints: number = 5,
+    startingBalance: number = 1000
+  ): BacktestResult {
+    return this.runStrategyBacktest('meanReversion', lookbackPoints, threshold, holdingPeriodPoints, startingBalance);
+  }
+
+  private runStrategyBacktest(
+    strategy: 'momentum' | 'meanReversion',
+    lookbackPoints: number,
+    threshold: number,
+    holdingPeriodPoints: number,
+    startingBalance: number,
+  ): BacktestResult {
     const history = loadHistoryData();
     const trades: BacktestResult['trades'] = [];
     const equityCurve: Array<{ time: number; equity: number }> = [];
@@ -118,8 +141,13 @@ export class Backtester {
         const change = (currentPrice - pastPrice) / pastPrice;
 
         let action: 'BUY_YES' | 'BUY_NO' | null = null;
-        if (change > threshold) action = 'BUY_YES';
-        else if (change < -threshold) action = 'BUY_NO';
+        if (strategy === 'momentum') {
+          if (change > threshold) action = 'BUY_YES';
+          else if (change < -threshold) action = 'BUY_NO';
+        } else {
+          if (change < -threshold) action = 'BUY_YES';
+          else if (change > threshold) action = 'BUY_NO';
+        }
 
         if (!action || balance <= 0) continue;
 
@@ -161,7 +189,7 @@ export class Backtester {
     const avgHoldMin = times.length > 0 ? times.reduce((s, v) => s + v, 0) / times.length / 60000 : 0;
 
     return {
-      strategyName: 'Momentum',
+      strategyName: strategy === 'momentum' ? 'Momentum' : 'Mean Reversion',
       periodDays: this.getPeriodDays(equityCurve),
       totalTrades: trades.length,
       winningTrades: wins,
