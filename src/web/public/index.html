@@ -1957,13 +1957,13 @@
         <div class="section-title" style="margin-top:20px;">最近交易</div>
         <div id="paper-trades"></div>
         <div class="section-title" style="margin-top:24px;">🤖 AI 模拟跑单</div>
-        <p style="font-size:11.5px;color:var(--text-secondary);margin-bottom:10px;">设定金额，选一个币安交易对，AI 会自动用 RSI 策略模拟开平仓。独立账本，不影响手动模拟盘。</p>
+        <p style="font-size:11.5px;color:var(--text-secondary);margin-bottom:10px;">设定金额，选择币安交易对或预测市场，AI 会自动进行纸面模拟。独立账本，不影响手动模拟盘。</p>
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px;">
           <select id="ai-runner-venue" style="padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);font-size:12px;">
             <option value="Binance">🏦 币安</option>
-            <option value="Predict.fun" disabled>🎯 Predict.fun（即将支持）</option>
+            <option value="Predict.fun">🎯 Predict.fun</option>
           </select>
-          <input id="ai-runner-symbol" placeholder="如 BTCUSDT" style="width:120px;padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);font-size:12px;text-transform:uppercase;" />
+          <input id="ai-runner-symbol" placeholder="如 BTCUSDT / 市场ID" style="width:120px;padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);font-size:12px;text-transform:uppercase;" />
           <input id="ai-runner-budget" type="number" placeholder="预算 $" min="1" step="1" style="width:90px;padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);font-size:12px;" />
           <input id="ai-runner-max-trade" type="number" placeholder="单笔上限 $" min="1" step="1" style="width:92px;padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);font-size:12px;" />
           <input id="ai-runner-max-positions" type="number" placeholder="最大持仓" min="1" step="1" value="1" style="width:82px;padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);font-size:12px;" />

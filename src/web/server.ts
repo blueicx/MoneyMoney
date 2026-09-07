@@ -4091,8 +4091,30 @@ async function tickAllAiRunners(): Promise<Array<{ id: string; actionZh: string 
             rsi > 68 ? `RSI ${rsi.toFixed(0)} 超买` : '跌破 SMA10 止损');
           results.push({ id: runner.id, actionZh: `SELL @ ${price.toFixed(2)} PnL=${pnl?.toFixed(2) ?? '?'}` });
         }
+      } else if (runner.venue === 'Predict.fun') {
+        const radar = getCachedPredictionRadarSlice('', 240);
+        if (!radar) continue;
+        const market = radar?.markets.find(item => String(item.id) === String(runner.symbolOrMarketId));
+        if (!market) continue;
+
+        const price = Number(market.yesPrice);
+        const modelProbability = Number(market.modelProbability);
+        const edge = modelProbability - price;
+        const freshEnough = Boolean(radar.updatedAt)
+          && Date.now() - Date.parse(radar.updatedAt) <= runner.policy.minFreshnessMs;
+        if (!freshEnough || !Number.isFinite(price) || !Number.isFinite(modelProbability) || price <= 0 || price >= 1) continue;
+
+        const openPos = runner.positions.find(p => p.status === 'OPEN');
+        if (!openPos && edge >= 0.05 && runner.cashUsd > 5) {
+          const qty = Math.floor(runner.cashUsd * 0.95 / price * 1000) / 1000;
+          if (qty > 0 && runnerOpenPosition(runner.id, price, qty, 'YES', `模型概率高于市场价 ${(edge * 100).toFixed(1)}pp`)) {
+            results.push({ id: runner.id, actionZh: `YES ${qty} @ ${price.toFixed(3)} (edge=${(edge * 100).toFixed(1)}pp)` });
+          }
+        } else if (openPos && edge <= 0) {
+          const pnl = runnerClosePosition(runner.id, openPos.id, price, '模型优势消失');
+          results.push({ id: runner.id, actionZh: `SELL YES @ ${price.toFixed(3)} PnL=${pnl?.toFixed(2) ?? '?'}` });
+        }
       }
-      // Predict.fun tick can be added later with radar probability data.
     } catch { /* skip on error */ }
   }
 
