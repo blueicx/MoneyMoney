@@ -4046,6 +4046,35 @@ function getRunnerKlineAdapter(symbol: string): ResilientDataSourceAdapter<unkno
   return adapter;
 }
 
+const runnerStockKlineAdapters = new Map<string, ResilientDataSourceAdapter<unknown[][]>>();
+function getRunnerStockKlineAdapter(symbol: string): ResilientDataSourceAdapter<unknown[][]> {
+  const key = symbol.replace(/^us/i, '').split('.')[0].toUpperCase();
+  let adapter = runnerStockKlineAdapters.get(key);
+  if (!adapter) {
+    adapter = new ResilientDataSourceAdapter<unknown[][]>({
+      id: `stock-klines-${key}`,
+      group: 'ai-runner-market-data',
+      ttlMs: 60_000,
+      timeoutMs: 15_000,
+      retries: 2,
+      fetcher: async (_input, signal) => {
+        const response = await fetch(`https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=us${key}.OQ,day,,,40,qfq`, { signal });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const payload = await response.json() as any;
+        const dataKey = Object.keys(payload.data || {})[0];
+        const rows = dataKey ? (payload.data[dataKey].qfqday || payload.data[dataKey].day) : null;
+        if (!Array.isArray(rows) || !rows.length) throw new Error('股票 K 线为空');
+        return rows.map((row: unknown[]) => [
+          new Date(String(row[0])).getTime(),
+          Number(row[1]), Number(row[2]), Number(row[3]), Number(row[4]), Number(row[5]),
+        ]);
+      },
+    });
+    runnerStockKlineAdapters.set(key, adapter);
+  }
+  return adapter;
+}
+
 app.post('/api/ai-runners/stop', express.json(), (req, res) => {
   const { id } = req.body ?? {};
   const runner = id ? stopAiRunner(String(id)) : null;
@@ -4084,6 +4113,38 @@ async function tickAllAiRunners(): Promise<Array<{ id: string; actionZh: string 
           const qty = Math.floor(runner.cashUsd * 0.95 / price * 1000) / 1000;
           if (qty > 0) {
             runnerOpenPosition(runner.id, price, qty, 'LONG', `RSI ${rsi.toFixed(0)} 超卖，价格${aboveSma ? '在' : '低于'}SMA10`);
+            results.push({ id: runner.id, actionZh: `BUY ${qty} @ ${price.toFixed(2)} (RSI=${rsi.toFixed(0)})` });
+          }
+        } else if (openPos && (rsi > 68 || !aboveSma)) {
+          const pnl = runnerClosePosition(runner.id, openPos.id, price,
+            rsi > 68 ? `RSI ${rsi.toFixed(0)} 超买` : '跌破 SMA10 止损');
+          results.push({ id: runner.id, actionZh: `SELL @ ${price.toFixed(2)} PnL=${pnl?.toFixed(2) ?? '?'}` });
+        }
+      } else if (runner.venue === 'Stocks') {
+        const symbol = runner.symbolOrMarketId.replace(/^us/i, '').split('.')[0].toUpperCase();
+        if (!/^[A-Z]{1,6}$/.test(symbol)) continue;
+        const snapshot = await getRunnerStockKlineAdapter(symbol).fetch();
+        if (!snapshot.data) continue;
+        const closes = snapshot.data.map(k => Number(k[2])).filter(Number.isFinite);
+        if (closes.length < 15) continue;
+
+        let gains = 0, losses = 0;
+        for (let i = 1; i < 15; i++) {
+          const diff = closes[closes.length - i] - closes[closes.length - i - 1];
+          if (diff > 0) gains += diff; else losses += Math.abs(diff);
+        }
+        const rs = gains / (losses || 1e-9);
+        const rsi = 100 - 100 / (1 + rs);
+        const price = closes[closes.length - 1];
+        const sma10 = closes.slice(-10).reduce((a, b) => a + b, 0) / 10;
+        const aboveSma = price > sma10;
+        const openPos = runner.positions.find(p => p.status === 'OPEN');
+        const freshEnough = snapshot.status === 'fresh'
+          && Date.now() - Date.parse(snapshot.fetchedAt) <= runner.policy.minFreshnessMs;
+        if (!freshEnough || !Number.isFinite(price) || price <= 0) continue;
+        if (!openPos && rsi < 32 && runner.cashUsd > 5) {
+          const qty = Math.floor(runner.cashUsd * 0.95 / price * 1000) / 1000;
+          if (qty > 0 && runnerOpenPosition(runner.id, price, qty, 'LONG', `RSI ${rsi.toFixed(0)} 超卖，价格${aboveSma ? '在' : '低于'}SMA10`)) {
             results.push({ id: runner.id, actionZh: `BUY ${qty} @ ${price.toFixed(2)} (RSI=${rsi.toFixed(0)})` });
           }
         } else if (openPos && (rsi > 68 || !aboveSma)) {

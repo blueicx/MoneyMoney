@@ -12,7 +12,7 @@ import path from 'path';
 import { DATA_ROOT, ensureDir } from '../utils/paths';
 import { stateStore } from '../storage/sqlite-state';
 
-export type AiRunnerVenue = 'Binance' | 'Predict.fun';
+export type AiRunnerVenue = 'Binance' | 'Predict.fun' | 'Stocks';
 export type AiRunnerStatus = 'RUNNING' | 'STOPPED';
 
 export interface AiRunnerPolicy {
