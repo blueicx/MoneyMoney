@@ -97,9 +97,10 @@ export class Backtester {
     lookbackPoints: number = 10,
     threshold: number = 0.03,
     holdingPeriodPoints: number = 5,
-    startingBalance: number = 1000
+    startingBalance: number = 1000,
+    marketId?: number,
   ): BacktestResult {
-    return this.runStrategyBacktest('momentum', lookbackPoints, threshold, holdingPeriodPoints, startingBalance);
+    return this.runStrategyBacktest('momentum', lookbackPoints, threshold, holdingPeriodPoints, startingBalance, marketId);
   }
 
   /**
@@ -110,9 +111,10 @@ export class Backtester {
     lookbackPoints: number = 10,
     threshold: number = 0.03,
     holdingPeriodPoints: number = 5,
-    startingBalance: number = 1000
+    startingBalance: number = 1000,
+    marketId?: number,
   ): BacktestResult {
-    return this.runStrategyBacktest('meanReversion', lookbackPoints, threshold, holdingPeriodPoints, startingBalance);
+    return this.runStrategyBacktest('meanReversion', lookbackPoints, threshold, holdingPeriodPoints, startingBalance, marketId);
   }
 
   private runStrategyBacktest(
@@ -121,6 +123,7 @@ export class Backtester {
     threshold: number,
     holdingPeriodPoints: number,
     startingBalance: number,
+    marketId?: number,
   ): BacktestResult {
     const history = loadHistoryData();
     const trades: BacktestResult['trades'] = [];
@@ -131,6 +134,7 @@ export class Backtester {
     let returns: number[] = [];
 
     for (const [marketIdStr, market] of Object.entries(history)) {
+      if (marketId != null && marketIdStr !== String(marketId)) continue;
       const yesPrices = market.yes.map(p => p.p);
       const timestamps = market.yes.map(p => p.t);
       if (yesPrices.length < lookbackPoints + holdingPeriodPoints + 1) continue;
