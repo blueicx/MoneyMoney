@@ -6,6 +6,7 @@ const {
   alertDedupKey,
   isAlertSuppressed,
   evaluateUnifiedAlert,
+  triggerUnifiedAlerts,
   UnifiedAlertStore,
 } = require('../dist/features/unified-alerts');
 
@@ -29,5 +30,11 @@ assert.match(saved.id, /^uar_/);
 assert.equal(store.listRules().length, 1);
 assert.equal(store.removeRule(saved.id), true);
 assert.equal(store.listRules().length, 0);
+
+const triggerStore = new UnifiedAlertStore({ keyPrefix: 'test-unified-alert-trigger-' + Date.now() });
+const triggerRule = triggerStore.createRule({ ...rule, id: undefined, cooldownMinutes: 0 });
+const triggered = triggerUnifiedAlerts(triggerStore, [{ instrumentId: triggerRule.instrumentId, observation: { kind: 'price', value: 201, observedAt: '2026-09-08T01:00:00.000Z' } }], new Date('2026-09-08T01:00:00.000Z'));
+assert.equal(triggered.length, 1);
+assert.equal(triggerUnifiedAlerts(triggerStore, [{ instrumentId: triggerRule.instrumentId, observation: { kind: 'price', value: 201, observedAt: '2026-09-08T01:00:00.000Z' } }], new Date('2026-09-08T01:01:00.000Z')).length, 0);
 
 console.log('unified alert helpers: all assertions passed');

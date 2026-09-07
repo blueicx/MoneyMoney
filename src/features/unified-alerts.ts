@@ -118,6 +118,23 @@ export function evaluateUnifiedAlert(rule: UnifiedAlertRule, observation: Unifie
   return { matched, direction, message: matched ? `事件将在约 ${observation.minutesUntil} 分钟后发生` : '' };
 }
 
+export function triggerUnifiedAlerts(store: UnifiedAlertStore, observations: Array<{ instrumentId: string; observation: UnifiedAlertObservation }>, now = new Date()): UnifiedAlertHistory[] {
+  const created: UnifiedAlertHistory[] = [];
+  for (const rule of store.listRules()) {
+    if (isAlertSuppressed(rule, now)) continue;
+    const candidate = observations.find(item => item.instrumentId === rule.instrumentId && item.observation.kind === rule.kind);
+    if (!candidate) continue;
+    const result = evaluateUnifiedAlert(rule, candidate.observation);
+    if (!result.matched) continue;
+    const dedupKey = alertDedupKey(rule, candidate.observation);
+    if (store.listHistory(500).some(item => item.dedupKey === dedupKey)) continue;
+    const entry = store.appendHistory({ ruleId: rule.id, ownerId: rule.ownerId, instrumentId: rule.instrumentId, kind: rule.kind, dedupKey, direction: result.direction, channels: { ...rule.channels }, message: result.message, createdAt: now.toISOString() });
+    store.markTriggered(rule.id, now);
+    created.push(entry);
+  }
+  return created;
+}
+
 interface UnifiedAlertState { rules: UnifiedAlertRule[]; history: UnifiedAlertHistory[]; watchlist: string[] }
 
 export class UnifiedAlertStore {

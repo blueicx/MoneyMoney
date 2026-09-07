@@ -8941,18 +8941,33 @@ function renderInstrumentDetail(data) {
   if (!title || !sub || !content) return;
   title.textContent = instrument.title || instrument.symbol || '标的详情';
   sub.textContent = `${instrument.id || ''} · ${data.freshness?.status === 'fresh' ? '数据新鲜' : data.freshness?.status === 'stale' ? '数据可能过期' : '数据暂不可用'}`;
+  window.mm_currentInstrument = instrument;
+  const actions = window.mm_isGuest
+    ? '<span class="briefing-chip">访客模式：只读</span>'
+    : '<button class="tab active" onclick="addCurrentInstrumentToWatchlist()">⭐ 加入自选</button><button class="tab" onclick="showTab(\'alerts\');closeInstrumentDetail()">🔔 设置提醒</button><button class="tab" onclick="showTab(\'paper\');closeInstrumentDetail()">📈 模拟交易</button>';
   const quote = data.quote || data.marketData || {};
   const quoteEntries = Object.entries(quote).filter(([key]) => ['symbol','price','change24hPct','changePct','yesPrice','noPrice','modelProbability','high24h','low24h'].includes(key));
   const sourceRows = Object.entries(data.sourceStatus || {}).map(([key, value]) => `<span class="briefing-chip">${instrumentDetailEscape(key)} · ${value === 'ok' ? '正常' : value === 'stale' ? '过期' : '不可用'}</span>`).join('');
   const eventRows = (data.events || []).slice(0, 6).map(item => `<div style="padding:8px 0;border-bottom:1px solid var(--border);"><strong>${instrumentDetailEscape(item.titleZh || item.title)}</strong><div style="font-size:11px;color:var(--text-secondary);">${instrumentDetailEscape(item.date)} · ${instrumentDetailEscape(item.impact)}${item.actual ? ` · 结果 ${instrumentDetailEscape(item.actual)}` : ''}</div></div>`).join('') || '<div style="color:var(--text-secondary);">暂无事件</div>';
   const newsRows = (data.news || []).slice(0, 6).map(item => `<div style="padding:8px 0;border-bottom:1px solid var(--border);"><a href="${instrumentDetailEscape(item.url || '#')}" target="_blank" rel="noreferrer">${instrumentDetailEscape(item.title)}</a><div style="font-size:11px;color:var(--text-secondary);">${instrumentDetailEscape(item.source)} · ${instrumentDetailEscape(item.publishedAt)}</div></div>`).join('') || '<div style="color:var(--text-secondary);">暂无相关新闻</div>';
-  content.innerHTML = `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;">${quoteEntries.map(([key, value]) => `<span class="briefing-chip">${instrumentDetailEscape(key)} <strong>${instrumentDetailEscape(typeof value === 'number' ? Number(value).toFixed(4) : value)}</strong></span>`).join('')}</div>
+  content.innerHTML = `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;">${actions}</div><div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;">${quoteEntries.map(([key, value]) => `<span class="briefing-chip">${instrumentDetailEscape(key)} <strong>${instrumentDetailEscape(typeof value === 'number' ? Number(value).toFixed(4) : value)}</strong></span>`).join('')}</div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;">${sourceRows}</div>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px;">
       <section class="glass-card" style="padding:14px;"><strong>🧠 AI 分析</strong><p style="white-space:pre-wrap;line-height:1.6;margin-top:8px;color:var(--text-secondary);">${instrumentDetailEscape(data.analysis?.text || '暂不可用')}</p></section>
       <section class="glass-card" style="padding:14px;"><strong>📅 事件</strong><div style="margin-top:8px;">${eventRows}</div></section>
       <section class="glass-card" style="padding:14px;"><strong>📰 新闻</strong><div style="margin-top:8px;">${newsRows}</div></section>
     </div>`;
+}
+
+async function addCurrentInstrumentToWatchlist() {
+  const instrument = window.mm_currentInstrument;
+  if (!instrument?.id) return;
+  try {
+    const response = await fetch('/api/watchlist', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ instrumentId: instrument.id }) });
+    const body = await response.json();
+    if (!body.success) throw new Error(body.error || '加入自选失败');
+    if (typeof window.showToast === 'function') window.showToast('已加入统一自选', 'success');
+  } catch (error) { if (typeof window.showToast === 'function') window.showToast(error.message || '加入自选失败', 'error'); }
 }
 
 async function openUnifiedInstrument(instrument) {

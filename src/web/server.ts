@@ -86,7 +86,7 @@ import { calculatePredictionPosition } from '../features/prediction-position-siz
 import { aiCommentaryConfigured, getAiMarketCommentary } from '../features/ai-commentary';
 import { getAiConfigurationStatus, testAiConnection, type AiChain } from '../features/ai-runtime-config';
 import { unifiedInstrumentService, normalizeInstrumentRef, type InstrumentType } from '../features/unified-instruments';
-import { unifiedAlertStore } from '../features/unified-alerts';
+import { unifiedAlertStore, triggerUnifiedAlerts } from '../features/unified-alerts';
 import { buildPortfolioRiskOverview } from '../features/risk-overview';
 import { getRiskHistory, recordRiskHistory } from '../features/risk-history';
 import { buildDailyResearchBriefing } from '../features/research-briefing';
@@ -101,6 +101,7 @@ import { createLoginToken, verifyLoginToken, createLoginRateLimiter, extractAuth
 import { isDefaultLoginCredentials, isJwtSecretDefault } from '../config';
 import { stateStore, getStorageHealth } from '../storage/sqlite-state';
 import { paperTradingExecutor } from '../features/trading-executor';
+import { unifiedPaperLedgerStore, calculateUnifiedPerformance, replayUnifiedPaperOrders, type UnifiedPaperOrder } from '../features/unified-paper-trading';
 import { logger } from '../utils/logger';
 import { curlCommand } from '../utils/platform-command';
 import {
@@ -3274,6 +3275,42 @@ async function monitorTelegramPriceAlerts(): Promise<void> {
   }
 }
 
+async function monitorUnifiedAlertRules(): Promise<void> {
+  const rules = unifiedAlertStore.listRules().filter(rule => rule.enabled);
+  if (!rules.length) return;
+  const radar = getCachedPredictionRadarSlice('', 240);
+  const calendar = await getUpcomingEventCalendar(2).catch(() => null);
+  const news = await newsFeed.getNews().catch(() => []);
+  const observations: Array<{ instrumentId: string; observation: any }> = [];
+  for (const rule of rules) {
+    if (rule.kind === 'price') {
+      let price: number | undefined;
+      if (rule.instrumentId.startsWith('crypto:binance:')) price = (await binanceFeed.getPrice(rule.instrumentId.split(':').pop() || ''))?.price;
+      else if (rule.instrumentId.startsWith('prediction:')) price = radar?.markets.find(item => String(item.id) === rule.instrumentId.split(':').pop())?.yesPrice;
+      else price = Number((await unifiedInstrumentService.overview({ id: rule.instrumentId, type: 'stock', venue: 'us', symbol: rule.instrumentId.split(':').pop() || '', title: '', aliases: [] })).quote?.price);
+      if (price != null && Number.isFinite(price)) observations.push({ instrumentId: rule.instrumentId, observation: { kind: 'price', value: price, observedAt: new Date().toISOString() } });
+    } else if (rule.kind === 'event') {
+      const event = calendar?.events.filter(item => item.impact === 'high').sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())[0];
+      if (event) observations.push({ instrumentId: rule.instrumentId, observation: { kind: 'event', minutesUntil: (new Date(event.date).getTime() - Date.now()) / 60_000, title: event.titleZh || event.title, actual: event.actual, forecast: event.forecast, observedAt: new Date().toISOString() } });
+    } else {
+      const hit = news.find(item => rule.condition.keywords?.some(keyword => `${item.title} ${item.source}`.toLowerCase().includes(String(keyword).toLowerCase())));
+      if (hit) observations.push({ instrumentId: rule.instrumentId, observation: { kind: 'news', title: hit.title, content: hit.source, value: hit.sentimentScore, observedAt: hit.publishedAt } });
+    }
+  }
+  const triggered = triggerUnifiedAlerts(unifiedAlertStore, observations);
+  if (!triggered.length) return;
+  const telegramConfig = getRuntimeTelegramConfig();
+  const chats = parseChatIds(telegramConfig.allowedChatIds, telegramConfig.chatId);
+  for (const entry of triggered) {
+    const direction = entry.direction === 'bullish' ? '偏利好' : entry.direction === 'bearish' ? '偏利空' : entry.direction === 'neutral' ? '中性/无法判断' : entry.direction;
+    const message = `🔔 ${entry.message} · ${direction} · ${entry.instrumentId}`;
+    if (entry.channels.web) pushNotification('alert', message);
+    if (entry.channels.telegram && telegramInteractionBot) {
+      for (const chatId of chats) await telegramInteractionBot.sendToChat(chatId, telegramReply(escapeTelegramHtml(message))).catch(() => {});
+    }
+  }
+}
+
 async function monitorTelegramSlowAlerts(): Promise<void> {
   if (!telegramInteractionBot) return;
   const telegramConfig = getRuntimeTelegramConfig();
@@ -3308,7 +3345,7 @@ async function monitorTelegramSlowAlerts(): Promise<void> {
 
 function startTelegramCommandCenterMonitor(): void {
   if (!telegramInteractionBot) return;
-  if (!telegramPriceMonitor) telegramPriceMonitor = setInterval(() => { void monitorTelegramPriceAlerts().catch(() => {}); }, 60_000);
+  if (!telegramPriceMonitor) telegramPriceMonitor = setInterval(() => { void Promise.all([monitorTelegramPriceAlerts(), monitorUnifiedAlertRules()]).catch(() => {}); }, 60_000);
   if (!telegramDigestMonitor) telegramDigestMonitor = setInterval(() => { void monitorTelegramDigests().catch(() => {}); }, 60_000);
   if (!telegramEventMonitor) telegramEventMonitor = setInterval(() => { void monitorTelegramEventAlerts().catch(() => {}); }, 60_000);
   if (!telegramSlowMonitor) telegramSlowMonitor = setInterval(() => { void Promise.all([monitorTelegramSlowAlerts(), monitorTelegramSmartAlerts()]).catch(() => {}); }, 10 * 60_000);
@@ -3803,6 +3840,30 @@ app.post('/api/notifications/mark-read', (req, res) => {
 });
 
 // --- Paper Trading APIs ---
+
+// Canonical cross-asset paper ledger. Legacy prediction-market endpoints below
+// remain untouched for existing clients and stored portfolios.
+app.get('/api/paper/ledger', (_req, res) => res.json({ success: true, data: unifiedPaperLedgerStore.get() }));
+app.get('/api/paper/positions', (_req, res) => res.json({ success: true, data: unifiedPaperLedgerStore.get().positions }));
+app.get('/api/paper/performance', (_req, res) => res.json({ success: true, data: unifiedPaperLedgerStore.performance() }));
+app.post('/api/paper/orders', (req, res) => {
+  try {
+    const body = req.body || {};
+    const order: UnifiedPaperOrder = {
+      instrumentId: String(body.instrumentId || ''), instrumentType: body.instrumentType, title: String(body.title || ''), side: body.side,
+      price: Number(body.price), quantity: Number(body.quantity), timestamp: String(body.timestamp || new Date().toISOString()), strategy: body.strategy ? String(body.strategy) : undefined, reason: body.reason ? String(body.reason) : undefined,
+    };
+    const ledger = unifiedPaperLedgerStore.apply(order);
+    res.status(201).json({ success: true, data: { order, ledger, performance: calculateUnifiedPerformance(ledger) } });
+  } catch (error: any) { res.status(400).json({ success: false, error: error?.message || '统一模拟订单无效' }); }
+});
+app.post('/api/paper/replay', (req, res) => {
+  try {
+    const ledger = replayUnifiedPaperOrders({ startingCash: Number(req.body?.startingCash) || 1000, orders: Array.isArray(req.body?.orders) ? req.body.orders : [], prices: req.body?.prices });
+    res.json({ success: true, data: { ledger, performance: calculateUnifiedPerformance(ledger) } });
+  } catch (error: any) { res.status(400).json({ success: false, error: error?.message || '复盘失败' }); }
+});
+app.post('/api/paper/unified/reset', (req, res) => res.json({ success: true, data: unifiedPaperLedgerStore.reset(Number(req.body?.startingCash) || 1000) }));
 
 app.get('/api/paper/portfolio', (req, res) => {
   res.json({ success: true, data: paperEngine.getPortfolio() });
