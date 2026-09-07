@@ -8,6 +8,8 @@ const runner = fs.readFileSync('src/features/ai-paper-runner.ts', 'utf8');
 assert.match(html, /<option value="Predict\.fun">[^<]*Predict\.fun/);
 assert.match(html, /<option value="Stocks">[^<]*(?:美股|Stocks)/);
 assert.match(html, /startAiRunnerFromInstrument/);
+assert.match(html, /id="ai-runners-summary"/);
+assert.match(html, /syncAiRunnerVenueHint/);
 assert.doesNotMatch(html, /<option value="Predict\.fun" disabled>/);
 assert.match(server, /runner\.venue === 'Stocks'/);
 assert.match(server, /runner\.venue === 'Predict\.fun'/);
