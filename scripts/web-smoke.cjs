@@ -12,10 +12,10 @@ let output = '';
 child.stdout.on('data', data => { output += data.toString(); });
 child.stderr.on('data', data => { output += data.toString(); });
 
-function request(method, pathname, payload) {
+function request(method, pathname, payload, headers = {}) {
   return new Promise((resolve, reject) => {
     const body = payload == null ? '' : JSON.stringify(payload);
-    const request = http.request({ host: '127.0.0.1', port, path: pathname, method, timeout: 5000, headers: body ? { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) } : {} }, response => {
+    const request = http.request({ host: '127.0.0.1', port, path: pathname, method, timeout: 5000, headers: { ...headers, ...(body ? { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) } : {}) } }, response => {
       let body = ''; response.setEncoding('utf8'); response.on('data', chunk => { body += chunk; });
       response.on('end', () => resolve({ status: response.statusCode, body }));
     });
@@ -37,19 +37,29 @@ const get = pathname => request('GET', pathname);
     if (!live || live.status !== 200) throw new Error(`server did not start\n${output}`);
     const health = await get('/api/health');
     if (health.status !== 200 || !JSON.parse(health.body).ok) throw new Error(`health failed: ${health.status} ${health.body}`);
-    const home = await get('/');
+    const unauthHome = await get('/');
+    if (unauthHome.status !== 302 || !String(unauthHome.body).includes('/login?next=')) throw new Error(`login gate redirect failed: ${unauthHome.status}`);
+    const unauthSettings = await get('/api/settings');
+    if (unauthSettings.status !== 401) throw new Error(`unauthenticated API was not rejected: ${unauthSettings.status}`);
+    const login = await request('POST', '/api/auth/login', { username: 'admin', password: 'admin123' });
+    const loginBody = JSON.parse(login.body);
+    if (login.status !== 200 || !loginBody.success || !loginBody.token) throw new Error(`login failed: ${login.status} ${login.body}`);
+    const authHeaders = { Authorization: `Bearer ${loginBody.token}` };
+    const authedGet = pathname => request('GET', pathname, null, authHeaders);
+    const authedRequest = (method, pathname, payload) => request(method, pathname, payload, authHeaders);
+    const home = await authedGet('/');
     if (home.status !== 200 || !home.body.includes('AI 模型接口') || !home.body.includes('testAiProvider')) throw new Error(`AI settings UI missing: ${home.status}`);
-    const settings = await get('/api/settings');
+    const settings = await authedGet('/api/settings');
     const settingsBody = JSON.parse(settings.body);
     if (settings.status !== 200 || !settingsBody.ai?.openrouter || !settingsBody.ai?.groq) throw new Error(`AI settings status failed: ${settings.status} ${settings.body}`);
     if ('apiKey' in settingsBody.ai.openrouter || 'apiKey' in settingsBody.ai.groq) throw new Error('AI settings leaked an API key');
-    const secretAttempt = await request('POST', '/api/settings', { openRouterApiKey: 'smoke-secret', groqApiKey: 'smoke-secret' });
+    const secretAttempt = await authedRequest('POST', '/api/settings', { openRouterApiKey: 'smoke-secret', groqApiKey: 'smoke-secret' });
     if (secretAttempt.status !== 200) throw new Error(`AI settings whitelist failed: ${secretAttempt.status} ${secretAttempt.body}`);
-    const settingsAfterSecretAttempt = JSON.parse((await get('/api/settings')).body);
+    const settingsAfterSecretAttempt = JSON.parse((await authedGet('/api/settings')).body);
     if ('openRouterApiKey' in settingsAfterSecretAttempt.data || 'groqApiKey' in settingsAfterSecretAttempt.data) throw new Error('AI settings persisted an API key');
-    const invalidAiTest = await request('POST', '/api/ai/test', { chain: 'invalid' });
+    const invalidAiTest = await authedRequest('POST', '/api/ai/test', { chain: 'invalid' });
     if (invalidAiTest.status !== 400) throw new Error(`AI test validation failed: ${invalidAiTest.status} ${invalidAiTest.body}`);
-    const realStatus = await get('/api/real-trading/status');
+    const realStatus = await authedGet('/api/real-trading/status');
     if (realStatus.status !== 200 || JSON.parse(realStatus.body).data.enabled !== false) throw new Error(`real trading boundary failed: ${realStatus.status} ${realStatus.body}`);
     console.log('Web smoke passed: health, AI settings redaction, AI test validation, and real-trading disabled boundary');
   } finally {

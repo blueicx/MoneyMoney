@@ -6,6 +6,8 @@
  * public endpoints are used only for research, ranking, and screening.
  */
 
+import { curlCommand } from '../utils/platform-command';
+
 export interface PredictionMarket {
   platform: 'Polymarket' | 'Kalshi' | 'Manifold' | 'Good Judgment Open' | 'Metaculus';
   id: string;
@@ -124,7 +126,7 @@ async function getJson(url: string, timeoutMs = 10_000): Promise<any> {
 }
 
 function getCurlJson(url: string): Promise<any> {
-  const command = process.platform === 'win32' ? 'curl.exe' : 'curl';
+  const command = curlCommand();
   return new Promise((resolve, reject) => {
     execFile(
       command,

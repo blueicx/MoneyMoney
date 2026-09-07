@@ -9,6 +9,7 @@
 
 import { execFile } from 'child_process';
 import { promisify } from 'util';
+import { curlCommand } from '../utils/platform-command';
 
 export interface InstitutionalPositionGroup {
   label: string;
@@ -162,7 +163,7 @@ async function requestSnapshot(symbolInput: string): Promise<InstitutionalOwners
   const url = `https://api.nasdaq.com/api/company/${encodeURIComponent(symbol)}/institutional-holdings?limit=12`;
   // System curl passes where Node's fetch is sometimes challenged by Nasdaq.
   const { stdout } = await execFileAsync(
-    'curl.exe',
+    curlCommand(),
     [
       '--fail', '--silent', '--show-error', '--max-time', '18',
       '-A', USER_AGENT,

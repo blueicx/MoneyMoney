@@ -9,6 +9,7 @@
 
 import { execFile } from 'child_process';
 import { promisify } from 'util';
+import { curlCommand } from '../utils/platform-command';
 
 export type AnalystConsensusSignal =
   | 'strong-buy'
@@ -326,7 +327,7 @@ function extractCompany(rawHtml: string, symbol: string): { name: string; nameFu
 
 async function fetchTencentQuote(symbol: string): Promise<{ price: number; officialName: string }> {
   const { stdout } = await execFileAsync(
-    'curl.exe',
+    curlCommand(),
     [
       '--fail', '--silent', '--show-error', '--max-time', '12',
       '-A', USER_AGENT,
@@ -463,7 +464,7 @@ async function requestSnapshot(symbolInput: string): Promise<AnalystConsensusSna
   const symbol = normalizeSymbol(symbolInput);
   const url = `https://stockanalysis.com/stocks/${encodeURIComponent(symbol.toLowerCase())}/forecast/`;
   const { stdout: rawHtml } = await execFileAsync(
-    'curl.exe',
+    curlCommand(),
     [
       '--fail', '--silent', '--show-error', '--max-time', '18',
       '-A', USER_AGENT,

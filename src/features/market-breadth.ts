@@ -7,6 +7,7 @@
 
 import { execFile } from 'child_process';
 import { promisify } from 'util';
+import { curlCommand } from '../utils/platform-command';
 
 export interface MarketBreadthRow {
   symbol: string;
@@ -193,7 +194,7 @@ async function requestSnapshot(): Promise<MarketBreadthSnapshot> {
   // Node fetch is sometimes challenged here, while Windows system curl passes.
   // The full screener is roughly 2MB, so maxBuffer needs ample headroom.
   const { stdout } = await execFileAsync(
-    'curl.exe',
+    curlCommand(),
     [
       '--fail', '--silent', '--show-error', '--max-time', '20',
       '-A', USER_AGENT,

@@ -480,7 +480,7 @@ app.get('/api/heatmap', async (req, res) => {
     // Get top coins by volume
     const movers = await binanceFeed.getTopMovers();
     const all = [...movers.gainers, ...movers.losers];
-    
+
     // Also get specific popular coins
     const popular = ['BTCUSDT','ETHUSDT','BNBUSDT','SOLUSDT','XRPUSDT','DOGEUSDT','ADAUSDT','AVAXUSDT','DOTUSDT','LINKUSDT','MATICUSDT','UNIUSDT'];
     const tickers: any[] = [];
@@ -488,7 +488,7 @@ app.get('/api/heatmap', async (req, res) => {
       const t = await binanceFeed.getPrice(sym);
       if (t) tickers.push({ symbol: sym, changePct: t.change24hPct, price: t.price, volumeUsd: Math.round(t.volume24hUsd) });
     }));
-    
+
     const result = { heatmap: tickers, movers: all };
     setCached('heatmap', result);
     res.json({ success: true, data: result });
@@ -516,7 +516,7 @@ app.post('/api/binance/paper-trade', async (req, res) => {
     const { symbol, side, amountUsd } = req.body;
     const ticker = await binanceFeed.getPrice(symbol);
     if (!ticker) { res.json({ success: false, message: '无法获取价格' }); return; }
-    
+
     const pos: CryptoPaperPosition = {
       id: 'cp_' + Date.now(),
       symbol,
@@ -528,7 +528,7 @@ app.post('/api/binance/paper-trade', async (req, res) => {
     };
     cryptoPositions.unshift(pos);
     if (cryptoPositions.length > 50) cryptoPositions.pop();
-    
+
     pushNotification('trade', `模拟${side === 'BUY' ? '买入' : '卖出'} ${symbol} @ ${ticker.price}`);
     res.json({ success: true, data: pos });
   } catch (e: any) {
@@ -542,7 +542,7 @@ app.get('/api/binance/paper-positions', async (req, res) => {
       cryptoPositions.map(async (pos) => {
         const t = await binanceFeed.getPrice(pos.symbol);
         const currentPrice = t?.price || pos.entryPrice;
-        const pnl = pos.side === 'BUY' 
+        const pnl = pos.side === 'BUY'
           ? (currentPrice - pos.entryPrice) * pos.quantity
           : (pos.entryPrice - currentPrice) * pos.quantity;
         return { ...pos, currentPrice, pnl: Math.round(pnl * 100) / 100 };
@@ -913,7 +913,7 @@ app.get('/api/stock/quotes', async (req, res) => {
     const stocks = await sanitizeUsQuoteNames(text.split(';')
       .map(s => parseTencentStock(s.trim()))
       .filter(Boolean));
-    
+
     if (stocks.length) setCached(cacheKey, stocks);
     res.json({ success: true, data: stocks });
   } catch (e: any) {
@@ -925,7 +925,7 @@ app.get('/api/stock/indices', async (req, res) => {
   try {
     const cached = getCached('stockIndices');
     if (cached) return res.json({ success: true, data: cached });
-    
+
     // Major indices
     const indices = 'sh000001,sz399001,hkHSI,usDJI,usIXIC,usINX';
     const url = `https://qt.gtimg.cn/q=${indices}`;
@@ -933,7 +933,7 @@ app.get('/api/stock/indices', async (req, res) => {
     const stocks = await sanitizeUsQuoteNames(text.split(';')
       .map(s => parseTencentStock(s.trim()))
       .filter(Boolean));
-    
+
     if (stocks.length) setCached('stockIndices', stocks);
     res.json({ success: true, data: stocks });
   } catch (e: any) {
@@ -1059,7 +1059,7 @@ app.get('/api/stock/search', async (req, res) => {
       { code: 'hk00700', name: '00700', nameCN: '腾讯控股', market: '港股' },
       { code: 'hkHSI', name: 'HSI', nameCN: '恒生指数', market: '港股' },
     ];
-    
+
     const query = q.toUpperCase();
     const results = db.filter(s =>
       s.code.toUpperCase().includes(query) ||
@@ -1085,7 +1085,7 @@ app.get('/api/stock/search', async (req, res) => {
       res.json({ success: true, data: merged });
       return;
     }
-    
+
     res.json({ success: true, data: results });
   } catch (e: any) {
     res.json({ success: false, error: e.message, data: [] });
@@ -1147,7 +1147,7 @@ app.get('/api/stock/kline', async (req, res) => {
     const symbol = String(req.query.symbol || 'sh600519');
     const rawApiSymbol = String(req.query.api || '').trim().toUpperCase();
     const days = parseInt(String(req.query.days || '30'));
-    
+
     // Search supplies the actual Tencent exchange suffix; older clients fall
     // back to Nasdaq, which still covers the popular default list.
     const normalizedApiSymbol = rawApiSymbol && !rawApiSymbol.startsWith('US')
@@ -1156,20 +1156,20 @@ app.get('/api/stock/kline', async (req, res) => {
     const apiSymbol = normalizedApiSymbol ||
       (symbol.startsWith('us') && !symbol.includes('.') ? symbol + '.OQ' : symbol);
     const url = `https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=${apiSymbol},day,,,${days},qfq`;
-    
+
     const cached = getCached('kline:' + symbol);
     if (cached) return res.json({ success: true, data: cached });
-    
+
     const response = await fetch(url, { signal: AbortSignal.timeout(15000) });
     if (!response.ok) throw new Error('API failed');
-    
+
     const json: any = await response.json();
     const dataKey = Object.keys(json.data || {})[0];
     if (!dataKey) throw new Error('No data');
-    
+
     const raw = json.data[dataKey].qfqday || json.data[dataKey].day;
     if (!raw?.length) throw new Error('Empty');
-    
+
     const klines = raw.map((k: string[]) => ({
       time: new Date(k[0]).getTime(),
       open: parseFloat(k[1]),
@@ -1178,7 +1178,7 @@ app.get('/api/stock/kline', async (req, res) => {
       low: parseFloat(k[4]),
       volume: parseFloat(k[5]) || 0,
     }));
-    
+
     setCached('kline:' + symbol, klines);
     res.json({ success: true, data: klines });
   } catch (e: any) {
@@ -1192,19 +1192,19 @@ app.get('/api/defi/tvl', async (req, res) => {
   try {
     const cached = getCached('defiTvl');
     if (cached) return res.json({ success: true, data: cached });
-    
+
     const response = await fetch('https://api.llama.fi/v2/historicalChainTvl', {
       signal: AbortSignal.timeout(15000)
     });
     if (!response.ok) throw new Error('API failed');
-    
+
     const data: any[] = await response.json() as any[];
     // Get last 30 days
     const recent = data.slice(-30).map((d: any) => ({
       date: d.date,
       tvl: Math.round(d.tvl),
     }));
-    
+
     setCached('defiTvl', recent);
     res.json({ success: true, data: recent });
   } catch (e: any) {
@@ -1216,12 +1216,12 @@ app.get('/api/defi/protocols', async (req, res) => {
   try {
     const cached = getCached('defiProtocols');
     if (cached) return res.json({ success: true, data: cached });
-    
+
     const response = await fetch('https://api.llama.fi/protocols', {
       signal: AbortSignal.timeout(20000)
     });
     if (!response.ok) throw new Error('API failed');
-    
+
     const all: any[] = await response.json() as any[];
     const top = all
       .filter((p: any) => p.tvl > 0)
@@ -1233,7 +1233,7 @@ app.get('/api/defi/protocols', async (req, res) => {
         chain: p.chain || 'Multi-chain',
         category: p.category || 'Other',
       }));
-    
+
     setCached('defiProtocols', top);
     res.json({ success: true, data: top });
   } catch (e: any) {
@@ -1601,15 +1601,15 @@ app.get('/api/macro/btc-chain', async (req, res) => {
   try {
     const cached = getCached('btcChain');
     if (cached) return res.json({ success: true, data: cached });
-    
+
     const [heightRes, diffRes] = await Promise.all([
       fetch('https://mempool.space/api/blocks/tip/height', { signal: AbortSignal.timeout(8000) }),
       fetch('https://mempool.space/api/v1/difficulty-adjustment', { signal: AbortSignal.timeout(8000) })
     ]);
-    
+
     const height = heightRes.ok ? parseInt(await heightRes.text()) : 0;
     const diffData = diffRes.ok ? await diffRes.json() as any : null;
-    
+
     const result = {
       blockHeight: height,
       difficultyChangePct: diffData ? Math.round((diffData.difficultyChange || 0) * 100) / 100 : 0,
@@ -1626,20 +1626,20 @@ app.get('/api/macro/commodities', async (req, res) => {
   try {
     const cached = getCached('commodities');
     if (cached) return res.json({ success: true, data: cached });
-    
+
     const response = await fetch(
       'https://hq.sinajs.cn/list=hf_CL,hf_SI,hf_GC,hf_NG',
       { headers: { Referer: 'https://finance.sina.com.cn' }, signal: AbortSignal.timeout(8000) }
     );
     if (!response.ok) throw new Error('API failed');
-    
+
     const text = await response.text();
     const parsePrice = (name: string): number => {
       const re = new RegExp(name + '="([0-9.]+)');
       const m = text.match(re);
       return m ? parseFloat(m[1]) : 0;
     };
-    
+
     const result = {
       crudeOil: parsePrice('hf_CL'),
       naturalGas: parsePrice('hf_NG'),
@@ -1705,7 +1705,7 @@ app.get('/api/binance/volume-ranking', async (req, res) => {
     if (entry && Date.now() - entry.ts < 300000) {
       return res.json({ success: true, data: entry.data });
     }
-    
+
     // Predefined top 50 USDT pairs - much faster than fetching all 3684
     const topPairs = [
       'BTCUSDT','ETHUSDT','SOLUSDT','XRPUSDT','BNBUSDT',
@@ -1714,7 +1714,7 @@ app.get('/api/binance/volume-ranking', async (req, res) => {
       'APTUSDT','ARBUSDT','OPUSDT','INJUSDT','SUIUSDT',
       'PEPEUSDT','SHIBUSDT','FLOKIUSDT','BONKUSDT','WIFUSDT'
     ];
-    
+
     // Fetch in parallel batches of 10
     const results: any[] = [];
     for (let i = 0; i < topPairs.length; i += 10) {
@@ -1737,10 +1737,10 @@ app.get('/api/binance/volume-ranking', async (req, res) => {
       );
       results.push(...batchResults.filter(Boolean));
     }
-    
+
     // Sort by volume descending
     results.sort((a, b) => b.volumeUsd - a.volumeUsd);
-    
+
     responseCache.set('volRankV2', { data: results, ts: Date.now() });
     res.json({ success: true, data: results });
   } catch (e: any) {
@@ -1787,16 +1787,16 @@ app.get('/api/crypto-news-decrypt', async (req, res) => {
   try {
     const cached = getCached('decryptNews');
     if (cached) return res.json({ success: true, data: cached });
-    
+
     const response = await fetch('https://decrypt.co/feed', {
       signal: AbortSignal.timeout(10000),
       headers: { 'User-Agent': 'Mozilla/5.0' },
     });
     if (!response.ok) throw new Error('RSS failed');
-    
+
     const xml = await response.text();
     const items = parseRssItems(xml, 10);
-    
+
     setCached('decryptNews', items);
     res.json({ success: true, data: items });
   } catch (e: any) {
@@ -1809,16 +1809,16 @@ app.get('/api/crypto-news-btc-mag', async (req, res) => {
   try {
     const cached = getCached('btcMagNews');
     if (cached) return res.json({ success: true, data: cached });
-    
+
     const response = await fetch('https://bitcoinmagazine.com/feed', {
       signal: AbortSignal.timeout(10000),
       headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36', 'Accept': 'application/rss+xml, application/xml, text/xml, */*', 'Accept-Language': 'en-US,en;q=0.9' },
     });
     if (!response.ok) throw new Error('RSS failed');
-    
+
     const xml = await response.text();
     const items = parseRssItems(xml, 8);
-    
+
     setCached('btcMagNews', items);
     res.json({ success: true, data: items });
   } catch (e: any) {
@@ -2045,7 +2045,7 @@ const TELEGRAM_HELP = [
   '/digest   查看或配置定时摘要',
   '/ops     查看自动化任务状态',
   '/strategies 查看 AI 模拟策略',
-  '/backtest   运行策略回测，例如 /backtest momentum 1234',
+  '/backtest   只读策略回测，例如 /backtest momentum 1234',
   '',
   '<b>工具与诊断</b>',
   '/export   查看最近模拟交易记录',
@@ -2346,6 +2346,35 @@ function getTelegramCommandHandlers(): Record<string, TelegramCommandHandler> {
     menu_page: () => telegramReply('当前菜单页。'),
     start: () => `${TELEGRAM_HELP}\n\n已连接。发送 /help 查看命令。`,
     help: () => TELEGRAM_HELP,
+    backtest: ({ args }) => {
+      const first = String(args[0] || '').trim();
+      const second = String(args[1] || '').trim();
+      const aliases: Record<string, 'momentum' | 'meanReversion'> = {
+        momentum: 'momentum',
+        mean: 'meanReversion',
+        mr: 'meanReversion',
+        meanreversion: 'meanReversion',
+        'mean-reversion': 'meanReversion',
+      };
+      const firstKey = first.toLowerCase();
+      const strategy = aliases[firstKey] || 'momentum';
+      const firstIsMarketId = /^\d+$/.test(first);
+      const marketIdInput = firstIsMarketId ? first : second;
+      const hasUnsupportedStrategy = Boolean(first) && !firstIsMarketId && !aliases[firstKey];
+      const marketId = /^\d+$/.test(marketIdInput) ? parseInt(marketIdInput, 10) : undefined;
+
+      if (hasUnsupportedStrategy || (marketIdInput && marketId == null)) {
+        return '用法：/backtest [momentum|meanReversion] [市场ID]\n只读查看策略回测，不会创建交易。';
+      }
+
+      const stats = strategy === 'meanReversion'
+        ? backtester.runMeanReversionBacktest(10, 0.03, 5, 1000, marketId)
+        : backtester.runMomentumBacktest(10, 0.03, 5, 1000, marketId);
+
+      if (stats.totalTrades === 0) return `${marketIdInput ? `市场 ${escapeTelegramHtml(marketIdInput)}` : '当前范围'}暂无足够历史数据进行回测。`;
+
+      return `<b>🧪 策略回测</b> · ${escapeTelegramHtml(stats.strategyName)}\n范围：${marketIdInput ? `市场 ${escapeTelegramHtml(marketIdInput)}` : '全部市场'}\n交易数：${stats.totalTrades} · 胜率：${formatTelegramNumber(stats.winRate * 100, 1)}%\n收益：${formatTelegramNumber(stats.totalReturnPct, 2)}% · 最大回撤：${formatTelegramNumber(stats.maxDrawdownPct, 2)}%\nSharpe：${formatTelegramNumber(stats.sharpeRatio, 2)} · 平均持仓：${formatTelegramNumber(stats.avgHoldMinutes, 1)} 分钟`;
+    },
     watchlist: ({ chatId }) => {
       const ids = telegramCommandCenterStore.listWatchlist(chatId);
       if (!ids.length) return '<b>⭐ 自选市场</b>\n暂无自选市场。\n用法：发送 /search 搜索后点“加自选”。';

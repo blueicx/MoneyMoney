@@ -7,6 +7,7 @@
 
 import { execFile } from 'child_process';
 import { promisify } from 'util';
+import { curlCommand } from '../utils/platform-command';
 
 const execFileAsync = promisify(execFile);
 
@@ -72,7 +73,7 @@ async function fetchReport(): Promise<string> {
   // CFTC's edge challenges Node's TLS fingerprint, while the system curl
   // client is allowed through. Windows 10+ ships curl.exe.
   const { stdout } = await execFileAsync(
-    'curl.exe',
+    curlCommand(),
     ['--fail', '--silent', '--show-error', '--max-time', '20', '-A', USER_AGENT, REPORT_URL],
     { timeout: 25_000, maxBuffer: 5 * 1024 * 1024, encoding: 'utf8' },
   );

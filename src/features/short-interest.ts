@@ -5,6 +5,10 @@
  * useful for crowding/squeeze risk, but never a standalone trade trigger.
  */
 
+import { execFile } from 'child_process';
+import { promisify } from 'util';
+import { curlCommand } from '../utils/platform-command';
+
 export interface ShortInterestPoint {
   settlementDate: string;
   interestShares: number;
@@ -43,9 +47,6 @@ export interface ShortInterestRadar {
   generatedAt: string;
   source: string;
 }
-
-import { execFile } from 'child_process';
-import { promisify } from 'util';
 
 const ADVISOR_SYMBOLS = ['AAPL', 'MSFT', 'NVDA', 'TSLA', 'QQQ'];
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 MoneyMoney/1.0';
@@ -134,7 +135,7 @@ async function requestSnapshot(symbol: string): Promise<ShortInterestSnapshot> {
   // Nasdaq challenges Node's TLS fingerprint, while the system curl client is
   // allowed through. Windows 10+ ships curl.exe.
   const { stdout } = await execFileAsync(
-    'curl.exe',
+    curlCommand(),
     [
       '--fail', '--silent', '--show-error', '--max-time', '16',
       '-A', USER_AGENT,

@@ -8,6 +8,7 @@
  */
 
 import { execFile } from 'child_process';
+import { curlCommand } from '../utils/platform-command';
 
 export interface FundingVenueQuote {
   exchange: 'Binance' | 'Bybit' | 'OKX' | 'Gate.io' | 'HTX' | 'Deribit';
@@ -68,7 +69,7 @@ async function getJson(url: string, timeoutMs = 8_000): Promise<any> {
 }
 
 function getCurlJson(url: string): Promise<any> {
-  const command = process.platform === 'win32' ? 'curl.exe' : 'curl';
+  const command = curlCommand();
   return new Promise((resolve, reject) => {
     execFile(
       command,
