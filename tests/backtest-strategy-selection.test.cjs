@@ -7,6 +7,8 @@ const backtest = fs.readFileSync('src/features/kelly-backtest.ts', 'utf8');
 
 assert.match(html, /id="bt-strategy"/);
 assert.match(html, /均值回归/);
+assert.match(html, /compareBacktests/);
+assert.match(html, /id="backtest-compare"/);
 assert.match(html, /strategy=\$\{encodeURIComponent\(strategy\)\}/);
 assert.match(server, /req\.query\.strategy/);
 assert.match(server, /runMeanReversionBacktest/);

@@ -1986,9 +1986,11 @@
           <label style="font-size:13px;">回看周期: <input type="number" id="bt-lookback" value="10" min="3" max="50" style="width:50px;padding:4px;border-radius:6px;border:1px solid var(--border);"></label>
           <label style="font-size:13px;">触发阈值: <input type="number" id="bt-threshold" value="0.03" step="0.01" min="0.01" max="0.2" style="width:60px;padding:4px;border-radius:6px;border:1px solid var(--border);"></label>
           <label style="font-size:13px;">持有天数: <input type="number" id="bt-holding" value="5" min="1" max="30" style="width:50px;padding:4px;border-radius:6px;border:1px solid var(--border);"></label>
-          <button class="tab active" onclick="runBacktest()">▶ 运行回测</button>
-        </div>
-        <div id="backtest-results"></div>
+          <button class="tab active" onclick="runBacktest()">▶ 运行回测</button>
+          <button class="tab" onclick="compareBacktests()">⚔️ 对比两策略</button>
+        </div>
+        <div id="backtest-results"></div>
+        <div id="backtest-compare" style="margin-top:16px;"></div>
       </div>
 
       <!-- News Tab -->
@@ -4011,7 +4013,35 @@ function renderEventMonthGrid(events) {
     </table>`;
 }
 
-async function loadEventCalendar(force = false) {
+async function compareBacktests() {
+  const compareEl = document.getElementById('backtest-compare');
+  if (!compareEl) return;
+  const lookback = document.getElementById('bt-lookback').value;
+  const threshold = document.getElementById('bt-threshold').value;
+  const holding = document.getElementById('bt-holding').value;
+  compareEl.innerHTML = '<div style="padding:12px;color:var(--text-secondary);">⚔️ 正在并行比较两套策略…</div>';
+  try {
+    const query = `lookback=${lookback}&threshold=${threshold}&holding=${holding}`;
+    const responses = await Promise.all([
+      fetch(`/api/backtest?strategy=momentum&${query}`),
+      fetch(`/api/backtest?strategy=meanReversion&${query}`),
+    ]);
+    const results = await Promise.all(responses.map(response => response.json().then(body => body.data)));
+    const rows = results.map((result, index) => ({
+      name: index === 0 ? '📈 动量' : '↔️ 均值回归',
+      result: result || {},
+    }));
+    compareEl.innerHTML = `<div class="section-title" style="margin-bottom:8px;">⚔️ 策略对比</div><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px;">${rows.map(({ name, result }) => {
+      const returnPct = Number(result.totalReturnPct || 0);
+      const color = returnPct >= 0 ? 'var(--green)' : 'var(--red)';
+      return `<div style="background:var(--bg-card);border-radius:12px;padding:12px;box-shadow:var(--shadow);"><div style="font-weight:800;">${name}</div><div style="font-size:20px;font-weight:800;color:${color};margin-top:5px;">${returnPct >= 0 ? '+' : ''}${returnPct.toFixed(2)}%</div><div style="font-size:11px;color:var(--text-secondary);margin-top:5px;">交易 ${Number(result.totalTrades || 0)} · 胜率 ${(Number(result.winRate || 0) * 100).toFixed(0)}% · 回撤 ${Number(result.maxDrawdownPct || 0).toFixed(2)}%</div><div style="font-size:11px;color:var(--text-secondary);margin-top:3px;">Sharpe ${Number(result.sharpeRatio || 0).toFixed(2)}</div></div>`;
+    }).join('')}</div>`;
+  } catch (error) {
+    compareEl.innerHTML = `<div style="padding:12px;color:var(--red);">对比失败：${safeNewsText(error?.message || '数据源暂时不可用')}</div>`;
+  }
+}
+
+async function loadEventCalendar(force = false) {
   if (eventCalendarState.loading) return;
   const host = document.getElementById('event-calendar-list');
   if (!host) return;
