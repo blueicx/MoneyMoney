@@ -2202,6 +2202,7 @@
           </div>
         </div>
         <div id="market-scope-empty" class="empty-tip" hidden style="margin-bottom:16px;"></div>
+        <div id="stock-data-freshness" data-market-scopes="stocks overview watchlist" style="margin-bottom:12px;color:var(--text-secondary);font-size:12px;"></div>
         <details class="dash-collapse" data-collapse-key="stocks-market" data-market-scopes="stocks overview" open>
           <summary>
             <span class="collapse-title">📈 行情与选股</span>
@@ -5144,6 +5145,32 @@ async function loadPopularStocks() {
 }
 async function loadStockQuotes() {
   await Promise.all([loadStockIndices(), loadPopularStocks()]);
+  if (['stocks', 'overview', 'watchlist'].includes(activeMarketScope)) loadUnifiedStockData('AAPL');
+}
+async function loadUnifiedStockData(symbol) {
+  const el = document.getElementById('stock-data-freshness');
+  if (!el || !['stocks', 'overview', 'watchlist'].includes(activeMarketScope)) return null;
+  const normalized = String(symbol || '').replace(/^us/i, '').toUpperCase();
+  if (!/^[A-Z][A-Z0-9.-]{0,9}$/.test(normalized)) return null;
+  const requestToken = (window._stockDataRequestToken || 0) + 1;
+  window._stockDataRequestToken = requestToken;
+  el.textContent = '正在读取股票免费数据源…';
+  try {
+    const res = await fetch('/api/stocks/' + encodeURIComponent(normalized) + '/overview', { cache: 'no-store' });
+    const payload = await res.json();
+    if (requestToken !== window._stockDataRequestToken || !['stocks', 'overview', 'watchlist'].includes(activeMarketScope)) return null;
+    if (!payload.success || !payload.data) throw new Error(payload.error || '股票数据暂不可用');
+    const sources = (payload.data.sources || []).map(source => {
+      const label = ({ 'nasdaq-public-quote': 'Nasdaq报价', 'nasdaq-public-history': 'Nasdaq历史', 'sec-edgar-submissions': 'SEC申报', 'sec-edgar-companyfacts': 'SEC公司事实' })[source.source] || source.source;
+      const status = source.status === 'fresh' ? '正常' : source.status === 'stale' ? '旧缓存' : source.status === 'unconfigured' ? '未配置' : '不可用';
+      return label + '：' + status + '（' + new Date(source.fetchedAt).toLocaleString() + '）';
+    });
+    el.textContent = normalized + ' · 来源状态：' + (sources.join('　') || '暂无');
+    return payload.data;
+  } catch (error) {
+    if (requestToken === window._stockDataRequestToken) el.textContent = normalized + ' · 股票免费数据源暂时不可用，其他卡片仍可查看。';
+    return null;
+  }
 }
 async function loadStockMarket() { loadStockQuotes(); loadGlobalMetrics(); loadMacroCalendar(); }
 async function loadStockSearch() {
@@ -5175,6 +5202,7 @@ function selectStockResult(item) {
   const result = (window._stockSearchResults || [])?.[Number(item?.dataset?.index)];
   item.parentElement?.querySelectorAll('.srch-item.active').forEach(active => active.classList.remove('active'));
   item.classList.add('active');
+  if (symbol.startsWith('us')) loadUnifiedStockData(symbol.slice(2));
   loadStockKline(symbol, name, result?.exchangeSymbol);
   if (symbol.startsWith('us')) loadInsiderRadar(symbol.slice(2), name);
   if (symbol.startsWith('us')) loadFundamentalQuality(symbol.slice(2), name);
