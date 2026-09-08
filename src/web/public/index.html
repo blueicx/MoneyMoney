@@ -236,6 +236,34 @@
     }
     .nav-sub-btn:hover { background: rgba(128,128,128,.08); color: var(--text-primary); }
     .nav-sub-btn.active { background: var(--purple-light, rgba(139,92,246,.15)); color: var(--purple); font-weight: 600; }
+    .market-scope-bar,
+    .utility-nav-bar,
+    .core-workspace-nav {
+      display: flex; align-items: center; gap: 6px; max-width: 100%;
+      overflow-x: auto; scrollbar-width: thin; white-space: nowrap;
+      background: var(--bg-card); border: 1px solid var(--border);
+      box-shadow: var(--shadow); backdrop-filter: blur(18px);
+    }
+    .market-scope-bar { padding: 6px; border-radius: 12px; }
+    .utility-nav-bar { margin-top: 6px; padding: 5px 6px; border-radius: 10px; }
+    .core-workspace-nav { margin-top: 16px; padding: 6px; border-radius: 12px; }
+    .market-scope-label, .utility-nav-label { flex: 0 0 auto; padding: 0 5px; color: var(--text-secondary); font-size: 11px; }
+    .market-scope-btn, .utility-nav-btn, .core-workspace-btn {
+      flex: 0 0 auto; border: 0; border-radius: 8px; padding: 9px 12px;
+      background: transparent; color: var(--text-secondary); cursor: pointer;
+      font-size: 12px; white-space: nowrap; transition: var(--transition);
+    }
+    .market-scope-btn:hover, .utility-nav-btn:hover, .core-workspace-btn:hover { background: var(--bg-secondary); color: var(--text); }
+    .market-scope-btn.active { background: var(--purple); color: #fff; font-weight: 700; }
+    .utility-nav-btn.active, .core-workspace-btn.active { background: var(--purple-light); color: var(--purple); font-weight: 700; }
+    .market-scope-actions { display: flex; align-items: center; gap: 6px; margin-left: auto; flex: 0 0 auto; }
+    .market-scope-action { border: 1px solid var(--border); background: var(--bg-secondary); }
+    .market-scope-action.admin { color: var(--yellow); }
+    @media (max-width: 760px) {
+      .market-scope-bar, .utility-nav-bar { margin-left: -4px; margin-right: -4px; border-left: 0; border-right: 0; border-radius: 0; }
+      .market-scope-actions { margin-left: 0; }
+      .core-workspace-nav { display: none; }
+    }
     #mm-toast-container {
       position: fixed; bottom: 20px; right: 20px; z-index: 99999;
       display: flex; flex-direction: column; gap: 8px; pointer-events: none;
@@ -1772,8 +1800,8 @@
     </div>
   <div class="layout">
     <main class="main">
-      <div id="nav-group-bar" class="nav-group-bar"></div>
-      <div id="nav-sub-bar" class="nav-sub-bar"></div>
+      <div id="market-scope-bar" class="market-scope-bar"></div>
+      <div id="utility-nav-bar" class="utility-nav-bar"></div>
       <div id="mm-toast-container"></div>
       <button id="theme-toggle-btn" onclick="toggleTheme()" title="浅色" aria-label="浅色" style="position:fixed;top:14px;right:18px;z-index:9999;width:38px;height:38px;border-radius:50%;border:1px solid var(--border);background:var(--bg-card);backdrop-filter:blur(10px);cursor:pointer;font-size:17px;display:flex;align-items:center;justify-content:center;box-shadow:var(--shadow);transition:transform .15s;" onmouseover="this.style.transform='scale(1.1)'" onmouseout="this.style.transform='scale(1)'">☀️</button>
       <!-- Market Overview Bar -->
@@ -2590,6 +2618,7 @@
         <div id="ops-overview" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:16px;"></div>
         <div id="ops-jobs" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;"></div>
       </div>
+      <nav id="core-workspace-nav" class="core-workspace-nav" aria-label="核心工作区"></nav>
     </main>
     <aside class="sidebar" id="app-sidebar">
       <button class="sidebar-toggle" id="sidebar-edge-toggle" onclick="toggleSidebar()" title="收起侧栏">‹</button>
@@ -8238,6 +8267,7 @@ function renderGlobalSearchResults(groups, note = '') {
 async function runGlobalSearchNow() {
   const query = document.getElementById('global-search-input')?.value?.trim() || '';
   const request = ++globalSearchState.request;
+  const scopeToken = marketScopeRequestToken();
   if (!query) {
     const recent = globalSearchRecent().map(text => ({
       kind: 'recent', title: text, sub: '最近搜索', badge: '历史',
@@ -8252,15 +8282,17 @@ async function runGlobalSearchNow() {
     ]);
     return;
   }
-  const cached = globalSearchState.cache.get(query.toLowerCase());
+  const searchScope = activeMarketScope === 'watchlist' ? 'overview' : activeMarketScope;
+  const searchKey = `${searchScope}:${query.toLowerCase()}`;
+  const cached = globalSearchState.cache.get(searchKey);
   const unifiedPromise = cached?.unified ? Promise.resolve(cached.unified)
-    : fetch('/api/instruments/search?q=' + encodeURIComponent(query)).then(res => res.json()).catch(() => null);
+    : fetch('/api/instruments/search?q=' + encodeURIComponent(query) + '&scope=' + encodeURIComponent(searchScope), { cache: 'no-store' }).then(res => res.json()).catch(() => null);
   renderGlobalSearchResults([{ label: '本机匹配', items: localGlobalSearch(query).map(item => ({ ...item, badge: item.kind === 'page' ? '页面' : '功能' })) }], '正在搜索...');
   const unifiedBody = await unifiedPromise;
-  if (request !== globalSearchState.request) return;
+  if (request !== globalSearchState.request || !isCurrentMarketScopeToken(scopeToken)) return;
   const instruments = unifiedBody?.success && Array.isArray(unifiedBody.data) ? unifiedBody.data.slice(0, 12) : [];
   const predictions = [];
-  globalSearchState.cache.set(query.toLowerCase(), { unified: unifiedBody });
+  globalSearchState.cache.set(searchKey, { unified: unifiedBody });
   if (globalSearchState.cache.size > 60) globalSearchState.cache.delete(globalSearchState.cache.keys().next().value);
   const stockItems = instruments.map(item => ({
     kind: 'instrument',
@@ -8435,39 +8467,91 @@ function showToast(message, type = 'info', durationMs = 2500) {
     setTimeout(() => toast.remove(), 300);
   }, durationMs);
 }
-const NAV_GROUPS = [
-  { id: 'home',    label: '🏠 首页',   tabs: [{ id: 'command', label: '🏠 指挥台' }, { id: 'markets', label: '🎯 Predict.fun' }] },
-  { id: 'trade',   label: '📈 交易',   tabs: [{ id: 'binance', label: '🏦 币安' }, { id: 'stocks', label: '📈 股票·宏观' }, { id: 'options', label: '🎯 期权' }, { id: 'positions', label: '📋 持仓' }, { id: 'orders', label: '📄 订单' }] },
-  { id: 'research',label: '🌐 研究',   tabs: [{ id: 'research', label: '📚 证据工作台' }, { id: 'radar', label: '🌐 预测雷达' }, { id: 'news', label: '📰 新闻日历' }, { id: 'whales', label: '🐋 巨鲸监控' }, { id: 'backtest', label: '🧪 回测' }, { id: 'strategies', label: '⚔️ 策略对比' }] },
-  { id: 'risk',    label: '🛡 风控',   tabs: [{ id: 'analysis', label: '📊 智能助手' }, { id: 'risk', label: '🛡 风险总览' }, { id: 'alerts', label: '🔔 预警' }, { id: 'paper', label: '📈 模拟盘' }, { id: 'journal', label: '📝 日志复盘' }] },
-  { id: 'system',  label: '⚙️ 系统',   tabs: [{ id: 'ops', label: '⚙️ 自动化运营' }, { id: 'settings', label: '⚙️ 设置' }] },
-];
 const GUEST_ADMIN_TABS = new Set(['positions', 'orders', 'paper', 'journal', 'ops', 'settings']);
-let activeNavGroup = 'home';
-function renderNavGroups() {
-  const bar = document.getElementById('nav-group-bar');
+const MARKET_SCOPES = [
+  { id: 'overview', label: '🏠 首页（总体）', tab: 'command' },
+  { id: 'stocks', label: '📈 股票', tab: 'stocks' },
+  { id: 'options', label: '🎯 期权', tab: 'options' },
+  { id: 'crypto', label: '₿ 虚拟币', tab: 'binance' },
+  { id: 'prediction', label: '🎯 预测市场', tab: 'radar' },
+  { id: 'watchlist', label: '⭐ 自选', tab: 'positions' },
+];
+const UTILITY_NAV_ITEMS = [
+  ['research', '🧾 证据工作台'], ['news', '📰 新闻日历'], ['backtest', '🧪 回测'],
+  ['strategies', '⚖️ 策略对比'], ['alerts', '🔔 提醒'], ['whales', '🐋 巨鲸监控'],
+];
+const CORE_NAV_ITEMS = [
+  ['command', '🏠 指挥台'], ['radar', '🌐 雷达'], ['paper', '📈 模拟'],
+  ['analysis', '🧠 分析'], ['positions', '💼 持仓'], ['risk', '🛡 风险'], ['stocks', '📊 宏观'],
+];
+let activeMarketScope = 'overview';
+let marketScopeRequestEpoch = 0;
+
+function isMarketScope(value) { return MARKET_SCOPES.some(scope => scope.id === value); }
+function marketScopeForTab(tab) {
+  if (tab === 'stocks') return 'stocks';
+  if (tab === 'options') return 'options';
+  if (tab === 'binance') return 'crypto';
+  if (tab === 'radar') return 'prediction';
+  if (tab === 'positions') return 'watchlist';
+  if (tab === 'command' || tab === 'markets') return 'overview';
+  return null;
+}
+function defaultTabForMarketScope(scope) { return MARKET_SCOPES.find(item => item.id === scope)?.tab || 'command'; }
+function readInitialMarketScope() {
+  const queryScope = new URLSearchParams(location.search).get('market');
+  if (isMarketScope(queryScope)) return queryScope;
+  try {
+    const stored = localStorage.getItem('mm-market-scope');
+    if (isMarketScope(stored)) return stored;
+  } catch (e) {}
+  return 'overview';
+}
+function renderMarketScopeBar() {
+  const bar = document.getElementById('market-scope-bar');
   if (!bar) return;
-  bar.innerHTML = NAV_GROUPS.filter(g => !(window.mm_isGuest && g.id === 'system')).map(g =>
-    `<button class="nav-group-btn${g.id === activeNavGroup ? ' active' : ''}" onclick="switchNavGroup('${g.id}')">${g.label}</button>`
-  ).join('');
+  const scopes = MARKET_SCOPES.map(scope => `<button class="market-scope-btn${scope.id === activeMarketScope ? ' active' : ''}" data-market-scope="${scope.id}" aria-current="${scope.id === activeMarketScope ? 'page' : 'false'}" onclick="setMarketScope('${scope.id}')">${scope.label}</button>`).join('');
+  const actions = [
+    '<button class="market-scope-btn market-scope-action" onclick="openGlobalSearch()">🔎 搜索</button>',
+    '<button class="market-scope-btn market-scope-action admin" data-admin-entry="settings" onclick="showTab(\'settings\')">⚙️ 总设置</button>',
+    '<button class="market-scope-btn market-scope-action admin" data-admin-entry="ops" onclick="showTab(\'ops\')">🤖 自动化运营</button>',
+  ].filter((_, index) => !window.mm_isGuest || index === 0).join('');
+  bar.innerHTML = `<span class="market-scope-label">市场</span>${scopes}<span class="market-scope-actions">${actions}</span>`;
 }
-function switchNavGroup(groupId) {
-  activeNavGroup = groupId;
-  try { localStorage.setItem('mm-last-group', groupId); } catch (e) {}
-  renderNavGroups();
-  renderNavSubTabs();
-  const group = NAV_GROUPS.find(g => g.id === groupId);
-  if (group && group.tabs.length) showTab(group.tabs[0].id);
-}
-function renderNavSubTabs() {
-  const bar = document.getElementById('nav-sub-bar');
+function renderUtilityNav() {
+  const bar = document.getElementById('utility-nav-bar');
   if (!bar) return;
-  const group = NAV_GROUPS.find(g => g.id === activeNavGroup);
-  if (!group) return;
-  bar.innerHTML = group.tabs.filter(t => !(window.mm_isGuest && GUEST_ADMIN_TABS.has(t.id))).map(t =>
-    `<button class="nav-sub-btn${GUEST_ADMIN_TABS.has(t.id) ? ' guest-admin-only' : ''}" data-tab="${t.id}" onclick="showTab('${t.id}', this)">${t.label}</button>`
-  ).join('');
+  bar.innerHTML = `<span class="utility-nav-label">通用工具</span>${UTILITY_NAV_ITEMS.map(([tab, label]) => `<button class="utility-nav-btn" data-tab="${tab}" onclick="showTab('${tab}', this)">${label}</button>`).join('')}`;
 }
+function renderCoreNav() {
+  const items = CORE_NAV_ITEMS.filter(([tab]) => !(window.mm_isGuest && GUEST_ADMIN_TABS.has(tab)));
+  const markup = items.map(([tab, label]) => `<button class="core-workspace-btn" data-tab="${tab}" onclick="showTab('${tab}', this)">${label}</button>`).join('');
+  const desktop = document.getElementById('core-workspace-nav');
+  if (desktop) desktop.innerHTML = markup;
+  const mobile = document.getElementById('mobile-nav');
+  if (mobile) mobile.innerHTML = items.map(([tab, label]) => `<button class="mnav-btn" data-tab="${tab}" onclick="mobileTab('${tab}')"><span>${label.slice(0, 2)}</span><small>${label.slice(2).trim()}</small></button>`).join('');
+}
+function renderNavigationState() {
+  renderMarketScopeBar();
+  renderUtilityNav();
+  renderCoreNav();
+  document.querySelectorAll('[data-market-scope]').forEach(node => node.classList.toggle('active', node.dataset.marketScope === activeMarketScope));
+  document.querySelectorAll('[data-tab]').forEach(node => node.classList.toggle('active', node.dataset.tab === (window.mm_active_tab || 'command')));
+}
+function setMarketScope(scope, options = {}) {
+  if (!isMarketScope(scope)) return;
+  activeMarketScope = scope;
+  marketScopeRequestEpoch += 1;
+  document.body.dataset.marketScope = scope;
+  try { localStorage.setItem('mm-market-scope', scope); } catch (e) {}
+  const params = new URLSearchParams(location.search);
+  params.set('market', scope);
+  history.replaceState({}, '', `${location.pathname}?${params}${location.hash}`);
+  renderNavigationState();
+  if (options.openTab !== false) showTab(defaultTabForMarketScope(scope), null, { scopeAlreadySynced: true });
+}
+function marketScopeRequestToken() { return { scope: activeMarketScope, epoch: marketScopeRequestEpoch }; }
+function isCurrentMarketScopeToken(token) { return token?.scope === activeMarketScope && token?.epoch === marketScopeRequestEpoch; }
 function closeInstrumentDetail() {
   document.getElementById('instrument-detail-overlay')?.classList.remove('open');
 }
@@ -8538,11 +8622,14 @@ async function openUnifiedInstrument(instrument) {
     content.innerHTML = `<div style="padding:24px;color:var(--red);">${instrumentDetailEscape(error.message || '详情加载失败')}</div>`;
   }
 }
-function showTab(tab, clicked) {
+function showTab(tab, clicked, options = {}) {
   if (window.mm_isGuest && GUEST_ADMIN_TABS.has(tab)) {
     if (typeof window.showToast === 'function') window.showToast('访客模式仅支持只读浏览', 'error');
     return;
   }
+  const impliedScope = marketScopeForTab(tab);
+  if (!options.scopeAlreadySynced && impliedScope && impliedScope !== activeMarketScope) setMarketScope(impliedScope, { openTab: false });
+  window.mm_active_tab = tab;
   try { localStorage.setItem('mm-last-tab', tab); } catch (e) {}
   document.querySelectorAll('.tab').forEach((t) => t.classList.remove('active'));
   const button = clicked || [...document.querySelectorAll('.tabs .tab')].find(item => (item.getAttribute('onclick') || '').includes(`'${tab}'`));
@@ -8550,7 +8637,9 @@ function showTab(tab, clicked) {
   document.querySelectorAll('.tab-content').forEach((c) => c.classList.remove('active'));
   document.getElementById(tab + '-tab').classList.add('active');
   document.querySelectorAll('.nav-sub-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+  document.querySelectorAll('.utility-nav-btn, .core-workspace-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
   document.querySelectorAll('.mnav-btn').forEach(button => button.classList.toggle('active', button.dataset.tab === tab));
+  renderNavigationState();
   if (tab === 'positions') loadPositions();
   if (tab === 'command') loadCommandCenter();
   if (tab === 'orders') loadOrders();
@@ -9713,18 +9802,16 @@ document.getElementById('sell-modal').addEventListener('click', (e) => {
 loadAll();
 loadCommandCenter();
 initTheme();
-renderNavGroups();
+activeMarketScope = readInitialMarketScope();
+renderNavigationState();
 // Restore last visited tab from localStorage.
 (function restoreLastTab() {
   const saved = localStorage.getItem('mm-last-tab');
-  const savedGroup = localStorage.getItem('mm-last-group');
-  if (savedGroup && NAV_GROUPS.some(g => g.id === savedGroup)) activeNavGroup = savedGroup;
-  renderNavGroups();
-  renderNavSubTabs();
   if (saved && document.getElementById(saved + '-tab')) {
     showTab(saved);
     return;
   }
+  showTab(defaultTabForMarketScope(activeMarketScope), null, { scopeAlreadySynced: true });
 })();
 loadMarketOverview();
 loadResearchBriefing();
@@ -9758,16 +9845,7 @@ initializeDashboardCollapses();
   </div>
 </div>
 <!-- Mobile Bottom Navigation -->
-    <nav class="mobile-nav" id="mobile-nav">
-      <button class="mnav-btn active" data-tab="command" onclick="mobileTab('command')"><span>🏠</span><small>指挥台</small></button>
-      <button class="mnav-btn" data-tab="radar" onclick="mobileTab('radar')"><span>🌐</span><small>雷达</small></button>
-      <button class="mnav-btn" data-tab="paper" onclick="mobileTab('paper')"><span>📈</span><small>模拟</small></button>
-      <button class="mnav-btn" data-tab="analysis" onclick="mobileTab('analysis')"><span>🧠</span><small>分析</small></button>
-      <button class="mnav-btn" data-tab="binance" onclick="mobileTab('binance')"><span>🏦</span><small>币安</small></button>
-      <button class="mnav-btn" data-tab="risk" onclick="mobileTab('risk')"><span>🛡</span><small>风险</small></button>
-      <button class="mnav-btn" data-tab="stocks" onclick="mobileTab('stocks')"><span>📈</span><small>宏观</small></button>
-      <button class="mnav-btn" data-tab="settings" onclick="mobileTab('settings')"><span>⚙️</span><small>设置</small></button>
-    </nav>
+    <nav class="mobile-nav" id="mobile-nav" aria-label="核心工作区"></nav>
 <script>
 // LAN mode API authentication: open the dashboard once with ?access_token=...
 // and keep the token only in localStorage. The server never receives it in logs.
