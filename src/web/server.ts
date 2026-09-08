@@ -86,6 +86,7 @@ import { calculatePredictionPosition } from '../features/prediction-position-siz
 import { aiCommentaryConfigured, getAiMarketCommentary } from '../features/ai-commentary';
 import { getAiConfigurationStatus, testAiConnection, type AiChain } from '../features/ai-runtime-config';
 import { unifiedInstrumentService, normalizeInstrumentRef, type InstrumentType } from '../features/unified-instruments';
+import { MARKET_SCOPES, type MarketScope } from '../features/market-scope';
 import { unifiedAlertStore, triggerUnifiedAlerts } from '../features/unified-alerts';
 import { buildPortfolioRiskOverview } from '../features/risk-overview';
 import { getRiskHistory, recordRiskHistory } from '../features/risk-history';
@@ -4437,7 +4438,9 @@ app.get('/api/instruments/search', async (req, res) => {
   try {
     const q = String(req.query.q || '').trim();
     if (!q) return res.json({ success: true, data: [] });
-    const data = await unifiedInstrumentService.search(q);
+    const rawScope = String(req.query.scope || 'overview');
+    if (!MARKET_SCOPES.includes(rawScope as MarketScope)) return res.status(400).json({ success: false, error: '市场范围无效', data: [] });
+    const data = await unifiedInstrumentService.search(q, rawScope as MarketScope);
     res.json({ success: true, data, fetchedAt: new Date().toISOString() });
   } catch (error: any) {
     res.status(502).json({ success: false, error: error?.message || '统一搜索暂不可用', data: [] });

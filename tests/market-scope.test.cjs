@@ -1,4 +1,5 @@
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
 const test = require('node:test');
 const {
   marketScopeForInstrumentType,
@@ -6,6 +7,8 @@ const {
   filterInstrumentResults,
   defaultTabForMarketScope,
 } = require('../dist/features/market-scope');
+const serverSource = fs.readFileSync('src/web/server.ts', 'utf8');
+const instrumentsSource = fs.readFileSync('src/features/unified-instruments.ts', 'utf8');
 
 test('maps instrument types to market scopes', () => {
   assert.equal(marketScopeForInstrumentType('stock'), 'stocks');
@@ -38,4 +41,12 @@ test('filters explicit stock and crypto scopes independently', () => {
   ];
   assert.deepEqual(filterInstrumentResults(items, 'stocks').map(item => item.type), ['stock']);
   assert.deepEqual(filterInstrumentResults(items, 'crypto').map(item => item.type), ['crypto']);
+});
+
+test('unified search endpoint accepts and validates a market scope', () => {
+  assert.match(serverSource, /req\.query\.scope/);
+  assert.match(serverSource, /MARKET_SCOPES/);
+  assert.match(serverSource, /search\(q, rawScope/);
+  assert.match(instrumentsSource, /async search\(query: string, scope: MarketScope = 'overview'\)/);
+  assert.match(instrumentsSource, /filterInstrumentResults/);
 });

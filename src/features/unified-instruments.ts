@@ -3,6 +3,7 @@ import { newsFeed, type NewsItem } from './news-settings';
 import { getUpcomingEventCalendar, type UpcomingEvent } from './event-calendar';
 import { getCachedPredictionRadarSlice, getPredictionRadar, type PredictionMarket } from './prediction-radar';
 import { getAiRuntimeConfig } from './ai-runtime-config';
+import { filterInstrumentResults, type MarketScope } from './market-scope';
 
 export type InstrumentType = 'stock' | 'crypto' | 'prediction';
 
@@ -175,7 +176,7 @@ function predictionResult(market: PredictionMarket): InstrumentSearchResult {
 }
 
 export class UnifiedInstrumentService {
-  async search(query: string): Promise<InstrumentSearchResult[]> {
+  async search(query: string, scope: MarketScope = 'overview'): Promise<InstrumentSearchResult[]> {
     const q = clean(query);
     if (!q) return [];
     const parsed = parseInstrumentQuery(q);
@@ -185,7 +186,8 @@ export class UnifiedInstrumentService {
     ]);
     const radar = getCachedPredictionRadarSlice(q, 12);
     const predictions = (radar?.markets || []).map(predictionResult);
-    return dedupeInstrumentRefs([...stocks, ...crypto, ...predictions]).slice(0, 20) as InstrumentSearchResult[];
+    const deduped = dedupeInstrumentRefs([...stocks, ...crypto, ...predictions]) as InstrumentSearchResult[];
+    return filterInstrumentResults(deduped, scope).slice(0, 20);
   }
 
   async overview(ref: InstrumentRef): Promise<UnifiedInstrumentOverview> {
