@@ -47,5 +47,7 @@ assert.match(indexHtml, /id=.admin-paper-unified-categories./, 'Critical DOM: ad
 assert.match(indexHtml, /\/api\/paper\/performance/, 'API: fetches performance');
 assert.match(indexHtml, /\/api\/paper\/positions/, 'API: fetches positions');
 assert.match(indexHtml, /typeLabels\s*=\s*{/, 'Category display: types mapped correctly');
+assert.match(indexHtml, /Number\(p\.cash\s*\?\?\s*0\)\.toFixed/, 'Performance uses API cash field');
+assert.match(indexHtml, /byType\[pos\.instrumentType\]/, 'Categories use unified instrumentType field');
 
 console.log('unified paper trading: all assertions passed');
