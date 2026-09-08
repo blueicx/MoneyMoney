@@ -45,5 +45,6 @@ export interface StockDataBundle {
   filings: StockFiling[];
   fundamentals: StockCompanyFacts | null;
   snapshots: SourceSnapshot<unknown>[];
+  sources: SourceSnapshot<unknown>[];
   sourceStatus: Record<string, SourceStatus>;
 }

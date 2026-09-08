@@ -4,6 +4,7 @@ import { getUpcomingEventCalendar, type UpcomingEvent } from './event-calendar';
 import { getCachedPredictionRadarSlice, getPredictionRadar, type PredictionMarket } from './prediction-radar';
 import { getAiRuntimeConfig } from './ai-runtime-config';
 import { filterInstrumentResults, type MarketScope } from './market-scope';
+import { stockDataService } from './stock-data-service';
 
 export type InstrumentType = 'stock' | 'crypto' | 'prediction';
 
@@ -211,9 +212,14 @@ export class UnifiedInstrumentService {
         const market = radar.markets.find(item => String(item.id) === normalized.symbol);
         if (market) { marketData = market as unknown as Record<string, unknown>; quote = { yesPrice: market.yesPrice, noPrice: market.noPrice, modelProbability: market.modelProbability }; fetchedAt = radar.updatedAt; sourceStatus.market = 'ok'; sourceStatus.quote = 'ok'; }
       } else {
-        const response = await fetch(`https://qt.gtimg.cn/q=us${normalized.symbol}`, { signal: AbortSignal.timeout(8000) });
-        const stock = stockFromTencent(await response.text());
-        if (stock) { quote = stock as unknown as Record<string, unknown>; fetchedAt = new Date().toISOString(); sourceStatus.quote = 'ok'; }
+        const stockData = await stockDataService.overview(normalized.symbol);
+        if (stockData.quote) {
+          quote = stockData.quote as unknown as Record<string, unknown>;
+          fetchedAt = stockData.quote.asOf || stockData.snapshots.map(item => item.fetchedAt).filter(Boolean).sort().pop() || new Date().toISOString();
+        }
+        klines = stockData.bars;
+        sourceStatus.quote = stockStatus(stockData.sourceStatus['nasdaq-public-quote']);
+        sourceStatus.klines = stockStatus(stockData.sourceStatus['nasdaq-public-history']);
       }
     } catch { /* each source is independently optional */ }
     const [eventsResult, newsResult] = await Promise.allSettled([getUpcomingEventCalendar(7), newsFeed.getNews()]);
@@ -238,6 +244,12 @@ export class UnifiedInstrumentService {
     ].sort((a, b) => new Date(String(b.at)).getTime() - new Date(String(a.at)).getTime());
     return { instrument: overview.instrument, items, generatedAt: new Date().toISOString() };
   }
+}
+
+function stockStatus(status: string | undefined): UnifiedInstrumentOverview['sourceStatus'][string] {
+  if (status === 'fresh') return 'ok';
+  if (status === 'stale') return 'stale';
+  return 'unavailable';
 }
 
 async function getInstrumentAnalysis(ref: InstrumentRef, overview: Omit<UnifiedInstrumentOverview, 'analysis'>): Promise<UnifiedInstrumentOverview['analysis']> {
