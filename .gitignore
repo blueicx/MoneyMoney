@@ -93,3 +93,6 @@ release/core/*.sqlite
 release/core/*.sqlite-*
 release/core/migration-backups/
 release/core/MoneyMoneyCore-previous-*.exe
+
+# Local isolated implementation worktrees
+.worktrees/
