@@ -8,6 +8,8 @@ const {
   scopeAllowsSection,
   scopeQuery,
   scopeForInstrument,
+  filterRiskOverview,
+  filterRiskHistory,
 } = require('../dist/features/market-scope-view');
 
 test('market sections are visible only in their declared scope', () => {
@@ -47,10 +49,16 @@ test('assistant report keeps only the selected market actions', () => {
     predictionPicks: [],
     optionActions: [],
     sectorActions: [{ id: 'sector' }],
-    macroActions: [{ id: 'macro' }],
+    macroActions: [],
     reminders: [{ id: 's', venue: 'Stocks' }],
+    journal: undefined,
   });
   assert.deepEqual(filterAssistantReport(report, 'crypto').cryptoActions, [{ id: 'c' }]);
+  assert.deepEqual(filterAssistantReport({ ...report, context: { crossAssetRisk: { riskScore: 20 }, cautionFlags: [{ id: 'global' }] } }, 'stocks').context, {
+    crossAssetRisk: undefined,
+    eventRisk: undefined,
+    cautionFlags: [],
+  });
   assert.deepEqual(filterAssistantReport(report, 'overview'), report);
 });
 
@@ -88,6 +96,41 @@ test('unified paper ledger is isolated to the selected market', () => {
   assert.equal(stocks.cash, 910);
   assert.equal(stocks.realizedPnl, 10);
   assert.equal(filterUnifiedPaperLedger(ledger, 'overview'), ledger);
+});
+
+test('risk overview keeps only the selected market and hides prediction radar outside prediction', () => {
+  const overview = {
+    groups: [{ name: '股票' }, { name: '币安' }, { name: '期权' }],
+    actionSignals: [
+      { id: 'Stocks:AAPL', venueZh: '股票' },
+      { id: 'Binance:BTCUSDT', venueZh: '币安' },
+      { id: 'Options:SPY', venueZh: '期权' },
+    ],
+    radarWatchlist: [{ id: 'Predict.fun:42' }],
+    radarCount: 1,
+    divergenceWatchCount: 1,
+  };
+  const options = filterRiskOverview(overview, 'options');
+  assert.deepEqual(options.groups, [{ name: '期权' }]);
+  assert.deepEqual(options.actionSignals, [{ id: 'Options:SPY', venueZh: '期权' }]);
+  assert.deepEqual(options.radarWatchlist, []);
+  assert.equal(options.radarCount, 0);
+  assert.equal(options.divergenceWatchCount, 0);
+  assert.deepEqual(filterRiskOverview(overview, 'overview'), overview);
+});
+
+test('risk history only returns snapshots written for the selected market', () => {
+  const history = {
+    updatedAt: '2026-09-08T00:00:00.000Z',
+    points: [
+      { t: '2026-09-08T00:00:00.000Z', scope: 'stocks', level: '稳健' },
+      { t: '2026-09-08T00:01:00.000Z', scope: 'crypto', level: '观察' },
+      { t: '2026-09-08T00:02:00.000Z', level: '偏高' },
+    ],
+    trend: { direction: 'stable' },
+  };
+  assert.deepEqual(filterRiskHistory(history, 'stocks').points.map(item => item.scope), ['stocks']);
+  assert.deepEqual(filterRiskHistory(history, 'overview'), history);
 });
 
 console.log('Market scoped view tests loaded');

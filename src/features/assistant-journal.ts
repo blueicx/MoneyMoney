@@ -9,6 +9,8 @@ import path from 'path';
 import { api } from '../api';
 import { binanceFeed } from './binance';
 import { stateStore } from '../storage/sqlite-state';
+import type { MarketScope } from './market-scope';
+import { scopeForAction } from './market-scope-view';
 import { getMacroCurrentPrices } from './macro-market';
 import { getSectorCurrentPrices } from './sector-rotation';
 import { pushNotification } from './notifications';
@@ -186,9 +188,12 @@ function save(state: JournalFile): void {
   stateStore.set('assistant-journal', state, 1);
 }
 
-export function getAssistantCalibration(): AssistantCalibrationStats {
+export function getAssistantCalibration(scope?: MarketScope): AssistantCalibrationStats {
   const state = load();
-  const rows = state.trades
+  const trades = scope && scope !== 'overview' && scope !== 'watchlist'
+    ? state.trades.filter(trade => scopeForAction(trade) === scope)
+    : state.trades;
+  const rows = trades
     .filter(trade => trade.status === 'CLOSED')
     .filter(trade => (trade.probabilityPct ?? trade.confidencePct) != null)
     .map(trade => ({
@@ -230,7 +235,7 @@ export function getAssistantCalibration(): AssistantCalibrationStats {
   const quality = rows.length < 20 ? '样本不足，先当学习记录看' : brier <= 0.18 ? '判断质量很好' : brier <= 0.25 ? '判断质量可用' : '概率判断仍偏粗糙';
   return {
     updatedAt: new Date().toISOString(),
-    closed: state.trades.filter(item => item.status === 'CLOSED').length,
+    closed: trades.filter(item => item.status === 'CLOSED').length,
     evaluated: rows.length,
     brierScore: Math.round(brier * 10000) / 10000,
     logLoss: Math.round(logLoss * 10000) / 10000,

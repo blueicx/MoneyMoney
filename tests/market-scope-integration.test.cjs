@@ -26,4 +26,33 @@ test('server exposes scoped advisor and paper contracts while keeping legacy URL
   assert.match(server, /app\.get\('\/api\/events\/calendar', async \(req, res\)/);
 });
 
+test('analysis and risk markup declares market-specific sections', () => {
+  assert.match(html, /data-analysis-scopes="prediction"/);
+  assert.match(html, /data-analysis-scopes="crypto"/);
+  assert.match(html, /data-analysis-scopes="stocks"/);
+  assert.match(html, /data-analysis-scopes="options"/);
+  assert.match(html, /scopedUrl\('\/api\/risk\/history\?limit=72'\)/);
+  assert.match(html, /fetch\(scopedUrl\('\/api\/calibration'\)/);
+});
+
+test('ticker loads after scope initialization and uses market-specific data', () => {
+  assert.match(html, /activeMarketScope = readInitialMarketScope\(\);[\s\S]*loadNewsTicker\(/);
+  assert.match(html, /scopedUrl\('\/api\/market-ticker'\)/);
+  assert.match(html, /data-market-scopes="overview stocks options crypto prediction watchlist"/);
+  assert.match(server, /app\.get\('\/api\/market-ticker'/);
+});
+
+test('macro is a common utility entry rather than the stock market entry', () => {
+  assert.match(html, /\['macro', '[^']*宏观'\]/);
+  assert.doesNotMatch(html, /CORE_NAV_ITEMS[\s\S]*\['stocks', '[^']*宏观'\]/);
+  assert.match(html, /id="macro-tab"/);
+});
+
+test('server scopes risk history and risk exports', () => {
+  assert.match(server, /filterRiskOverview\(rawOverview, scope\)/);
+  assert.match(server, /getRiskHistory\(Number\.isFinite\(limit\) \? limit : 72, scope\)/);
+  assert.match(server, /app\.get\('\/api\/export\/journal', \(req, res\)/);
+  assert.match(server, /app\.get\('\/api\/export\/calibration', \(req, res\)/);
+});
+
 console.log('Market scope integration tests loaded');

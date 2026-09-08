@@ -2,11 +2,13 @@ import fs from 'fs';
 import path from 'path';
 import { pushNotification } from './notifications';
 import type { PortfolioRiskOverview } from './risk-overview';
+import type { MarketScope } from './market-scope';
 
 export type RiskLevel = PortfolioRiskOverview['riskLevelZh'];
 
 export interface RiskHistorySnapshot {
   t: string;
+  scope?: MarketScope;
   level: RiskLevel;
   riskScore: number;
   openCount: number;
@@ -77,9 +79,10 @@ function loadHistory(): RiskHistoryFile {
   return { version: 1, updatedAt: new Date().toISOString(), points: [] };
 }
 
-function toSnapshot(overview: PortfolioRiskOverview): RiskHistorySnapshot {
+function toSnapshot(overview: PortfolioRiskOverview, scope: MarketScope = 'overview'): RiskHistorySnapshot {
   return {
     t: overview.updatedAt || new Date().toISOString(),
+    scope,
     level: overview.riskLevelZh,
     riskScore: LEVEL_SCORE[overview.riskLevelZh] ?? 1,
     openCount: Number(overview.openCount || 0),
@@ -149,8 +152,8 @@ export function buildRiskHistoryInsight(input: RiskHistorySnapshot[]): RiskHisto
   };
 }
 
-export async function recordRiskHistory(overview: PortfolioRiskOverview): Promise<void> {
-  const snapshot = toSnapshot(overview);
+export async function recordRiskHistory(overview: PortfolioRiskOverview, scope: MarketScope = 'overview'): Promise<void> {
+  const snapshot = toSnapshot(overview, scope);
   if (!Number.isFinite(new Date(snapshot.t).getTime())) return;
   const state = loadHistory();
   const last = state.points.at(-1);
@@ -176,9 +179,12 @@ export async function recordRiskHistory(overview: PortfolioRiskOverview): Promis
   await fs.promises.writeFile(HISTORY_FILE, JSON.stringify(state), 'utf8');
 }
 
-export function getRiskHistory(limit = 72): RiskHistoryReport {
+export function getRiskHistory(limit = 72, scope?: MarketScope): RiskHistoryReport {
   const state = loadHistory();
-  const points = state.points.slice(-Math.max(1, Math.min(240, limit)));
+  const scopedPoints = !scope || scope === 'overview' || scope === 'watchlist'
+    ? state.points
+    : state.points.filter(point => point.scope === scope);
+  const points = scopedPoints.slice(-Math.max(1, Math.min(240, limit)));
   return {
     updatedAt: state.updatedAt,
     points,

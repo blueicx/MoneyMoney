@@ -2,6 +2,8 @@ import fs from 'fs';
 import path from 'path';
 import { DATA_ROOT } from '../utils/paths';
 import { getAssistantCalibration } from './assistant-journal';
+import type { MarketScope } from './market-scope';
+import { scopeForAction } from './market-scope-view';
 
 type CsvValue = string | number | null | undefined;
 
@@ -24,9 +26,12 @@ function readJson<T>(name: string, fallback: T): T {
   }
 }
 
-export function exportJournalCsv(): string {
+export function exportJournalCsv(scope?: MarketScope): string {
   const file = readJson<{ trades?: any[] }>('assistant-journal.json', {});
-  const rows = (file.trades || []).map(item => [
+  const trades = scope && scope !== 'overview' && scope !== 'watchlist'
+    ? (file.trades || []).filter(item => scopeForAction(item) === scope)
+    : file.trades || [];
+  const rows = trades.map(item => [
     item.openedAt,
     item.venue,
     item.symbol,
@@ -52,9 +57,10 @@ export function exportJournalCsv(): string {
   ], rows);
 }
 
-export function exportPaperCsv(): string {
+export function exportPaperCsv(scope?: MarketScope): string {
   const file = readJson<{ positions?: any[]; tradeLog?: any[] }>('paper-portfolio.json', { positions: [], tradeLog: [] });
-  const rows = (file.positions || []).map(item => [
+  const positions = scope && !['overview', 'prediction', 'watchlist'].includes(scope) ? [] : file.positions || [];
+  const rows = positions.map(item => [
     item.entryTime,
     item.marketTitle,
     item.outcomeName,
@@ -72,8 +78,8 @@ export function exportPaperCsv(): string {
   ].slice(0, 10), rows);
 }
 
-export function exportCalibrationCsv(): string {
-  const data = getAssistantCalibration();
+export function exportCalibrationCsv(scope?: MarketScope): string {
+  const data = getAssistantCalibration(scope);
   const rows = data.buckets.map(item => [
     data.updatedAt,
     item.label,

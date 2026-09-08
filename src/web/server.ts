@@ -87,7 +87,7 @@ import { aiCommentaryConfigured, getAiMarketCommentary } from '../features/ai-co
 import { getAiConfigurationStatus, testAiConnection, type AiChain } from '../features/ai-runtime-config';
 import { unifiedInstrumentService, normalizeInstrumentRef, type InstrumentType } from '../features/unified-instruments';
 import { MARKET_SCOPES, type MarketScope } from '../features/market-scope';
-import { filterAssistantReport, filterUnifiedPaperLedger } from '../features/market-scope-view';
+import { filterAssistantReport, filterRiskOverview, filterUnifiedPaperLedger } from '../features/market-scope-view';
 import { unifiedAlertStore, triggerUnifiedAlerts } from '../features/unified-alerts';
 import { buildPortfolioRiskOverview } from '../features/risk-overview';
 import { getRiskHistory, recordRiskHistory } from '../features/risk-history';
@@ -3521,6 +3521,37 @@ app.get('/api/advisor', async (req, res) => {
   }
 });
 
+app.get('/api/market-ticker', async (req, res) => {
+  const scope = requestedMarketScope(req.query.scope) || 'overview';
+  try {
+    if (scope === 'crypto' || scope === 'overview') {
+      const prices = await binanceFeed.getMultiplePrices(['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT']);
+      const data = Object.values(prices).map(item => ({
+        label: item.symbol,
+        title: `${item.symbol} ${item.price.toLocaleString()} ${item.change24hPct >= 0 ? '+' : ''}${item.change24hPct.toFixed(2)}%`,
+        value: item.price,
+        changePct: item.change24hPct,
+        source: 'Binance',
+      }));
+      return res.json({ success: true, scope, data });
+    }
+    if (scope === 'prediction') {
+      const radar = getCachedPredictionRadarSlice('', 240);
+      const data = (radar?.markets || []).slice(0, 8).map(item => ({
+        label: item.platform,
+        title: item.titleZh || item.title,
+        value: Math.round(item.yesPrice * 100),
+        changePct: null,
+        source: item.platform,
+      }));
+      return res.json({ success: true, scope, data });
+    }
+    return res.json({ success: true, scope, data: [] });
+  } catch (error: any) {
+    return res.json({ success: false, scope, error: error.message, data: [] });
+  }
+});
+
 app.get('/api/risk/overview', async (req, res) => {
   try {
     const scope = requestedMarketScope(req.query.scope);
@@ -3534,11 +3565,20 @@ app.get('/api/risk/overview', async (req, res) => {
     };
     if (!lastAdvisorReport) refreshAdvisorReportInBackground();
     const scopedReport = scope && scope !== 'overview' && scope !== 'watchlist' ? filterAssistantReport(report, scope) : report;
-    const overview = buildPortfolioRiskOverview(scopedReport, paper, metrics, {
-      ready: !!radar && (!scope || scope === 'overview' || scope === 'prediction' || scope === 'watchlist'),
+    const scopedPaper = scope && !['overview', 'prediction', 'watchlist'].includes(scope)
+      ? { ...paper, cashBalance: paper.startingBalance, positions: [], tradeLog: [], totalPnl: 0, winsCount: 0, lossesCount: 0, maxDrawdownPct: 0, peakEquity: paper.startingBalance }
+      : paper;
+    const scopedMetrics = scope && !['overview', 'prediction', 'watchlist'].includes(scope)
+      ? { var95Usd: 0, profitFactor: 0, winRate: 0 }
+      : metrics;
+    const rawOverview = buildPortfolioRiskOverview(scopedReport, scopedPaper, scopedMetrics, {
+      ready: scope && !['overview', 'prediction', 'watchlist'].includes(scope) ? true : !!radar,
       markets: !scope || scope === 'overview' || scope === 'prediction' || scope === 'watchlist' ? radar?.markets || [] : [],
     });
-    await recordRiskHistory(overview);
+    const overview = scope && scope !== 'overview' && scope !== 'watchlist'
+      ? filterRiskOverview(rawOverview, scope)
+      : rawOverview;
+    await recordRiskHistory(overview, scope || 'overview');
     res.json({
       success: true,
       data: overview,
@@ -3551,7 +3591,8 @@ app.get('/api/risk/overview', async (req, res) => {
 app.get('/api/risk/history', (req, res) => {
   try {
     const limit = Number(req.query.limit || 72);
-    res.json({ success: true, data: getRiskHistory(Number.isFinite(limit) ? limit : 72) });
+    const scope = requestedMarketScope(req.query.scope);
+    res.json({ success: true, data: getRiskHistory(Number.isFinite(limit) ? limit : 72, scope) });
   } catch (error: any) {
     res.json({ success: false, error: error.message });
   }
@@ -3585,30 +3626,30 @@ app.get('/api/research/daily-briefing', (_req, res) => {
   }
 });
 
-app.get('/api/calibration', (_req, res) => {
+app.get('/api/calibration', (req, res) => {
   try {
-    res.json({ success: true, data: getAssistantCalibration() });
+    res.json({ success: true, data: getAssistantCalibration(requestedMarketScope(req.query.scope)) });
   } catch (error: any) {
     res.json({ success: false, error: error.message });
   }
 });
 
-app.get('/api/export/journal', (_req, res) => {
+app.get('/api/export/journal', (req, res) => {
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', 'attachment; filename="moneymoney-signals.csv"');
-  res.send(exportJournalCsv());
+  res.send(exportJournalCsv(requestedMarketScope(req.query.scope)));
 });
 
-app.get('/api/export/paper', (_req, res) => {
+app.get('/api/export/paper', (req, res) => {
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', 'attachment; filename="moneymoney-paper-trades.csv"');
-  res.send(exportPaperCsv());
+  res.send(exportPaperCsv(requestedMarketScope(req.query.scope)));
 });
 
-app.get('/api/export/calibration', (_req, res) => {
+app.get('/api/export/calibration', (req, res) => {
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', 'attachment; filename="moneymoney-calibration.csv"');
-  res.send(exportCalibrationCsv());
+  res.send(exportCalibrationCsv(requestedMarketScope(req.query.scope)));
 });
 
 app.get('/api/export/forecast-lab', (_req, res) => {

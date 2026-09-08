@@ -57,8 +57,19 @@ function actionScope(action: { venue?: string; id?: string }): MarketScope | nul
   if (venue === 'binance') return 'crypto';
   if (venue === 'predict.fun') return 'prediction';
   if (venue === 'options') return 'options';
-  if (venue === 'macro') return 'stocks';
+  if (venue === 'macro') return null;
   return scopeForInstrument({ id: action.id });
+}
+
+export function scopeForAction(action: { venue?: string; venueZh?: string; name?: string; id?: string }): MarketScope | null {
+  const direct = actionScope(action);
+  if (direct) return direct;
+  const label = String(action.venueZh || action.name || '').trim().toLowerCase();
+  if (['股票', 'stock', 'stocks'].includes(label)) return 'stocks';
+  if (['期权', 'option', 'options'].includes(label)) return 'options';
+  if (['币安', '加密', 'crypto', 'binance'].includes(label)) return 'crypto';
+  if (['预测市场', 'prediction', 'predict.fun'].includes(label)) return 'prediction';
+  return null;
 }
 
 export function filterAssistantReport<T extends Record<string, any>>(report: T, scope: MarketScope): T {
@@ -74,7 +85,47 @@ export function filterAssistantReport<T extends Record<string, any>>(report: T, 
     predictionPicks: scope === 'prediction' ? rows('predictionPicks') : [],
     optionActions: scope === 'options' ? rows('optionActions') : [],
     sectorActions: scope === 'stocks' ? rows('sectorActions') : [],
-    macroActions: scope === 'stocks' ? rows('macroActions') : [],
-    reminders: (Array.isArray(report.reminders) ? report.reminders : []).filter((item: any) => actionScope(item) === scope),
+    macroActions: [],
+    ...(report.context && typeof report.context === 'object'
+      ? { context: { ...report.context, crossAssetRisk: undefined, eventRisk: undefined, cautionFlags: [] } }
+      : {}),
+    journal: report.journal && typeof report.journal === 'object'
+      ? { ...report.journal, openTrades: (Array.isArray(report.journal.openTrades) ? report.journal.openTrades : []).filter((item: any) => scopeForAction(item) === scope) }
+      : report.journal,
+    reminders: (Array.isArray(report.reminders) ? report.reminders : []).filter((item: any) => scopeForAction(item) === scope),
   };
+}
+
+function riskScope(item: { venueZh?: string; name?: string; venue?: string; id?: string }): MarketScope | null {
+  return scopeForAction(item);
+}
+
+export function filterRiskOverview<T extends Record<string, any>>(overview: T, scope: MarketScope): T {
+  if (scope === 'overview' || scope === 'watchlist') return overview;
+  const groups = Array.isArray(overview.groups) ? overview.groups.filter((item: any) => riskScope(item) === scope) : [];
+  const actionSignals = Array.isArray(overview.actionSignals) ? overview.actionSignals.filter((item: any) => riskScope(item) === scope) : [];
+  const radarWatchlist = scope === 'prediction' && Array.isArray(overview.radarWatchlist) ? overview.radarWatchlist : [];
+  const bullishSignals = actionSignals.filter((item: any) => String(item.directionZh || '').includes('多')).length;
+  const bearishSignals = actionSignals.filter((item: any) => String(item.directionZh || '').includes('空')).length;
+  const signalBalanceZh = !actionSignals.length ? '暂无明确信号'
+    : bullishSignals > bearishSignals * 2 ? '信号明显偏多'
+      : bearishSignals > bullishSignals * 2 ? '信号明显偏空' : '多空相对均衡';
+  return {
+    ...overview,
+    groups,
+    actionSignals,
+    radarWatchlist,
+    radarCount: radarWatchlist.length,
+    divergenceWatchCount: radarWatchlist.length,
+    expiringSoonCount: scope === 'prediction' ? Number(overview.expiringSoonCount || 0) : 0,
+    highConvictionCount: actionSignals.filter((item: any) => Number(item.confidencePct || 0) >= 68).length,
+    bullishSignals,
+    bearishSignals,
+    signalBalanceZh,
+  };
+}
+
+export function filterRiskHistory<T extends { points?: Array<{ scope?: string }> }>(history: T, scope: MarketScope): T {
+  if (scope === 'overview' || scope === 'watchlist') return history;
+  return { ...history, points: (history.points || []).filter(point => point.scope === scope) };
 }
