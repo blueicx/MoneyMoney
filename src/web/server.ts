@@ -2243,6 +2243,13 @@ function formatTelegramWatchlist(chatId: string): string {
 function formatTelegramPortfolio(): string {
   const portfolio = paperEngine.getPortfolio();
   const positions = paperEngine.getOpenPositions();
+  const unifiedPerformance = unifiedPaperLedgerStore.performance();
+  const unifiedPositions = unifiedPaperLedgerStore.get().positions;
+  const unifiedCounts = unifiedPositions.reduce((counts, position) => {
+    const label = position.instrumentType === 'stock' ? '股票' : position.instrumentType === 'crypto' ? '加密货币' : '预测市场';
+    counts[label] = (counts[label] || 0) + 1;
+    return counts;
+  }, {} as Record<string, number>);
   return [
     '<b>💼 模拟盘账户</b>',
     '权益：$' + formatTelegramNumber(portfolio.equity) + ' · 现金：$' + formatTelegramNumber(portfolio.cashBalance),
@@ -2255,6 +2262,12 @@ function formatTelegramPortfolio(): string {
       const pnl = (current - position.entryPrice) * position.quantity;
       return '· ' + escapeTelegramHtml(position.id) + ' · ' + escapeTelegramHtml(position.marketTitle) + ' · ' + escapeTelegramHtml(position.outcomeName) + ' · ' + (pnl >= 0 ? '+' : '') + '$' + formatTelegramNumber(pnl);
     }),
+    '',
+    '<b>📊 统一纸面账本</b>',
+    '权益：$' + formatTelegramNumber(unifiedPerformance.equity) + ' · 现金：$' + formatTelegramNumber(unifiedPerformance.cash),
+    '总盈亏：' + (unifiedPerformance.totalPnl >= 0 ? '+' : '') + '$' + formatTelegramNumber(unifiedPerformance.totalPnl) + ' · 持仓：' + unifiedPerformance.positions,
+    '交易数：' + unifiedPerformance.totalTrades + ' · 胜率：' + formatTelegramNumber(unifiedPerformance.winRate * 100, 1) + '%',
+    '按类型：' + (Object.entries(unifiedCounts).map(([label, count]) => `${label} ${count}`).join(' · ') || '暂无持仓'),
     '',
     '开仓：/paper open &lt;市场ID&gt; &lt;yes|no&gt; &lt;价格0-1&gt; &lt;金额USD&gt; · 平仓：/close &lt;持仓ID&gt; &lt;价格0-1&gt;',
   ].join('\n');
