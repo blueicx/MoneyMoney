@@ -102,3 +102,13 @@ interface StockDataSnapshot<T> {
 3. 任一数据源失败时，其他数据卡片仍能展示，且状态可见。
 4. 新增接口与现有接口同时通过测试，构建和完整测试通过。
 5. VPS 只发生应用资源替换和 MoneyMoney 服务重启，Nginx、证书和 VPN 配置保持不变。
+
+## 实施记录（2026-09-08）
+
+- 已新增 SEC EDGAR 统一客户端、Nasdaq 公共股票报价/历史适配器和股票数据编排服务。
+- 已接入统一股票详情接口：`/api/stocks/:symbol/overview`、`/filings`、`/fundamentals`、`/source-health`。
+- 已接入 `GET /api/source-health?scope=stocks`，股票范围只返回 4 个股票数据源：Nasdaq 报价、Nasdaq 历史、SEC 申报、SEC 公司事实。
+- AAPL 真实网络冒烟成功：报价和历史行情均为 `fresh`，SEC 申报返回 1000 条、公司事实包含 198 个年度事实标签。
+- 股票范围来源健康真实检查为 4/4 `fresh`，未出现 Binance、预测市场或加密数据项。
+- 安全扫描通过；构建通过；完整测试由基线 105 个增加到 118 个，结果为 118/118 通过。
+- Nasdaq Data Link 保持可选且未作为默认依赖启用；本轮未新增或写入任何 API Key。
