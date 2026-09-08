@@ -86,6 +86,7 @@ import { calculatePredictionPosition } from '../features/prediction-position-siz
 import { aiCommentaryConfigured, getAiMarketCommentary } from '../features/ai-commentary';
 import { getAiConfigurationStatus, testAiConnection, type AiChain } from '../features/ai-runtime-config';
 import { unifiedInstrumentService, normalizeInstrumentRef, type InstrumentType } from '../features/unified-instruments';
+import { stockDataService } from '../features/stock-data-service';
 import { MARKET_SCOPES, type MarketScope } from '../features/market-scope';
 import { filterAssistantReport, filterRiskOverview, filterUnifiedPaperLedger } from '../features/market-scope-view';
 import { unifiedAlertStore, triggerUnifiedAlerts } from '../features/unified-alerts';
@@ -1320,9 +1321,51 @@ app.post('/api/prediction-position-size', (req, res) => {
   }
 });
 
-app.get('/api/source-health', async (_req, res) => {
+app.get('/api/stocks/:symbol/overview', async (req, res) => {
   try {
-    res.json({ success: true, data: await getSourceHealth() });
+    res.json({ success: true, data: await stockDataService.overview(String(req.params.symbol || '')) });
+  } catch (error: any) {
+    res.status(502).json({ success: false, error: error?.message || '股票详情暂不可用', data: null });
+  }
+});
+
+app.get('/api/stocks/:symbol/filings', async (req, res) => {
+  try {
+    const data = await stockDataService.overview(String(req.params.symbol || ''));
+    res.json({ success: true, data: { symbol: data.symbol, filings: data.filings, sources: data.sources } });
+  } catch (error: any) {
+    res.status(502).json({ success: false, error: error?.message || '股票申报暂不可用', data: null });
+  }
+});
+
+app.get('/api/stocks/:symbol/fundamentals', async (req, res) => {
+  try {
+    const data = await stockDataService.overview(String(req.params.symbol || ''));
+    res.json({ success: true, data: { symbol: data.symbol, fundamentals: data.fundamentals, sources: data.sources } });
+  } catch (error: any) {
+    res.status(502).json({ success: false, error: error?.message || '股票公司事实暂不可用', data: null });
+  }
+});
+
+app.get('/api/stocks/:symbol/source-health', async (req, res) => {
+  try {
+    const data = await stockDataService.overview(String(req.params.symbol || ''));
+    res.json({ success: true, data: data.sources.map(snapshot => ({
+      id: snapshot.source,
+      status: snapshot.status,
+      detail: snapshot.error || snapshot.status,
+      fetchedAt: snapshot.fetchedAt,
+      expiresAt: snapshot.expiresAt,
+      latencyMs: snapshot.latencyMs,
+    })) });
+  } catch (error: any) {
+    res.status(502).json({ success: false, error: error?.message || '股票数据源状态暂不可用', data: [] });
+  }
+});
+
+app.get('/api/source-health', async (req, res) => {
+  try {
+    res.json({ success: true, data: await getSourceHealth(String(req.query.scope || 'all')) });
   } catch (e: any) {
     res.json({ success: false, error: e.message });
   }

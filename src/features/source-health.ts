@@ -1,6 +1,7 @@
 import { getPredictionRadar } from './prediction-radar';
 import { aiCommentaryConfigured } from './ai-commentary';
 import { ResilientDataSourceAdapter, type SourceStatus } from '../data/source-adapter';
+import { stockDataService } from './stock-data-service';
 
 export interface SourceHealthItem {
   id: string;
@@ -28,7 +29,7 @@ interface HealthCache {
   expiresAt: number;
 }
 
-let cache: HealthCache | null = null;
+const caches = new Map<string, HealthCache>();
 
 function friendlyError(value: unknown): string {
   const text = String(value || '未知错误');
@@ -103,7 +104,40 @@ function radarItem(
   };
 }
 
-async function buildSourceHealth(): Promise<SourceHealthReport> {
+async function stockHealthItems(): Promise<SourceHealthItem[]> {
+  const data = await stockDataService.overview('AAPL');
+  const names: Record<string, string> = {
+    'nasdaq-public-quote': 'Nasdaq 公共报价',
+    'nasdaq-public-history': 'Nasdaq 公共历史行情',
+    'sec-edgar-submissions': 'SEC EDGAR 申报',
+    'sec-edgar-companyfacts': 'SEC EDGAR 公司事实',
+  };
+  return data.snapshots.map(snapshot => {
+    const hasData = snapshot.data != null;
+    const usable = hasData && (snapshot.status === 'fresh' || snapshot.status === 'stale');
+    return {
+      id: snapshot.source,
+      name: names[snapshot.source] || snapshot.source,
+      group: '股票数据',
+      ok: usable,
+      configured: true,
+      latencyMs: snapshot.latencyMs,
+      detail: usable
+        ? `${snapshot.status === 'stale' ? '使用旧缓存' : '正常'} · 数据时间 ${snapshot.fetchedAt}`
+        : friendlyError(snapshot.error),
+      checkedAt: snapshot.fetchedAt,
+      status: snapshot.status,
+      expiresAt: snapshot.expiresAt,
+    };
+  });
+}
+
+async function buildSourceHealth(scope = 'all'): Promise<SourceHealthReport> {
+  if (scope === 'stocks') {
+    const checkedAt = new Date().toISOString();
+    const items = await stockHealthItems();
+    return { updatedAt: checkedAt, total: items.length, online: items.filter(item => item.ok).length, configuredOptional: 0, items };
+  }
   // This normally reuses the warm radar cache, so the panel does not duplicate
   // the radar's network work. On a fresh install it may wait for one warm-up.
   const radar = await getPredictionRadar('', 1);
@@ -183,6 +217,7 @@ async function buildSourceHealth(): Promise<SourceHealthReport> {
     radarItem('Manifold', source.manifold || { ok: false, count: 0, error: '尚未检查', checkedAt }),
     radarItem('Good Judgment Open', source.gjopen || { ok: false, count: 0, error: '尚未检查', checkedAt }),
     radarItem('Metaculus', source.metaculus || { ok: false, count: 0, error: '尚未检查', checkedAt }, /未配置/.test(String(source.metaculus?.error || '')) ? false : undefined),
+    ...(await stockHealthItems()),
     ...extraItems,
   ];
 
@@ -195,9 +230,10 @@ async function buildSourceHealth(): Promise<SourceHealthReport> {
   };
 }
 
-export async function getSourceHealth(): Promise<SourceHealthReport> {
+export async function getSourceHealth(scope = 'all'): Promise<SourceHealthReport> {
+  const cache = caches.get(scope);
   if (cache && cache.expiresAt > Date.now()) return cache.value;
-  const value = await buildSourceHealth();
-  cache = { value, expiresAt: Date.now() + 30_000 };
+  const value = await buildSourceHealth(scope);
+  caches.set(scope, { value, expiresAt: Date.now() + 30_000 });
   return value;
 }
