@@ -1957,7 +1957,7 @@
         <div class="section-title" style="margin-top:20px;">最近交易</div>
         <div id="paper-trades"></div>
         <div class="section-title" style="margin-top:24px;">🤖 AI 模拟跑单</div>
-        <p style="font-size:11.5px;color:var(--text-secondary);margin-bottom:10px;">设定金额，选择币安、预测市场或美股，AI 会自动进行纸面模拟。独立账本，不影响手动模拟盘。</p>
+        <p id="ai-runner-desc" style="font-size:11.5px;color:var(--text-secondary);margin-bottom:10px;">设定金额，选择币安、预测市场或美股，AI 会自动进行纸面模拟。独立账本，不影响手动模拟盘。</p>
         <div id="ai-runners-summary" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;margin-bottom:12px;"></div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px;">
           <select id="ai-runner-venue" onchange="syncAiRunnerVenueHint()" style="padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);font-size:12px;">
@@ -4150,8 +4150,19 @@ async function loadSettings() {
 function syncAiRunnerVenueHint() {
   const venue = document.getElementById('ai-runner-venue')?.value;
   const symbolEl = document.getElementById('ai-runner-symbol');
+  const descEl = document.getElementById('ai-runner-desc');
   if (!symbolEl) return;
-  symbolEl.placeholder = venue === 'Stocks' ? '如 AAPL / NVDA' : venue === 'Predict.fun' ? '如 12345（市场ID）' : '如 BTCUSDT / ETHUSDT';
+
+  if (venue === 'Stocks') {
+    symbolEl.placeholder = '如 AAPL / NVDA';
+    if (descEl) descEl.textContent = '设定金额，选择美股标的（如 AAPL），AI 会自动获取财报及宏观情绪并进行买卖点预测的纸面模拟。';
+  } else if (venue === 'Predict.fun') {
+    symbolEl.placeholder = '如 12345（市场ID）';
+    if (descEl) descEl.textContent = '设定金额，输入 Predict.fun 的市场 ID（纯数字），AI 将读取新闻和该市场盘口计算获胜概率。';
+  } else {
+    symbolEl.placeholder = '如 BTCUSDT / ETHUSDT';
+    if (descEl) descEl.textContent = '设定金额，选择币安交易对（如 BTCUSDT），AI 会自动读取K线、RSI、MACD指标和多空情绪进行模拟交易。';
+  }
 }
 
 function renderSettingsForm(s) {

@@ -19,4 +19,14 @@ assert.match(server, /runnerOpenPosition\(runner\.id, price, qty, 'YES'/);
 assert.match(server, /getRunnerStockKlineAdapter/);
 assert.match(runner, /AiRunnerVenue = 'Binance' \| 'Predict\.fun' \| 'Stocks'/);
 
+assert.match(html, /venue === 'Stocks'/);
+assert.match(html, /venue === 'Predict\.fun'/);
+assert.match(html, /如 AAPL \/ NVDA/);
+assert.match(html, /如 12345/);
+assert.match(html, /如 BTCUSDT \/ ETHUSDT/);
+assert.match(html, /ai-runner-desc/);
+assert.match(html, /选择美股标的/);
+assert.match(html, /预测市场/);
+assert.match(html, /Predict\.fun 的市场 ID/);
+assert.match(html, /币安交易对/);
 console.log('AI runner market selection: all assertions passed');
