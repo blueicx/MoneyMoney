@@ -2463,7 +2463,7 @@
         <p style="margin-top:10px;font-size:11px;color:var(--text-secondary);">加密数据来自 Deribit；美股/ETF 延迟行情来自 CBOE。PCR = Put/OI ÷ Call/OI；GEX 为一阶近似，仅用于观察持仓结构，不构成投资建议。</p>
       </div>
       <!-- Cross-platform Prediction Radar Tab -->
-      <div id="radar-tab" class="tab-content">
+      <div id="radar-tab" class="tab-content" data-market-scopes="overview prediction">
         <div class="section-title">🌐 跨平台预测雷达</div>
         <div class="radar-controls">
           <div class="radar-field">
@@ -8574,6 +8574,18 @@ let activeMarketScope = 'overview';
 let marketScopeRequestEpoch = 0;
 
 function isMarketScope(value) { return MARKET_SCOPES.some(scope => scope.id === value); }
+function marketRadarTab(scope = activeMarketScope) {
+  return scope === 'stocks' ? 'stocks'
+    : scope === 'options' ? 'options'
+      : scope === 'crypto' ? 'binance'
+        : scope === 'watchlist' ? 'positions' : 'radar';
+}
+function marketRadarLabel(scope = activeMarketScope) {
+  return scope === 'stocks' ? '📈 股票雷达'
+    : scope === 'options' ? '🎯 期权雷达'
+      : scope === 'crypto' ? '₿ 币安雷达'
+        : scope === 'watchlist' ? '⭐ 自选雷达' : '🌐 预测雷达';
+}
 function marketScopeForTab() { return null; }
 function defaultTabForMarketScope(scope) { return MARKET_SCOPES.find(item => item.id === scope)?.tab || 'command'; }
 function scopeAllowsView(declared) {
@@ -8640,11 +8652,12 @@ function renderUtilityNav() {
 }
 function renderCoreNav() {
   const items = CORE_NAV_ITEMS.filter(([tab]) => !(window.mm_isGuest && GUEST_ADMIN_TABS.has(tab)));
-  const markup = items.map(([tab, label]) => `<button class="core-workspace-btn" data-tab="${tab}" onclick="showTab('${tab}', this)">${label}</button>`).join('');
+  const navigationItems = items.map(([tab, label]) => tab === 'radar' ? [marketRadarTab(), marketRadarLabel()] : [tab, label]);
+  const markup = navigationItems.map(([tab, label]) => `<button class="core-workspace-btn" data-tab="${tab}" onclick="showTab('${tab}', this)">${label}</button>`).join('');
   const desktop = document.getElementById('core-workspace-nav');
   if (desktop) desktop.innerHTML = markup;
   const mobile = document.getElementById('mobile-nav');
-  if (mobile) mobile.innerHTML = items.map(([tab, label]) => `<button class="mnav-btn" data-tab="${tab}" onclick="mobileTab('${tab}')"><span>${label.slice(0, 2)}</span><small>${label.slice(2).trim()}</small></button>`).join('');
+  if (mobile) mobile.innerHTML = navigationItems.map(([tab, label]) => `<button class="mnav-btn" data-tab="${tab}" onclick="mobileTab('${tab}')"><span>${label.slice(0, 2)}</span><small>${label.slice(2).trim()}</small></button>`).join('');
 }
 function renderNavigationState() {
   ensureMacroWorkspace();
@@ -8747,39 +8760,40 @@ function showTab(tab, clicked, options = {}) {
     if (typeof window.showToast === 'function') window.showToast('访客模式仅支持只读浏览', 'error');
     return;
   }
+  const targetTab = tab === 'radar' ? marketRadarTab() : tab;
   const impliedScope = marketScopeForTab(tab);
   if (!options.scopeAlreadySynced && impliedScope && impliedScope !== activeMarketScope) setMarketScope(impliedScope, { openTab: false });
-  window.mm_active_tab = tab;
-  try { localStorage.setItem('mm-last-tab', tab); } catch (e) {}
+  window.mm_active_tab = targetTab;
+  try { localStorage.setItem('mm-last-tab', targetTab); } catch (e) {}
   document.querySelectorAll('.tab').forEach((t) => t.classList.remove('active'));
-  const button = clicked || [...document.querySelectorAll('.tabs .tab')].find(item => (item.getAttribute('onclick') || '').includes(`'${tab}'`));
+  const button = clicked || [...document.querySelectorAll('.tabs .tab')].find(item => (item.getAttribute('onclick') || '').includes(`'${targetTab}'`));
   if (button) button.classList.add('active');
   document.querySelectorAll('.tab-content').forEach((c) => c.classList.remove('active'));
-  document.getElementById(tab + '-tab').classList.add('active');
-  document.querySelectorAll('.nav-sub-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
-  document.querySelectorAll('.utility-nav-btn, .core-workspace-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
-  document.querySelectorAll('.mnav-btn').forEach(button => button.classList.toggle('active', button.dataset.tab === tab));
+  document.getElementById(targetTab + '-tab').classList.add('active');
+  document.querySelectorAll('.nav-sub-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === targetTab));
+  document.querySelectorAll('.utility-nav-btn, .core-workspace-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === targetTab));
+  document.querySelectorAll('.mnav-btn').forEach(button => button.classList.toggle('active', button.dataset.tab === targetTab));
   renderNavigationState();
-  if (tab === 'positions') loadPositions();
-  if (tab === 'command') loadCommandCenter();
-  if (tab === 'orders') loadOrders();
-if (tab === 'paper') { loadPaperPortfolio(); loadAiRunners(); }
-  if (tab === 'analysis') loadTradeAssistant();
-  if (tab === 'news') loadNews();
-  if (tab === 'settings') {loadSettings();loadConnectionInfo();loadSourceHealth();}
-  if (tab === 'binance') loadBinanceDashboard();
-  if (tab === 'stocks') queueOpenStockSections();
-  if (tab === 'options') loadOptions();
-  if (tab === 'macro') queueOpenStockSections();
-  if (tab === 'radar') { loadPredictionRadar(); loadForecastLab(); }
-  if (tab === 'risk') { loadPortfolioRisk(); loadCalibration(); }
-  if (tab === 'alerts') loadAlerts();
-  if (tab === 'whales') loadWhales();
-  if (tab === 'strategies') loadStrategies();
-if (tab === 'journal') loadJournal();
-  if (tab === 'journal') loadReviewNotes();
-  if (tab === 'research') loadResearchWorkspace();
-  if (tab === 'ops') loadOpsConsole();
+  if (targetTab === 'positions') loadPositions();
+  if (targetTab === 'command') loadCommandCenter();
+  if (targetTab === 'orders') loadOrders();
+if (targetTab === 'paper') { loadPaperPortfolio(); loadAiRunners(); }
+  if (targetTab === 'analysis') loadTradeAssistant();
+  if (targetTab === 'news') loadNews();
+  if (targetTab === 'settings') {loadSettings();loadConnectionInfo();loadSourceHealth();}
+  if (targetTab === 'binance') loadBinanceDashboard();
+  if (targetTab === 'stocks') queueOpenStockSections();
+  if (targetTab === 'options') loadOptions();
+  if (targetTab === 'macro') queueOpenStockSections();
+  if (targetTab === 'radar') { loadPredictionRadar(); loadForecastLab(); }
+  if (targetTab === 'risk') { loadPortfolioRisk(); loadCalibration(); }
+  if (targetTab === 'alerts') loadAlerts();
+  if (targetTab === 'whales') loadWhales();
+  if (targetTab === 'strategies') loadStrategies();
+if (targetTab === 'journal') loadJournal();
+  if (targetTab === 'journal') loadReviewNotes();
+  if (targetTab === 'research') loadResearchWorkspace();
+  if (targetTab === 'ops') loadOpsConsole();
 }
 // --- Cross-platform Prediction Radar ---
 function riskLevelColor(level) {
@@ -9404,6 +9418,7 @@ async function loadAiMarketCommentary(force = false) {
   }
 }
 async function loadPredictionRadar(force = false) {
+  if (!['overview', 'prediction'].includes(activeMarketScope)) return;
   if (predictionRadarState.loading || (!force && predictionRadarState.data)) return;
   predictionRadarState.loading = true;
   document.getElementById('radar-loading').style.display = 'block';
@@ -9582,6 +9597,7 @@ function renderForecastLab(d) {
 }
 let forecastLabLoading = false;
 async function loadForecastLab(force = false) {
+  if (!['overview', 'prediction'].includes(activeMarketScope)) return;
   const host = document.getElementById('forecast-lab-panel');
   if (!host || (forecastLabLoading && !force)) return;
   forecastLabLoading = true;
@@ -9944,9 +9960,11 @@ loadNewsTicker();
 // Restore last visited tab from localStorage.
 (function restoreLastTab() {
   const saved = localStorage.getItem('mm-last-tab');
-  if (saved && document.getElementById(saved + '-tab')) {
-    showTab(saved);
-    return;
+  if (saved !== 'radar' || marketRadarTab() === 'radar') {
+    if (saved && document.getElementById(saved + '-tab')) {
+      showTab(saved);
+      return;
+    }
   }
   showTab(defaultTabForMarketScope(activeMarketScope), null, { scopeAlreadySynced: true });
 })();
