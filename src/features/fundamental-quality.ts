@@ -6,6 +6,7 @@
  */
 
 import { loadTickerRecords } from './insider-transactions';
+import { buildSecHeaders } from './sec-edgar-client';
 
 export interface FundamentalHistoryPoint {
   endDate: string;
@@ -63,7 +64,6 @@ interface CompanyFacts {
   }>>;
 }
 
-const USER_AGENT = 'MoneyMoney/1.0 (keyless research; contact@moneymoney.app)';
 const CACHE_TTL = 12 * 60 * 60_000;
 const resultCache = new Map<string, { ts: number; value: FundamentalRadarResult }>();
 const inflight = new Map<string, Promise<FundamentalRadarResult>>();
@@ -82,7 +82,7 @@ function safeRatio(numerator: number | null, denominator: number | null): number
 async function fetchCompanyFacts(cik: string): Promise<CompanyFacts> {
   const response = await fetch(`https://data.sec.gov/api/xbrl/companyfacts/CIK${cik.padStart(10, '0')}.json`, {
     headers: {
-      'User-Agent': USER_AGENT,
+      ...buildSecHeaders(),
       Accept: 'application/json',
     },
     signal: AbortSignal.timeout(25_000),
