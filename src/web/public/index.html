@@ -47,6 +47,23 @@
       --red-light: rgba(248, 113, 113, 0.14);
       --shadow: 0 24px 60px rgba(0, 0, 0, 0.38);
     }
+    [data-theme="money"] {
+      --bg: #140d07;
+      --bg-card: rgba(36, 22, 12, 0.75);
+      --bg-secondary: rgba(212, 175, 55, 0.12);
+      --glass-highlight: rgba(255, 223, 0, 0.15);
+      --border: rgba(212, 175, 55, 0.5);
+      --text: #fef8f0;
+      --text-secondary: #d4af37;
+      --purple: #d4af37;
+      --purple-light: rgba(212, 175, 55, 0.15);
+      --purple-dark: #b8860b;
+      --green: #34d399;
+      --green-light: rgba(52, 211, 153, 0.14);
+      --red: #f87171;
+      --red-light: rgba(248, 113, 113, 0.14);
+      --shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
+    }
     html {
       background: var(--bg);
     }
@@ -4535,7 +4552,7 @@ async function loadBinanceKlines() {
   try {
     const res = await fetch('/api/binance/klines?symbol=' + bnCurrentSymbol + '&interval=' + bnCurrentInterval + '&limit=80');
     const data = await res.json();
-    if (!data.success) { 
+    if (!data.success) {
       const ctx = canvas.getContext('2d');
       ctx.clearRect(0,0,canvas.width,canvas.height);
       return;
@@ -4647,7 +4664,7 @@ async function loadMovers() {
     const data = await res.json();
     if (!data.success || !data.data) return;
     const { gainers, losers } = data.data;
-    const renderList = (items) => items.map(t => 
+    const renderList = (items) => items.map(t =>
       '<div class="mover-row"><span style="font-weight:600;">' + t.symbol.replace('USDT','') + '</span>' +
       '<span>$' + (t.price>=100?t.price.toFixed(0):t.price.toFixed(4)) + '</span>' +
       '<span class="' + (t.changePct>=0?'bn-up':'bn-down') + '" style="font-weight:700;">' + (t.changePct>=0?'+':'') + t.changePct.toFixed(2) + '%</span></div>'
@@ -4931,10 +4948,10 @@ async function loadPortfolioSummary() {
     canvas.parentElement.appendChild(overlayCanvas);
     return overlayCanvas;
   }
-  function clearOverlay() { 
-    const oc = getOverlay(); 
-    const ctx = oc.getContext('2d'); 
-    ctx.clearRect(0, 0, oc.width, oc.height); 
+  function clearOverlay() {
+    const oc = getOverlay();
+    const ctx = oc.getContext('2d');
+    ctx.clearRect(0, 0, oc.width, oc.height);
     document.getElementById('bn-hover-tip').style.display = 'none';
   }
   function drawCrosshair(x, y) {
@@ -4958,9 +4975,9 @@ async function loadPortfolioSummary() {
     const tip = document.getElementById('bn-hover-tip');
     if (!tip) return;
     const time = new Date(k.time);
-    const timeStr = time.toLocaleDateString('zh-CN',{month:'short',day:'numeric'}) + ' ' + 
+    const timeStr = time.toLocaleDateString('zh-CN',{month:'short',day:'numeric'}) + ' ' +
                     time.toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit',hour12:false});
-    tip.innerHTML = 
+    tip.innerHTML =
       '<div style="font-weight:700;margin-bottom:4px;">' + timeStr + '</div>' +
       '<div><span style="color:var(--text-secondary);">\u5F00</span> <span style="font-weight:600;">$' + k.open.toFixed(k.open>100?1:4) + '</span></div>' +
       '<div><span style="color:var(--text-secondary);">\u9AD8</span> <span style="font-weight:600;">$' + k.high.toFixed(k.high>100?1:4) + '</span></div>' +
@@ -6889,7 +6906,7 @@ function calcMACD(data) {
   const signalLine = calcEMA(macdLine.slice(25), 9);
   // Pad signal to match length
   const paddedSignal = new Array(25).fill(null).concat(signalLine);
-  const histogram = macdLine.map((v, i) => 
+  const histogram = macdLine.map((v, i) =>
     paddedSignal[i] !== null ? v - paddedSignal[i] : null
   );
   return { macdLine, signalLine: paddedSignal, histogram };
@@ -8343,28 +8360,67 @@ document.addEventListener('keydown', event => {
   if (event.key === 'Enter') { event.preventDefault(); runGlobalSearchItem(globalSearchState.active); }
 });
 // --- Grouped Navigation ---
-function initTheme() {
-  const saved = localStorage.getItem('mm-theme');
-  if (saved === 'dark') {
-    document.documentElement.setAttribute('data-theme', 'dark');
-    const btn = document.getElementById('theme-toggle-btn');
-    if (btn) btn.textContent = '☀️';
+function updateThemeButtons(theme) {
+  const icon = theme === 'money' ? '🪙' : (theme === 'dark' ? '🌙' : '☀️');
+  const title = theme === 'money' ? '纸醉金迷' : (theme === 'dark' ? '深色' : '浅色');
+
+  const btn1 = document.getElementById('theme-toggle-btn');
+  if (btn1) {
+    btn1.textContent = icon;
+    btn1.title = `切换主题 (${title})`;
+    btn1.setAttribute('aria-label', title);
+  }
+
+  const btn2 = document.getElementById('theme-toggle');
+  if (btn2) {
+    btn2.textContent = icon;
+    btn2.title = `切换主题 (${title})`;
+    btn2.setAttribute('aria-label', title);
   }
 }
+
+function initTheme() {
+  const saved = localStorage.getItem('mm-theme') || localStorage.getItem('theme');
+  let current = saved || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+  if (['light', 'dark', 'money'].indexOf(current) === -1) {
+    current = 'light';
+  }
+  if (current === 'light') {
+    document.documentElement.removeAttribute('data-theme');
+  } else {
+    document.documentElement.setAttribute('data-theme', current);
+  }
+  localStorage.setItem('mm-theme', current);
+  localStorage.setItem('theme', current);
+  updateThemeButtons(current);
+}
+
 function toggleTheme() {
   const root = document.documentElement;
-  const isDark = root.getAttribute('data-theme') === 'dark';
-  if (isDark) {
-    root.removeAttribute('data-theme');
-    localStorage.setItem('mm-theme', 'light');
-    showToast('☀️ 已切换到浅色主题', 'info', 1500);
-  } else {
-    root.setAttribute('data-theme', 'dark');
-    localStorage.setItem('mm-theme', 'dark');
-    showToast('🌙 已切换到深色主题', 'info', 1500);
+  const current = root.getAttribute('data-theme') || 'light';
+  let next = 'light';
+  let msg = '☀️ 已切换到浅色主题';
+
+  if (current === 'light') {
+    next = 'dark';
+    msg = '🌙 已切换到深色主题';
+  } else if (current === 'dark') {
+    next = 'money';
+    msg = '🪙 已切换到纸醉金迷';
   }
-  const btn = document.getElementById('theme-toggle-btn');
-  if (btn) btn.textContent = isDark ? '🌙' : '☀️';
+
+  if (next === 'light') {
+    root.removeAttribute('data-theme');
+  } else {
+    root.setAttribute('data-theme', next);
+  }
+  localStorage.setItem('mm-theme', next);
+  localStorage.setItem('theme', next);
+
+  updateThemeButtons(next);
+  if (typeof showToast === 'function') {
+    showToast(msg, 'info', 1500);
+  }
 }
 function showToast(message, type = 'info', durationMs = 2500) {
   const container = document.getElementById('mm-toast-container');
@@ -9728,22 +9784,7 @@ initializeDashboardCollapses();
     return nativeFetch(input, { ...init, headers });
   };
 })();
-    // --- Theme Toggle ---
-    function toggleTheme() {
-      const body = document.documentElement;
-      const current = body.getAttribute('data-theme');
-      const next = current === 'dark' ? 'light' : 'dark';
-      body.setAttribute('data-theme', next);
-      localStorage.setItem('theme', next);
-      document.getElementById('theme-toggle').textContent = next === 'dark' ? '☀️' : '🌙';
-    }
-    // Load saved theme on startup
-    (function() {
-      const saved = localStorage.getItem('theme') || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
-      document.documentElement.setAttribute('data-theme', saved);
-      const btn = document.getElementById('theme-toggle');
-      if (btn) btn.textContent = saved === 'dark' ? '☀️' : '🌙';
-    })();
+
     // --- Mobile Tab Navigation ---
 function mobileTab(tab) {
   showTab(tab);
