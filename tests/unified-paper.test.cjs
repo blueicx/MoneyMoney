@@ -37,4 +37,15 @@ const replay = replayUnifiedPaperOrders({ startingCash: 1000, orders: [
 assert.equal(replay.realizedPnl, 20);
 assert.throws(() => replayUnifiedPaperOrders({ startingCash: 1000, orders: [{ instrumentId: 'crypto:binance:BTCUSDT', instrumentType: 'crypto', side: 'BUY', price: 100, quantity: 1, timestamp: '2026-09-08T00:00:00.000Z' }], prices: {} }), /历史价格/);
 
+
+const fsNode = require('fs');
+const path = require('path');
+const indexHtml = fsNode.readFileSync(path.join(__dirname, '..', 'src', 'web', 'public', 'index.html'), 'utf8');
+
+assert.match(indexHtml, /id=.admin-paper-unified-stats./, 'Critical DOM: admin-paper-unified-stats is present');
+assert.match(indexHtml, /id=.admin-paper-unified-categories./, 'Critical DOM: admin-paper-unified-categories is present');
+assert.match(indexHtml, /\/api\/paper\/performance/, 'API: fetches performance');
+assert.match(indexHtml, /\/api\/paper\/positions/, 'API: fetches positions');
+assert.match(indexHtml, /typeLabels\s*=\s*{/, 'Category display: types mapped correctly');
+
 console.log('unified paper trading: all assertions passed');

@@ -10761,6 +10761,78 @@ async function loadPaperPortfolio() {
     // Recent trades
 
 
+    // Unified Performance (Admin only)
+    try {
+      if (document.body.classList.contains('guest-mode') === false || !document.querySelector('.guest-admin-only').style.display) {
+        const [perfRes, posRes] = await Promise.all([
+          fetch('/api/paper/performance'),
+          fetch('/api/paper/positions')
+        ]);
+        if (perfRes.ok && posRes.ok) {
+          const perfData = await perfRes.json();
+          const posData = await posRes.json();
+          
+          if (perfData.success && posData.success) {
+            const p = perfData.data;
+            const positions = posData.data || [];
+            
+            const statsEl = document.getElementById('admin-paper-unified-stats');
+            const pnlColor = p.totalPnl >= 0 ? 'var(--green)' : 'var(--red)';
+            const pnlSign = p.totalPnl >= 0 ? '+' : '';
+            
+            statsEl.innerHTML = `
+              <div style="background:var(--bg-card);padding:14px;border-radius:12px;box-shadow:var(--shadow);text-align:center;">
+                <div style="font-size:11px;color:var(--text-secondary);">统一总权益</div>
+                <div style="font-size:18px;font-weight:700;">$${p.equity.toFixed(2)}</div>
+              </div>
+              <div style="background:var(--bg-card);padding:14px;border-radius:12px;box-shadow:var(--shadow);text-align:center;">
+                <div style="font-size:11px;color:var(--text-secondary);">可用现金</div>
+                <div style="font-size:18px;font-weight:700;">$${p.cashBalance.toFixed(2)}</div>
+              </div>
+              <div style="background:var(--bg-card);padding:14px;border-radius:12px;box-shadow:var(--shadow);text-align:center;">
+                <div style="font-size:11px;color:var(--text-secondary);">总盈亏</div>
+                <div style="font-size:18px;font-weight:700;color:${pnlColor};">${pnlSign}$${p.totalPnl.toFixed(2)}</div>
+              </div>
+              <div style="background:var(--bg-card);padding:14px;border-radius:12px;box-shadow:var(--shadow);text-align:center;">
+                <div style="font-size:11px;color:var(--text-secondary);">持仓数</div>
+                <div style="font-size:18px;font-weight:700;">${positions.length}</div>
+              </div>
+              <div style="background:var(--bg-card);padding:14px;border-radius:12px;box-shadow:var(--shadow);text-align:center;">
+                <div style="font-size:11px;color:var(--text-secondary);">总交易笔数</div>
+                <div style="font-size:18px;font-weight:700;">${p.totalTrades || 0}</div>
+              </div>
+              <div style="background:var(--bg-card);padding:14px;border-radius:12px;box-shadow:var(--shadow);text-align:center;">
+                <div style="font-size:11px;color:var(--text-secondary);">综合胜率</div>
+                <div style="font-size:18px;font-weight:700;">${((p.winRate || 0) * 100).toFixed(0)}%</div>
+              </div>
+            `;
+            
+            const catsEl = document.getElementById('admin-paper-unified-categories');
+            catsEl.innerHTML = '';
+            const typeLabels = { 'stock': '股票', 'crypto': '加密', 'prediction': '预测市场' };
+            const typeColors = { 'stock': 'var(--purple)', 'crypto': 'var(--yellow)', 'prediction': 'var(--green)' };
+            
+            // Group positions by type
+            const byType = {};
+            positions.forEach(pos => {
+              byType[pos.type] = (byType[pos.type] || 0) + 1;
+            });
+            
+            for (const [t, count] of Object.entries(byType)) {
+              catsEl.innerHTML += `<div style="background:var(--bg-card);padding:6px 12px;border-radius:20px;font-size:12px;border:1px solid ${typeColors[t]||'var(--border)'}">
+                ${typeLabels[t] || t}: <strong>${count}</strong>
+              </div>`;
+            }
+            if (Object.keys(byType).length === 0) {
+              catsEl.innerHTML = '<div style="color:var(--text-secondary);font-size:12px;">无持仓</div>';
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.error('Unified paper stats error:', e);
+    }
+
     const tradesRes = await fetch('/api/paper/trades');
 
 
