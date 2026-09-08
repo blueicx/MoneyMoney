@@ -4,6 +4,7 @@ const test = require('node:test');
 const {
   filterAssistantReport,
   filterByMarketScope,
+  filterUnifiedPaperLedger,
   scopeAllowsSection,
   scopeQuery,
   scopeForInstrument,
@@ -62,6 +63,31 @@ test('generic records filter by explicit instrument type or market scope', () =>
   assert.equal(filterByMarketScope(rows, 'stocks').length, 1);
   assert.equal(filterByMarketScope(rows, 'crypto')[0].instrumentType, 'crypto');
   assert.equal(filterByMarketScope(rows, 'overview').length, 3);
+});
+
+test('unified paper ledger is isolated to the selected market', () => {
+  const ledger = {
+    startingCash: 1000,
+    cash: 650,
+    positions: [
+      { instrumentId: 'stock:us:AAPL', instrumentType: 'stock' },
+      { instrumentId: 'crypto:binance:BTCUSDT', instrumentType: 'crypto' },
+    ],
+    orders: [
+      { instrumentId: 'stock:us:AAPL', instrumentType: 'stock', side: 'BUY', price: 100, quantity: 2 },
+      { instrumentId: 'crypto:binance:BTCUSDT', instrumentType: 'crypto', side: 'BUY', price: 200, quantity: 1 },
+      { instrumentId: 'stock:us:AAPL', instrumentType: 'stock', side: 'SELL', price: 110, quantity: 1, pnlUsd: 10 },
+    ],
+    realizedPnl: 10,
+    peakEquity: 1000,
+    maxDrawdownPct: 2,
+  };
+  const stocks = filterUnifiedPaperLedger(ledger, 'stocks');
+  assert.deepEqual(stocks.positions.map(item => item.instrumentId), ['stock:us:AAPL']);
+  assert.equal(stocks.orders.length, 2);
+  assert.equal(stocks.cash, 910);
+  assert.equal(stocks.realizedPnl, 10);
+  assert.equal(filterUnifiedPaperLedger(ledger, 'overview'), ledger);
 });
 
 console.log('Market scoped view tests loaded');

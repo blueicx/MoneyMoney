@@ -1793,7 +1793,7 @@
     </div>
   </div>
     <!-- News Ticker -->
-    <div class="news-ticker" id="news-ticker">
+    <div class="news-ticker" id="news-ticker" data-market-scopes="overview crypto">
       <div class="news-ticker-inner" id="ticker-content">
         <span class="ticker-item">加载新闻中...</span>
       </div>
@@ -1805,7 +1805,7 @@
       <div id="mm-toast-container"></div>
       <button id="theme-toggle-btn" onclick="toggleTheme()" title="浅色" aria-label="浅色" style="position:fixed;top:14px;right:18px;z-index:9999;width:38px;height:38px;border-radius:50%;border:1px solid var(--border);background:var(--bg-card);backdrop-filter:blur(10px);cursor:pointer;font-size:17px;display:flex;align-items:center;justify-content:center;box-shadow:var(--shadow);transition:transform .15s;" onmouseover="this.style.transform='scale(1.1)'" onmouseout="this.style.transform='scale(1)'">☀️</button>
       <!-- Market Overview Bar -->
-      <div id="market-overview" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;padding:12px 14px;background:var(--bg-card);border-radius:12px;border:1px solid var(--border);overflow-x:auto;">
+      <div id="market-overview" data-market-scopes="overview" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;padding:12px 14px;background:var(--bg-card);border-radius:12px;border:1px solid var(--border);overflow-x:auto;">
         <span class="skl" style="min-width:100px;height:36px;"></span>
         <span class="skl" style="min-width:100px;height:36px;"></span>
         <span class="skl" style="min-width:100px;height:36px;"></span>
@@ -2191,14 +2191,15 @@
             <button class="collapse-action" onclick="setAllDashboardCollapses(false)">全部收起</button>
           </div>
         </div>
-        <details class="dash-collapse" data-collapse-key="stocks-market" open>
+        <div id="market-scope-empty" class="empty-tip" hidden style="margin-bottom:16px;"></div>
+        <details class="dash-collapse" data-collapse-key="stocks-market" data-market-scopes="stocks overview" open>
           <summary>
             <span class="collapse-title">📈 行情与选股</span>
             <span class="collapse-hint">全球指标 · 主要指数 · K线 · 热门股 · 搜索</span>
             <span class="collapse-chevron">▾</span>
           </summary>
           <div class="collapse-body">
-            <div style="display:flex;gap:8px;overflow-x:auto;padding-bottom:4px;margin-bottom:16px;" id="global-crypto-metrics"></div>
+            <div style="display:flex;gap:8px;overflow-x:auto;padding-bottom:4px;margin-bottom:16px;" id="global-crypto-metrics" data-market-scopes="crypto overview"></div>
             <div style="font-weight:700;font-size:13px;margin-bottom:10px;">🌍 主要指数</div>
             <div id="stock-indices" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-bottom:20px;"></div>
             <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
@@ -2224,7 +2225,7 @@
             <div id="stock-search-results"></div>
           </div>
         </details>
-        <details class="dash-collapse" data-collapse-key="stocks-insider">
+        <details class="dash-collapse" data-collapse-key="stocks-insider" data-market-scopes="stocks overview">
           <summary>
             <span class="collapse-title">🧑‍💼 内部人交易雷达</span>
             <span class="collapse-hint">SEC Form 4 · 近90天买卖 · 高管与股东</span>
@@ -2243,7 +2244,7 @@
             <div id="insider-radar"></div>
           </div>
         </details>
-        <details class="dash-collapse" data-collapse-key="stocks-institutional">
+        <details class="dash-collapse" data-collapse-key="stocks-institutional" data-market-scopes="stocks overview">
           <summary>
             <span class="collapse-title">🏛️ 机构持仓雷达</span>
             <span class="collapse-hint">Nasdaq · 增减持 · 新建/清仓 · 大持有人</span>
@@ -2262,7 +2263,7 @@
             <div id="institutional-radar"></div>
           </div>
         </details>
-        <details class="dash-collapse" data-collapse-key="stocks-analyst">
+        <details class="dash-collapse" data-collapse-key="stocks-analyst" data-market-scopes="stocks overview">
           <summary>
             <span class="collapse-title">🎯 分析师共识雷达</span>
             <span class="collapse-hint">评级 · 目标价 · 上调下调 · 覆盖广度</span>
@@ -2281,7 +2282,7 @@
             <div id="analyst-radar"></div>
           </div>
         </details>
-        <details class="dash-collapse" data-collapse-key="stocks-fundamentals">
+        <details class="dash-collapse" data-collapse-key="stocks-fundamentals" data-market-scopes="stocks overview">
           <summary>
             <span class="collapse-title">📊 基本面质量雷达</span>
             <span class="collapse-hint">SEC 10-K · 增长 · 现金流 · 负债</span>
@@ -2300,7 +2301,7 @@
             <div id="fundamental-radar"></div>
           </div>
         </details>
-        <details class="dash-collapse" data-collapse-key="stocks-breadth">
+        <details class="dash-collapse" data-collapse-key="stocks-breadth" data-market-scopes="stocks overview">
           <summary>
             <span class="collapse-title">🌡️ 市场宽度雷达</span>
             <span class="collapse-hint">Nasdaq · 上涨/下跌家数 · 板块与市值</span>
@@ -2314,7 +2315,7 @@
             <div id="market-breadth-radar"></div>
           </div>
         </details>
-        <details class="dash-collapse" data-collapse-key="stocks-short-interest">
+        <details class="dash-collapse" data-collapse-key="stocks-short-interest" data-market-scopes="stocks overview">
           <summary>
             <span class="collapse-title">🐻 空头利息雷达</span>
             <span class="collapse-hint">Nasdaq · 回补天数 · 拥挤/逼空</span>
@@ -2334,7 +2335,7 @@
             <div id="short-interest-radar"></div>
           </div>
         </details>
-        <details class="dash-collapse" data-collapse-key="stocks-global-spot">
+        <details class="dash-collapse" data-collapse-key="stocks-global-spot" data-market-scopes="stocks overview">
           <summary>
             <span class="collapse-title">🌐 全球宏观现货雷达</span>
             <span class="collapse-hint">金银 · 原油 · 美元 · 金银比</span>
@@ -2348,39 +2349,34 @@
             <div id="global-spot-radar"></div>
           </div>
         </details>
-        <details class="dash-collapse" data-collapse-key="stocks-macro" open>
+        <details class="dash-collapse" data-collapse-key="stocks-macro" data-market-scopes="stocks crypto options overview" open>
           <summary>
             <span class="collapse-title">🌍 宏观与流动性</span>
             <span class="collapse-hint">宏观指标 · 稳定币 · 美国经济 · 美债曲线</span>
             <span class="collapse-chevron">▾</span>
           </summary>
           <div class="collapse-body">
-            <div style="font-weight:700;font-size:13px;margin-bottom:10px;">🌍 宏观指标</div>
-            <div id="macro-indicators" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:20px;"></div>
-            <div style="font-weight:700;font-size:13px;margin-bottom:10px;">💧 稳定币流动性雷达</div>
-            <div id="stablecoin-liquidity" style="background:var(--bg-card);border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:20px;"></div>
-            <div style="font-weight:700;font-size:13px;margin-bottom:10px;margin-top:24px;">🏛️ 美国经济指标</div>
-            <div id="economic-indicators" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:20px;"></div>
-            <div style="font-weight:700;font-size:13px;margin-bottom:10px;margin-top:24px;">🏦 美债收益率曲线</div>
-            <div id="treasury-yields"></div>
+            <div data-market-scopes="stocks options overview"><div style="font-weight:700;font-size:13px;margin-bottom:10px;">🌍 股票/期权宏观指标</div><div id="macro-indicators" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:20px;"></div></div>
+            <div data-market-scopes="crypto overview"><div style="font-weight:700;font-size:13px;margin-bottom:10px;">💧 加密流动性与链上背景</div><div id="stablecoin-liquidity" style="background:var(--bg-card);border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:20px;"></div></div>
+            <div data-market-scopes="stocks options overview"><div style="font-weight:700;font-size:13px;margin-bottom:10px;margin-top:24px;">🏛️ 美国经济指标</div><div id="economic-indicators" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:20px;"></div><div style="font-weight:700;font-size:13px;margin-bottom:10px;margin-top:24px;">🏦 美债收益率曲线</div><div id="treasury-yields"></div></div>
           </div>
         </details>
-        <details class="dash-collapse" data-collapse-key="stocks-calendar">
+        <details class="dash-collapse" data-collapse-key="stocks-calendar" data-market-scopes="stocks crypto options overview">
           <summary>
             <span class="collapse-title">📅 日历与情绪</span>
             <span class="collapse-hint">财报 · 宏观事件 · 恐贪 · 资金费率</span>
             <span class="collapse-chevron">▾</span>
           </summary>
           <div class="collapse-body">
-            <div style="font-weight:700;font-size:13px;margin-bottom:10px;">📅 美股财报日历</div>
+            <div data-market-scopes="stocks options overview"><div style="font-weight:700;font-size:13px;margin-bottom:10px;">📅 美股财报日历</div>
             <div class="earnings-toolbar">
               <input type="date" id="earnings-date" class="earnings-date" onchange="loadEarningsCalendar()">
               <button class="tab active" onclick="loadEarningsCalendar()">🔄 刷新</button>
               <span id="earnings-updated" style="font-size:11px;color:var(--text-secondary);"></span>
             </div>
             <div id="earnings-summary" class="earnings-summary"></div>
-            <div id="earnings-list"></div>
-            <div style="font-weight:700;font-size:13px;margin-bottom:10px;margin-top:24px;">📅 本周宏观日历</div>
+            <div id="earnings-list"></div></div>
+            <div data-market-scopes="stocks crypto options overview"><div style="font-weight:700;font-size:13px;margin-bottom:10px;margin-top:24px;">📅 本周宏观日历</div>
             <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap;">
               <select id="calendar-impact" onchange="loadMacroCalendar()" style="padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);">
                 <option value="all">全部事件</option>
@@ -2390,15 +2386,12 @@
               </select>
               <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-secondary);"><input type="checkbox" id="calendar-upcoming" onchange="loadMacroCalendar()"> 只看即将公布</label>
             </div>
-            <div id="macro-calendar"></div>
-            <div style="font-weight:700;font-size:13px;margin-bottom:10px;margin-top:24px;">😱 恐贪指数 & 💸 资金费率</div>
-            <div id="fear-greed-card" style="margin-bottom:16px;"></div>
-            <div id="funding-rates-card"></div>
-            <div style="font-weight:700;font-size:13px;margin-bottom:10px;margin-top:24px;">🏛️ CME 机构持仓雷达</div>
-            <div id="cot-radar"></div>
+            <div id="macro-calendar"></div></div>
+            <div data-market-scopes="crypto overview"><div style="font-weight:700;font-size:13px;margin-bottom:10px;margin-top:24px;">😱 恐贪指数 & 💸 资金费率</div><div id="fear-greed-card" style="margin-bottom:16px;"></div><div id="funding-rates-card"></div></div>
+            <div data-market-scopes="stocks overview"><div style="font-weight:700;font-size:13px;margin-bottom:10px;margin-top:24px;">🏛️ CME 机构持仓雷达</div><div id="cot-radar"></div></div>
           </div>
         </details>
-        <details class="dash-collapse" data-collapse-key="stocks-defi">
+        <details class="dash-collapse" data-collapse-key="stocks-defi" data-market-scopes="crypto overview">
           <summary>
             <span class="collapse-title">🔗 DeFi 与资讯</span>
             <span class="collapse-hint">TVL · 收益池 · 交易量 · 加密新闻</span>
@@ -2823,6 +2816,7 @@ async function loadRiskPatrol(run = false) {
 async function loadTradeAssistant() {
   if (advisorLoading) return;
   const host = document.getElementById('trade-assistant');
+  const scopeToken = marketScopeRequestToken();
   advisorLoading = true;
   host.innerHTML = `
     <div style="background:var(--bg-card);border-radius:14px;padding:18px;margin-bottom:16px;border:1px solid var(--border);">
@@ -2830,22 +2824,23 @@ async function loadTradeAssistant() {
         <div style="width:18px;height:18px;border:2px solid var(--purple);border-top-color:transparent;border-radius:50%;animation:spin 1s linear infinite;"></div>
         <strong>智能交易助手正在汇总信号…</strong>
       </div>
-      <div style="font-size:12px;color:var(--text-secondary);margin-top:8px;">正在读取币安技术面、全球股票日线、美股行业轮动、VIX 期限结构、预测市场短窗、期权策略、恐贪指数和资金费率。</div>
+      <div style="font-size:12px;color:var(--text-secondary);margin-top:8px;">正在读取${activeMarketScope === 'overview' ? '全部市场' : ({ stocks: '股票', options: '期权', crypto: '虚拟币', prediction: '预测市场', watchlist: '自选标的' }[activeMarketScope] || '当前市场')}范围内的信号。</div>
     </div>`;
   try {
-    const res = await fetch('/api/advisor', { cache: 'no-store' });
+    const res = await fetch(scopedUrl('/api/advisor'), { cache: 'no-store' });
     const payload = await res.json();
     if (!payload.success) throw new Error(payload.error || '助手暂时不可用');
+    if (!isCurrentMarketScopeToken(scopeToken)) return;
     const d = payload.data;
     const regimeColor = d.regime.score > 18 ? 'var(--green)' : d.regime.score < -18 ? 'var(--red)' : 'var(--yellow)';
     const risk = d.context?.crossAssetRisk;
     const riskColor = risk ? (risk.riskScore >= 62 ? 'var(--green)' : risk.riskScore >= 48 ? 'var(--yellow)' : risk.riskScore >= 34 ? 'orange' : 'var(--red)') : 'var(--text-secondary)';
-    const riskChips = risk ? [...(risk.quotes || []), ...(risk.crypto || []).map(item => ({
+    const riskChips = risk ? [...(['stocks', 'options', 'overview', 'watchlist'].includes(activeMarketScope) ? (risk.quotes || []) : []), ...(['crypto', 'overview', 'watchlist'].includes(activeMarketScope) ? (risk.crypto || []).map(item => ({
       labelZh: item.labelZh,
       price: item.price,
       changePct: item.change24hPct,
       kind: 'crypto'
-    }))] : [];
+    })) : [])] : [];
     const riskChipHtml = riskChips.map(item => {
       const change = Number(item.changePct || 0);
       const color = item.kind === 'volatility'
@@ -2887,7 +2882,7 @@ async function loadTradeAssistant() {
         <div style="font-size:10.5px;color:var(--text-secondary);margin-top:5px;line-height:1.5;">${safeNewsText(marketRegime.summaryZh)}</div>
       </div>` : '';
     let srData = null;
-    try {
+    if (['crypto', 'overview'].includes(activeMarketScope)) try {
       const srRes = await fetch('/api/support-resistance?symbol=BTCUSDT&interval=4h');
       const srPayload = await srRes.json();
       if (srPayload.success) srData = srPayload.data;
@@ -2911,7 +2906,7 @@ async function loadTradeAssistant() {
         <div style="font-size:10.5px;color:var(--text-secondary);margin-top:5px;line-height:1.5;">${safeNewsText(srData.trendHintZh)}</div>
       </div>` : '';
     let confluenceData = null;
-    try {
+    if (['crypto', 'overview'].includes(activeMarketScope)) try {
       const cfRes = await fetch('/api/confluence?symbol=BTCUSDT');
       const cfPayload = await cfRes.json();
       if (cfPayload.success) confluenceData = cfPayload.data;
@@ -3425,7 +3420,48 @@ async function runMonteCarlo() {
     resultEl.innerHTML = `<div style="color:var(--red);font-size:12px;padding:8px 0;">${safeNewsText(e.message)}</div>`;
   }
 }
+async function loadScopedPaperPortfolio() {
+  const token = marketScopeRequestToken();
+  const statsEl = document.getElementById('paper-stats');
+  const positionsEl = document.getElementById('paper-positions');
+  const tradesEl = document.getElementById('paper-trades');
+  const riskEl = document.getElementById('paper-risk-metrics');
+  const curveEl = document.getElementById('paper-equity-chart');
+  const monteCarloEl = document.getElementById('paper-monte-carlo');
+  const adminEl = document.querySelector('#paper-tab .guest-admin-only');
+  if (monteCarloEl) monteCarloEl.hidden = true;
+  if (adminEl) adminEl.hidden = true;
+  try {
+    const [perfRes, posRes, ledgerRes] = await Promise.all([
+      fetch(scopedUrl('/api/paper/performance')),
+      fetch(scopedUrl('/api/paper/positions')),
+      fetch(scopedUrl('/api/paper/ledger')),
+    ]);
+    const perf = await perfRes.json();
+    const positions = await posRes.json();
+    const ledger = await ledgerRes.json();
+    if (!isCurrentMarketScopeToken(token)) return;
+    const p = perf.data || {};
+    const rows = Array.isArray(positions.data) ? positions.data : [];
+    const orders = Array.isArray(ledger.data?.orders) ? ledger.data.orders : [];
+    const pnl = Number(p.totalPnl || 0);
+    const scopeLabel = ({ stocks: '股票', options: '期权', crypto: '虚拟币', prediction: '预测市场' }[activeMarketScope] || '当前市场');
+    statsEl.innerHTML = [['范围', scopeLabel], ['权益', `$${Number(p.equity || 0).toFixed(2)}`], ['总盈亏', `${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)}`], ['现金', `$${Number(p.cash || 0).toFixed(2)}`], ['胜率', `${(Number(p.winRate || 0) * 100).toFixed(0)}%`], ['交易数', Number(p.totalTrades || orders.length)]]
+      .map(([label, value]) => `<div style="background:var(--bg-card);padding:14px;border-radius:12px;box-shadow:var(--shadow);text-align:center;"><div style="font-size:11px;color:var(--text-secondary);">${label}</div><div style="font-size:18px;font-weight:700;color:${label === '总盈亏' ? (pnl >= 0 ? 'var(--green)' : 'var(--red)') : 'inherit'};">${value}</div></div>`).join('');
+    riskEl.innerHTML = `<div class="empty-tip">当前仅展示${scopeLabel}的统一纸面账本：持仓 ${rows.length} 个 · 已实现盈亏 $${Number(p.realizedPnl || 0).toFixed(2)} · 最大回撤 ${Number(p.maxDrawdownPct || 0).toFixed(2)}%</div>`;
+    curveEl.innerHTML = '<div class="empty-tip">当前市场范围已隔离；该范围的权益曲线将在形成更多统一账本快照后展示。</div>';
+    positionsEl.innerHTML = rows.length ? rows.map(pos => `<div style="background:var(--bg-card);border-radius:12px;padding:14px;margin-bottom:8px;box-shadow:var(--shadow);display:flex;justify-content:space-between;align-items:center;"><div><div style="font-weight:600;font-size:13px;">${safeNewsText(pos.title || pos.instrumentId)}</div><div style="font-size:12px;color:var(--text-secondary);">${safeNewsText(pos.instrumentId)} · ${Number(pos.quantity || 0)} × ${Number(pos.currentPrice || pos.averageEntryPrice || 0).toFixed(4)}</div></div></div>`).join('') : '<div class="empty-tip">当前市场暂无统一纸面持仓</div>';
+    tradesEl.innerHTML = orders.length ? orders.slice(0, 30).map(order => `<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border);font-size:12px;"><span>${safeNewsText(order.side)} · ${safeNewsText(order.title || order.instrumentId)}</span><span style="color:var(--text-secondary);">${Number(order.price || 0).toFixed(4)} × ${Number(order.quantity || 0)}</span></div>`).join('') : '<div class="empty-tip">当前市场暂无统一纸面交易</div>';
+  } catch (error) {
+    if (isCurrentMarketScopeToken(token)) statsEl.innerHTML = `<div class="empty-tip" style="color:var(--red);">${safeNewsText(error.message || '统一纸面账本加载失败')}</div>`;
+  }
+}
 async function loadPaperPortfolio() {
+  if (!['overview', 'prediction'].includes(activeMarketScope)) return loadScopedPaperPortfolio();
+  const monteCarloEl = document.getElementById('paper-monte-carlo');
+  const adminEl = document.querySelector('#paper-tab .guest-admin-only');
+  if (monteCarloEl) monteCarloEl.hidden = false;
+  if (adminEl) adminEl.hidden = false;
   try {
     const res = await fetch('/api/paper/portfolio');
     const { data: p } = await res.json();
@@ -3671,10 +3707,14 @@ async function runBacktest() {
   const threshold = document.getElementById('bt-threshold').value;
   const holding = document.getElementById('bt-holding').value;
   const resultsEl = document.getElementById('backtest-results');
+  if (!['overview', 'prediction'].includes(activeMarketScope)) {
+    resultsEl.innerHTML = '<div class="empty-tip">当前回测引擎是预测市场专用；股票、期权和虚拟币范围不会显示预测市场回测结果。</div>';
+    return;
+  }
   resultsEl.innerHTML = "<div style=\"text-align:center;padding:20px;\">\u23F3 \u6B63\u5728\u8FD0\u884C\u56DE\u6D4B...</div>";
   try {
     const marketQuery = marketId ? `&marketId=${encodeURIComponent(marketId)}` : '';
-    const res = await fetch(`/api/backtest?strategy=${encodeURIComponent(strategy)}${marketQuery}&lookback=${lookback}&threshold=${threshold}&holding=${holding}`);
+    const res = await fetch(scopedUrl(`/api/backtest?strategy=${encodeURIComponent(strategy)}${marketQuery}&lookback=${lookback}&threshold=${threshold}&holding=${holding}`));
     const { data: r } = await res.json();
     if (r.totalTrades === 0) {
       resultsEl.innerHTML = "<div style=\"padding:20px;text-align:center;color:var(--text-secondary);\">\u5386\u53F2\u6570\u636E\u8FD8\u4E0D\u8DB3\uFF0C\u65E0\u6CD5\u56DE\u6D4B\u3002<br><small>\u673A\u5668\u4EBA\u8FD0\u884C\u5E76\u8BB0\u5F55\u4EF7\u683C\u540E\u4F1A\u9010\u6B65\u79EF\u7D2F\u6570\u636E\u3002</small></div>";
@@ -3898,6 +3938,10 @@ function renderEventMonthGrid(events) {
 async function compareBacktests() {
   const compareEl = document.getElementById('backtest-compare');
   if (!compareEl) return;
+  if (!['overview', 'prediction'].includes(activeMarketScope)) {
+    compareEl.innerHTML = '<div class="empty-tip">当前回测引擎是预测市场专用；请切换到预测市场或总体范围。</div>';
+    return;
+  }
   const marketId = document.getElementById('bt-market-id').value.trim();
   const lookback = document.getElementById('bt-lookback').value;
   const threshold = document.getElementById('bt-threshold').value;
@@ -3907,8 +3951,8 @@ async function compareBacktests() {
     const marketQuery = marketId ? `&marketId=${encodeURIComponent(marketId)}` : '';
     const query = `lookback=${lookback}&threshold=${threshold}&holding=${holding}${marketQuery}`;
     const responses = await Promise.all([
-      fetch(`/api/backtest?strategy=momentum&${query}`),
-      fetch(`/api/backtest?strategy=meanReversion&${query}`),
+      fetch(scopedUrl(`/api/backtest?strategy=momentum&${query}`)),
+      fetch(scopedUrl(`/api/backtest?strategy=meanReversion&${query}`)),
     ]);
     const results = await Promise.all(responses.map(response => response.json().then(body => body.data)));
     const rows = results.map((result, index) => ({
@@ -3933,12 +3977,14 @@ async function loadEventCalendar(force = false) {
     return;
   }
   eventCalendarState.loading = true;
+  const scopeToken = marketScopeRequestToken();
   host.innerHTML = '<div class="event-loading">正在汇总财报、央行与经济数据…</div>';
   try {
     const days = document.getElementById('event-days')?.value || '7';
-    const res = await fetch(`/api/events/calendar?days=${encodeURIComponent(days)}${force ? '&refresh=1' : ''}`);
+    const res = await fetch(scopedUrl(`/api/events/calendar?days=${encodeURIComponent(days)}${force ? '&refresh=1' : ''}`));
     const payload = await res.json();
     if (!payload.success) throw new Error(payload.error || '未来事件日历暂时不可用');
+    if (!isCurrentMarketScopeToken(scopeToken)) return;
     eventCalendarState.cache = payload.data;
     eventCalendarState.cacheAt = Date.now();
     renderEventCalendar(payload.data);
@@ -3955,7 +4001,7 @@ async function loadNews() {
   listEl.innerHTML = '';
   loadEventCalendar();
   try {
-    const res = await fetch('/api/news');
+    const res = await fetch(scopedUrl('/api/news'));
     const { data: items } = await res.json();
     loading.style.display = 'none';
     if (!items || items.length === 0) {
@@ -3984,7 +4030,7 @@ async function loadNews() {
 }
 async function loadCorrelations() {
   try {
-    const res = await fetch('/api/correlations');
+    const res = await fetch(scopedUrl('/api/correlations'));
     const { data: corrs } = await res.json();
     const el = document.getElementById('correlations-list');
     if (!corrs || corrs.length === 0) {
@@ -6652,8 +6698,11 @@ async function loadMacroIndicators() {
   if (!el) return;
   el.innerHTML = Array(4).fill('<div class="skl skl-card"><div class="skl-line"></div><div class="skl-line w60"></div></div>').join('');
   const cards = [];
+  const cryptoScope = activeMarketScope === 'crypto' || activeMarketScope === 'overview';
+  const equityScope = activeMarketScope === 'stocks' || activeMarketScope === 'options' || activeMarketScope === 'overview';
+  if (!equityScope && !cryptoScope) { el.innerHTML = ''; return; }
   // FX rates
-  try {
+  if (equityScope) try {
     const fxRes = await fetch('/api/macro/fx');
     const fxD = await fxRes.json();
     if (fxD.success) {
@@ -6662,25 +6711,15 @@ async function loadMacroIndicators() {
     }
   } catch(e) {}
   // Gold price
-  try {
+  if (equityScope) try {
     const goldRes = await fetch('/api/macro/gold');
     const goldD = await goldRes.json();
     if (goldD.success && goldD.data.price > 0) {
       cards.push({ name: '黄金 (美盎)', value: '$' + goldD.data.price.toFixed(0), icon: '🥇' });
     }
   } catch(e) {}
-  // Stablecoins
-  try {
-    const scRes = await fetch('/api/macro/stablecoins');
-    const scD = await scRes.json();
-    if (scD.success && scD.data.totalCirculatingUsd > 0) {
-      const total = scD.data.totalCirculatingUsd;
-      const display = total >= 1e9 ? '$' + (total/1e9).toFixed(0) + 'B' : '$' + (total/1e6).toFixed(0) + 'M';
-      cards.push({ name: '稳定币市值', value: display, icon: '💠' });
-    }
-  } catch(e) {}
   // Commodities (gold/silver/oil via Sina)
-  try {
+  if (equityScope) try {
     const comRes = await fetch('/api/macro/commodities');
     const comD = await comRes.json();
     if (comD.success && comD.data) {
@@ -6690,7 +6729,7 @@ async function loadMacroIndicators() {
     }
   } catch(e) {}
   // BTC on-chain (mempool.space)
-  try {
+  if (cryptoScope) try {
     const btcRes = await fetch('/api/macro/btc-chain');
     const btcD = await btcRes.json();
     if (btcD.success && btcD.data.blockHeight > 0) {
@@ -6702,7 +6741,7 @@ async function loadMacroIndicators() {
     }
   } catch(e) {}
   // ETH Gas (ethgasprice.org)
-  try {
+  if (cryptoScope) try {
     const gasRes = await fetch('/api/macro/eth-gas');
     const gasD = await gasRes.json();
     if (gasD.success && gasD.data) {
@@ -7212,7 +7251,7 @@ async function loadBinancePortfolio() {
 // --- Alerts ---
 async function loadAlerts() {
   try {
-    const res = await fetch('/api/alerts');
+    const res = await fetch(scopedUrl('/api/alerts'));
     const { data: alerts } = await res.json();
     const el = document.getElementById('alerts-list');
     if (!alerts || alerts.length === 0) {
@@ -7249,8 +7288,13 @@ async function loadWhales() {
   const listEl = document.getElementById('whales-list');
   loading.style.display = 'block';
   listEl.innerHTML = '';
+  if (!['overview', 'crypto'].includes(activeMarketScope)) {
+    loading.style.display = 'none';
+    listEl.innerHTML = '<div class="empty-tip">巨鲸监控仅适用于虚拟币市场；请切换到“虚拟币”范围。</div>';
+    return;
+  }
   try {
-    const res = await fetch('/api/whales?threshold=1000000');
+    const res = await fetch(scopedUrl('/api/whales?threshold=1000000'));
     const { data: txs } = await res.json();
     loading.style.display = 'none';
     if (!txs || txs.length === 0) {
@@ -7544,7 +7588,7 @@ async function loadResearchWorkspace() {
   if (!host) return;
   host.innerHTML = '<div class="empty-tip">正在读取研究对象...</div>';
   try {
-    const res = await fetch('/api/research?limit=80', { cache: 'no-store' });
+    const res = await fetch(scopedUrl('/api/research?limit=80'), { cache: 'no-store' });
     const body = await res.json();
     if (!body.success) throw new Error(body.error || '研究对象读取失败');
     host.innerHTML = body.data.length ? body.data.map(renderResearchEntryUi).join('') : '<div class="empty-tip">还没有研究对象。可以从上方建立第一张研究卡。</div>';
@@ -8153,17 +8197,28 @@ const STOCK_SECTION_LOADERS = {
 };
 const loadedStockSections = new Set();
 let stockSectionTimer = 0;
+function scopedStockLoaders(key) {
+  if (key === 'stocks-market') return activeMarketScope === 'overview' ? [loadStockQuotes, loadGlobalMetrics, loadMacroCalendar, loadStockKline] : activeMarketScope === 'stocks' ? [loadStockQuotes, loadMacroCalendar, loadStockKline] : [];
+  if (key === 'stocks-macro') return activeMarketScope === 'crypto' ? [loadMacroIndicators, loadStablecoinLiquidity] : activeMarketScope === 'overview' ? [loadMacroIndicators, loadStablecoinLiquidity, loadEconomicIndicators, loadTreasuryYields] : ['stocks', 'options'].includes(activeMarketScope) ? [loadMacroIndicators, loadEconomicIndicators, loadTreasuryYields] : [];
+  if (key === 'stocks-calendar') return activeMarketScope === 'crypto' ? [loadMarketSentiment] : ['stocks', 'options'].includes(activeMarketScope) ? [loadEarningsCalendar, loadMacroCalendar, loadCotRadar] : activeMarketScope === 'overview' ? [loadEarningsCalendar, loadMacroCalendar, loadMarketSentiment, loadCotRadar] : [];
+  if (key === 'stocks-defi') return ['crypto', 'overview'].includes(activeMarketScope) ? STOCK_SECTION_LOADERS[key] : [];
+  return ['stocks', 'overview'].includes(activeMarketScope) ? STOCK_SECTION_LOADERS[key] || [] : [];
+}
 function runStockSectionOnce(key) {
-  const loaders = STOCK_SECTION_LOADERS[key];
-  if (!loaders || loadedStockSections.has(key)) return;
-  loadedStockSections.add(key);
+  const section = document.querySelector(`#stocks-tab .dash-collapse[data-collapse-key="${key}"]`);
+  if (!section || section.hidden || !scopeAllowsView(section.dataset.marketScopes)) return;
+  const cacheKey = `${activeMarketScope}:${key}`;
+  const loaders = scopedStockLoaders(key);
+  if (!loaders.length || loadedStockSections.has(cacheKey)) return;
+  loadedStockSections.add(cacheKey);
   loaders.forEach(loader => { try { loader(); } catch (e) {} });
 }
 function queueOpenStockSections() {
   clearTimeout(stockSectionTimer);
   let delay = 0;
   for (const section of document.querySelectorAll('#stocks-tab .dash-collapse[data-collapse-key]')) {
-    if (!section.open || loadedStockSections.has(section.dataset.collapseKey)) continue;
+    const cacheKey = `${activeMarketScope}:${section.dataset.collapseKey}`;
+    if (!section.open || section.hidden || !scopeAllowsView(section.dataset.marketScopes) || loadedStockSections.has(cacheKey)) continue;
     setTimeout(() => runStockSectionOnce(section.dataset.collapseKey), delay);
     delay += 140;
   }
@@ -8349,10 +8404,13 @@ async function runGlobalSearchItem(index) {
     return;
   }
   if (item.kind === 'instrument') {
+    const instrumentScope = item.instrument?.type === 'stock' ? 'stocks' : item.instrument?.type === 'crypto' ? 'crypto' : item.instrument?.type === 'prediction' ? 'prediction' : null;
+    if (instrumentScope) setMarketScope(instrumentScope, { openTab: false });
     openUnifiedInstrument(item.instrument);
     return;
   }
   if (item.kind === 'stock') {
+    setMarketScope('stocks', { openTab: false });
     showTab('stocks');
     setTimeout(() => {
       const result = { code: item.symbol, name: item.name, exchangeSymbol: item.exchangeSymbol };
@@ -8366,6 +8424,7 @@ async function runGlobalSearchItem(index) {
     return;
   }
   if (item.kind === 'prediction') {
+    setMarketScope('prediction', { openTab: false });
     showTab('radar');
     const market = item.market || {};
     const query = (market.titleZh || market.title || '').slice(0, 42);
@@ -8488,16 +8547,32 @@ let activeMarketScope = 'overview';
 let marketScopeRequestEpoch = 0;
 
 function isMarketScope(value) { return MARKET_SCOPES.some(scope => scope.id === value); }
-function marketScopeForTab(tab) {
-  if (tab === 'stocks') return 'stocks';
-  if (tab === 'options') return 'options';
-  if (tab === 'binance') return 'crypto';
-  if (tab === 'radar') return 'prediction';
-  if (tab === 'positions') return 'watchlist';
-  if (tab === 'command' || tab === 'markets') return 'overview';
-  return null;
-}
+function marketScopeForTab() { return null; }
 function defaultTabForMarketScope(scope) { return MARKET_SCOPES.find(item => item.id === scope)?.tab || 'command'; }
+function scopeAllowsView(declared) {
+  const scopes = String(declared || '').split(/[\s,|]+/).filter(Boolean);
+  return activeMarketScope === 'overview' || scopes.includes('all') || scopes.includes('common') || scopes.includes(activeMarketScope);
+}
+function scopedUrl(path) {
+  const separator = String(path).includes('?') ? '&' : '?';
+  return `${path}${separator}scope=${encodeURIComponent(activeMarketScope)}`;
+}
+function applyMarketScopeView() {
+  document.querySelectorAll('[data-market-scopes]').forEach(node => {
+    const visible = scopeAllowsView(node.dataset.marketScopes);
+    node.hidden = !visible;
+    if (!visible && node.tagName === 'DETAILS') node.open = false;
+  });
+  const title = document.querySelector('#stocks-tab > .section-title');
+  const labels = { overview: '总体市场工作区', stocks: '股票市场工作区', options: '期权市场工作区', crypto: '虚拟币市场工作区', prediction: '预测市场工作区', watchlist: '自选标的工作区' };
+  if (title) title.textContent = `📊 ${labels[activeMarketScope] || '市场工作区'}`;
+  const empty = document.getElementById('market-scope-empty');
+  if (empty) {
+    const hasVisibleSection = [...document.querySelectorAll('#stocks-tab .dash-collapse[data-market-scopes]')].some(node => !node.hidden);
+    empty.hidden = hasVisibleSection;
+    empty.textContent = `${labels[activeMarketScope] || '当前市场'}暂无可用的宏观工作区。请从对应市场首页进入专属功能。`;
+  }
+}
 function readInitialMarketScope() {
   const queryScope = new URLSearchParams(location.search).get('market');
   if (isMarketScope(queryScope)) return queryScope;
@@ -8537,11 +8612,14 @@ function renderNavigationState() {
   renderCoreNav();
   document.querySelectorAll('[data-market-scope]').forEach(node => node.classList.toggle('active', node.dataset.marketScope === activeMarketScope));
   document.querySelectorAll('[data-tab]').forEach(node => node.classList.toggle('active', node.dataset.tab === (window.mm_active_tab || 'command')));
+  applyMarketScopeView();
 }
 function setMarketScope(scope, options = {}) {
   if (!isMarketScope(scope)) return;
   activeMarketScope = scope;
   marketScopeRequestEpoch += 1;
+  if (typeof loadedStockSections !== 'undefined') loadedStockSections.clear();
+  if (typeof eventCalendarState !== 'undefined') { eventCalendarState.cache = null; eventCalendarState.cacheAt = 0; }
   document.body.dataset.marketScope = scope;
   try { localStorage.setItem('mm-market-scope', scope); } catch (e) {}
   const params = new URLSearchParams(location.search);
@@ -8667,20 +8745,23 @@ function riskLevelColor(level) {
 async function loadPortfolioRisk() {
   const host = document.getElementById('portfolio-risk');
   if (!host) return;
+  const scopeToken = marketScopeRequestToken();
   host.innerHTML = '<div class="glass-card" style="padding:16px;border-radius:18px;">⏳ 正在汇总模拟持仓、助手信号、市场环境与预测雷达...</div>';
   try {
-    const res = await fetch('/api/risk/overview', { cache: 'no-store' });
+    const res = await fetch(scopedUrl('/api/risk/overview'), { cache: 'no-store' });
     const payload = await res.json();
     if (!payload.success) throw new Error(payload.error || '风险总览暂不可用');
+    if (!isCurrentMarketScopeToken(scopeToken)) return;
     const d = payload.data;
     let history = null;
     try {
-      const historyRes = await fetch('/api/risk/history?limit=72', { cache: 'no-store' });
+      const historyRes = await fetch(scopedUrl('/api/risk/history?limit=72'), { cache: 'no-store' });
       const historyPayload = await historyRes.json();
       if (historyPayload.success) history = historyPayload.data;
     } catch {
       history = null;
     }
+    if (!isCurrentMarketScopeToken(scopeToken)) return;
     const metric = (label, value, sub='') => `
       <div class="radar-fact"><small>${label}</small><b>${safeNewsText(value)}</b>${sub ? `<span style="font-size:10px;color:var(--text-secondary);">${safeNewsText(sub)}</span>` : ''}</div>`;
     const riskSparkline = (points) => {

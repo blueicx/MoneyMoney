@@ -31,6 +31,26 @@ export function filterByMarketScope<T extends { type?: string; instrumentType?: 
   return items.filter(item => scopeForInstrument(item) === scope);
 }
 
+export function filterUnifiedPaperLedger<T extends {
+  startingCash: number;
+  cash: number;
+  positions: Array<{ instrumentId: string; instrumentType?: string }>;
+  orders: Array<{ instrumentId: string; instrumentType?: string; side?: string; price: number; quantity: number; pnlUsd?: number }>;
+  realizedPnl: number;
+  peakEquity: number;
+  maxDrawdownPct: number;
+}>(ledger: T, scope: MarketScope): T {
+  if (scope === 'overview' || scope === 'watchlist') return ledger;
+  const positions = filterByMarketScope(ledger.positions, scope);
+  const orders = filterByMarketScope(ledger.orders, scope);
+  const cash = orders.reduce((balance, order) => {
+    const notional = Number(order.price) * Number(order.quantity);
+    return order.side === 'SELL' ? balance + notional : balance - notional;
+  }, Number(ledger.startingCash) || 0);
+  const realizedPnl = orders.reduce((sum, order) => sum + (Number(order.pnlUsd) || 0), 0);
+  return { ...ledger, cash, positions, orders, realizedPnl, peakEquity: Math.max(Number(ledger.startingCash) || 0, cash), maxDrawdownPct: 0 };
+}
+
 function actionScope(action: { venue?: string; id?: string }): MarketScope | null {
   const venue = String(action.venue || '').toLowerCase();
   if (venue === 'stocks') return 'stocks';

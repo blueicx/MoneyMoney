@@ -87,6 +87,7 @@ import { aiCommentaryConfigured, getAiMarketCommentary } from '../features/ai-co
 import { getAiConfigurationStatus, testAiConnection, type AiChain } from '../features/ai-runtime-config';
 import { unifiedInstrumentService, normalizeInstrumentRef, type InstrumentType } from '../features/unified-instruments';
 import { MARKET_SCOPES, type MarketScope } from '../features/market-scope';
+import { filterAssistantReport, filterUnifiedPaperLedger } from '../features/market-scope-view';
 import { unifiedAlertStore, triggerUnifiedAlerts } from '../features/unified-alerts';
 import { buildPortfolioRiskOverview } from '../features/risk-overview';
 import { getRiskHistory, recordRiskHistory } from '../features/risk-history';
@@ -1354,6 +1355,8 @@ app.get('/api/macro/calendar', async (req, res) => {
 
 app.get('/api/events/calendar', async (req, res) => {
   try {
+    const scope = requestedMarketScope(req.query.scope);
+    if (scope && !['overview', 'stocks', 'options'].includes(scope)) return res.json({ success: true, data: { events: [], count: 0 } });
     const result = await getUpcomingEventCalendar(Number(req.query.days) || 7, req.query.refresh === '1');
     res.json({ success: true, data: result });
   } catch (e: any) {
@@ -3502,18 +3505,25 @@ function stopTelegramCommandCenterMonitor(): void {
   telegramEventMonitor = null;
 }
 
-app.get('/api/advisor', async (_req, res) => {
+function requestedMarketScope(value: unknown): MarketScope | undefined {
+  const raw = String(value || '').trim();
+  return MARKET_SCOPES.includes(raw as MarketScope) ? raw as MarketScope : undefined;
+}
+
+app.get('/api/advisor', async (req, res) => {
   try {
     const report = await generateAssistantReport();
     lastAdvisorReport = report;
-    res.json({ success: true, data: report });
+    const scope = requestedMarketScope(req.query.scope);
+    res.json({ success: true, data: scope ? filterAssistantReport(report, scope) : report });
   } catch (error: any) {
     res.json({ success: false, error: error.message });
   }
 });
 
-app.get('/api/risk/overview', async (_req, res) => {
+app.get('/api/risk/overview', async (req, res) => {
   try {
+    const scope = requestedMarketScope(req.query.scope);
     const radar = getCachedPredictionRadarSlice('', 240);
     const paper = paperEngine.getPortfolio();
     const metrics = paperEngine.getRiskMetrics();
@@ -3523,9 +3533,10 @@ app.get('/api/risk/overview', async (_req, res) => {
       context: {},
     };
     if (!lastAdvisorReport) refreshAdvisorReportInBackground();
-    const overview = buildPortfolioRiskOverview(report, paper, metrics, {
-      ready: !!radar,
-      markets: radar?.markets || [],
+    const scopedReport = scope && scope !== 'overview' && scope !== 'watchlist' ? filterAssistantReport(report, scope) : report;
+    const overview = buildPortfolioRiskOverview(scopedReport, paper, metrics, {
+      ready: !!radar && (!scope || scope === 'overview' || scope === 'prediction' || scope === 'watchlist'),
+      markets: !scope || scope === 'overview' || scope === 'prediction' || scope === 'watchlist' ? radar?.markets || [] : [],
     });
     await recordRiskHistory(overview);
     res.json({
@@ -3664,7 +3675,8 @@ app.get('/api/binance/price/:symbol', async (req, res) => {
 // --- Price Alerts ---
 
 app.get('/api/alerts', (req, res) => {
-  res.json({ success: true, data: alertManager.getAlerts() });
+  const scope = requestedMarketScope(req.query.scope);
+  res.json({ success: true, data: scope && !['overview', 'crypto'].includes(scope) ? [] : alertManager.getAlerts() });
 });
 
 app.post('/api/alerts/add', async (req, res) => {
@@ -3741,6 +3753,8 @@ app.get('/api/reddit', async (req, res) => {
 
 app.get('/api/whales', async (req, res) => {
   try {
+    const scope = requestedMarketScope(req.query.scope);
+    if (scope && !['overview', 'crypto'].includes(scope)) return res.json({ success: true, data: [] });
     const threshold = parseInt(String(req.query.threshold || '1000000'));
     const txs = await whaleMonitor.getRecentWhaleTransactions(threshold);
     res.json({ success: true, data: txs });
@@ -3936,7 +3950,12 @@ app.get('/api/notifications', (req, res) => {
 // --- Research Workspace ---
 
 app.get('/api/research', (req, res) => {
-  const entries = listResearchEntries(Number(req.query.limit) || 50);
+  const scope = requestedMarketScope(req.query.scope);
+  const entries = listResearchEntries(Number(req.query.limit) || 50).filter(entry => {
+    if (!scope || scope === 'overview' || scope === 'watchlist') return true;
+    const entryScope = entry.subjectType === 'crypto' ? 'crypto' : entry.subjectType === 'prediction' ? 'prediction' : entry.subjectType === 'stock' || entry.subjectType === 'macro' ? 'stocks' : entry.subjectType === 'option' ? 'options' : null;
+    return entryScope === scope;
+  });
   res.json({ success: true, data: entries.map(entry => ({ ...entry, summary: summarizeResearchEntry(entry) })) });
 });
 
@@ -3983,9 +4002,21 @@ app.post('/api/notifications/mark-read', (req, res) => {
 
 // Canonical cross-asset paper ledger. Legacy prediction-market endpoints below
 // remain untouched for existing clients and stored portfolios.
-app.get('/api/paper/ledger', (_req, res) => res.json({ success: true, data: unifiedPaperLedgerStore.get() }));
-app.get('/api/paper/positions', (_req, res) => res.json({ success: true, data: unifiedPaperLedgerStore.get().positions }));
-app.get('/api/paper/performance', (_req, res) => res.json({ success: true, data: unifiedPaperLedgerStore.performance() }));
+app.get('/api/paper/ledger', (req, res) => {
+  const ledger = unifiedPaperLedgerStore.get();
+  const scope = requestedMarketScope(req.query.scope);
+  res.json({ success: true, data: scope ? filterUnifiedPaperLedger(ledger, scope) : ledger });
+});
+app.get('/api/paper/positions', (req, res) => {
+  const ledger = unifiedPaperLedgerStore.get();
+  const scope = requestedMarketScope(req.query.scope);
+  res.json({ success: true, data: scope ? filterUnifiedPaperLedger(ledger, scope).positions : ledger.positions });
+});
+app.get('/api/paper/performance', (req, res) => {
+  const ledger = unifiedPaperLedgerStore.get();
+  const scope = requestedMarketScope(req.query.scope);
+  res.json({ success: true, data: scope ? calculateUnifiedPerformance(filterUnifiedPaperLedger(ledger, scope)) : unifiedPaperLedgerStore.performance() });
+});
 app.post('/api/paper/orders', (req, res) => {
   try {
     const body = req.body || {};
@@ -4411,13 +4442,16 @@ app.get('/api/history/:marketId', (req, res) => {
 });
 
 app.get('/api/correlations', (req, res) => {
-  res.json({ success: true, data: priceTracker.allCorrelations() });
+  const scope = requestedMarketScope(req.query.scope);
+  res.json({ success: true, data: scope && scope !== 'overview' ? [] : priceTracker.allCorrelations() });
 });
 
 // --- News Feed ---
 
 app.get('/api/news', async (req, res) => {
   try {
+    const scope = requestedMarketScope(req.query.scope);
+    if (scope && !['overview', 'crypto'].includes(scope)) return res.json({ success: true, data: [] });
     const items = await newsFeed.getNews();
     res.json({ success: true, data: items });
   } catch (e: any) {
