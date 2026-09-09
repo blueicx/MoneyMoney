@@ -3591,6 +3591,20 @@ app.get('/api/market-ticker', async (req, res) => {
     }
     if (scope === 'stocks') {
       const symbols = ['AAPL', 'MSFT', 'NVDA', 'TSLA'];
+      try {
+        const text = await fetchTencentText(`https://qt.gtimg.cn/q=${symbols.map(symbol => `us${symbol}`).join(',')}`, 6000);
+        const data = text.split(';')
+          .map(raw => parseTencentStock(raw.trim()))
+          .filter(item => item?.market === 'us' && item.price > 0)
+          .map(item => ({
+            label: item.code,
+            title: `${item.code} ${item.price.toLocaleString()} ${item.changePct >= 0 ? '+' : ''}${item.changePct.toFixed(2)}%`,
+            value: item.price,
+            changePct: item.changePct,
+            source: 'Tencent Finance',
+          }));
+        if (data.length) return res.json({ success: true, scope, data });
+      } catch {}
       const results = await Promise.all(symbols.map(async symbol => {
         try {
           const result = await stockDataService.quote(symbol);

@@ -45,6 +45,7 @@ test('ticker loads after scope initialization and uses market-specific data', ()
   assert.match(html, /activeMarketScope = readInitialMarketScope\(\);[\s\S]*loadAll\(\)/);
   assert.match(server, /app\.get\('\/api\/market-ticker'/);
   assert.match(server, /if \(scope === 'stocks'\)/);
+  assert.match(server, /fetchTencentText\(`https:\/\/qt\.gtimg\.cn\/q=/);
   assert.match(server, /stockDataService\.quote/);
   assert.match(server, /if \(scope === 'options'\)/);
   assert.match(server, /getEquityOptionsSnapshot/);
