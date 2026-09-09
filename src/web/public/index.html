@@ -1805,7 +1805,7 @@
       <div id="mm-toast-container"></div>
       <button id="theme-toggle-btn" onclick="toggleTheme()" title="浅色" aria-label="浅色" style="position:fixed;top:14px;right:18px;z-index:9999;width:38px;height:38px;border-radius:50%;border:1px solid var(--border);background:var(--bg-card);backdrop-filter:blur(10px);cursor:pointer;font-size:17px;display:flex;align-items:center;justify-content:center;box-shadow:var(--shadow);transition:transform .15s;" onmouseover="this.style.transform='scale(1.1)'" onmouseout="this.style.transform='scale(1)'">☀️</button>
       <!-- Market Overview Bar -->
-      <div id="market-overview" data-market-scopes="overview" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;padding:12px 14px;background:var(--bg-card);border-radius:12px;border:1px solid var(--border);overflow-x:auto;">
+      <div id="market-overview" hidden data-market-scopes="overview" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;padding:12px 14px;background:var(--bg-card);border-radius:12px;border:1px solid var(--border);overflow-x:auto;">
         <span class="skl" style="min-width:100px;height:36px;"></span>
         <span class="skl" style="min-width:100px;height:36px;"></span>
         <span class="skl" style="min-width:100px;height:36px;"></span>
@@ -7148,6 +7148,11 @@ async function loadResearchBriefing(force = false) {
 async function loadMarketOverview() {
   const el = document.getElementById('market-overview');
   if (!el) return;
+  if (activeMarketScope !== 'overview') {
+    el.hidden = true;
+    return;
+  }
+  el.hidden = false;
   const chips = [];
   try {
     const results = await Promise.allSettled([
@@ -8709,6 +8714,7 @@ function setMarketScope(scope, options = {}) {
   history.replaceState({}, '', `${location.pathname}?${params}${location.hash}`);
   renderNavigationState();
   loadNewsTicker();
+  loadMarketOverview();
   if (options.openTab !== false) showTab(defaultTabForMarketScope(scope), null, { scopeAlreadySynced: true });
 }
 function marketScopeRequestToken() { return { scope: activeMarketScope, epoch: marketScopeRequestEpoch }; }
