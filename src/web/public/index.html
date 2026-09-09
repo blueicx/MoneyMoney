@@ -2832,10 +2832,10 @@ async function loadRiskPatrol(run = false) {
   }
 }
 async function loadTradeAssistant() {
-  if (advisorLoading) return;
   if (currentAnalysisController) currentAnalysisController.abort();
-  currentAnalysisController = new AbortController();
-  const signal = currentAnalysisController.signal;
+  const controller = new AbortController();
+  currentAnalysisController = controller;
+  const signal = controller.signal;
 
   const host = document.getElementById('trade-assistant');
   const scopeToken = marketScopeRequestToken();
@@ -2852,7 +2852,7 @@ async function loadTradeAssistant() {
     const res = await fetch(scopedUrl('/api/advisor'), { cache: 'no-store', signal });
     const payload = await res.json();
     if (!payload.success) throw new Error(payload.error || '助手暂时不可用');
-    if (!isCurrentMarketScopeToken(scopeToken)) return;
+    if (!isCurrentMarketScopeToken(scopeToken) || signal.aborted) return;
     const d = payload.data;
     const regimeColor = d.regime.score > 18 ? 'var(--green)' : d.regime.score < -18 ? 'var(--red)' : 'var(--yellow)';
     const risk = activeMarketScope === 'overview' ? d.context?.crossAssetRisk : null;
@@ -3254,7 +3254,10 @@ async function loadTradeAssistant() {
         <button class="tab" onclick="loadTradeAssistant()" style="margin-left:8px;">重试</button>
       </div>`;
   } finally {
-    advisorLoading = false;
+    if (currentAnalysisController === controller) {
+      advisorLoading = false;
+      currentAnalysisController = null;
+    }
   }
 }
 // --- Analysis Tab ---
@@ -4000,18 +4003,22 @@ async function loadEventCalendar(force = false) {
     return;
   }
   eventCalendarState.loading = true;
+  if (currentEventCalendarController) currentEventCalendarController.abort();
+  currentEventCalendarController = new AbortController();
+  const signal = currentEventCalendarController.signal;
   const scopeToken = marketScopeRequestToken();
   host.innerHTML = '<div class="event-loading">正在汇总财报、央行与经济数据…</div>';
   try {
     const days = document.getElementById('event-days')?.value || '7';
-    const res = await fetch(scopedUrl(`/api/events/calendar?days=${encodeURIComponent(days)}${force ? '&refresh=1' : ''}`));
+    const res = await fetch(scopedUrl(`/api/events/calendar?days=${encodeURIComponent(days)}${force ? '&refresh=1' : ''}`), { signal });
     const payload = await res.json();
     if (!payload.success) throw new Error(payload.error || '未来事件日历暂时不可用');
-    if (!isCurrentMarketScopeToken(scopeToken)) return;
+    if (!isCurrentMarketScopeToken(scopeToken) || signal.aborted) return;
     eventCalendarState.cache = payload.data;
     eventCalendarState.cacheAt = Date.now();
     renderEventCalendar(payload.data);
   } catch (error) {
+    if (error.name === 'AbortError') return;
     host.innerHTML = `<div style="color:var(--red);padding:14px 0;">${safeNewsText(error.message)}</div>`;
   } finally {
     eventCalendarState.loading = false;
@@ -7163,7 +7170,25 @@ async function loadResearchBriefing(force = false) {
 // --- Market Overview Bar ---
 const marketOverviewCache = new Map();
 const MARKET_OVERVIEW_CACHE_TTL_MS = 30000;
+const MARKET_OVERVIEW_REQUEST_TIMEOUT_MS = 12000;
 let currentMarketOverviewController = null;
+
+function fetchMarketOverviewJson(path, signal) {
+  const controller = new AbortController();
+  const relayAbort = () => controller.abort();
+  const timeoutId = setTimeout(() => controller.abort(), MARKET_OVERVIEW_REQUEST_TIMEOUT_MS);
+  if (signal?.aborted) controller.abort();
+  else signal?.addEventListener('abort', relayAbort, { once: true });
+  return fetch(path, { cache: 'no-store', signal: controller.signal })
+    .then(response => {
+      if (!response.ok) throw new Error(`请求失败（${response.status}）`);
+      return response.json();
+    })
+    .finally(() => {
+      clearTimeout(timeoutId);
+      signal?.removeEventListener('abort', relayAbort);
+    });
+}
 
 async function loadMarketOverview() {
   const el = document.getElementById('market-overview');
@@ -7210,33 +7235,33 @@ async function loadMarketOverview() {
     if (scope === 'overview' || scope === 'crypto') {
       sourceLabel = 'Binance/DeFiLlama/CoinGecko';
       requests = [
-        fetch('/api/binance/price/BTCUSDT', { signal }).then(r => r.json()),
-        fetch('/api/binance/price/ETHUSDT', { signal }).then(r => r.json()),
-        fetch('/api/sentiment', { signal }).then(r => r.json()),
-        fetch('/api/defi/tvl', { signal }).then(r => r.json()),
-        fetch('/api/crypto/global', { signal }).then(r => r.json())
+        fetchMarketOverviewJson('/api/binance/price/BTCUSDT', signal),
+        fetchMarketOverviewJson('/api/binance/price/ETHUSDT', signal),
+        fetchMarketOverviewJson('/api/sentiment', signal),
+        fetchMarketOverviewJson('/api/defi/tvl', signal),
+        fetchMarketOverviewJson('/api/crypto/global', signal)
       ];
     } else if (scope === 'stocks') {
       sourceLabel = '腾讯财经/Nasdaq Public Screener';
       requests = [
-        fetch('/api/stock/indices', { cache: 'no-store', signal }).then(r => r.json()),
-        fetch('/api/stock/market-breadth', { cache: 'no-store', signal }).then(r => r.json())
+        fetchMarketOverviewJson('/api/stock/indices', signal),
+        fetchMarketOverviewJson('/api/stock/market-breadth', signal)
       ];
     } else if (scope === 'options') {
       sourceLabel = '期权行情聚合源';
       requests = [
-        fetch('/api/market-ticker?scope=options', { cache: 'no-store', signal }).then(r => r.json())
+        fetchMarketOverviewJson('/api/market-ticker?scope=options', signal)
       ];
     } else if (scope === 'prediction') {
       sourceLabel = '预测雷达';
       requests = [
-        fetch('/api/prediction-radar?cachedOnly=1&limit=24', { cache: 'no-store', signal }).then(r => r.json())
+        fetchMarketOverviewJson('/api/prediction-radar?cachedOnly=1&limit=24', signal)
       ];
     } else if (scope === 'watchlist') {
       sourceLabel = '本地沙盒/同步';
-      requests = [fetch('/api/watchlist', { cache: 'no-store', signal }).then(r => r.json())];
+      requests = [fetchMarketOverviewJson('/api/watchlist', signal)];
       if (!window.mm_isGuest) {
-        requests.push(fetch('/api/risk/overview?scope=watchlist', { cache: 'no-store', signal }).then(r => r.json()));
+        requests.push(fetchMarketOverviewJson('/api/risk/overview?scope=watchlist', signal));
       }
     }
 
@@ -7264,15 +7289,16 @@ async function loadMarketOverview() {
     } else if (scope === 'stocks') {
       const [indicesRes, breadthRes] = [0, 1].map(getRes);
       if (indicesRes?.success && Array.isArray(indicesRes.data)) {
-        indicesRes.data.slice(0, 4).forEach(item => chips.push(chip(item.name, Number(item.price).toLocaleString(), pct(item.changePct), '指数')));
+        indicesRes.data.slice(0, 6).forEach(item => chips.push(chip(item.name, Number(item.price).toLocaleString(), pct(item.changePct), '指数')));
       }
       if (breadthRes?.success && breadthRes.data) {
         const bd = breadthRes.data;
         if (bd.advancers || bd.decliners) {
            chips.push(chip('涨跌比', `${bd.advancers || 0}:${bd.decliners || 0}`, '', '市场宽度'));
         }
-        if (bd.hotSectors && bd.hotSectors.length) {
-           chips.push(chip('热门板块', bd.hotSectors[0].name, pct(bd.hotSectors[0].changePct), 'Sector'));
+        if (bd.leadingSectors && bd.leadingSectors.length) {
+           const sector = bd.leadingSectors[0];
+           chips.push(chip('热门板块', sector.nameZh || sector.name, pct(sector.averageChangePct), 'Nasdaq Sector'));
         }
       }
     } else if (scope === 'options') {
@@ -7341,12 +7367,15 @@ async function loadMarketOverview() {
 async function loadNewsTicker() {
   const el = document.getElementById('ticker-content');
   if (!el) return;
+  if (currentTickerController) currentTickerController.abort();
+  currentTickerController = new AbortController();
+  const signal = currentTickerController.signal;
   const token = marketScopeRequestToken();
   el.innerHTML = '<span class="ticker-item">正在读取当前市场持续信息…</span>';
   try {
-    const res = await fetch(scopedUrl('/api/market-ticker'), { cache: 'no-store' });
+    const res = await fetch(scopedUrl('/api/market-ticker'), { cache: 'no-store', signal });
     const d = await res.json();
-    if (!isCurrentMarketScopeToken(token)) return;
+    if (!isCurrentMarketScopeToken(token) || signal.aborted) return;
     const items = d.success && Array.isArray(d.data) ? d.data : [];
     if (!items.length) {
       el.innerHTML = `<span class="ticker-item">${safeNewsText(({ stocks: '股票', options: '期权', crypto: '虚拟币', prediction: '预测市场', watchlist: '自选标的' }[activeMarketScope] || '总体市场'))}暂无持续信息</span>`;
@@ -7355,6 +7384,7 @@ async function loadNewsTicker() {
     const repeated = [...items, ...items];
     el.innerHTML = repeated.map(item => `<span class="ticker-item">📰 ${safeNewsText(item.title || item.label || '')}</span>`).join('');
   } catch (e) {
+    if (e.name === 'AbortError') return;
     if (isCurrentMarketScopeToken(token)) el.innerHTML = '<span class="ticker-item">当前市场持续信息暂不可用</span>';
   }
 }
@@ -7365,6 +7395,20 @@ let currentNewsController = null;
 let currentRadarController = null;
 let currentAnalysisController = null;
 let currentRiskController = null;
+let currentTickerController = null;
+let currentEventCalendarController = null;
+
+function abortMarketScopedRequests() {
+  currentMarketOverviewController?.abort();
+  currentNewsController?.abort();
+  currentRadarController?.abort();
+  currentAnalysisController?.abort();
+  currentRiskController?.abort();
+  currentTickerController?.abort();
+  currentEventCalendarController?.abort();
+  if (typeof predictionRadarState !== 'undefined') predictionRadarState.loading = false;
+  if (typeof eventCalendarState !== 'undefined') eventCalendarState.loading = false;
+}
 
 let bnActiveAlerts = [];
 function toggleAutoRefresh() {
@@ -8850,6 +8894,7 @@ function renderNavigationState() {
 }
 function setMarketScope(scope, options = {}) {
   if (!isMarketScope(scope)) return;
+  abortMarketScopedRequests();
   activeMarketScope = scope;
   marketScopeRequestEpoch += 1;
   if (typeof loadedStockSections !== 'undefined') loadedStockSections.clear();

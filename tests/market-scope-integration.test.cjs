@@ -82,6 +82,33 @@ test('watchlist overview never requests private risk data for guests', () => {
   assert.match(html, /chips\.push\(chip\('期权'/);
 });
 
+test('market switches cancel every active scoped loader and stale ticker request', () => {
+  assert.match(html, /function abortMarketScopedRequests\(\)[\s\S]*currentMarketOverviewController\?\.abort\(\)[\s\S]*currentNewsController\?\.abort\(\)[\s\S]*currentTickerController\?\.abort\(\)/);
+  assert.match(html, /function setMarketScope\(scope, options = \{\}\) \{[\s\S]*abortMarketScopedRequests\(\)[\s\S]*marketScopeRequestEpoch \+= 1/);
+  assert.match(html, /let currentTickerController = null/);
+  assert.match(html, /loadNewsTicker\(\)[\s\S]*currentTickerController = new AbortController\(\)[\s\S]*fetch\(scopedUrl\('\/api\/market-ticker'\), \{ cache: 'no-store', signal \}\)/);
+});
+
+test('aborted analysis cannot block or reset a newer market analysis request', () => {
+  assert.doesNotMatch(html, /async function loadTradeAssistant\(\) \{\n  if \(advisorLoading\) return;/);
+  assert.match(html, /async function loadTradeAssistant\(\)[\s\S]*const controller = new AbortController\(\)[\s\S]*currentAnalysisController === controller/);
+  assert.match(html, /if \(!isCurrentMarketScopeToken\(scopeToken\) \|\| signal\.aborted\) return;/);
+});
+
+test('market overview requests have a bounded timeout and retain partial data', () => {
+  assert.match(html, /const MARKET_OVERVIEW_REQUEST_TIMEOUT_MS = 12000/);
+  assert.match(html, /function fetchMarketOverviewJson\(path, signal\)[\s\S]*setTimeout\(/);
+  assert.match(html, /fetchMarketOverviewJson\('\/api\/stock\/indices', signal\)/);
+  assert.match(html, /Promise\.allSettled\(requests\)/);
+  assert.match(html, /部分成功/);
+});
+
+test('stock overview consumes the breadth contract without dropping index coverage', () => {
+  assert.match(html, /indicesRes\.data\.slice\(0, 6\)/);
+  assert.match(html, /bd\.leadingSectors/);
+  assert.doesNotMatch(html, /bd\.hotSectors/);
+});
+
 test('macro is a common utility entry rather than the stock market entry', () => {
   assert.match(html, /\['macro', '[^']*宏观'\]/);
   assert.doesNotMatch(html, /CORE_NAV_ITEMS[\s\S]*\['stocks', '[^']*宏观'\]/);
