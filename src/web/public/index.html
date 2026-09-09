@@ -1324,6 +1324,16 @@
     .idx-name { font-size:11px; color:var(--text-secondary); font-weight:600; margin-bottom:4px; }
     .idx-price { font-size:18px; font-weight:800; }
     .idx-change { font-size:12px; font-weight:700; margin-top:2px; }
+    .stock-symbol-selector { display:flex; align-items:center; gap:8px; overflow-x:auto; padding:8px; margin-bottom:12px; border:1px solid var(--border); border-radius:12px; background:var(--bg-card); scrollbar-width:thin; }
+    .stock-symbol-quick, .stock-watchlist-quick { display:flex; align-items:center; gap:6px; flex:0 0 auto; }
+    .stock-symbol-choice, .stock-watchlist-choice { flex:0 0 auto; padding:8px 14px; border:0; border-radius:9px; background:transparent; color:var(--text-secondary); font-size:14px; font-weight:700; cursor:pointer; white-space:nowrap; }
+    .stock-symbol-choice:hover, .stock-watchlist-choice:hover { background:var(--bg-secondary); color:var(--text); }
+    .stock-symbol-choice.active, .stock-watchlist-choice.active { background:var(--purple); color:#fff; }
+    .stock-watchlist-quick { border-left:1px solid var(--border); padding-left:8px; }
+    .stock-selector-search { display:flex; align-items:center; gap:6px; flex:0 0 auto; margin-left:auto; }
+    .stock-selector-search input { width:170px; padding:8px 10px; border-radius:9px; border:1px solid var(--border); color:var(--text); }
+    .stock-quote-card { width:100%; text-align:left; cursor:pointer; color:inherit; font:inherit; }
+    .stock-quote-card:hover { border-color:var(--purple); }
     .srch-item { display:flex; justify-content:space-between; align-items:center; padding:10px 14px; background:var(--bg-card); border-radius:10px; margin-bottom:6px; cursor:pointer; border:1px solid var(--border); transition:border-color .15s; }
     .srch-item:hover { border-color:var(--purple); }
     .srch-item.active { border-color:var(--purple); background:color-mix(in srgb,var(--purple) 12%,transparent); }
@@ -2229,12 +2239,27 @@
               <canvas id="stock-kline" width="640" height="360" style="width:100%;height:340px;display:block;"></canvas>
             </div>
             <div style="font-weight:700;font-size:13px;margin-bottom:10px;">💼 热门股票</div>
+            <div class="stock-symbol-selector" aria-label="股票快捷选择">
+              <div id="stock-symbol-quick" class="stock-symbol-quick" aria-label="美股七姐妹">
+                <button class="stock-symbol-choice active" type="button" data-stock-symbol="AAPL" data-stock-name="Apple" onclick="selectStockSymbol('AAPL','Apple')">AAPL</button>
+                <button class="stock-symbol-choice" type="button" data-stock-symbol="MSFT" data-stock-name="Microsoft" onclick="selectStockSymbol('MSFT','Microsoft')">MSFT</button>
+                <button class="stock-symbol-choice" type="button" data-stock-symbol="NVDA" data-stock-name="NVIDIA" onclick="selectStockSymbol('NVDA','NVIDIA')">NVDA</button>
+                <button class="stock-symbol-choice" type="button" data-stock-symbol="AMZN" data-stock-name="Amazon" onclick="selectStockSymbol('AMZN','Amazon')">AMZN</button>
+                <button class="stock-symbol-choice" type="button" data-stock-symbol="GOOGL" data-stock-name="Alphabet" onclick="selectStockSymbol('GOOGL','Alphabet')">GOOGL</button>
+                <button class="stock-symbol-choice" type="button" data-stock-symbol="META" data-stock-name="Meta" onclick="selectStockSymbol('META','Meta')">META</button>
+                <button class="stock-symbol-choice" type="button" data-stock-symbol="TSLA" data-stock-name="Tesla" onclick="selectStockSymbol('TSLA','Tesla')">TSLA</button>
+              </div>
+              <div id="stock-watchlist-quick" class="stock-watchlist-quick" aria-label="股票自选"></div>
+              <button class="tab guest-admin-only" type="button" onclick="addCurrentStockToWatchlist()">⭐ 加入自选</button>
+              <div class="stock-selector-search">
+                <input type="text" id="stock-search-input" placeholder="搜索股票代码或名称" oninput="stockSearchDebounce()" onkeydown="if(event.key==='Enter')loadStockSearch()" aria-label="搜索股票">
+                <button class="tab" type="button" onclick="loadStockSearch()">🔍 搜索</button>
+              </div>
+            </div>
             <div id="stock-popular" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-bottom:20px;"></div>
-            <div style="font-weight:700;font-size:13px;margin-bottom:10px;">🔍 搜索个股</div>
-            <div style="display:flex;gap:8px;margin-bottom:16px;">
-              <input type="text" id="stock-search-input" placeholder="输入代码或名称，如：AAPL、600519、茅台"
-                     oninput="stockSearchDebounce()" style="flex:1;padding:10px 14px;border-radius:10px;border:1px solid var(--border);background:var(--bg-card);color:var(--text-primary);">
-              <button class="tab active" onclick="loadStockQuotes()">🔄 刷新</button>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin:4px 0 10px;">
+              <div style="font-weight:700;font-size:13px;">🔍 搜索结果</div>
+              <button class="tab active" type="button" onclick="loadStockQuotes()">🔄 刷新行情</button>
             </div>
             <div id="stock-search-results"></div>
           </div>
@@ -2251,6 +2276,9 @@
                 <button class="tab active" onclick="loadInsiderRadar('AAPL','Apple')">AAPL</button>
                 <button class="tab" onclick="loadInsiderRadar('MSFT','Microsoft')">MSFT</button>
                 <button class="tab" onclick="loadInsiderRadar('NVDA','NVIDIA')">NVDA</button>
+                <button class="tab" onclick="loadInsiderRadar('AMZN','Amazon')">AMZN</button>
+                <button class="tab" onclick="loadInsiderRadar('GOOGL','Alphabet')">GOOGL</button>
+                <button class="tab" onclick="loadInsiderRadar('META','Meta')">META</button>
                 <button class="tab" onclick="loadInsiderRadar('TSLA','Tesla')">TSLA</button>
               </div>
               <button class="tab" onclick="loadInsiderRadar()">🔄 刷新</button>
@@ -2270,6 +2298,9 @@
                 <button class="tab active" onclick="loadInstitutionalOwnership('AAPL','Apple')">AAPL</button>
                 <button class="tab" onclick="loadInstitutionalOwnership('MSFT','Microsoft')">MSFT</button>
                 <button class="tab" onclick="loadInstitutionalOwnership('NVDA','NVIDIA')">NVDA</button>
+                <button class="tab" onclick="loadInstitutionalOwnership('AMZN','Amazon')">AMZN</button>
+                <button class="tab" onclick="loadInstitutionalOwnership('GOOGL','Alphabet')">GOOGL</button>
+                <button class="tab" onclick="loadInstitutionalOwnership('META','Meta')">META</button>
                 <button class="tab" onclick="loadInstitutionalOwnership('TSLA','Tesla')">TSLA</button>
               </div>
               <button class="tab" onclick="loadInstitutionalOwnership()">🔄 刷新</button>
@@ -2289,6 +2320,9 @@
                 <button class="tab active" onclick="loadAnalystConsensus('AAPL','Apple')">AAPL</button>
                 <button class="tab" onclick="loadAnalystConsensus('MSFT','Microsoft')">MSFT</button>
                 <button class="tab" onclick="loadAnalystConsensus('NVDA','NVIDIA')">NVDA</button>
+                <button class="tab" onclick="loadAnalystConsensus('AMZN','Amazon')">AMZN</button>
+                <button class="tab" onclick="loadAnalystConsensus('GOOGL','Alphabet')">GOOGL</button>
+                <button class="tab" onclick="loadAnalystConsensus('META','Meta')">META</button>
                 <button class="tab" onclick="loadAnalystConsensus('TSLA','Tesla')">TSLA</button>
               </div>
               <button class="tab" onclick="loadAnalystConsensus()">🔄 刷新</button>
@@ -2308,6 +2342,9 @@
                 <button class="tab active" onclick="loadFundamentalQuality('AAPL','Apple')">AAPL</button>
                 <button class="tab" onclick="loadFundamentalQuality('MSFT','Microsoft')">MSFT</button>
                 <button class="tab" onclick="loadFundamentalQuality('NVDA','NVIDIA')">NVDA</button>
+                <button class="tab" onclick="loadFundamentalQuality('AMZN','Amazon')">AMZN</button>
+                <button class="tab" onclick="loadFundamentalQuality('GOOGL','Alphabet')">GOOGL</button>
+                <button class="tab" onclick="loadFundamentalQuality('META','Meta')">META</button>
                 <button class="tab" onclick="loadFundamentalQuality('TSLA','Tesla')">TSLA</button>
               </div>
               <button class="tab" onclick="loadFundamentalQuality()">🔄 刷新</button>
@@ -2341,6 +2378,9 @@
                 <button class="tab active" onclick="loadShortInterest('AAPL','Apple')">AAPL</button>
                 <button class="tab" onclick="loadShortInterest('MSFT','Microsoft')">MSFT</button>
                 <button class="tab" onclick="loadShortInterest('NVDA','NVIDIA')">NVDA</button>
+                <button class="tab" onclick="loadShortInterest('AMZN','Amazon')">AMZN</button>
+                <button class="tab" onclick="loadShortInterest('GOOGL','Alphabet')">GOOGL</button>
+                <button class="tab" onclick="loadShortInterest('META','Meta')">META</button>
                 <button class="tab" onclick="loadShortInterest('TSLA','Tesla')">TSLA</button>
                 <button class="tab" onclick="loadShortInterest('QQQ','Nasdaq 100 ETF')">QQQ</button>
               </div>
@@ -5134,6 +5174,85 @@ function stockSearchDebounce() {
   clearTimeout(window._stockSearchTimer);
   window._stockSearchTimer = setTimeout(() => loadStockSearch(), 500);
 }
+const STOCK_QUICK_SYMBOLS = Object.freeze([
+  ['AAPL', 'Apple'], ['MSFT', 'Microsoft'], ['NVDA', 'NVIDIA'], ['AMZN', 'Amazon'],
+  ['GOOGL', 'Alphabet'], ['META', 'Meta'], ['TSLA', 'Tesla']
+]);
+function stockInstrumentId(symbol) {
+  const normalized = String(symbol || '').replace(/^us/i, '').toUpperCase();
+  return /^[A-Z][A-Z0-9.-]{0,9}$/.test(normalized) ? 'stock:us:' + normalized : '';
+}
+function stockSymbolFromWatchlistId(value) {
+  const id = String(value || '').trim();
+  if (id.toLowerCase().startsWith('stock:us:')) return id.slice(9).toUpperCase();
+  if (/^us[A-Za-z][A-Za-z0-9.-]{0,9}$/.test(id)) return id.slice(2).toUpperCase();
+  return '';
+}
+function stockNameForSymbol(symbol) {
+  const normalized = String(symbol || '').replace(/^us/i, '').toUpperCase();
+  return STOCK_QUICK_SYMBOLS.find(item => item[0] === normalized)?.[1] || normalized;
+}
+function setStockSelectorActive(symbol) {
+  const normalized = String(symbol || '').replace(/^us/i, '').toUpperCase();
+  document.querySelectorAll('[data-stock-symbol]').forEach(button => {
+    button.classList.toggle('active', String(button.dataset.stockSymbol || '').toUpperCase() === normalized);
+  });
+}
+async function loadStockWatchlistShortcuts(signal) {
+  const el = document.getElementById('stock-watchlist-quick');
+  if (!el) return;
+  try {
+    const response = await fetch('/api/watchlist', { signal, cache: 'no-store' });
+    const body = await response.json();
+    if (signal?.aborted) return;
+    const symbols = Array.from(new Set((body.data || []).map(stockSymbolFromWatchlistId).filter(Boolean)));
+    el.innerHTML = symbols.length
+      ? symbols.map(symbol => `<button class="stock-watchlist-choice" type="button" data-stock-symbol="${stockEscapeHtml(symbol)}" onclick="selectStockSymbol('${stockEscapeHtml(symbol)}','${stockEscapeHtml(stockNameForSymbol(symbol))}')">⭐ ${stockEscapeHtml(symbol)}</button>`).join('')
+      : '<span style="font-size:12px;color:var(--text-secondary);white-space:nowrap;">暂无股票自选</span>';
+    setStockSelectorActive(window._stockSelectedSymbol || currentStockSymbol);
+  } catch (error) {
+    if (error.name !== 'AbortError') el.innerHTML = '<span style="font-size:12px;color:var(--text-secondary);white-space:nowrap;">自选暂不可用</span>';
+  }
+}
+async function addStockToWatchlist(symbol) {
+  if (window.mm_isGuest) {
+    window.showToast?.('访客模式仅支持只读浏览', 'error');
+    return;
+  }
+  const instrumentId = stockInstrumentId(symbol);
+  if (!instrumentId) return;
+  try {
+    const response = await fetch('/api/watchlist', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ instrumentId }) });
+    const body = await response.json();
+    if (!body.success) throw new Error(body.error || '加入自选失败');
+    window.showToast?.('已加入股票自选', 'success');
+    await loadStockWatchlistShortcuts();
+  } catch (error) { window.showToast?.(error.message || '加入自选失败', 'error'); }
+}
+function addCurrentStockToWatchlist() {
+  addStockToWatchlist(window._stockSelectedSymbol || currentStockSymbol);
+}
+function selectStockQuoteCard(card) {
+  selectStockSymbol(card?.dataset?.stockSymbol, card?.dataset?.stockName);
+}
+function selectStockSymbol(symbol, name, apiSymbol, options = {}) {
+  const raw = String(symbol || '').trim();
+  const normalized = raw.replace(/^us/i, '').toUpperCase();
+  if (!stockInstrumentId(normalized) || !['stocks', 'overview', 'watchlist'].includes(activeMarketScope)) return;
+  const displayName = name || stockNameForSymbol(normalized);
+  const legacySymbol = raw.toLowerCase().startsWith('us') ? raw : 'us' + normalized;
+  window._stockSelectedSymbol = normalized;
+  setStockSelectorActive(normalized);
+  loadUnifiedStockData(normalized);
+  loadStockKline(legacySymbol, displayName, apiSymbol);
+  if (options.refreshRelated === false) return;
+  loadInsiderRadar(normalized, displayName);
+  loadFundamentalQuality(normalized, displayName);
+  loadShortInterest(normalized, displayName);
+  loadInstitutionalOwnership(normalized, displayName);
+  loadAnalystConsensus(normalized, displayName);
+  document.getElementById('stock-chart-title')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
 async function loadStockIndices(signal) {
   const el = document.getElementById('stock-indices');
   if (!el) return;
@@ -5156,16 +5275,18 @@ async function loadPopularStocks(signal) {
   const el = document.getElementById('stock-popular');
   if (!el) return;
   try {
-    const res = await fetch('/api/stock/quotes?symbols=usAAPL,usMSFT,usNVDA,usTSLA,sh600519,sz000001', { signal });
+    const res = await fetch('/api/stock/quotes?symbols=usAAPL,usMSFT,usNVDA,usAMZN,usGOOGL,usMETA,usTSLA', { signal });
     const d = await res.json();
     if (signal?.aborted) return;
     if (!d.success || !d.data?.length) { el.innerHTML = '<div style="color:var(--text-secondary);">加载失败</div>'; return; }
     el.innerHTML = d.data.map(s => {
       const cls = s.changePct >= 0 ? 'bn-up' : 'bn-down';
-      return '<div class="idx-card"><div class="idx-name">' + stockEscapeHtml(s.name) + '</div>' +
+      const symbol = String(s.symbol || s.code || '').replace(/^us/i, '').toUpperCase();
+      return '<button type="button" class="idx-card stock-quote-card" data-stock-symbol="' + stockEscapeHtml(symbol) + '" data-stock-name="' + stockEscapeHtml(s.name || symbol) + '" onclick="selectStockQuoteCard(this)"><div class="idx-name">' + stockEscapeHtml(s.name) + '</div>' +
         '<div class="idx-price">$' + s.price.toFixed(2) + '</div>' +
-        '<div class="idx-change ' + cls + '">' + (s.changePct>=0?'+':'') + s.changePct.toFixed(2) + '%</div></div>';
+        '<div class="idx-change ' + cls + '">' + (s.changePct>=0?'+':'') + s.changePct.toFixed(2) + '%</div></button>';
     }).join('');
+    setStockSelectorActive(window._stockSelectedSymbol || currentStockSymbol);
   } catch(e) { if (e.name !== 'AbortError') console.warn('热门股票加载失败', e); }
 }
 async function loadStockQuotes() {
@@ -5174,8 +5295,8 @@ async function loadStockQuotes() {
   currentStockDashboardController = controller;
   const signal = controller.signal;
   try {
-    await Promise.allSettled([loadStockIndices(signal), loadPopularStocks(signal)]);
-    if (!signal.aborted && ['stocks', 'overview', 'watchlist'].includes(activeMarketScope)) loadUnifiedStockData('AAPL');
+    await Promise.allSettled([loadStockIndices(signal), loadPopularStocks(signal), loadStockWatchlistShortcuts(signal)]);
+    if (!signal.aborted && ['stocks', 'overview', 'watchlist'].includes(activeMarketScope)) selectStockSymbol(window._stockSelectedSymbol || 'AAPL', stockNameForSymbol(window._stockSelectedSymbol || 'AAPL'), undefined, { refreshRelated: false });
   } finally {
     if (currentStockDashboardController === controller) currentStockDashboardController = null;
   }
@@ -5221,7 +5342,8 @@ async function loadStockSearch() {
         '<div class="srch-item" role="button" tabindex="0" data-index="' + d.data.indexOf(r) + '" data-symbol="' + stockEscapeHtml(r.code) + '" data-name="' + stockEscapeHtml(r.name) + '" onclick="selectStockResult(this)" onkeydown="if(event.key===\'Enter\')selectStockResult(this)">' +
           '<span><span style="display:block;font-weight:600;">' + stockEscapeHtml(r.name) + '</span>' +
           '<small style="color:var(--text-secondary);">' + stockEscapeHtml([r.market, r.alias].filter(Boolean).join(' · ')) + '</small></span>' +
-          '<span style="color:var(--text-secondary);font-size:12px;">' + stockEscapeHtml(r.code) + '</span>' +
+          '<span style="display:flex;align-items:center;gap:8px;color:var(--text-secondary);font-size:12px;"><span>' + stockEscapeHtml(r.code) + '</span>' +
+          (window.mm_isGuest ? '' : '<button class="tab" type="button" data-stock-symbol="' + stockEscapeHtml(r.code) + '" onclick="event.stopPropagation();addStockSearchResultToWatchlist(this)">⭐</button>') + '</span>' +
         '</div>'
       ).join('');
   } catch(e) {
@@ -5235,14 +5357,10 @@ function selectStockResult(item) {
   const result = (window._stockSearchResults || [])?.[Number(item?.dataset?.index)];
   item.parentElement?.querySelectorAll('.srch-item.active').forEach(active => active.classList.remove('active'));
   item.classList.add('active');
-  if (symbol.startsWith('us')) loadUnifiedStockData(symbol.slice(2));
-  loadStockKline(symbol, name, result?.exchangeSymbol);
-  if (symbol.startsWith('us')) loadInsiderRadar(symbol.slice(2), name);
-  if (symbol.startsWith('us')) loadFundamentalQuality(symbol.slice(2), name);
-  if (symbol.toLowerCase() !== 'usspy') loadShortInterest(symbol.slice(2), name);
-  if (symbol.toLowerCase() !== 'usspy' && symbol.toLowerCase() !== 'usqqq') loadInstitutionalOwnership(symbol.slice(2), name);
-  if (symbol.toLowerCase() !== 'usspy' && symbol.toLowerCase() !== 'usqqq') loadAnalystConsensus(symbol.slice(2), name);
-  document.getElementById('stock-chart-title')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  selectStockSymbol(symbol, name, result?.exchangeSymbol);
+}
+function addStockSearchResultToWatchlist(button) {
+  addStockToWatchlist(button?.dataset?.stockSymbol);
 }
 let currentInsiderSymbol = 'AAPL';
 let insiderRequestToken = 0;

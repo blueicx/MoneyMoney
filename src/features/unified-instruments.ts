@@ -151,7 +151,7 @@ async function fetchStockSearch(query: string): Promise<InstrumentSearchResult[]
 }
 
 const POPULAR_STOCKS = [
-  ['AAPL', 'Apple'], ['MSFT', 'Microsoft'], ['NVDA', 'NVIDIA'], ['TSLA', 'Tesla'], ['AMZN', 'Amazon'], ['GOOG', 'Alphabet'], ['META', 'Meta'],
+  ['AAPL', 'Apple'], ['MSFT', 'Microsoft'], ['NVDA', 'NVIDIA'], ['AMZN', 'Amazon'], ['GOOGL', 'Alphabet'], ['META', 'Meta'], ['TSLA', 'Tesla'],
 ] as const;
 
 async function searchStocks(query: string): Promise<InstrumentSearchResult[]> {

@@ -3590,7 +3590,7 @@ app.get('/api/market-ticker', async (req, res) => {
       return res.json({ success: true, scope, data });
     }
     if (scope === 'stocks') {
-      const symbols = ['AAPL', 'MSFT', 'NVDA', 'TSLA'];
+      const symbols = ['AAPL', 'MSFT', 'NVDA', 'AMZN', 'GOOGL', 'META', 'TSLA'];
       try {
         const text = await fetchTencentText(`https://qt.gtimg.cn/q=${symbols.map(symbol => `us${symbol}`).join(',')}`, 6000);
         const data = text.split(';')

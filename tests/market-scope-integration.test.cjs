@@ -105,7 +105,7 @@ test('research briefing owns a declared scoped controller and is cancelled on ma
 test('stock dashboard requests share the market cancellation boundary', () => {
   assert.match(html, /let currentStockDashboardController = null/);
   assert.match(html, /function abortMarketScopedRequests\(\)[\s\S]*currentStockDashboardController\?\.abort\(\)/);
-  assert.match(html, /async function loadStockQuotes\(\)[\s\S]*const controller = new AbortController\(\)[\s\S]*currentStockDashboardController = controller[\s\S]*Promise\.allSettled\(\[loadStockIndices\(signal\),\s*loadPopularStocks\(signal\)\]\)/);
+  assert.match(html, /async function loadStockQuotes\(\)[\s\S]*const controller = new AbortController\(\)[\s\S]*currentStockDashboardController = controller[\s\S]*Promise\.allSettled\(\[loadStockIndices\(signal\),\s*loadPopularStocks\(signal\),\s*loadStockWatchlistShortcuts\(signal\)\]\)/);
   assert.match(html, /loadStockIndices\(signal\)[\s\S]*fetch\('\/api\/stock\/indices', \{ signal \}\)/);
 });
 
