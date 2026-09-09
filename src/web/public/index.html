@@ -5134,13 +5134,14 @@ function stockSearchDebounce() {
   clearTimeout(window._stockSearchTimer);
   window._stockSearchTimer = setTimeout(() => loadStockSearch(), 500);
 }
-async function loadStockIndices() {
+async function loadStockIndices(signal) {
   const el = document.getElementById('stock-indices');
   if (!el) return;
   el.innerHTML = Array(6).fill('<div class="skl skl-card"><div class="skl-line"></div><div class="skl-line w60"></div></div>').join('');
   try {
-    const res = await fetch('/api/stock/indices');
+    const res = await fetch('/api/stock/indices', { signal });
     const d = await res.json();
+    if (signal?.aborted) return;
     if (!d.success || !d.data?.length) { el.innerHTML = '<div style="color:var(--text-secondary);">加载失败</div>'; return; }
     el.innerHTML = d.data.map(s => {
       const cls = s.changePct >= 0 ? 'bn-up' : 'bn-down';
@@ -5149,14 +5150,15 @@ async function loadStockIndices() {
         '<div class="idx-price">' + s.price.toLocaleString() + '</div>' +
         '<div class="idx-change ' + cls + '">' + arrow + ' ' + Math.abs(s.changePct).toFixed(2) + '%</div></div>';
     }).join('');
-  } catch(e) {}
+  } catch(e) { if (e.name !== 'AbortError') console.warn('股票指数加载失败', e); }
 }
-async function loadPopularStocks() {
+async function loadPopularStocks(signal) {
   const el = document.getElementById('stock-popular');
   if (!el) return;
   try {
-    const res = await fetch('/api/stock/quotes?symbols=usAAPL,usMSFT,usNVDA,usTSLA,sh600519,sz000001');
+    const res = await fetch('/api/stock/quotes?symbols=usAAPL,usMSFT,usNVDA,usTSLA,sh600519,sz000001', { signal });
     const d = await res.json();
+    if (signal?.aborted) return;
     if (!d.success || !d.data?.length) { el.innerHTML = '<div style="color:var(--text-secondary);">加载失败</div>'; return; }
     el.innerHTML = d.data.map(s => {
       const cls = s.changePct >= 0 ? 'bn-up' : 'bn-down';
@@ -5164,11 +5166,19 @@ async function loadPopularStocks() {
         '<div class="idx-price">$' + s.price.toFixed(2) + '</div>' +
         '<div class="idx-change ' + cls + '">' + (s.changePct>=0?'+':'') + s.changePct.toFixed(2) + '%</div></div>';
     }).join('');
-  } catch(e) {}
+  } catch(e) { if (e.name !== 'AbortError') console.warn('热门股票加载失败', e); }
 }
 async function loadStockQuotes() {
-  await Promise.all([loadStockIndices(), loadPopularStocks()]);
-  if (['stocks', 'overview', 'watchlist'].includes(activeMarketScope)) loadUnifiedStockData('AAPL');
+  if (currentStockDashboardController) currentStockDashboardController.abort();
+  const controller = new AbortController();
+  currentStockDashboardController = controller;
+  const signal = controller.signal;
+  try {
+    await Promise.allSettled([loadStockIndices(signal), loadPopularStocks(signal)]);
+    if (!signal.aborted && ['stocks', 'overview', 'watchlist'].includes(activeMarketScope)) loadUnifiedStockData('AAPL');
+  } finally {
+    if (currentStockDashboardController === controller) currentStockDashboardController = null;
+  }
 }
 async function loadUnifiedStockData(symbol) {
   const el = document.getElementById('stock-data-freshness');
@@ -6720,7 +6730,7 @@ function drawStockKline(canvas, klines) {
 }
 // --- DeFi Data ---
 async function loadDefiData() {
-  await Promise.all([loadDefiTvl(), loadDefiProtocols()]);
+  await Promise.allSettled([loadDefiTvl(), loadDefiProtocols()]);
 }
 async function loadDefiTvl() {
   const el = document.getElementById('defi-tvl-card');
@@ -7102,6 +7112,10 @@ function drawMACD(canvas, klines) {
 async function loadResearchBriefing(force = false) {
   const el = document.getElementById('research-briefing');
   if (!el) return;
+  if (currentResearchBriefingController) currentResearchBriefingController.abort();
+  currentResearchBriefingController = new AbortController();
+  const signal = currentResearchBriefingController.signal;
+  const token = marketScopeRequestToken();
   if (force) {
     el.innerHTML = `
       <div style="display:flex;justify-content:space-between;align-items:center;">
@@ -7109,8 +7123,9 @@ async function loadResearchBriefing(force = false) {
       </div>`;
   }
   try {
-    const res = await fetch('/api/research/daily-briefing', { cache: 'no-store' });
+    const res = await fetch(scopedUrl('/api/research/daily-briefing'), { cache: 'no-store', signal });
     const payload = await res.json();
+    if (!isCurrentMarketScopeToken(token) || signal.aborted) return;
     if (!payload.success) throw new Error(payload.error || '简报暂时不可用');
     const d = payload.data;
     const riskColor = d.risk.levelZh === '偏高' ? 'var(--red)'
@@ -7160,6 +7175,7 @@ async function loadResearchBriefing(force = false) {
       </details>
       <div style="margin-top:9px;font-size:10.5px;color:var(--text-secondary);">${safeNewsText(d.noteZh)}</div>`;
   } catch (error) {
+    if (error.name === 'AbortError' || !isCurrentMarketScopeToken(token)) return;
     el.innerHTML = `
       <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;">
         <div><b>📅 今日研究简报</b><div style="margin-top:5px;color:var(--text-secondary);font-size:12px;">❌ ${safeNewsText(error.message)}</div></div>
@@ -7397,6 +7413,8 @@ let currentAnalysisController = null;
 let currentRiskController = null;
 let currentTickerController = null;
 let currentEventCalendarController = null;
+let currentResearchBriefingController = null;
+let currentStockDashboardController = null;
 
 function abortMarketScopedRequests() {
   currentMarketOverviewController?.abort();
@@ -7406,6 +7424,8 @@ function abortMarketScopedRequests() {
   currentRiskController?.abort();
   currentTickerController?.abort();
   currentEventCalendarController?.abort();
+  currentResearchBriefingController?.abort();
+  currentStockDashboardController?.abort();
   if (typeof predictionRadarState !== 'undefined') predictionRadarState.loading = false;
   if (typeof eventCalendarState !== 'undefined') eventCalendarState.loading = false;
 }
@@ -7444,7 +7464,7 @@ function exportKlineCSV() {
   showToast('CSV \u5DF2\u5BFC\u51FA', 'success');
 }
 async function loadBinanceDashboard() {
-  await Promise.all([
+  await Promise.allSettled([
     loadBinancePrices(),
     loadBinanceKlines(),
     loadBinanceDepth(),

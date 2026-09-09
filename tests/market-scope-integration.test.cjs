@@ -95,6 +95,20 @@ test('aborted analysis cannot block or reset a newer market analysis request', (
   assert.match(html, /if \(!isCurrentMarketScopeToken\(scopeToken\) \|\| signal\.aborted\) return;/);
 });
 
+test('research briefing owns a declared scoped controller and is cancelled on market changes', () => {
+  assert.match(html, /let currentResearchBriefingController = null/);
+  assert.match(html, /function abortMarketScopedRequests\(\)[\s\S]*currentResearchBriefingController\?\.abort\(\)/);
+  assert.match(html, /loadResearchBriefing\(force = false\)[\s\S]*fetch\(scopedUrl\('\/api\/research\/daily-briefing'\), \{ cache: 'no-store', signal \}\)/);
+  assert.match(html, /catch \(error\) \{[\s\S]*if \(error\.name === 'AbortError' \|\| !isCurrentMarketScopeToken\(token\)\) return;/);
+});
+
+test('stock dashboard requests share the market cancellation boundary', () => {
+  assert.match(html, /let currentStockDashboardController = null/);
+  assert.match(html, /function abortMarketScopedRequests\(\)[\s\S]*currentStockDashboardController\?\.abort\(\)/);
+  assert.match(html, /async function loadStockQuotes\(\)[\s\S]*const controller = new AbortController\(\)[\s\S]*currentStockDashboardController = controller[\s\S]*Promise\.allSettled\(\[loadStockIndices\(signal\),\s*loadPopularStocks\(signal\)\]\)/);
+  assert.match(html, /loadStockIndices\(signal\)[\s\S]*fetch\('\/api\/stock\/indices', \{ signal \}\)/);
+});
+
 test('market overview requests have a bounded timeout and retain partial data', () => {
   assert.match(html, /const MARKET_OVERVIEW_REQUEST_TIMEOUT_MS = 12000/);
   assert.match(html, /function fetchMarketOverviewJson\(path, signal\)[\s\S]*setTimeout\(/);
