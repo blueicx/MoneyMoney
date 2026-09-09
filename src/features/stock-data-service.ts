@@ -16,6 +16,12 @@ export interface StockDataServiceOptions {
   cacheTtlMs?: number;
 }
 
+export interface StockQuoteResult {
+  symbol: string;
+  quote: StockQuote | null;
+  snapshot: SourceSnapshot<StockQuote>;
+}
+
 function validSymbol(value: string): string {
   const symbol = String(value || '').trim().toUpperCase().replace(/^US(?=[A-Z])/, '');
   if (!/^[A-Z][A-Z0-9.-]{0,9}$/.test(symbol) || symbol.includes('..')) throw new Error('股票代码无效');
@@ -59,11 +65,23 @@ export class StockDataService {
   private readonly dependencies: StockDataDependencies;
   private readonly cacheTtlMs: number;
   private readonly cache = new Map<string, { at: number; value: StockDataBundle }>();
+  private readonly quoteCache = new Map<string, { at: number; value: StockQuoteResult }>();
 
   constructor(dependencies: Partial<StockDataDependencies> = {}, options: StockDataServiceOptions = {}) {
     const defaults = createDefaultStockDataDependencies();
     this.dependencies = { ...defaults, ...dependencies };
     this.cacheTtlMs = options.cacheTtlMs ?? 60_000;
+  }
+
+  async quote(symbolInput: string): Promise<StockQuoteResult> {
+    const symbol = validSymbol(symbolInput);
+    const hit = this.quoteCache.get(symbol);
+    if (hit && Date.now() - hit.at <= this.cacheTtlMs) return hit.value;
+    const snapshot = await this.read(this.dependencies.quote, { symbol }, 'nasdaq-public-quote');
+    const value: StockQuoteResult = { symbol, quote: snapshot.data, snapshot };
+    this.quoteCache.set(symbol, { at: Date.now(), value });
+    if (this.quoteCache.size > 100) this.quoteCache.delete(this.quoteCache.keys().next().value as string);
+    return value;
   }
 
   async overview(symbolInput: string): Promise<StockDataBundle> {

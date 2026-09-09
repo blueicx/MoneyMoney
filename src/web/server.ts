@@ -3593,9 +3593,9 @@ app.get('/api/market-ticker', async (req, res) => {
       const symbols = ['AAPL', 'MSFT', 'NVDA', 'TSLA'];
       const results = await Promise.all(symbols.map(async symbol => {
         try {
-          const bundle = await stockDataService.overview(symbol);
-          if (!bundle?.quote) return null;
-          const { price, changePct } = bundle.quote;
+          const result = await stockDataService.quote(symbol);
+          if (!result.quote) return null;
+          const { price, changePct } = result.quote;
           const sign = changePct != null && changePct >= 0 ? '+' : '';
           const pctStr = changePct != null ? `${sign}${changePct.toFixed(2)}%` : '';
           return {

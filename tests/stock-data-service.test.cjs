@@ -33,6 +33,20 @@ test('one source failure does not erase successful stock cards', async () => {
   assert.equal(result.sourceStatus['nasdaq-public-history'], 'failed');
 });
 
+test('quote-only path does not wait for history or SEC sources', async () => {
+  let detailCalls = 0;
+  const service = new StockDataService({
+    quote: { fetch: async () => snapshot('nasdaq-public-quote', { symbol: 'AAPL', price: 227.16 }) },
+    bars: { fetch: async () => { detailCalls += 1; return snapshot('nasdaq-public-history', []); } },
+    filings: { fetch: async () => { detailCalls += 1; return snapshot('sec-edgar-submissions', []); } },
+    fundamentals: { fetch: async () => { detailCalls += 1; return snapshot('sec-edgar-companyfacts', null); } },
+  });
+  const result = await service.quote('AAPL');
+  assert.equal(result.quote.price, 227.16);
+  assert.equal(result.snapshot.source, 'nasdaq-public-quote');
+  assert.equal(detailCalls, 0);
+});
+
 test('non-stock symbols are rejected before any network adapter runs', async () => {
   const service = new StockDataService({ quote: { fetch: async () => { throw new Error('must not run'); } } });
   await assert.rejects(() => service.overview('crypto:binance:BTCUSDT'), /股票代码无效/);

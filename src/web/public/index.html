@@ -7703,6 +7703,11 @@ async function runOpsJob(jobId) {
   loadCommandCenter();
 }
 async function loadAll(retryCount = 0, forceCategories = false) {
+  if (!['overview', 'prediction', 'watchlist'].includes(activeMarketScope)) {
+    loadBalance();
+    loadWallet();
+    return;
+  }
   loadOverview();
   loadMovers();
   loadBalance();
@@ -9986,11 +9991,11 @@ async function submitSellOrder() {
 document.getElementById('sell-modal').addEventListener('click', (e) => {
   if (e.target.id === 'sell-modal') closeSellModal();
 });
-loadAll();
-loadCommandCenter();
 initTheme();
 activeMarketScope = readInitialMarketScope();
 renderNavigationState();
+loadAll();
+loadCommandCenter();
 loadNewsTicker();
 // Restore last visited tab from localStorage.
 (function restoreLastTab() {

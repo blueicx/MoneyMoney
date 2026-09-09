@@ -41,9 +41,11 @@ test('ticker loads after scope initialization and uses market-specific data', ()
   assert.match(html, /data-market-scopes="overview stocks options crypto prediction watchlist"/);
   assert.match(html, /id="market-overview"[^>]*hidden/);
   assert.match(html, /function loadMarketOverview\(\)[\s\S]*activeMarketScope !== 'overview'[\s\S]*hidden = true/);
+  assert.match(html, /function loadAll\([\s\S]*\['overview', 'prediction', 'watchlist'\]\.includes\(activeMarketScope\)/);
+  assert.match(html, /activeMarketScope = readInitialMarketScope\(\);[\s\S]*loadAll\(\)/);
   assert.match(server, /app\.get\('\/api\/market-ticker'/);
   assert.match(server, /if \(scope === 'stocks'\)/);
-  assert.match(server, /stockDataService\.overview/);
+  assert.match(server, /stockDataService\.quote/);
   assert.match(server, /if \(scope === 'options'\)/);
   assert.match(server, /getEquityOptionsSnapshot/);
 });
