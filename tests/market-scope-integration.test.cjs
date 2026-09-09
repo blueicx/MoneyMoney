@@ -115,6 +115,7 @@ test('market overview requests have a bounded timeout and retain partial data', 
   assert.match(html, /fetchMarketOverviewJson\('\/api\/stock\/indices', signal\)/);
   assert.match(html, /Promise\.allSettled\(requests\)/);
   assert.match(html, /部分成功/);
+  assert.match(html, /if \(hasPartialFailure && cached\?\.html\) \{[\s\S]*显示上一份完整缓存/);
 });
 
 test('stock overview consumes the breadth contract without dropping index coverage', () => {

@@ -7368,6 +7368,11 @@ async function loadMarketOverview() {
 
   if (chips.length) {
     const html = chips.join('');
+    if (hasPartialFailure && cached?.html) {
+      itemsEl.innerHTML = cached.html;
+      if (statusEl) statusEl.textContent = `数据更新时间：${new Date(cached.fetchedAt).toLocaleTimeString()} · ${cached.source} · 部分成功，显示上一份完整缓存`;
+      return;
+    }
     marketOverviewCache.set(scope, { html, fetchedAt: Date.now(), source: sourceLabel });
     itemsEl.innerHTML = html;
     if (statusEl) statusEl.textContent = `数据更新时间：${new Date().toLocaleTimeString()} · ${sourceLabel} · ${finalStatus}`;
