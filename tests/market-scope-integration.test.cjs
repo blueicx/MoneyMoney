@@ -60,6 +60,14 @@ test('market overview bar follows the selected market instead of disappearing', 
   assert.match(html, /isCurrentMarketScopeToken\(token\)/);
 });
 
+test('market overview keeps a scoped cache and exposes freshness state', () => {
+  assert.match(html, /id="market-overview-status"/);
+  assert.match(html, /const marketOverviewCache = new Map\(\)/);
+  assert.match(html, /marketOverviewCache\.get\(scope\)/);
+  assert.match(html, /缓存 · 正在刷新/);
+  assert.match(html, /market-overview-status.*数据更新时间/);
+});
+
 test('macro is a common utility entry rather than the stock market entry', () => {
   assert.match(html, /\['macro', '[^']*宏观'\]/);
   assert.doesNotMatch(html, /CORE_NAV_ITEMS[\s\S]*\['stocks', '[^']*宏观'\]/);
