@@ -7150,9 +7150,11 @@ async function loadMarketOverview() {
   if (!el) return;
   if (activeMarketScope !== 'overview') {
     el.hidden = true;
+    el.style.display = 'none';
     return;
   }
   el.hidden = false;
+  el.style.display = 'flex';
   const chips = [];
   try {
     const results = await Promise.allSettled([
