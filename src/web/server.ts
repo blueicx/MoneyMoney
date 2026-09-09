@@ -3811,8 +3811,14 @@ app.post('/api/ai/market-analysis', async (req, res) => {
 app.post('/api/ai/market-commentary', async (req, res) => {
   try {
     const force = req.body?.force === true;
-    const radar = await getPredictionRadar('', 120);
-    const result = await getAiMarketCommentary(radar, force);
+    const scope = requestedMarketScope(req.body?.scope) || 'prediction';
+    const radar = scope === 'prediction' || scope === 'overview'
+      ? await getPredictionRadar('', 120)
+      : { markets: [] };
+    const report = scope === 'prediction'
+      ? {}
+      : filterAssistantReport(lastAdvisorReport ?? await generateAssistantReport(), scope);
+    const result = await getAiMarketCommentary(radar, force, scope, report);
     res.json({ success: true, data: result });
   } catch (e: any) {
     res.json({

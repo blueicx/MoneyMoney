@@ -1,6 +1,9 @@
 import type { PredictionRadar } from './prediction-radar';
 import { getAiRuntimeConfig } from './ai-runtime-config';
 import { resolveChatCompletionsUrl } from './ai-endpoint';
+import type { MarketScope } from './market-scope';
+
+type PredictionRadarInput = Pick<PredictionRadar, 'markets'>;
 
 export function resolveOpenRouterApiUrl(explicitUrl = process.env.OPENROUTER_API_URL, baseUrl = process.env.OPENROUTER_BASE_URL): string {
   return resolveChatCompletionsUrl(explicitUrl, baseUrl, 'https://openrouter.ai/api/v1');
@@ -19,15 +22,34 @@ interface CommentaryCache {
 
 let cache: CommentaryCache | null = null;
 let pending: Promise<CommentaryCache> | null = null;
+let pendingSignature: string | null = null;
 
-function radarSignature(radar: PredictionRadar): string {
+function radarSignature(radar: PredictionRadarInput): string {
   return radar.markets
     .slice(0, 12)
     .map(item => `${item.platform}:${item.id}:${item.yesPrice.toFixed(2)}:${item.volume24h}`)
     .join('|');
 }
 
-function buildPrompt(radar: PredictionRadar): string {
+const SCOPE_LABELS: Record<MarketScope, string> = {
+  overview: '总体市场',
+  stocks: '股票',
+  options: '期权',
+  crypto: '虚拟币',
+  prediction: '预测市场',
+  watchlist: '自选标的',
+};
+
+const SCOPE_REPORT_KEYS: Record<MarketScope, string[]> = {
+  overview: ['stockActions', 'sectorActions', 'optionActions', 'cryptoActions', 'predictionPicks'],
+  stocks: ['stockActions', 'sectorActions'],
+  options: ['optionActions'],
+  crypto: ['cryptoActions'],
+  prediction: ['predictionPicks'],
+  watchlist: ['stockActions', 'sectorActions', 'optionActions', 'cryptoActions', 'predictionPicks'],
+};
+
+function buildRadarRows(radar: PredictionRadarInput): string {
   const rows = radar.markets
     .slice(0, 12)
     .map((item, index) => {
@@ -38,7 +60,32 @@ function buildPrompt(radar: PredictionRadar): string {
     })
     .join('\n');
 
-  return `你是严谨的中文市场研究助手。以下是跨平台预测市场的最新快照：\n${rows}\n\n请用简体中文输出三段，不要编造数据，不给出保证赚钱的说法，不构成投资建议：\n1. 今日重点：最多 4 条，解释哪些市场最值得关注；\n2. 分歧与风险：指出概率分歧、低流动性、临近截止或解读风险；\n3. 观察清单：给出 3 个后续核对动作。\n\n要求总长不超过 320 字，使用短句和“·”分隔要点。`;
+  return rows;
+}
+
+function buildReportRows(scope: MarketScope, report: Record<string, unknown>): string {
+  return SCOPE_REPORT_KEYS[scope]
+    .flatMap(key => Array.isArray(report[key]) ? report[key] as unknown[] : [])
+    .slice(0, 24)
+    .map(row => {
+      const item = row && typeof row === 'object' ? row as Record<string, unknown> : {};
+      const title = String(item.titleZh || item.title || item.name || item.symbol || '').trim();
+      const reason = String(item.reasonZh || item.reason || item.summary || item.signalZh || '').trim();
+      return title ? `- ${title}${reason ? `：${reason}` : ''}` : '';
+    })
+    .filter(Boolean)
+    .join('\n');
+}
+
+export function buildAiMarketPrompt(scope: MarketScope = 'prediction', radar: PredictionRadarInput, report: Record<string, unknown> = {}): string {
+  const sections: string[] = [`当前市场作用域：${SCOPE_LABELS[scope]}`];
+  if (scope === 'prediction' || scope === 'overview') {
+    sections.push(`预测市场快照：\n${buildRadarRows(radar) || '暂无预测市场数据'}`);
+  }
+  if (scope !== 'prediction') {
+    sections.push(`${SCOPE_LABELS[scope]}专属行动与指标：\n${buildReportRows(scope, report) || '暂无当前市场行动数据'}`);
+  }
+  return `你是严谨的中文市场研究助手。只分析“${SCOPE_LABELS[scope]}”作用域，禁止引用其他市场的数据或术语。以下是当前作用域可用的快照：\n${sections.join('\n\n')}\n\n请用简体中文输出三段，不要编造数据，不给出保证赚钱的说法，不构成投资建议：\n1. 今日重点：最多 4 条；\n2. 分歧与风险：指出数据不足、低流动性或解读风险；\n3. 观察清单：给出 3 个后续核对动作。\n\n要求总长不超过 320 字，使用短句和“·”分隔要点。`;
 }
 
 async function callOpenRouter(model: string, prompt: string): Promise<string> {
@@ -76,7 +123,12 @@ export function aiCommentaryConfigured(): boolean {
   return getAiRuntimeConfig('openrouter').configured;
 }
 
-export async function getAiMarketCommentary(radar: PredictionRadar, force = false): Promise<{
+export async function getAiMarketCommentary(
+  radar: PredictionRadarInput,
+  force = false,
+  scope: MarketScope = 'prediction',
+  report: Record<string, unknown> = {},
+): Promise<{
   configured: boolean;
   analysis: string;
   model: string;
@@ -94,7 +146,8 @@ export async function getAiMarketCommentary(radar: PredictionRadar, force = fals
     };
   }
 
-  const signature = radarSignature(radar);
+  const prompt = buildAiMarketPrompt(scope, radar, report);
+  const signature = `${scope}|${radarSignature(radar)}|${prompt}`;
   if (!force && cache && cache.signature === signature) {
     return {
       configured: true,
@@ -104,7 +157,7 @@ export async function getAiMarketCommentary(radar: PredictionRadar, force = fals
       cached: true,
     };
   }
-  if (!force && pending) {
+  if (!force && pending && pendingSignature === signature) {
     const result = await pending;
     return {
       configured: true,
@@ -115,8 +168,8 @@ export async function getAiMarketCommentary(radar: PredictionRadar, force = fals
     };
   }
 
+  pendingSignature = signature;
   pending = (async () => {
-    const prompt = buildPrompt(radar);
     let lastError = '';
     for (const model of [runtime.model, ...FALLBACK_MODELS.filter(item => item !== runtime.model)]) {
       try {
@@ -140,6 +193,9 @@ export async function getAiMarketCommentary(radar: PredictionRadar, force = fals
       cached: false,
     };
   } finally {
-    pending = null;
+    if (pendingSignature === signature) {
+      pending = null;
+      pendingSignature = null;
+    }
   }
 }

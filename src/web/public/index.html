@@ -9428,12 +9428,13 @@ async function loadAiMarketCommentary(force = false) {
   const output = document.getElementById('ai-commentary');
   const button = output?.previousElementSibling?.querySelector('button');
   if (button) { button.disabled = true; button.textContent = force ? '🔄 强制重写...' : '✨ 正在思考...'; }
-  if (output) output.textContent = '正在汇总预测雷达并生成中文点评...';
+  const scopeLabels = { overview: '总体市场', stocks: '股票', options: '期权', crypto: '虚拟币', prediction: '预测市场', watchlist: '自选标的' };
+  if (output) output.textContent = `正在汇总${scopeLabels[activeMarketScope] || '当前市场'}并生成中文点评...`;
   try {
     const res = await fetch('/api/ai/market-commentary', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ force }),
+      body: JSON.stringify({ force, scope: activeMarketScope }),
     });
     const body = await res.json();
     if (!body.success) throw new Error(body.error || 'AI 点评不可用');
