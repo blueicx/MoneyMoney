@@ -63,6 +63,7 @@ test('market overview bar follows the selected market instead of disappearing', 
 test('market overview keeps a scoped cache and exposes freshness state', () => {
   assert.match(html, /id="market-overview-status"/);
   assert.match(html, /const marketOverviewCache = new Map\(\)/);
+  assert.match(html, /Date\.now\(\) - cached\.fetchedAt < MARKET_OVERVIEW_CACHE_TTL_MS/);
   assert.match(html, /marketOverviewCache\.get\(scope\)/);
   assert.match(html, /缓存 · 正在刷新/);
   assert.match(html, /market-overview-status.*数据更新时间/);
