@@ -1805,12 +1805,14 @@
       <div id="mm-toast-container"></div>
       <button id="theme-toggle-btn" onclick="toggleTheme()" title="浅色" aria-label="浅色" style="position:fixed;top:14px;right:18px;z-index:9999;width:38px;height:38px;border-radius:50%;border:1px solid var(--border);background:var(--bg-card);backdrop-filter:blur(10px);cursor:pointer;font-size:17px;display:flex;align-items:center;justify-content:center;box-shadow:var(--shadow);transition:transform .15s;" onmouseover="this.style.transform='scale(1.1)'" onmouseout="this.style.transform='scale(1)'">☀️</button>
       <!-- Market Overview Bar -->
-      <div id="market-overview" hidden data-market-scopes="overview" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;padding:12px 14px;background:var(--bg-card);border-radius:12px;border:1px solid var(--border);overflow-x:auto;">
-        <span class="skl" style="min-width:100px;height:36px;"></span>
-        <span class="skl" style="min-width:100px;height:36px;"></span>
-        <span class="skl" style="min-width:100px;height:36px;"></span>
-        <span class="skl" style="min-width:100px;height:36px;"></span>
-        <span class="skl" style="min-width:100px;height:36px;"></span>
+      <div id="market-overview" data-market-scopes="overview stocks options crypto prediction watchlist" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:16px;padding:12px 14px;background:var(--bg-card);border-radius:12px;border:1px solid var(--border);overflow-x:auto;">
+        <span id="market-overview-heading" style="flex:0 0 auto;font-size:11px;font-weight:800;color:var(--purple);white-space:nowrap;">总体大盘</span>
+        <div id="market-overview-items" style="display:flex;gap:8px;flex:1;flex-wrap:wrap;min-width:0;">
+          <span class="skl" style="min-width:100px;height:36px;"></span>
+          <span class="skl" style="min-width:100px;height:36px;"></span>
+          <span class="skl" style="min-width:100px;height:36px;"></span>
+          <span class="skl" style="min-width:100px;height:36px;"></span>
+        </div>
       </div>
       <!-- Command Center Tab -->
       <div id="command-tab" class="tab-content active">
@@ -7147,61 +7149,80 @@ async function loadResearchBriefing(force = false) {
 // --- Market Overview Bar ---
 async function loadMarketOverview() {
   const el = document.getElementById('market-overview');
-  if (!el) return;
-  if (activeMarketScope !== 'overview') {
-    el.hidden = true;
-    el.style.display = 'none';
-    return;
-  }
-  el.hidden = false;
-  el.style.display = 'flex';
+  const itemsEl = document.getElementById('market-overview-items');
+  const headingEl = document.getElementById('market-overview-heading');
+  if (!el || !itemsEl) return;
+  const scope = activeMarketScope;
+  const token = marketScopeRequestToken();
+  const headings = { overview: '总体大盘', stocks: '股票大盘', options: '期权大盘', crypto: '虚拟币大盘', prediction: '预测市场大盘', watchlist: '自选大盘' };
+  if (headingEl) headingEl.textContent = headings[scope] || '市场大盘';
+  itemsEl.innerHTML = Array(4).fill('<span class="skl" style="min-width:100px;height:36px;"></span>').join('');
   const chips = [];
+  const escape = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
+  const pct = value => value == null || !Number.isFinite(Number(value)) ? '' : `${Number(value) >= 0 ? '+' : ''}${Number(value).toFixed(1)}%`;
+  const chip = (label, value, change = '', note = '') => `<div class="ov-chip"><span class="ov-label">${escape(label)}</span><span class="ov-value">${escape(value)}</span>${change ? `<span class="ov-change ${Number(change) >= 0 ? 'bn-up' : 'bn-down'}">${escape(change)}</span>` : ''}${note ? `<small style="display:block;color:var(--text-secondary);font-size:10px;">${escape(note)}</small>` : ''}</div>`;
   try {
-    const results = await Promise.allSettled([
-      fetch('/api/binance/price/BTCUSDT').then(r => r.json()),
-      fetch('/api/binance/price/ETHUSDT').then(r => r.json()),
-      fetch('/api/sentiment').then(r => r.json()),
-      fetch('/api/defi/tvl').then(r => r.json()),
-      fetch('/api/crypto/global').then(r => r.json())
-    ]);
-    {
-      const d = results[0].status === 'fulfilled' ? results[0].value : null;
-      if (d.success && d.data) {
-        const cls = d.data.change24hPct >= 0 ? 'bn-up' : 'bn-down';
-        chips.push('<div class="ov-chip"><span class="ov-label">BTC</span><span class="ov-value">$' + Math.round(d.data.price).toLocaleString() + '</span><span class="ov-change ' + cls + '">' + (d.data.change24hPct>=0?'+':'') + d.data.change24hPct.toFixed(1) + '%</span></div>');
-      }
-    }
-    {
-      const d = results[1].status === 'fulfilled' ? results[1].value : null;
-      if (d.success && d.data) {
-        const cls = d.data.change24hPct >= 0 ? 'bn-up' : 'bn-down';
-        chips.push('<div class="ov-chip"><span class="ov-label">ETH</span><span class="ov-value">$' + Math.round(d.data.price).toLocaleString() + '</span><span class="ov-change ' + cls + '">' + (d.data.change24hPct>=0?'+':'') + d.data.change24hPct.toFixed(1) + '%</span></div>');
-      }
-    }
-    {
-      const d = results[2].status === 'fulfilled' ? results[2].value : null;
-      if (d.success && d.data && d.data.length) {
-        const val = parseInt(d.data[0].value);
-        const cls = val <= 24 ? '#e74c3c' : val <= 44 ? '#f39c12' : val <= 55 ? '#f1c40f' : val <= 74 ? '#2ecc71' : '#27ae60';
+    if (scope === 'overview' || scope === 'crypto') {
+      const results = await Promise.allSettled([
+        fetch('/api/binance/price/BTCUSDT').then(r => r.json()),
+        fetch('/api/binance/price/ETHUSDT').then(r => r.json()),
+        fetch('/api/sentiment').then(r => r.json()),
+        fetch('/api/defi/tvl').then(r => r.json()),
+        fetch('/api/crypto/global').then(r => r.json())
+      ]);
+      const btc = results[0].status === 'fulfilled' ? results[0].value : null;
+      const eth = results[1].status === 'fulfilled' ? results[1].value : null;
+      const sentiment = results[2].status === 'fulfilled' ? results[2].value : null;
+      const defi = results[3].status === 'fulfilled' ? results[3].value : null;
+      const global = results[4].status === 'fulfilled' ? results[4].value : null;
+      if (btc?.success && btc.data) chips.push(chip('BTC', '$' + Math.round(btc.data.price).toLocaleString(), pct(btc.data.change24hPct), 'Binance'));
+      if (eth?.success && eth.data) chips.push(chip('ETH', '$' + Math.round(eth.data.price).toLocaleString(), pct(eth.data.change24hPct), 'Binance'));
+      if (sentiment?.success && sentiment.data?.length) {
+        const val = parseInt(sentiment.data[0].value, 10);
         const label = val <= 24 ? '极度恐惧' : val <= 44 ? '恐惧' : val <= 55 ? '中性' : val <= 74 ? '贪婪' : '极度贪婪';
-        chips.push('<div class="ov-chip"><span class="ov-label">恐贪</span><span class="ov-value" style="color:' + cls + ';">' + val + ' ' + label + '</span></div>');
+        chips.push(chip('恐贪', `${val} ${label}`, '', 'Alternative.me'));
       }
-    }
-    {
-      const d = results[3].status === 'fulfilled' ? results[3].value : null;
-      if (d.success && d.data && d.data.length) {
-        chips.push('<div class="ov-chip"><span class="ov-label">DeFi TVL</span><span class="ov-value">$' + (d.data[d.data.length-1].tvl/1e9).toFixed(0) + 'B</span></div>');
+      if (defi?.success && defi.data?.length) chips.push(chip('DeFi TVL', '$' + (defi.data[defi.data.length - 1].tvl / 1e9).toFixed(0) + 'B', '', 'DeFiLlama'));
+      if (global?.success && global.data) {
+        chips.push(chip('总市值', compactUsd(global.data.totalMarketCapUsd), pct(global.data.marketCapChange24hPct), 'CoinGecko'));
+        chips.push(chip('BTC占比', Number(global.data.bitcoinDominancePct).toFixed(1) + '%'));
       }
+    } else if (scope === 'stocks') {
+      const payload = await fetch('/api/stock/indices', { cache: 'no-store' }).then(r => r.json());
+      const indices = Array.isArray(payload.data) ? payload.data : [];
+      indices.slice(0, 6).forEach(item => chips.push(chip(item.name, Number(item.price).toLocaleString(), pct(item.changePct), '股票指数')));
+    } else if (scope === 'options') {
+      const payload = await fetch('/api/market-ticker?scope=options', { cache: 'no-store' }).then(r => r.json());
+      const options = Array.isArray(payload.data) ? payload.data : [];
+      options.forEach(item => {
+        const iv = String(item.title || '').match(/IV30\s+([\d.]+%)/i)?.[1];
+        chips.push(chip(item.label, Number(item.value).toLocaleString(), pct(item.changePct), iv ? `隐含波动率 ${iv}` : 'CBOE'));
+      });
+    } else if (scope === 'prediction') {
+      const payload = await fetch('/api/prediction-radar?cachedOnly=1&limit=24', { cache: 'no-store' }).then(r => r.json());
+      const markets = Array.isArray(payload.data?.markets) ? payload.data.markets : [];
+      const sources = new Set(markets.map(item => item.platform).filter(Boolean));
+      chips.push(chip('活跃市场', `${markets.length} 个`, '', markets.length ? '缓存雷达' : '等待雷达缓存'));
+      chips.push(chip('数据平台', `${sources.size} 个`, '', '公开市场'));
+      markets.slice(0, 4).forEach(item => chips.push(chip(item.platform || '市场', `${Math.round(Number(item.yesPrice || 0) * 100)}%`, '', item.titleZh || item.title || '预测概率')));
+    } else if (scope === 'watchlist') {
+      const payload = await fetch('/api/watchlist', { cache: 'no-store' }).then(r => r.json());
+      const list = Array.isArray(payload.data) ? payload.data : [];
+      const counts = { stock: 0, crypto: 0, prediction: 0 };
+      list.forEach(item => {
+        const type = String(item.instrumentId || item.id || '').split(':')[0];
+        if (type in counts) counts[type] += 1;
+      });
+      chips.push(chip('自选标的', `${list.length} 个`, '', '网页/TG同步'));
+      chips.push(chip('股票', `${counts.stock} 个`));
+      chips.push(chip('虚拟币', `${counts.crypto} 个`));
+      chips.push(chip('预测市场', `${counts.prediction} 个`));
     }
-    {
-      const d = results[4].status === 'fulfilled' ? results[4].value : null;
-      if (d.success && d.data) {
-        chips.push(`<div class="ov-chip"><span class="ov-label">总市值</span><span class="ov-value">${compactUsd(d.data.totalMarketCapUsd)}</span><span class="ov-change ${Number(d.data.marketCapChange24hPct)>=0?'bn-up':'bn-down'}">${Number(d.data.marketCapChange24hPct)>=0?'+':''}${Number(d.data.marketCapChange24hPct).toFixed(1)}%</span></div>`);
-        chips.push(`<div class="ov-chip"><span class="ov-label">BTC占比</span><span class="ov-value">${Number(d.data.bitcoinDominancePct).toFixed(1)}%</span></div>`);
-      }
-    }
-  } catch(e) {}
-  el.innerHTML = chips.join('') || '';
+  } catch (error) {
+    chips.push(chip(headings[scope] || '当前市场', '暂时不可用', '', '可点击刷新重试'));
+  }
+  if (!isCurrentMarketScopeToken(token)) return;
+  itemsEl.innerHTML = chips.join('') || chip(headings[scope] || '当前市场', '暂无数据');
 }
 // --- Market-scoped persistent ticker ---
 async function loadNewsTicker() {
