@@ -25,8 +25,11 @@ test('stock radar sections each expose watchlist, add and search controls', () =
   for (const key of ['insider', 'institutional', 'analyst', 'fundamentals', 'short-interest']) {
     assert.match(html, new RegExp(`data-stock-radar-toolbar=["']${key}["']`));
     assert.match(html, new RegExp(`id=["']stock-radar-search-${key}["']`));
+    assert.match(html, new RegExp(`id=["']stock-radar-search-results-${key}["']`));
+    assert.match(html, new RegExp(`searchStockFromRadar\\('stock-radar-search-${key}','${key}'\\)`));
   }
   assert.match(html, /function searchStockFromRadar\(/);
+  assert.match(html, /function selectStockRadarResult\(/);
   assert.match(html, /setMarketScope\('watchlist'\)/);
 });
 
