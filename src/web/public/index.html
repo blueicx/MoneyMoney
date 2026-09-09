@@ -1341,6 +1341,16 @@
     .stock-radar-search-result strong { font-size:12px; }
     .stock-radar-search-result small { color:var(--text-secondary); font-size:10px; }
     .stock-radar-search-result:hover, .stock-radar-search-result.active { border-color:var(--purple); background:color-mix(in srgb,var(--purple) 12%,transparent); }
+    .stock-library-panel { padding:14px; border:1px solid var(--border); border-radius:14px; background:var(--bg-card); }
+    .stock-library-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:8px; }
+    .stock-library-item { display:flex; flex-direction:column; align-items:flex-start; gap:3px; width:100%; padding:10px 12px; border:1px solid var(--border); border-radius:10px; background:var(--bg-secondary); color:var(--text); text-align:left; cursor:pointer; }
+    .stock-library-item:hover, .stock-library-item.active { border-color:var(--purple); background:var(--purple-light); }
+    .stock-library-item strong { font-size:13px; }
+    .stock-library-item small { color:var(--text-secondary); font-size:10px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:100%; }
+    .stock-library-group { margin-bottom:18px; }
+    .stock-library-group:last-child { margin-bottom:0; }
+    .stock-library-group-title { margin-bottom:8px; font-weight:800; }
+    .stock-library-disabled { color:var(--text-secondary); font-size:11px; line-height:1.5; }
     .stock-quote-card { width:100%; text-align:left; cursor:pointer; color:inherit; font:inherit; }
     .stock-quote-card:hover { border-color:var(--purple); }
     .srch-item { display:flex; justify-content:space-between; align-items:center; padding:10px 14px; background:var(--bg-card); border-radius:10px; margin-bottom:6px; cursor:pointer; border:1px solid var(--border); transition:border-color .15s; }
@@ -1866,6 +1876,10 @@
         <div id="categories-list" class="categories-list"></div>
       </div>
       <div id="positions-tab" class="tab-content">
+        <div id="watchlist-stock-library" class="stock-library-panel" data-market-scopes="watchlist" style="margin-bottom:20px;">
+          <div class="section-title">⭐ 我的自选</div>
+          <div id="watchlist-stock-library-items" data-stock-library-item="watchlist" class="stock-library-grid"><div class="empty-tip">正在读取股票自选...</div></div>
+        </div>
         <div class="section-title">我的持仓</div>
         <table class="data-table">
           <thead>
@@ -2713,6 +2727,20 @@
         <button class="sidebar-collapse-btn" onclick="toggleSidebar()" title="收起侧栏，全屏查看左侧">⤢</button>
       </div>
       <div class="sidebar-content">
+        <div id="stock-instrument-library" data-stock-library-scope="stocks" style="display:none;">
+          <div class="stock-library-group">
+            <div class="stock-library-group-title">⭐ 我的自选</div>
+            <div id="stock-library-watchlist" data-stock-library-item="sidebar-watchlist"></div>
+          </div>
+          <div class="stock-library-group">
+            <div class="stock-library-group-title">📈 模拟持仓</div>
+            <div id="stock-library-paper" data-stock-library-item="sidebar-paper"></div>
+          </div>
+          <div class="stock-library-group stock-library-disabled">
+            <div class="stock-library-group-title">🔒 真实持仓（暂未接入）</div>
+            <div>当前仅支持模拟持仓，不读取真实交易账户。</div>
+          </div>
+        </div>
         <div id="no-selection" class="no-selection">
           <div class="no-selection-icon">👈</div>
           <div>请从左侧列表选择一个事件。</div>
@@ -5228,6 +5256,77 @@ function stockNameForSymbol(symbol) {
   const normalized = String(symbol || '').replace(/^us/i, '').toUpperCase();
   return STOCK_QUICK_SYMBOLS.find(item => item[0] === normalized)?.[1] || normalized;
 }
+let stockLibraryPromise = null;
+function stockLibraryData(force = false) {
+  if (!force && stockLibraryPromise) return stockLibraryPromise;
+  stockLibraryPromise = Promise.allSettled([
+    fetch('/api/watchlist', { cache: 'no-store' }).then(response => response.json()),
+    fetch('/api/paper/positions?scope=stocks', { cache: 'no-store' }).then(response => response.json()),
+  ]).then(([watchResult, paperResult]) => {
+    const watchPayload = watchResult.status === 'fulfilled' ? watchResult.value : null;
+    const paperPayload = paperResult.status === 'fulfilled' ? paperResult.value : null;
+    const watchlist = [...new Set((Array.isArray(watchPayload?.data) ? watchPayload.data : [])
+      .map(stockSymbolFromWatchlistId).filter(Boolean))].map(symbol => ({
+        symbol, name: stockNameForSymbol(symbol), meta: '股票自选'
+      }));
+    const paper = (Array.isArray(paperPayload?.data) ? paperPayload.data : []).map(position => {
+      const symbol = stockSymbolFromWatchlistId(position.instrumentId);
+      if (!symbol) return null;
+      const quantity = Number(position.quantity || 0);
+      const price = Number(position.currentPrice || position.averageEntryPrice || 0);
+      return { symbol, name: position.title || stockNameForSymbol(symbol), meta: `模拟持仓 · ${quantity} × ${price.toFixed(4)}` };
+    }).filter(Boolean);
+    return { watchlist, paper, watchOk: watchPayload?.success !== false, paperOk: paperPayload?.success !== false };
+  });
+  return stockLibraryPromise;
+}
+function invalidateStockLibrary() { stockLibraryPromise = null; }
+function renderStockLibraryList(element, items, emptyText) {
+  if (!element) return;
+  element.innerHTML = items.length ? items.map(item => `
+    <button type="button" class="stock-library-item" data-stock-library-item="${stockEscapeHtml(item.symbol)}" data-symbol="${stockEscapeHtml(item.symbol)}" data-name="${stockEscapeHtml(item.name)}" onclick="selectStockLibraryItem(this)">
+      <strong>${stockEscapeHtml(item.symbol)}</strong><small>${stockEscapeHtml(item.name)} · ${stockEscapeHtml(item.meta || '')}</small>
+    </button>`).join('') : `<div class="empty-tip">${stockEscapeHtml(emptyText)}</div>`;
+  const selected = String(window._stockSelectedSymbol || '').toUpperCase();
+  element.querySelectorAll('[data-symbol]').forEach(item => item.classList.toggle('active', item.dataset.symbol?.toUpperCase() === selected));
+}
+async function loadStockWatchlistLibrary(force = false) {
+  const element = document.getElementById('watchlist-stock-library-items');
+  if (!element) return;
+  element.innerHTML = '<div class="empty-tip">正在读取股票自选...</div>';
+  try {
+    const data = await stockLibraryData(force);
+    renderStockLibraryList(element, data.watchlist, data.watchOk ? '暂无股票自选，请在股票工作区加入自选。' : '股票自选暂时不可用，请稍后重试。');
+  } catch (error) {
+    element.innerHTML = `<div class="empty-tip" style="color:var(--red);">${safeNewsText(error.message || '股票自选加载失败')}</div>`;
+  }
+}
+async function loadStockInstrumentLibrary(force = false) {
+  const host = document.getElementById('stock-instrument-library');
+  if (!host) return;
+  const watchlist = document.getElementById('stock-library-watchlist');
+  const paper = document.getElementById('stock-library-paper');
+  watchlist.innerHTML = '<div class="empty-tip">正在读取...</div>';
+  paper.innerHTML = '<div class="empty-tip">正在读取...</div>';
+  try {
+    const data = await stockLibraryData(force);
+    renderStockLibraryList(watchlist, data.watchlist, data.watchOk ? '暂无股票自选。' : '股票自选暂时不可用。');
+    renderStockLibraryList(paper, data.paper, data.paperOk ? '暂无股票模拟持仓。' : '模拟持仓暂时不可用。');
+  } catch (error) {
+    const message = `<div class="empty-tip" style="color:var(--red);">${safeNewsText(error.message || '股票标的库加载失败')}</div>`;
+    watchlist.innerHTML = message;
+    paper.innerHTML = message;
+  }
+}
+function selectStockLibraryItem(item) {
+  const symbol = String(item?.dataset?.symbol || '').trim().toUpperCase();
+  if (!stockInstrumentId(symbol)) return;
+  const name = item?.dataset?.name || stockNameForSymbol(symbol);
+  setMarketScope('stocks', { openTab: false });
+  showTab('stocks', null, { scopeAlreadySynced: true });
+  selectStockSymbol(symbol, name);
+  document.querySelectorAll('[data-stock-library-item][data-symbol]').forEach(node => node.classList.toggle('active', node.dataset.symbol?.toUpperCase() === symbol));
+}
 function setStockSelectorActive(symbol) {
   const normalized = String(symbol || '').replace(/^us/i, '').toUpperCase();
   document.querySelectorAll('[data-stock-symbol]').forEach(button => {
@@ -5262,7 +5361,10 @@ async function addStockToWatchlist(symbol) {
     const body = await response.json();
     if (!body.success) throw new Error(body.error || '加入自选失败');
     window.showToast?.('已加入股票自选', 'success');
+    invalidateStockLibrary();
     await loadStockWatchlistShortcuts();
+    if (activeMarketScope === 'watchlist') loadStockWatchlistLibrary(true);
+    if (activeMarketScope === 'stocks') loadStockInstrumentLibrary(true);
   } catch (error) { window.showToast?.(error.message || '加入自选失败', 'error'); }
 }
 function addCurrentStockToWatchlist() {
@@ -9079,6 +9181,27 @@ function applyMarketScopeView() {
     empty.textContent = `${labels[activeMarketScope] || '当前市场'}暂无可用的宏观工作区。请从对应市场首页进入专属功能。`;
   }
 }
+function applySidebarScope() {
+  const library = document.getElementById('stock-instrument-library');
+  const empty = document.getElementById('no-selection');
+  const outcomes = document.getElementById('outcomes-container');
+  const title = document.getElementById('sidebar-title');
+  const subtitle = document.getElementById('sidebar-subtitle');
+  const stockScope = activeMarketScope === 'stocks';
+  if (library) library.style.display = stockScope ? 'block' : 'none';
+  if (stockScope) {
+    if (empty) empty.style.display = 'none';
+    if (outcomes) outcomes.style.display = 'none';
+    if (title) title.textContent = '股票标的库';
+    if (subtitle) subtitle.textContent = '点击自选或模拟持仓，加载全部股票工作区';
+    loadStockInstrumentLibrary();
+    return;
+  }
+  if (title) title.textContent = '选择事件';
+  if (subtitle) subtitle.textContent = '点击事件查看结果';
+  if (empty) empty.style.display = selectedCategory ? 'none' : '';
+  if (outcomes) outcomes.style.display = selectedCategory ? 'block' : 'none';
+}
 function ensureMacroWorkspace() {
   const macro = document.getElementById('macro-tab');
   const stocks = document.getElementById('stocks-tab');
@@ -9134,6 +9257,7 @@ function renderNavigationState() {
   document.querySelectorAll('[data-market-scope]').forEach(node => node.classList.toggle('active', node.dataset.marketScope === activeMarketScope));
   document.querySelectorAll('[data-tab]').forEach(node => node.classList.toggle('active', node.dataset.tab === (window.mm_active_tab || 'command')));
   applyMarketScopeView();
+  applySidebarScope();
 }
 function setMarketScope(scope, options = {}) {
   if (!isMarketScope(scope)) return;
@@ -9243,7 +9367,10 @@ function showTab(tab, clicked, options = {}) {
   document.querySelectorAll('.utility-nav-btn, .core-workspace-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === targetTab));
   document.querySelectorAll('.mnav-btn').forEach(button => button.classList.toggle('active', button.dataset.tab === targetTab));
   renderNavigationState();
-  if (targetTab === 'positions') loadPositions();
+  if (targetTab === 'positions') {
+    loadPositions();
+    if (activeMarketScope === 'watchlist') loadStockWatchlistLibrary();
+  }
   if (targetTab === 'command') loadCommandCenter();
   if (targetTab === 'orders') loadOrders();
 if (targetTab === 'paper') { loadPaperPortfolio(); loadAiRunners(); }

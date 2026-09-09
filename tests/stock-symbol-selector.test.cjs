@@ -63,4 +63,27 @@ test('stock quote request includes the Magnificent Seven', () => {
   assert.match(html, /usAAPL,usMSFT,usNVDA,usAMZN,usGOOGL,usMETA,usTSLA/);
 });
 
+test('watchlist page exposes the actual stock favorites above holdings', () => {
+  const watchlistLibrary = html.indexOf('id="watchlist-stock-library"');
+  const holdings = html.indexOf('id="positions-list"');
+  assert.ok(watchlistLibrary >= 0);
+  assert.ok(holdings >= 0);
+  assert.ok(watchlistLibrary < holdings);
+  assert.match(html, /function loadStockWatchlistLibrary\(/);
+  assert.match(html, /data-stock-library-item/);
+});
+
+test('stock market replaces the event sidebar with a scoped stock library', () => {
+  assert.match(html, /id="stock-instrument-library"/);
+  assert.match(html, /data-stock-library-scope="stocks"/);
+  assert.match(html, /我的自选/);
+  assert.match(html, /模拟持仓/);
+  assert.match(html, /真实持仓（暂未接入）/);
+  assert.match(html, /function loadStockInstrumentLibrary\(/);
+  assert.match(html, /function selectStockLibraryItem\(/);
+  assert.match(html, /\/api\/paper\/positions\?scope=stocks/);
+  assert.match(html, /function selectStockLibraryItem\([\s\S]*?selectStockSymbol/);
+  assert.match(html, /function applySidebarScope\(/);
+});
+
 console.log('Stock symbol selector tests loaded');
