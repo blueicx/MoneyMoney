@@ -84,6 +84,7 @@ test('stock market replaces the event sidebar with a scoped stock library', () =
   assert.match(html, /\/api\/paper\/positions\?scope=stocks/);
   assert.match(html, /function selectStockLibraryItem\([\s\S]*?selectStockSymbol/);
   assert.match(html, /function applySidebarScope\(/);
+  assert.match(html, /activeMarketScope === 'watchlist'[\s\S]*?showTab\('positions'/);
 });
 
 console.log('Stock symbol selector tests loaded');

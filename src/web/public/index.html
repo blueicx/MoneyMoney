@@ -9258,6 +9258,7 @@ function renderNavigationState() {
   document.querySelectorAll('[data-tab]').forEach(node => node.classList.toggle('active', node.dataset.tab === (window.mm_active_tab || 'command')));
   applyMarketScopeView();
   applySidebarScope();
+  if (activeMarketScope === 'watchlist') loadStockWatchlistLibrary();
 }
 function setMarketScope(scope, options = {}) {
   if (!isMarketScope(scope)) return;
@@ -10571,6 +10572,10 @@ loadNewsTicker();
 // Restore last visited tab from localStorage.
 (function restoreLastTab() {
   const saved = localStorage.getItem('mm-last-tab');
+  if (activeMarketScope === 'watchlist') {
+    showTab('positions', null, { scopeAlreadySynced: true });
+    return;
+  }
   if (saved !== 'radar' || marketRadarTab() === 'radar') {
     if (saved && document.getElementById(saved + '-tab')) {
       showTab(saved);
