@@ -40,6 +40,10 @@ test('ticker loads after scope initialization and uses market-specific data', ()
   assert.match(html, /scopedUrl\('\/api\/market-ticker'\)/);
   assert.match(html, /data-market-scopes="overview stocks options crypto prediction watchlist"/);
   assert.match(server, /app\.get\('\/api\/market-ticker'/);
+  assert.match(server, /if \(scope === 'stocks'\)/);
+  assert.match(server, /stockDataService\.overview/);
+  assert.match(server, /if \(scope === 'options'\)/);
+  assert.match(server, /getEquityOptionsSnapshot/);
 });
 
 test('macro is a common utility entry rather than the stock market entry', () => {

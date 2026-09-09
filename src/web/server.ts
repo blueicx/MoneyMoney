@@ -3589,6 +3589,48 @@ app.get('/api/market-ticker', async (req, res) => {
       }));
       return res.json({ success: true, scope, data });
     }
+    if (scope === 'stocks') {
+      const symbols = ['AAPL', 'MSFT', 'NVDA', 'TSLA'];
+      const results = await Promise.all(symbols.map(async symbol => {
+        try {
+          const bundle = await stockDataService.overview(symbol);
+          if (!bundle?.quote) return null;
+          const { price, changePct } = bundle.quote;
+          const sign = changePct != null && changePct >= 0 ? '+' : '';
+          const pctStr = changePct != null ? `${sign}${changePct.toFixed(2)}%` : '';
+          return {
+            label: symbol,
+            title: `${symbol} ${price.toLocaleString()} ${pctStr}`.trim(),
+            value: price,
+            changePct,
+            source: 'Nasdaq',
+          };
+        } catch {
+          return null;
+        }
+      }));
+      return res.json({ success: true, scope, data: results.filter(Boolean) });
+    }
+    if (scope === 'options') {
+      const symbols = ['SPY', 'QQQ', 'IWM'];
+      const results = await Promise.all(symbols.map(async symbol => {
+        try {
+          const snapshot = await getEquityOptionsSnapshot(symbol);
+          const quote = snapshot.quote;
+          const iv = quote?.iv30Pct != null ? `IV30 ${quote.iv30Pct.toFixed(1)}%` : '';
+          return {
+            label: symbol,
+            title: `${symbol} ${snapshot.spot.toLocaleString()} ${iv}`.trim(),
+            value: snapshot.spot,
+            changePct: quote?.changePercent ?? null,
+            source: 'CBOE',
+          };
+        } catch {
+          return null;
+        }
+      }));
+      return res.json({ success: true, scope, data: results.filter(Boolean) });
+    }
     return res.json({ success: true, scope, data: [] });
   } catch (error: any) {
     return res.json({ success: false, scope, error: error.message, data: [] });
