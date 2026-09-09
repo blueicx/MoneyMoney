@@ -1325,6 +1325,8 @@
     .idx-price { font-size:18px; font-weight:800; }
     .idx-change { font-size:12px; font-weight:700; margin-top:2px; }
     .stock-symbol-selector { display:flex; align-items:center; gap:8px; overflow-x:auto; padding:8px; margin-bottom:12px; border:1px solid var(--border); border-radius:12px; background:var(--bg-card); scrollbar-width:thin; }
+    .stock-selector-actions { display:flex; align-items:center; gap:6px; flex:0 0 auto; padding-right:4px; }
+    .stock-watchlist-btn { border:1px solid var(--border); background:var(--bg-secondary); color:var(--text); font-weight:800; }
     .stock-symbol-quick, .stock-watchlist-quick { display:flex; align-items:center; gap:6px; flex:0 0 auto; }
     .stock-symbol-choice, .stock-watchlist-choice { flex:0 0 auto; padding:8px 14px; border:0; border-radius:9px; background:transparent; color:var(--text-secondary); font-size:14px; font-weight:700; cursor:pointer; white-space:nowrap; }
     .stock-symbol-choice:hover, .stock-watchlist-choice:hover { background:var(--bg-secondary); color:var(--text); }
@@ -2240,6 +2242,10 @@
             </div>
             <div style="font-weight:700;font-size:13px;margin-bottom:10px;">💼 热门股票</div>
             <div class="stock-symbol-selector" aria-label="股票快捷选择">
+              <div class="stock-selector-actions" aria-label="股票自选操作">
+                <button id="stock-watchlist-open" class="tab stock-watchlist-btn" type="button" onclick="setMarketScope('watchlist')">⭐ 自选</button>
+                <button id="stock-watchlist-add" class="tab guest-admin-only stock-watchlist-btn" type="button" onclick="addCurrentStockToWatchlist()">＋加入自选</button>
+              </div>
               <div id="stock-symbol-quick" class="stock-symbol-quick" aria-label="美股七姐妹">
                 <button class="stock-symbol-choice active" type="button" data-stock-symbol="AAPL" data-stock-name="Apple" onclick="selectStockSymbol('AAPL','Apple')">AAPL</button>
                 <button class="stock-symbol-choice" type="button" data-stock-symbol="MSFT" data-stock-name="Microsoft" onclick="selectStockSymbol('MSFT','Microsoft')">MSFT</button>
@@ -2262,6 +2268,20 @@
               <button class="tab active" type="button" onclick="loadStockQuotes()">🔄 刷新行情</button>
             </div>
             <div id="stock-search-results"></div>
+          </div>
+        </details>
+        <details class="dash-collapse" data-collapse-key="stocks-breadth" data-market-scopes="stocks overview">
+          <summary>
+            <span class="collapse-title">🌡️ 市场宽度雷达</span>
+            <span class="collapse-hint">Nasdaq · 上涨/下跌家数 · 板块与市值</span>
+            <span class="collapse-chevron">▾</span>
+          </summary>
+          <div class="collapse-body">
+            <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap;">
+              <button class="tab" onclick="loadMarketBreadth()">🔄 刷新宽度雷达</button>
+              <span id="market-breadth-updated" style="font-size:11px;color:var(--text-secondary);"></span>
+            </div>
+            <div id="market-breadth-radar"></div>
           </div>
         </details>
         <details class="dash-collapse" data-collapse-key="stocks-insider" data-market-scopes="stocks overview">
@@ -2350,20 +2370,6 @@
               <button class="tab" onclick="loadFundamentalQuality()">🔄 刷新</button>
             </div>
             <div id="fundamental-radar"></div>
-          </div>
-        </details>
-        <details class="dash-collapse" data-collapse-key="stocks-breadth" data-market-scopes="stocks overview">
-          <summary>
-            <span class="collapse-title">🌡️ 市场宽度雷达</span>
-            <span class="collapse-hint">Nasdaq · 上涨/下跌家数 · 板块与市值</span>
-            <span class="collapse-chevron">▾</span>
-          </summary>
-          <div class="collapse-body">
-            <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap;">
-              <button class="tab" onclick="loadMarketBreadth()">🔄 刷新宽度雷达</button>
-              <span id="market-breadth-updated" style="font-size:11px;color:var(--text-secondary);"></span>
-            </div>
-            <div id="market-breadth-radar"></div>
           </div>
         </details>
         <details class="dash-collapse" data-collapse-key="stocks-short-interest" data-market-scopes="stocks overview">
@@ -5445,7 +5451,7 @@ async function loadFundamentalQuality(symbol, name) {
   const token = ++fundamentalsRequestToken;
   el.innerHTML = '<div class="skl skl-card"><div class="skl-line"></div><div class="skl-line w60"></div></div>';
   try {
-    const res = await fetch('/api/stock/fundamentals/' + encodeURIComponent(currentFundamentalSymbol));
+    const res = await fetch('/api/stock/fundamentals/' + encodeURIComponent(currentFundamentalSymbol), { credentials: 'include', cache: 'no-store' });
     const payload = await res.json();
     if (token !== fundamentalsRequestToken) return;
     if (!payload.success || !payload.data) throw new Error(payload.error || 'no data');
@@ -5455,7 +5461,10 @@ async function loadFundamentalQuality(symbol, name) {
     renderFundamentalQuality(payload.data);
   } catch (e) {
     if (token !== fundamentalsRequestToken) return;
-    el.innerHTML = '<div class="empty-tip">' + stockEscapeHtml(currentFundamentalSymbol) + ' 暂无可读的 SEC 年报基本面，或数据暂时不可用。</div>';
+    const message = e?.message || '数据源暂时不可用';
+    const isAuthFailure = /未登录|unauthorized|401/i.test(message);
+    const detail = isAuthFailure ? '登录状态已失效，请重新登录后再加载。' : message === 'no data' ? '暂无可读的 SEC 年报基本面。' : '数据源暂时不可用：' + message;
+    el.innerHTML = '<div class="empty-tip"><div class="empty-tip-icon">' + (isAuthFailure ? '🔐' : '⚠️') + '</div><div><strong>' + stockEscapeHtml(currentFundamentalSymbol) + '</strong> ' + stockEscapeHtml(detail) + '</div><button class="tab" type="button" onclick="loadFundamentalQuality()" style="margin-top:10px;">🔄 重试</button></div>';
   }
 }
 function renderFundamentalQuality(data) {
