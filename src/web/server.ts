@@ -3654,6 +3654,11 @@ app.get('/api/market-ticker', async (req, res) => {
 app.get('/api/risk/overview', async (req, res) => {
   try {
     const scope = requestedMarketScope(req.query.scope);
+    const token = extractAuthToken(req as any);
+    const auth = token ? verifyLoginToken(token) : null;
+    if (auth?.role === 'guest' && scope === 'watchlist') {
+      return res.status(403).json({ success: false, error: '访客模式不可查看自选和个人风险数据', code: 'GUEST_READ_ONLY' });
+    }
     const radar = getCachedPredictionRadarSlice('', 240);
     const paper = paperEngine.getPortfolio();
     const metrics = paperEngine.getRiskMetrics();

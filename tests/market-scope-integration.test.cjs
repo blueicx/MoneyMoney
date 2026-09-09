@@ -69,6 +69,19 @@ test('market overview keeps a scoped cache and exposes freshness state', () => {
   assert.match(html, /market-overview-status.*数据更新时间/);
 });
 
+test('scope-sensitive heavy requests own abort controllers', () => {
+  assert.match(html, /async function loadPortfolioRisk\(\)[\s\S]*currentRiskController = new AbortController\(\)[\s\S]*fetch\(scopedUrl\('\/api\/risk\/overview'\), \{ cache: 'no-store', signal \}\)/);
+  assert.match(html, /fetch\(scopedUrl\('\/api\/risk\/history\?limit=72'\), \{ cache: 'no-store', signal \}\)/);
+  assert.match(html, /fetch\(scopedUrl\('\/api\/advisor'\), \{ cache: 'no-store', signal \}\)/);
+  assert.match(html, /if \(error\.name === 'AbortError'\) return;/);
+});
+
+test('watchlist overview never requests private risk data for guests', () => {
+  assert.match(html, /if \(!window\.mm_isGuest\)\s*\{\s*requests\.push\(/);
+  assert.match(html, /const counts = \{ stock: 0, option: 0, crypto: 0, prediction: 0 \}/);
+  assert.match(html, /chips\.push\(chip\('期权'/);
+});
+
 test('macro is a common utility entry rather than the stock market entry', () => {
   assert.match(html, /\['macro', '[^']*宏观'\]/);
   assert.doesNotMatch(html, /CORE_NAV_ITEMS[\s\S]*\['stocks', '[^']*宏观'\]/);

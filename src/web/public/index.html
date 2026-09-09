@@ -2833,6 +2833,10 @@ async function loadRiskPatrol(run = false) {
 }
 async function loadTradeAssistant() {
   if (advisorLoading) return;
+  if (currentAnalysisController) currentAnalysisController.abort();
+  currentAnalysisController = new AbortController();
+  const signal = currentAnalysisController.signal;
+
   const host = document.getElementById('trade-assistant');
   const scopeToken = marketScopeRequestToken();
   advisorLoading = true;
@@ -2845,7 +2849,7 @@ async function loadTradeAssistant() {
       <div style="font-size:12px;color:var(--text-secondary);margin-top:8px;">正在读取${activeMarketScope === 'overview' ? '全部市场' : ({ stocks: '股票', options: '期权', crypto: '虚拟币', prediction: '预测市场', watchlist: '自选标的' }[activeMarketScope] || '当前市场')}范围内的信号。</div>
     </div>`;
   try {
-    const res = await fetch(scopedUrl('/api/advisor'), { cache: 'no-store' });
+    const res = await fetch(scopedUrl('/api/advisor'), { cache: 'no-store', signal });
     const payload = await res.json();
     if (!payload.success) throw new Error(payload.error || '助手暂时不可用');
     if (!isCurrentMarketScopeToken(scopeToken)) return;
@@ -3243,6 +3247,7 @@ async function loadTradeAssistant() {
       </div>`;
     loadRiskPatrol();
   } catch (error) {
+    if (error.name === 'AbortError') return;
     host.innerHTML = `
       <div style="background:var(--red-light);color:var(--red);border-radius:12px;padding:14px;margin-bottom:16px;">
         ⚠️ 智能助手加载失败：${safeNewsText(error.message)}
@@ -4013,14 +4018,21 @@ async function loadEventCalendar(force = false) {
   }
 }
 async function loadNews() {
+  if (currentNewsController) currentNewsController.abort();
+  currentNewsController = new AbortController();
+  const signal = currentNewsController.signal;
+  const token = marketScopeRequestToken();
+
   const loading = document.getElementById('news-loading');
   const listEl = document.getElementById('news-list');
   loading.style.display = 'block';
   listEl.innerHTML = '';
   loadEventCalendar();
   try {
-    const res = await fetch(scopedUrl('/api/news'));
+    const res = await fetch(scopedUrl('/api/news'), { signal });
     const { data: items } = await res.json();
+  if (!isCurrentMarketScopeToken(token) || signal.aborted) return;
+
     loading.style.display = 'none';
     if (!items || items.length === 0) {
       listEl.innerHTML = "<div style=\"color:var(--text-secondary);padding:20px;\">\u6682\u65E0\u65B0\u95FB</div>";
@@ -4042,6 +4054,7 @@ async function loadNews() {
     // Also load correlations
     loadCorrelations();
   } catch (e) {
+    if (e.name === 'AbortError') return;
     loading.style.display = 'none';
     listEl.innerHTML = `<div style="color:var(--red);padding:20px;">新闻加载失败</div>`;
   }
@@ -7150,6 +7163,7 @@ async function loadResearchBriefing(force = false) {
 // --- Market Overview Bar ---
 const marketOverviewCache = new Map();
 const MARKET_OVERVIEW_CACHE_TTL_MS = 30000;
+let currentMarketOverviewController = null;
 
 async function loadMarketOverview() {
   const el = document.getElementById('market-overview');
@@ -7157,10 +7171,18 @@ async function loadMarketOverview() {
   const headingEl = document.getElementById('market-overview-heading');
   const statusEl = document.getElementById('market-overview-status');
   if (!el || !itemsEl) return;
+
+  if (currentMarketOverviewController) {
+    currentMarketOverviewController.abort();
+  }
+  currentMarketOverviewController = new AbortController();
+  const signal = currentMarketOverviewController.signal;
+
   const scope = activeMarketScope;
   const token = marketScopeRequestToken();
   const headings = { overview: '总体大盘', stocks: '股票大盘', options: '期权大盘', crypto: '虚拟币大盘', prediction: '预测市场大盘', watchlist: '自选大盘' };
   if (headingEl) headingEl.textContent = headings[scope] || '市场大盘';
+
   const cached = marketOverviewCache.get(scope);
   if (cached?.html) {
     if (Date.now() - cached.fetchedAt < MARKET_OVERVIEW_CACHE_TTL_MS) {
@@ -7174,26 +7196,59 @@ async function loadMarketOverview() {
     itemsEl.innerHTML = Array(4).fill('<span class="skl" style="min-width:100px;height:36px;"></span>').join('');
     if (statusEl) statusEl.textContent = '正在读取当前市场大盘…';
   }
+
   const chips = [];
   let sourceLabel = '公开数据源';
+  let hasPartialFailure = false;
+
   const escape = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
   const pct = value => value == null || !Number.isFinite(Number(value)) ? '' : `${Number(value) >= 0 ? '+' : ''}${Number(value).toFixed(1)}%`;
   const chip = (label, value, change = '', note = '') => `<div class="ov-chip"><span class="ov-label">${escape(label)}</span><span class="ov-value">${escape(value)}</span>${change ? `<span class="ov-change ${Number(change) >= 0 ? 'bn-up' : 'bn-down'}">${escape(change)}</span>` : ''}${note ? `<small style="display:block;color:var(--text-secondary);font-size:10px;">${escape(note)}</small>` : ''}</div>`;
+
   try {
+    let requests = [];
     if (scope === 'overview' || scope === 'crypto') {
-      sourceLabel = 'Binance · Alternative.me · DeFiLlama · CoinGecko';
-      const results = await Promise.allSettled([
-        fetch('/api/binance/price/BTCUSDT').then(r => r.json()),
-        fetch('/api/binance/price/ETHUSDT').then(r => r.json()),
-        fetch('/api/sentiment').then(r => r.json()),
-        fetch('/api/defi/tvl').then(r => r.json()),
-        fetch('/api/crypto/global').then(r => r.json())
-      ]);
-      const btc = results[0].status === 'fulfilled' ? results[0].value : null;
-      const eth = results[1].status === 'fulfilled' ? results[1].value : null;
-      const sentiment = results[2].status === 'fulfilled' ? results[2].value : null;
-      const defi = results[3].status === 'fulfilled' ? results[3].value : null;
-      const global = results[4].status === 'fulfilled' ? results[4].value : null;
+      sourceLabel = 'Binance/DeFiLlama/CoinGecko';
+      requests = [
+        fetch('/api/binance/price/BTCUSDT', { signal }).then(r => r.json()),
+        fetch('/api/binance/price/ETHUSDT', { signal }).then(r => r.json()),
+        fetch('/api/sentiment', { signal }).then(r => r.json()),
+        fetch('/api/defi/tvl', { signal }).then(r => r.json()),
+        fetch('/api/crypto/global', { signal }).then(r => r.json())
+      ];
+    } else if (scope === 'stocks') {
+      sourceLabel = '腾讯财经/Nasdaq Public Screener';
+      requests = [
+        fetch('/api/stock/indices', { cache: 'no-store', signal }).then(r => r.json()),
+        fetch('/api/stock/market-breadth', { cache: 'no-store', signal }).then(r => r.json())
+      ];
+    } else if (scope === 'options') {
+      sourceLabel = '期权行情聚合源';
+      requests = [
+        fetch('/api/market-ticker?scope=options', { cache: 'no-store', signal }).then(r => r.json())
+      ];
+    } else if (scope === 'prediction') {
+      sourceLabel = '预测雷达';
+      requests = [
+        fetch('/api/prediction-radar?cachedOnly=1&limit=24', { cache: 'no-store', signal }).then(r => r.json())
+      ];
+    } else if (scope === 'watchlist') {
+      sourceLabel = '本地沙盒/同步';
+      requests = [fetch('/api/watchlist', { cache: 'no-store', signal }).then(r => r.json())];
+      if (!window.mm_isGuest) {
+        requests.push(fetch('/api/risk/overview?scope=watchlist', { cache: 'no-store', signal }).then(r => r.json()));
+      }
+    }
+
+    const results = await Promise.allSettled(requests);
+    if (signal.aborted) return;
+
+    hasPartialFailure = results.some(r => r.status === 'rejected' || (r.status === 'fulfilled' && r.value && r.value.success === false));
+
+    const getRes = (idx) => results[idx]?.status === 'fulfilled' ? results[idx].value : null;
+
+    if (scope === 'overview' || scope === 'crypto') {
+      const [btc, eth, sentiment, defi, global] = [0, 1, 2, 3, 4].map(getRes);
       if (btc?.success && btc.data) chips.push(chip('BTC', '$' + Math.round(btc.data.price).toLocaleString(), pct(btc.data.change24hPct), 'Binance'));
       if (eth?.success && eth.data) chips.push(chip('ETH', '$' + Math.round(eth.data.price).toLocaleString(), pct(eth.data.change24hPct), 'Binance'));
       if (sentiment?.success && sentiment.data?.length) {
@@ -7207,55 +7262,79 @@ async function loadMarketOverview() {
         chips.push(chip('BTC占比', Number(global.data.bitcoinDominancePct).toFixed(1) + '%'));
       }
     } else if (scope === 'stocks') {
-      sourceLabel = '腾讯财经指数';
-      const payload = await fetch('/api/stock/indices', { cache: 'no-store' }).then(r => r.json());
-      const indices = Array.isArray(payload.data) ? payload.data : [];
-      indices.slice(0, 6).forEach(item => chips.push(chip(item.name, Number(item.price).toLocaleString(), pct(item.changePct), '股票指数')));
+      const [indicesRes, breadthRes] = [0, 1].map(getRes);
+      if (indicesRes?.success && Array.isArray(indicesRes.data)) {
+        indicesRes.data.slice(0, 4).forEach(item => chips.push(chip(item.name, Number(item.price).toLocaleString(), pct(item.changePct), '指数')));
+      }
+      if (breadthRes?.success && breadthRes.data) {
+        const bd = breadthRes.data;
+        if (bd.advancers || bd.decliners) {
+           chips.push(chip('涨跌比', `${bd.advancers || 0}:${bd.decliners || 0}`, '', '市场宽度'));
+        }
+        if (bd.hotSectors && bd.hotSectors.length) {
+           chips.push(chip('热门板块', bd.hotSectors[0].name, pct(bd.hotSectors[0].changePct), 'Sector'));
+        }
+      }
     } else if (scope === 'options') {
-      sourceLabel = '期权行情聚合源';
-      const payload = await fetch('/api/market-ticker?scope=options', { cache: 'no-store' }).then(r => r.json());
-      const options = Array.isArray(payload.data) ? payload.data : [];
-      options.forEach(item => {
-        const iv = String(item.title || '').match(/IV30\s+([\d.]+%)/i)?.[1];
-        chips.push(chip(item.label, Number(item.value).toLocaleString(), pct(item.changePct), iv ? `隐含波动率 ${iv}` : 'CBOE'));
-      });
+      const [optionsRes] = [0].map(getRes);
+      if (optionsRes?.success && Array.isArray(optionsRes.data)) {
+        optionsRes.data.forEach(item => {
+          const iv = String(item.title || '').match(/IV30\s+([\d.]+%)/i)?.[1];
+          chips.push(chip(item.label, Number(item.value).toLocaleString(), pct(item.changePct), iv ? `隐含波动率 ${iv}` : 'CBOE'));
+        });
+      }
     } else if (scope === 'prediction') {
-      sourceLabel = '预测雷达缓存';
-      const payload = await fetch('/api/prediction-radar?cachedOnly=1&limit=24', { cache: 'no-store' }).then(r => r.json());
-      const markets = Array.isArray(payload.data?.markets) ? payload.data.markets : [];
-      const sources = new Set(markets.map(item => item.platform).filter(Boolean));
-      chips.push(chip('活跃市场', `${markets.length} 个`, '', markets.length ? '缓存雷达' : '等待雷达缓存'));
-      chips.push(chip('数据平台', `${sources.size} 个`, '', '公开市场'));
-      markets.slice(0, 4).forEach(item => chips.push(chip(item.platform || '市场', `${Math.round(Number(item.yesPrice || 0) * 100)}%`, '', item.titleZh || item.title || '预测概率')));
+      const [radarRes] = [0].map(getRes);
+      if (radarRes?.data?.markets) {
+        const markets = radarRes.data.markets;
+        const sources = new Set(markets.map(item => item.platform).filter(Boolean));
+        let vol = 0;
+        markets.forEach(m => vol += Number(m.volume || 0));
+        chips.push(chip('活跃市场', `${markets.length} 个`, '', markets.length ? '缓存雷达' : '等待雷达缓存'));
+        chips.push(chip('数据平台', `${sources.size} 个`, '', '公开市场'));
+        if (vol > 0) chips.push(chip('预估交易量', '$' + (vol).toLocaleString(), '', '总计'));
+        markets.slice(0, 3).forEach(item => chips.push(chip(item.platform || '市场', `${Math.round(Number(item.yesPrice || 0) * 100)}%`, '', item.titleZh || item.title || '预测概率')));
+      }
     } else if (scope === 'watchlist') {
-      sourceLabel = 'SQLite 自选 · 网页/TG同步';
-      const payload = await fetch('/api/watchlist', { cache: 'no-store' }).then(r => r.json());
-      const list = Array.isArray(payload.data) ? payload.data : [];
-      const counts = { stock: 0, crypto: 0, prediction: 0 };
-      list.forEach(item => {
-        const type = String(item.instrumentId || item.id || '').split(':')[0];
-        if (type in counts) counts[type] += 1;
-      });
-      chips.push(chip('自选标的', `${list.length} 个`, '', '网页/TG同步'));
-      chips.push(chip('股票', `${counts.stock} 个`));
-      chips.push(chip('虚拟币', `${counts.crypto} 个`));
-      chips.push(chip('预测市场', `${counts.prediction} 个`));
+      const [watchRes, riskRes] = [0, 1].map(getRes);
+      if (watchRes?.success && Array.isArray(watchRes.data)) {
+        const list = watchRes.data;
+        const counts = { stock: 0, option: 0, crypto: 0, prediction: 0 };
+        list.forEach(item => {
+          const type = String(item.instrumentId || item.id || '').split(':')[0];
+          if (type in counts) counts[type] += 1;
+        });
+        chips.push(chip('自选标的', `${list.length} 个`, '', '网页/TG同步'));
+        chips.push(chip('股票', `${counts.stock} 个`));
+        chips.push(chip('期权', `${counts.option} 个`));
+        chips.push(chip('虚拟币', `${counts.crypto} 个`));
+        chips.push(chip('预测市场', `${counts.prediction} 个`));
+      }
+      if (riskRes?.success && riskRes.data?.metrics) {
+        chips.push(chip('模拟净值', '$' + riskRes.data.metrics.equity, '', '安全沙盒'));
+      }
     }
   } catch (error) {
+    if (error.name === 'AbortError') return;
+    hasPartialFailure = true;
     if (!cached?.html) chips.push(chip(headings[scope] || '当前市场', '暂时不可用', '', '可点击刷新重试'));
   }
+
   if (!isCurrentMarketScopeToken(token)) return;
+
+  const finalStatus = hasPartialFailure ? (chips.length > 0 ? '部分成功' : '失败') : '实时';
+
   if (chips.length) {
     const html = chips.join('');
     marketOverviewCache.set(scope, { html, fetchedAt: Date.now(), source: sourceLabel });
     itemsEl.innerHTML = html;
-    if (statusEl) statusEl.textContent = `数据更新时间：${new Date().toLocaleTimeString()} · ${sourceLabel}`;
+    if (statusEl) statusEl.textContent = `数据更新时间：${new Date().toLocaleTimeString()} · ${sourceLabel} · ${finalStatus}`;
   } else if (cached?.html) {
     itemsEl.innerHTML = cached.html;
     if (statusEl) statusEl.textContent = `数据更新时间：${new Date(cached.fetchedAt).toLocaleTimeString()} · ${cached.source} · 刷新失败，显示缓存`;
   } else {
     itemsEl.innerHTML = chip(headings[scope] || '当前市场', '暂无数据');
-    if (statusEl) statusEl.textContent = `数据更新时间：${new Date().toLocaleTimeString()} · ${sourceLabel}`;
+    if (statusEl) statusEl.textContent = `数据更新时间：${new Date().toLocaleTimeString()} · ${sourceLabel} · ${finalStatus}`;
   }
 }
 // --- Market-scoped persistent ticker ---
@@ -7281,6 +7360,12 @@ async function loadNewsTicker() {
 }
 // --- Auto Refresh ---
 let bnAutoRefreshTimer = null;
+
+let currentNewsController = null;
+let currentRadarController = null;
+let currentAnalysisController = null;
+let currentRiskController = null;
+
 let bnActiveAlerts = [];
 function toggleAutoRefresh() {
   const btn = document.getElementById('bn-auto-refresh');
@@ -8898,18 +8983,21 @@ function riskLevelColor(level) {
 async function loadPortfolioRisk() {
   const host = document.getElementById('portfolio-risk');
   if (!host) return;
+  if (currentRiskController) currentRiskController.abort();
+  currentRiskController = new AbortController();
+  const signal = currentRiskController.signal;
   updateScopedRiskLinks();
   const scopeToken = marketScopeRequestToken();
   host.innerHTML = '<div class="glass-card" style="padding:16px;border-radius:18px;">⏳ 正在汇总模拟持仓、助手信号、市场环境与预测雷达...</div>';
   try {
-    const res = await fetch(scopedUrl('/api/risk/overview'), { cache: 'no-store' });
+    const res = await fetch(scopedUrl('/api/risk/overview'), { cache: 'no-store', signal });
     const payload = await res.json();
     if (!payload.success) throw new Error(payload.error || '风险总览暂不可用');
     if (!isCurrentMarketScopeToken(scopeToken)) return;
     const d = payload.data;
     let history = null;
     try {
-      const historyRes = await fetch(scopedUrl('/api/risk/history?limit=72'), { cache: 'no-store' });
+      const historyRes = await fetch(scopedUrl('/api/risk/history?limit=72'), { cache: 'no-store', signal });
       const historyPayload = await historyRes.json();
       if (historyPayload.success) history = historyPayload.data;
     } catch {
@@ -9068,6 +9156,7 @@ async function loadPortfolioRisk() {
       ${predictionWatchlistBlock}
       ${groups ? `<div class="risk-command" style="margin-top:14px;overflow:auto;"><table class="risk-table"><thead><tr><th style="text-align:left;">分组</th><th style="text-align:right;">数量</th><th style="text-align:right;">模拟敞口</th><th style="text-align:right;">平均信心</th></tr></thead><tbody>${groups}</tbody></table></div>` : ''}`;
   } catch (error) {
+    if (error.name === 'AbortError') return;
     host.innerHTML = `<div class="glass-card" style="padding:16px;border-radius:18px;color:var(--red);">❌ ${safeNewsText(error.message)}</div>`;
   }
 }
@@ -9515,18 +9604,25 @@ async function loadAiMarketCommentary(force = false) {
   }
 }
 async function loadPredictionRadar(force = false) {
+  if (currentRadarController) currentRadarController.abort();
+  currentRadarController = new AbortController();
+  const signal = currentRadarController.signal;
+  const token = marketScopeRequestToken();
+
   if (!['overview', 'prediction'].includes(activeMarketScope)) return;
   if (predictionRadarState.loading || (!force && predictionRadarState.data)) return;
   predictionRadarState.loading = true;
   document.getElementById('radar-loading').style.display = 'block';
   document.getElementById('radar-markets').innerHTML = '';
   try {
-    const res = await fetch('/api/prediction-radar?limit=500');
+    const res = await fetch('/api/prediction-radar?limit=500', { signal });
     const body = await res.json();
+    if (!isCurrentMarketScopeToken(token) || signal.aborted) return;
     if (!body.success) throw new Error(body.error || '预测雷达加载失败');
     predictionRadarState.data = body.data;
     renderPredictionRadar();
   } catch (error) {
+    if (error.name === 'AbortError') return;
     document.getElementById('radar-markets').innerHTML =
       `<div class="empty-tip" style="grid-column:1/-1;"><div class="empty-tip-icon">⚠️</div>${radarEscape(error.message)}</div>`;
   } finally {
@@ -9694,6 +9790,8 @@ function renderForecastLab(d) {
 }
 let forecastLabLoading = false;
 async function loadForecastLab(force = false) {
+  const token = marketScopeRequestToken();
+
   if (!['overview', 'prediction'].includes(activeMarketScope)) return;
   const host = document.getElementById('forecast-lab-panel');
   if (!host || (forecastLabLoading && !force)) return;
@@ -9702,6 +9800,7 @@ async function loadForecastLab(force = false) {
   try {
     const res = await fetch('/api/forecast-lab', { cache: 'no-store' });
     const body = await res.json();
+    if (!isCurrentMarketScopeToken(token)) return;
     if (!body.success) throw new Error(body.error || '策略实验室暂不可用');
     host.innerHTML = renderForecastLab(body.data);
   } catch (error) {

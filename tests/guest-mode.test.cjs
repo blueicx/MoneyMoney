@@ -43,6 +43,10 @@ test('server exposes guest login and enforces guest read-only middleware', () =>
   assert.match(serverSrc, /GUEST_TOKEN_EXPIRY_MS/, 'guest expiry is explicit');
 });
 
+test('guest cannot request private watchlist risk data', () => {
+  assert.match(serverSrc, /app\.get\(['"]\/api\/risk\/overview['"][\s\S]*role === ['"]guest['"][\s\S]*scope === ['"]watchlist['"]/);
+});
+
 test('login and dashboard expose the guest read-only state', () => {
   assert.match(loginHtml, /访客进入/, 'login page has guest entry');
   assert.match(loginHtml, /\/api\/auth\/guest/, 'guest button calls guest endpoint');
