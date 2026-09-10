@@ -21,6 +21,7 @@ import { buildEventEvidence, filterTimelineItems, type EventEvidence } from '../
 
 import { getRuntimeTelegramConfig, parseChatIds, runtimeSecrets } from '../config/runtime-secrets';
 import { api } from '../api';
+import { createCacheEtag, globalCache } from '../features/performance-cache';
 
 import { tradingEngine } from '../trading';
 
@@ -391,11 +392,18 @@ app.get('/api/screener', async (req, res) => {
   try {
     const filters = queryJson<Record<string, ScreenerFilter>>(req.query.filters, {});
     const rawSort = queryJson<ScreenerSort | null>(req.query.sort, null);
-    let rows = await loadScopedScreenerRows(scope);
+    const cachedRows = await globalCache.fetch(`scope:${scope}:screener:rows`, () => loadScopedScreenerRows(scope), { ttl: 15_000, staleTtl: 60_000 });
+    if (!Array.isArray(cachedRows.data)) throw cachedRows.error || new Error('筛选数据暂不可用');
+    let rows = cachedRows.data;
     rows = filterRows(scope, rows, filters);
     if (rawSort) rows = sortRows(scope, rows, rawSort);
     const page = paginateRows(rows, Number(req.query.pageSize) || 50, Number(req.query.page) || 1);
-    res.json({ success: true, data: { scope, fields: fieldsForScreener(scope), ...page }, freshness: { fetchedAt: new Date().toISOString(), status: page.rows.length ? 'fresh' : 'unavailable' }, sourceStatus: page.rows.length ? 'ok' : 'unavailable' });
+    sendPerformanceJson(req, res, {
+      success: true,
+      data: { scope, fields: fieldsForScreener(scope), ...page },
+      freshness: { fetchedAt: new Date().toISOString(), status: cachedRows.status },
+      sourceStatus: page.rows.length ? 'ok' : 'unavailable',
+    }, cachedRows.status);
   } catch (error: any) {
     res.status(400).json({ success: false, error: error?.message || '筛选失败', data: [] });
   }
@@ -3781,6 +3789,18 @@ function requestedMarketScope(value: unknown): MarketScope | undefined {
   return MARKET_SCOPES.includes(raw as MarketScope) ? raw as MarketScope : undefined;
 }
 
+function sendPerformanceJson(req: express.Request, res: express.Response, payload: Record<string, unknown>, cacheStatus: string): void {
+  const etag = createCacheEtag(payload.data);
+  res.setHeader('ETag', etag);
+  res.setHeader('Cache-Control', 'public, max-age=10, stale-while-revalidate=60');
+  res.setHeader('X-MoneyMoney-Cache', cacheStatus);
+  if (String(req.headers['if-none-match'] || '') === etag) {
+    res.status(304).end();
+    return;
+  }
+  res.json({ ...payload, cacheStatus });
+}
+
 app.get('/api/advisor', async (req, res) => {
   try {
     const report = await generateAssistantReport();
@@ -3795,88 +3815,88 @@ app.get('/api/advisor', async (req, res) => {
 app.get('/api/market-ticker', async (req, res) => {
   const scope = requestedMarketScope(req.query.scope) || 'overview';
   try {
-    if (scope === 'overview') {
-      return res.json({ success: true, scope, data: [] });
-    }
-    if (scope === 'crypto') {
-      const prices = await binanceFeed.getMultiplePrices(['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT']);
-      const data = Object.values(prices).map(item => ({
-        label: item.symbol,
-        title: `${item.symbol} ${item.price.toLocaleString()} ${item.change24hPct >= 0 ? '+' : ''}${item.change24hPct.toFixed(2)}%`,
-        value: item.price,
-        changePct: item.change24hPct,
-        source: 'Binance',
-      }));
-      return res.json({ success: true, scope, data });
-    }
-    if (scope === 'prediction') {
-      const radar = getCachedPredictionRadarSlice('', 240);
-      const data = (radar?.markets || []).slice(0, 8).map(item => ({
-        label: item.platform,
-        title: item.titleZh || item.title,
-        value: Math.round(item.yesPrice * 100),
-        changePct: null,
-        source: item.platform,
-      }));
-      return res.json({ success: true, scope, data });
-    }
-    if (scope === 'stocks') {
-      const symbols = ['AAPL', 'MSFT', 'NVDA', 'AMZN', 'GOOGL', 'META', 'TSLA'];
-      try {
-        const text = await fetchTencentText(`https://qt.gtimg.cn/q=${symbols.map(symbol => `us${symbol}`).join(',')}`, 6000);
-        const data = text.split(';')
-          .map(raw => parseTencentStock(raw.trim()))
-          .filter(item => item?.market === 'us' && item.price > 0)
-          .map(item => ({
-            label: item.code,
-            title: `${item.code} ${item.price.toLocaleString()} ${item.changePct >= 0 ? '+' : ''}${item.changePct.toFixed(2)}%`,
-            value: item.price,
-            changePct: item.changePct,
-            source: 'Tencent Finance',
-          }));
-        if (data.length) return res.json({ success: true, scope, data });
-      } catch {}
-      const results = await Promise.all(symbols.map(async symbol => {
+    const cached = await globalCache.fetch(`scope:${scope}:market-ticker`, async () => {
+      if (scope === 'overview') return [];
+      if (scope === 'crypto') {
+        const prices = await binanceFeed.getMultiplePrices(['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT']);
+        return Object.values(prices).map(item => ({
+          label: item.symbol,
+          title: `${item.symbol} ${item.price.toLocaleString()} ${item.change24hPct >= 0 ? '+' : ''}${item.change24hPct.toFixed(2)}%`,
+          value: item.price,
+          changePct: item.change24hPct,
+          source: 'Binance',
+        }));
+      }
+      if (scope === 'prediction') {
+        const radar = getCachedPredictionRadarSlice('', 240);
+        return (radar?.markets || []).slice(0, 8).map(item => ({
+          label: item.platform,
+          title: item.titleZh || item.title,
+          value: Math.round(item.yesPrice * 100),
+          changePct: null,
+          source: item.platform,
+        }));
+      }
+      if (scope === 'stocks') {
+        const symbols = ['AAPL', 'MSFT', 'NVDA', 'AMZN', 'GOOGL', 'META', 'TSLA'];
         try {
-          const result = await stockDataService.quote(symbol);
-          if (!result.quote) return null;
-          const { price, changePct } = result.quote;
-          const sign = changePct != null && changePct >= 0 ? '+' : '';
-          const pctStr = changePct != null ? `${sign}${changePct.toFixed(2)}%` : '';
-          return {
-            label: symbol,
-            title: `${symbol} ${price.toLocaleString()} ${pctStr}`.trim(),
-            value: price,
-            changePct,
-            source: 'Nasdaq',
-          };
-        } catch {
-          return null;
-        }
-      }));
-      return res.json({ success: true, scope, data: results.filter(Boolean) });
-    }
-    if (scope === 'options') {
-      const symbols = ['SPY', 'QQQ', 'IWM'];
-      const results = await Promise.all(symbols.map(async symbol => {
-        try {
-          const snapshot = await getEquityOptionsSnapshot(symbol);
-          const quote = snapshot.quote;
-          const iv = quote?.iv30Pct != null ? `IV30 ${quote.iv30Pct.toFixed(1)}%` : '';
-          return {
-            label: symbol,
-            title: `${symbol} ${snapshot.spot.toLocaleString()} ${iv}`.trim(),
-            value: snapshot.spot,
-            changePct: quote?.changePercent ?? null,
-            source: 'CBOE',
-          };
-        } catch {
-          return null;
-        }
-      }));
-      return res.json({ success: true, scope, data: results.filter(Boolean) });
-    }
-    return res.json({ success: true, scope, data: [] });
+          const text = await fetchTencentText(`https://qt.gtimg.cn/q=${symbols.map(symbol => `us${symbol}`).join(',')}`, 6000);
+          const data = text.split(';')
+            .map(raw => parseTencentStock(raw.trim()))
+            .filter(item => item?.market === 'us' && item.price > 0)
+            .map(item => ({
+              label: item.code,
+              title: `${item.code} ${item.price.toLocaleString()} ${item.changePct >= 0 ? '+' : ''}${item.changePct.toFixed(2)}%`,
+              value: item.price,
+              changePct: item.changePct,
+              source: 'Tencent Finance',
+            }));
+          if (data.length) return data;
+        } catch {}
+        const results = await Promise.all(symbols.map(async symbol => {
+          try {
+            const result = await stockDataService.quote(symbol);
+            if (!result.quote) return null;
+            const { price, changePct } = result.quote;
+            const sign = changePct != null && changePct >= 0 ? '+' : '';
+            const pctStr = changePct != null ? `${sign}${changePct.toFixed(2)}%` : '';
+            return {
+              label: symbol,
+              title: `${symbol} ${price.toLocaleString()} ${pctStr}`.trim(),
+              value: price,
+              changePct,
+              source: 'Nasdaq',
+            };
+          } catch {
+            return null;
+          }
+        }));
+        return results.filter(Boolean);
+      }
+      if (scope === 'options') {
+        const symbols = ['SPY', 'QQQ', 'IWM'];
+        const results = await Promise.all(symbols.map(async symbol => {
+          try {
+            const snapshot = await getEquityOptionsSnapshot(symbol);
+            const quote = snapshot.quote;
+            const iv = quote?.iv30Pct != null ? `IV30 ${quote.iv30Pct.toFixed(1)}%` : '';
+            return {
+              label: symbol,
+              title: `${symbol} ${snapshot.spot.toLocaleString()} ${iv}`.trim(),
+              value: snapshot.spot,
+              changePct: quote?.changePercent ?? null,
+              source: 'CBOE',
+            };
+          } catch {
+            return null;
+          }
+        }));
+        return results.filter(Boolean);
+      }
+      return [];
+    }, { ttl: 15_000, staleTtl: 60_000 });
+    if (!Array.isArray(cached.data)) throw cached.error || new Error('行情暂不可用');
+    sendPerformanceJson(req, res, { success: true, scope, data: cached.data }, cached.status);
   } catch (error: any) {
     return res.json({ success: false, scope, error: error.message, data: [] });
   }

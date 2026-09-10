@@ -52,6 +52,7 @@ const GUEST_GET_PREFIXES = [
   '/forecast-lab',
   '/instruments',
   '/screener',
+  '/market-ticker',
 ];
 
 function matchesPathPrefix(pathname: string, prefix: string): boolean {

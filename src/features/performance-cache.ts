@@ -10,6 +10,16 @@ export interface CacheEntry<T> {
   error?: any;
 }
 
+export function createCacheEtag(value: unknown): string {
+  const input = JSON.stringify(value) ?? 'null';
+  let hash = 2166136261;
+  for (let index = 0; index < input.length; index += 1) {
+    hash ^= input.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `"${(hash >>> 0).toString(16)}"`;
+}
+
 export function createPerformanceCache() {
   const store = new Map<string, { value: any, expiresAt: number, staleAt: number }>();
   const pending = new Map<string, Promise<any>>();

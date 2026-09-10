@@ -29,6 +29,8 @@ test('guest access only permits explicit read-only GET paths', () => {
   assert.equal(auth.isGuestRequestAllowed('GET', '/stock/quotes'), true);
   assert.equal(auth.isGuestRequestAllowed('GET', '/news'), true);
   assert.equal(auth.isGuestRequestAllowed('GET', '/events/calendar'), true);
+  assert.equal(auth.isGuestRequestAllowed('GET', '/market-ticker'), true);
+  assert.equal(auth.isGuestRequestAllowed('GET', '/screener'), true);
   assert.equal(auth.isGuestRequestAllowed('GET', '/settings'), false);
   assert.equal(auth.isGuestRequestAllowed('GET', '/telegram/status'), false);
   assert.equal(auth.isGuestRequestAllowed('GET', '/paper/portfolio'), false);
