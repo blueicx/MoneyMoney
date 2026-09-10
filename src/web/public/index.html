@@ -2477,6 +2477,18 @@
             <div data-market-scopes="stocks options overview"><div style="font-weight:700;font-size:13px;margin-bottom:10px;margin-top:24px;">🏛️ 美国经济指标</div><div id="economic-indicators" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:20px;"></div><div style="font-weight:700;font-size:13px;margin-bottom:10px;margin-top:24px;">🏦 美债收益率曲线</div><div id="treasury-yields"></div></div>
           </div>
         </details>
+
+        <details class="dash-collapse" data-collapse-key="stocks-timeline" data-market-scopes="stocks options crypto prediction overview" open>
+          <summary>
+            <span class="collapse-title">📰 市场事件与新闻</span>
+            <span class="collapse-hint">近期公开证据与垂直动态</span>
+            <span class="collapse-chevron">▾</span>
+          </summary>
+          <div class="collapse-body">
+            <div id="market-timeline-list"></div>
+          </div>
+        </details>
+
         <details class="dash-collapse" data-collapse-key="stocks-calendar" data-market-scopes="stocks crypto options overview">
           <summary>
             <span class="collapse-title">📅 日历与情绪</span>
@@ -2492,7 +2504,7 @@
             </div>
             <div id="earnings-summary" class="earnings-summary"></div>
             <div id="earnings-list"></div></div>
-            <div data-market-scopes="stocks crypto options overview"><div style="font-weight:700;font-size:13px;margin-bottom:10px;margin-top:24px;">📅 本周宏观日历</div>
+            <div data-market-scopes="overview"><div style="font-weight:700;font-size:13px;margin-bottom:10px;margin-top:24px;">📅 本周宏观日历</div>
             <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap;">
               <select id="calendar-impact" onchange="loadMacroCalendar()" style="padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);">
                 <option value="all">全部事件</option>
@@ -7783,7 +7795,47 @@ let currentEventCalendarController = null;
 let currentResearchBriefingController = null;
 let currentStockDashboardController = null;
 
+
+let currentTimelineController = null;
+async function loadMarketTimeline() {
+  const host = document.getElementById('market-timeline-list');
+  if (!host) return;
+  if (currentTimelineController) currentTimelineController.abort();
+  currentTimelineController = new AbortController();
+  const signal = currentTimelineController.signal;
+  const scopeToken = marketScopeRequestToken();
+  host.innerHTML = '<div class="event-loading">正在加载市场事件与新闻...</div>';
+  try {
+    const res = await fetch(scopedUrl('/api/events/timeline'), { signal });
+    const payload = await res.json();
+    if (!payload.success) throw new Error(payload.error || '无法获取时间线');
+    if (!isCurrentMarketScopeToken(scopeToken) || signal.aborted) return;
+
+    if (!payload.data || !payload.data.length) {
+      host.innerHTML = '<div style="color:var(--text-secondary);padding:14px 0;">当前市场暂无事件与新闻。</div>';
+      return;
+    }
+
+    host.innerHTML = payload.data.map(item => `
+      <div style="padding:10px 0;border-bottom:1px solid var(--border);">
+        <a href="${/^https?:\/\//i.test(String(item.url || '')) ? instrumentDetailEscape(item.url) : '#'}" target="_blank" rel="noopener noreferrer" style="text-decoration:none;font-weight:600;color:var(--text);display:block;margin-bottom:4px;">${instrumentDetailEscape(item.title)}</a>
+        <div style="font-size:11px;color:var(--text-secondary);display:flex;gap:8px;flex-wrap:wrap;">
+          ${item.date ? `<span>${instrumentDetailEscape(new Date(item.date).toLocaleString('zh-CN'))}</span>` : ''}
+          <span>${instrumentDetailEscape(item.source || '未知来源')}</span>
+          ${item.direction !== 'unavailable' ? `<span style="color:${item.direction==='bullish'?'var(--green)':item.direction==='bearish'?'var(--red)':'var(--text)'};">${item.direction === 'bullish' ? '🟢 利好' : item.direction === 'bearish' ? '🔴 利空' : '⚪ 中性'}</span>` : ''}
+          ${item.actual !== null ? `<span>实际: ${instrumentDetailEscape(String(item.actual))}</span>` : ''}
+          ${item.forecast !== null ? `<span>预测: ${instrumentDetailEscape(String(item.forecast))}</span>` : ''}
+        </div>
+      </div>
+    `).join('');
+  } catch (error) {
+    if (error.name === 'AbortError') return;
+    host.innerHTML = `<div style="color:var(--red);padding:14px 0;">${safeNewsText(error.message)}</div>`;
+  }
+}
+
 function abortMarketScopedRequests() {
+  currentTimelineController?.abort();
   marketResearchController?.abort();
   currentMarketOverviewController?.abort();
   currentNewsController?.abort();
@@ -9325,7 +9377,7 @@ function setMarketScope(scope, options = {}) {
   params.set('market', scope);
   history.replaceState({}, '', `${location.pathname}?${params}${location.hash}`);
   renderNavigationState();
-  loadNewsTicker();
+  loadNewsTicker(); loadMarketTimeline();
   loadMarketOverview();
   if (options.openTab !== false) showTab(defaultTabForMarketScope(scope), null, { scopeAlreadySynced: true });
 }
@@ -10727,6 +10779,7 @@ renderNavigationState();
 loadAll();
 loadCommandCenter();
 loadNewsTicker();
+loadMarketTimeline();
 // Restore last visited tab from localStorage.
 (function restoreLastTab() {
   const saved = localStorage.getItem('mm-last-tab');

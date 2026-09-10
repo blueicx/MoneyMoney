@@ -17,6 +17,8 @@ import path from 'path';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { config } from '../config';
+import { buildEventEvidence, filterTimelineItems, type EventEvidence } from '../features/event-evidence';
+
 import { getRuntimeTelegramConfig, parseChatIds, runtimeSecrets } from '../config/runtime-secrets';
 import { api } from '../api';
 
@@ -1563,6 +1565,65 @@ app.get('/api/macro/calendar', async (req, res) => {
   }
 });
 
+
+app.get('/api/events/timeline', async (req, res) => {
+  const scope = String(req.query.scope || 'overview');
+  const instrumentId = String(req.query.instrumentId || '');
+  if (!['overview', 'stocks', 'options', 'crypto', 'prediction'].includes(scope)) {
+    return res.status(400).json({ success: false, error: '市场范围无效', data: [] });
+  }
+  const evidences: EventEvidence[] = [];
+  const sourceStatus: Record<string, string> = { events: 'unavailable', news: 'unavailable' };
+
+  if (scope === 'overview' || scope === 'stocks') try {
+    const cal = await getUpcomingEventCalendar(7, false);
+    for (const ev of cal.events) {
+      const earningsSymbol = ev.id.match(/^earnings-\d{4}-\d{2}-\d{2}-(.+)$/)?.[1] || null;
+      evidences.push(buildEventEvidence({
+        title: ev.titleZh || ev.title,
+        actual: ev.actual,
+        forecast: ev.forecast,
+        previous: ev.previous,
+        source: ev.source,
+        url: null,
+        scope: ev.category === 'earnings' ? 'stocks' : 'overview',
+        instrumentId: earningsSymbol ? `stock:us:${earningsSymbol}` : null,
+      }));
+      const evidence = evidences[evidences.length - 1];
+      evidence.id = ev.id;
+      evidence.kind = 'event';
+      evidence.date = ev.date;
+    }
+    sourceStatus.events = cal.stale ? 'stale' : 'ok';
+  } catch {
+    sourceStatus.events = 'failed';
+  }
+
+  if (scope === 'overview') try {
+    const news = await newsFeed.getNews();
+    for (const n of news) {
+      const evidence = buildEventEvidence({
+        title: n.title,
+        actual: null, forecast: null, previous: null,
+        source: n.source,
+        url: n.url,
+        scope: 'overview',
+      });
+      evidences.push({ ...evidence, kind: 'news', date: n.publishedAt, id: `news:${n.publishedAt}:${n.title}` });
+    }
+    sourceStatus.news = 'ok';
+  } catch {
+    sourceStatus.news = 'failed';
+  }
+
+  const filtered = filterTimelineItems(evidences, scope, instrumentId);
+  res.json({
+    success: true,
+    data: filtered,
+    freshness: { fetchedAt: new Date().toISOString(), status: Object.values(sourceStatus).some(value => value === 'ok' || value === 'stale') ? 'fresh' : 'unavailable' },
+    sourceStatus,
+  });
+});
 app.get('/api/events/calendar', async (req, res) => {
   try {
     const scope = requestedMarketScope(req.query.scope);
