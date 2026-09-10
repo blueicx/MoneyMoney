@@ -89,6 +89,24 @@ test('market switches cancel every active scoped loader and stale ticker request
   assert.match(html, /loadNewsTicker\(\)[\s\S]*currentTickerController = new AbortController\(\)[\s\S]*fetch\(scopedUrl\('\/api\/market-ticker'\), \{ cache: 'no-store', signal \}\)/);
 });
 
+test('cross-asset correlation radar belongs to the overview workspace', () => {
+  const overviewStart = html.indexOf('<div id="command-tab"');
+  const overviewEnd = html.indexOf('<div id="markets-tab"', overviewStart);
+  const cryptoStart = html.indexOf('<div id="binance-tab"');
+  const cryptoEnd = html.indexOf('<div id="macro-tab"', cryptoStart);
+  assert.ok(overviewStart >= 0 && overviewEnd > overviewStart);
+  assert.ok(cryptoStart >= 0 && cryptoEnd > cryptoStart);
+  const overviewMarkup = html.slice(overviewStart, overviewEnd);
+  const cryptoMarkup = html.slice(cryptoStart, cryptoEnd);
+  assert.match(overviewMarkup, /data-collapse-key="overview-cross-asset-correlation" data-market-scopes="overview"/);
+  assert.doesNotMatch(cryptoMarkup, /binance-cross-asset-correlation/);
+  const binanceLoaderStart = html.indexOf('async function loadBinanceDashboard()');
+  const binanceLoaderEnd = html.indexOf('async function loadBinancePortfolio()', binanceLoaderStart);
+  assert.doesNotMatch(html.slice(binanceLoaderStart, binanceLoaderEnd), /loadCrossAssetCorrelation\(\)/);
+  assert.match(html, /if \(activeMarketScope === 'overview'\) loadCrossAssetCorrelation\(\);/);
+  assert.match(html, /loadMarketOverview\(\);\s*if \(scope === 'overview'\) loadCrossAssetCorrelation\(\);/);
+});
+
 test('aborted analysis cannot block or reset a newer market analysis request', () => {
   assert.doesNotMatch(html, /async function loadTradeAssistant\(\) \{\n  if \(advisorLoading\) return;/);
   assert.match(html, /async function loadTradeAssistant\(\)[\s\S]*const controller = new AbortController\(\)[\s\S]*currentAnalysisController === controller/);

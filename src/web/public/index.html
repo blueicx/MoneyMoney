@@ -1865,6 +1865,20 @@
         <div id="command-actions" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px;margin-bottom:18px;"></div>
         <div class="section-title" style="margin-top:14px;">🧭 研究与运行状态</div>
         <div id="command-workstreams" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;"></div>
+        <details class="dash-collapse" data-collapse-key="overview-cross-asset-correlation" data-market-scopes="overview" open>
+          <summary>
+            <span class="collapse-title">🧩 跨资产联动回撤雷达</span>
+            <span class="collapse-hint">相关性 · 回撤 · 波动 · 分散度</span>
+            <span class="collapse-chevron">▾</span>
+          </summary>
+          <div class="collapse-body">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px;">
+              <span style="font-size:12px;color:var(--text-secondary);">看加密、美股、黄金、债券和信用债是否同向承压，先管总风险，再选标的。</span>
+              <button class="tab active" onclick="loadCrossAssetCorrelation()">🔄 刷新</button>
+            </div>
+            <div id="cross-asset-correlation"></div>
+          </div>
+        </details>
       </div>
       <div id="markets-tab" class="tab-content">
         <div class="section-title">开放事件</div>
@@ -2210,20 +2224,6 @@
               <button class="tab active" onclick="loadOrderFlowLiquidity()">🔄 刷新</button>
             </div>
             <div id="order-flow-liquidity"></div>
-          </div>
-        </details>
-        <details class="dash-collapse" data-collapse-key="binance-cross-asset-correlation">
-          <summary>
-            <span class="collapse-title">🧩 跨资产联动回撤雷达</span>
-            <span class="collapse-hint">相关性 · 回撤 · 波动 · 分散度</span>
-            <span class="collapse-chevron">▾</span>
-          </summary>
-          <div class="collapse-body">
-            <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px;">
-              <span style="font-size:12px;color:var(--text-secondary);">看加密、美股、黄金、债券和信用债是否同向承压，先管总风险，再选标的。</span>
-              <button class="tab active" onclick="loadCrossAssetCorrelation()">🔄 刷新</button>
-            </div>
-            <div id="cross-asset-correlation"></div>
           </div>
         </details>
         <div class="section-title">💼 币安资产组合</div>
@@ -7896,7 +7896,6 @@ async function loadBinanceDashboard() {
     loadFundingCarry(),
     loadOrderFlowLiquidity(),
     loadBitcoinOnchain(),
-    loadCrossAssetCorrelation(),
     loadAlertsForChart(),
     loadMTF(),
     loadPortfolioSummary()
@@ -8335,6 +8334,7 @@ async function loadAll(retryCount = 0, forceCategories = false) {
     return;
   }
   loadOverview();
+  if (activeMarketScope === 'overview') loadCrossAssetCorrelation();
   loadMovers();
   loadBalance();
   loadWallet();
@@ -9384,6 +9384,7 @@ function setMarketScope(scope, options = {}) {
   renderNavigationState();
   loadNewsTicker(); loadMarketTimeline();
   loadMarketOverview();
+  if (scope === 'overview') loadCrossAssetCorrelation();
   if (options.openTab !== false) showTab(defaultTabForMarketScope(scope), null, { scopeAlreadySynced: true });
 }
 function marketScopeRequestToken() { return { scope: activeMarketScope, epoch: marketScopeRequestEpoch }; }
