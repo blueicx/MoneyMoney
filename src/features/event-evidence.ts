@@ -1,6 +1,7 @@
 import { classifyEventResult, compareEventValues, type EventResultDirection } from './event-alerts';
 
 export interface EventEvidence {
+  [key: string]: unknown;
   id?: string;
   kind?: 'event' | 'news';
   date?: string;
@@ -15,6 +16,13 @@ export interface EventEvidence {
   direction: EventResultDirection | 'unavailable';
 }
 
+const SCOPE_EXTRA_FIELDS: Record<string, readonly string[]> = {
+  stocks: ['marketCap', 'sector', 'exchange', 'changePct'],
+  options: ['impliedVolPct', 'openInterest', 'putCallOIRatio', 'strike', 'expiry'],
+  crypto: ['openInterest', 'fundingRate', 'liquidation', 'orderbook', 'spread', 'liquidity', 'changePct'],
+  prediction: ['yesPrice', 'noPrice', 'liquidity', 'orderbook', 'tradeEvidence', 'settlementEvidence', 'outcomesDetail', 'spread'],
+};
+
 export function buildEventEvidence(input: {
   scope: string;
   instrumentId?: string | null;
@@ -24,6 +32,10 @@ export function buildEventEvidence(input: {
   previous: string | null;
   source?: string | null;
   url?: string | null;
+  id?: string;
+  kind?: 'event' | 'news';
+  date?: string;
+  [key: string]: unknown;
 }): EventEvidence {
   let direction: EventEvidence['direction'] = 'unavailable';
 
@@ -36,8 +48,12 @@ export function buildEventEvidence(input: {
     if (comparison !== 'unknown') direction = classifyEventResult(input.title, comparison);
   }
 
-  return {
-    scope: String(input.scope || '').trim(),
+  const scopeStr = String(input.scope || '').trim();
+  const evidence: EventEvidence = {
+    ...(input.id ? { id: String(input.id) } : {}),
+    ...(input.kind ? { kind: input.kind } : {}),
+    ...(input.date ? { date: String(input.date) } : {}),
+    scope: scopeStr,
     instrumentId: input.instrumentId || null,
     title: String(input.title || '').trim(),
     actual: input.actual == null ? null : String(input.actual),
@@ -47,6 +63,12 @@ export function buildEventEvidence(input: {
     url: input.url ? String(input.url).trim() : null,
     direction,
   };
+
+  for (const key of SCOPE_EXTRA_FIELDS[scopeStr] || []) {
+    if (input[key] !== undefined) evidence[key] = input[key];
+  }
+
+  return evidence;
 }
 
 export function matchesEventScope(item: { scope: string; instrumentId?: string | null }, scope: string, instrumentId?: string): boolean {

@@ -609,7 +609,7 @@ app.get('/api/binance/depth', async (req, res) => {
     const symbol = String(req.query.symbol || 'BTCUSDT');
     const depthLimit = parseInt(String(req.query.limit || '20'));
     const depth = await binanceFeed.getDepth(symbol, depthLimit);
-    res.json({ success: !!depth, data: depth });
+    res.json({ success: !!depth && depth.sourceStatus === 'ok', data: depth });
   } catch (e: any) { res.json({ success: false, error: e.message }); }
 });
 
@@ -4406,6 +4406,8 @@ app.post('/api/paper/orders', (req, res) => {
     const order: UnifiedPaperOrder = {
       instrumentId: String(body.instrumentId || ''), instrumentType: body.instrumentType, title: String(body.title || ''), side: body.side,
       price: Number(body.price), quantity: Number(body.quantity), timestamp: String(body.timestamp || new Date().toISOString()), strategy: body.strategy ? String(body.strategy) : undefined, reason: body.reason ? String(body.reason) : undefined,
+      feeUsd: Number.isFinite(Number(body.feeUsd)) ? Number(body.feeUsd) : undefined,
+      slippageUsd: Number.isFinite(Number(body.slippageUsd)) ? Number(body.slippageUsd) : undefined,
     };
     const ledger = unifiedPaperLedgerStore.apply(order);
     res.status(201).json({ success: true, data: { order, ledger, performance: calculateUnifiedPerformance(ledger) } });

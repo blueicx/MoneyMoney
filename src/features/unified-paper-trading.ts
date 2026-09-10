@@ -14,6 +14,8 @@ export interface UnifiedPaperOrder {
   strategy?: string;
   reason?: string;
   pnlUsd?: number;
+  feeUsd?: number;
+  slippageUsd?: number;
 }
 
 export interface UnifiedPaperPosition {
@@ -57,15 +59,21 @@ export function validateUnifiedPaperOrder(input: Partial<UnifiedPaperOrder>): { 
 
 function round(value: number, digits = 8): number { const factor = 10 ** digits; return Math.round(value * factor) / factor; }
 function positionKey(order: UnifiedPaperOrder): string { return `${order.instrumentId}:${order.instrumentType === 'prediction' ? order.side : 'direction'}`; }
+function orderCosts(order: UnifiedPaperOrder): number {
+  const fee = Number(order.feeUsd);
+  const slippage = Number(order.slippageUsd);
+  return (Number.isFinite(fee) ? Math.abs(fee) : 0) + (Number.isFinite(slippage) ? Math.abs(slippage) : 0);
+}
 
 export function applyUnifiedPaperOrder(source: UnifiedPaperLedger, order: UnifiedPaperOrder): UnifiedPaperLedger {
   const validation = validateUnifiedPaperOrder(order);
   if (!validation.ok) throw new Error(validation.error);
   const ledger: UnifiedPaperLedger = { ...source, positions: source.positions.map(item => ({ ...item })), orders: [...source.orders] };
   const notional = order.price * order.quantity;
+  const costs = orderCosts(order);
   const key = positionKey(order);
   let recordedOrder: UnifiedPaperOrder = { ...order };
-  if ((order.side === 'BUY' || order.side === 'YES' || order.side === 'NO') && notional > ledger.cash) throw new Error('模拟账户余额不足');
+  if ((order.side === 'BUY' || order.side === 'YES' || order.side === 'NO') && notional + costs > ledger.cash) throw new Error('模拟账户余额不足');
   let position = ledger.positions.find(item => `${item.instrumentId}:${item.instrumentType === 'prediction' ? item.outcome : 'direction'}` === key);
   if (order.side === 'SELL') {
     if (!position || position.quantity < order.quantity) throw new Error('没有足够的可卖持仓');
@@ -74,10 +82,10 @@ export function applyUnifiedPaperOrder(source: UnifiedPaperLedger, order: Unifie
     ledger.realizedPnl += closePnl;
     recordedOrder = { ...order, pnlUsd: closePnl };
     position.quantity = round(position.quantity - order.quantity);
-    ledger.cash = round(ledger.cash + notional, 8);
+    ledger.cash = round(ledger.cash + notional - costs, 8);
     if (position.quantity <= 0) ledger.positions = ledger.positions.filter(item => item !== position);
   } else {
-    ledger.cash = round(ledger.cash - notional, 8);
+    ledger.cash = round(ledger.cash - notional - costs, 8);
     if (position) {
       const totalQty = position.quantity + order.quantity;
       position.averageEntryPrice = round((position.averageEntryPrice * position.quantity + order.price * order.quantity) / totalQty, 8);
@@ -103,12 +111,54 @@ export function markUnifiedPaperPrices(source: UnifiedPaperLedger, prices: Map<s
   return ledger;
 }
 
-export function calculateUnifiedPerformance(ledger: UnifiedPaperLedger): { cash: number; equity: number; realizedPnl: number; unrealizedPnl: number; totalPnl: number; totalTrades: number; winRate: number; maxDrawdownPct: number; positions: number } {
+export function calculateUnifiedPerformance(ledger: UnifiedPaperLedger): {
+  cash: number;
+  equity: number;
+  realizedPnl: number;
+  unrealizedPnl: number;
+  totalPnl: number;
+  totalTrades: number;
+  winRate: number;
+  maxDrawdownPct: number;
+  positions: number;
+  feeSlippageTotal: number;
+  isRecovered: boolean;
+  concentrationPct: number;
+  attributionByAsset: Record<UnifiedPaperInstrumentType, number>;
+} {
   const unrealizedPnl = ledger.positions.reduce((sum, position) => sum + (position.currentPrice - position.averageEntryPrice) * position.quantity, 0);
-  const equity = ledger.cash + ledger.positions.reduce((sum, position) => sum + position.currentPrice * position.quantity, 0);
+  const positionValues = ledger.positions.map(position => position.currentPrice * position.quantity);
+  const positionsValue = positionValues.reduce((sum, value) => sum + value, 0);
+  const equity = ledger.cash + positionsValue;
   const closed = ledger.orders.filter(order => order.side === 'SELL' && Number.isFinite(order.pnlUsd));
   const wins = closed.filter(order => (order.pnlUsd || 0) > 0).length;
-  return { cash: round(ledger.cash, 2), equity: round(equity, 2), realizedPnl: round(ledger.realizedPnl, 2), unrealizedPnl: round(unrealizedPnl, 2), totalPnl: round(ledger.realizedPnl + unrealizedPnl, 2), totalTrades: ledger.orders.length, winRate: closed.length ? round(wins / closed.length, 4) : 0, maxDrawdownPct: round(ledger.maxDrawdownPct, 2), positions: ledger.positions.length };
+  const feeSlippageTotal = ledger.orders.reduce((sum, order) => sum + orderCosts(order), 0);
+  const attributionByAsset: Record<UnifiedPaperInstrumentType, number> = { stock: 0, crypto: 0, prediction: 0 };
+  for (const order of closed) attributionByAsset[order.instrumentType] += Number(order.pnlUsd) || 0;
+  for (const position of ledger.positions) {
+    attributionByAsset[position.instrumentType] += (position.currentPrice - position.averageEntryPrice) * position.quantity;
+  }
+  for (const order of ledger.orders) attributionByAsset[order.instrumentType] -= orderCosts(order);
+  const largestPositionValue = positionValues.length ? Math.max(...positionValues) : 0;
+  return {
+    cash: round(ledger.cash, 2),
+    equity: round(equity, 2),
+    realizedPnl: round(ledger.realizedPnl, 2),
+    unrealizedPnl: round(unrealizedPnl, 2),
+    totalPnl: round(ledger.realizedPnl + unrealizedPnl - feeSlippageTotal, 2),
+    totalTrades: ledger.orders.length,
+    winRate: closed.length ? round(wins / closed.length, 4) : 0,
+    maxDrawdownPct: round(ledger.maxDrawdownPct, 2),
+    positions: ledger.positions.length,
+    feeSlippageTotal: round(feeSlippageTotal, 2),
+    isRecovered: equity >= ledger.peakEquity,
+    concentrationPct: equity > 0 ? round((largestPositionValue / equity) * 100, 2) : 0,
+    attributionByAsset: {
+      stock: round(attributionByAsset.stock, 2),
+      crypto: round(attributionByAsset.crypto, 2),
+      prediction: round(attributionByAsset.prediction, 2),
+    },
+  };
 }
 
 export function replayUnifiedPaperOrders(input: { startingCash?: number; orders: UnifiedPaperOrder[]; prices?: Record<string, unknown> }): UnifiedPaperLedger {

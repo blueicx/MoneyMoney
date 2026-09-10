@@ -9363,6 +9363,11 @@ function setMarketScope(scope, options = {}) {
   marketScopeRequestEpoch += 1;
   if (typeof loadedStockSections !== 'undefined') loadedStockSections.clear();
   if (typeof eventCalendarState !== 'undefined') { eventCalendarState.cache = null; eventCalendarState.cacheAt = 0; }
+  if (window.mm_screenerState) window.mm_screenerState.page = 1;
+  const compareIds = document.getElementById('market-compare-ids');
+  if (compareIds) compareIds.value = '';
+  const compareResults = document.getElementById('market-compare-results');
+  if (compareResults) compareResults.textContent = '最多比较 6 个同市场标的。';
 
   const aiOutput = document.getElementById('ai-commentary');
   if (aiOutput) aiOutput.textContent = '暂无当前市场大局观和事件解读';
@@ -9390,7 +9395,7 @@ function marketResearchLabel(scope) {
 function marketResearchEscape(value) {
   return instrumentDetailEscape(String(value ?? ''));
 }
-async function loadMarketResearch() {
+async function loadMarketResearch(page = 1) {
   const fieldsEl = document.getElementById('market-screener-fields');
   const resultsEl = document.getElementById('market-screener-results');
   if (!fieldsEl || !resultsEl || !['stocks', 'options', 'crypto', 'prediction'].includes(activeMarketScope)) return;
@@ -9401,7 +9406,8 @@ async function loadMarketResearch() {
   fieldsEl.innerHTML = '<span class="empty-tip">正在读取当前市场筛选字段…</span>';
   resultsEl.textContent = `正在读取${marketResearchLabel(activeMarketScope)}标的…`;
   try {
-    const response = await fetch(`/api/screener?scope=${encodeURIComponent(activeMarketScope)}`, { cache: 'no-store', signal: controller.signal });
+    const query = new URLSearchParams({ scope: activeMarketScope, page: String(Math.max(1, page)), pageSize: '50' });
+    const response = await fetch(`/api/screener?${query.toString()}`, { cache: 'no-store', signal: controller.signal });
     const payload = await response.json();
     if (!response.ok || !payload.success) throw new Error(payload.error || '筛选数据暂不可用');
     if (!isCurrentMarketScopeToken(token) || controller.signal.aborted) return;
@@ -9414,41 +9420,103 @@ async function loadMarketResearch() {
     }
   }
 }
+window.mm_screenerState = window.mm_screenerState || { page: 1, totalPages: 1 };
 function renderMarketScreener(data) {
   const fieldsEl = document.getElementById('market-screener-fields');
   const resultsEl = document.getElementById('market-screener-results');
   if (!fieldsEl || !resultsEl) return;
-  const fields = Array.isArray(data.fields) ? data.fields : [];
-  const rows = Array.isArray(data.rows) ? data.rows : [];
+  const fields = Array.isArray(data.fields) ? data.fields : (window.mm_screenerState.fields || []);
+  const rows = Array.isArray(data.rows) ? data.rows : (window.mm_screenerState.rows || []);
+  window.mm_screenerState.rows = rows;
+  window.mm_screenerState.fields = fields;
+  window.mm_screenerState.page = Number(data.page) || window.mm_screenerState.page || 1;
+  window.mm_screenerState.totalPages = Number(data.totalPages) || 1;
   const options = fields.map(field => `<option value="${marketResearchEscape(field.key)}">${marketResearchEscape(field.label)}</option>`).join('');
+  const extraBtns = `<button class="tab" type="button" onclick="exportScreenerCSV()">📥 导出</button>` + (window.mm_isGuest ? '' : `<button class="tab" type="button" onclick="saveMarketScreenerTemplate()">💾 保存模板</button>`);
   fieldsEl.innerHTML = fields.length
-    ? `<select id="market-screener-field" aria-label="筛选字段">${options}</select><input id="market-screener-min" type="number" step="any" placeholder="最小值" aria-label="最小值"><button class="tab" type="button" onclick="loadMarketScreenerFilter()">应用筛选</button>`
+    ? `<select id="market-screener-field" aria-label="筛选字段">${options}</select><input id="market-screener-min" type="number" step="any" placeholder="最小值" aria-label="最小值"><button class="tab" type="button" onclick="loadMarketScreenerFilter()">应用筛选</button>${extraBtns}`
     : '<span class="empty-tip">当前市场暂无可用筛选字段</span>';
   if (!rows.length) {
     resultsEl.innerHTML = `<div class="empty-tip">暂无${marketResearchEscape(marketResearchLabel(activeMarketScope))}可用标的；数据源可能暂时不可用。</div>`;
     return;
   }
-  resultsEl.innerHTML = rows.map(row => {
+  const page = window.mm_screenerState.page || 1;
+  const totalPages = window.mm_screenerState.totalPages || 1;
+  const listHtml = rows.map(row => {
     const values = fields.slice(0, 3).map(field => `${marketResearchEscape(field.label)}: ${marketResearchEscape(row[field.key] ?? '—')}`).join(' · ');
     const id = marketResearchEscape(row.id || row.symbol || '');
     return `<button class="market-research-row" type="button" data-instrument-id="${id}" onclick="addScreenerIdToCompare(this.dataset.instrumentId)"><strong>${marketResearchEscape(row.title || row.symbol || row.id)}</strong><span>${values}</span></button>`;
   }).join('');
+  const paginationHtml = totalPages > 1 ? `<div style="display:flex;justify-content:center;gap:10px;margin-top:10px;"><button class="tab" onclick="loadMarketScreenerPage(${Math.max(1, page - 1)})">上一页</button><span style="padding:10px;font-size:12px;">${page} / ${totalPages}</span><button class="tab" onclick="loadMarketScreenerPage(${Math.min(totalPages, page + 1)})">下一页</button></div>` : '';
+  resultsEl.innerHTML = listHtml + paginationHtml;
 }
-async function loadMarketScreenerFilter() {
+
+function exportScreenerCSV() {
+  const rows = window.mm_screenerState?.rows || [];
+  const fields = window.mm_screenerState?.fields || [];
+  if (!rows.length || !fields.length) return;
+  const csvCell = value => {
+    const text = String(value ?? '');
+    return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+  };
+  const header = fields.map(f => csvCell(f.label)).join(',');
+  const csv = [header, ...rows.map(row => fields.map(f => csvCell(row[f.key])).join(','))].join('\n');
+  const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `screener_${activeMarketScope}_${new Date().toISOString().split('T')[0]}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+async function saveMarketScreenerTemplate() {
   const field = document.getElementById('market-screener-field')?.value;
   const minimum = document.getElementById('market-screener-min')?.value;
-  if (!field || minimum === '') return loadMarketResearch();
+  if (!field) { showToast('请先设置筛选条件', 'error'); return; }
+  const name = prompt('请输入筛选模板名称：', `${marketResearchLabel(activeMarketScope)}_${field}_gte_${minimum || 0}`);
+  if (!name) return;
+  try {
+    const filters = minimum !== '' ? { [field]: { gte: Number(minimum) } } : {};
+    const sort = { field, direction: 'desc' };
+    const payload = { name, scope: activeMarketScope, filters, sort };
+    const response = await fetch('/api/screener/templates', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const result = await response.json();
+    if (!response.ok || !result.success) throw new Error(result.error || '保存模板失败');
+    showToast('模板保存成功', 'success');
+  } catch (error) {
+    showToast(error.message, 'error');
+  }
+}
+async function loadMarketScreenerFilter(page = 1) {
+  const field = document.getElementById('market-screener-field')?.value;
+  const minimum = document.getElementById('market-screener-min')?.value;
+  if (!field || minimum === '') return loadMarketResearch(1);
   const resultsEl = document.getElementById('market-screener-results');
   if (!resultsEl) return;
+  marketResearchController?.abort();
+  marketResearchController = new AbortController();
+  const controller = marketResearchController;
+  const token = marketScopeRequestToken();
   try {
-    const query = new URLSearchParams({ scope: activeMarketScope, filters: JSON.stringify({ [field]: { gte: Number(minimum) } }), sort: JSON.stringify({ field, direction: 'desc' }) });
-    const response = await fetch(`/api/screener?${query.toString()}`, { cache: 'no-store' });
+    const query = new URLSearchParams({ scope: activeMarketScope, page: String(Math.max(1, page)), pageSize: '50', filters: JSON.stringify({ [field]: { gte: Number(minimum) } }), sort: JSON.stringify({ field, direction: 'desc' }) });
+    const response = await fetch(`/api/screener?${query.toString()}`, { cache: 'no-store', signal: controller.signal });
     const payload = await response.json();
     if (!response.ok || !payload.success) throw new Error(payload.error || '筛选失败');
+    if (!isCurrentMarketScopeToken(token) || controller.signal.aborted) return;
     renderMarketScreener(payload.data || {});
   } catch (error) {
-    resultsEl.textContent = error?.message || '筛选失败';
+    if (error?.name === 'AbortError') return;
+    if (isCurrentMarketScopeToken(token)) resultsEl.textContent = error?.message || '筛选失败';
   }
+}
+function loadMarketScreenerPage(page) {
+  const minimum = document.getElementById('market-screener-min')?.value;
+  return minimum === '' || minimum == null ? loadMarketResearch(page) : loadMarketScreenerFilter(page);
 }
 function addScreenerIdToCompare(id) {
   const input = document.getElementById('market-compare-ids');

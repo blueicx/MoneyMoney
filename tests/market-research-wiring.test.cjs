@@ -22,7 +22,12 @@ test('compare API uses requested instrument ids and UI has a market-scoped entry
   assert.match(server, /app\.post\('\/api\/instruments\/compare\/snapshots'/);
   assert.match(page, /id="market-screener"/);
   assert.match(page, /id="market-compare"/);
-  assert.match(page, /function loadMarketResearch\(\)/);
+  assert.match(page, /function loadMarketResearch\(page = 1\)/);
+  const filterStart = page.indexOf('async function loadMarketScreenerFilter');
+  assert.ok(filterStart >= 0);
+  const filterCode = page.slice(filterStart, page.indexOf('function loadMarketScreenerPage', filterStart));
+  assert.match(filterCode, /signal: controller\.signal/);
+  assert.match(filterCode, /isCurrentMarketScopeToken\(token\)/);
   assert.match(page, /marketResearchController\?\.abort\(\)/);
   assert.match(page, /isCurrentMarketScopeToken\(token\)/);
 });
