@@ -3567,7 +3567,10 @@ app.get('/api/advisor', async (req, res) => {
 app.get('/api/market-ticker', async (req, res) => {
   const scope = requestedMarketScope(req.query.scope) || 'overview';
   try {
-    if (scope === 'crypto' || scope === 'overview') {
+    if (scope === 'overview') {
+      return res.json({ success: true, scope, data: [] });
+    }
+    if (scope === 'crypto') {
       const prices = await binanceFeed.getMultiplePrices(['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT']);
       const data = Object.values(prices).map(item => ({
         label: item.symbol,
@@ -3873,13 +3876,14 @@ app.post('/api/ai/market-commentary', async (req, res) => {
   try {
     const force = req.body?.force === true;
     const scope = requestedMarketScope(req.body?.scope) || 'prediction';
+    const instrumentRef = String(req.body?.instrumentRef || '').trim();
     const radar = scope === 'prediction' || scope === 'overview'
       ? await getPredictionRadar('', 120)
       : { markets: [] };
     const report = scope === 'prediction'
       ? {}
       : filterAssistantReport(lastAdvisorReport ?? await generateAssistantReport(), scope);
-    const result = await getAiMarketCommentary(radar, force, scope, report);
+    const result = await getAiMarketCommentary(radar, force, scope, report, instrumentRef);
     res.json({ success: true, data: result });
   } catch (e: any) {
     res.json({

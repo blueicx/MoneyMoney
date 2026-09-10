@@ -77,8 +77,17 @@ function buildReportRows(scope: MarketScope, report: Record<string, unknown>): s
     .join('\n');
 }
 
-export function buildAiMarketPrompt(scope: MarketScope = 'prediction', radar: PredictionRadarInput, report: Record<string, unknown> = {}): string {
-  const sections: string[] = [`当前市场作用域：${SCOPE_LABELS[scope]}`];
+export function buildAiMarketPrompt(
+  scope: MarketScope = 'prediction',
+  radar: PredictionRadarInput,
+  report: Record<string, unknown> = {},
+  instrumentRef = '',
+): string {
+  const selectedInstrument = String(instrumentRef || '').replace(/[\r\n]+/g, ' ').trim().slice(0, 120);
+  const sections: string[] = [
+    `当前市场作用域：${SCOPE_LABELS[scope]}`,
+    `当前标的：${selectedInstrument || '未指定'}`,
+  ];
   if (scope === 'prediction' || scope === 'overview') {
     sections.push(`预测市场快照：\n${buildRadarRows(radar) || '暂无预测市场数据'}`);
   }
@@ -128,6 +137,7 @@ export async function getAiMarketCommentary(
   force = false,
   scope: MarketScope = 'prediction',
   report: Record<string, unknown> = {},
+  instrumentRef: string = '',
 ): Promise<{
   configured: boolean;
   analysis: string;
@@ -146,14 +156,15 @@ export async function getAiMarketCommentary(
     };
   }
 
-  const prompt = buildAiMarketPrompt(scope, radar, report);
-  const signature = `${scope}|${radarSignature(radar)}|${prompt}`;
-  if (!force && cache && cache.signature === signature) {
+  const prompt = buildAiMarketPrompt(scope, radar, report, instrumentRef);
+  const signature = `${scope}|${radarSignature(radar)}|${prompt}|${instrumentRef}`;
+  const isCacheValid = cache && cache.signature === signature && (Date.now() - new Date(cache.createdAt).getTime() < 15 * 60 * 1000);
+  if (!force && isCacheValid) {
     return {
       configured: true,
-      analysis: cache.value,
-      model: cache.model,
-      updatedAt: cache.createdAt,
+      analysis: cache!.value,
+      model: cache!.model,
+      updatedAt: cache!.createdAt,
       cached: true,
     };
   }

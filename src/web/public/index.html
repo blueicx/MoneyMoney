@@ -4485,6 +4485,12 @@ let bnCurrentSymbol = 'BTCUSDT';
 let bnCurrentInterval = '15m';
 let bnKlineData = [];
 function bnSetSymbol(sym) {
+  if (bnCurrentSymbol !== sym) {
+    const aiOutput = document.getElementById('ai-commentary');
+    if (aiOutput) aiOutput.textContent = '暂无当前标的大局观和事件解读';
+    const tradeAssistant = document.getElementById('trade-assistant');
+    if (tradeAssistant) tradeAssistant.innerHTML = '';
+  }
   bnCurrentSymbol = sym;
   document.getElementById('bn-symbol').value = sym;
   loadBinanceDashboard();
@@ -5440,6 +5446,14 @@ function selectStockSymbol(symbol, name, apiSymbol, options = {}) {
   if (!stockInstrumentId(normalized) || !['stocks', 'overview', 'watchlist'].includes(activeMarketScope)) return;
   const displayName = name || stockNameForSymbol(normalized);
   const legacySymbol = raw.toLowerCase().startsWith('us') ? raw : 'us' + normalized;
+
+  if (window._stockSelectedSymbol !== normalized) {
+    const aiOutput = document.getElementById('ai-commentary');
+    if (aiOutput) aiOutput.textContent = '暂无当前标的大局观和事件解读';
+    const tradeAssistant = document.getElementById('trade-assistant');
+    if (tradeAssistant) tradeAssistant.innerHTML = '';
+  }
+
   window._stockSelectedSymbol = normalized;
   setStockSelectorActive(normalized);
   loadUnifiedStockData(normalized);
@@ -7568,7 +7582,7 @@ async function loadMarketOverview() {
 
   try {
     let requests = [];
-    if (scope === 'overview' || scope === 'crypto') {
+    if (scope === 'crypto') {
       sourceLabel = 'Binance/DeFiLlama/CoinGecko';
       requests = [
         fetchMarketOverviewJson('/api/binance/price/BTCUSDT', signal),
@@ -7576,6 +7590,13 @@ async function loadMarketOverview() {
         fetchMarketOverviewJson('/api/sentiment', signal),
         fetchMarketOverviewJson('/api/defi/tvl', signal),
         fetchMarketOverviewJson('/api/crypto/global', signal)
+      ];
+    } else if (scope === 'overview') {
+      sourceLabel = '综合大盘 / Overview';
+      requests = [
+        fetchMarketOverviewJson('/api/stock/indices', signal),
+        fetchMarketOverviewJson('/api/binance/price/BTCUSDT', signal),
+        fetchMarketOverviewJson('/api/prediction-radar?cachedOnly=1&limit=1', signal)
       ];
     } else if (scope === 'stocks') {
       sourceLabel = '腾讯财经/Nasdaq Public Screener';
@@ -7608,7 +7629,7 @@ async function loadMarketOverview() {
 
     const getRes = (idx) => results[idx]?.status === 'fulfilled' ? results[idx].value : null;
 
-    if (scope === 'overview' || scope === 'crypto') {
+    if (scope === 'crypto') {
       const [btc, eth, sentiment, defi, global] = [0, 1, 2, 3, 4].map(getRes);
       if (btc?.success && btc.data) chips.push(chip('BTC', '$' + Math.round(btc.data.price).toLocaleString(), pct(btc.data.change24hPct), 'Binance'));
       if (eth?.success && eth.data) chips.push(chip('ETH', '$' + Math.round(eth.data.price).toLocaleString(), pct(eth.data.change24hPct), 'Binance'));
@@ -7621,6 +7642,15 @@ async function loadMarketOverview() {
       if (global?.success && global.data) {
         chips.push(chip('总市值', compactUsd(global.data.totalMarketCapUsd), pct(global.data.marketCapChange24hPct), 'CoinGecko'));
         chips.push(chip('BTC占比', Number(global.data.bitcoinDominancePct).toFixed(1) + '%'));
+      }
+    } else if (scope === 'overview') {
+      const [indicesRes, btc, radarRes] = [0, 1, 2].map(getRes);
+      if (indicesRes?.success && Array.isArray(indicesRes.data)) {
+        indicesRes.data.slice(0, 3).forEach(item => chips.push(chip(item.name, Number(item.price).toLocaleString(), pct(item.changePct), '指数')));
+      }
+      if (btc?.success && btc.data) chips.push(chip('BTC', '$' + Math.round(btc.data.price).toLocaleString(), pct(btc.data.change24hPct), 'Binance'));
+      if (radarRes?.data?.markets && radarRes.data.markets.length > 0) {
+        chips.push(chip('活跃预测', `${radarRes.data.markets.length} 个`, '', '雷达'));
       }
     } else if (scope === 'stocks') {
       const [indicesRes, breadthRes] = [0, 1].map(getRes);
@@ -9267,6 +9297,14 @@ function setMarketScope(scope, options = {}) {
   marketScopeRequestEpoch += 1;
   if (typeof loadedStockSections !== 'undefined') loadedStockSections.clear();
   if (typeof eventCalendarState !== 'undefined') { eventCalendarState.cache = null; eventCalendarState.cacheAt = 0; }
+
+  const aiOutput = document.getElementById('ai-commentary');
+  if (aiOutput) aiOutput.textContent = '暂无当前市场大局观和事件解读';
+  const tradeAssistant = document.getElementById('trade-assistant');
+  if (tradeAssistant) tradeAssistant.innerHTML = '';
+  const portfolioRisk = document.getElementById('portfolio-risk');
+  if (portfolioRisk) portfolioRisk.innerHTML = '';
+
   document.body.dataset.marketScope = scope;
   try { localStorage.setItem('mm-market-scope', scope); } catch (e) {}
   const params = new URLSearchParams(location.search);
@@ -10004,10 +10042,24 @@ async function loadAiMarketCommentary(force = false) {
   const scopeLabels = { overview: '总体市场', stocks: '股票', options: '期权', crypto: '虚拟币', prediction: '预测市场', watchlist: '自选标的' };
   if (output) output.textContent = `正在汇总${scopeLabels[activeMarketScope] || '当前市场'}并生成中文点评...`;
   try {
+    let instrumentRef = '';
+    if (activeMarketScope === 'stocks') {
+      instrumentRef = typeof currentStockSymbol !== 'undefined' ? currentStockSymbol : '';
+    } else if (activeMarketScope === 'options') {
+      const optionMarket = document.getElementById('option-market')?.value || 'crypto';
+      const optionAsset = document.getElementById('option-asset')?.value || 'BTC';
+      const optionSymbol = (document.getElementById('option-symbol')?.value || 'SPY').trim().toUpperCase();
+      instrumentRef = optionMarket === 'us' ? `option:cboe:${optionSymbol}` : `option:deribit:${optionAsset}`;
+    } else if (activeMarketScope === 'crypto') {
+      instrumentRef = typeof bnCurrentSymbol !== 'undefined' ? `crypto:binance:${bnCurrentSymbol}` : '';
+    } else if (activeMarketScope === 'prediction' && typeof selectedMarket !== 'undefined' && selectedMarket) {
+      instrumentRef = `prediction:${selectedMarket.platform || 'unknown'}:${selectedMarket.id || ''}`;
+    }
+
     const res = await fetch('/api/ai/market-commentary', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ force, scope: activeMarketScope }),
+      body: JSON.stringify({ force, scope: activeMarketScope, instrumentRef }),
     });
     const body = await res.json();
     if (!body.success) throw new Error(body.error || 'AI 点评不可用');

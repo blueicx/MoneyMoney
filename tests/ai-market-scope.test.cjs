@@ -26,6 +26,13 @@ test('stock AI context excludes crypto, option and prediction sections', () => {
   assert.doesNotMatch(prompt, /选举预测/);
 });
 
+test('AI prompt includes the selected instrument without widening market scope', () => {
+  const prompt = buildAiMarketPrompt('stocks', radar, report, 'stock:us:AAPL');
+  assert.match(prompt, /当前标的：stock:us:AAPL/);
+  assert.match(prompt, /只分析“股票”作用域/);
+  assert.doesNotMatch(prompt, /BTC funding/);
+});
+
 test('crypto AI context excludes stock, option and prediction sections', () => {
   const prompt = buildAiMarketPrompt('crypto', radar, report);
   assert.match(prompt, /虚拟币/);
@@ -45,8 +52,14 @@ test('prediction AI context uses radar only for prediction scope', () => {
 
 test('AI commentary route forwards the selected scope and avoids prediction fetches elsewhere', () => {
   assert.match(server, /const scope = requestedMarketScope\(req\.body\?\.scope\) \|\| 'prediction'/);
-  assert.match(server, /getAiMarketCommentary\(radar, force, scope, report\)/);
+  assert.match(server, /getAiMarketCommentary\(radar, force, scope, report, instrumentRef\)/);
   assert.match(server, /scope === 'prediction' \|\| scope === 'overview'/);
+});
+
+test('frontend sends the active instrument for stock, option and crypto AI commentary', () => {
+  assert.match(fs.readFileSync('src/web/public/index.html', 'utf8'), /activeMarketScope === 'stocks'[\s\S]*currentStockSymbol/);
+  assert.match(fs.readFileSync('src/web/public/index.html', 'utf8'), /activeMarketScope === 'options'[\s\S]*option-symbol/);
+  assert.match(fs.readFileSync('src/web/public/index.html', 'utf8'), /activeMarketScope === 'crypto'[\s\S]*bnCurrentSymbol/);
 });
 
 test('AI commentary pending requests are isolated by scope signature', () => {
