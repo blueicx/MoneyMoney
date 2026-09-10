@@ -320,10 +320,13 @@ app.get('/api/health/live', (_req, res) => {
 const SCREENER_STOCK_SYMBOLS = ['AAPL', 'MSFT', 'NVDA', 'AMZN', 'GOOGL', 'META', 'TSLA'];
 const SCREENER_OPTION_SYMBOLS = ['SPY', 'QQQ', 'IWM'];
 const SCREENER_CRYPTO_SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT', 'XRPUSDT', 'DOGEUSDT'];
+function withScreenerTimeout<T>(promise: Promise<T>, timeoutMs = 8000): Promise<T> {
+  return Promise.race([promise, new Promise<T>((_, reject) => setTimeout(() => reject(new Error('筛选数据源超时')), timeoutMs))]);
+}
 
 async function loadScopedScreenerRows(scope: ScreenerScope): Promise<Record<string, unknown>[]> {
   if (scope === 'stocks') {
-    const settled = await Promise.allSettled(SCREENER_STOCK_SYMBOLS.map(symbol => stockDataService.quote(symbol)));
+    const settled = await Promise.allSettled(SCREENER_STOCK_SYMBOLS.map(symbol => withScreenerTimeout(stockDataService.quote(symbol))));
     return settled.flatMap(result => {
       if (result.status !== 'fulfilled' || !result.value.quote) return [];
       const quote = result.value.quote;
@@ -331,7 +334,7 @@ async function loadScopedScreenerRows(scope: ScreenerScope): Promise<Record<stri
     });
   }
   if (scope === 'options') {
-    const settled = await Promise.allSettled(SCREENER_OPTION_SYMBOLS.map(symbol => getEquityOptionsSnapshot(symbol)));
+    const settled = await Promise.allSettled(SCREENER_OPTION_SYMBOLS.map(symbol => withScreenerTimeout(getEquityOptionsSnapshot(symbol))));
     return settled.flatMap(result => {
       if (result.status !== 'fulfilled') return [];
       const snapshot = result.value;
@@ -339,10 +342,13 @@ async function loadScopedScreenerRows(scope: ScreenerScope): Promise<Record<stri
     });
   }
   if (scope === 'crypto') {
-    const prices = await binanceFeed.getMultiplePrices(SCREENER_CRYPTO_SYMBOLS);
-    return Object.values(prices).map(ticker => ({ id: `crypto:binance:${ticker.symbol}`, symbol: ticker.symbol, title: `${ticker.symbol.replace(/USDT$/, '')}/USDT`, price: ticker.price, changePct: ticker.change24hPct, fundingRate: null, openInterest: null, dataTime: new Date().toISOString(), source: 'Binance public REST' }));
+    try {
+      const prices = await withScreenerTimeout(binanceFeed.getMultiplePrices(SCREENER_CRYPTO_SYMBOLS));
+      return Object.values(prices).map(ticker => ({ id: `crypto:binance:${ticker.symbol}`, symbol: ticker.symbol, title: `${ticker.symbol.replace(/USDT$/, '')}/USDT`, price: ticker.price, changePct: ticker.change24hPct, fundingRate: null, openInterest: null, dataTime: new Date().toISOString(), source: 'Binance public REST' }));
+    } catch { return []; }
   }
-  const radar = getCachedPredictionRadarSlice('', 40) || await getPredictionRadar('', 40);
+  let radar;
+  try { radar = getCachedPredictionRadarSlice('', 40) || await withScreenerTimeout(getPredictionRadar('', 40)); } catch { return []; }
   return radar.markets.map(market => ({ id: `prediction:${String(market.platform).toLowerCase().replace(/\s+/g, '-')}:${market.id}`, symbol: market.id, title: market.titleZh || market.title, yesPrice: market.yesPrice, noPrice: market.noPrice, liquidity: market.liquidity, dataTime: radar.updatedAt, source: market.platform }));
 }
 

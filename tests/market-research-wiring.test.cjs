@@ -11,6 +11,7 @@ test('market research API is wired to scoped data and persistent templates', () 
   assert.match(server, /getEquityOptionsSnapshot/);
   assert.match(server, /binanceFeed\.getMultiplePrices/);
   assert.match(server, /getPredictionRadar/);
+  assert.match(server, /withScreenerTimeout/);
   assert.match(server, /stateStore\.get.*screener-templates/s);
   assert.doesNotMatch(server, /let screenerTemplates: any\[\] = \[\]/);
 });
