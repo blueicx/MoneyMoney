@@ -35,6 +35,12 @@ test('analysis and risk markup declares market-specific sections', () => {
   assert.match(html, /fetch\(scopedUrl\('\/api\/calibration'\)/);
 });
 
+test('prediction-only calibration tools stay out of stock and options risk workspaces', () => {
+  assert.match(html, /id="prediction-risk-tools"[^>]*data-market-scopes="overview prediction"/);
+  assert.match(html, /if \(scopeAllowsView\('overview prediction'\)\) loadCalibration\(\);/);
+  assert.match(html, /async function loadCalibration\(\)[\s\S]*if \(!scopeAllowsView\('overview prediction'\)\)/);
+});
+
 test('ticker loads after scope initialization and uses market-specific data', () => {
   assert.match(html, /activeMarketScope = readInitialMarketScope\(\);[\s\S]*loadNewsTicker\(/);
   assert.match(html, /scopedUrl\('\/api\/market-ticker'\)/);

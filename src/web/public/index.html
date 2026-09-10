@@ -2666,15 +2666,19 @@
           <button class="tab" onclick="loadPortfolioRisk()">🔄 刷新</button>
         </div>
         <div id="portfolio-risk"></div>
-        <div class="section-title" style="margin-top:28px;">🎯 概率校准追踪</div>
-        <div id="calibration-panel"><button class="tab" onclick="loadCalibration()">📊 读取校准</button></div>
+        <div id="prediction-risk-tools" data-market-scopes="overview prediction">
+          <div class="section-title" style="margin-top:28px;">🎯 概率校准追踪</div>
+          <div id="calibration-panel"><button class="tab" onclick="loadCalibration()">📊 读取校准</button></div>
+        </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:16px;">
           <a class="tab" href="/api/export/journal">⬇ 导出信号 CSV</a>
           <a class="tab" href="/api/export/paper">⬇ 导出模拟盘 CSV</a>
-          <a class="tab" href="/api/export/calibration">⬇ 导出校准 CSV</a>
-          <a class="tab" href="/api/export/radar">⬇ 导出预测雷达 CSV</a>
+          <span id="prediction-risk-exports" data-market-scopes="overview prediction" style="display:flex;gap:8px;flex-wrap:wrap;">
+            <a class="tab" href="/api/export/calibration">⬇ 导出校准 CSV</a>
+            <a class="tab" href="/api/export/radar">⬇ 导出预测雷达 CSV</a>
+          </span>
         </div>
-        <p style="margin-top:14px;font-size:11px;color:var(--text-secondary);">风险页只汇总模拟账本和助手跟踪信号，不会自动下单。Brier 分数越接近 0，说明历史概率判断越准。</p>
+        <p style="margin-top:14px;font-size:11px;color:var(--text-secondary);">风险页只汇总当前市场范围内的模拟账本和跟踪信号，不会自动下单。预测市场工作区另提供 Brier 概率校准指标。</p>
       </div>
       <!-- Alerts Tab -->
       <div id="alerts-tab" class="tab-content">
@@ -9659,7 +9663,10 @@ if (targetTab === 'paper') { loadPaperPortfolio(); loadAiRunners(); }
   if (targetTab === 'options') loadOptions();
   if (targetTab === 'macro') queueOpenStockSections();
   if (targetTab === 'radar') { loadPredictionRadar(); loadForecastLab(); }
-  if (targetTab === 'risk') { loadPortfolioRisk(); loadCalibration(); }
+  if (targetTab === 'risk') {
+    loadPortfolioRisk();
+    if (scopeAllowsView('overview prediction')) loadCalibration();
+  }
   if (targetTab === 'alerts') loadAlerts();
   if (targetTab === 'whales') loadWhales();
   if (targetTab === 'strategies') loadStrategies();
@@ -9861,6 +9868,13 @@ function updateScopedRiskLinks() {
 }
 async function loadCalibration() {
   const host = document.getElementById('calibration-panel');
+  if (!scopeAllowsView('overview prediction')) {
+    if (host) {
+      host.innerHTML = '';
+      host.dataset.scope = '';
+    }
+    return;
+  }
   if (!host || host.dataset.scope === activeMarketScope) return;
   const scopeToken = marketScopeRequestToken();
   host.innerHTML = '<div class="glass-card" style="padding:16px;border-radius:18px;">⏳ 正在读取概率校准...</div>';
