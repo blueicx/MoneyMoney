@@ -133,19 +133,33 @@ async function stockHealthItems(): Promise<SourceHealthItem[]> {
 }
 
 async function buildSourceHealth(scope = 'all'): Promise<SourceHealthReport> {
+  const checkedAt = new Date().toISOString();
+
+  const safeStockHealth = async () => {
+    try {
+      return await Promise.race([
+        stockHealthItems(),
+        new Promise<SourceHealthItem[]>((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000))
+      ]);
+    } catch {
+      return [];
+    }
+  };
+
   if (scope === 'stocks') {
-    const checkedAt = new Date().toISOString();
-    const items = await stockHealthItems();
+    const items = await safeStockHealth();
     return { updatedAt: checkedAt, total: items.length, online: items.filter(item => item.ok).length, configuredOptional: 0, items };
   }
-  // This normally reuses the warm radar cache, so the panel does not duplicate
-  // the radar's network work. On a fresh install it may wait for one warm-up.
-  const radar = await getPredictionRadar('', 1);
-  const checkedAt = new Date().toISOString();
-  const source = radar.sources || {};
-  const optionalConfigured: boolean[] = [];
 
-  const [predict, binance, openMeteo] = await Promise.all([
+  const optionalConfigured: boolean[] = [];
+  const aiConfigured = aiCommentaryConfigured();
+  optionalConfigured.push(aiConfigured);
+
+  const [radarSettled, predictSettled, binanceSettled, openMeteoSettled, stockSettled] = await Promise.allSettled([
+    Promise.race([
+      getPredictionRadar('', 1),
+      new Promise<any>((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000))
+    ]),
     timedJson('https://graphql.predict.fun/graphql', 6_000, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -156,10 +170,17 @@ async function buildSourceHealth(scope = 'all'): Promise<SourceHealthReport> {
     }),
     timedJson('https://api.binance.com/api/v3/ping', 4_000),
     timedJson('https://api.open-meteo.com/v1/forecast?latitude=39.9042&longitude=116.4074&current=temperature_2m', 5_000),
+    safeStockHealth()
   ]);
 
-  const aiConfigured = aiCommentaryConfigured();
-  optionalConfigured.push(aiConfigured);
+  const radar = radarSettled.status === 'fulfilled' ? radarSettled.value : { sources: {} };
+  const source = radar?.sources || {};
+  
+  const extractJson = (res: any) => res.status === 'fulfilled' ? res.value : { ok: false, error: new Error('failed') };
+  const predict = extractJson(predictSettled);
+  const binance = extractJson(binanceSettled);
+  const openMeteo = extractJson(openMeteoSettled);
+  const resolvedStockItems = stockSettled.status === 'fulfilled' ? stockSettled.value : [];
 
   const extraItems: SourceHealthItem[] = [
     {
@@ -167,7 +188,7 @@ async function buildSourceHealth(scope = 'all'): Promise<SourceHealthReport> {
       name: 'Predict.fun GraphQL',
       group: '交易数据',
       ok: predict.ok && !!predict.payload?.data?.categories,
-      latencyMs: predict.latencyMs,
+      latencyMs: predict.latencyMs || null,
       detail: predict.ok
         ? `正常 · ${Number(predict.payload?.data?.categories?.totalCount || 0)} 个事件`
         : friendlyError(predict.error),
@@ -180,7 +201,7 @@ async function buildSourceHealth(scope = 'all'): Promise<SourceHealthReport> {
       name: '币安公共行情',
       group: '加密与宏观',
       ok: binance.ok,
-      latencyMs: binance.latencyMs,
+      latencyMs: binance.latencyMs || null,
       detail: binance.ok ? '正常' : friendlyError(binance.error),
       checkedAt,
       status: binance.ok ? 'fresh' : 'failed',
@@ -191,7 +212,7 @@ async function buildSourceHealth(scope = 'all'): Promise<SourceHealthReport> {
       name: 'Open-Meteo 天气',
       group: '天气证据',
       ok: openMeteo.ok && openMeteo.payload?.current != null,
-      latencyMs: openMeteo.latencyMs,
+      latencyMs: openMeteo.latencyMs || null,
       detail: openMeteo.ok ? '预报接口正常' : friendlyError(openMeteo.error),
       checkedAt,
       status: openMeteo.ok ? 'fresh' : 'failed',
@@ -217,7 +238,7 @@ async function buildSourceHealth(scope = 'all'): Promise<SourceHealthReport> {
     radarItem('Manifold', source.manifold || { ok: false, count: 0, error: '尚未检查', checkedAt }),
     radarItem('Good Judgment Open', source.gjopen || { ok: false, count: 0, error: '尚未检查', checkedAt }),
     radarItem('Metaculus', source.metaculus || { ok: false, count: 0, error: '尚未检查', checkedAt }, /未配置/.test(String(source.metaculus?.error || '')) ? false : undefined),
-    ...(await stockHealthItems()),
+    ...resolvedStockItems,
     ...extraItems,
   ];
 
