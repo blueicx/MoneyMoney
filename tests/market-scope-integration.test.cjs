@@ -156,3 +156,17 @@ test('server scopes risk history and risk exports', () => {
 });
 
 console.log('Market scope integration tests loaded');
+
+test('server.ts api boundaries handle market isolation properly (regression)', () => {
+  assert.match(server, /if \(scope !== 'overview' && scope !== 'prediction'\) {/);
+  assert.match(server, /const radar = isPredictionOrOverview \? getCachedPredictionRadarSlice\('', 240\) : null;/);
+  assert.match(server, /const needsPrediction = !scope || \['overview', 'prediction', 'watchlist'\].includes\(scope\);/);
+});
+
+test('analysis loader requests the active market scope and rejects stale responses', () => {
+  assert.equal(html.includes("const res = await fetch('/api/analysis');"), false);
+  assert.equal(html.includes("fetch(scopedUrl('/api/analysis'), { signal })"), true);
+  assert.equal(html.includes('currentMarketAnalysisController = new AbortController()'), true);
+  assert.match(html, /function abortMarketScopedRequests\(\)[\s\S]*currentMarketAnalysisController\?\.abort\(\)/);
+  assert.equal(html.includes('if (!isCurrentMarketScopeToken(scopeToken) || signal.aborted) return;'), true);
+});

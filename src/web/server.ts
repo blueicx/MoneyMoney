@@ -1625,12 +1625,14 @@ app.get('/api/events/timeline', async (req, res) => {
   }
 
   const filtered = filterTimelineItems(evidences, scope, instrumentId);
-  res.json({
+  sendPerformanceJson(req, res, {
     success: true,
     data: filtered,
-    freshness: { fetchedAt: new Date().toISOString(), status: Object.values(sourceStatus).some(value => value === 'ok' || value === 'stale') ? 'fresh' : 'unavailable' },
+    scope,
     sourceStatus,
-  });
+    updatedAt: new Date().toISOString(),
+    freshness: { fetchedAt: new Date().toISOString(), status: Object.values(sourceStatus).some(value => value === 'ok' || value === 'stale') ? 'fresh' : 'unavailable' },
+  }, Object.values(sourceStatus).includes('failed') ? 'failed' : 'ok');
 });
 app.get('/api/events/calendar', async (req, res) => {
   try {
@@ -2263,8 +2265,34 @@ const analysisEngine = new AnalysisEngine(dataCollector);
 
 app.get('/api/analysis', async (req, res) => {
   try {
+    const scope = requestedMarketScope(req.query.scope) || 'overview';
+
+    if (scope !== 'overview' && scope !== 'prediction') {
+      sendPerformanceJson(req, res, {
+        success: true,
+        data: {
+          timestamp: new Date().toISOString(),
+          totalMarkets: 0,
+          analyzedMarkets: 0,
+          recommendations: [],
+          topOpportunities: []
+        },
+        scope,
+        sourceStatus: 'unavailable',
+        message: `暂无 ${scope} 市场专用分析源`,
+        updatedAt: new Date().toISOString()
+      }, 'ok');
+      return;
+    }
+
     const report = await analysisEngine.analyzeAll();
-    res.json({ success: true, data: report });
+    sendPerformanceJson(req, res, {
+      success: true,
+      data: report,
+      scope,
+      sourceStatus: 'ok',
+      updatedAt: new Date().toISOString()
+    }, 'ok');
   } catch (error: any) {
     res.json({ success: false, error: error.message });
   }
@@ -3790,7 +3818,14 @@ function requestedMarketScope(value: unknown): MarketScope | undefined {
 }
 
 function sendPerformanceJson(req: express.Request, res: express.Response, payload: Record<string, unknown>, cacheStatus: string): void {
-  const etag = createCacheEtag(payload.data);
+  const scope = requestedMarketScope(req.query.scope) || 'overview';
+  const finalPayload = {
+    ...payload,
+    scope: payload.scope || scope,
+    sourceStatus: payload.sourceStatus || (cacheStatus === 'failed' ? 'degraded' : 'ok'),
+    updatedAt: payload.updatedAt || new Date().toISOString(),
+  };
+  const etag = createCacheEtag((finalPayload as any).data);
   res.setHeader('ETag', etag);
   res.setHeader('Cache-Control', 'public, max-age=10, stale-while-revalidate=60');
   res.setHeader('X-MoneyMoney-Cache', cacheStatus);
@@ -3798,7 +3833,7 @@ function sendPerformanceJson(req: express.Request, res: express.Response, payloa
     res.status(304).end();
     return;
   }
-  res.json({ ...payload, cacheStatus });
+  res.json({ ...finalPayload, cacheStatus });
 }
 
 app.get('/api/advisor', async (req, res) => {
@@ -3910,7 +3945,10 @@ app.get('/api/risk/overview', async (req, res) => {
     if (auth?.role === 'guest' && scope === 'watchlist') {
       return res.status(403).json({ success: false, error: '访客模式不可查看自选和个人风险数据', code: 'GUEST_READ_ONLY' });
     }
-    const radar = getCachedPredictionRadarSlice('', 240);
+
+    const needsPrediction = !scope || ['overview', 'prediction', 'watchlist'].includes(scope);
+    const radar = needsPrediction ? getCachedPredictionRadarSlice('', 240) : null;
+
     const paper = paperEngine.getPortfolio();
     const metrics = paperEngine.getRiskMetrics();
     const report = lastAdvisorReport ?? {
@@ -3919,25 +3957,32 @@ app.get('/api/risk/overview', async (req, res) => {
       context: {},
     };
     if (!lastAdvisorReport) refreshAdvisorReportInBackground();
+
     const scopedReport = scope && scope !== 'overview' && scope !== 'watchlist' ? filterAssistantReport(report, scope) : report;
-    const scopedPaper = scope && !['overview', 'prediction', 'watchlist'].includes(scope)
+
+    const scopedPaper = !needsPrediction
       ? { ...paper, cashBalance: paper.startingBalance, positions: [], tradeLog: [], totalPnl: 0, winsCount: 0, lossesCount: 0, maxDrawdownPct: 0, peakEquity: paper.startingBalance }
       : paper;
-    const scopedMetrics = scope && !['overview', 'prediction', 'watchlist'].includes(scope)
+
+    const scopedMetrics = !needsPrediction
       ? { var95Usd: 0, profitFactor: 0, winRate: 0 }
       : metrics;
+
     const rawOverview = buildPortfolioRiskOverview(scopedReport, scopedPaper, scopedMetrics, {
-      ready: scope && !['overview', 'prediction', 'watchlist'].includes(scope) ? true : !!radar,
-      markets: !scope || scope === 'overview' || scope === 'prediction' || scope === 'watchlist' ? radar?.markets || [] : [],
+      ready: !needsPrediction ? true : !!radar,
+      markets: needsPrediction ? radar?.markets || [] : [],
     });
     const overview = scope && scope !== 'overview' && scope !== 'watchlist'
       ? filterRiskOverview(rawOverview, scope)
       : rawOverview;
     await recordRiskHistory(overview, scope || 'overview');
-    res.json({
+    sendPerformanceJson(req, res, {
       success: true,
       data: overview,
-    });
+      scope,
+      sourceStatus: 'ok',
+      updatedAt: overview.updatedAt || new Date().toISOString()
+    }, 'ok');
   } catch (error: any) {
     res.json({ success: false, error: error.message });
   }
@@ -3953,29 +3998,61 @@ app.get('/api/risk/history', (req, res) => {
   }
 });
 
-app.get('/api/research/daily-briefing', (_req, res) => {
+app.get('/api/research/daily-briefing', (req, res) => {
   try {
-    const radar = getCachedPredictionRadarSlice('', 240);
-    if (!radar) void warmPredictionRadarCache();
-    const paper = paperEngine.getPortfolio();
-    const metrics = paperEngine.getRiskMetrics();
+    const scope = requestedMarketScope(req.query.scope) || 'overview';
+    const isPredictionOrOverview = scope === 'overview' || scope === 'prediction';
+
+    const radar = isPredictionOrOverview ? getCachedPredictionRadarSlice('', 240) : null;
+    if (isPredictionOrOverview && !radar) void warmPredictionRadarCache();
+
+    const rawLedger = unifiedPaperLedgerStore.get();
+    const scopedLedger = filterUnifiedPaperLedger(rawLedger, scope);
+    const perf = calculateUnifiedPerformance(scopedLedger);
+    const closedCount = scopedLedger.orders.filter(order => order.side === 'SELL' && Number.isFinite(order.pnlUsd)).length;
+
     const briefing = buildDailyResearchBriefing({
+      scope,
       markets: radar?.markets || [],
       radarReady: !!radar,
       paper: {
-        equity: paper.equity,
-        cashBalance: paper.cashBalance,
-        openPositionsValue: paper.openPositionsValue,
-        totalPnl: paper.totalPnl,
-        winRate: paper.winRate,
-        openCount: paper.positions.filter(item => item.status === 'OPEN').length,
-        closedCount: paper.positions.filter(item => item.status === 'CLOSED').length,
-        maxDrawdownPct: paper.maxDrawdownPct,
+        equity: perf.equity,
+        cashBalance: perf.cash,
+        openPositionsValue: perf.equity - perf.cash,
+        totalPnl: perf.totalPnl,
+        winRate: perf.winRate,
+        openCount: perf.positions,
+        closedCount: closedCount,
+        maxDrawdownPct: perf.maxDrawdownPct,
       },
-      metrics: { var95Usd: metrics.var95Usd, profitFactor: metrics.profitFactor },
-      forecastLab: getForecastLabReport(),
+      metrics: { var95Usd: 0, profitFactor: 1 }, // var95Usd and profitFactor not fully mapped from unified, use fallback
+      forecastLab: isPredictionOrOverview ? getForecastLabReport() : {
+        updatedAt: new Date().toISOString(),
+        activeCount: 0,
+        resolvedCount: 0,
+        evaluatedCases: 0,
+        evaluatedSamples: 0,
+        model: { cases: 0, samples: 0, brier: 0, logLoss: 0, hitRatePct: 0 },
+        market: { cases: 0, samples: 0, brier: 0, logLoss: 0, hitRatePct: 0 },
+        modelEdgePct: 0,
+        verdictZh: '非预测市场视图',
+        calibration: [],
+        platforms: [],
+        groups: [],
+        confidenceGroups: [],
+        activeCases: [],
+        resolvedCases: [],
+        noteZh: ''
+      },
     });
-    res.json({ success: true, data: briefing });
+
+    sendPerformanceJson(req, res, {
+      success: true,
+      data: briefing,
+      scope,
+      sourceStatus: briefing.sourceStatus || 'ok',
+      updatedAt: new Date().toISOString()
+    }, 'ok');
   } catch (error: any) {
     res.json({ success: false, error: error.message });
   }

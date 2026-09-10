@@ -3389,20 +3389,26 @@ async function loadTradeAssistant() {
   }
 }
 // --- Analysis Tab ---
+let currentMarketAnalysisController = null;
 async function loadAnalysis() {
   const loading = document.getElementById('analysis-loading');
   const content = document.getElementById('analysis-content');
   const errDiv = document.getElementById('analysis-error');
   const btn = document.getElementById('analysis-refresh-btn');
   const timeEl = document.getElementById('analysis-time');
+  const scopeToken = marketScopeRequestToken();
+  if (currentMarketAnalysisController) currentMarketAnalysisController.abort();
+  currentMarketAnalysisController = new AbortController();
+  const signal = currentMarketAnalysisController.signal;
   loading.style.display = 'block';
   content.innerHTML = '';
   errDiv.style.display = 'none';
   btn.disabled = true;
   btn.textContent = "\u23F3 \u5206\u6790\u4E2D...";
   try {
-    const res = await fetch('/api/analysis');
+    const res = await fetch(scopedUrl('/api/analysis'), { signal });
     const data = await res.json();
+    if (!isCurrentMarketScopeToken(scopeToken) || signal.aborted) return;
     if (!data.success) throw new Error(data.error || "\u5206\u6790\u5931\u8D25");
     const report = data.data;
     timeEl.textContent = "\u66F4\u65B0\u4E8E\uFF1A" + new Date(report.timestamp).toLocaleTimeString() + " \xB7 \u5DF2\u5206\u6790\u5E02\u573A\uFF1A" + report.analyzedMarkets + '/' + report.totalMarkets;
@@ -3434,12 +3440,16 @@ async function loadAnalysis() {
     }
     content.innerHTML = html;
   } catch (err) {
+    if (err.name === 'AbortError' || !isCurrentMarketScopeToken(scopeToken)) return;
     errDiv.textContent = '⚠️ ' + err.message;
     errDiv.style.display = 'block';
   } finally {
-    loading.style.display = 'none';
-    btn.disabled = false;
-    btn.textContent = "\uD83D\uDD04 \u5237\u65B0\u5206\u6790";
+    if (currentMarketAnalysisController?.signal === signal && isCurrentMarketScopeToken(scopeToken)) {
+      loading.style.display = 'none';
+      btn.disabled = false;
+      btn.textContent = "\uD83D\uDD04 \u5237\u65B0\u5206\u6790";
+      currentMarketAnalysisController = null;
+    }
   }
 }
 // --- Paper Trading ---
@@ -7841,6 +7851,7 @@ function abortMarketScopedRequests() {
   currentNewsController?.abort();
   currentRadarController?.abort();
   currentAnalysisController?.abort();
+  currentMarketAnalysisController?.abort();
   currentRiskController?.abort();
   currentTickerController?.abort();
   currentEventCalendarController?.abort();

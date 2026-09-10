@@ -6,6 +6,6 @@ test('readiness should not be blocked by single slow source', async () => {
   const start = Date.now();
   const result = await getSourceHealth('all');
   const duration = Date.now() - start;
-  assert.ok(duration < 7000, 'should return within budget');
+  assert.ok(duration < 2000, 'should return within budget');
   assert.ok(result.items.length > 0, 'should return partial state');
 });

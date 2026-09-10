@@ -1,6 +1,7 @@
 import { ResilientDataSourceAdapter, type DataSourceAdapter, type SourceSnapshot, type SourceStatus } from '../data/source-adapter';
 import { createNasdaqStockAdapters } from './nasdaq-stock-source';
 import { loadSecCompanyFacts, loadSecSubmissions } from './sec-edgar-client';
+import { createYahooStockAdapter } from '../data/yahoo-adapter';
 import type { StockBar, StockCompanyFacts, StockDataBundle, StockFiling, StockQuote } from './stock-data-contracts';
 
 type Adapter<T> = Pick<DataSourceAdapter<T>, 'id' | 'fetch'>;
@@ -42,6 +43,7 @@ function emptyValue(id: string, snapshot: SourceSnapshot<unknown>): unknown {
 
 function createDefaultStockDataDependencies(): StockDataDependencies {
   const nasdaq = createNasdaqStockAdapters();
+  const yahooQuote = createYahooStockAdapter();
   const filings = new ResilientDataSourceAdapter<StockFiling[]>({
     id: 'sec-edgar-submissions',
     group: 'SEC 公司申报',
@@ -58,7 +60,21 @@ function createDefaultStockDataDependencies(): StockDataDependencies {
     retries: 2,
     fetcher: async (input) => loadSecCompanyFacts(String((input as { symbol?: string })?.symbol || '')),
   });
-  return { quote: nasdaq.quote, bars: nasdaq.bars, filings, fundamentals };
+  // wrap quote with a fallback
+  const quoteAdapter: Adapter<StockQuote> = {
+    id: 'stock-quote-fallback',
+    fetch: async (input) => {
+      let snapshot = await nasdaq.quote.fetch(input);
+      if (snapshot.status === 'failed') {
+        const yahooSnap = await yahooQuote.fetch(input);
+        if (yahooSnap.status !== 'failed') {
+          return yahooSnap;
+        }
+      }
+      return snapshot;
+    }
+  };
+  return { quote: quoteAdapter, bars: nasdaq.bars, filings, fundamentals };
 }
 
 export class StockDataService {
