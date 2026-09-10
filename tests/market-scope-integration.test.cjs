@@ -37,6 +37,7 @@ test('analysis and risk markup declares market-specific sections', () => {
 
 test('prediction-only calibration tools stay out of stock and options risk workspaces', () => {
   assert.match(html, /id="prediction-risk-tools"[^>]*data-market-scopes="overview prediction"/);
+  assert.match(html, /id="prediction-risk-exports"[^>]*data-market-scopes="overview prediction"(?![^>]*style=)/);
   assert.match(html, /if \(scopeAllowsView\('overview prediction'\)\) loadCalibration\(\);/);
   assert.match(html, /async function loadCalibration\(\)[\s\S]*if \(!scopeAllowsView\('overview prediction'\)\)/);
 });
