@@ -45,3 +45,5 @@ test('server wires the chat scope into the menu and filters Telegram search resu
   assert.match(serverSource, /getTelegramMenuEntries\(scope\)/);
   assert.match(serverSource, /market:\s*\(\{\s*chatId,\s*args\s*\}\)/);
 });
+
+setTimeout(() => process.exit(0), 10);
