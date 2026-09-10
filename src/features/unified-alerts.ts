@@ -9,10 +9,6 @@ export interface UnifiedAlertRule {
   id: string;
   ownerId: string;
   instrumentId: string;
-  scope?: string;
-  watchlistId?: string;
-  expiresAt?: string;
-  digestMinutes?: number;
   kind: UnifiedAlertKind;
   condition: {
     stage?: number;

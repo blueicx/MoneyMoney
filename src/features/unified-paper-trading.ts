@@ -119,19 +119,6 @@ export function replayUnifiedPaperOrders(input: { startingCash?: number; orders:
   return input.orders.slice().sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()).reduce(applyUnifiedPaperOrder, emptyUnifiedPaperLedger(input.startingCash));
 }
 
-export function calculatePerformance({ scope, trades, benchmark }: { scope: string; trades: any[]; benchmark?: any }) {
-  if (!trades || trades.length === 0) {
-    return {
-      benchmark: benchmark || null,
-      attribution: [],
-      concentration: [],
-      maxDrawdown: null,
-      recoveryDays: null
-    };
-  }
-  return { benchmark: benchmark || null, attribution: [], concentration: [], maxDrawdown: 0, recoveryDays: 0 };
-}
-
 export class UnifiedPaperLedgerStore {
   private ledger: UnifiedPaperLedger;
   constructor() { this.ledger = stateStore.get<UnifiedPaperLedger>('paper-ledger') || emptyUnifiedPaperLedger(); }

@@ -107,8 +107,8 @@ import { paperTradingExecutor } from '../features/trading-executor';
 import { unifiedPaperLedgerStore, calculateUnifiedPerformance, replayUnifiedPaperOrders, type UnifiedPaperOrder } from '../features/unified-paper-trading';
 import { logger } from '../utils/logger';
 import { curlCommand } from '../utils/platform-command';
-import { createScreener, filterRows } from '../features/market-screener';
-
+import { fieldsForScreener, filterRows, isScreenerScope, paginateRows, serializeTemplate, sortRows, type ScreenerFilter, type ScreenerScope, type ScreenerSort } from '../features/market-screener';
+import { compareInstruments, createCompareSnapshot, type CompareInstrument, type CompareScope } from '../features/instrument-compare';
 import {
   addResearchNote,
   addResearchSnapshot,
@@ -317,78 +317,163 @@ app.get('/api/health/live', (_req, res) => {
   res.json({ ok: true, app: 'MoneyMoney', status: 'alive' });
 });
 
-app.get('/api/screener', (req, res) => {
-  const scope = req.query.scope as string;
+const SCREENER_STOCK_SYMBOLS = ['AAPL', 'MSFT', 'NVDA', 'AMZN', 'GOOGL', 'META', 'TSLA'];
+const SCREENER_OPTION_SYMBOLS = ['SPY', 'QQQ', 'IWM'];
+const SCREENER_CRYPTO_SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT', 'XRPUSDT', 'DOGEUSDT'];
+
+async function loadScopedScreenerRows(scope: ScreenerScope): Promise<Record<string, unknown>[]> {
+  if (scope === 'stocks') {
+    const settled = await Promise.allSettled(SCREENER_STOCK_SYMBOLS.map(symbol => stockDataService.quote(symbol)));
+    return settled.flatMap(result => {
+      if (result.status !== 'fulfilled' || !result.value.quote) return [];
+      const quote = result.value.quote;
+      return [{ id: `stock:us:${quote.symbol}`, symbol: quote.symbol, title: quote.symbol, price: quote.price, changePct: quote.changePct, marketCap: null, dataTime: quote.asOf, source: result.value.snapshot.source }];
+    });
+  }
+  if (scope === 'options') {
+    const settled = await Promise.allSettled(SCREENER_OPTION_SYMBOLS.map(symbol => getEquityOptionsSnapshot(symbol)));
+    return settled.flatMap(result => {
+      if (result.status !== 'fulfilled') return [];
+      const snapshot = result.value;
+      return [{ id: `option:cboe:${snapshot.asset}`, symbol: snapshot.asset, title: `${snapshot.asset} 期权`, price: snapshot.spot, changePct: snapshot.quote?.changePercent ?? null, impliedVolPct: snapshot.quote?.iv30Pct ?? null, openInterest: snapshot.totalCallOpenInterest + snapshot.totalPutOpenInterest, putCallOIRatio: snapshot.totalPutCallOIRatio, dataTime: snapshot.fetchedAt, source: snapshot.source }];
+    });
+  }
+  if (scope === 'crypto') {
+    const prices = await binanceFeed.getMultiplePrices(SCREENER_CRYPTO_SYMBOLS);
+    return Object.values(prices).map(ticker => ({ id: `crypto:binance:${ticker.symbol}`, symbol: ticker.symbol, title: `${ticker.symbol.replace(/USDT$/, '')}/USDT`, price: ticker.price, changePct: ticker.change24hPct, fundingRate: null, openInterest: null, dataTime: new Date().toISOString(), source: 'Binance public REST' }));
+  }
+  const radar = getCachedPredictionRadarSlice('', 40) || await getPredictionRadar('', 40);
+  return radar.markets.map(market => ({ id: `prediction:${String(market.platform).toLowerCase().replace(/\s+/g, '-')}:${market.id}`, symbol: market.id, title: market.titleZh || market.title, yesPrice: market.yesPrice, noPrice: market.noPrice, liquidity: market.liquidity, dataTime: radar.updatedAt, source: market.platform }));
+}
+
+function queryJson<T>(value: unknown, fallback: T): T {
+  if (typeof value !== 'string' || !value.trim()) return fallback;
+  try { return JSON.parse(value) as T; } catch { throw new Error('查询参数 JSON 无效'); }
+}
+
+interface StoredScreenerTemplate {
+  id: string;
+  ownerId: string;
+  createdAt: string;
+  name: string;
+  scope: ScreenerScope;
+  filters: Record<string, ScreenerFilter>;
+  sort?: ScreenerSort;
+}
+
+function loadScreenerTemplates(): StoredScreenerTemplate[] {
+  return stateStore.get<StoredScreenerTemplate[]>('screener-templates') || [];
+}
+
+function saveScreenerTemplates(value: StoredScreenerTemplate[]): void {
+  stateStore.set('screener-templates', value.slice(-100), 1);
+}
+
+function adminOnly(req: express.Request, res: express.Response): boolean {
+  if ((req as any).user?.role === 'guest') {
+    res.status(403).json({ success: false, error: '访客模式仅支持公开读取', code: 'GUEST_READ_ONLY' });
+    return false;
+  }
+  return true;
+}
+
+app.get('/api/screener', async (req, res) => {
+  const scope = String(req.query.scope || '') as ScreenerScope;
+  if (!isScreenerScope(scope)) return res.status(400).json({ success: false, error: '筛选市场无效', data: [] });
   try {
-    const screener = createScreener(scope, []);
-    res.json({ success: true, ...screener, freshness: 'fresh', sourceStatus: 'ok' });
+    const filters = queryJson<Record<string, ScreenerFilter>>(req.query.filters, {});
+    const rawSort = queryJson<ScreenerSort | null>(req.query.sort, null);
+    let rows = await loadScopedScreenerRows(scope);
+    rows = filterRows(scope, rows, filters);
+    if (rawSort) rows = sortRows(scope, rows, rawSort);
+    const page = paginateRows(rows, Number(req.query.pageSize) || 50, Number(req.query.page) || 1);
+    res.json({ success: true, data: { scope, fields: fieldsForScreener(scope), ...page }, freshness: { fetchedAt: new Date().toISOString(), status: page.rows.length ? 'fresh' : 'unavailable' }, sourceStatus: page.rows.length ? 'ok' : 'unavailable' });
   } catch (error: any) {
-    res.json({ success: false, error: error.message });
+    res.status(400).json({ success: false, error: error?.message || '筛选失败', data: [] });
   }
 });
 
-let screenerTemplates: any[] = [];
-
 app.get('/api/screener/templates', (req, res) => {
-  res.json({ success: true, data: screenerTemplates });
+  const templates = loadScreenerTemplates();
+  const isGuest = (req as any).user?.role === 'guest';
+  res.json({ success: true, data: isGuest ? templates.filter(item => item.ownerId === 'public') : templates });
 });
 
 app.post('/api/screener/templates', (req, res) => {
-  const template = req.body;
-  template.id = Date.now().toString();
-  screenerTemplates.push(template);
-  res.json({ success: true, data: template });
+  if (!adminOnly(req, res)) return;
+  try {
+    const body = req.body || {};
+    const template = serializeTemplate({ name: String(body.name || ''), scope: String(body.scope || '') as ScreenerScope, filters: body.filters || {}, sort: body.sort });
+    const stored: StoredScreenerTemplate = { ...template, id: `scr_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`, ownerId: 'admin', createdAt: new Date().toISOString() };
+    saveScreenerTemplates([...loadScreenerTemplates(), stored]);
+    res.status(201).json({ success: true, data: stored });
+  } catch (error: any) { res.status(400).json({ success: false, error: error?.message || '模板无效' }); }
 });
 
 app.delete('/api/screener/templates/:id', (req, res) => {
-  screenerTemplates = screenerTemplates.filter(t => t.id !== req.params.id);
-  res.json({ success: true });
+  if (!adminOnly(req, res)) return;
+  const before = loadScreenerTemplates();
+  saveScreenerTemplates(before.filter(item => item.id !== String(req.params.id)));
+  res.json({ success: true, removed: before.length !== loadScreenerTemplates().length });
 });
 
-import { compareInstruments } from '../features/instrument-compare';
-
-app.get('/api/instruments/compare', (req, res) => {
-  // dummy implementation just to pass
-  try {
-    const scope = req.query.scope;
-    const instruments = [{ type: scope, quote: { price: 100 } }];
-    res.json({ success: true, data: compareInstruments(instruments) });
-  } catch (err: any) {
-    res.json({ success: false, error: err.message });
+function parseCompareId(value: string, scope: CompareScope): { type: CompareInstrument['type']; venue: string; symbol: string; id: string } | null {
+  const raw = decodeURIComponent(String(value || '').trim());
+  if (!raw) return null;
+  const expectedType = scope === 'stocks' ? 'stock' : scope === 'options' ? 'option' : scope === 'crypto' ? 'crypto' : 'prediction';
+  const canonical = raw.match(/^(stock|option|crypto|prediction):([^:]+):(.+)$/i);
+  if (canonical) {
+    const type = canonical[1].toLowerCase() as CompareInstrument['type'];
+    if (type !== expectedType) return null;
+    return { type, venue: canonical[2], symbol: canonical[3], id: raw };
   }
+  const type = expectedType;
+  const venue = scope === 'stocks' ? 'us' : scope === 'options' ? 'cboe' : scope === 'crypto' ? 'binance' : 'predictfun';
+  return { type, venue, symbol: raw, id: `${type}:${venue}:${raw}` };
+}
+
+app.get('/api/instruments/compare', async (req, res) => {
+  const scope = String(req.query.scope || '') as CompareScope;
+  if (!['stocks', 'options', 'crypto', 'prediction'].includes(scope)) return res.status(400).json({ success: false, error: '比较市场无效' });
+  const ids = String(req.query.ids || '').split(',').map(item => item.trim()).filter(Boolean).slice(0, 7);
+  if (!ids.length) return res.status(400).json({ success: false, error: '至少提供一个标的 ID' });
+  if (ids.length > 6) return res.status(400).json({ success: false, error: '最多同时比较 6 个标的' });
+  try {
+    const parsed = ids.map(id => parseCompareId(id, scope));
+    if (parsed.some(item => !item)) return res.status(400).json({ success: false, error: '标的 ID 无效' });
+    const settled = await Promise.allSettled(parsed.map(async item => {
+      if (!item) throw new Error('标的 ID 无效');
+      if (scope === 'options') {
+        const snapshot = await getEquityOptionsSnapshot(item.symbol);
+        return { id: item.id, type: 'option' as const, symbol: item.symbol, title: `${item.symbol} 期权`, quote: { price: snapshot.spot, changePct: snapshot.quote?.changePercent ?? null, openInterest: snapshot.totalCallOpenInterest + snapshot.totalPutOpenInterest }, dataTime: snapshot.fetchedAt, sourceStatus: { source: snapshot.source } };
+      }
+      const ref = normalizeInstrumentRef({ type: item.type === 'option' ? 'stock' : item.type, venue: item.venue, symbol: item.symbol, title: item.symbol, aliases: [], marketId: scope === 'prediction' ? item.symbol : undefined });
+      const overview = await unifiedInstrumentService.overview(ref);
+      const quote = overview.quote ? { ...overview.quote, changePct: overview.quote.changePct ?? overview.quote.change24hPct ?? null } : null;
+      return { id: overview.instrument.id, type: overview.instrument.type, symbol: overview.instrument.symbol, title: overview.instrument.title, quote, dataTime: overview.freshness.fetchedAt, sourceStatus: overview.sourceStatus };
+    }));
+    const items = settled.flatMap(result => result.status === 'fulfilled' ? [result.value] : []);
+    if (!items.length) return res.status(503).json({ success: false, error: '比较数据暂不可用', data: [] });
+    res.json({ success: true, data: compareInstruments(scope, items) });
+  } catch (error: any) { res.status(400).json({ success: false, error: error?.message || '比较失败' }); }
 });
 
-let compareSnapshots: any[] = [];
 app.get('/api/instruments/compare/snapshots', (req, res) => {
-  res.json({ success: true, data: compareSnapshots });
+  const snapshots = stateStore.get<Array<Record<string, unknown>>>('instrument-compare-snapshots') || [];
+  const isGuest = (req as any).user?.role === 'guest';
+  res.json({ success: true, data: isGuest ? snapshots.filter(item => item.visibility === 'public') : snapshots });
 });
+
 app.post('/api/instruments/compare/snapshots', (req, res) => {
-  compareSnapshots.push(req.body);
-  res.json({ success: true, data: req.body });
-});
-
-app.get('/api/events/timeline', (req, res) => {
-  res.json({ success: true, data: [] });
-});
-
-import { calculatePerformance } from '../features/unified-paper-trading';
-app.get('/api/paper/performance', (req, res) => {
+  if (!adminOnly(req, res)) return;
   try {
-    const scope = req.query.scope as string;
-    const benchmark = req.query.benchmark ? JSON.parse(req.query.benchmark as string) : undefined;
-    const report = calculatePerformance({ scope, trades: [], benchmark });
-    res.json({ success: true, data: report });
-  } catch (err: any) {
-    res.json({ success: false, error: err.message });
-  }
-});
-
-app.get('/api/alerts/delivery-log', (req, res) => {
-  res.json({ success: true, data: [] });
-});
-
-app.post('/api/alerts/watchlist', (req, res) => {
-  res.json({ success: true, data: req.body });
+    const body = req.body || {};
+    const snapshot = createCompareSnapshot(String(body.scope || '') as CompareScope, body.instruments || []);
+    const stored = { ...snapshot, visibility: body.visibility === 'public' ? 'public' : 'private' };
+    const previous = stateStore.get<Array<Record<string, unknown>>>('instrument-compare-snapshots') || [];
+    stateStore.set('instrument-compare-snapshots', [...previous, stored].slice(-50), 1);
+    res.status(201).json({ success: true, data: stored });
+  } catch (error: any) { res.status(400).json({ success: false, error: error?.message || '比较快照无效' }); }
 });
 
 app.get('/api/health/readiness', async (_req, res) => {

@@ -31,12 +31,6 @@ export interface ResearchNote {
   createdAt: string;
 }
 
-export function getFields(scope: string): string[] {
-  if (scope === 'crypto') return ['fundingRate', 'oi'];
-  if (scope === 'prediction') return ['orderbook', 'spread'];
-  return [];
-}
-
 export interface ResearchEntry {
   id: string;
   subjectType: ResearchSubjectType;

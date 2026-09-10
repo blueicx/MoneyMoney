@@ -51,8 +51,3 @@ assert.match(indexHtml, /Number\(p\.cash\s*\?\?\s*0\)\.toFixed/, 'Performance us
 assert.match(indexHtml, /byType\[pos\.instrumentType\]/, 'Categories use unified instrumentType field');
 
 console.log('unified paper trading: all assertions passed');
-
-const { calculatePerformance } = require('../dist/features/unified-paper-trading');
-const report = calculatePerformance({ scope: 'stocks', trades: [], benchmark: { returnPct: 1.2 } });
-assert.equal(report.benchmark.returnPct, 1.2);
-assert.deepEqual(report.attribution, []);

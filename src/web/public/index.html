@@ -1844,6 +1844,18 @@
         </div>
         <span id="market-overview-status" style="flex:0 0 auto;color:var(--text-secondary);font-size:10px;white-space:nowrap;">数据更新时间：-</span>
       </div>
+      <section id="market-research-tools" data-market-scopes="stocks options crypto prediction" style="display:grid;grid-template-columns:minmax(300px,1.2fr) minmax(260px,1fr);gap:12px;margin-bottom:16px;">
+        <div id="market-screener" class="glass-card" style="padding:14px;border-radius:14px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px;"><strong>🔎 当前市场筛选</strong><button class="tab" type="button" onclick="loadMarketResearch()">刷新</button></div>
+          <div id="market-screener-fields" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;"><span class="empty-tip">选择市场后加载筛选字段</span></div>
+          <div id="market-screener-results" style="font-size:12px;color:var(--text-secondary);">只显示当前市场的可用标的。</div>
+        </div>
+        <div id="market-compare" class="glass-card" style="padding:14px;border-radius:14px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px;"><strong>📊 同市场比较</strong><button class="tab" type="button" onclick="loadMarketCompare()">比较</button></div>
+          <input id="market-compare-ids" type="text" placeholder="输入标的 ID，用逗号分隔" aria-label="同市场比较标的" style="width:100%;box-sizing:border-box;padding:8px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);margin-bottom:10px;">
+          <div id="market-compare-results" style="font-size:12px;color:var(--text-secondary);">最多比较 6 个同市场标的。</div>
+        </div>
+      </section>
       <!-- Command Center Tab -->
       <div id="command-tab" class="tab-content active">
         <div class="section-title">🏠 风险指挥台</div>
@@ -7772,6 +7784,7 @@ let currentResearchBriefingController = null;
 let currentStockDashboardController = null;
 
 function abortMarketScopedRequests() {
+  marketResearchController?.abort();
   currentMarketOverviewController?.abort();
   currentNewsController?.abort();
   currentRadarController?.abort();
@@ -9288,6 +9301,7 @@ function renderNavigationState() {
   document.querySelectorAll('[data-tab]').forEach(node => node.classList.toggle('active', node.dataset.tab === (window.mm_active_tab || 'command')));
   applyMarketScopeView();
   applySidebarScope();
+  if (activeMarketScope !== 'overview' && activeMarketScope !== 'watchlist') loadMarketResearch();
   if (activeMarketScope === 'watchlist') loadStockWatchlistLibrary();
 }
 function setMarketScope(scope, options = {}) {
@@ -9317,6 +9331,98 @@ function setMarketScope(scope, options = {}) {
 }
 function marketScopeRequestToken() { return { scope: activeMarketScope, epoch: marketScopeRequestEpoch }; }
 function isCurrentMarketScopeToken(token) { return token?.scope === activeMarketScope && token?.epoch === marketScopeRequestEpoch; }
+let marketResearchController = null;
+function marketResearchLabel(scope) {
+  return { stocks: '股票', options: '期权', crypto: '虚拟币', prediction: '预测市场' }[scope] || '当前市场';
+}
+function marketResearchEscape(value) {
+  return instrumentDetailEscape(String(value ?? ''));
+}
+async function loadMarketResearch() {
+  const fieldsEl = document.getElementById('market-screener-fields');
+  const resultsEl = document.getElementById('market-screener-results');
+  if (!fieldsEl || !resultsEl || !['stocks', 'options', 'crypto', 'prediction'].includes(activeMarketScope)) return;
+  marketResearchController?.abort();
+  marketResearchController = new AbortController();
+  const controller = marketResearchController;
+  const token = marketScopeRequestToken();
+  fieldsEl.innerHTML = '<span class="empty-tip">正在读取当前市场筛选字段…</span>';
+  resultsEl.textContent = `正在读取${marketResearchLabel(activeMarketScope)}标的…`;
+  try {
+    const response = await fetch(`/api/screener?scope=${encodeURIComponent(activeMarketScope)}`, { cache: 'no-store', signal: controller.signal });
+    const payload = await response.json();
+    if (!response.ok || !payload.success) throw new Error(payload.error || '筛选数据暂不可用');
+    if (!isCurrentMarketScopeToken(token) || controller.signal.aborted) return;
+    renderMarketScreener(payload.data || {});
+  } catch (error) {
+    if (error?.name === 'AbortError') return;
+    if (isCurrentMarketScopeToken(token)) {
+      fieldsEl.innerHTML = '<span class="empty-tip">当前市场筛选字段暂不可用</span>';
+      resultsEl.textContent = error?.message || '当前市场筛选数据暂不可用';
+    }
+  }
+}
+function renderMarketScreener(data) {
+  const fieldsEl = document.getElementById('market-screener-fields');
+  const resultsEl = document.getElementById('market-screener-results');
+  if (!fieldsEl || !resultsEl) return;
+  const fields = Array.isArray(data.fields) ? data.fields : [];
+  const rows = Array.isArray(data.rows) ? data.rows : [];
+  const options = fields.map(field => `<option value="${marketResearchEscape(field.key)}">${marketResearchEscape(field.label)}</option>`).join('');
+  fieldsEl.innerHTML = fields.length
+    ? `<select id="market-screener-field" aria-label="筛选字段">${options}</select><input id="market-screener-min" type="number" step="any" placeholder="最小值" aria-label="最小值"><button class="tab" type="button" onclick="loadMarketScreenerFilter()">应用筛选</button>`
+    : '<span class="empty-tip">当前市场暂无可用筛选字段</span>';
+  if (!rows.length) {
+    resultsEl.innerHTML = `<div class="empty-tip">暂无${marketResearchEscape(marketResearchLabel(activeMarketScope))}可用标的；数据源可能暂时不可用。</div>`;
+    return;
+  }
+  resultsEl.innerHTML = rows.map(row => {
+    const values = fields.slice(0, 3).map(field => `${marketResearchEscape(field.label)}: ${marketResearchEscape(row[field.key] ?? '—')}`).join(' · ');
+    const id = marketResearchEscape(row.id || row.symbol || '');
+    return `<button class="market-research-row" type="button" data-instrument-id="${id}" onclick="addScreenerIdToCompare(this.dataset.instrumentId)"><strong>${marketResearchEscape(row.title || row.symbol || row.id)}</strong><span>${values}</span></button>`;
+  }).join('');
+}
+async function loadMarketScreenerFilter() {
+  const field = document.getElementById('market-screener-field')?.value;
+  const minimum = document.getElementById('market-screener-min')?.value;
+  if (!field || minimum === '') return loadMarketResearch();
+  const resultsEl = document.getElementById('market-screener-results');
+  if (!resultsEl) return;
+  try {
+    const query = new URLSearchParams({ scope: activeMarketScope, filters: JSON.stringify({ [field]: { gte: Number(minimum) } }), sort: JSON.stringify({ field, direction: 'desc' }) });
+    const response = await fetch(`/api/screener?${query.toString()}`, { cache: 'no-store' });
+    const payload = await response.json();
+    if (!response.ok || !payload.success) throw new Error(payload.error || '筛选失败');
+    renderMarketScreener(payload.data || {});
+  } catch (error) {
+    resultsEl.textContent = error?.message || '筛选失败';
+  }
+}
+function addScreenerIdToCompare(id) {
+  const input = document.getElementById('market-compare-ids');
+  if (!input || !id) return;
+  const current = input.value.split(',').map(item => item.trim()).filter(Boolean);
+  if (!current.includes(id) && current.length < 6) current.push(id);
+  input.value = current.join(',');
+  loadMarketCompare();
+}
+async function loadMarketCompare() {
+  const input = document.getElementById('market-compare-ids');
+  const resultsEl = document.getElementById('market-compare-results');
+  if (!input || !resultsEl || !['stocks', 'options', 'crypto', 'prediction'].includes(activeMarketScope)) return;
+  const ids = input.value.split(',').map(item => item.trim()).filter(Boolean).slice(0, 6);
+  if (!ids.length) { resultsEl.textContent = '先从筛选结果选择标的，或输入同一市场的标的 ID。'; return; }
+  try {
+    const query = new URLSearchParams({ scope: activeMarketScope, ids: ids.join(',') });
+    const response = await fetch(`/api/instruments/compare?${query.toString()}`, { cache: 'no-store' });
+    const payload = await response.json();
+    if (!response.ok || !payload.success) throw new Error(payload.error || '比较数据暂不可用');
+    const rows = Array.isArray(payload.data) ? payload.data : [];
+    resultsEl.innerHTML = rows.length ? rows.map(item => `<div class="market-compare-row"><strong>${marketResearchEscape(item.title || item.symbol)}</strong><span>价格 ${marketResearchEscape(item.quote?.price ?? '—')} · 涨跌 ${marketResearchEscape(item.quote?.changePct ?? '—')} · ${item.freshness?.status === 'fresh' ? '数据新鲜' : item.freshness?.status === 'stale' ? '数据可能过期' : '数据不可用'}</span></div>`).join('') : '暂无可比较数据。';
+  } catch (error) {
+    resultsEl.textContent = error?.message || '比较数据暂不可用';
+  }
+}
 function closeInstrumentDetail() {
   document.getElementById('instrument-detail-overlay')?.classList.remove('open');
 }
@@ -10711,5 +10817,5 @@ function mobileTab(tab) {
       </div>
       <div id="notif-list" style="max-height:360px;overflow-y:auto;"></div>
     </div>
-  <div id='screener-ui' data-scope=''></div></body>
+  </body>
 </html>
