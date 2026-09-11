@@ -25,6 +25,12 @@ test('stock instrument selection is concentrated in the right library', () => {
   assert.doesNotMatch(html, /class="stock-selector-actions"/);
 });
 
+test('stock market does not render popular stock cards in the center', () => {
+  assert.doesNotMatch(html, /\.stock-quote-card/);
+  assert.doesNotMatch(html, /function loadPopularStocks\(/);
+  assert.doesNotMatch(html, /loadPopularStocks\(signal\)/);
+});
+
 test('stock feature panels keep only their feature content', () => {
   for (const key of ['insider', 'institutional', 'analyst', 'fundamentals', 'short-interest']) {
     assert.doesNotMatch(html, new RegExp(`data-stock-radar-toolbar=["']${key}["']`));
@@ -66,8 +72,10 @@ test('stock library shortcuts and search share the scoped selection action', () 
   assert.match(html, /function selectStockFromInstrumentLibrary\([\s\S]*?activeWorkspaceId === 'insider'/);
 });
 
-test('stock quote request includes the Magnificent Seven', () => {
-  assert.match(html, /usAAPL,usMSFT,usNVDA,usAMZN,usGOOGL,usMETA,usTSLA/);
+test('stock library keeps the Magnificent Seven without a center quote request', () => {
+  assert.match(html, /const STOCK_QUICK_SYMBOLS = Object\.freeze\(\[/);
+  assert.match(html, /\['AAPL', 'Apple'\][\s\S]*\['TSLA', 'Tesla'\]/);
+  assert.doesNotMatch(html, /stock\/quotes\?symbols=usAAPL,usMSFT,usNVDA,usAMZN,usGOOGL,usMETA,usTSLA/);
 });
 
 test('watchlist page exposes the actual stock favorites above holdings', () => {

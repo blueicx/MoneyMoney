@@ -1418,8 +1418,6 @@
     .stock-library-search-result:hover, .stock-library-search-result:focus-visible, .stock-library-search-result.active { border-color:var(--purple); background:var(--purple-light); outline:none; }
     .stock-library-search-result strong { font-size:12px; }
     .stock-library-search-result small { color:var(--text-secondary); font-size:10px; }
-    .stock-quote-card { width:100%; text-align:left; cursor:pointer; color:inherit; font:inherit; }
-    .stock-quote-card:hover { border-color:var(--purple); }
     .srch-item { display:flex; justify-content:space-between; align-items:center; padding:10px 14px; background:var(--bg-card); border-radius:10px; margin-bottom:6px; cursor:pointer; border:1px solid var(--border); transition:border-color .15s; }
     .srch-item:hover { border-color:var(--purple); }
     .srch-item.active { border-color:var(--purple); background:color-mix(in srgb,var(--purple) 12%,transparent); }
@@ -5771,31 +5769,13 @@ async function loadStockIndices(signal) {
     }).join('');
   } catch(e) { if (e.name !== 'AbortError') console.warn('股票指数加载失败', e); }
 }
-async function loadPopularStocks(signal) {
-  const el = document.getElementById('stock-popular');
-  if (!el) return;
-  try {
-    const res = await fetch('/api/stock/quotes?symbols=usAAPL,usMSFT,usNVDA,usAMZN,usGOOGL,usMETA,usTSLA', { signal });
-    const d = await res.json();
-    if (signal?.aborted) return;
-    if (!d.success || !d.data?.length) { el.innerHTML = '<div style="color:var(--text-secondary);">加载失败</div>'; return; }
-    el.innerHTML = d.data.map(s => {
-      const cls = s.changePct >= 0 ? 'bn-up' : 'bn-down';
-      const symbol = String(s.symbol || s.code || '').replace(/^us/i, '').toUpperCase();
-      return '<button type="button" class="idx-card stock-quote-card" data-stock-symbol="' + stockEscapeHtml(symbol) + '" data-stock-name="' + stockEscapeHtml(s.name || symbol) + '" onclick="selectStockQuoteCard(this)"><div class="idx-name">' + stockEscapeHtml(s.name) + '</div>' +
-        '<div class="idx-price">$' + s.price.toFixed(2) + '</div>' +
-        '<div class="idx-change ' + cls + '">' + (s.changePct>=0?'+':'') + s.changePct.toFixed(2) + '%</div></button>';
-    }).join('');
-    setStockSelectorActive(window._stockSelectedSymbol || currentStockSymbol);
-  } catch(e) { if (e.name !== 'AbortError') console.warn('热门股票加载失败', e); }
-}
 async function loadStockQuotes() {
   if (currentStockDashboardController) currentStockDashboardController.abort();
   const controller = new AbortController();
   currentStockDashboardController = controller;
   const signal = controller.signal;
   try {
-    await Promise.allSettled([loadStockIndices(signal), loadPopularStocks(signal), loadStockWatchlistShortcuts(signal)]);
+    await Promise.allSettled([loadStockIndices(signal)]);
     if (!signal.aborted && ['stocks', 'overview', 'watchlist'].includes(activeMarketScope)) selectStockSymbol(window._stockSelectedSymbol || 'AAPL', stockNameForSymbol(window._stockSelectedSymbol || 'AAPL'), undefined, { refreshRelated: false });
   } finally {
     if (currentStockDashboardController === controller) currentStockDashboardController = null;
