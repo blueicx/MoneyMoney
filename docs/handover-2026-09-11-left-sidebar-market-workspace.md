@@ -17,17 +17,29 @@
 ## 验收证据
 
 - `npm run build`：通过。
-- `npm test`：209 项通过。
-- `npm run security:scan`：297 个受跟踪文件通过。
+- `npm test`：211 项通过，0 失败。
+- `npm run security:scan`：298 个受跟踪文件通过。
 - `npm run smoke:web`：健康检查、登录门禁、敏感配置脱敏和真实交易关闭边界通过。
-- 浏览器 smoke：自选分组/列面板、股票与虚拟币左栏隔离通过。
+- 浏览器 smoke（本机 Chrome + Playwright）：自选分组/列面板、股票与虚拟币左栏隔离通过；检查到股票 `insider` 与虚拟币 `funding-rate` 菜单互不混入。
 
-## 尚未发布
+本轮未将移动端和真实登录后的四市场逐项验收冒充为已完成；这些仍是后续验收项。
 
-本轮只完成本地代码与验证，尚未推送 GitHub，也尚未部署 VPS。发布前仍需重新检查工作树、远端分支、密钥扫描和 VPS 当前服务状态，再只发布生成的 `dist` 产物并做远端健康校验。
+## 发布记录
+
+- GitHub：已推送 `codex/stock-free-data-sources`，远端提交为 `888d502`。
+- VPS：已备份到 `/opt/moneymoney/backups/dist-20260911-888d502`，新产物已发布到 `/opt/moneymoney/dist`。
+- 回滚：保留 `/opt/moneymoney/dist.rollback-888d502`；本次临时 staging 已清理。
+- 服务：`moneymoney.service` 重启后为 active，公网 HTTPS 页面、访客读取接口和访客写入 403 均已核验。
+- Hash：远端 `dist/web/server.js` 与本地构建产物一致：`08fbcafcbc5dc531fc925182d0a7a75521e818dd279355ec2a69465bf08f95b3`。
+
+本轮实现提交：`bf7f3c9`、`410754d`、`c489ba0`、`4ef095f`、`0ee1f24`、`859c357`、`3f41b77`、`d9834b7`、`888d502`；发布以 `888d502` 的构建产物为准。
+
+本轮未修改 Nginx、TLS、VPN、系统环境文件、Telegram Token 或轮询所有权。普通 Git LFS 推送因历史二进制无响应，确认本轮无新增 LFS 对象后使用 `GIT_LFS_SKIP_PUSH=1` 完成代码推送。
 
 ## 后续建议
 
-1. 为筛选器结果增加“保存候选”快捷入口，并让提醒页读取候选的标的与市场上下文。
-2. 将数据源健康状态进一步映射到看板卡片的实时 `live/stale/degraded` 状态。
-3. 发布前用真实登录会话检查股票、期权、虚拟币、预测市场各自的首屏加载与数据缺失提示。
+1. 将“候选建立监控”从当前的带标的跳转，继续完善为自动带入策略、阈值和来源的提醒规则草稿。
+2. 将数据源健康状态进一步映射到看板卡片的实时 `live/stale/degraded` 状态，并补齐缓存年龄。
+3. 用真实登录会话检查股票、期权、虚拟币、预测市场各自的首屏加载与数据缺失提示，再补做移动端抽屉验收。
+
+已知边界：期权回测暂未接入真实历史链、隐含波动率和 Greeks 数据，页面/Telegram 会明确返回 unavailable；候选库当前按市场作用域隔离并保存在浏览器本地，不跨设备同步。

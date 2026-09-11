@@ -499,7 +499,7 @@ git commit -m "perf: scope workspace data loading and status"
 
 在 390px 和 768px 宽度检查抽屉、关闭、滚动、底部快捷入口和表格/卡片布局；侧栏抽屉关闭后右侧内容不刷新成旧市场。
 
-- [ ] **步骤 3：访客权限验收**
+- [x] **步骤 3：访客权限验收**
 
 访客可以读取作用域大盘、自选展示和可用数据；不能写入自选、持仓、候选、监控或下单；敏感 GET 继续返回 403。不得在侧栏隐藏后仍留下可直接调用的写入按钮。
 
@@ -507,7 +507,7 @@ git commit -m "perf: scope workspace data loading and status"
 
 Telegram 菜单与网页共用相同市场语义：股票、期权、虚拟币、预测市场的菜单和搜索/自选/回测/详情处理器只调用对应市场数据；宏观仍显示为通用工具。服务只保留一个轮询实例，不发送测试消息给真实用户。
 
-- [ ] **步骤 5：记录交接文档**
+- [x] **步骤 5：记录交接文档**
 
 文档必须记录：实现提交列表、测试结果、浏览器验收截图/路径、已知数据源不可用边界、GitHub SHA、VPS 备份目录、服务状态和回滚命令。密钥、Token、个人标识和完整 Telegram 内容不得写入。
 
@@ -525,7 +525,7 @@ git commit -m "docs: record market workspace acceptance"
 - 读取：`docs/handover-2026-09-02.md`
 - 读取：`docs/handover-2026-09-10.md`
 
-- [ ] **步骤 1：运行发布前验证**
+- [ ] **步骤 1：运行发布前验证**（构建、全量测试、安全扫描、Web smoke 和桌面浏览器 smoke 已完成；移动端验收仍待补做）
 
 运行：
 
@@ -539,11 +539,11 @@ git diff --check
 
 预期：构建成功；全量测试 0 failures；secret scan、Web smoke 和 diff check 退出码均为 0。浏览器还必须验证桌面和移动端实际界面，不能只看命令行。
 
-- [ ] **步骤 2：审查暂存内容**
+- [x] **步骤 2：审查暂存内容**
 
 只暂存本计划涉及的源码、测试和交接文档；检查 `git diff --cached --name-status`，确认没有 `.env`、Token、运行数据库、截图缓存或用户未要求的未跟踪文件。
 
-- [ ] **步骤 3：提交并推送 GitHub**
+- [x] **步骤 3：提交并推送 GitHub**
 
 ```bash
 git diff --cached --check
@@ -555,7 +555,7 @@ git ls-remote origin refs/heads/codex/stock-free-data-sources
 
 预期：本地 HEAD 与远端分支 SHA 一致；若仓库已有无关 Git LFS 上传阻塞，只能在确认本次提交不包含新 LFS 对象后使用 `GIT_LFS_SKIP_PUSH=1` 重试，并把原因记录在交接文档。
 
-- [ ] **步骤 4：备份并发布 VPS 应用产物**
+- [x] **步骤 4：备份并发布 VPS 应用产物**
 
 只操作现有 `/opt/moneymoney/dist` 和带提交号的备份目录：
 
@@ -568,7 +568,7 @@ git ls-remote origin refs/heads/codex/stock-free-data-sources
 
 不修改 Nginx、TLS、VPN、系统环境文件、Telegram Token 或轮询所有权；失败时保留备份并按交接文档回滚。
 
-- [ ] **步骤 5：发布后验证**
+- [ ] **步骤 5：发布后验证**（公网健康、访客读/写权限和远端 hash 已完成；真实登录四市场逐项切换及期权 unavailable 页面仍待补做）
 
 验证：
 
