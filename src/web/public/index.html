@@ -1397,17 +1397,6 @@
     .stock-symbol-choice:hover, .stock-watchlist-choice:hover { background:var(--bg-secondary); color:var(--text); }
     .stock-symbol-choice.active, .stock-watchlist-choice.active { background:var(--purple); color:#fff; }
     .stock-watchlist-quick { border-left:1px solid var(--border); padding-left:8px; }
-    .stock-selector-search { display:flex; align-items:center; gap:6px; flex:0 0 auto; margin-left:auto; }
-    .stock-selector-search input { width:170px; padding:8px 10px; border-radius:9px; border:1px solid var(--border); color:var(--text); }
-    .stock-radar-toolbar { display:flex; align-items:center; gap:8px; flex:0 0 100%; flex-wrap:wrap; margin-bottom:12px; padding:8px 0 4px; }
-    .stock-radar-toolbar input { width:190px; padding:8px 10px; border-radius:9px; border:1px solid var(--border); color:var(--text); }
-    .stock-radar-toolbar .stock-radar-watchlist { border:1px solid var(--border); background:var(--bg-secondary); color:var(--text); font-weight:800; }
-    .stock-radar-search-results { display:flex; align-items:center; gap:6px; flex:1 1 240px; min-width:220px; overflow-x:auto; scrollbar-width:thin; }
-    .stock-radar-search-result { display:flex; flex:0 0 auto; flex-direction:column; align-items:flex-start; gap:2px; max-width:260px; padding:6px 10px; border:1px solid var(--border); border-radius:9px; background:var(--bg-secondary); color:var(--text); cursor:pointer; white-space:nowrap; }
-    .stock-radar-search-result strong, .stock-radar-search-result small { overflow:hidden; text-overflow:ellipsis; max-width:220px; }
-    .stock-radar-search-result strong { font-size:12px; }
-    .stock-radar-search-result small { color:var(--text-secondary); font-size:10px; }
-    .stock-radar-search-result:hover, .stock-radar-search-result.active { border-color:var(--purple); background:color-mix(in srgb,var(--purple) 12%,transparent); }
     .stock-library-panel { padding:14px; border:1px solid var(--border); border-radius:14px; background:var(--bg-card); }
     .stock-library-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:8px; }
     .stock-library-item { display:flex; flex-direction:column; align-items:flex-start; gap:3px; width:100%; padding:10px 12px; border:1px solid var(--border); border-radius:10px; background:var(--bg-secondary); color:var(--text); text-align:left; cursor:pointer; }
@@ -1418,6 +1407,17 @@
     .stock-library-group:last-child { margin-bottom:0; }
     .stock-library-group-title { margin-bottom:8px; font-weight:800; }
     .stock-library-disabled { color:var(--text-secondary); font-size:11px; line-height:1.5; }
+    .stock-library-current { display:flex; flex-direction:column; gap:3px; padding:10px 12px; margin-bottom:14px; border:1px solid var(--border); border-radius:10px; background:var(--purple-light); }
+    .stock-library-current strong { font-size:16px; }
+    .stock-library-current small { color:var(--text-secondary); font-size:11px; }
+    .stock-library-search-label { display:block; margin-bottom:7px; font-size:12px; font-weight:800; }
+    .stock-library-search { display:flex; gap:6px; }
+    .stock-library-search input { min-width:0; width:100%; padding:8px 10px; border-radius:9px; border:1px solid var(--border); color:var(--text); }
+    .stock-library-search-results { margin-top:8px; }
+    .stock-library-search-result { display:flex; width:100%; flex-direction:column; align-items:flex-start; gap:3px; padding:9px 10px; margin-bottom:6px; border:1px solid var(--border); border-radius:9px; background:var(--bg-secondary); color:var(--text); cursor:pointer; text-align:left; }
+    .stock-library-search-result:hover, .stock-library-search-result:focus-visible, .stock-library-search-result.active { border-color:var(--purple); background:var(--purple-light); outline:none; }
+    .stock-library-search-result strong { font-size:12px; }
+    .stock-library-search-result small { color:var(--text-secondary); font-size:10px; }
     .stock-quote-card { width:100%; text-align:left; cursor:pointer; color:inherit; font:inherit; }
     .stock-quote-card:hover { border-color:var(--purple); }
     .srch-item { display:flex; justify-content:space-between; align-items:center; padding:10px 14px; background:var(--bg-card); border-radius:10px; margin-bottom:6px; cursor:pointer; border:1px solid var(--border); transition:border-color .15s; }
@@ -2393,30 +2393,9 @@
               <div id="stock-chart-title" style="font-weight:700;font-size:15px;margin-bottom:8px;"></div>
               <canvas id="stock-kline" width="640" height="360" style="width:100%;height:340px;display:block;"></canvas>
             </div>
-            <div style="font-weight:700;font-size:13px;margin-bottom:10px;">💼 热门股票</div>
-            <div class="stock-symbol-selector" aria-label="股票快捷选择">
-              <div id="stock-symbol-quick" class="stock-symbol-quick" aria-label="美股七姐妹">
-                <button class="stock-symbol-choice active" type="button" data-stock-symbol="AAPL" data-stock-name="Apple" onclick="selectStockSymbol('AAPL','Apple')">AAPL</button>
-                <button class="stock-symbol-choice" type="button" data-stock-symbol="MSFT" data-stock-name="Microsoft" onclick="selectStockSymbol('MSFT','Microsoft')">MSFT</button>
-                <button class="stock-symbol-choice" type="button" data-stock-symbol="NVDA" data-stock-name="NVIDIA" onclick="selectStockSymbol('NVDA','NVIDIA')">NVDA</button>
-                <button class="stock-symbol-choice" type="button" data-stock-symbol="AMZN" data-stock-name="Amazon" onclick="selectStockSymbol('AMZN','Amazon')">AMZN</button>
-                <button class="stock-symbol-choice" type="button" data-stock-symbol="GOOGL" data-stock-name="Alphabet" onclick="selectStockSymbol('GOOGL','Alphabet')">GOOGL</button>
-                <button class="stock-symbol-choice" type="button" data-stock-symbol="META" data-stock-name="Meta" onclick="selectStockSymbol('META','Meta')">META</button>
-                <button class="stock-symbol-choice" type="button" data-stock-symbol="TSLA" data-stock-name="Tesla" onclick="selectStockSymbol('TSLA','Tesla')">TSLA</button>
-              </div>
-              <div id="stock-watchlist-quick" class="stock-watchlist-quick" aria-label="股票自选"></div>
-              <button class="tab guest-admin-only" type="button" onclick="addCurrentStockToWatchlist()">⭐ 加入自选</button>
-              <div class="stock-selector-search">
-                <input type="text" id="stock-search-input" placeholder="搜索股票代码或名称" oninput="stockSearchDebounce()" onkeydown="if(event.key==='Enter')loadStockSearch()" aria-label="搜索股票">
-                <button class="tab" type="button" onclick="loadStockSearch()">🔍 搜索</button>
-              </div>
-            </div>
-            <div id="stock-popular" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-bottom:20px;"></div>
-            <div style="display:flex;justify-content:space-between;align-items:center;margin:4px 0 10px;">
-              <div style="font-weight:700;font-size:13px;">🔍 搜索结果</div>
+            <div style="display:flex;justify-content:flex-end;align-items:center;margin:4px 0 10px;">
               <button class="tab active" type="button" onclick="loadStockQuotes()">🔄 刷新行情</button>
             </div>
-            <div id="stock-search-results"></div>
           </div>
         </details>
         <details class="dash-collapse" data-collapse-key="stocks-breadth" data-market-scopes="stocks overview" data-workspace-id="breadth">
@@ -2440,23 +2419,7 @@
             <span class="collapse-chevron">▾</span>
           </summary>
           <div class="collapse-body">
-            <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap;">
-              <div class="stock-radar-toolbar" data-stock-radar-toolbar="insider" aria-label="内部人雷达股票操作">
-                <button class="tab stock-radar-watchlist" type="button" onclick="setMarketScope('watchlist')">⭐ 自选</button>
-                <button class="tab guest-admin-only" type="button" onclick="addCurrentStockToWatchlist()">＋加入自选</button>
-                <input type="text" id="stock-radar-search-insider" placeholder="搜索股票代码或名称" aria-label="搜索股票" onkeydown="if(event.key==='Enter')searchStockFromRadar('stock-radar-search-insider','insider')">
-                <button class="tab" type="button" onclick="searchStockFromRadar('stock-radar-search-insider','insider')">🔍 搜索</button>
-                <div id="stock-radar-search-results-insider" class="stock-radar-search-results" data-stock-radar-results="insider" aria-live="polite"></div>
-              </div>
-              <div id="insider-quick" style="display:flex;gap:6px;flex-wrap:wrap;">
-                <button class="tab active" onclick="loadInsiderRadar('AAPL','Apple')">AAPL</button>
-                <button class="tab" onclick="loadInsiderRadar('MSFT','Microsoft')">MSFT</button>
-                <button class="tab" onclick="loadInsiderRadar('NVDA','NVIDIA')">NVDA</button>
-                <button class="tab" onclick="loadInsiderRadar('AMZN','Amazon')">AMZN</button>
-                <button class="tab" onclick="loadInsiderRadar('GOOGL','Alphabet')">GOOGL</button>
-                <button class="tab" onclick="loadInsiderRadar('META','Meta')">META</button>
-                <button class="tab" onclick="loadInsiderRadar('TSLA','Tesla')">TSLA</button>
-              </div>
+            <div style="display:flex;justify-content:flex-end;align-items:center;margin-bottom:12px;">
               <button class="tab" onclick="loadInsiderRadar()">🔄 刷新</button>
             </div>
             <div id="insider-radar"></div>
@@ -2469,23 +2432,7 @@
             <span class="collapse-chevron">▾</span>
           </summary>
           <div class="collapse-body">
-            <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap;">
-              <div class="stock-radar-toolbar" data-stock-radar-toolbar="institutional" aria-label="机构持仓雷达股票操作">
-                <button class="tab stock-radar-watchlist" type="button" onclick="setMarketScope('watchlist')">⭐ 自选</button>
-                <button class="tab guest-admin-only" type="button" onclick="addCurrentStockToWatchlist()">＋加入自选</button>
-                <input type="text" id="stock-radar-search-institutional" placeholder="搜索股票代码或名称" aria-label="搜索股票" onkeydown="if(event.key==='Enter')searchStockFromRadar('stock-radar-search-institutional','institutional')">
-                <button class="tab" type="button" onclick="searchStockFromRadar('stock-radar-search-institutional','institutional')">🔍 搜索</button>
-                <div id="stock-radar-search-results-institutional" class="stock-radar-search-results" data-stock-radar-results="institutional" aria-live="polite"></div>
-              </div>
-              <div id="institutional-quick" style="display:flex;gap:6px;flex-wrap:wrap;">
-                <button class="tab active" onclick="loadInstitutionalOwnership('AAPL','Apple')">AAPL</button>
-                <button class="tab" onclick="loadInstitutionalOwnership('MSFT','Microsoft')">MSFT</button>
-                <button class="tab" onclick="loadInstitutionalOwnership('NVDA','NVIDIA')">NVDA</button>
-                <button class="tab" onclick="loadInstitutionalOwnership('AMZN','Amazon')">AMZN</button>
-                <button class="tab" onclick="loadInstitutionalOwnership('GOOGL','Alphabet')">GOOGL</button>
-                <button class="tab" onclick="loadInstitutionalOwnership('META','Meta')">META</button>
-                <button class="tab" onclick="loadInstitutionalOwnership('TSLA','Tesla')">TSLA</button>
-              </div>
+            <div style="display:flex;justify-content:flex-end;align-items:center;margin-bottom:12px;">
               <button class="tab" onclick="loadInstitutionalOwnership()">🔄 刷新</button>
             </div>
             <div id="institutional-radar"></div>
@@ -2498,23 +2445,7 @@
             <span class="collapse-chevron">▾</span>
           </summary>
           <div class="collapse-body">
-            <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap;">
-              <div class="stock-radar-toolbar" data-stock-radar-toolbar="analyst" aria-label="分析师雷达股票操作">
-                <button class="tab stock-radar-watchlist" type="button" onclick="setMarketScope('watchlist')">⭐ 自选</button>
-                <button class="tab guest-admin-only" type="button" onclick="addCurrentStockToWatchlist()">＋加入自选</button>
-                <input type="text" id="stock-radar-search-analyst" placeholder="搜索股票代码或名称" aria-label="搜索股票" onkeydown="if(event.key==='Enter')searchStockFromRadar('stock-radar-search-analyst','analyst')">
-                <button class="tab" type="button" onclick="searchStockFromRadar('stock-radar-search-analyst','analyst')">🔍 搜索</button>
-                <div id="stock-radar-search-results-analyst" class="stock-radar-search-results" data-stock-radar-results="analyst" aria-live="polite"></div>
-              </div>
-              <div id="analyst-quick" style="display:flex;gap:6px;flex-wrap:wrap;">
-                <button class="tab active" onclick="loadAnalystConsensus('AAPL','Apple')">AAPL</button>
-                <button class="tab" onclick="loadAnalystConsensus('MSFT','Microsoft')">MSFT</button>
-                <button class="tab" onclick="loadAnalystConsensus('NVDA','NVIDIA')">NVDA</button>
-                <button class="tab" onclick="loadAnalystConsensus('AMZN','Amazon')">AMZN</button>
-                <button class="tab" onclick="loadAnalystConsensus('GOOGL','Alphabet')">GOOGL</button>
-                <button class="tab" onclick="loadAnalystConsensus('META','Meta')">META</button>
-                <button class="tab" onclick="loadAnalystConsensus('TSLA','Tesla')">TSLA</button>
-              </div>
+            <div style="display:flex;justify-content:flex-end;align-items:center;margin-bottom:12px;">
               <button class="tab" onclick="loadAnalystConsensus()">🔄 刷新</button>
             </div>
             <div id="analyst-radar"></div>
@@ -2527,23 +2458,7 @@
             <span class="collapse-chevron">▾</span>
           </summary>
           <div class="collapse-body">
-            <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap;">
-              <div class="stock-radar-toolbar" data-stock-radar-toolbar="fundamentals" aria-label="基本面雷达股票操作">
-                <button class="tab stock-radar-watchlist" type="button" onclick="setMarketScope('watchlist')">⭐ 自选</button>
-                <button class="tab guest-admin-only" type="button" onclick="addCurrentStockToWatchlist()">＋加入自选</button>
-                <input type="text" id="stock-radar-search-fundamentals" placeholder="搜索股票代码或名称" aria-label="搜索股票" onkeydown="if(event.key==='Enter')searchStockFromRadar('stock-radar-search-fundamentals','fundamentals')">
-                <button class="tab" type="button" onclick="searchStockFromRadar('stock-radar-search-fundamentals','fundamentals')">🔍 搜索</button>
-                <div id="stock-radar-search-results-fundamentals" class="stock-radar-search-results" data-stock-radar-results="fundamentals" aria-live="polite"></div>
-              </div>
-              <div id="fundamentals-quick" style="display:flex;gap:6px;flex-wrap:wrap;">
-                <button class="tab active" onclick="loadFundamentalQuality('AAPL','Apple')">AAPL</button>
-                <button class="tab" onclick="loadFundamentalQuality('MSFT','Microsoft')">MSFT</button>
-                <button class="tab" onclick="loadFundamentalQuality('NVDA','NVIDIA')">NVDA</button>
-                <button class="tab" onclick="loadFundamentalQuality('AMZN','Amazon')">AMZN</button>
-                <button class="tab" onclick="loadFundamentalQuality('GOOGL','Alphabet')">GOOGL</button>
-                <button class="tab" onclick="loadFundamentalQuality('META','Meta')">META</button>
-                <button class="tab" onclick="loadFundamentalQuality('TSLA','Tesla')">TSLA</button>
-              </div>
+            <div style="display:flex;justify-content:flex-end;align-items:center;margin-bottom:12px;">
               <button class="tab" onclick="loadFundamentalQuality()">🔄 刷新</button>
             </div>
             <div id="fundamental-radar"></div>
@@ -2556,24 +2471,7 @@
             <span class="collapse-chevron">▾</span>
           </summary>
           <div class="collapse-body">
-            <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap;">
-              <div class="stock-radar-toolbar" data-stock-radar-toolbar="short-interest" aria-label="空头利息雷达股票操作">
-                <button class="tab stock-radar-watchlist" type="button" onclick="setMarketScope('watchlist')">⭐ 自选</button>
-                <button class="tab guest-admin-only" type="button" onclick="addCurrentStockToWatchlist()">＋加入自选</button>
-                <input type="text" id="stock-radar-search-short-interest" placeholder="搜索股票代码或名称" aria-label="搜索股票" onkeydown="if(event.key==='Enter')searchStockFromRadar('stock-radar-search-short-interest','short-interest')">
-                <button class="tab" type="button" onclick="searchStockFromRadar('stock-radar-search-short-interest','short-interest')">🔍 搜索</button>
-                <div id="stock-radar-search-results-short-interest" class="stock-radar-search-results" data-stock-radar-results="short-interest" aria-live="polite"></div>
-              </div>
-              <div id="short-interest-quick" style="display:flex;gap:6px;flex-wrap:wrap;">
-                <button class="tab active" onclick="loadShortInterest('AAPL','Apple')">AAPL</button>
-                <button class="tab" onclick="loadShortInterest('MSFT','Microsoft')">MSFT</button>
-                <button class="tab" onclick="loadShortInterest('NVDA','NVIDIA')">NVDA</button>
-                <button class="tab" onclick="loadShortInterest('AMZN','Amazon')">AMZN</button>
-                <button class="tab" onclick="loadShortInterest('GOOGL','Alphabet')">GOOGL</button>
-                <button class="tab" onclick="loadShortInterest('META','Meta')">META</button>
-                <button class="tab" onclick="loadShortInterest('TSLA','Tesla')">TSLA</button>
-                <button class="tab" onclick="loadShortInterest('QQQ','Nasdaq 100 ETF')">QQQ</button>
-              </div>
+            <div style="display:flex;justify-content:flex-end;align-items:center;margin-bottom:12px;">
               <button class="tab" onclick="loadShortInterest()">🔄 刷新</button>
             </div>
             <div id="short-interest-radar"></div>
@@ -2885,6 +2783,23 @@
       </div>
       <div class="sidebar-content">
         <div id="stock-instrument-library" data-stock-library-scope="stocks" style="display:none;">
+          <div class="stock-library-current" id="stock-library-current" aria-live="polite">
+            <strong id="stock-library-current-symbol">AAPL</strong>
+            <small id="stock-library-current-workspace">当前功能：市场总览</small>
+          </div>
+          <button class="tab guest-admin-only" type="button" onclick="addCurrentStockToWatchlist()" style="width:100%;margin-bottom:14px;">⭐ 加入自选</button>
+          <div class="stock-library-group">
+            <div class="stock-library-group-title">📌 美股七姐妹</div>
+            <div id="stock-library-quick" class="stock-library-grid" aria-label="美股七姐妹"></div>
+          </div>
+          <div class="stock-library-group">
+            <label class="stock-library-search-label" for="stock-library-search-input">🔍 搜索股票</label>
+            <div class="stock-library-search">
+              <input id="stock-library-search-input" type="search" placeholder="代码或名称" aria-label="搜索股票代码或名称" oninput="stockLibrarySearchDebounce()" onkeydown="if(event.key==='Enter')loadStockLibrarySearch()">
+              <button class="tab" type="button" onclick="loadStockLibrarySearch()">搜索</button>
+            </div>
+            <div id="stock-library-search-results" class="stock-library-search-results" aria-live="polite"></div>
+          </div>
           <div class="stock-library-group">
             <div class="stock-library-group-title">⭐ 我的自选</div>
             <div id="stock-library-watchlist" data-stock-library-item="sidebar-watchlist"></div>
@@ -5581,6 +5496,60 @@ function stockLibraryData(force = false) {
   return stockLibraryPromise;
 }
 function invalidateStockLibrary() { stockLibraryPromise = null; }
+function stockLibraryWorkspaceLabel() {
+  const labels = { overview: '市场总览', breadth: '市场宽度', insider: '内部人交易', institutional: '机构持仓', analyst: '分析师共识', fundamentals: '基本面质量', 'short-interest': '空头利息', backtest: '策略回测', analysis: '标的分析', risk: '风险监控', positions: '我的持仓' };
+  return labels[activeWorkspaceId] || '当前股票工作区';
+}
+function updateStockLibraryCurrent(symbol, name) {
+  const symbolEl = document.getElementById('stock-library-current-symbol');
+  const workspaceEl = document.getElementById('stock-library-current-workspace');
+  if (symbolEl) symbolEl.textContent = symbol || window._stockSelectedSymbol || 'AAPL';
+  if (workspaceEl) workspaceEl.textContent = `${stockLibraryWorkspaceLabel()} · ${name || stockNameForSymbol(symbol || window._stockSelectedSymbol || 'AAPL')}`;
+}
+function renderStockLibraryQuick() {
+  const element = document.getElementById('stock-library-quick');
+  if (!element) return;
+  element.innerHTML = STOCK_QUICK_SYMBOLS.map(([symbol, name]) => `
+    <button type="button" class="stock-library-item" data-stock-symbol="${stockEscapeHtml(symbol)}" data-stock-name="${stockEscapeHtml(name)}" onclick="selectStockFromInstrumentLibrary('${stockEscapeHtml(symbol)}','${stockEscapeHtml(name)}')">
+      <strong>${stockEscapeHtml(symbol)}</strong><small>${stockEscapeHtml(name)}</small>
+    </button>`).join('');
+  setStockSelectorActive(window._stockSelectedSymbol || currentStockSymbol || 'AAPL');
+}
+function stockLibrarySearchDebounce() {
+  clearTimeout(window._stockLibrarySearchTimer);
+  window._stockLibrarySearchTimer = setTimeout(() => loadStockLibrarySearch(), 350);
+}
+async function loadStockLibrarySearch() {
+  const source = document.getElementById('stock-library-search-input');
+  const element = document.getElementById('stock-library-search-results');
+  const query = String(source?.value || '').trim();
+  if (!element) return;
+  if (!query) { element.innerHTML = ''; return; }
+  element.innerHTML = '<div class="empty-tip">搜索中...</div>';
+  try {
+    const response = await fetch('/api/stock/search?q=' + encodeURIComponent(query), { credentials: 'include', cache: 'no-store' });
+    const payload = await response.json();
+    const results = Array.isArray(payload?.data) ? payload.data.slice(0, 8) : [];
+    window._stockLibrarySearchResults = results;
+    if (!payload?.success || !results.length) {
+      element.innerHTML = '<div class="empty-tip">没有找到股票结果。</div>';
+      return;
+    }
+    element.innerHTML = results.map((result, index) => `<button type="button" class="stock-library-search-result" data-index="${index}" onclick="selectStockLibrarySearchResult(this)">
+      <strong>${stockEscapeHtml(result.code || '')} · ${stockEscapeHtml(result.name || '未命名标的')}</strong>
+      <small>${stockEscapeHtml([result.market, result.alias].filter(Boolean).join(' · '))}</small>
+    </button>`).join('');
+  } catch (error) {
+    element.innerHTML = '<div class="empty-tip" style="color:var(--red);">搜索暂时失败，请稍后重试。</div>';
+  }
+}
+function selectStockLibrarySearchResult(item) {
+  const result = window._stockLibrarySearchResults?.[Number(item?.dataset?.index)];
+  if (!result?.code) return;
+  item.parentElement?.querySelectorAll('.stock-library-search-result.active').forEach(active => active.classList.remove('active'));
+  item.classList.add('active');
+  selectStockFromInstrumentLibrary(result.code, result.name, result.exchangeSymbol);
+}
 function renderStockLibraryList(element, items, emptyText) {
   if (!element) return;
   element.innerHTML = items.length ? items.map(item => `
@@ -5604,6 +5573,8 @@ async function loadStockWatchlistLibrary(force = false) {
 async function loadStockInstrumentLibrary(force = false) {
   const host = document.getElementById('stock-instrument-library');
   if (!host) return;
+  renderStockLibraryQuick();
+  updateStockLibraryCurrent(window._stockSelectedSymbol || currentStockSymbol || 'AAPL');
   const watchlist = document.getElementById('stock-library-watchlist');
   const paper = document.getElementById('stock-library-paper');
   watchlist.innerHTML = '<div class="empty-tip">正在读取...</div>';
@@ -5622,9 +5593,11 @@ function selectStockLibraryItem(item) {
   const symbol = String(item?.dataset?.symbol || '').trim().toUpperCase();
   if (!stockInstrumentId(symbol)) return;
   const name = item?.dataset?.name || stockNameForSymbol(symbol);
-  setMarketScope('stocks', { openTab: false });
-  showTab('stocks', null, { scopeAlreadySynced: true });
-  selectStockSymbol(symbol, name);
+  if (activeMarketScope !== 'stocks') {
+    setMarketScope('stocks', { openTab: false });
+    showTab('stocks', null, { scopeAlreadySynced: true });
+  }
+  selectStockFromInstrumentLibrary(symbol, name);
   document.querySelectorAll('[data-stock-library-item][data-symbol]').forEach(node => node.classList.toggle('active', node.dataset.symbol?.toUpperCase() === symbol));
 }
 function setStockSelectorActive(symbol) {
@@ -5732,7 +5705,26 @@ function selectStockRadarResult(item) {
   loaders[radarKey](normalized, result.name || normalized);
 }
 function selectStockQuoteCard(card) {
-  selectStockSymbol(card?.dataset?.stockSymbol, card?.dataset?.stockName);
+  selectStockFromInstrumentLibrary(card?.dataset?.stockSymbol, card?.dataset?.stockName);
+}
+function selectStockFromInstrumentLibrary(symbol, name, apiSymbol) {
+  const normalized = String(symbol || '').replace(/^us/i, '').trim().toUpperCase();
+  if (!stockInstrumentId(normalized) || activeMarketScope !== 'stocks') return;
+  const displayName = name || stockNameForSymbol(normalized);
+  window._stockSelectedSymbol = normalized;
+  setWorkspaceInstrument(normalized);
+  setStockSelectorActive(normalized);
+  if (activeWorkspaceId === 'insider') loadInsiderRadar(normalized, displayName);
+  else if (activeWorkspaceId === 'institutional') loadInstitutionalOwnership(normalized, displayName);
+  else if (activeWorkspaceId === 'analyst') loadAnalystConsensus(normalized, displayName);
+  else if (activeWorkspaceId === 'fundamentals') loadFundamentalQuality(normalized, displayName);
+  else if (activeWorkspaceId === 'short-interest') loadShortInterest(normalized, displayName);
+  else if (activeWorkspaceId === 'breadth') loadMarketBreadth();
+  else {
+    loadUnifiedStockData(normalized);
+    loadStockKline('us' + normalized, displayName, apiSymbol);
+  }
+  updateStockLibraryCurrent(normalized, displayName);
 }
 function selectStockSymbol(symbol, name, apiSymbol, options = {}) {
   const raw = String(symbol || '').trim();
@@ -9840,6 +9832,7 @@ window.openWorkspace = function(id) {
   syncWorkspaceContextUrl();
   renderWorkspaceMenu(groups);
   applyWorkspaceView();
+  updateStockLibraryCurrent(window._stockSelectedSymbol || currentStockSymbol || 'AAPL');
   if (id === 'search') {
     closeWorkspaceDrawer();
     openGlobalSearch();

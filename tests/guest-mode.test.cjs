@@ -38,6 +38,13 @@ test('guest access only permits explicit read-only GET paths', () => {
   assert.equal(auth.isGuestRequestAllowed('DELETE', '/watchlist/item'), false);
 });
 
+test('guest can read the stock library and search without gaining write access', () => {
+  assert.equal(auth.isGuestRequestAllowed('GET', '/watchlist'), true);
+  assert.equal(auth.isGuestRequestAllowed('GET', '/paper/positions'), true);
+  assert.equal(auth.isGuestRequestAllowed('GET', '/stock/search'), true);
+  assert.equal(auth.isGuestRequestAllowed('POST', '/watchlist'), false);
+});
+
 test('server exposes guest login and enforces guest read-only middleware', () => {
   assert.match(serverSrc, /app\.post\(['"]\/api\/auth\/guest['"]/, 'guest login endpoint exists');
   assert.match(serverSrc, /role:\s*['"]guest['"]/, 'guest response identifies role');

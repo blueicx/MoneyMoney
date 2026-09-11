@@ -16,7 +16,7 @@
 - 修改：`tests/market-workspace-flow.test.cjs`
 - 参考：`src/web/public/index.html:2390-2570`、`src/web/public/index.html:2877-2908`
 
-- [ ] **步骤 1：编写失败的测试**
+- [x] **步骤 1：编写失败的测试**
 
 在现有工作区测试中加入以下断言，锁定右侧结构、中心去重和当前工作区选择路由：
 
@@ -33,7 +33,7 @@ test('股票选择入口集中在右侧标的库并保持当前功能工作区',
 });
 ```
 
-- [ ] **步骤 2：运行测试验证失败**
+- [x] **步骤 2：运行测试验证失败**
 
 运行：`node --test tests/market-workspace-flow.test.cjs`
 
@@ -46,7 +46,7 @@ test('股票选择入口集中在右侧标的库并保持当前功能工作区',
 - 修改：`src/web/public/index.html:2375-2570`
 - 修改：`src/web/public/index.html:2877-2908`
 
-- [ ] **步骤 1：在右侧标的库加入静态选择与搜索结构**
+- [x] **步骤 1：在右侧标的库加入静态选择与搜索结构**
 
 在 `#stock-instrument-library` 的自选列表之前加入以下结构，所有选择动作统一进入 `selectStockFromInstrumentLibrary`：
 
@@ -69,11 +69,11 @@ test('股票选择入口集中在右侧标的库并保持当前功能工作区',
 </div>
 ```
 
-- [ ] **步骤 2：删除中心行情区和股票雷达里的重复选择控件**
+- [x] **步骤 2：删除中心行情区和股票雷达里的重复选择控件**
 
 删除 `#stocks-tab` 行情与选股中的 `.stock-symbol-selector`，删除五个 `data-stock-radar-toolbar` 容器及其搜索结果节点，保留每个雷达的刷新按钮和数据容器。中心不得再拥有 `stock-search-input`、`stock-radar-search-*` 或 `stock-radar-toolbar`。
 
-- [ ] **步骤 3：补充右侧库样式**
+- [x] **步骤 3：补充右侧库样式**
 
 在现有股票库样式后加入紧凑的单列侧栏样式：快捷按钮使用 `.stock-library-item`，搜索输入占满宽度，搜索结果使用可聚焦按钮；移动端沿用既有 `.sidebar { display:none }` 策略，不引入第二套移动选择器。
 
@@ -83,7 +83,7 @@ test('股票选择入口集中在右侧标的库并保持当前功能工作区',
 - 修改：`src/web/public/index.html:5560-5785`
 - 测试：`tests/market-workspace-flow.test.cjs`
 
-- [ ] **步骤 1：让测试先覆盖 loader 路由**
+- [x] **步骤 1：让测试先覆盖 loader 路由**
 
 在契约测试中加入函数体断言，要求统一入口包含五个股票工作区 loader 和总览分支：
 
@@ -99,13 +99,13 @@ test('右侧标的选择按当前股票工作区刷新对应数据', () => {
 });
 ```
 
-- [ ] **步骤 2：运行新增测试确认仍为红灯**
+- [x] **步骤 2：运行新增测试确认仍为红灯**
 
 运行：`node --test tests/market-workspace-flow.test.cjs`
 
 预期：新增工作区路由测试失败，原因是 `selectStockFromInstrumentLibrary` 尚未定义。
 
-- [ ] **步骤 3：实现最小工作区感知入口**
+- [x] **步骤 3：实现最小工作区感知入口**
 
 按现有函数签名实现：规范化股票代码，写入 `window._stockSelectedSymbol` 和 `setWorkspaceInstrument()`，再按工作区调用一个 loader；只有 `overview` 调用行情/K 线，避免一次点击触发五个无关请求：
 
@@ -124,11 +124,13 @@ function selectStockFromInstrumentLibrary(symbol, name, apiSymbol) {
 }
 ```
 
-- [ ] **步骤 4：让右侧七姐妹、自选、持仓和搜索结果调用统一入口**
+- [x] **步骤 4：让右侧七姐妹、自选、持仓和搜索结果调用统一入口**
+
+同时把常见七姐妹代码加入服务端本地搜索快速路径；访客仅新增股票库所需的 GET 读取白名单，写操作仍被拒绝。
 
 新增 `renderStockLibraryQuick()`、`loadStockLibrarySearch()` 和 `selectStockLibrarySearchResult()`，修改 `selectStockLibraryItem()`、`loadStockWatchlistShortcuts()` 的按钮回调，调用 `selectStockFromInstrumentLibrary()`；搜索失败与空结果只写入 `#stock-library-search-results`。
 
-- [ ] **步骤 5：运行测试确认通过**
+- [x] **步骤 5：运行测试确认通过**
 
 运行：`node --test tests/market-workspace-flow.test.cjs`
 
@@ -140,17 +142,17 @@ function selectStockFromInstrumentLibrary(symbol, name, apiSymbol) {
 - 修改：`src/web/public/index.html:9935-9955`、股票初始化调用点
 - 创建：`tests/.stock-instrument-library-browser-smoke.py`
 
-- [ ] **步骤 1：在股票作用域加载右侧库，离开时隐藏**
+- [x] **步骤 1：在股票作用域加载右侧库，离开时隐藏**
 
 让 `applySidebarScope()` 在股票作用域调用右侧快捷按钮渲染与 `loadStockInstrumentLibrary()`，并让 `applyMarketScopeView()` 后的当前标的摘要反映 `activeWorkspaceId`；切换到其他市场时隐藏整个库。
 
-- [ ] **步骤 2：用 Playwright 验证实际 DOM 和点击链路**
+- [x] **步骤 2：用 Playwright 验证实际 DOM 和点击链路**
 
 运行：`python tests/.stock-instrument-library-browser-smoke.py`
 
 脚本必须验证：股票内部人页存在 `#stock-library-quick` 和 `#stock-library-search-input`；中心没有 `.stock-radar-toolbar`；点击 MSFT 后 URL 仍为 `market=stocks&workspace=insider`，仅内部人模块可见；搜索 AAPL 后点击结果仍保持 insider；切换 institutional 后同样保持；切换 crypto 后股票库隐藏。输出成功断言并保存截图到临时目录。
 
-- [ ] **步骤 3：删除一次性 smoke 脚本并保留测试证据**
+- [x] **步骤 3：删除一次性 smoke 脚本并保留测试证据**
 
 浏览器验证通过后使用 `apply_patch` 删除 `tests/.stock-instrument-library-browser-smoke.py`，截图保留在系统临时目录，不进入 Git。
 
@@ -159,7 +161,7 @@ function selectStockFromInstrumentLibrary(symbol, name, apiSymbol) {
 **文件：**
 - 修改：`docs/handover-2026-09-11-left-sidebar-market-workspace.md`
 
-- [ ] **步骤 1：运行完整验证**
+- [x] **步骤 1：运行完整验证**
 
 依次运行：
 
@@ -173,7 +175,7 @@ git diff --check
 
 预期：构建退出码 0，所有测试通过，安全扫描无敏感文件，web smoke 全部通过，diff check 无错误。
 
-- [ ] **步骤 2：记录交接证据**
+- [x] **步骤 2：记录交接证据**
 
 更新交接文档，写入新 commit、测试数量、浏览器 smoke 核心断言、生成的 `dist` 关键文件 SHA-256、VPS 备份目录和回滚目录；不写入 token、密码、私钥或完整连接串。
 

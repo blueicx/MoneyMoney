@@ -6,31 +6,36 @@ const html = fs.readFileSync('src/web/public/index.html', 'utf8');
 
 test('stock market exposes all Magnificent Seven shortcuts', () => {
   for (const symbol of ['AAPL', 'MSFT', 'NVDA', 'AMZN', 'GOOGL', 'META', 'TSLA']) {
-    assert.match(html, new RegExp(`data-stock-symbol=["']${symbol}["']`));
+    assert.match(html, new RegExp(`\\['${symbol}',`));
   }
+  assert.match(html, /const STOCK_QUICK_SYMBOLS = Object\.freeze\(\[/);
 });
 
-test('stock selector places watchlist and search beside shortcuts', () => {
-  assert.match(html, /id="stock-symbol-quick"/);
-  assert.match(html, /id="stock-watchlist-quick"/);
-  assert.match(html, /id="stock-search-input"/);
-  assert.match(html, /onclick="addCurrentStockToWatchlist\(\)"/);
-  assert.match(html, /function loadStockWatchlistShortcuts\(/);
+test('stock instrument selection is concentrated in the right library', () => {
+  assert.match(html, /id="stock-instrument-library"/);
+  assert.match(html, /id="stock-library-quick"/);
+  assert.match(html, /id="stock-library-search-input"/);
+  assert.match(html, /id="stock-library-search-results"/);
+  assert.match(html, /function renderStockLibraryQuick\(/);
+  assert.match(html, /function loadStockLibrarySearch\(/);
+  assert.match(html, /function selectStockFromInstrumentLibrary\(/);
+  assert.doesNotMatch(html, /id="stock-symbol-quick"/);
+  assert.doesNotMatch(html, /id="stock-watchlist-quick"/);
+  assert.doesNotMatch(html, /id="stock-search-input"/);
   assert.doesNotMatch(html, /class="stock-selector-actions"/);
-  assert.doesNotMatch(html, /id="stock-watchlist-open"/);
-  assert.doesNotMatch(html, /id="stock-watchlist-add"/);
 });
 
-test('stock radar sections each expose watchlist, add and search controls', () => {
+test('stock feature panels keep only their feature content', () => {
   for (const key of ['insider', 'institutional', 'analyst', 'fundamentals', 'short-interest']) {
-    assert.match(html, new RegExp(`data-stock-radar-toolbar=["']${key}["']`));
-    assert.match(html, new RegExp(`id=["']stock-radar-search-${key}["']`));
-    assert.match(html, new RegExp(`id=["']stock-radar-search-results-${key}["']`));
-    assert.match(html, new RegExp(`searchStockFromRadar\\('stock-radar-search-${key}','${key}'\\)`));
+    assert.doesNotMatch(html, new RegExp(`data-stock-radar-toolbar=["']${key}["']`));
+    assert.doesNotMatch(html, new RegExp(`id=["']stock-radar-search-${key}["']`));
+    assert.doesNotMatch(html, new RegExp(`id=["']stock-radar-search-results-${key}["']`));
   }
-  assert.match(html, /function searchStockFromRadar\(/);
-  assert.match(html, /function selectStockRadarResult\(/);
-  assert.match(html, /setMarketScope\('watchlist'\)/);
+  assert.match(html, /function selectStockFromInstrumentLibrary\([\s\S]*?loadInsiderRadar/);
+  assert.match(html, /function selectStockFromInstrumentLibrary\([\s\S]*?loadInstitutionalOwnership/);
+  assert.match(html, /function selectStockFromInstrumentLibrary\([\s\S]*?loadAnalystConsensus/);
+  assert.match(html, /function selectStockFromInstrumentLibrary\([\s\S]*?loadFundamentalQuality/);
+  assert.match(html, /function selectStockFromInstrumentLibrary\([\s\S]*?loadShortInterest/);
 });
 
 test('stock workspace hides redundant helper and source-status lines', () => {
@@ -52,11 +57,13 @@ test('fundamental radar exposes the backend error instead of masking every failu
   assert.match(html, /数据源暂时不可用/);
 });
 
-test('stock shortcut, watchlist and search share the quote selection action', () => {
+test('stock library shortcuts and search share the scoped selection action', () => {
   assert.match(html, /function selectStockSymbol\(/);
   assert.match(html, /function selectStockSymbol\(symbol, name, apiSymbol, options = \{\}\)/);
   assert.match(html, /function selectStockSymbol\([\s\S]*?loadStockKline/);
   assert.match(html, /function selectStockSymbol\([\s\S]*?loadUnifiedStockData/);
+  assert.match(html, /function selectStockFromInstrumentLibrary\([\s\S]*?setWorkspaceInstrument/);
+  assert.match(html, /function selectStockFromInstrumentLibrary\([\s\S]*?activeWorkspaceId === 'insider'/);
 });
 
 test('stock quote request includes the Magnificent Seven', () => {
@@ -82,7 +89,7 @@ test('stock market replaces the event sidebar with a scoped stock library', () =
   assert.match(html, /function loadStockInstrumentLibrary\(/);
   assert.match(html, /function selectStockLibraryItem\(/);
   assert.match(html, /\/api\/paper\/positions\?scope=stocks/);
-  assert.match(html, /function selectStockLibraryItem\([\s\S]*?selectStockSymbol/);
+  assert.match(html, /function selectStockLibraryItem\([\s\S]*?selectStockFromInstrumentLibrary/);
   assert.match(html, /function applySidebarScope\(/);
   assert.match(html, /activeMarketScope === 'watchlist'[\s\S]*?showTab\('positions'/);
 });

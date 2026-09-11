@@ -31,3 +31,9 @@ test('stock source status treats live and fallback data as usable', () => {
   assert.match(sourceHealth, /snapshot\.status === 'live'[\s\S]*snapshot\.status === 'fallback'/);
   assert.match(html, /source\.status === 'live'[\s\S]*source\.status === 'fallback'/);
 });
+
+test('common US ticker searches have a local fast path before remote sources', () => {
+  assert.match(server, /function fastStockSearch\(/);
+  assert.match(server, /const fastResults = fastStockSearch\(q\)/);
+  assert.match(server, /if \(fastResults\.length\) \{[\s\S]*res\.json\(\{ success: true, data: fastResults \}\)/);
+});

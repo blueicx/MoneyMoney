@@ -77,3 +77,24 @@ test('具体工作区只显示当前正文模块，并在总览时恢复市场�
   assert.match(html, /if \(!visible && node\.tagName === 'DETAILS'\) node\.open = false/);
   assert.match(html, /applyWorkspaceView\(\);/);
 });
+
+test('股票选择入口集中在右侧标的库并保持当前功能工作区', () => {
+  assert.match(html, /id="stock-library-quick"/);
+  assert.match(html, /id="stock-library-search-input"/);
+  assert.match(html, /id="stock-library-search-results"/);
+  assert.match(html, /selectStockFromInstrumentLibrary/);
+  assert.match(html, /activeWorkspaceId === 'insider'/);
+  assert.match(html, /activeWorkspaceId === 'institutional'/);
+  assert.doesNotMatch(html, /id="stock-search-input"/);
+  assert.doesNotMatch(html, /data-stock-radar-toolbar=/);
+});
+
+test('右侧标的选择按当前股票工作区刷新对应数据', () => {
+  assert.match(html, /function selectStockFromInstrumentLibrary\(/);
+  for (const key of ['insider', 'institutional', 'analyst', 'fundamentals', 'short-interest']) {
+    assert.match(html, new RegExp(`activeWorkspaceId === '${key}'`));
+  }
+  assert.match(html, /loadUnifiedStockData\(normalized\)/);
+  assert.match(html, /setWorkspaceInstrument\(normalized\)/);
+  assert.match(html, /stock-library-search-results/);
+});

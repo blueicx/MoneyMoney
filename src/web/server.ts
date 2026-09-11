@@ -1156,6 +1156,21 @@ app.get('/api/stock/indices', async (req, res) => {
   }
 });
 
+function fastStockSearch(query: string): Array<Record<string, string>> {
+  const normalized = String(query || '').trim().toUpperCase();
+  if (!normalized) return [];
+  const common = [
+    { code: 'usAAPL', exchangeSymbol: 'AAPL.OQ', name: 'Apple', nameCN: '苹果', market: '美股' },
+    { code: 'usMSFT', exchangeSymbol: 'MSFT.OQ', name: 'Microsoft', nameCN: '微软', market: '美股' },
+    { code: 'usNVDA', exchangeSymbol: 'NVDA.OQ', name: 'NVIDIA', nameCN: '英伟达', market: '美股' },
+    { code: 'usAMZN', exchangeSymbol: 'AMZN.OQ', name: 'Amazon', nameCN: '亚马逊', market: '美股' },
+    { code: 'usGOOGL', exchangeSymbol: 'GOOGL.OQ', name: 'Alphabet', nameCN: '谷歌', market: '美股' },
+    { code: 'usMETA', exchangeSymbol: 'META.OQ', name: 'Meta', nameCN: 'Meta', market: '美股' },
+    { code: 'usTSLA', exchangeSymbol: 'TSLA.OQ', name: 'Tesla', nameCN: '特斯拉', market: '美股' },
+  ];
+  return common.filter(item => [item.code, item.name, item.nameCN].some(value => value.toUpperCase().includes(normalized)));
+}
+
 app.get('/api/stock/search', async (req, res) => {
   try {
     const q = String(req.query.q || '').trim();
@@ -1164,6 +1179,12 @@ app.get('/api/stock/search', async (req, res) => {
     const cacheKey = 'stockSearch:' + q.toLowerCase();
     const cached = getCached(cacheKey);
     if (cached) { res.json({ success: true, data: cached }); return; }
+    const fastResults = fastStockSearch(q);
+    if (fastResults.length) {
+      setCached(cacheKey, fastResults);
+      res.json({ success: true, data: fastResults });
+      return;
+    }
 
     try {
       // Smartbox occasionally rate-limits a burst of requests. Two light

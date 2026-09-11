@@ -13,18 +13,22 @@
 - 回测结果可保存到当前市场的本地候选库，支持载入参数并跳转提醒页；候选不会跨市场复用。
 - Telegram 菜单继续按聊天市场作用域隔离，并补齐股票/虚拟币真实资产回测入口；期权回测会明确返回未覆盖原因。
 - 访客仍为 GET 只读，新增工作区查询接口未暴露 owner 信息，写操作未加入访客白名单。
+- 股票工作区将美股七姐妹、股票搜索、股票自选和模拟持仓统一放入右侧“股票标的库”；中间正文只保留当前选中的内部人交易、机构持仓、分析师共识、基本面质量、空头利息、市场宽度或总览功能。
+- 右侧库点击标的会保留当前股票工作区，仅刷新该工作区对应数据；搜索常见七姐妹代码走服务端本地快速路径，避免等待远程数据源。
 
 ## 验收证据
 
 - `npm run build`：通过。
-- `npm test`：212 项通过，0 失败。
-- `npm run security:scan`：300 个受跟踪文件通过。
+- `npm test`：216 项通过，0 失败。
+- `npm run security:scan`：302 个受跟踪文件通过。
 - `npm run smoke:web`：健康检查、登录门禁、敏感配置脱敏和真实交易关闭边界通过。
-- 浏览器 smoke（本机 Chrome + Playwright）：自选分组/列面板、股票与虚拟币左栏隔离通过；本次新增验证股票 `insider/institutional`、虚拟币 `funding-rate/order-flow` 点击后正文只保留当前模块，回到总览后恢复全部当前市场模块。验收截图：`C:\Users\blueice\AppData\Local\Temp\moneymoney-workspace-exclusive-smoke.png`。
+- 浏览器 smoke（本机 Chrome + Playwright）：右侧七姐妹、搜索 AAPL、点击 MSFT 后保持 `market=stocks&workspace=insider&instrument=MSFT`、切换 institutional 仍保持右侧库、切换 crypto 后股票库隐藏；验收截图：`C:\Users\blueice\AppData\Local\Temp\moneymoney-stock-library-smoke.png`。
 
 本轮未将移动端和真实登录后的四市场逐项验收冒充为已完成；这些仍是后续验收项。
 
 ## 发布记录
+
+本轮右侧股票标的库的代码、测试和交接文档已完成本地验收，待本次提交后更新 GitHub/VPS 版本号、dist hash、备份目录和远端验收结果。
 
 - GitHub：已推送 `codex/stock-free-data-sources`，最新代码提交为 `859a288`。
 - VPS：已备份到 `/opt/moneymoney/backups/dist-20260911-859a288`，新产物已发布到 `/opt/moneymoney/dist`。
