@@ -204,7 +204,7 @@ git commit -m "feat: expose scoped workspace navigation API"
 - 修改：`src/web/public/sw.js`
 - 修改：`tests/theme-scoped-backtest.test.cjs`
 
-- [ ] **步骤 1：编写主题和结构失败测试**
+- [x] **步骤 1：编写主题和结构失败测试**
 
 测试必须检查桌面侧栏、折叠态、移动抽屉、激活项和现有主题变量：
 
@@ -218,13 +218,13 @@ assert.match(html, /workspace-sidebar-toggle/);
 assert.match(html, /workspace-drawer/);
 ```
 
-- [ ] **步骤 2：运行测试确认失败**
+- [ ] **步骤 2：运行测试确认失败**（先完成了结构实现，再执行浏览器验证；未单独停在缺少壳结构的红灯阶段）
 
 运行：`node --test tests/theme-scoped-backtest.test.cjs`
 
 预期：FAIL，找不到 `market-workspace-sidebar` 或 `workspace-drawer`。
 
-- [ ] **步骤 3：实现三态导航壳**
+- [x] **步骤 3：实现三态导航壳**
 
 在现有 `#core-workspace-nav` 所在主布局位置增加：
 
@@ -247,17 +247,17 @@ assert.match(html, /workspace-drawer/);
 
 CSS 使用现有 `--bg-card`、`--bg-secondary`、`--border`、`--text`、`--text-secondary`、`--purple`，桌面端 `grid-template-columns: 224px minmax(0, 1fr)`，折叠态为 `56px minmax(0, 1fr)`，小于 768px 时隐藏 aside、打开抽屉。菜单项必须在侧栏和移动抽屉复用同一渲染函数，不复制两套点击逻辑。
 
-- [ ] **步骤 4：接入持久化和键盘可用性**
+- [x] **步骤 4：接入持久化和键盘可用性**
 
 使用 `localStorage` 保存 `mm-workspace-sidebar-state`，仅允许 `expanded` 或 `rail`；侧栏按钮提供 `aria-expanded`、焦点样式和 Escape 关闭移动抽屉。刷新页面后恢复折叠态，切换市场不重置用户的折叠偏好。
 
-- [ ] **步骤 5：运行浏览器检查并修正主题**
+- [x] **步骤 5：运行浏览器检查并修正主题**
 
 运行：`node --test tests/theme-scoped-backtest.test.cjs`
 
 浏览器验收：桌面展开、桌面折叠、移动抽屉、股票/虚拟币菜单切换；预期无浏览器默认白色按钮、无横向溢出、当前项有明显激活态。
 
-- [ ] **步骤 6：Commit**
+- [x] **步骤 6：Commit**
 
 ```bash
 git add src/web/public/index.html src/web/public/sw.js tests/theme-scoped-backtest.test.cjs

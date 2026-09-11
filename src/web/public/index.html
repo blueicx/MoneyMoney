@@ -195,6 +195,49 @@
       grid-template-columns: 1fr 450px;
       min-height: calc(100vh - 61px);
     }
+    .market-workspace-shell {
+      display: grid;
+      grid-template-columns: 224px minmax(0, 1fr);
+      min-width: 0;
+      min-height: calc(100vh - 61px);
+      transition: grid-template-columns .2s ease;
+    }
+    .workspace-sidebar {
+      min-width: 0;
+      position: sticky;
+      top: 61px;
+      height: calc(100vh - 61px);
+      overflow-y: auto;
+      padding: 14px 10px;
+      border-right: 1px solid var(--border);
+      background: linear-gradient(180deg, color-mix(in srgb, var(--glass-highlight) 82%, transparent), var(--bg-card));
+      backdrop-filter: blur(18px) saturate(140%);
+      -webkit-backdrop-filter: blur(18px) saturate(140%);
+      transition: opacity .2s ease, padding .2s ease;
+      z-index: 10;
+    }
+    .workspace-sidebar-header { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:4px 6px 12px; }
+    .workspace-sidebar-title { font-size:13px; font-weight:800; color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .workspace-sidebar-toggle { width:30px; height:30px; flex:0 0 auto; border:1px solid var(--border); border-radius:8px; background:var(--bg-secondary); color:var(--text-secondary); cursor:pointer; }
+    .workspace-sidebar-toggle:hover, .workspace-sidebar-toggle:focus-visible { color:var(--purple); border-color:var(--purple); outline:none; }
+    .workspace-group { margin:0 0 12px; }
+    .workspace-group-label { display:block; padding:7px 8px 5px; color:var(--text-secondary); font-size:10px; letter-spacing:.08em; text-transform:uppercase; }
+    .workspace-item { width:100%; display:flex; align-items:center; gap:9px; min-height:36px; padding:8px 9px; border:1px solid transparent; border-radius:9px; background:transparent; color:var(--text-secondary); text-align:left; cursor:pointer; font-size:12px; transition:var(--transition); }
+    .workspace-item:hover, .workspace-item:focus-visible { background:var(--bg-secondary); color:var(--text); outline:none; }
+    .workspace-item.active { background:var(--purple-light); border-color:color-mix(in srgb, var(--purple) 32%, transparent); color:var(--purple); font-weight:800; }
+    .workspace-item-icon { width:18px; text-align:center; flex:0 0 auto; font-size:15px; }
+    .workspace-item-label { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .workspace-empty { padding:14px 8px; color:var(--text-secondary); font-size:11px; line-height:1.5; }
+    .workspace-main { min-width:0; }
+    .workspace-drawer-open { display:none; border:1px solid var(--border); border-radius:9px; padding:8px 11px; background:var(--bg-card); color:var(--text-secondary); cursor:pointer; }
+    .workspace-drawer { display:none; }
+    .market-workspace-shell[data-sidebar-state="rail"] { grid-template-columns:56px minmax(0, 1fr); }
+    .market-workspace-shell[data-sidebar-state="rail"] .workspace-sidebar { padding-left:7px; padding-right:7px; }
+    .market-workspace-shell[data-sidebar-state="rail"] .workspace-sidebar-title,
+    .market-workspace-shell[data-sidebar-state="rail"] .workspace-group-label,
+    .market-workspace-shell[data-sidebar-state="rail"] .workspace-item-label { display:none; }
+    .market-workspace-shell[data-sidebar-state="rail"] .workspace-sidebar-header { justify-content:center; padding-left:0; padding-right:0; }
+    .market-workspace-shell[data-sidebar-state="rail"] .workspace-item { justify-content:center; padding-left:4px; padding-right:4px; }
     @media (max-width: 1100px) {
       .layout { grid-template-columns: 1fr; }
       .sidebar { display: none; }
@@ -1687,7 +1730,7 @@
       }
     }
     @supports not (backdrop-filter: blur(1px)) {
-      .header, .tabs, .sidebar, .category-card, .yield-card, .dash-collapse,
+      .header, .tabs, .sidebar, .workspace-sidebar, .category-card, .yield-card, .dash-collapse,
       .dash-collapse summary, .advisor-card, .option-strategy, .data-table,
       .chain-wrap, .modal-content {
         background: color-mix(in srgb, var(--bg-card) 88%, var(--bg)) !important;
@@ -1708,6 +1751,18 @@
     .layout { transition: grid-template-columns .28s ease; }
     body.guest-mode #guest-banner { display:block; }
     body.guest-mode .guest-admin-only { display:none !important; }
+    @media (max-width: 768px) {
+      .market-workspace-shell { display:block; min-height:0; }
+      .workspace-sidebar { display:none; }
+      .workspace-main { width:100%; }
+      .workspace-drawer-open { display:inline-flex; align-items:center; gap:6px; margin:8px 0 10px; }
+      .workspace-drawer { position:fixed; inset:0; z-index:1200; background:color-mix(in srgb, var(--bg) 74%, transparent); }
+      .workspace-drawer:not([hidden]) { display:block; }
+      .workspace-drawer-panel { width:min(300px,86vw); height:100%; overflow-y:auto; padding:16px 12px; background:var(--bg-card); border-right:1px solid var(--border); box-shadow:var(--shadow); }
+      .workspace-drawer-close { float:right; border:1px solid var(--border); border-radius:8px; padding:6px 9px; background:var(--bg-secondary); color:var(--text-secondary); cursor:pointer; }
+      .workspace-drawer-panel .workspace-sidebar-header { clear:both; padding-top:14px; }
+      .market-workspace-shell[data-sidebar-state="rail"] { grid-template-columns:1fr; }
+    }
     </style>
 <script>
 // MoneyMoney 登录守卫：以 Cookie(HttpOnly) 为主，localStorage 兼容；统一 credentials:include
@@ -1844,9 +1899,18 @@
       </div>
     </div>
   <div class="layout">
-    <main class="main">
+    <div id="market-workspace-shell" class="market-workspace-shell" data-market-scope="overview" data-sidebar-state="expanded">
+      <aside id="market-workspace-sidebar" class="workspace-sidebar" aria-label="市场功能区">
+        <div class="workspace-sidebar-header">
+          <div class="workspace-sidebar-title">市场功能区</div>
+          <button id="workspace-sidebar-toggle" class="workspace-sidebar-toggle" type="button" aria-expanded="true" aria-controls="workspace-sidebar-content" title="折叠功能区">‹</button>
+        </div>
+        <div id="workspace-sidebar-content"></div>
+      </aside>
+    <main id="market-workspace-main" class="main workspace-main">
       <div id="market-scope-bar" class="market-scope-bar"></div>
       <div id="utility-nav-bar" class="utility-nav-bar"></div>
+      <button id="workspace-drawer-open" class="workspace-drawer-open" type="button" onclick="openWorkspaceDrawer()">☰ 功能区</button>
       <div id="mm-toast-container"></div>
       <button id="theme-toggle-btn" onclick="toggleTheme()" title="浅色" aria-label="浅色" style="position:fixed;top:14px;right:18px;z-index:9999;width:38px;height:38px;border-radius:50%;border:1px solid var(--border);background:var(--bg-card);backdrop-filter:blur(10px);cursor:pointer;font-size:17px;display:flex;align-items:center;justify-content:center;box-shadow:var(--shadow);transition:transform .15s;" onmouseover="this.style.transform='scale(1.1)'" onmouseout="this.style.transform='scale(1)'">☀️</button>
       <!-- Market Overview Bar -->
@@ -2762,6 +2826,7 @@
       </div>
       <nav id="core-workspace-nav" class="core-workspace-nav" aria-label="核心工作区"></nav>
     </main>
+    </div>
     <aside class="sidebar" id="app-sidebar">
       <button class="sidebar-toggle" id="sidebar-edge-toggle" onclick="toggleSidebar()" title="收起侧栏">‹</button>
       <div class="sidebar-header">
@@ -2794,6 +2859,12 @@
       </div>
     </aside>
     <button class="sidebar-expand-fab" id="sidebar-expand-fab" onclick="toggleSidebar()" title="展开侧栏">›</button>
+  </div>
+  <div id="workspace-drawer" class="workspace-drawer" hidden>
+    <div class="workspace-drawer-panel" role="dialog" aria-modal="true" aria-label="市场功能区">
+      <button id="workspace-drawer-close" class="workspace-drawer-close" type="button" data-workspace-drawer-close onclick="closeWorkspaceDrawer()">关闭</button>
+      <div id="workspace-drawer-content"></div>
+    </div>
   </div>
   <div id="toast" class="toast"></div>
   <!-- Wallet Setup Modal -->
@@ -9310,8 +9381,144 @@ const CORE_NAV_ITEMS = [
   ['command', '🏠 指挥台'], ['radar', '🌐 雷达'], ['paper', '📈 模拟'],
   ['analysis', '🧠 分析'], ['positions', '💼 持仓'], ['risk', '🛡 风险'],
 ];
+const WORKSPACE_ITEM_CATALOG = {
+  overview: ['⌂', '市场总览'], radar: ['◉', '市场雷达'], analysis: ['⌁', '标的分析'],
+  backtest: ['⌘', '策略回测'], watchlist: ['★', '我的自选'], positions: ['▣', '我的持仓'],
+  risk: ['♡', '风险监控'], search: ['⌕', '搜索标的'], breadth: ['▥', '市场宽度'],
+  insider: ['♟', '内部人交易'], institutional: ['♜', '机构持仓'], analyst: ['◎', '分析师共识'],
+  fundamentals: ['▥', '基本面质量'], 'short-interest': ['♟', '空头利息'],
+  'option-chain': ['◌', '期权链'], volatility: ['∿', '隐含波动率'], greeks: ['Δ', 'Greeks'],
+  'funding-rate': ['⇄', '资金费率'], 'open-interest': ['◫', '未平仓量'], 'on-chain': ['⌁', '链上数据'],
+  'prediction-radar': ['◎', '预测雷达'],
+};
+const WORKSPACE_BASE_GROUPS = [
+  ['market', '市场', ['overview', 'radar', 'analysis']],
+  ['research', '研究', ['backtest', 'risk', 'search']],
+  ['portfolio', '组合', ['watchlist', 'positions']],
+];
+const WORKSPACE_SPECIFIC_IDS = {
+  overview: [], watchlist: [],
+  stocks: ['breadth', 'insider', 'institutional', 'analyst', 'fundamentals', 'short-interest'],
+  options: ['option-chain', 'volatility', 'greeks'],
+  crypto: ['funding-rate', 'open-interest', 'on-chain'],
+  prediction: ['prediction-radar'],
+};
 let activeMarketScope = 'overview';
+let activeWorkspaceId = 'overview';
 let marketScopeRequestEpoch = 0;
+const workspaceNavigationState = new Map();
+const WORKSPACE_SIDEBAR_STATE_KEY = 'mm-workspace-sidebar-state';
+
+function workspaceFallbackNavigation(scope) {
+  const groups = WORKSPACE_BASE_GROUPS.map(([id, label, ids]) => ({
+    id, label, items: ids.map(itemId => ({ id: itemId, icon: WORKSPACE_ITEM_CATALOG[itemId][0], label: WORKSPACE_ITEM_CATALOG[itemId][1] })),
+  }));
+  const specific = WORKSPACE_SPECIFIC_IDS[scope] || [];
+  if (specific.length) groups.push({ id: 'market-specific', label: '市场专属', items: specific.map(itemId => ({ id: itemId, icon: WORKSPACE_ITEM_CATALOG[itemId][0], label: WORKSPACE_ITEM_CATALOG[itemId][1] })) });
+  return groups;
+}
+
+function workspaceMenuMarkup(groups) {
+  return groups.map(group => `<section class="workspace-group" data-workspace-group="${group.id}"><div class="workspace-group-label">${marketResearchEscape(group.label)}</div>${group.items.map(item => `<button type="button" class="workspace-item${item.id === activeWorkspaceId ? ' active' : ''}" data-workspace-id="${item.id}" onclick="openWorkspace('${item.id}')" aria-current="${item.id === activeWorkspaceId ? 'page' : 'false'}"><span class="workspace-item-icon">${marketResearchEscape(item.icon)}</span><span class="workspace-item-label">${marketResearchEscape(item.label)}</span></button>`).join('')}</section>`).join('');
+}
+
+function renderWorkspaceMenu(groups) {
+  const markup = groups?.length ? workspaceMenuMarkup(groups) : '<div class="workspace-empty">当前市场暂无专属功能。</div>';
+  const content = document.getElementById('workspace-sidebar-content');
+  const drawer = document.getElementById('workspace-drawer-content');
+  if (content) content.innerHTML = markup;
+  if (drawer) drawer.innerHTML = `<div class="workspace-sidebar-header"><div class="workspace-sidebar-title">市场功能区</div></div>${markup}`;
+}
+
+function renderWorkspaceSidebar() {
+  const shell = document.getElementById('market-workspace-shell');
+  if (!shell) return;
+  shell.dataset.marketScope = activeMarketScope;
+  const state = workspaceNavigationState.get(activeMarketScope) || { groups: workspaceFallbackNavigation(activeMarketScope), requested: false };
+  workspaceNavigationState.set(activeMarketScope, state);
+  renderWorkspaceMenu(state.groups);
+  if (state.requested) return;
+  state.requested = true;
+  fetch(`/api/workspace/navigation?scope=${encodeURIComponent(activeMarketScope)}`, { cache: 'no-store' })
+    .then(response => response.ok ? response.json() : null)
+    .then(payload => {
+      if (!payload?.success || !Array.isArray(payload.groups)) return;
+      workspaceNavigationState.set(activeMarketScope, { groups: payload.groups, requested: true });
+      if (shell.dataset.marketScope === activeMarketScope) renderWorkspaceMenu(payload.groups);
+    })
+    .catch(() => {});
+}
+
+function setWorkspaceSidebarState(state) {
+  const next = state === 'rail' ? 'rail' : 'expanded';
+  const shell = document.getElementById('market-workspace-shell');
+  const button = document.getElementById('workspace-sidebar-toggle');
+  if (shell) shell.dataset.sidebarState = next;
+  if (button) {
+    button.textContent = next === 'rail' ? '›' : '‹';
+    button.title = next === 'rail' ? '展开功能区' : '折叠功能区';
+    button.setAttribute('aria-expanded', next === 'expanded' ? 'true' : 'false');
+  }
+  try { localStorage.setItem(WORKSPACE_SIDEBAR_STATE_KEY, next); } catch {}
+}
+window.toggleWorkspaceSidebar = function() {
+  const shell = document.getElementById('market-workspace-shell');
+  setWorkspaceSidebarState(shell?.dataset.sidebarState === 'rail' ? 'expanded' : 'rail');
+};
+window.openWorkspaceDrawer = function() {
+  const drawer = document.getElementById('workspace-drawer');
+  if (!drawer) return;
+  drawer.hidden = false;
+  document.getElementById('workspace-drawer-close')?.focus();
+};
+window.closeWorkspaceDrawer = function() {
+  const drawer = document.getElementById('workspace-drawer');
+  if (!drawer) return;
+  drawer.hidden = true;
+  document.getElementById('workspace-drawer-open')?.focus();
+};
+function workspaceTabFor(id) {
+  if (id === 'overview') return 'command';
+  if (id === 'radar' || id === 'prediction-radar') return marketRadarTab();
+  if (id === 'backtest') return 'backtest';
+  if (id === 'analysis') return 'analysis';
+  if (id === 'watchlist' || id === 'positions') return 'positions';
+  if (id === 'risk') return 'risk';
+  if (id === 'search') return null;
+  if (['breadth', 'insider', 'institutional', 'analyst', 'fundamentals', 'short-interest'].includes(id)) return 'stocks';
+  if (['option-chain', 'volatility', 'greeks'].includes(id)) return 'options';
+  if (['funding-rate', 'open-interest', 'on-chain'].includes(id)) return 'binance';
+  return 'command';
+}
+window.openWorkspace = function(id) {
+  const groups = workspaceNavigationState.get(activeMarketScope)?.groups || workspaceFallbackNavigation(activeMarketScope);
+  if (!groups.some(group => group.items.some(item => item.id === id))) return;
+  activeWorkspaceId = id;
+  renderWorkspaceMenu(groups);
+  if (id === 'search') {
+    closeWorkspaceDrawer();
+    openGlobalSearch();
+    return;
+  }
+  const targetTab = workspaceTabFor(id);
+  if (targetTab) showTab(targetTab, null, { scopeAlreadySynced: true });
+  closeWorkspaceDrawer();
+  const section = document.querySelector(`[data-collapse-key="stocks-${id}"]`);
+  if (section) {
+    section.hidden = false;
+    section.open = true;
+    setTimeout(() => section.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0);
+  }
+};
+
+(function initWorkspaceSidebar() {
+  let state = 'expanded';
+  try { state = localStorage.getItem(WORKSPACE_SIDEBAR_STATE_KEY) === 'rail' ? 'rail' : 'expanded'; } catch {}
+  setWorkspaceSidebarState(state);
+  document.getElementById('workspace-sidebar-toggle')?.addEventListener('click', window.toggleWorkspaceSidebar);
+  document.addEventListener('keydown', event => { if (event.key === 'Escape') window.closeWorkspaceDrawer(); });
+  document.getElementById('workspace-drawer')?.addEventListener('click', event => { if (event.target?.id === 'workspace-drawer') window.closeWorkspaceDrawer(); });
+})();
 
 function isMarketScope(value) { return MARKET_SCOPES.some(scope => scope.id === value); }
 function marketRadarTab(scope = activeMarketScope) {
@@ -9425,6 +9632,7 @@ function renderNavigationState() {
   renderMarketScopeBar();
   renderUtilityNav();
   renderCoreNav();
+  renderWorkspaceSidebar();
   document.querySelectorAll('[data-market-scope]').forEach(node => node.classList.toggle('active', node.dataset.marketScope === activeMarketScope));
   document.querySelectorAll('[data-tab]').forEach(node => node.classList.toggle('active', node.dataset.tab === (window.mm_active_tab || 'command')));
   applyMarketScopeView();
@@ -9436,6 +9644,7 @@ function setMarketScope(scope, options = {}) {
   if (!isMarketScope(scope)) return;
   abortMarketScopedRequests();
   activeMarketScope = scope;
+  activeWorkspaceId = scope === 'watchlist' ? 'watchlist' : 'overview';
   marketScopeRequestEpoch += 1;
   if (typeof loadedStockSections !== 'undefined') loadedStockSections.clear();
   if (typeof eventCalendarState !== 'undefined') { eventCalendarState.cache = null; eventCalendarState.cacheAt = 0; }
@@ -9468,10 +9677,6 @@ function setMarketScope(scope, options = {}) {
   updateBacktestScopeNote();
   const backtestInput = document.getElementById('bt-market-id');
   if (backtestInput) backtestInput.value = '';
-  const backtestResults = document.getElementById('backtest-results');
-  const backtestCompare = document.getElementById('backtest-compare');
-  if (backtestResults) backtestResults.innerHTML = '';
-  if (backtestCompare) backtestCompare.innerHTML = '';
   loadNewsTicker(); loadMarketTimeline();
   loadMarketOverview();
   if (scope === 'overview') loadCrossAssetCorrelation();

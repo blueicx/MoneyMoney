@@ -14,6 +14,19 @@ test('market result controls use the active theme', () => {
   assert.doesNotMatch(html, /class="backtest-panel theme-scoped-backtest-panel" style="display:none"/);
 });
 
+test('market workspace sidebar uses the MoneyMoney theme and responsive shell', () => {
+  assert.match(html, /id="market-workspace-shell"/);
+  assert.match(html, /id="market-workspace-sidebar"/);
+  assert.match(html, /id="market-workspace-main"/);
+  assert.match(html, /data-sidebar-state="expanded"/);
+  assert.match(html, /aria-label="市场功能区"/);
+  assert.match(html, /workspace-sidebar-toggle/);
+  assert.match(html, /id="workspace-drawer"/);
+  assert.match(html, /--bg-card|--bg-secondary/);
+  assert.match(html, /mm-workspace-sidebar-state/);
+  assert.equal((html.match(/const backtestResults/g) || []).length, 1, 'market switching script must not redeclare backtestResults');
+});
+
 test('backtest route dispatches by scope and does not silently reuse prediction data', () => {
   assert.match(server, /req\.query\.scope/);
   assert.match(server, /runStockBacktest/);
