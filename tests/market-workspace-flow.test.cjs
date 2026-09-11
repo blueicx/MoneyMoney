@@ -56,3 +56,11 @@ test('回测结果可按当前市场保存候选并跳转提醒', () => {
   assert.match(html, /saveBacktestCandidate/);
   assert.match(html, /openCandidateMonitor/);
 });
+
+test('筛选结果提供同市场详情、候选和回测动作', () => {
+  assert.match(html, /openScreenerDetail\(\$\{index\}\)/);
+  assert.match(html, /saveScreenerCandidate\(\$\{index\}\)/);
+  assert.match(html, /runScreenerBacktest\(\$\{index\}\)/);
+  assert.match(html, /screenerInstrumentRef/);
+  assert.match(html, /setWorkspaceInstrument\(instrument\.symbol\)/);
+});

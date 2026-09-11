@@ -253,6 +253,8 @@
     .workspace-watchlist-columns { display:flex; gap:6px; align-items:center; flex-wrap:wrap; color:var(--text-secondary); font-size:11px; }
     .workspace-watchlist-columns label { display:inline-flex; gap:4px; align-items:center; cursor:pointer; }
     .workspace-watchlist-columns input { accent-color:var(--purple); }
+    .market-research-actions { display:flex; gap:5px; flex-wrap:wrap; margin-top:7px; }
+    .market-research-actions .tab { padding:4px 7px; font-size:11px; }
     .market-workspace-shell[data-sidebar-state="rail"] { grid-template-columns:56px minmax(0, 1fr); }
     .market-workspace-shell[data-sidebar-state="rail"] .workspace-sidebar { padding-left:7px; padding-right:7px; }
     .market-workspace-shell[data-sidebar-state="rail"] .workspace-sidebar-title,
@@ -10082,10 +10084,10 @@ function renderMarketScreener(data) {
   }
   const page = window.mm_screenerState.page || 1;
   const totalPages = window.mm_screenerState.totalPages || 1;
-  const listHtml = rows.map(row => {
+  const listHtml = rows.map((row, index) => {
     const values = fields.slice(0, 3).map(field => `${marketResearchEscape(field.label)}: ${marketResearchEscape(row[field.key] ?? '—')}`).join(' · ');
     const id = marketResearchEscape(row.id || row.symbol || '');
-    return `<button class="market-research-row" type="button" data-instrument-id="${id}" onclick="addScreenerIdToCompare(this.dataset.instrumentId)"><strong>${marketResearchEscape(row.title || row.symbol || row.id)}</strong><span>${values}</span></button>`;
+    return `<article class="market-research-row" data-instrument-id="${id}"><strong>${marketResearchEscape(row.title || row.symbol || row.id)}</strong><span>${values}</span><div class="market-research-actions"><button class="tab" type="button" onclick="addScreenerIdToCompare(this.closest('[data-instrument-id]').dataset.instrumentId)">比较</button><button class="tab" type="button" onclick="openScreenerDetail(${index})">详情</button><button class="tab" type="button" onclick="saveScreenerCandidate(${index})">☆ 候选</button><button class="tab active" type="button" onclick="runScreenerBacktest(${index})">🧪 回测</button></div></article>`;
   }).join('');
   const paginationHtml = totalPages > 1 ? `<div style="display:flex;justify-content:center;gap:10px;margin-top:10px;"><button class="tab" onclick="loadMarketScreenerPage(${Math.max(1, page - 1)})">上一页</button><span style="padding:10px;font-size:12px;">${page} / ${totalPages}</span><button class="tab" onclick="loadMarketScreenerPage(${Math.min(totalPages, page + 1)})">下一页</button></div>` : '';
   resultsEl.innerHTML = listHtml + paginationHtml;
@@ -10158,6 +10160,50 @@ function loadMarketScreenerPage(page) {
   const minimum = document.getElementById('market-screener-min')?.value;
   return minimum === '' || minimum == null ? loadMarketResearch(page) : loadMarketScreenerFilter(page);
 }
+function screenerInstrumentRef(index) {
+  const row = window.mm_screenerState?.rows?.[Number(index)];
+  if (!row) return null;
+  const raw = String(row.id || row.symbol || '').trim();
+  if (!raw) return null;
+  if (activeMarketScope === 'stocks') {
+    const symbol = raw.split(':').pop().replace(/^us/i, '').toUpperCase();
+    return { id: raw.includes(':') ? raw : `stock:us:${symbol}`, type: 'stock', venue: 'us', symbol, title: String(row.title || symbol), aliases: [] };
+  }
+  if (activeMarketScope === 'crypto') {
+    const symbol = raw.split(':').pop().toUpperCase();
+    return { id: raw.includes(':') ? raw : `crypto:binance:${symbol}`, type: 'crypto', venue: 'binance', symbol, title: String(row.title || symbol), aliases: [] };
+  }
+  if (activeMarketScope === 'prediction') {
+    const marketId = raw.split(':').pop();
+    return { id: raw.includes(':') ? raw : `prediction:predictfun:${marketId}`, type: 'prediction', venue: 'predictfun', symbol: marketId, title: String(row.title || marketId), aliases: [] };
+  }
+  return null;
+}
+window.openScreenerDetail = function(index) {
+  const instrument = screenerInstrumentRef(index);
+  if (!instrument) { if (typeof window.showToast === 'function') window.showToast('当前市场暂无统一详情入口', 'info'); return; }
+  setWorkspaceInstrument(instrument.symbol);
+  openUnifiedInstrument(instrument);
+};
+window.runScreenerBacktest = function(index) {
+  const instrument = screenerInstrumentRef(index);
+  if (!instrument || !['stocks', 'crypto'].includes(activeMarketScope)) {
+    if (typeof window.showToast === 'function') window.showToast('当前市场暂无可用的资产回测历史数据', 'info');
+    return;
+  }
+  setWorkspaceInstrument(instrument.symbol);
+  const input = document.getElementById('bt-market-id');
+  if (input) input.value = instrument.symbol;
+  showTab('backtest');
+  setTimeout(() => runBacktest(), 0);
+};
+window.saveScreenerCandidate = function(index) {
+  const instrument = screenerInstrumentRef(index);
+  if (!instrument) return;
+  const existing = readBacktestCandidates().filter(item => !(item.scope === activeMarketScope && item.instrument === instrument.symbol && item.source === 'screener'));
+  writeBacktestCandidates([{ scope: activeMarketScope, instrument: instrument.symbol, strategy: 'momentum', strategyLabel: '筛选候选', source: 'screener', returnPct: 0, winRatePct: 0, maxDrawdownPct: 0, totalTrades: 0, savedAt: new Date().toISOString() }, ...existing]);
+  if (typeof window.showToast === 'function') window.showToast(`已保存 ${instrument.symbol} 为当前市场候选`, 'success');
+};
 function addScreenerIdToCompare(id) {
   const input = document.getElementById('market-compare-ids');
   if (!input || !id) return;
