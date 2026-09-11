@@ -32,3 +32,12 @@ test('工作区上下文写入 URL，并保留旧请求失效令牌', () => {
   assert.match(html, /marketScopeRequestEpoch/);
   assert.match(server, /isWorkspaceAllowed/);
 });
+
+test('自选页提供表格和卡片视图，并从当前标的进入对应市场', () => {
+  assert.match(html, /id="workspace-watchlist-panel"/);
+  assert.match(html, /data-watchlist-view="table"/);
+  assert.match(html, /data-watchlist-view="cards"/);
+  assert.match(html, /workspace-watchlist-groups/);
+  assert.match(html, /openWatchlistInstrument/);
+  assert.match(html, /setMarketScope\(scope, \{ openTab: false \}\)/);
+});

@@ -361,8 +361,9 @@ git commit -m "feat: define scoped market dashboard cards"
 - 修改：`src/web/public/index.html`
 - 修改：`src/web/server.ts`
 - 修改：`tests/market-workspace-flow.test.cjs`
+- 修改：`tests/market-workspace-api.test.cjs`
 
-- [ ] **步骤 1：盘点并复用现有自选 API**
+- [x] **步骤 1：盘点并复用现有自选 API**
 
 复用 `/api/watchlist`、统一标的 ID、模拟持仓查询和现有权限 middleware；新增返回不得泄露 owner、账户或敏感持仓标识。股票自选、虚拟币自选、期权自选和预测市场自选必须按市场类型隔离。
 
@@ -374,19 +375,19 @@ git commit -m "feat: define scoped market dashboard cards"
 
 桌面端提供表格/卡片切换；表格默认显示标的、最新价、涨跌、数据源状态和最后更新时间；市场专属字段由菜单矩阵决定。卡片显示行情摘要、状态和加入/移出自选按钮。列配置保存在当前用户/本地作用域，不把股票列带到虚拟币。
 
-- [ ] **步骤 4：实现点击标的预览**
+- [x] **步骤 4：实现点击标的预览**
 
 点击表格行或卡片设置当前标的，右侧详情、雷达、分析和回测入口全部使用该标的；保留同一列表的上一个/下一个切换，不回到热门股票页面。
 
-- [ ] **步骤 5：测试和 Commit**
+- [x] **步骤 5：测试和 Commit**（已完成本批接口、静态和浏览器 smoke；列配置/加入移出按钮仍留在后续）
 
 运行：`npm run build; npm test`
 
 预期：自选分组、双视图、列配置和标的预览测试通过，访客 GET 仍可读，所有写入路径仍被阻断。
 
 ```bash
-git add src/web/public/index.html src/web/server.ts tests/market-workspace-flow.test.cjs
-git commit -m "feat: add grouped dual-view market watchlists"
+git add src/web/public/index.html src/web/server.ts tests/market-workspace-flow.test.cjs tests/market-workspace-api.test.cjs docs/superpowers/plans/2026-09-11-left-sidebar-market-workspace.md
+git commit -m "feat: add scoped dual-view market watchlists"
 ```
 
 ## 任务 7：吸收筛选—详情—回测—候选—监控研究闭环

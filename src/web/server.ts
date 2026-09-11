@@ -5197,6 +5197,44 @@ app.get('/api/instruments/:type/:venue/:symbol/timeline', async (req, res) => {
 // Shared web/Telegram state. The current deployment intentionally has one
 // owner; ownerId remains explicit so a future multi-user migration is local.
 app.get('/api/watchlist', (_req, res) => res.json({ success: true, data: unifiedAlertStore.listWatchlist(), ownerId: 'admin' }));
+app.get('/api/workspace/watchlist', (req, res) => {
+  const rawScope = String(req.query.scope || 'watchlist');
+  if (!MARKET_SCOPES.includes(rawScope as MarketScope)) {
+    return res.status(400).json({ success: false, error: '未知市场 scope' });
+  }
+  const scope = rawScope as MarketScope;
+  const scopeForId = (value: string): MarketScope | null => {
+    const id = value.toLowerCase();
+    if (id.startsWith('stock:')) return 'stocks';
+    if (id.startsWith('crypto:')) return 'crypto';
+    if (id.startsWith('option:')) return 'options';
+    if (id.startsWith('prediction:')) return 'prediction';
+    return null;
+  };
+  const allWatchlist = unifiedAlertStore.listWatchlist().map(instrumentId => ({
+    instrumentId: String(instrumentId),
+    title: String(instrumentId),
+    type: scopeForId(String(instrumentId)),
+  }));
+  const watchlist = scope === 'overview' || scope === 'watchlist'
+    ? allWatchlist
+    : allWatchlist.filter(item => item.type === scope);
+  const token = extractAuthToken(req as any);
+  const payload = token ? verifyLoginToken(token) : null;
+  const paper = payload?.role === 'guest' ? [] : (scope === 'overview' || scope === 'watchlist'
+    ? unifiedPaperLedgerStore.get().positions
+    : filterUnifiedPaperLedger(unifiedPaperLedgerStore.get(), scope).positions).map(position => ({
+      instrumentId: String(position.instrumentId),
+      title: String(position.title || position.instrumentId),
+      type: position.instrumentType || scopeForId(String(position.instrumentId)),
+      quantity: Number(position.quantity || 0),
+      currentPrice: Number(position.currentPrice || position.averageEntryPrice || 0),
+    }));
+  return res.json({ success: true, scope, groups: [
+    { id: 'watchlist', label: '我的自选', items: watchlist },
+    { id: 'paper', label: '模拟持仓', items: paper },
+  ] });
+});
 app.post('/api/watchlist', (req, res) => {
   const instrumentId = String(req.body?.instrumentId || '').trim();
   if (!instrumentId) return res.status(400).json({ success: false, error: '缺少标的 ID' });

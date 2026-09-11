@@ -236,6 +236,17 @@
     .workspace-dashboard-card-title { font-size:12px; font-weight:800; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
     .workspace-dashboard-card-meta { display:flex; justify-content:space-between; gap:6px; margin-top:6px; font-size:10px; color:var(--text-secondary); }
     .workspace-dashboard-status { color:var(--yellow); }
+    .watchlist-view-toggle { display:flex; gap:5px; }
+    .workspace-watchlist-group { margin-top:14px; }
+    .workspace-watchlist-group-title { display:flex; justify-content:space-between; gap:8px; color:var(--text-secondary); font-size:11px; font-weight:800; margin-bottom:7px; }
+    .workspace-watchlist-table { width:100%; border-collapse:collapse; font-size:12px; }
+    .workspace-watchlist-table th, .workspace-watchlist-table td { padding:8px 6px; border-bottom:1px solid var(--border); text-align:left; }
+    .workspace-watchlist-table th { color:var(--text-secondary); font-size:10px; font-weight:600; }
+    .workspace-watchlist-row { width:100%; border:0; background:transparent; color:var(--text); cursor:pointer; text-align:left; }
+    .workspace-watchlist-row:hover td, .workspace-watchlist-row:focus-visible td { background:var(--bg-secondary); outline:none; }
+    .workspace-watchlist-cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:8px; }
+    .workspace-watchlist-card { border:1px solid var(--border); border-radius:10px; padding:10px; background:var(--bg-secondary); cursor:pointer; color:var(--text); text-align:left; }
+    .workspace-watchlist-card:hover, .workspace-watchlist-card:focus-visible { border-color:var(--purple); outline:none; }
     .market-workspace-shell[data-sidebar-state="rail"] { grid-template-columns:56px minmax(0, 1fr); }
     .market-workspace-shell[data-sidebar-state="rail"] .workspace-sidebar { padding-left:7px; padding-right:7px; }
     .market-workspace-shell[data-sidebar-state="rail"] .workspace-sidebar-title,
@@ -1988,9 +1999,15 @@
         <div id="categories-list" class="categories-list"></div>
       </div>
       <div id="positions-tab" class="tab-content">
-        <div id="watchlist-stock-library" class="stock-library-panel" data-market-scopes="watchlist" style="margin-bottom:20px;">
-          <div class="section-title">⭐ 我的自选</div>
-          <div id="watchlist-stock-library-items" data-stock-library-item="watchlist" class="stock-library-grid"><div class="empty-tip">正在读取股票自选...</div></div>
+        <div id="workspace-watchlist-panel" class="stock-library-panel" data-market-scopes="watchlist" style="margin-bottom:20px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
+            <div class="section-title" style="margin-bottom:0;">⭐ 我的自选</div>
+            <div class="watchlist-view-toggle" role="group" aria-label="自选视图">
+              <button type="button" class="tab active" data-watchlist-view="table" onclick="setWorkspaceWatchlistView('table')">▤ 表格</button>
+              <button type="button" class="tab" data-watchlist-view="cards" onclick="setWorkspaceWatchlistView('cards')">▦ 卡片</button>
+            </div>
+          </div>
+          <div id="workspace-watchlist-groups" class="workspace-watchlist-groups"><div class="empty-tip">正在读取当前市场自选...</div></div>
         </div>
         <div class="section-title">我的持仓</div>
         <table class="data-table">
@@ -9533,6 +9550,100 @@ function loadWorkspaceDashboardCards() {
     .catch(() => {});
 }
 
+let workspaceWatchlistView = 'table';
+let workspaceWatchlistRequested = false;
+let workspaceWatchlistGroups = null;
+
+function watchlistScopeLabel(scope) {
+  return ({ stocks: '股票', options: '期权', crypto: '虚拟币', prediction: '预测市场' })[scope] || '其他';
+}
+
+function watchlistInstrumentScope(instrumentId) {
+  const value = String(instrumentId || '').toLowerCase();
+  if (value.startsWith('stock:')) return 'stocks';
+  if (value.startsWith('crypto:')) return 'crypto';
+  if (value.startsWith('option:')) return 'options';
+  if (value.startsWith('prediction:')) return 'prediction';
+  return activeMarketScope === 'watchlist' ? 'overview' : activeMarketScope;
+}
+
+function renderWorkspaceWatchlist(groups) {
+  const host = document.getElementById('workspace-watchlist-groups');
+  if (!host) return;
+  if (!groups?.length || !groups.some(group => group.items?.length)) {
+    host.innerHTML = '<div class="workspace-empty">当前市场暂无自选标的。请从股票、期权或虚拟币工作区加入。</div>';
+    return;
+  }
+  const renderItem = item => {
+    const id = String(item.instrumentId || '');
+    const scope = watchlistInstrumentScope(id);
+    const title = String(item.title || id);
+    const quantity = item.quantity == null ? '' : `${Number(item.quantity)} × ${Number(item.currentPrice || 0).toFixed(4)}`;
+    return { id, scope, title, quantity };
+  };
+  host.innerHTML = groups.map(group => {
+    const items = (group.items || []).map(renderItem).filter(item => item.id);
+    if (!items.length) return '';
+    const body = workspaceWatchlistView === 'cards'
+      ? `<div class="workspace-watchlist-cards">${items.map(item => `<button type="button" class="workspace-watchlist-card" data-watchlist-instrument="${marketResearchEscape(item.id)}" onclick="openWatchlistInstrument(this.dataset.watchlistInstrument)"><strong>${marketResearchEscape(item.title)}</strong><small style="display:block;margin-top:5px;color:var(--text-secondary);">${watchlistScopeLabel(item.scope)}${item.quantity ? ` · ${marketResearchEscape(item.quantity)}` : ''}</small></button>`).join('')}</div>`
+      : `<table class="workspace-watchlist-table"><thead><tr><th>标的</th><th>市场</th><th>状态</th></tr></thead><tbody>${items.map(item => `<tr class="workspace-watchlist-row" tabindex="0" role="button" data-watchlist-instrument="${marketResearchEscape(item.id)}" onclick="openWatchlistInstrument(this.dataset.watchlistInstrument)" onkeydown="if(event.key==='Enter')openWatchlistInstrument(this.dataset.watchlistInstrument)"><td><strong>${marketResearchEscape(item.title)}</strong></td><td>${watchlistScopeLabel(item.scope)}</td><td>${item.quantity ? marketResearchEscape(item.quantity) : '自选'}</td></tr>`).join('')}</tbody></table>`;
+    return `<section class="workspace-watchlist-group"><div class="workspace-watchlist-group-title"><span>${marketResearchEscape(group.label || '标的库')}</span><span>${items.length}</span></div>${body}</section>`;
+  }).join('') || '<div class="workspace-empty">当前市场暂无自选标的。</div>';
+}
+
+window.setWorkspaceWatchlistView = function(view) {
+  workspaceWatchlistView = view === 'cards' ? 'cards' : 'table';
+  document.querySelectorAll('[data-watchlist-view]').forEach(button => button.classList.toggle('active', button.dataset.watchlistView === workspaceWatchlistView));
+  try { localStorage.setItem('mm-watchlist-view', workspaceWatchlistView); } catch {}
+  renderWorkspaceWatchlist(workspaceWatchlistGroups);
+};
+
+window.openWatchlistInstrument = function(instrumentId) {
+  const id = String(instrumentId || '').trim();
+  if (!id) return;
+  const scope = watchlistInstrumentScope(id);
+  const symbol = id.split(':').pop() || id;
+  if (!['stocks', 'options', 'crypto', 'prediction'].includes(scope)) return;
+  setMarketScope(scope, { openTab: false });
+  activeWorkspaceId = 'analysis';
+  setWorkspaceInstrument(symbol);
+  if (scope === 'stocks') {
+    showTab('stocks', null, { scopeAlreadySynced: true });
+    selectStockSymbol(symbol, stockNameForSymbol(symbol));
+  } else if (scope === 'crypto') {
+    showTab('binance', null, { scopeAlreadySynced: true });
+    bnSetSymbol(symbol);
+  } else if (scope === 'options') {
+    showTab('options', null, { scopeAlreadySynced: true });
+    setOptionAsset(symbol);
+  } else {
+    showTab('radar', null, { scopeAlreadySynced: true });
+  }
+};
+
+function loadWorkspaceWatchlist(force = false) {
+  const host = document.getElementById('workspace-watchlist-groups');
+  if (!host || activeMarketScope !== 'watchlist') return;
+  if (!force && workspaceWatchlistRequested) {
+    renderWorkspaceWatchlist(workspaceWatchlistGroups);
+    return;
+  }
+  workspaceWatchlistRequested = true;
+  host.innerHTML = '<div class="empty-tip">正在读取当前市场自选...</div>';
+  fetch('/api/workspace/watchlist?scope=watchlist', { cache: 'no-store' })
+    .then(response => response.ok ? response.json() : null)
+    .then(payload => {
+      if (!payload?.success || !Array.isArray(payload.groups)) throw new Error(payload?.error || '自选库暂时不可用');
+      workspaceWatchlistGroups = payload.groups;
+      renderWorkspaceWatchlist(workspaceWatchlistGroups);
+    })
+    .catch(error => { host.innerHTML = `<div class="workspace-empty" style="color:var(--red);">${marketResearchEscape(error.message || '自选库暂时不可用')}</div>`; });
+}
+
+(function initWorkspaceWatchlistView() {
+  try { workspaceWatchlistView = localStorage.getItem('mm-watchlist-view') === 'cards' ? 'cards' : 'table'; } catch {}
+})();
+
 function setWorkspaceSidebarState(state) {
   const next = state === 'rail' ? 'rail' : 'expanded';
   const shell = document.getElementById('market-workspace-shell');
@@ -9719,6 +9830,7 @@ function renderNavigationState() {
   renderCoreNav();
   renderWorkspaceSidebar();
   loadWorkspaceDashboardCards();
+  if (activeMarketScope === 'watchlist') loadWorkspaceWatchlist();
   document.querySelectorAll('[data-market-scope]').forEach(node => node.classList.toggle('active', node.dataset.marketScope === activeMarketScope));
   document.querySelectorAll('[data-tab]').forEach(node => node.classList.toggle('active', node.dataset.tab === (window.mm_active_tab || 'command')));
   applyMarketScopeView();
