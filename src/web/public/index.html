@@ -1936,7 +1936,7 @@
       <div id="mm-toast-container"></div>
       <button id="theme-toggle-btn" onclick="toggleTheme()" title="浅色" aria-label="浅色" style="position:fixed;top:14px;right:18px;z-index:9999;width:38px;height:38px;border-radius:50%;border:1px solid var(--border);background:var(--bg-card);backdrop-filter:blur(10px);cursor:pointer;font-size:17px;display:flex;align-items:center;justify-content:center;box-shadow:var(--shadow);transition:transform .15s;" onmouseover="this.style.transform='scale(1.1)'" onmouseout="this.style.transform='scale(1)'">☀️</button>
       <!-- Market Overview Bar -->
-      <div id="market-overview" data-market-scopes="overview stocks options crypto prediction watchlist" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:16px;padding:12px 14px;background:var(--bg-card);border-radius:12px;border:1px solid var(--border);overflow-x:auto;">
+      <div id="market-overview" data-market-scopes="overview stocks options crypto prediction watchlist" data-workspace-ids="overview" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:16px;padding:12px 14px;background:var(--bg-card);border-radius:12px;border:1px solid var(--border);overflow-x:auto;">
         <span id="market-overview-heading" style="flex:0 0 auto;font-size:11px;font-weight:800;color:var(--purple);white-space:nowrap;">总体大盘</span>
         <div id="market-overview-items" style="display:flex;gap:8px;flex:1;flex-wrap:wrap;min-width:0;">
           <span class="skl" style="min-width:100px;height:36px;"></span>
@@ -1946,8 +1946,8 @@
         </div>
         <span id="market-overview-status" style="flex:0 0 auto;color:var(--text-secondary);font-size:10px;white-space:nowrap;">数据更新时间：-</span>
       </div>
-      <div id="workspace-dashboard-cards" class="workspace-dashboard-cards" aria-label="当前市场看板层级"></div>
-      <section id="market-research-tools" data-market-scopes="stocks options crypto prediction" style="display:grid;grid-template-columns:minmax(300px,1.2fr) minmax(260px,1fr);gap:12px;margin-bottom:16px;">
+      <div id="workspace-dashboard-cards" class="workspace-dashboard-cards" data-workspace-ids="overview" aria-label="当前市场看板层级"></div>
+      <section id="market-research-tools" data-market-scopes="stocks options crypto prediction" data-workspace-ids="overview" style="display:grid;grid-template-columns:minmax(300px,1.2fr) minmax(260px,1fr);gap:12px;margin-bottom:16px;">
         <div id="market-screener" class="glass-card" style="padding:14px;border-radius:14px;">
           <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px;"><strong>🔎 当前市场筛选</strong><button class="tab" type="button" onclick="loadMarketResearch()">刷新</button></div>
           <div id="market-screener-fields" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;"><span class="empty-tip">选择市场后加载筛选字段</span></div>

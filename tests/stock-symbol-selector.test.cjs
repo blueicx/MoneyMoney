@@ -31,6 +31,13 @@ test('stock market does not render popular stock cards in the center', () => {
   assert.doesNotMatch(html, /loadPopularStocks\(signal\)/);
 });
 
+test('stock exclusive workspaces hide shared overview and selection tools', () => {
+  for (const id of ['market-overview', 'workspace-dashboard-cards', 'market-research-tools']) {
+    assert.match(html, new RegExp(`id="${id}"[^>]*data-workspace-ids="overview"`));
+  }
+  assert.match(html, /function applyWorkspaceView\(\)[\s\S]*querySelectorAll\('\[data-workspace-id\], \[data-workspace-ids\]'\)/);
+});
+
 test('stock feature panels keep only their feature content', () => {
   for (const key of ['insider', 'institutional', 'analyst', 'fundamentals', 'short-interest']) {
     assert.doesNotMatch(html, new RegExp(`data-stock-radar-toolbar=["']${key}["']`));
