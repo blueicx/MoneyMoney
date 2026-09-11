@@ -28,6 +28,8 @@ test('workspace watchlist API is scoped and hides owner information', () => {
   assert.match(serverSource, /app\.get\(['"]\/api\/workspace\/watchlist['"]/);
   assert.match(serverSource, /groups: \[/);
   assert.match(serverSource, /payload\?\.role === 'guest' \? \[\]/);
+  assert.match(serverSource, /requestedGroup/);
+  assert.match(serverSource, /未知标的库分组/);
   assert.doesNotMatch(serverSource, /workspace\/watchlist[^\n]*ownerId/);
 });
 

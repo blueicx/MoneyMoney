@@ -41,3 +41,18 @@ test('自选页提供表格和卡片视图，并从当前标的进入对应市�
   assert.match(html, /openWatchlistInstrument/);
   assert.match(html, /setMarketScope\(scope, \{ openTab: false \}\)/);
 });
+
+test('自选库支持分组、列配置和移出操作', () => {
+  assert.match(html, /data-watchlist-group="watchlist"/);
+  assert.match(html, /data-watchlist-group="paper"/);
+  assert.match(html, /mm-watchlist-columns/);
+  assert.match(html, /removeWorkspaceWatchlistInstrument/);
+  assert.match(html, /watchlistGroup/);
+});
+
+test('回测结果可按当前市场保存候选并跳转提醒', () => {
+  assert.match(html, /mm-backtest-candidates-v1/);
+  assert.match(html, /lastBacktestResult\.scope !== activeMarketScope/);
+  assert.match(html, /saveBacktestCandidate/);
+  assert.match(html, /openCandidateMonitor/);
+});

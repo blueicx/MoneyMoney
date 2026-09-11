@@ -5202,6 +5202,10 @@ app.get('/api/workspace/watchlist', (req, res) => {
   if (!MARKET_SCOPES.includes(rawScope as MarketScope)) {
     return res.status(400).json({ success: false, error: '未知市场 scope' });
   }
+  const requestedGroup = String(req.query.group || 'all');
+  if (!['all', 'watchlist', 'paper'].includes(requestedGroup)) {
+    return res.status(400).json({ success: false, error: '未知标的库分组' });
+  }
   const scope = rawScope as MarketScope;
   const scopeForId = (value: string): MarketScope | null => {
     const id = value.toLowerCase();
@@ -5230,10 +5234,11 @@ app.get('/api/workspace/watchlist', (req, res) => {
       quantity: Number(position.quantity || 0),
       currentPrice: Number(position.currentPrice || position.averageEntryPrice || 0),
     }));
-  return res.json({ success: true, scope, groups: [
+  const groups = [
     { id: 'watchlist', label: '我的自选', items: watchlist },
     { id: 'paper', label: '模拟持仓', items: paper },
-  ] });
+  ].filter(group => requestedGroup === 'all' || group.id === requestedGroup);
+  return res.json({ success: true, scope, group: requestedGroup, groups });
 });
 app.post('/api/watchlist', (req, res) => {
   const instrumentId = String(req.body?.instrumentId || '').trim();

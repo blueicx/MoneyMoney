@@ -328,7 +328,7 @@ git commit -m "feat: bind workspace content to market context"
 
 卡片必须包含 `id/title/source/fetchedAt/status/fields`；状态为 `live`、`stale`、`degraded`、`unavailable` 之一。股票卡片使用指数、涨跌广度、市场宽度、热门板块和股票事件；虚拟币卡片使用交易所行情、资金费率、未平仓量和虚拟币事件；期权卡片使用现有期权行情与可用的链/波动率字段；预测市场卡片使用预测市场快照。
 
-- [ ] **步骤 2：实现右侧看板排列**
+- [x] **步骤 2：实现右侧看板排列**
 
 右侧默认顺序固定为：
 
@@ -367,11 +367,11 @@ git commit -m "feat: define scoped market dashboard cards"
 
 复用 `/api/watchlist`、统一标的 ID、模拟持仓查询和现有权限 middleware；新增返回不得泄露 owner、账户或敏感持仓标识。股票自选、虚拟币自选、期权自选和预测市场自选必须按市场类型隔离。
 
-- [ ] **步骤 2：实现左栏自选分组入口**
+- [x] **步骤 2：实现左栏自选分组入口**
 
 侧栏“我的自选”展开显示当前市场分组和数量；点击分组只更新 `workspace=watchlist&group=<id>`，不跳出当前市场。无分组或接口不可用时显示明确空状态。
 
-- [ ] **步骤 3：实现双视图和列配置**
+- [x] **步骤 3：实现双视图和列配置**
 
 桌面端提供表格/卡片切换；表格默认显示标的、最新价、涨跌、数据源状态和最后更新时间；市场专属字段由菜单矩阵决定。卡片显示行情摘要、状态和加入/移出自选按钮。列配置保存在当前用户/本地作用域，不把股票列带到虚拟币。
 
@@ -379,7 +379,7 @@ git commit -m "feat: define scoped market dashboard cards"
 
 点击表格行或卡片设置当前标的，右侧详情、雷达、分析和回测入口全部使用该标的；保留同一列表的上一个/下一个切换，不回到热门股票页面。
 
-- [x] **步骤 5：测试和 Commit**（已完成本批接口、静态和浏览器 smoke；列配置/加入移出按钮仍留在后续）
+- [x] **步骤 5：测试和 Commit**（已完成接口、静态测试、全量测试和浏览器 smoke；列配置、分组切换、移出自选和候选库已纳入本批）
 
 运行：`npm run build; npm test`
 
@@ -407,7 +407,7 @@ git commit -m "feat: add scoped dual-view market watchlists"
 
 回测侧栏入口读取当前标的；股票和虚拟币继续调用独立真实历史数据引擎；预测市场保留 YES/NO 引擎；期权历史链、隐含波动率和 Greeks 不可用时返回结构化 unavailable。页面采用“策略 / 验证”内部标签、候选方案入口、净值和交易明细卡片，所有标签和字段按市场替换。
 
-- [ ] **步骤 3：实现候选方案沉淀**
+- [x] **步骤 3：实现候选方案沉淀**
 
 回测成功结果保存 `scope/instrument/strategy/parameters/metrics/dataSource/createdAt` 快照；载入候选时校验当前市场和标的类型，允许重新运行但不允许把股票候选载入虚拟币或预测市场。
 
