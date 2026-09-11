@@ -44,7 +44,7 @@
 - 创建：`tests/market-workspace-navigation.test.cjs`
 - 创建：`tests/market-workspace-flow.test.cjs`
 
-- [ ] **步骤 1：编写失败的菜单矩阵测试**
+- [x] **步骤 1：编写失败的菜单矩阵测试**
 
 测试必须验证股票、期权、虚拟币、预测市场和总体的菜单边界：
 
@@ -73,13 +73,13 @@ test('市场切换不允许旧工作区继续使用', () => {
 });
 ```
 
-- [ ] **步骤 2：运行测试确认失败**
+- [x] **步骤 2：运行测试确认失败**
 
 运行：`npm run build; node --test tests/market-workspace-navigation.test.cjs tests/market-workspace-flow.test.cjs`
 
 预期：FAIL，报错 `Cannot find module '../dist/features/market-workspace.js'` 或导出函数不存在。
 
-- [ ] **步骤 3：实现菜单类型和作用域矩阵**
+- [x] **步骤 3：实现菜单类型和作用域矩阵**
 
 `src/features/market-workspace.ts` 必须导出以下契约，并集中声明菜单：
 
@@ -114,13 +114,13 @@ export function defaultWorkspace(scope: MarketScope): WorkspaceId;
 
 基础菜单保持位置一致，市场专属菜单由 `scope` 过滤；`macro`、`news`、`research` 等通用工具不进入此模型，仍由现有通用工具栏管理。
 
-- [ ] **步骤 4：运行定向测试确认通过**
+- [x] **步骤 4：运行定向测试确认通过**
 
 运行：`npm run build; node --test tests/market-workspace-navigation.test.cjs tests/market-workspace-flow.test.cjs`
 
 预期：菜单矩阵测试全部 PASS，股票和虚拟币的专属工作区不会互相出现。
 
-- [ ] **步骤 5：Commit**
+- [x] **步骤 5：Commit**
 
 ```bash
 git add src/features/market-workspace.ts tests/market-workspace-navigation.test.cjs tests/market-workspace-flow.test.cjs
