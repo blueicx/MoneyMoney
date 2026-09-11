@@ -9452,6 +9452,13 @@ function setMarketScope(scope, options = {}) {
   const portfolioRisk = document.getElementById('portfolio-risk');
   if (portfolioRisk) portfolioRisk.innerHTML = '';
 
+  const backtestResults = document.getElementById('backtest-results');
+  if (backtestResults) backtestResults.innerHTML = '';
+  const backtestCompare = document.getElementById('backtest-compare');
+  if (backtestCompare) backtestCompare.innerHTML = '';
+  const btMarketId = document.getElementById('bt-market-id');
+  if (btMarketId) btMarketId.value = '';
+
   document.body.dataset.marketScope = scope;
   try { localStorage.setItem('mm-market-scope', scope); } catch (e) {}
   const params = new URLSearchParams(location.search);
