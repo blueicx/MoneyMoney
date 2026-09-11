@@ -271,7 +271,7 @@ git commit -m "feat: add responsive market workspace sidebar"
 - 修改：`src/web/server.ts`
 - 修改：`tests/market-workspace-flow.test.cjs`
 
-- [ ] **步骤 1：编写跨市场状态失败测试**
+- [x] **步骤 1：编写跨市场状态失败测试**
 
 测试 URL、缓存键和请求取消语义：
 
@@ -283,7 +283,7 @@ assert.match(html, /marketScopeRequestEpoch/);
 assert.match(server, /isWorkspaceAllowed/);
 ```
 
-- [ ] **步骤 2：实现上下文状态和 URL 恢复**
+- [x] **步骤 2：实现上下文状态和 URL 恢复**
 
 统一维护：
 
@@ -298,17 +298,17 @@ const contextKey = `${workspaceContext.scope}:${workspaceContext.workspace}:${wo
 
 路由格式固定为 `/?market=stocks&workspace=insider&instrument=AAPL`。`setMarketScope` 必须清除不兼容工作区、取消旧请求、清空旧标的结果，再加载新作用域；`selectStockSymbol`、币种选择、期权链选择和预测市场选择都通过同一上下文入口写入。
 
-- [ ] **步骤 3：把侧栏点击绑定到上下文入口**
+- [x] **步骤 3：把侧栏点击绑定到上下文入口**
 
 侧栏点击只调用 `openWorkspace(workspaceId)`，由该函数完成校验、URL 更新、激活态更新、请求令牌更新和内容加载。任何工作区不得直接写 `innerHTML` 后绕过作用域令牌。
 
-- [ ] **步骤 4：验证跨市场回归**
+- [x] **步骤 4：验证跨市场回归**
 
 运行：`npm run build; node --test tests/market-workspace-flow.test.cjs tests/market-isolation-regression.test.cjs`
 
 预期：从股票内部人切换到虚拟币后，内部人内容清空，虚拟币工作区只显示虚拟币字段；旧请求返回后不能覆盖新页面。
 
-- [ ] **步骤 5：Commit**
+- [x] **步骤 5：Commit**
 
 ```bash
 git add src/web/public/index.html src/web/server.ts tests/market-workspace-flow.test.cjs

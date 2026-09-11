@@ -4662,6 +4662,7 @@ function bnSetSymbol(sym) {
     if (tradeAssistant) tradeAssistant.innerHTML = '';
   }
   bnCurrentSymbol = sym;
+  setWorkspaceInstrument(sym);
   document.getElementById('bn-symbol').value = sym;
   loadBinanceDashboard();
 }
@@ -5625,6 +5626,7 @@ function selectStockSymbol(symbol, name, apiSymbol, options = {}) {
   }
 
   window._stockSelectedSymbol = normalized;
+  setWorkspaceInstrument(normalized);
   setStockSelectorActive(normalized);
   loadUnifiedStockData(normalized);
   loadStockKline(legacySymbol, displayName, apiSymbol);
@@ -6967,6 +6969,7 @@ function optionMetricCard(label, value, hint = '') {
 }
 function setOptionAsset(asset) {
   optionsSnapshot = null;
+  setWorkspaceInstrument(asset);
   document.getElementById('option-expiry').innerHTML = '<option>加载中...</option>';
   loadOptions();
 }
@@ -6979,13 +6982,16 @@ function setOptionMarket(market) {
   loadOptions();
 }
 function setEquitySymbol(symbol) {
-  document.getElementById('option-symbol').value = symbol.toUpperCase();
+  const normalized = symbol.toUpperCase();
+  document.getElementById('option-symbol').value = normalized;
+  setWorkspaceInstrument(normalized);
   loadOptions();
 }
 async function loadOptions() {
   const market = document.getElementById('option-market')?.value || 'crypto';
   const asset = document.getElementById('option-asset')?.value || 'BTC';
   const symbol = (document.getElementById('option-symbol')?.value || 'SPY').trim().toUpperCase();
+  setWorkspaceInstrument(market === 'us' ? symbol : asset);
   if (market === 'us' && !symbol) throw new Error('请输入美股/ETF 代码');
   const loading = document.getElementById('options-loading');
   const errorEl = document.getElementById('options-error');
@@ -8930,6 +8936,7 @@ function renderOutcomes() {
 }
 function selectMarket(marketId) {
   selectedMarket = selectedCategory.markets.find((m) => m.id === marketId);
+  setWorkspaceInstrument(selectedMarket ? String(selectedMarket.id) : '');
   tradeState.side = 'yes';
   renderOutcomes();
 }
@@ -9405,9 +9412,46 @@ const WORKSPACE_SPECIFIC_IDS = {
 };
 let activeMarketScope = 'overview';
 let activeWorkspaceId = 'overview';
+let currentInstrumentId = null;
 let marketScopeRequestEpoch = 0;
 const workspaceNavigationState = new Map();
 const WORKSPACE_SIDEBAR_STATE_KEY = 'mm-workspace-sidebar-state';
+const workspaceContext = { scope: 'overview', workspace: 'overview', instrument: null };
+
+function workspaceContextKey() {
+  return `${workspaceContext.scope}:${workspaceContext.workspace}:${workspaceContext.instrument || '-'}`;
+}
+
+function syncWorkspaceContextUrl() {
+  workspaceContext.scope = activeMarketScope;
+  workspaceContext.workspace = activeWorkspaceId;
+  workspaceContext.instrument = currentInstrumentId || null;
+  const params = new URLSearchParams(location.search);
+  params.set('market', workspaceContext.scope);
+  params.set('workspace', workspaceContext.workspace);
+  if (workspaceContext.instrument) params.set('instrument', workspaceContext.instrument);
+  else params.delete('instrument');
+  history.replaceState({}, '', `${location.pathname}?${params}${location.hash}`);
+}
+
+function setWorkspaceInstrument(instrument) {
+  const normalized = String(instrument || '').trim();
+  currentInstrumentId = normalized || null;
+  syncWorkspaceContextUrl();
+  return currentInstrumentId;
+}
+
+function restoreWorkspaceContextFromUrl() {
+  const params = new URLSearchParams(location.search);
+  const requestedWorkspace = params.get('workspace');
+  const allowed = (workspaceNavigationState.get(activeMarketScope)?.groups || workspaceFallbackNavigation(activeMarketScope))
+    .some(group => group.items.some(item => item.id === requestedWorkspace));
+  activeWorkspaceId = allowed ? requestedWorkspace : (activeMarketScope === 'watchlist' ? 'watchlist' : 'overview');
+  currentInstrumentId = String(params.get('instrument') || '').trim() || null;
+  workspaceContext.scope = activeMarketScope;
+  workspaceContext.workspace = activeWorkspaceId;
+  workspaceContext.instrument = currentInstrumentId;
+}
 
 function workspaceFallbackNavigation(scope) {
   const groups = WORKSPACE_BASE_GROUPS.map(([id, label, ids]) => ({
@@ -9494,6 +9538,7 @@ window.openWorkspace = function(id) {
   const groups = workspaceNavigationState.get(activeMarketScope)?.groups || workspaceFallbackNavigation(activeMarketScope);
   if (!groups.some(group => group.items.some(item => item.id === id))) return;
   activeWorkspaceId = id;
+  syncWorkspaceContextUrl();
   renderWorkspaceMenu(groups);
   if (id === 'search') {
     closeWorkspaceDrawer();
@@ -9645,6 +9690,7 @@ function setMarketScope(scope, options = {}) {
   abortMarketScopedRequests();
   activeMarketScope = scope;
   activeWorkspaceId = scope === 'watchlist' ? 'watchlist' : 'overview';
+  currentInstrumentId = null;
   marketScopeRequestEpoch += 1;
   if (typeof loadedStockSections !== 'undefined') loadedStockSections.clear();
   if (typeof eventCalendarState !== 'undefined') { eventCalendarState.cache = null; eventCalendarState.cacheAt = 0; }
@@ -9670,9 +9716,7 @@ function setMarketScope(scope, options = {}) {
 
   document.body.dataset.marketScope = scope;
   try { localStorage.setItem('mm-market-scope', scope); } catch (e) {}
-  const params = new URLSearchParams(location.search);
-  params.set('market', scope);
-  history.replaceState({}, '', `${location.pathname}?${params}${location.hash}`);
+  syncWorkspaceContextUrl();
   renderNavigationState();
   updateBacktestScopeNote();
   const backtestInput = document.getElementById('bt-market-id');
@@ -11149,6 +11193,7 @@ document.getElementById('sell-modal').addEventListener('click', (e) => {
 });
 initTheme();
 activeMarketScope = readInitialMarketScope();
+restoreWorkspaceContextFromUrl();
 renderNavigationState();
 loadAll();
 loadCommandCenter();
