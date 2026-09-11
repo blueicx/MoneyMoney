@@ -21,6 +21,7 @@ export type WorkspaceId =
   | 'funding-rate'
   | 'open-interest'
   | 'on-chain'
+  | 'order-flow'
   | 'prediction-radar';
 
 export interface WorkspaceItem {
@@ -62,6 +63,7 @@ const ITEMS: Record<WorkspaceId, WorkspaceItem> = {
   'funding-rate': { id: 'funding-rate', label: '资金费率', icon: '⇄', scopes: ['crypto'], requiresInstrument: true },
   'open-interest': { id: 'open-interest', label: '未平仓量', icon: '◫', scopes: ['crypto'], requiresInstrument: true },
   'on-chain': { id: 'on-chain', label: '链上数据', icon: '⌁', scopes: ['crypto'], requiresInstrument: true },
+  'order-flow': { id: 'order-flow', label: '主动资金流', icon: 'ϟ', scopes: ['crypto'], requiresInstrument: true },
   'prediction-radar': { id: 'prediction-radar', label: '预测雷达', icon: '◎', scopes: ['prediction'] },
 };
 
@@ -75,7 +77,7 @@ const SPECIFIC_ITEMS: Record<MarketScope, readonly WorkspaceId[]> = {
   overview: [],
   stocks: ['breadth', 'insider', 'institutional', 'analyst', 'fundamentals', 'short-interest'],
   options: ['option-chain', 'volatility', 'greeks'],
-  crypto: ['funding-rate', 'open-interest', 'on-chain'],
+  crypto: ['funding-rate', 'open-interest', 'on-chain', 'order-flow'],
   prediction: ['prediction-radar'],
   watchlist: [],
 };

@@ -2298,7 +2298,7 @@
             <div id="bn-heatmap" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(90px,1fr));gap:4px;"></div>
           </div>
         </div>
-        <details class="dash-collapse" data-collapse-key="binance-perpetual-crowding">
+        <details class="dash-collapse" data-collapse-key="binance-perpetual-crowding" data-market-scopes="crypto" data-workspace-id="open-interest">
           <summary>
             <span class="collapse-title">🧯 永续持仓拥挤雷达</span>
             <span class="collapse-hint">资金费率 · 多空账号 · 未平仓价值</span>
@@ -2312,7 +2312,7 @@
             <div id="perpetual-crowding"></div>
           </div>
         </details>
-        <details class="dash-collapse" data-collapse-key="binance-funding-carry">
+        <details class="dash-collapse" data-collapse-key="binance-funding-carry" data-market-scopes="crypto" data-workspace-id="funding-rate">
           <summary>
             <span class="collapse-title">⚖️ 跨所资金费套利雷达</span>
             <span class="collapse-hint">Gate.io · HTX · Deribit 等</span>
@@ -2326,7 +2326,7 @@
             <div id="funding-carry"></div>
           </div>
         </details>
-        <details class="dash-collapse" data-collapse-key="binance-bitcoin-onchain">
+        <details class="dash-collapse" data-collapse-key="binance-bitcoin-onchain" data-market-scopes="crypto" data-workspace-id="on-chain">
           <summary>
             <span class="collapse-title">⛓️ 比特币链上健康雷达</span>
             <span class="collapse-hint">活跃地址 · 结算额 · 算力 · NVT</span>
@@ -2340,7 +2340,7 @@
             <div id="bitcoin-onchain"></div>
           </div>
         </details>
-        <details class="dash-collapse" data-collapse-key="binance-order-flow-liquidity">
+        <details class="dash-collapse" data-collapse-key="binance-order-flow-liquidity" data-market-scopes="crypto" data-workspace-id="order-flow">
           <summary>
             <span class="collapse-title">⚡ 主动资金流与盘口雷达</span>
             <span class="collapse-hint">Taker Flow · 盘口 · 承接</span>
@@ -2371,7 +2371,7 @@
       <div id="stocks-tab" class="tab-content">
         <div class="section-title">📈 全球股票市场</div>
         <div id="market-scope-empty" class="empty-tip" hidden style="margin-bottom:16px;"></div>
-        <details class="dash-collapse" data-collapse-key="stocks-market" data-market-scopes="stocks overview" open>
+        <details class="dash-collapse" data-collapse-key="stocks-market" data-market-scopes="stocks overview" data-workspace-id="overview" open>
           <summary>
             <span class="collapse-title">📈 行情与选股</span>
             <span class="collapse-hint">全球指标 · 主要指数 · K线 · 热门股 · 搜索</span>
@@ -2419,7 +2419,7 @@
             <div id="stock-search-results"></div>
           </div>
         </details>
-        <details class="dash-collapse" data-collapse-key="stocks-breadth" data-market-scopes="stocks overview">
+        <details class="dash-collapse" data-collapse-key="stocks-breadth" data-market-scopes="stocks overview" data-workspace-id="breadth">
           <summary>
             <span class="collapse-title">🌡️ 市场宽度雷达</span>
             <span class="collapse-hint">Nasdaq · 上涨/下跌家数 · 板块与市值</span>
@@ -2433,7 +2433,7 @@
             <div id="market-breadth-radar"></div>
           </div>
         </details>
-        <details class="dash-collapse" data-collapse-key="stocks-insider" data-market-scopes="stocks overview">
+        <details class="dash-collapse" data-collapse-key="stocks-insider" data-market-scopes="stocks overview" data-workspace-id="insider">
           <summary>
             <span class="collapse-title">🧑‍💼 内部人交易雷达</span>
             <span class="collapse-hint">SEC Form 4 · 近90天买卖 · 高管与股东</span>
@@ -2462,7 +2462,7 @@
             <div id="insider-radar"></div>
           </div>
         </details>
-        <details class="dash-collapse" data-collapse-key="stocks-institutional" data-market-scopes="stocks overview">
+        <details class="dash-collapse" data-collapse-key="stocks-institutional" data-market-scopes="stocks overview" data-workspace-id="institutional">
           <summary>
             <span class="collapse-title">🏛️ 机构持仓雷达</span>
             <span class="collapse-hint">Nasdaq · 增减持 · 新建/清仓 · 大持有人</span>
@@ -2491,7 +2491,7 @@
             <div id="institutional-radar"></div>
           </div>
         </details>
-        <details class="dash-collapse" data-collapse-key="stocks-analyst" data-market-scopes="stocks overview">
+        <details class="dash-collapse" data-collapse-key="stocks-analyst" data-market-scopes="stocks overview" data-workspace-id="analyst">
           <summary>
             <span class="collapse-title">🎯 分析师共识雷达</span>
             <span class="collapse-hint">评级 · 目标价 · 上调下调 · 覆盖广度</span>
@@ -2520,7 +2520,7 @@
             <div id="analyst-radar"></div>
           </div>
         </details>
-        <details class="dash-collapse" data-collapse-key="stocks-fundamentals" data-market-scopes="stocks overview">
+        <details class="dash-collapse" data-collapse-key="stocks-fundamentals" data-market-scopes="stocks overview" data-workspace-id="fundamentals">
           <summary>
             <span class="collapse-title">📊 基本面质量雷达</span>
             <span class="collapse-hint">SEC 10-K · 增长 · 现金流 · 负债</span>
@@ -2549,7 +2549,7 @@
             <div id="fundamental-radar"></div>
           </div>
         </details>
-        <details class="dash-collapse" data-collapse-key="stocks-short-interest" data-market-scopes="stocks overview">
+        <details class="dash-collapse" data-collapse-key="stocks-short-interest" data-market-scopes="stocks overview" data-workspace-id="short-interest">
           <summary>
             <span class="collapse-title">🐻 空头利息雷达</span>
             <span class="collapse-hint">Nasdaq · 回补天数 · 拥挤/逼空</span>
@@ -2579,7 +2579,7 @@
             <div id="short-interest-radar"></div>
           </div>
         </details>
-        <details class="dash-collapse" data-collapse-key="stocks-global-spot" data-market-scopes="stocks overview">
+        <details class="dash-collapse" data-collapse-key="stocks-global-spot" data-market-scopes="stocks overview" data-workspace-id="overview">
           <summary>
             <span class="collapse-title">🌐 全球宏观现货雷达</span>
             <span class="collapse-hint">金银 · 原油 · 美元 · 金银比</span>
@@ -2593,7 +2593,7 @@
             <div id="global-spot-radar"></div>
           </div>
         </details>
-        <details class="dash-collapse" data-collapse-key="stocks-macro" data-market-scopes="stocks crypto options overview" open>
+        <details class="dash-collapse" data-collapse-key="stocks-macro" data-market-scopes="stocks crypto options overview" data-workspace-id="overview" open>
           <summary>
             <span class="collapse-title">🌍 宏观与流动性</span>
             <span class="collapse-hint">宏观指标 · 稳定币 · 美国经济 · 美债曲线</span>
@@ -2606,7 +2606,7 @@
           </div>
         </details>
 
-        <details class="dash-collapse" data-collapse-key="stocks-timeline" data-market-scopes="stocks options crypto prediction overview" open>
+        <details class="dash-collapse" data-collapse-key="stocks-timeline" data-market-scopes="stocks options crypto prediction overview" data-workspace-id="overview" open>
           <summary>
             <span class="collapse-title">📰 市场事件与新闻</span>
             <span class="collapse-hint">近期公开证据与垂直动态</span>
@@ -2617,7 +2617,7 @@
           </div>
         </details>
 
-        <details class="dash-collapse" data-collapse-key="stocks-calendar" data-market-scopes="stocks crypto options overview">
+        <details class="dash-collapse" data-collapse-key="stocks-calendar" data-market-scopes="stocks crypto options overview" data-workspace-id="overview">
           <summary>
             <span class="collapse-title">📅 日历与情绪</span>
             <span class="collapse-hint">财报 · 宏观事件 · 恐贪 · 资金费率</span>
@@ -2647,7 +2647,7 @@
             <div data-market-scopes="stocks overview"><div style="font-weight:700;font-size:13px;margin-bottom:10px;margin-top:24px;">🏛️ CME 机构持仓雷达</div><div id="cot-radar"></div></div>
           </div>
         </details>
-        <details class="dash-collapse" data-collapse-key="stocks-defi" data-market-scopes="crypto overview">
+        <details class="dash-collapse" data-collapse-key="stocks-defi" data-market-scopes="crypto overview" data-workspace-id="overview">
           <summary>
             <span class="collapse-title">🔗 DeFi 与资讯</span>
             <span class="collapse-hint">TVL · 收益池 · 交易量 · 加密新闻</span>
@@ -2673,7 +2673,7 @@
         </details>
       </div>
       <!-- Options Market Tab -->
-      <div id="options-tab" class="tab-content">
+      <div id="options-tab" class="tab-content" data-workspace-ids="option-chain volatility greeks">
         <div class="section-title">🎯 期权市场雷达</div>
         <div style="display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap;">
           <select id="option-market" onchange="setOptionMarket(this.value)" style="padding:9px 12px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);font-weight:700;">
@@ -2709,7 +2709,7 @@
         <p style="margin-top:10px;font-size:11px;color:var(--text-secondary);">加密数据来自 Deribit；美股/ETF 延迟行情来自 CBOE。PCR = Put/OI ÷ Call/OI；GEX 为一阶近似，仅用于观察持仓结构，不构成投资建议。</p>
       </div>
       <!-- Cross-platform Prediction Radar Tab -->
-      <div id="radar-tab" class="tab-content" data-market-scopes="overview prediction">
+      <div id="radar-tab" class="tab-content" data-market-scopes="overview prediction" data-workspace-id="prediction-radar">
         <div class="section-title">🌐 跨平台预测雷达</div>
         <div class="radar-controls">
           <div class="radar-field">
@@ -9518,7 +9518,7 @@ const WORKSPACE_ITEM_CATALOG = {
   insider: ['♟', '内部人交易'], institutional: ['♜', '机构持仓'], analyst: ['◎', '分析师共识'],
   fundamentals: ['▥', '基本面质量'], 'short-interest': ['♟', '空头利息'],
   'option-chain': ['◌', '期权链'], volatility: ['∿', '隐含波动率'], greeks: ['Δ', 'Greeks'],
-  'funding-rate': ['⇄', '资金费率'], 'open-interest': ['◫', '未平仓量'], 'on-chain': ['⌁', '链上数据'],
+  'funding-rate': ['⇄', '资金费率'], 'open-interest': ['◫', '未平仓量'], 'on-chain': ['⌁', '链上数据'], 'order-flow': ['ϟ', '主动资金流'],
   'prediction-radar': ['◎', '预测雷达'],
 };
 const WORKSPACE_BASE_GROUPS = [
@@ -9530,7 +9530,7 @@ const WORKSPACE_SPECIFIC_IDS = {
   overview: [], watchlist: [],
   stocks: ['breadth', 'insider', 'institutional', 'analyst', 'fundamentals', 'short-interest'],
   options: ['option-chain', 'volatility', 'greeks'],
-  crypto: ['funding-rate', 'open-interest', 'on-chain'],
+  crypto: ['funding-rate', 'open-interest', 'on-chain', 'order-flow'],
   prediction: ['prediction-radar'],
 };
 let activeMarketScope = 'overview';
@@ -9830,7 +9830,7 @@ function workspaceTabFor(id) {
   if (id === 'search') return null;
   if (['breadth', 'insider', 'institutional', 'analyst', 'fundamentals', 'short-interest'].includes(id)) return 'stocks';
   if (['option-chain', 'volatility', 'greeks'].includes(id)) return 'options';
-  if (['funding-rate', 'open-interest', 'on-chain'].includes(id)) return 'binance';
+  if (['funding-rate', 'open-interest', 'on-chain', 'order-flow'].includes(id)) return 'binance';
   return 'command';
 }
 window.openWorkspace = function(id) {
@@ -9839,6 +9839,7 @@ window.openWorkspace = function(id) {
   activeWorkspaceId = id;
   syncWorkspaceContextUrl();
   renderWorkspaceMenu(groups);
+  applyWorkspaceView();
   if (id === 'search') {
     closeWorkspaceDrawer();
     openGlobalSearch();
@@ -9882,6 +9883,35 @@ function defaultTabForMarketScope(scope) { return MARKET_SCOPES.find(item => ite
 function scopeAllowsView(declared) {
   const scopes = String(declared || '').split(/[\s,|]+/).filter(Boolean);
   return activeMarketScope === 'overview' || scopes.includes('all') || scopes.includes('common') || scopes.includes(activeMarketScope);
+}
+const EXCLUSIVE_WORKSPACE_IDS = new Set([
+  'breadth', 'insider', 'institutional', 'analyst', 'fundamentals', 'short-interest',
+  'option-chain', 'volatility', 'greeks', 'funding-rate', 'open-interest', 'on-chain', 'order-flow',
+  'prediction-radar',
+]);
+function workspaceIdsForNode(node) {
+  return String(node?.dataset?.workspaceIds || node?.dataset?.workspaceId || '')
+    .split(/[\s,|]+/).filter(Boolean);
+}
+function workspaceAllowsView(node) {
+  if (!EXCLUSIVE_WORKSPACE_IDS.has(activeWorkspaceId)) return true;
+  return workspaceIdsForNode(node).includes(activeWorkspaceId);
+}
+function applyWorkspaceView() {
+  const exclusive = EXCLUSIVE_WORKSPACE_IDS.has(activeWorkspaceId);
+  document.querySelectorAll('[data-workspace-id], [data-workspace-ids]').forEach(node => {
+    const visible = scopeAllowsView(node.dataset.marketScopes) && workspaceAllowsView(node);
+    node.hidden = !visible;
+    if (!visible && node.tagName === 'DETAILS') node.open = false;
+  });
+  ['stocks-tab', 'binance-tab'].forEach(tabId => {
+    const tab = document.getElementById(tabId);
+    if (!tab) return;
+    tab.querySelectorAll(':scope > *').forEach(node => {
+      if (!exclusive || node.matches('.section-title, #market-scope-empty, [data-workspace-id], [data-workspace-ids]')) return;
+      node.hidden = true;
+    });
+  });
 }
 function scopedUrl(path) {
   const separator = String(path).includes('?') ? '&' : '?';
@@ -9982,6 +10012,7 @@ function renderNavigationState() {
   document.querySelectorAll('[data-market-scope]').forEach(node => node.classList.toggle('active', node.dataset.marketScope === activeMarketScope));
   document.querySelectorAll('[data-tab]').forEach(node => node.classList.toggle('active', node.dataset.tab === (window.mm_active_tab || 'command')));
   applyMarketScopeView();
+  applyWorkspaceView();
   applySidebarScope();
   if (activeMarketScope !== 'overview' && activeMarketScope !== 'watchlist') loadMarketResearch();
   if (activeMarketScope === 'watchlist') loadStockWatchlistLibrary();

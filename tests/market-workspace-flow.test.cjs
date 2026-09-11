@@ -64,3 +64,16 @@ test('筛选结果提供同市场详情、候选和回测动作', () => {
   assert.match(html, /screenerInstrumentRef/);
   assert.match(html, /setWorkspaceInstrument\(instrument\.symbol\)/);
 });
+
+test('具体工作区只显示当前正文模块，并在总览时恢复市场模块', () => {
+  assert.match(html, /data-workspace-id="insider"/);
+  assert.match(html, /data-workspace-id="institutional"/);
+  assert.match(html, /data-workspace-id="order-flow"/);
+  assert.match(html, /data-workspace-ids="option-chain volatility greeks"/);
+  assert.match(html, /data-workspace-id="prediction-radar"/);
+  assert.match(html, /function workspaceAllowsView\(/);
+  assert.match(html, /function applyWorkspaceView\(/);
+  assert.match(html, /node\?\.dataset\?\.workspaceId/);
+  assert.match(html, /if \(!visible && node\.tagName === 'DETAILS'\) node\.open = false/);
+  assert.match(html, /applyWorkspaceView\(\);/);
+});

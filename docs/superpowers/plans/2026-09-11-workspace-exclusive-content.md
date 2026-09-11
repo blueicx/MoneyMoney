@@ -15,11 +15,11 @@
 **文件：**
 - 修改：`tests/market-workspace-flow.test.cjs`
 
-- [ ] **步骤 1：编写失败测试**
+- [x] **步骤 1：编写失败测试**
 
 增加静态断言，要求页面存在 `applyWorkspaceView`、`data-workspace-id`、默认工作区回退和非当前 `details` 关闭逻辑；现有页面尚无这些完整断言时测试应失败。
 
-- [ ] **步骤 2：运行测试确认失败**
+- [x] **步骤 2：运行测试确认失败**
 
 运行：
 
@@ -34,11 +34,11 @@ npm test -- tests/market-workspace-flow.test.cjs
 **文件：**
 - 修改：`src/web/public/index.html`
 
-- [ ] **步骤 1：标记现有模块**
+- [x] **步骤 1：标记现有模块**
 
 为股票市场宽度、内部人、机构、分析师、基本面、空头等 `details` 增加与导航一致的 `data-workspace-id`；为期权、虚拟币、预测市场的具体模块补齐对应标识。宏观、新闻、日历等通用模块标记为 `overview` 或保留市场总览语义。
 
-- [ ] **步骤 2：运行失败测试**
+- [ ] **步骤 2：运行失败测试**（标记测试与实现一起迭代，未单独停留在标记完成后的红灯阶段）
 
 运行同任务 1 的定向测试，确认标识数量和关键标识断言仍准确，失败只允许来自渲染函数尚未接入。
 
@@ -47,15 +47,15 @@ npm test -- tests/market-workspace-flow.test.cjs
 **文件：**
 - 修改：`src/web/public/index.html`
 
-- [ ] **步骤 1：实现过滤函数**
+- [x] **步骤 1：实现过滤函数**
 
 新增 `workspaceAllowsView()` 和 `applyWorkspaceView()`：`overview` 显示当前市场允许的模块；具体工作区只显示 `data-workspace-id` 等于当前值的模块，并关闭被隐藏的 `details`。
 
-- [ ] **步骤 2：接入导航和市场切换**
+- [x] **步骤 2：接入导航和市场切换**
 
 在 `renderNavigationState()`、`setMarketScope()`、`restoreWorkspaceContextFromUrl()` 和 `openWorkspace()` 后调用过滤函数；不存在或跨市场工作区时回退到当前市场默认入口，并同步 URL。
 
-- [ ] **步骤 3：运行定向测试确认通过**
+- [x] **步骤 3：运行定向测试确认通过**
 
 运行：
 
@@ -71,11 +71,11 @@ npm test -- tests/market-workspace-flow.test.cjs tests/theme-scoped-backtest.tes
 - 修改：`tests/market-workspace-flow.test.cjs`
 - 修改：`docs/handover-2026-09-11-left-sidebar-market-workspace.md`
 
-- [ ] **步骤 1：运行全量验证**
+- [x] **步骤 1：运行全量验证**
 
 运行 `npm run build`、`npm test`、`npm run security:scan`、`npm run smoke:web` 和 `git diff --check`。
 
-- [ ] **步骤 2：浏览器验证**
+- [x] **步骤 2：浏览器验证**
 
 用本地 Chrome 验证股票内部人、机构、基本面和虚拟币资金费率：点击任一入口后正文只剩当前模块，左栏仍保留其他入口；返回总览后恢复当前市场模块。
 
