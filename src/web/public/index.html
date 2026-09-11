@@ -231,6 +231,11 @@
     .workspace-main { min-width:0; }
     .workspace-drawer-open { display:none; border:1px solid var(--border); border-radius:9px; padding:8px 11px; background:var(--bg-card); color:var(--text-secondary); cursor:pointer; }
     .workspace-drawer { display:none; }
+    .workspace-dashboard-cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:8px; margin:-6px 0 16px; }
+    .workspace-dashboard-card { min-width:0; padding:10px 11px; border:1px solid var(--border); border-radius:11px; background:linear-gradient(135deg,var(--glass-highlight),var(--bg-card)); box-shadow:var(--shadow); }
+    .workspace-dashboard-card-title { font-size:12px; font-weight:800; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .workspace-dashboard-card-meta { display:flex; justify-content:space-between; gap:6px; margin-top:6px; font-size:10px; color:var(--text-secondary); }
+    .workspace-dashboard-status { color:var(--yellow); }
     .market-workspace-shell[data-sidebar-state="rail"] { grid-template-columns:56px minmax(0, 1fr); }
     .market-workspace-shell[data-sidebar-state="rail"] .workspace-sidebar { padding-left:7px; padding-right:7px; }
     .market-workspace-shell[data-sidebar-state="rail"] .workspace-sidebar-title,
@@ -1924,6 +1929,7 @@
         </div>
         <span id="market-overview-status" style="flex:0 0 auto;color:var(--text-secondary);font-size:10px;white-space:nowrap;">数据更新时间：-</span>
       </div>
+      <div id="workspace-dashboard-cards" class="workspace-dashboard-cards" aria-label="当前市场看板层级"></div>
       <section id="market-research-tools" data-market-scopes="stocks options crypto prediction" style="display:grid;grid-template-columns:minmax(300px,1.2fr) minmax(260px,1fr);gap:12px;margin-bottom:16px;">
         <div id="market-screener" class="glass-card" style="padding:14px;border-radius:14px;">
           <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px;"><strong>🔎 当前市场筛选</strong><button class="tab" type="button" onclick="loadMarketResearch()">刷新</button></div>
@@ -9493,6 +9499,40 @@ function renderWorkspaceSidebar() {
     .catch(() => {});
 }
 
+const WORKSPACE_DASHBOARD_FALLBACK = {
+  overview: [['overview-markets', '跨市场大盘', 'MoneyMoney 综合数据'], ['overview-events', '跨市场事件', '公开事件源']],
+  stocks: [['stock-indices', '股票指数', 'Nasdaq / Tencent Finance'], ['stock-breadth', '市场宽度', 'Nasdaq Public Screener'], ['stock-events', '股票事件', 'SEC EDGAR / 财报日历']],
+  options: [['option-chain', '期权链', 'CBOE / Deribit Public'], ['option-volatility', '波动率与 Greeks', '公开期权链'], ['option-events', '期权相关事件', '公开事件源']],
+  crypto: [['crypto-prices', '交易所行情', 'Binance Public'], ['crypto-derivatives', '衍生品结构', 'Binance Public'], ['crypto-chain', '链上与事件', 'CoinGecko / DeFiLlama']],
+  prediction: [['prediction-probability', '预测概率', 'Predict.fun / Polymarket Public'], ['prediction-liquidity', '市场流动性', '公开预测市场快照']],
+  watchlist: [['watchlist-summary', '自选摘要', '本地自选库'], ['watchlist-events', '自选事件', '当前市场事件源']],
+};
+const workspaceDashboardState = new Map();
+
+function renderWorkspaceDashboardCards(cards) {
+  const host = document.getElementById('workspace-dashboard-cards');
+  if (!host) return;
+  host.innerHTML = (cards || []).map(card => `<div class="workspace-dashboard-card" data-dashboard-card="${marketResearchEscape(card.id)}"><div class="workspace-dashboard-card-title">${marketResearchEscape(card.title)}</div><div class="workspace-dashboard-card-meta"><span>${marketResearchEscape(card.source)}</span><span class="workspace-dashboard-status">${card.status === 'live' ? '实时' : card.status === 'stale' ? '缓存' : card.status === 'degraded' ? '部分可用' : '待加载'}</span></div></div>`).join('');
+}
+
+function loadWorkspaceDashboardCards() {
+  const scope = activeMarketScope;
+  const fallback = (WORKSPACE_DASHBOARD_FALLBACK[scope] || []).map(([id, title, source]) => ({ id, title, source, status: 'unavailable' }));
+  const cached = workspaceDashboardState.get(scope);
+  renderWorkspaceDashboardCards(cached?.cards || fallback);
+  if (cached?.requested) return;
+  workspaceDashboardState.set(scope, { cards: fallback, requested: true });
+  const token = marketScopeRequestToken();
+  fetch(`/api/workspace/dashboard?scope=${encodeURIComponent(scope)}`, { cache: 'no-store' })
+    .then(response => response.ok ? response.json() : null)
+    .then(payload => {
+      if (!payload?.success || !Array.isArray(payload.cards) || !isCurrentMarketScopeToken(token)) return;
+      workspaceDashboardState.set(scope, { cards: payload.cards, requested: true });
+      renderWorkspaceDashboardCards(payload.cards);
+    })
+    .catch(() => {});
+}
+
 function setWorkspaceSidebarState(state) {
   const next = state === 'rail' ? 'rail' : 'expanded';
   const shell = document.getElementById('market-workspace-shell');
@@ -9678,6 +9718,7 @@ function renderNavigationState() {
   renderUtilityNav();
   renderCoreNav();
   renderWorkspaceSidebar();
+  loadWorkspaceDashboardCards();
   document.querySelectorAll('[data-market-scope]').forEach(node => node.classList.toggle('active', node.dataset.marketScope === activeMarketScope));
   document.querySelectorAll('[data-tab]').forEach(node => node.classList.toggle('active', node.dataset.tab === (window.mm_active_tab || 'command')));
   applyMarketScopeView();

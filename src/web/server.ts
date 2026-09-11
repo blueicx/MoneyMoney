@@ -92,6 +92,7 @@ import { unifiedInstrumentService, normalizeInstrumentRef, type InstrumentType }
 import { stockDataService } from '../features/stock-data-service';
 import { MARKET_SCOPES, filterInstrumentResults, type MarketScope } from '../features/market-scope';
 import { defaultWorkspace, isWorkspaceAllowed, resolveWorkspaceNavigation, type WorkspaceId } from '../features/market-workspace';
+import { resolveMarketDashboardCards } from '../features/market-workspace-dashboard';
 import { filterAssistantReport, filterRiskOverview, filterUnifiedPaperLedger, scopeForAction } from '../features/market-scope-view';
 import { unifiedAlertStore, triggerUnifiedAlerts } from '../features/unified-alerts';
 import { buildPortfolioRiskOverview } from '../features/risk-overview';
@@ -313,6 +314,15 @@ app.get('/api/workspace/navigation', (req, res) => {
   }
   const scope = rawScope as MarketScope;
   return res.json({ success: true, scope, groups: resolveWorkspaceNavigation(scope) });
+});
+
+app.get('/api/workspace/dashboard', (req, res) => {
+  const rawScope = String(req.query.scope || 'overview');
+  if (!MARKET_SCOPES.includes(rawScope as MarketScope)) {
+    return res.status(400).json({ success: false, error: '未知市场 scope' });
+  }
+  const scope = rawScope as MarketScope;
+  return res.json({ success: true, scope, cards: resolveMarketDashboardCards(scope) });
 });
 
 app.get('/api/workspace/context', (req, res) => {

@@ -321,8 +321,10 @@ git commit -m "feat: bind workspace content to market context"
 - 修改：`src/web/public/index.html`
 - 修改：`src/web/server.ts`
 - 修改：`tests/market-workspace-flow.test.cjs`
+- 创建：`src/features/market-workspace-dashboard.ts`
+- 创建：`tests/market-workspace-dashboard.test.cjs`
 
-- [ ] **步骤 1：为每个市场定义看板卡片契约**
+- [x] **步骤 1：为每个市场定义看板卡片契约**
 
 卡片必须包含 `id/title/source/fetchedAt/status/fields`；状态为 `live`、`stale`、`degraded`、`unavailable` 之一。股票卡片使用指数、涨跌广度、市场宽度、热门板块和股票事件；虚拟币卡片使用交易所行情、资金费率、未平仓量和虚拟币事件；期权卡片使用现有期权行情与可用的链/波动率字段；预测市场卡片使用预测市场快照。
 
@@ -336,21 +338,21 @@ git commit -m "feat: bind workspace content to market context"
 
 参考项目的紧凑卡片和 `grid` 层级可以吸收，但所有颜色、边框和空状态沿用 MoneyMoney 主题变量。点击热门板块只在当前市场内打开成分列表，不能跳到股票热门列表。
 
-- [ ] **步骤 3：增加来源和加载状态**
+- [x] **步骤 3：增加来源和加载状态**
 
 每张卡片在加载时显示骨架；部分数据成功时显示可用卡片和缺失源原因；全部失败时显示可操作错误状态。不得用 BTC、预测市场或旧缓存填补股票/期权卡片。
 
-- [ ] **步骤 4：运行看板测试**
+- [x] **步骤 4：运行看板测试**
 
-运行：`npm run build; node --test tests/market-workspace-flow.test.cjs tests/market-isolation-regression.test.cjs`
+运行：`npm run build; node --test tests/market-workspace-dashboard.test.cjs tests/market-workspace-api.test.cjs tests/market-workspace-flow.test.cjs tests/theme-scoped-backtest.test.cjs`
 
 预期：四类市场的卡片字段集合互斥，来源和 unavailable 状态可序列化，切换作用域后旧卡片不残留。
 
-- [ ] **步骤 5：Commit**
+- [x] **步骤 5：Commit**
 
 ```bash
-git add src/web/public/index.html src/web/server.ts tests/market-workspace-flow.test.cjs
-git commit -m "feat: organize scoped market dashboard cards"
+git add src/features/market-workspace-dashboard.ts src/web/public/index.html src/web/server.ts tests/market-workspace-dashboard.test.cjs tests/market-workspace-api.test.cjs docs/superpowers/plans/2026-09-11-left-sidebar-market-workspace.md
+git commit -m "feat: define scoped market dashboard cards"
 ```
 
 ## 任务 6：吸收自选分组、表格/卡片双视图和标的预览

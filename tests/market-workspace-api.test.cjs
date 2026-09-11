@@ -19,6 +19,11 @@ test('workspace context API validates workspace against the requested scope', ()
   assert.match(serverSource, /当前市场不支持该工作区/);
 });
 
+test('workspace dashboard API is registered with scope validation', () => {
+  assert.match(serverSource, /app\.get\(['"]\/api\/workspace\/dashboard['"]/);
+  assert.match(serverSource, /resolveMarketDashboardCards\(scope\)/);
+});
+
 test('workspace context response carries scope, workspace and instrument', () => {
   assert.match(serverSource, /scope, workspace, instrument: instrument \|\| null/);
 });
