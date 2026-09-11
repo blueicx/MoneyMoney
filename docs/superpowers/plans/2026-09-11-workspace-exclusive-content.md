@@ -79,14 +79,14 @@ npm test -- tests/market-workspace-flow.test.cjs tests/theme-scoped-backtest.tes
 
 用本地 Chrome 验证股票内部人、机构、基本面和虚拟币资金费率：点击任一入口后正文只剩当前模块，左栏仍保留其他入口；返回总览后恢复当前市场模块。
 
-- [ ] **步骤 3：提交并推送**
+- [x] **步骤 3：提交并推送**
 
 只提交本计划涉及文件，使用提交信息 `feat: isolate workspace content panels`，推送 `codex/stock-free-data-sources`。
 
-- [ ] **步骤 4：重新构建并部署 VPS**
+- [x] **步骤 4：重新构建并部署 VPS**
 
 备份现有 `/opt/moneymoney/dist`，只替换应用 `dist`，校验关键文件 hash，重启 `moneymoney.service` 并保留回滚目录；不修改 Nginx、TLS、VPN、Token 或 Telegram 轮询所有权。
 
-- [ ] **步骤 5：发布后核验并更新交接**
+- [x] **步骤 5：发布后核验并更新交接**
 
 核验公网健康、工作区导航接口、访客读写边界和远端 hash；将新提交、备份目录、服务状态、测试结果及剩余边界写入交接文档。

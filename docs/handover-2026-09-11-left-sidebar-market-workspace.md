@@ -17,22 +17,22 @@
 ## 验收证据
 
 - `npm run build`：通过。
-- `npm test`：211 项通过，0 失败。
-- `npm run security:scan`：298 个受跟踪文件通过。
+- `npm test`：212 项通过，0 失败。
+- `npm run security:scan`：300 个受跟踪文件通过。
 - `npm run smoke:web`：健康检查、登录门禁、敏感配置脱敏和真实交易关闭边界通过。
-- 浏览器 smoke（本机 Chrome + Playwright）：自选分组/列面板、股票与虚拟币左栏隔离通过；检查到股票 `insider` 与虚拟币 `funding-rate` 菜单互不混入。
+- 浏览器 smoke（本机 Chrome + Playwright）：自选分组/列面板、股票与虚拟币左栏隔离通过；本次新增验证股票 `insider/institutional`、虚拟币 `funding-rate/order-flow` 点击后正文只保留当前模块，回到总览后恢复全部当前市场模块。验收截图：`C:\Users\blueice\AppData\Local\Temp\moneymoney-workspace-exclusive-smoke.png`。
 
 本轮未将移动端和真实登录后的四市场逐项验收冒充为已完成；这些仍是后续验收项。
 
 ## 发布记录
 
-- GitHub：已推送 `codex/stock-free-data-sources`，远端提交为 `888d502`。
-- VPS：已备份到 `/opt/moneymoney/backups/dist-20260911-888d502`，新产物已发布到 `/opt/moneymoney/dist`。
-- 回滚：保留 `/opt/moneymoney/dist.rollback-888d502`；本次临时 staging 已清理。
+- GitHub：已推送 `codex/stock-free-data-sources`，最新代码提交为 `859a288`。
+- VPS：已备份到 `/opt/moneymoney/backups/dist-20260911-859a288`，新产物已发布到 `/opt/moneymoney/dist`。
+- 回滚：保留 `/opt/moneymoney/dist.rollback-859a288`；本次临时 staging 已清理。
 - 服务：`moneymoney.service` 重启后为 active，公网 HTTPS 页面、访客读取接口和访客写入 403 均已核验。
-- Hash：远端 `dist/web/server.js` 与本地构建产物一致：`08fbcafcbc5dc531fc925182d0a7a75521e818dd279355ec2a69465bf08f95b3`。
+- Hash：远端 `dist/web/server.js` 与本地构建产物一致：`08fbcafcbc5dc531fc925182d0a7a75521e818dd279355ec2a69465bf08f95b3`；`dist/web/public/index.html` 一致：`cf7e96c1f6f5d45b5d61f5ed07d01ca4c04fbe2fad722aa3c7335c68a565bd44`。
 
-本轮实现提交：`bf7f3c9`、`410754d`、`c489ba0`、`4ef095f`、`0ee1f24`、`859c357`、`3f41b77`、`d9834b7`、`888d502`；发布以 `888d502` 的构建产物为准。
+本轮实现提交：`bf7f3c9`、`410754d`、`c489ba0`、`4ef095f`、`0ee1f24`、`859c357`、`3f41b77`、`d9834b7`、`888d502`、`d66a9f3`、`859a288`；发布以 `859a288` 的构建产物为准。
 
 本轮未修改 Nginx、TLS、VPN、系统环境文件、Telegram Token 或轮询所有权。普通 Git LFS 推送因历史二进制无响应，确认本轮无新增 LFS 对象后使用 `GIT_LFS_SKIP_PUSH=1` 完成代码推送。
 
