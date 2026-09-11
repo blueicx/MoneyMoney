@@ -2827,7 +2827,31 @@ export function getTelegramCommandHandlers(): Record<string, TelegramCommandHand
       });
       return `<b>时间线</b>\n${escapeTelegramHtml(data.instrument.title)}\n${escapeTelegramHtml(data.instrument.id)}\n\n${lines.join('\n')}`;
     },
-    backtest: ({ args }) => {
+    backtest: async ({ args, chatId }) => {
+      const chatScope = telegramScopeForChat(chatId);
+      if (chatScope === 'options') {
+        return '<b>🧪 期权策略回测</b>\n当前期权历史链、隐含波动率和 Greeks 数据源尚未覆盖，暂不生成伪造结果。';
+      }
+      if (chatScope === 'stocks' || chatScope === 'crypto') {
+        const firstAssetArg = String(args[0] || '').trim();
+        const secondAssetArg = String(args[1] || '').trim();
+        const assetAliases: Record<string, 'momentum' | 'meanReversion'> = { momentum: 'momentum', mean: 'meanReversion', mr: 'meanReversion', meanreversion: 'meanReversion', 'mean-reversion': 'meanReversion' };
+        const firstAssetKey = firstAssetArg.toLowerCase();
+        const assetStrategy = assetAliases[firstAssetKey] || 'momentum';
+        const assetSymbol = assetAliases[firstAssetKey] ? secondAssetArg : firstAssetArg;
+        if (!assetSymbol || (secondAssetArg && !assetAliases[firstAssetKey])) {
+          return `用法：/backtest [momentum|meanReversion] ${chatScope === 'stocks' ? '[股票代码]' : '[交易对]'}\n只读取当前${TELEGRAM_SCOPE_LABELS[chatScope]}真实历史数据，不会创建交易。`;
+        }
+        try {
+          const stats = chatScope === 'stocks'
+            ? await backtester.runStockBacktest(assetStrategy, assetSymbol)
+            : await backtester.runCryptoBacktest(assetStrategy, assetSymbol);
+          if (stats.totalTrades === 0) return `${escapeTelegramHtml(stats.instrumentId)} 暂无足够真实历史数据进行回测。`;
+          return `<b>🧪 ${TELEGRAM_SCOPE_LABELS[chatScope]}策略回测</b> · ${escapeTelegramHtml(stats.strategyName)}\n标的：${escapeTelegramHtml(stats.instrumentId)}\n数据源：${escapeTelegramHtml(stats.dataSource)} · K线 ${stats.barCount}\n交易数：${stats.totalTrades} · 胜率：${formatTelegramNumber(stats.winRate * 100, 1)}%\n收益：${formatTelegramNumber(stats.totalReturnPct, 2)}% · 最大回撤：${formatTelegramNumber(stats.maxDrawdownPct, 2)}%\nSharpe：${formatTelegramNumber(stats.sharpeRatio, 2)} · 平均持仓：${formatTelegramNumber(stats.avgHoldMinutes, 1)} 分钟`;
+        } catch (error: any) {
+          return `当前${TELEGRAM_SCOPE_LABELS[chatScope]}回测不可用：${escapeTelegramHtml(error?.message || '真实历史数据暂不可用')}`;
+        }
+      }
       const first = String(args[0] || '').trim();
       const second = String(args[1] || '').trim();
       const aliases: Record<string, 'momentum' | 'meanReversion'> = {

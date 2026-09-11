@@ -6,7 +6,7 @@ const test = require('node:test');
 const serverSource = fs.readFileSync('src/web/server.ts', 'utf8');
 
 const { TelegramCommandCenterStore } = require('../dist/features/telegram-command-center');
-const { buildTelegramBottomMenu } = require('../dist/web/telegram-menu');
+const { buildTelegramBottomMenu, getTelegramMenuEntries } = require('../dist/web/telegram-menu');
 const { getTelegramCommandHandlers } = require('../dist/web/server');
 
 test('chat market scope is isolated and defaults to overview', () => {
@@ -30,6 +30,13 @@ test('market menu contains selected scope and only its feature labels', () => {
   assert.ok(labels.includes('🌡️ 市场宽度'));
   assert.ok(labels.includes('🧑‍💼 内部人'));
   assert.ok(!labels.includes('🌐 预测雷达'));
+});
+
+test('股票和虚拟币菜单提供各自的真实资产回测入口', () => {
+  const stocks = getTelegramMenuEntries('stocks').map(entry => entry.text);
+  const crypto = getTelegramMenuEntries('crypto').map(entry => entry.text);
+  assert.ok(stocks.includes('🧪 股票回测'));
+  assert.ok(crypto.includes('🧪 虚拟币回测'));
 });
 
 test('market button changes the chat scope and resets its menu page', async () => {

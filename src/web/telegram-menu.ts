@@ -32,7 +32,7 @@ const MENU_PAGES: Record<MarketScope, TelegramMenuPage[]> = {
       [{ text: '🎯 分析师', command: 'stocks' }, { text: '📊 基本面', command: 'stocks' }],
       [{ text: '🐻 空头', command: 'stocks' }, { text: '🔎 搜索股票', command: 'search' }],
     ],
-    [[{ text: '⭐ 股票自选', command: 'watchlist' }, { text: '🛡 股票风险', command: 'risk' }], [{ text: '📒 股票模拟盘', command: 'portfolio' }]],
+    [[{ text: '⭐ 股票自选', command: 'watchlist' }, { text: '🛡 股票风险', command: 'risk' }], [{ text: '📒 股票模拟盘', command: 'portfolio' }, { text: '🧪 股票回测', command: 'backtest' }]],
     [[{ text: '📰 股票新闻', command: 'news' }, { text: '📈 股票历史', command: 'history' }], [{ text: '📝 股票研究日志', command: 'journal' }]],
   ],
   options: [
@@ -52,7 +52,7 @@ const MENU_PAGES: Record<MarketScope, TelegramMenuPage[]> = {
       [{ text: '🔎 搜索虚拟币', command: 'search' }, { text: '⭐ 虚拟币自选', command: 'watchlist' }],
       [{ text: '🛡 虚拟币风险', command: 'risk' }],
     ],
-    [[{ text: '📒 虚拟币模拟盘', command: 'portfolio' }, { text: '📈 虚拟币历史', command: 'history' }], [{ text: '📝 虚拟币研究日志', command: 'journal' }]],
+    [[{ text: '📒 虚拟币模拟盘', command: 'portfolio' }, { text: '🧪 虚拟币回测', command: 'backtest' }], [{ text: '📈 虚拟币历史', command: 'history' }, { text: '📝 虚拟币研究日志', command: 'journal' }]],
     [[{ text: '🩺 数据源健康', command: 'sources' }, { text: '🔔 提醒设置', command: 'alerts' }]],
   ],
   prediction: [
