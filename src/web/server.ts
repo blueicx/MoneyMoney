@@ -91,6 +91,7 @@ import { getAiConfigurationStatus, testAiConnection, type AiChain } from '../fea
 import { unifiedInstrumentService, normalizeInstrumentRef, type InstrumentType } from '../features/unified-instruments';
 import { stockDataService } from '../features/stock-data-service';
 import { MARKET_SCOPES, filterInstrumentResults, type MarketScope } from '../features/market-scope';
+import { defaultWorkspace, isWorkspaceAllowed, resolveWorkspaceNavigation, type WorkspaceId } from '../features/market-workspace';
 import { filterAssistantReport, filterRiskOverview, filterUnifiedPaperLedger, scopeForAction } from '../features/market-scope-view';
 import { unifiedAlertStore, triggerUnifiedAlerts } from '../features/unified-alerts';
 import { buildPortfolioRiskOverview } from '../features/risk-overview';
@@ -139,7 +140,7 @@ import QRCode from 'qrcode';
 import os from 'os';
 import { parseRssItems } from '../utils/rss';
 
-const app = express();
+export const app = express();
 // The dashboard is local-first. Same-origin browser requests work normally;
 // cross-origin callers must be explicitly enabled by the deployment layer.
 app.use(cors({ origin: false }));
@@ -303,6 +304,30 @@ app.use(express.static(path.join(__dirname, 'public'), {
 
 
 // API Routes
+
+// Market-scoped workspace contract shared by the dashboard and other clients.
+app.get('/api/workspace/navigation', (req, res) => {
+  const rawScope = String(req.query.scope || 'overview');
+  if (!MARKET_SCOPES.includes(rawScope as MarketScope)) {
+    return res.status(400).json({ success: false, error: '未知市场 scope' });
+  }
+  const scope = rawScope as MarketScope;
+  return res.json({ success: true, scope, groups: resolveWorkspaceNavigation(scope) });
+});
+
+app.get('/api/workspace/context', (req, res) => {
+  const rawScope = String(req.query.scope || 'overview');
+  if (!MARKET_SCOPES.includes(rawScope as MarketScope)) {
+    return res.status(400).json({ success: false, error: '未知市场 scope' });
+  }
+  const scope = rawScope as MarketScope;
+  const workspace = String(req.query.workspace || defaultWorkspace(scope)) as WorkspaceId;
+  if (!isWorkspaceAllowed(scope, workspace)) {
+    return res.status(400).json({ success: false, scope, workspace, error: '当前市场不支持该工作区' });
+  }
+  const instrument = String(req.query.instrument || '').trim();
+  return res.json({ success: true, scope, workspace, instrument: instrument || null });
+});
 
 // Lightweight identity check used by the desktop launcher.
 app.get('/api/health', (_req, res) => {

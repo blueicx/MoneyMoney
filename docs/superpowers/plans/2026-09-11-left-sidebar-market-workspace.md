@@ -131,10 +131,10 @@ git commit -m "feat: define scoped market workspace navigation"
 
 **文件：**
 - 修改：`src/web/server.ts`
-- 修改：`tests/market-workspace-navigation.test.cjs`
-- 修改：`tests/market-isolation-regression.test.cjs`
+- 修改：`src/web/auth.ts`
+- 创建：`tests/market-workspace-api.test.cjs`
 
-- [ ] **步骤 1：编写 API 失败测试**
+- [x] **步骤 1：编写 API 失败测试**
 
 测试验证菜单接口和非法组合：
 
@@ -154,13 +154,13 @@ test('workspace API rejects unknown scope and disallowed workspace', async () =>
 });
 ```
 
-- [ ] **步骤 2：运行测试确认失败**
+- [ ] **步骤 2：运行测试确认失败**（本次先完成了接口实现，再补充验证；未将服务模块单独停在 404 红灯阶段）
 
-运行：`npm run build; node --test tests/market-workspace-navigation.test.cjs tests/market-isolation-regression.test.cjs`
+运行：`npm run build; node --test tests/market-workspace-api.test.cjs tests/market-workspace-navigation.test.cjs tests/market-workspace-flow.test.cjs`
 
 预期：FAIL，接口返回 404 或未过滤的菜单。
 
-- [ ] **步骤 3：实现后端菜单接口和上下文校验**
+- [x] **步骤 3：实现后端菜单接口和上下文校验**
 
 在 `src/web/server.ts` 注册：
 
@@ -184,16 +184,16 @@ app.get('/api/workspace/context', (req, res) => {
 
 实际实现需复用现有认证 middleware、`scope` 枚举和统一标的解析器；不得绕过访客 GET 白名单，不得把写入动作加入新接口。
 
-- [ ] **步骤 4：运行测试确认通过**
+- [x] **步骤 4：运行测试确认通过**
 
-运行：`npm run build; node --test tests/market-workspace-navigation.test.cjs tests/market-isolation-regression.test.cjs`
+运行：`npm run build; node --test tests/market-workspace-api.test.cjs tests/market-workspace-navigation.test.cjs tests/market-workspace-flow.test.cjs`
 
 预期：作用域过滤、非法工作区 400、访客只读边界全部 PASS。
 
-- [ ] **步骤 5：Commit**
+- [x] **步骤 5：Commit**
 
 ```bash
-git add src/web/server.ts tests/market-workspace-navigation.test.cjs tests/market-isolation-regression.test.cjs
+git add src/web/server.ts src/web/auth.ts tests/market-workspace-api.test.cjs docs/superpowers/plans/2026-09-11-left-sidebar-market-workspace.md
 git commit -m "feat: expose scoped workspace navigation API"
 ```
 
