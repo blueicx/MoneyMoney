@@ -1,4 +1,4 @@
-export type SourceStatus = 'fresh' | 'stale' | 'failed' | 'unconfigured';
+export type SourceStatus = 'live' | 'stale' | 'unavailable' | 'fallback' | 'unconfigured';
 
 export interface SourceSnapshot<T> {
   data: T | null;
@@ -48,7 +48,7 @@ export class ResilientDataSourceAdapter<T> implements DataSourceAdapter<T> {
 
   async fetch(input: unknown = undefined): Promise<SourceSnapshot<T>> {
     const now = Date.now();
-    if (this.cached?.status === 'fresh' && new Date(this.cached.expiresAt).getTime() > now) return this.cached;
+    if (this.cached?.status === 'live' && new Date(this.cached.expiresAt).getTime() > now) return this.cached;
     if (this.circuitOpenUntil > now && this.cached) return { ...this.cached, status: 'stale', error: 'source circuit is open', consecutiveFailures: this.failures };
     const started = Date.now();
     let lastError: unknown = null;
@@ -65,7 +65,7 @@ export class ResilientDataSourceAdapter<T> implements DataSourceAdapter<T> {
           fetchedAt,
           expiresAt: new Date(Date.now() + this.options.ttlMs).toISOString(),
           latencyMs: Date.now() - started,
-          status: 'fresh',
+          status: 'live',
           consecutiveFailures: 0,
         };
         this.cached = snapshot;
@@ -82,6 +82,6 @@ export class ResilientDataSourceAdapter<T> implements DataSourceAdapter<T> {
     if (this.failures >= 3) this.circuitOpenUntil = Date.now() + Math.min(5 * 60_000, this.options.backoffMs * (2 ** this.failures));
     if (this.cached?.data != null) return { ...this.cached, status: 'stale', error: String(lastError), latencyMs: Date.now() - started, consecutiveFailures: this.failures };
     const nowIso = new Date().toISOString();
-    return { data: null, source: this.id, fetchedAt: nowIso, expiresAt: nowIso, latencyMs: Date.now() - started, status: 'failed', error: String(lastError), consecutiveFailures: this.failures };
+    return { data: null, source: this.id, fetchedAt: nowIso, expiresAt: nowIso, latencyMs: Date.now() - started, status: 'unavailable', error: String(lastError), consecutiveFailures: this.failures };
   }
 }

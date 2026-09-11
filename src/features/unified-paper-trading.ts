@@ -126,19 +126,21 @@ export function calculateUnifiedPerformance(ledger: UnifiedPaperLedger): {
   concentrationPct: number;
   attributionByAsset: Record<UnifiedPaperInstrumentType, number>;
 } {
-  const unrealizedPnl = ledger.positions.reduce((sum, position) => sum + (position.currentPrice - position.averageEntryPrice) * position.quantity, 0);
-  const positionValues = ledger.positions.map(position => position.currentPrice * position.quantity);
+  const positions = Array.isArray(ledger.positions) ? ledger.positions : [];
+  const orders = Array.isArray(ledger.orders) ? ledger.orders : [];
+  const unrealizedPnl = positions.reduce((sum, position) => sum + ((position.currentPrice || 0) - (position.averageEntryPrice || 0)) * (position.quantity || 0), 0);
+  const positionValues = positions.map(position => (position.currentPrice || 0) * (position.quantity || 0));
   const positionsValue = positionValues.reduce((sum, value) => sum + value, 0);
-  const equity = ledger.cash + positionsValue;
-  const closed = ledger.orders.filter(order => order.side === 'SELL' && Number.isFinite(order.pnlUsd));
+  const equity = (ledger.cash || 0) + positionsValue;
+  const closed = orders.filter(order => order.side === 'SELL' && Number.isFinite(order.pnlUsd));
   const wins = closed.filter(order => (order.pnlUsd || 0) > 0).length;
-  const feeSlippageTotal = ledger.orders.reduce((sum, order) => sum + orderCosts(order), 0);
+  const feeSlippageTotal = orders.reduce((sum, order) => sum + orderCosts(order), 0);
   const attributionByAsset: Record<UnifiedPaperInstrumentType, number> = { stock: 0, crypto: 0, prediction: 0 };
-  for (const order of closed) attributionByAsset[order.instrumentType] += Number(order.pnlUsd) || 0;
-  for (const position of ledger.positions) {
-    attributionByAsset[position.instrumentType] += (position.currentPrice - position.averageEntryPrice) * position.quantity;
+  for (const order of closed) if (order.instrumentType) attributionByAsset[order.instrumentType] += Number(order.pnlUsd) || 0;
+  for (const position of positions) {
+    if (position.instrumentType) attributionByAsset[position.instrumentType] += ((position.currentPrice || 0) - (position.averageEntryPrice || 0)) * (position.quantity || 0);
   }
-  for (const order of ledger.orders) attributionByAsset[order.instrumentType] -= orderCosts(order);
+  for (const order of orders) if (order.instrumentType) attributionByAsset[order.instrumentType] -= orderCosts(order);
   const largestPositionValue = positionValues.length ? Math.max(...positionValues) : 0;
   return {
     cash: round(ledger.cash, 2),

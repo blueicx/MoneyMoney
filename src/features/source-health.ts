@@ -71,7 +71,7 @@ async function timedJson(
   }
   const snapshot = await adapter.fetch();
   return {
-    ok: snapshot.status === 'fresh' || snapshot.status === 'stale',
+    ok: snapshot.status === 'live' || snapshot.status === 'stale',
     latencyMs: snapshot.latencyMs || 0,
     payload: snapshot.data,
     error: snapshot.error ? new Error(snapshot.error) : undefined,
@@ -99,7 +99,7 @@ function radarItem(
       ? (state.count > 0 ? `${state.count} 个市场` : '连接成功，暂无开放市场')
       : friendlyError(state.error),
     checkedAt: state.checkedAt || new Date().toISOString(),
-    status: unconfigured ? 'unconfigured' : state.ok ? 'fresh' : 'failed',
+    status: unconfigured ? 'unconfigured' : state.ok ? 'live' : 'unavailable',
     expiresAt: new Date(Date.now() + 30_000).toISOString(),
   };
 }
@@ -116,7 +116,7 @@ async function stockHealthItems(quick = false): Promise<SourceHealthItem[]> {
   };
   return data.snapshots.map(snapshot => {
     const hasData = snapshot.data != null;
-    const usable = hasData && (snapshot.status === 'fresh' || snapshot.status === 'stale');
+    const usable = hasData && (snapshot.status === 'live' || snapshot.status === 'fallback' || snapshot.status === 'stale');
     return {
       id: snapshot.source,
       name: names[snapshot.source] || snapshot.source,
@@ -125,7 +125,7 @@ async function stockHealthItems(quick = false): Promise<SourceHealthItem[]> {
       configured: true,
       latencyMs: snapshot.latencyMs,
       detail: usable
-        ? `${snapshot.status === 'stale' ? '使用旧缓存' : '正常'} · 数据时间 ${snapshot.fetchedAt}`
+        ? `${snapshot.status === 'fallback' ? '使用降级源' : snapshot.status === 'stale' ? '使用旧缓存' : '正常'} · 数据时间 ${snapshot.fetchedAt}`
         : friendlyError(snapshot.error),
       checkedAt: snapshot.fetchedAt,
       status: snapshot.status,
@@ -188,7 +188,7 @@ async function buildSourceHealth(scope = 'all'): Promise<SourceHealthReport> {
   const radar = radarSettled.status === 'fulfilled' ? radarSettled.value : { sources: {} };
   const source = radar?.sources || {};
 
-  const extractJson = (res: any) => res.status === 'fulfilled' ? res.value : { ok: false, error: new Error('failed') };
+  const extractJson = (res: any) => res.status === 'fulfilled' ? res.value : { ok: false, error: new Error('unavailable') };
   const predict = extractJson(predictSettled);
   const binance = extractJson(binanceSettled);
   const openMeteo = extractJson(openMeteoSettled);
@@ -205,7 +205,7 @@ async function buildSourceHealth(scope = 'all'): Promise<SourceHealthReport> {
         ? `正常 · ${Number(predict.payload?.data?.categories?.totalCount || 0)} 个事件`
         : friendlyError(predict.error),
       checkedAt,
-      status: predict.ok ? 'fresh' : 'failed',
+      status: predict.ok ? 'live' : 'unavailable',
       expiresAt: new Date(Date.now() + 30_000).toISOString(),
     },
     {
@@ -216,7 +216,7 @@ async function buildSourceHealth(scope = 'all'): Promise<SourceHealthReport> {
       latencyMs: binance.latencyMs || null,
       detail: binance.ok ? '正常' : friendlyError(binance.error),
       checkedAt,
-      status: binance.ok ? 'fresh' : 'failed',
+      status: binance.ok ? 'live' : 'unavailable',
       expiresAt: new Date(Date.now() + 30_000).toISOString(),
     },
     {
@@ -227,7 +227,7 @@ async function buildSourceHealth(scope = 'all'): Promise<SourceHealthReport> {
       latencyMs: openMeteo.latencyMs || null,
       detail: openMeteo.ok ? '预报接口正常' : friendlyError(openMeteo.error),
       checkedAt,
-      status: openMeteo.ok ? 'fresh' : 'failed',
+      status: openMeteo.ok ? 'live' : 'unavailable',
       expiresAt: new Date(Date.now() + 30_000).toISOString(),
     },
     {
@@ -239,7 +239,7 @@ async function buildSourceHealth(scope = 'all'): Promise<SourceHealthReport> {
       latencyMs: null,
       detail: aiConfigured ? '已配置；实际生成时检查模型可用性' : '未配置 OPENROUTER_API_KEY',
       checkedAt,
-      status: aiConfigured ? 'fresh' : 'unconfigured',
+      status: aiConfigured ? 'live' : 'unconfigured',
       expiresAt: new Date(Date.now() + 30_000).toISOString(),
     },
   ];
@@ -277,7 +277,7 @@ function buildDegradedReport(scope: string): SourceHealthReport {
       latencyMs: null,
       detail: '健康检查超时，后台尝试中...',
       checkedAt: new Date().toISOString(),
-      status: 'failed'
+      status: 'unavailable'
     }]
   };
 }

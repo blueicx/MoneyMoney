@@ -26,3 +26,8 @@ test('stock UI requests unified stock data and renders source freshness', () => 
   assert.match(html, /nasdaq-public|sec-edgar/);
   assert.match(html, /activeMarketScope.*stocks|data-market-scopes="stocks/);
 });
+
+test('stock source status treats live and fallback data as usable', () => {
+  assert.match(sourceHealth, /snapshot\.status === 'live'[\s\S]*snapshot\.status === 'fallback'/);
+  assert.match(html, /source\.status === 'live'[\s\S]*source\.status === 'fallback'/);
+});

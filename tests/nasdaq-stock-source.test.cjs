@@ -25,7 +25,7 @@ test('Nasdaq adapter returns stale data after a later source failure', async () 
   }, { quoteTtlMs: 0, retries: 0, backoffMs: 0 });
   const fresh = await adapters.quote.fetch({ symbol: 'AAPL' });
   const stale = await adapters.quote.fetch({ symbol: 'AAPL' });
-  assert.equal(fresh.status, 'fresh');
+  assert.equal(fresh.status, 'live');
   assert.equal(stale.status, 'stale');
   assert.equal(stale.data.price, 227.16);
 });

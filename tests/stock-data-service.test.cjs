@@ -30,7 +30,7 @@ test('one source failure does not erase successful stock cards', async () => {
   const result = await service.overview('NVDA');
   assert.equal(result.quote.price, 120);
   assert.deepEqual(result.bars, []);
-  assert.equal(result.sourceStatus['nasdaq-public-history'], 'failed');
+  assert.equal(result.sourceStatus['nasdaq-public-history'], 'unavailable');
 });
 
 test('quote-only path does not wait for history or SEC sources', async () => {

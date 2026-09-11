@@ -1,4 +1,5 @@
 import { config } from './config';
+import { globalCache } from './features/performance-cache';
 import {
   ApiResponse,
   Market,
@@ -261,23 +262,30 @@ class PredictApi {
     after?: string,
     status?: 'OPEN' | 'RESOLVED'
   ): Promise<ApiResponse<Category[]>> {
-    let endpoint = '/v1/categories';
-    const params: string[] = [];
+    const key = `api:categories:${first}:${after}:${status}`;
+    const cached = await globalCache.fetch(key, async () => {
+      let endpoint = '/v1/categories';
+      const params: string[] = [];
 
-    if (first) params.push(`first=${first}`);
-    if (after) params.push(`after=${after}`);
-    if (status) params.push(`status=${status}`);
+      if (first) params.push(`first=${first}`);
+      if (after) params.push(`after=${after}`);
+      if (status) params.push(`status=${status}`);
 
-    if (params.length > 0) {
-      endpoint += '?' + params.join('&');
+      if (params.length > 0) {
+        endpoint += '?' + params.join('&');
+      }
+
+      try {
+        return await this.request<ApiResponse<Category[]>>('GET', endpoint, undefined, 1);
+      } catch (error) {
+        if (!/authorization failed|access denied|API Error 40[13]/i.test(String((error as Error).message))) throw error;
+        return this.getCategoriesViaGraphql(first);
+      }
+    }, { ttl: 15_000, staleTtl: 60_000 });
+    if (cached.status === 'error') {
+      throw cached.error instanceof Error ? cached.error : new Error('Categories request failed');
     }
-
-    try {
-      return await this.request<ApiResponse<Category[]>>('GET', endpoint, undefined, 1);
-    } catch (error) {
-      if (!/authorization failed|access denied|API Error 40[13]/i.test(String((error as Error).message))) throw error;
-      return this.getCategoriesViaGraphql(first);
-    }
+    return cached.data;
   }
 
   private async getCategoriesViaGraphql(first = 50): Promise<ApiResponse<Category[]>> {

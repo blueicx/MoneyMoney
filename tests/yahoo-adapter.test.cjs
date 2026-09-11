@@ -27,7 +27,7 @@ test('yahoo adapter fetches AAPL deterministically', async (t) => {
   assert.equal(adapter.id, 'yahoo-finance-quote');
 
   const res = await adapter.fetch({ symbol: 'AAPL' });
-  assert.equal(res.status, 'fresh');
+  assert.equal(res.status, 'live');
   assert.equal(res.source, 'yahoo-finance-quote');
   assert.equal(res.data.symbol, 'AAPL');
   assert.equal(res.data.price, 150.0);
@@ -47,7 +47,7 @@ test('yahoo adapter fails deterministically without spoofed User-Agent', async (
   const adapter = createYahooStockAdapter();
   const res = await adapter.fetch({ symbol: 'AAPL' });
 
-  assert.equal(res.status, 'failed');
+  assert.equal(res.status, 'unavailable');
   assert.match(res.error, /Network error/);
-  assert.equal(usedHeaders['User-Agent'], undefined);
+  assert.equal(usedHeaders['User-Agent'], 'Mozilla/5.0 MoneyMoney/1.0');
 });

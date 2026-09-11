@@ -11,8 +11,16 @@ export function createYahooStockAdapter(): DataSourceAdapter<StockQuote> {
     fetcher: async (input, signal) => {
       const symbol = String((input as { symbol?: string })?.symbol || '').trim();
       if (!symbol) throw new Error('Symbol is required');
-      const url = 'https://query1.finance.yahoo.com/v7/finance/quote?symbols=' + encodeURIComponent(symbol);
-      const response = await fetch(url, { signal });
+      let response;
+      const headers = { 'User-Agent': 'Mozilla/5.0 MoneyMoney/1.0' };
+      try {
+        const url = 'https://query1.finance.yahoo.com/v7/finance/quote?symbols=' + encodeURIComponent(symbol);
+        response = await fetch(url, { signal, headers });
+        if (!response.ok) throw new Error();
+      } catch (err) {
+        const url2 = 'https://query2.finance.yahoo.com/v7/finance/quote?symbols=' + encodeURIComponent(symbol);
+        response = await fetch(url2, { signal, headers });
+      }
       if (!response.ok) throw new Error('Yahoo Finance API failed with status: ' + response.status);
       const data = (await response.json()) as any;
       const quote = data.quoteResponse?.result?.[0];

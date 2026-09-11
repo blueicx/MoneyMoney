@@ -5567,7 +5567,7 @@ async function loadUnifiedStockData(symbol) {
     if (!payload.success || !payload.data) throw new Error(payload.error || '股票数据暂不可用');
     const sources = (payload.data.sources || []).map(source => {
       const label = ({ 'nasdaq-public-quote': 'Nasdaq报价', 'nasdaq-public-history': 'Nasdaq历史', 'sec-edgar-submissions': 'SEC申报', 'sec-edgar-companyfacts': 'SEC公司事实' })[source.source] || source.source;
-      const status = source.status === 'fresh' ? '正常' : source.status === 'stale' ? '旧缓存' : source.status === 'unconfigured' ? '未配置' : '不可用';
+      const status = source.status === 'live' ? '正常' : source.status === 'fallback' ? '降级源' : source.status === 'stale' ? '旧缓存' : source.status === 'unconfigured' ? '未配置' : '不可用';
       return label + '：' + status + '（' + new Date(source.fetchedAt).toLocaleString() + '）';
     });
     if (el) el.textContent = normalized + ' · 来源状态：' + (sources.join('　') || '暂无');

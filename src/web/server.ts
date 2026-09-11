@@ -499,7 +499,7 @@ app.get('/api/health/readiness', async (_req, res) => {
     const ready = storage.ok && sources.items.some(item => item.ok || item.configured);
     res.status(ready ? 200 : 503).json({ ok: ready, status: ready ? 'ready' : 'degraded', storage, sources });
   } catch (error) {
-    res.status(503).json({ ok: false, status: 'failed', error: error instanceof Error ? error.message : String(error) });
+    res.status(503).json({ ok: false, status: 'unavailable', error: error instanceof Error ? error.message : String(error) });
   }
 });
 
@@ -1604,7 +1604,7 @@ app.get('/api/events/timeline', async (req, res) => {
     }
     sourceStatus.events = cal.stale ? 'stale' : 'ok';
   } catch {
-    sourceStatus.events = 'failed';
+    sourceStatus.events = 'unavailable';
   }
 
   if (scope === 'overview') try {
@@ -1621,7 +1621,7 @@ app.get('/api/events/timeline', async (req, res) => {
     }
     sourceStatus.news = 'ok';
   } catch {
-    sourceStatus.news = 'failed';
+    sourceStatus.news = 'unavailable';
   }
 
   const filtered = filterTimelineItems(evidences, scope, instrumentId);
@@ -1631,8 +1631,8 @@ app.get('/api/events/timeline', async (req, res) => {
     scope,
     sourceStatus,
     updatedAt: new Date().toISOString(),
-    freshness: { fetchedAt: new Date().toISOString(), status: Object.values(sourceStatus).some(value => value === 'ok' || value === 'stale') ? 'fresh' : 'unavailable' },
-  }, Object.values(sourceStatus).includes('failed') ? 'failed' : 'ok');
+    freshness: { fetchedAt: new Date().toISOString(), status: Object.values(sourceStatus).some(value => value === 'ok' || value === 'stale') ? 'live' : 'unavailable' },
+  }, Object.values(sourceStatus).includes('unavailable') ? 'unavailable' : 'ok');
 });
 app.get('/api/events/calendar', async (req, res) => {
   try {
@@ -2588,8 +2588,8 @@ function formatTelegramPortfolio(scope: MarketScope = 'overview'): string {
   const portfolio = paperEngine.getPortfolio();
   const positions = paperEngine.getOpenPositions();
   const unifiedLedger = filterUnifiedPaperLedger(unifiedPaperLedgerStore.get(), scope);
-  const unifiedPerformance = calculateUnifiedPerformance(unifiedLedger);
-  const unifiedPositions = unifiedLedger.positions;
+  const unifiedPerformance = scope === 'overview' ? unifiedPaperLedgerStore.performance() : calculateUnifiedPerformance(unifiedLedger);
+  const unifiedPositions = unifiedLedger?.positions || [];
   const unifiedCounts = unifiedPositions.reduce((counts, position) => {
     const label = position.instrumentType === 'stock' ? '股票' : position.instrumentType === 'crypto' ? '加密货币' : '预测市场';
     counts[label] = (counts[label] || 0) + 1;
@@ -3958,7 +3958,7 @@ function sendPerformanceJson(req: express.Request, res: express.Response, payloa
   const finalPayload = {
     ...payload,
     scope: payload.scope || scope,
-    sourceStatus: payload.sourceStatus || (cacheStatus === 'failed' ? 'degraded' : 'ok'),
+    sourceStatus: payload.sourceStatus || (cacheStatus === 'unavailable' ? 'degraded' : 'ok'),
     updatedAt: payload.updatedAt || new Date().toISOString(),
   };
   const etag = createCacheEtag((finalPayload as any).data);
@@ -4880,7 +4880,7 @@ async function tickAllAiRunners(): Promise<Array<{ id: string; actionZh: string 
         const aboveSma = price > sma10;
 
         const openPos = runner.positions.find(p => p.status === 'OPEN');
-        const freshEnough = snapshot.status === 'fresh' && Date.now() - Date.parse(snapshot.fetchedAt) <= runner.policy.minFreshnessMs;
+        const freshEnough = snapshot.status === 'live' && Date.now() - Date.parse(snapshot.fetchedAt) <= runner.policy.minFreshnessMs;
         if (!openPos && freshEnough && rsi < 32 && runner.cashUsd > 5) {
           const qty = Math.floor(runner.cashUsd * 0.95 / price * 1000) / 1000;
           if (qty > 0) {
@@ -4911,7 +4911,7 @@ async function tickAllAiRunners(): Promise<Array<{ id: string; actionZh: string 
         const sma10 = closes.slice(-10).reduce((a, b) => a + b, 0) / 10;
         const aboveSma = price > sma10;
         const openPos = runner.positions.find(p => p.status === 'OPEN');
-        const freshEnough = snapshot.status === 'fresh'
+        const freshEnough = snapshot.status === 'live'
           && Date.now() - Date.parse(snapshot.fetchedAt) <= runner.policy.minFreshnessMs;
         if (!freshEnough || !Number.isFinite(price) || price <= 0) continue;
         if (!openPos && rsi < 32 && runner.cashUsd > 5) {

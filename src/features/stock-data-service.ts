@@ -31,7 +31,7 @@ function validSymbol(value: string): string {
 
 function failedSnapshot<T>(id: string, error: unknown): SourceSnapshot<T> {
   const now = new Date().toISOString();
-  return { data: null, source: id, fetchedAt: now, expiresAt: now, latencyMs: null, status: 'failed', error: String(error), consecutiveFailures: 1 };
+  return { data: null, source: id, fetchedAt: now, expiresAt: now, latencyMs: null, status: 'unavailable', error: String(error), consecutiveFailures: 1 };
 }
 
 function emptyValue(id: string, snapshot: SourceSnapshot<unknown>): unknown {
@@ -65,10 +65,10 @@ function createDefaultStockDataDependencies(): StockDataDependencies {
     id: 'stock-quote-fallback',
     fetch: async (input) => {
       let snapshot = await nasdaq.quote.fetch(input);
-      if (snapshot.status === 'failed') {
+      if (snapshot.status === 'unavailable') {
         const yahooSnap = await yahooQuote.fetch(input);
-        if (yahooSnap.status !== 'failed') {
-          return yahooSnap;
+        if (yahooSnap.status !== 'unavailable') {
+          return { ...yahooSnap, status: 'fallback' };
         }
       }
       return snapshot;
