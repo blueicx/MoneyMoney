@@ -1365,6 +1365,22 @@
     /* Better empty states */
     .empty-tip { text-align:center;padding:20px;color:var(--text-secondary);font-size:13px; }
     .empty-tip-icon { font-size:32px;margin-bottom:8px;opacity:.5; }
+    .market-research-row { display:flex; flex-direction:column; align-items:flex-start; gap:4px; width:100%; padding:10px 12px; margin-bottom:6px; border:1px solid var(--border); border-radius:10px; background:var(--bg-card); color:var(--text); text-align:left; cursor:pointer; font:inherit; }
+    .market-research-row:hover { border-color:var(--purple); background:var(--purple-light); }
+    .market-research-row strong { font-size:13px; }
+    .market-research-row span { color:var(--text-secondary); font-size:11px; }
+    .backtest-panel { padding:14px; border:1px solid var(--border); border-radius:14px; background:var(--bg-card); }
+    .backtest-toolbar { display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-bottom:16px; }
+    .backtest-control { display:inline-flex; align-items:center; gap:6px; font-size:13px; color:var(--text); }
+    .backtest-control input, .backtest-control select { width:auto; min-width:64px; padding:6px 8px; border:1px solid var(--border); border-radius:8px; background:var(--bg-secondary); color:var(--text); }
+    .backtest-scope-note { margin:0 0 12px; color:var(--text-secondary); font-size:12px; }
+    .backtest-loading-skeleton { min-height:46px; padding:14px; border:1px solid var(--border); border-radius:10px; background:linear-gradient(90deg,var(--bg-secondary) 25%,var(--border) 50%,var(--bg-secondary) 75%); background-size:200% 100%; color:var(--text-secondary); animation:shimmer 1.5s infinite; }
+    .backtest-error-state { padding:14px; border:1px solid color-mix(in srgb,var(--red) 55%,var(--border)); border-radius:10px; background:var(--red-light); color:var(--text); text-align:left; }
+    .backtest-error-state small { color:var(--text-secondary); }
+    .backtest-result-card { padding:14px; border:1px solid var(--border); border-radius:12px; background:var(--bg-card); box-shadow:var(--shadow); text-align:center; }
+    .backtest-result-card .metric-label { color:var(--text-secondary); font-size:11px; }
+    .backtest-result-card .metric-value { margin-top:4px; font-size:20px; font-weight:800; }
+    .backtest-meta { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px; color:var(--text-secondary); font-size:11px; }
     /* News Ticker */
     .news-ticker { background:var(--purple); color:white; overflow:hidden; white-space:nowrap; padding:6px 0; font-size:12px; position:relative; }
     .news-ticker-inner { display:inline-block; animation:ticker-scroll 60s linear infinite; padding-left:100%; }
@@ -1980,16 +1996,17 @@
         <div id="ai-runners-list"></div>
       </div>
       <!-- Backtest Tab -->
-      <div id="backtest-tab" class="tab-content">
-        <div class="section-title">🧪 策略回测</div>
-        <label style="font-size:13px;display:inline-flex;align-items:center;gap:6px;margin-bottom:12px;">策略: <select id="bt-strategy" style="padding:4px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);"><option value="momentum">📈 动量</option><option value="meanReversion">↔️ 均值回归</option></select></label>
-        <div style="display:flex;gap:12px;margin-bottom:20px;flex-wrap:wrap;align-items:center;">
-          <label style="font-size:13px;">市场 ID: <input type="number" id="bt-market-id" min="1" placeholder="全部" style="width:76px;padding:4px;border-radius:6px;border:1px solid var(--border);"></label>
-          <label style="font-size:13px;">回看周期: <input type="number" id="bt-lookback" value="10" min="3" max="50" style="width:50px;padding:4px;border-radius:6px;border:1px solid var(--border);"></label>
-          <label style="font-size:13px;">触发阈值: <input type="number" id="bt-threshold" value="0.03" step="0.01" min="0.01" max="0.2" style="width:60px;padding:4px;border-radius:6px;border:1px solid var(--border);"></label>
-          <label style="font-size:13px;">持有天数: <input type="number" id="bt-holding" value="5" min="1" max="30" style="width:50px;padding:4px;border-radius:6px;border:1px solid var(--border);"></label>
-          <button class="tab active" onclick="runBacktest()">▶ 运行回测</button>
-          <button class="tab" onclick="compareBacktests()">⚔️ 对比两策略</button>
+      <div id="backtest-tab" class="tab-content backtest-panel">
+        <div class="section-title">🧪 市场专属策略回测</div>
+        <p id="backtest-scope-note" class="backtest-scope-note">当前市场的真实历史数据将独立用于回测，数据不可用时不会替换为其他市场数据。</p>
+        <div class="backtest-toolbar">
+          <label class="backtest-control">策略: <select id="bt-strategy"><option value="momentum">📈 动量（做多）</option><option value="meanReversion">↔️ 均值回归（做多）</option></select></label>
+          <label class="backtest-control">标的: <input type="text" id="bt-market-id" placeholder="AAPL / BTCUSDT / 市场ID" autocomplete="off"></label>
+          <label class="backtest-control">回看周期: <input type="number" id="bt-lookback" value="10" min="1" max="50"></label>
+          <label class="backtest-control">触发阈值: <input type="number" id="bt-threshold" value="0.03" step="0.01" min="0.001" max="0.2"></label>
+          <label class="backtest-control">持有周期: <input type="number" id="bt-holding" value="5" min="1" max="30"></label>
+          <button class="tab active" type="button" onclick="runBacktest()">▶ 运行回测</button>
+          <button class="tab" type="button" onclick="compareBacktests()">⚔️ 对比两策略</button>
         </div>
         <div id="backtest-results"></div>
         <div id="backtest-compare" style="margin-top:16px;"></div>
@@ -3868,63 +3885,96 @@ async function closePaperPosition(positionId, currentPrice) {
   loadPaperPortfolio();
 }
 // --- Backtest ---
+function backtestScopeLabel(scope = activeMarketScope) {
+  return ({ overview: '总体市场', stocks: '股票', options: '期权', crypto: '虚拟币', prediction: '预测市场', watchlist: '自选' })[scope] || '当前市场';
+}
+function backtestInstrumentInput() {
+  return document.getElementById('bt-market-id')?.value.trim() || '';
+}
+function renderBacktestError(target, message, reason = '') {
+  if (!target) return;
+  target.innerHTML = `<div class="backtest-error-state"><strong>${safeNewsText(message)}</strong>${reason ? `<br><small>${safeNewsText(reason)}</small>` : ''}</div>`;
+}
+function updateBacktestScopeNote() {
+  const note = document.getElementById('backtest-scope-note');
+  const input = document.getElementById('bt-market-id');
+  if (!note) return;
+  const label = backtestScopeLabel();
+  note.textContent = `${label}回测仅使用${label}真实历史数据；数据源不可用时会明确提示，不会替换为其他市场数据。`;
+  if (input) input.placeholder = activeMarketScope === 'stocks' ? '如 AAPL' : activeMarketScope === 'crypto' ? '如 BTCUSDT' : activeMarketScope === 'prediction' ? '市场 ID（可选）' : '先选择当前市场标的';
+}
 async function runBacktest() {
   const strategy = document.getElementById('bt-strategy').value;
-  const marketId = document.getElementById('bt-market-id').value.trim();
+  const marketId = backtestInstrumentInput();
   const lookback = document.getElementById('bt-lookback').value;
   const threshold = document.getElementById('bt-threshold').value;
   const holding = document.getElementById('bt-holding').value;
   const resultsEl = document.getElementById('backtest-results');
-  if (!['overview', 'prediction'].includes(activeMarketScope)) {
-    resultsEl.innerHTML = '<div class="empty-tip">当前回测引擎是预测市场专用；股票、期权和虚拟币范围不会显示预测市场回测结果。</div>';
+  updateBacktestScopeNote();
+  if (activeMarketScope === 'options') {
+    renderBacktestError(resultsEl, '期权历史数据暂不可用', '真实历史期权链、隐含波动率和 Greeks 数据源尚未覆盖');
     return;
   }
-  resultsEl.innerHTML = "<div style=\"text-align:center;padding:20px;\">\u23F3 \u6B63\u5728\u8FD0\u884C\u56DE\u6D4B...</div>";
+  if (['stocks', 'crypto'].includes(activeMarketScope) && !marketId) {
+    renderBacktestError(resultsEl, `请输入${backtestScopeLabel()}回测标的`, activeMarketScope === 'stocks' ? '例如 AAPL' : '例如 BTCUSDT');
+    return;
+  }
+  resultsEl.innerHTML = "<div class=\"backtest-loading-skeleton\" style=\"text-align:center;padding:20px;\">\u23F3 \u6B63\u5728\u8FD0\u884C\u56DE\u6D4B...</div>";
   try {
     const marketQuery = marketId ? `&marketId=${encodeURIComponent(marketId)}` : '';
     const res = await fetch(scopedUrl(`/api/backtest?strategy=${encodeURIComponent(strategy)}${marketQuery}&lookback=${lookback}&threshold=${threshold}&holding=${holding}`));
-    const { data: r } = await res.json();
-    if (r.totalTrades === 0) {
+    const json = await res.json();
+    if (!json.success) {
+      renderBacktestError(resultsEl, json.error || '回测失败', json.reason || '数据源暂时不可用');
+      return;
+    }
+    const r = json.data;
+    if (!r || r.totalTrades === 0) {
       resultsEl.innerHTML = "<div style=\"padding:20px;text-align:center;color:var(--text-secondary);\">\u5386\u53F2\u6570\u636E\u8FD8\u4E0D\u8DB3\uFF0C\u65E0\u6CD5\u56DE\u6D4B\u3002<br><small>\u673A\u5668\u4EBA\u8FD0\u884C\u5E76\u8BB0\u5F55\u4EF7\u683C\u540E\u4F1A\u9010\u6B65\u79EF\u7D2F\u6570\u636E\u3002</small></div>";
       return;
     }
     const retColor = r.totalReturnPct >= 0 ? 'var(--green)' : 'var(--red)';
+    const isAsset = ['stocks', 'crypto'].includes(r.market);
+    const tradeRows = r.trades.slice(-15).reverse().map((t) => {
+      const direction = t.side === 'long' ? '做多' : translateAction(t.action);
+      const id = t.instrumentId || `#${t.marketId}`;
+      return `<tr><td>${marketResearchEscape(id)}</td><td>${direction}</td><td>${t.entryPrice}</td><td>${t.exitPrice}</td><td style="color:${t.pnlPct >= 0 ? 'var(--green)' : 'var(--red)'}">${t.pnlPct}%</td></tr>`;
+    }).join('');
     resultsEl.innerHTML = `
+          <div class="backtest-meta"><span>市场：${backtestScopeLabel(r.market || activeMarketScope)}</span><span>标的：${marketResearchEscape(r.instrumentId || '全部市场')}</span><span>数据源：${marketResearchEscape(r.dataSource || '预测市场历史记录')}</span><span>数据条数：${r.barCount || '—'}</span></div>
           <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:16px;">
-            <div style="background:var(--bg-card);padding:14px;border-radius:12px;box-shadow:var(--shadow);text-align:center;">
+            <div class="backtest-result-card">
               <div style="font-size:11px;color:var(--text-secondary);">总收益</div>
               <div style="font-size:20px;font-weight:700;color:${retColor};">${r.totalReturnPct}%</div>
             </div>
-            <div style="background:var(--bg-card);padding:14px;border-radius:12px;box-shadow:var(--shadow);text-align:center;">
+            <div class="backtest-result-card">
               <div style="font-size:11px;color:var(--text-secondary);">胜率</div>
               <div style="font-size:20px;font-weight:700;">${(r.winRate * 100).toFixed(0)}%</div>
             </div>
-            <div style="background:var(--bg-card);padding:14px;border-radius:12px;box-shadow:var(--shadow);text-align:center;">
+            <div class="backtest-result-card">
               <div style="font-size:11px;color:var(--text-secondary);">夏普比率</div>
               <div style="font-size:20px;font-weight:700;">${r.sharpeRatio}</div>
             </div>
-            <div style="background:var(--bg-card);padding:14px;border-radius:12px;box-shadow:var(--shadow);text-align:center;">
+            <div class="backtest-result-card">
               <div style="font-size:11px;color:var(--text-secondary);">最大回撤</div>
               <div style="font-size:20px;font-weight:700;color:var(--red);">${r.maxDrawdownPct}%</div>
             </div>
-            <div style="background:var(--bg-card);padding:14px;border-radius:12px;box-shadow:var(--shadow);text-align:center;">
+            <div class="backtest-result-card">
               <div style="font-size:11px;color:var(--text-secondary);">交易次数</div>
               <div style="font-size:20px;font-weight:700;">${r.totalTrades}</div>
             </div>
           </div>
           <div class="section-title">资金曲线</div>
-          <canvas id="equity-chart" width="800" height="200" style="width:100%;background:var(--bg-card);border-radius:12px;padding:10px;"></canvas>
+          <canvas id="equity-chart" width="800" height="200" class="backtest-equity-chart"></canvas>
           <div class="section-title" style="margin-top:16px;">最近交易</div>
           <table class="data-table">
             <thead><tr><th>市场</th><th>方向</th><th>开仓</th><th>平仓</th><th>盈亏 %</th></tr></thead>
-            <tbody>${r.trades.slice(-15).reverse().map((t) =>
-    `<tr><td>#${t.marketId}</td><td>${translateAction(t.action)}</td><td>${t.entryPrice}</td><td>${t.exitPrice}</td><td style="color:${t.pnlPct >= 0 ? 'var(--green)' : 'var(--red)'}">${t.pnlPct}%</td></tr>`
-    ).join('')}</tbody>
+            <tbody>${tradeRows}</tbody>
           </table>`;
     // Draw equity curve
     drawEquityChart(r.equityCurve);
   } catch (e) {
-    resultsEl.innerHTML = `<div style="color:var(--red);padding:20px;">错误：${e.message}</div>`;
+    renderBacktestError(resultsEl, '回测失败', e?.message || '数据源暂时不可用');
   }
 }
 function drawEquityChart(curve) {
@@ -3935,7 +3985,7 @@ function drawEquityChart(curve) {
   const minE = Math.min(...curve.map((c) => c.equity));
   const maxE = Math.max(...curve.map((c) => c.equity));
   const range = maxE - minE || 1;
-  ctx.strokeStyle = '#7c3aed';
+  ctx.strokeStyle = getComputedStyle(canvas).getPropertyValue('--purple').trim() || '#7c3aed';
   ctx.lineWidth = 2;
   ctx.beginPath();
   curve.forEach((point, i) => {
@@ -4106,15 +4156,20 @@ function renderEventMonthGrid(events) {
 async function compareBacktests() {
   const compareEl = document.getElementById('backtest-compare');
   if (!compareEl) return;
-  if (!['overview', 'prediction'].includes(activeMarketScope)) {
-    compareEl.innerHTML = '<div class="empty-tip">当前回测引擎是预测市场专用；请切换到预测市场或总体范围。</div>';
+  updateBacktestScopeNote();
+  if (activeMarketScope === 'options') {
+    renderBacktestError(compareEl, '期权历史数据暂不可用', '真实历史期权链、隐含波动率和 Greeks 数据源尚未覆盖');
     return;
   }
-  const marketId = document.getElementById('bt-market-id').value.trim();
+  const marketId = backtestInstrumentInput();
   const lookback = document.getElementById('bt-lookback').value;
   const threshold = document.getElementById('bt-threshold').value;
   const holding = document.getElementById('bt-holding').value;
-  compareEl.innerHTML = '<div style="padding:12px;color:var(--text-secondary);">⚔️ 正在并行比较两套策略…</div>';
+  if (['stocks', 'crypto'].includes(activeMarketScope) && !marketId) {
+    renderBacktestError(compareEl, `请输入${backtestScopeLabel()}回测标的`, activeMarketScope === 'stocks' ? '例如 AAPL' : '例如 BTCUSDT');
+    return;
+  }
+  compareEl.innerHTML = '<div class="backtest-loading-skeleton" style="padding:12px;color:var(--text-secondary);">⚔️ 正在并行比较两套策略…</div>';
   try {
     const marketQuery = marketId ? `&marketId=${encodeURIComponent(marketId)}` : '';
     const query = `lookback=${lookback}&threshold=${threshold}&holding=${holding}${marketQuery}`;
@@ -4122,7 +4177,13 @@ async function compareBacktests() {
       fetch(scopedUrl(`/api/backtest?strategy=momentum&${query}`)),
       fetch(scopedUrl(`/api/backtest?strategy=meanReversion&${query}`)),
     ]);
-    const results = await Promise.all(responses.map(response => response.json().then(body => body.data)));
+    const jsons = await Promise.all(responses.map(response => response.json()));
+    const firstError = jsons.find(j => !j.success);
+    if (firstError) {
+      renderBacktestError(compareEl, firstError.error || '回测失败', firstError.reason || '数据源暂时不可用');
+      return;
+    }
+    const results = jsons.map(j => j.data);
     const rows = results.map((result, index) => ({
       name: index === 0 ? '📈 动量' : '↔️ 均值回归',
       result: result || {},
@@ -4130,10 +4191,10 @@ async function compareBacktests() {
     compareEl.innerHTML = `<div class="section-title" style="margin-bottom:8px;">⚔️ 策略对比</div><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px;">${rows.map(({ name, result }) => {
       const returnPct = Number(result.totalReturnPct || 0);
       const color = returnPct >= 0 ? 'var(--green)' : 'var(--red)';
-      return `<div style="background:var(--bg-card);border-radius:12px;padding:12px;box-shadow:var(--shadow);"><div style="font-weight:800;">${name}</div><div style="font-size:20px;font-weight:800;color:${color};margin-top:5px;">${returnPct >= 0 ? '+' : ''}${returnPct.toFixed(2)}%</div><div style="font-size:11px;color:var(--text-secondary);margin-top:5px;">交易 ${Number(result.totalTrades || 0)} · 胜率 ${(Number(result.winRate || 0) * 100).toFixed(0)}% · 回撤 ${Number(result.maxDrawdownPct || 0).toFixed(2)}%</div><div style="font-size:11px;color:var(--text-secondary);margin-top:3px;">Sharpe ${Number(result.sharpeRatio || 0).toFixed(2)}</div></div>`;
+      return `<div class="backtest-result-card" style="text-align:left;"><div style="font-weight:800;">${name}</div><div class="metric-value" style="color:${color};">${returnPct >= 0 ? '+' : ''}${returnPct.toFixed(2)}%</div><div style="font-size:11px;color:var(--text-secondary);margin-top:5px;">交易 ${Number(result.totalTrades || 0)} · 胜率 ${(Number(result.winRate || 0) * 100).toFixed(0)}% · 回撤 ${Number(result.maxDrawdownPct || 0).toFixed(2)}%</div><div style="font-size:11px;color:var(--text-secondary);margin-top:3px;">Sharpe ${Number(result.sharpeRatio || 0).toFixed(2)}</div></div>`;
     }).join('')}</div>`;
   } catch (error) {
-    compareEl.innerHTML = `<div style="padding:12px;color:var(--red);">对比失败：${safeNewsText(error?.message || '数据源暂时不可用')}</div>`;
+    renderBacktestError(compareEl, '对比失败', error?.message || '数据源暂时不可用');
   }
 }
 async function loadEventCalendar(force = false) {
@@ -9397,6 +9458,13 @@ function setMarketScope(scope, options = {}) {
   params.set('market', scope);
   history.replaceState({}, '', `${location.pathname}?${params}${location.hash}`);
   renderNavigationState();
+  updateBacktestScopeNote();
+  const backtestInput = document.getElementById('bt-market-id');
+  if (backtestInput) backtestInput.value = '';
+  const backtestResults = document.getElementById('backtest-results');
+  const backtestCompare = document.getElementById('backtest-compare');
+  if (backtestResults) backtestResults.innerHTML = '';
+  if (backtestCompare) backtestCompare.innerHTML = '';
   loadNewsTicker(); loadMarketTimeline();
   loadMarketOverview();
   if (scope === 'overview') loadCrossAssetCorrelation();

@@ -55,6 +55,8 @@ import fs from 'fs';
 import path from 'path';
 
 import { DATA_ROOT } from '../utils/paths';
+import { stockDataService } from './stock-data-service';
+import { binanceFeed } from './binance';
 const DATA_DIR = DATA_ROOT;
 const HISTORY_FILE = path.join(DATA_DIR, 'price-history.json');
 
@@ -79,6 +81,153 @@ export interface BacktestResult {
     exitTime: number;
     pnlPct: number;
   }>;
+}
+
+export type AssetMarket = 'stocks' | 'crypto';
+
+export interface AssetBar {
+  time: number;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume?: number | null;
+}
+
+export interface AssetBacktestInput {
+  market: AssetMarket;
+  instrumentId: string;
+  dataSource: string;
+  bars: AssetBar[];
+  strategy: 'momentum' | 'meanReversion';
+  lookback: number;
+  threshold: number;
+  holding: number;
+  startingBalance: number;
+  feesBps?: number;
+  slippageBps?: number;
+}
+
+export interface AssetBacktestResult {
+  market: AssetMarket;
+  instrumentId: string;
+  dataSource: string;
+  barCount: number;
+  startTime: number;
+  endTime: number;
+  strategyName: string;
+  periodDays: number;
+  totalTrades: number;
+  winningTrades: number;
+  losingTrades: number;
+  winRate: number;
+  totalReturnPct: number;
+  maxDrawdownPct: number;
+  sharpeRatio: number;
+  avgHoldMinutes: number;
+  equityCurve: Array<{ time: number; equity: number }>;
+  trades: Array<{
+    instrumentId: string;
+    side: 'long';
+    entryPrice: number;
+    exitPrice: number;
+    entryTime: number;
+    exitTime: number;
+    pnlPct: number;
+  }>;
+}
+
+function roundNumber(value: number, digits = 4): number {
+  return Number(value.toFixed(digits));
+}
+
+/**
+ * A market-neutral price-bar engine for traditional assets.
+ * It deliberately has a different result contract from prediction-market
+ * backtests: trades are long positions in an instrument, never YES/NO bets.
+ */
+export function runAssetBacktest(input: AssetBacktestInput): AssetBacktestResult {
+  const instrumentId = String(input.instrumentId || '').trim().toUpperCase();
+  const lookback = Math.max(1, Math.floor(input.lookback));
+  const holding = Math.max(1, Math.floor(input.holding));
+  const threshold = Number(input.threshold);
+  const startingBalance = Number(input.startingBalance);
+  const feesBps = Math.max(0, Number(input.feesBps ?? 10));
+  const slippageBps = Math.max(0, Number(input.slippageBps ?? 5));
+  const cleanBars = input.bars
+    .filter(bar => Number.isFinite(bar.time) && Number.isFinite(bar.close) && bar.close > 0)
+    .sort((left, right) => left.time - right.time);
+
+  if (!instrumentId) throw new Error('回测标的不能为空');
+  if (!Number.isFinite(threshold) || threshold <= 0) throw new Error('回测阈值无效');
+  if (!Number.isFinite(startingBalance) || startingBalance <= 0) throw new Error('回测初始资金无效');
+  if (cleanBars.length < lookback + holding + 2) throw new Error('历史数据不足，无法进行真实回测');
+
+  const trades: AssetBacktestResult['trades'] = [];
+  const equityCurve: AssetBacktestResult['equityCurve'] = [{ time: cleanBars[0].time, equity: startingBalance }];
+  const returns: number[] = [];
+  let balance = startingBalance;
+  let peak = startingBalance;
+  let maxDrawdown = 0;
+  const roundTripCost = ((feesBps + slippageBps) * 2) / 10_000;
+
+  for (let index = lookback; index + holding < cleanBars.length; index += holding) {
+    const previous = cleanBars[index - lookback].close;
+    const entry = cleanBars[index].close;
+    const change = (entry - previous) / previous;
+    const shouldEnter = input.strategy === 'momentum' ? change >= threshold : change <= -threshold;
+    if (!shouldEnter) continue;
+
+    const exitIndex = index + holding;
+    const exit = cleanBars[exitIndex].close;
+    const grossReturn = (exit - entry) / entry;
+    const netReturn = grossReturn - roundTripCost;
+    const betSize = balance * 0.05;
+    const pnl = betSize * netReturn;
+    balance += pnl;
+    returns.push(netReturn);
+    trades.push({
+      instrumentId,
+      side: 'long',
+      entryPrice: roundNumber(entry),
+      exitPrice: roundNumber(exit),
+      entryTime: cleanBars[index].time,
+      exitTime: cleanBars[exitIndex].time,
+      pnlPct: roundNumber(netReturn * 100, 2),
+    });
+    equityCurve.push({ time: cleanBars[exitIndex].time, equity: roundNumber(balance, 2) });
+    peak = Math.max(peak, balance);
+    maxDrawdown = Math.max(maxDrawdown, peak > 0 ? ((peak - balance) / peak) * 100 : 0);
+  }
+
+  const wins = trades.filter(trade => trade.pnlPct > 0).length;
+  const averageReturn = returns.length ? returns.reduce((sum, value) => sum + value, 0) / returns.length : 0;
+  const variance = returns.length > 1
+    ? returns.reduce((sum, value) => sum + Math.pow(value - averageReturn, 2), 0) / (returns.length - 1)
+    : 0;
+  const deviation = Math.sqrt(variance);
+  const holdTimes = trades.map(trade => trade.exitTime - trade.entryTime).filter(value => value > 0);
+
+  return {
+    market: input.market,
+    instrumentId,
+    dataSource: input.dataSource,
+    barCount: cleanBars.length,
+    startTime: cleanBars[0].time,
+    endTime: cleanBars[cleanBars.length - 1].time,
+    strategyName: input.strategy === 'momentum' ? '动量（做多）' : '均值回归（做多）',
+    periodDays: Math.round((cleanBars[cleanBars.length - 1].time - cleanBars[0].time) / 86_400_000),
+    totalTrades: trades.length,
+    winningTrades: wins,
+    losingTrades: trades.length - wins,
+    winRate: trades.length ? wins / trades.length : 0,
+    totalReturnPct: roundNumber(((balance - startingBalance) / startingBalance) * 100, 2),
+    maxDrawdownPct: roundNumber(maxDrawdown, 2),
+    sharpeRatio: deviation > 0 ? roundNumber((averageReturn / deviation) * Math.sqrt(Math.min(returns.length, 252)), 2) : 0,
+    avgHoldMinutes: holdTimes.length ? roundNumber(holdTimes.reduce((sum, value) => sum + value, 0) / holdTimes.length / 60_000, 1) : 0,
+    equityCurve,
+    trades: trades.slice(-50),
+  };
 }
 
 interface SimplePricePoint { t: number; p: number }
@@ -115,6 +264,63 @@ export class Backtester {
     marketId?: number,
   ): BacktestResult {
     return this.runStrategyBacktest('meanReversion', lookbackPoints, threshold, holdingPeriodPoints, startingBalance, marketId);
+  }
+
+  async runStockBacktest(
+    strategy: 'momentum' | 'meanReversion',
+    symbol: string,
+    lookback = 10,
+    threshold = 0.03,
+    holding = 5,
+    startingBalance = 1000,
+  ): Promise<AssetBacktestResult> {
+    const overview = await stockDataService.overview(symbol);
+    const historySnapshot = overview.snapshots.find(snapshot => snapshot.source.includes('history'));
+    if (!overview.bars.length) throw new Error('股票真实 OHLCV 历史数据不可用');
+    return runAssetBacktest({
+      market: 'stocks',
+      instrumentId: overview.symbol,
+      dataSource: historySnapshot?.source || 'nasdaq-public-history',
+      bars: overview.bars,
+      strategy,
+      lookback,
+      threshold,
+      holding,
+      startingBalance,
+    });
+  }
+
+  async runCryptoBacktest(
+    strategy: 'momentum' | 'meanReversion',
+    symbol: string,
+    lookback = 10,
+    threshold = 0.03,
+    holding = 5,
+    startingBalance = 1000,
+  ): Promise<AssetBacktestResult> {
+    const instrumentId = String(symbol || '').trim().toUpperCase().replace(/[/:_-]/g, '');
+    if (!/^[A-Z0-9]{5,20}$/.test(instrumentId)) throw new Error('虚拟币交易对无效');
+    const klines = await binanceFeed.getKlines(instrumentId, '1d', 1000);
+    const bars: AssetBar[] = klines.map(kline => ({
+      time: Number(kline.time),
+      open: Number(kline.open),
+      high: Number(kline.high),
+      low: Number(kline.low),
+      close: Number(kline.close),
+      volume: Number(kline.volume),
+    }));
+    if (!bars.length) throw new Error('虚拟币真实 K 线历史数据不可用');
+    return runAssetBacktest({
+      market: 'crypto',
+      instrumentId,
+      dataSource: 'binance-public-klines',
+      bars,
+      strategy,
+      lookback,
+      threshold,
+      holding,
+      startingBalance,
+    });
   }
 
   private runStrategyBacktest(

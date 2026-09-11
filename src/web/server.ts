@@ -5038,17 +5038,53 @@ setInterval(() => {
 
 // --- Backtesting ---
 
-app.get('/api/backtest', (req, res) => {
-  const lookback = parseInt(req.query.lookback as string) || 10;
+app.get('/api/backtest', async (req, res) => {
+  const scope = String(req.query.scope || 'prediction');
+  const lookback = parseInt(req.query.lookback as string, 10) || 10;
   const threshold = parseFloat(req.query.threshold as string) || 0.03;
-  const holding = parseInt(req.query.holding as string) || 5;
-  const strategy = String(req.query.strategy || 'momentum');
-  const marketIdInput = String(req.query.marketId || '').trim();
-  const marketId = /^\d+$/.test(marketIdInput) ? parseInt(marketIdInput, 10) : undefined;
-  const result = strategy === 'meanReversion'
-    ? backtester.runMeanReversionBacktest(lookback, threshold, holding, 1000, marketId)
-    : backtester.runMomentumBacktest(lookback, threshold, holding, 1000, marketId);
-  res.json({ success: true, data: result });
+  const holding = parseInt(req.query.holding as string, 10) || 5;
+  const strategy = String(req.query.strategy || 'momentum') === 'meanReversion' ? 'meanReversion' : 'momentum';
+  const instrumentId = String(req.query.instrumentId || req.query.marketId || '').trim();
+
+  if (scope === 'options') {
+    return res.json({
+      success: false,
+      scope,
+      availability: 'unavailable',
+      error: '期权历史数据暂不可用',
+      reason: '真实历史期权链、隐含波动率和 Greeks 数据源尚未覆盖',
+    });
+  }
+
+  if (scope === 'prediction') {
+    const marketId = /^\d+$/.test(instrumentId) ? parseInt(instrumentId, 10) : undefined;
+    const result = strategy === 'meanReversion'
+      ? backtester.runMeanReversionBacktest(lookback, threshold, holding, 1000, marketId)
+      : backtester.runMomentumBacktest(lookback, threshold, holding, 1000, marketId);
+    return res.json({ success: true, scope, data: result });
+  }
+
+  if (!['stocks', 'crypto'].includes(scope)) {
+    return res.status(400).json({ success: false, scope, error: '未知市场 scope' });
+  }
+  if (!instrumentId) {
+    return res.json({ success: false, scope, availability: 'unavailable', error: scope === 'stocks' ? '股票回测需要提供标的代码' : '虚拟币回测需要提供交易对' });
+  }
+
+  try {
+    const data = scope === 'stocks'
+      ? await backtester.runStockBacktest(strategy, instrumentId.replace(/^us/i, ''), lookback, threshold, holding, 1000)
+      : await backtester.runCryptoBacktest(strategy, instrumentId, lookback, threshold, holding, 1000);
+    return res.json({ success: true, scope, data });
+  } catch (error) {
+    return res.json({
+      success: false,
+      scope,
+      availability: 'unavailable',
+      error: scope === 'stocks' ? '股票历史数据暂不可用' : '虚拟币历史数据暂不可用',
+      reason: error instanceof Error ? error.message : '历史数据源暂时不可用',
+    });
+  }
 });
 
 // --- Price History ---
