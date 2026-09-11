@@ -28,13 +28,14 @@
 
 ## 发布记录
 
-本轮右侧股票标的库的代码、测试和交接文档已完成本地验收，待本次提交后更新 GitHub/VPS 版本号、dist hash、备份目录和远端验收结果。
+本轮右侧股票标的库已完成 GitHub/VPS 发布和远端验收，版本提交为 `e8dd8b0`（交接文档更新提交另计）。
 
-- GitHub：已推送 `codex/stock-free-data-sources`，最新代码提交为 `859a288`。
-- VPS：已备份到 `/opt/moneymoney/backups/dist-20260911-859a288`，新产物已发布到 `/opt/moneymoney/dist`。
-- 回滚：保留 `/opt/moneymoney/dist.rollback-859a288`；本次临时 staging 已清理。
+- GitHub：已推送 `codex/stock-free-data-sources`，代码提交为 `e8dd8b0`，远端分支已核对为该提交。
+- VPS：已备份到 `/opt/moneymoney/backups/dist-20260911-e8dd8b0`，新产物已发布到 `/opt/moneymoney/dist`。
+- 回滚：保留 `/opt/moneymoney/dist.rollback-e8dd8b0`；本次临时 staging 和上传压缩包已清理。
 - 服务：`moneymoney.service` 重启后为 active，公网 HTTPS 页面、访客读取接口和访客写入 403 均已核验。
-- Hash：远端 `dist/web/server.js` 与本地构建产物一致：`08fbcafcbc5dc531fc925182d0a7a75521e818dd279355ec2a69465bf08f95b3`；`dist/web/public/index.html` 一致：`cf7e96c1f6f5d45b5d61f5ed07d01ca4c04fbe2fad722aa3c7335c68a565bd44`。
+- Hash：远端 `dist/web/server.js` 与本地构建产物一致：`92dc6ed303eb15bb0b1d0e9d7aa1f41c3c5798aa42c21d9608def9bce1a36398`；`dist/web/public/index.html` 一致：`8cc804829c0b6c047c0c915ccf1c1383847e4ee716a6ca5437b739f17a81cbb7`。
+- 公网验收：`https://bluetrade.bbroot.com` 健康 200；股票页面包含右侧标的库；guest 自选/模拟持仓/股票搜索读取均 200；guest 自选写入 403。
 
 本轮实现提交：`bf7f3c9`、`410754d`、`c489ba0`、`4ef095f`、`0ee1f24`、`859c357`、`3f41b77`、`d9834b7`、`888d502`、`d66a9f3`、`859a288`；发布以 `859a288` 的构建产物为准。
 

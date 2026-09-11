@@ -179,7 +179,7 @@ git diff --check
 
 更新交接文档，写入新 commit、测试数量、浏览器 smoke 核心断言、生成的 `dist` 关键文件 SHA-256、VPS 备份目录和回滚目录；不写入 token、密码、私钥或完整连接串。
 
-- [ ] **步骤 3：提交并推送 GitHub**
+- [x] **步骤 3：提交并推送 GitHub**
 
 只暂存本次代码、测试和交接文档，保留用户已有的 `docs/antigravity-plans/2026-09-11-money-next-batch.md` 与 `docs/notes/` 不变：
 
@@ -190,10 +190,10 @@ GIT_LFS_SKIP_PUSH=1 git push origin codex/stock-free-data-sources
 git ls-remote origin refs/heads/codex/stock-free-data-sources
 ```
 
-- [ ] **步骤 4：仅部署生成的 dist 到 VPS**
+- [x] **步骤 4：仅部署生成的 dist 到 VPS**
 
 构建后把 `dist` 直接内容上传到新的精确 staging 目录；远端先将当前 `/opt/moneymoney/dist` 备份到 `/opt/moneymoney/backups/dist-<sha>`，再移动到 `/opt/moneymoney/dist.rollback-<sha>`，替换 dist，修正 `moneymoney:moneymoney`，重启 `moneymoney.service`，轮询 active 和 `127.0.0.1:3001/api/health/live`。只清理本次精确 staging 目录，不修改 Nginx、TLS、VPN、Telegram token 或轮询归属。
 
-- [ ] **步骤 5：完成远端验收**
+- [x] **步骤 5：完成远端验收**
 
 核对本地与远端 `dist/web/server.js`、`dist/web/public/index.html` SHA-256；检查公开页面包含右侧标的库标记，guest 读取股票工作区成功，guest 对 `/api/watchlist` 写入仍返回 403，健康接口返回 200；如失败，按备份目录回滚并记录实际状态。
