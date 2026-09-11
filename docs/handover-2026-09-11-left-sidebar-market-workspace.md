@@ -15,12 +15,12 @@
 - 访客仍为 GET 只读，新增工作区查询接口未暴露 owner 信息，写操作未加入访客白名单。
 - 股票工作区将美股七姐妹、股票搜索、股票自选和模拟持仓统一放入右侧“股票标的库”；中间正文只保留当前选中的内部人交易、机构持仓、分析师共识、基本面质量、空头利息、市场宽度或总览功能。
 - 右侧库点击标的会保留当前股票工作区，仅刷新该工作区对应数据；搜索常见七姐妹代码走服务端本地快速路径，避免等待远程数据源。
-- 进一步移除中心热门股票卡片的渲染函数、调用和样式，避免旧容器或旧构建再次在中间区生成七姐妹卡片；七姐妹只由右侧标的库承载。
+- 进一步移除中心热门股票卡片的渲染函数、调用和样式，避免旧容器或旧构建再次在中间区生成七姐妹卡片；七姐妹只由右侧标的库承载。修复提交为 `c69be18`。
 
 ## 验收证据
 
 - `npm run build`：通过。
-- `npm test`：216 项通过，0 失败。
+- `npm test`：217 项通过，0 失败。
 - `npm run security:scan`：302 个受跟踪文件通过。
 - `npm run smoke:web`：健康检查、登录门禁、敏感配置脱敏和真实交易关闭边界通过。
 - 浏览器 smoke（本机 Chrome + Playwright）：右侧七姐妹、搜索 AAPL、点击 MSFT 后保持 `market=stocks&workspace=insider&instrument=MSFT`、切换 institutional 仍保持右侧库、切换 crypto 后股票库隐藏；验收截图：`C:\Users\blueice\AppData\Local\Temp\moneymoney-stock-library-smoke.png`。
@@ -35,8 +35,8 @@
 - VPS：已备份到 `/opt/moneymoney/backups/dist-20260911-e8dd8b0`，新产物已发布到 `/opt/moneymoney/dist`。
 - 回滚：保留 `/opt/moneymoney/dist.rollback-e8dd8b0`；本次临时 staging 和上传压缩包已清理。
 - 服务：`moneymoney.service` 重启后为 active，公网 HTTPS 页面、访客读取接口和访客写入 403 均已核验。
-- Hash：待本轮修复发布后更新；当前新本地构建 `dist/web/server.js` 为 `92dc6ed303eb15bb0b1d0e9d7aa1f41c3c5798aa42c21d9608def9bce1a36398`，`dist/web/public/index.html` 为 `7805dec884cf46f91a1e8ba614108b4d4ab3c758d1c687c5c5324e60bc155739`。
-- 公网验收：`https://bluetrade.bbroot.com` 健康 200；股票页面包含右侧标的库；guest 自选/模拟持仓/股票搜索读取均 200；guest 自选写入 403。
+- Hash：远端 `dist/web/server.js` 与本地构建产物一致：`92dc6ed303eb15bb0b1d0e9d7aa1f41c3c5798aa42c21d9608def9bce1a36398`；`dist/web/public/index.html` 一致：`7805dec884cf46f91a1e8ba614108b4d4ab3c758d1c687c5c5324e60bc155739`。
+- 公网验收：`https://bluetrade.bbroot.com` 健康 200；股票页面包含右侧标的库且不包含中心热门股票类名/加载函数；guest 股票搜索读取 200；guest 自选写入 403。
 
 本轮实现提交：`bf7f3c9`、`410754d`、`c489ba0`、`4ef095f`、`0ee1f24`、`859c357`、`3f41b77`、`d9834b7`、`888d502`、`d66a9f3`、`859a288`；发布以 `859a288` 的构建产物为准。
 
