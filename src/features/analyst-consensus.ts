@@ -247,7 +247,7 @@ class JsLiteralParser {
           return false;
       }
     }
-    const numberMatch = /^[-+]?(?:0[xX][\da-fA-F]+|\d+(?:\.\d+)?(?:[eE][-+]?\d+)?)/.exec(rest);
+    const numberMatch = /^[-+]?(?:0[xX][\da-fA-F]+|(?:\d+(?:\.\d+)?|\.\d+)(?:[eE][-+]?\d+)?)/.exec(rest);
     if (numberMatch) {
       this.pos += numberMatch[0].length;
       const value = Number(numberMatch[0]);

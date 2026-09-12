@@ -49,10 +49,11 @@ test('兼容当前 StockAnalysis ratings payload 的对象闭合标记', () => {
 });
 
 test('从 ratings 数组提取分析师姓名、机构和目标价', () => {
-  const raw = 'foo:{}]},ratings:[{action_rt:"Reiterates",pt_now:380,pt_old:null,firm:"Maxim Group",analyst:"Tom Forte",date:"2026-09-11",rating_new:"Buy",rating_old:""}],forecastDivider:null}';
+  const raw = 'foo:{}]},ratings:[{action_rt:"Reiterates",pt_now:380,pt_old:null,firm:"Maxim Group",analyst:"Tom Forte",date:"2026-09-11",rating_new:"Buy",rating_old:"",scores:{score:-.8}}],forecastDivider:null}';
   const actions = parseRecentAnalystActions(raw, 'https://stockanalysis.com/stocks/aapl/forecast/');
   assert.equal(actions.length, 1);
   assert.equal(actions[0].analyst, 'Tom Forte');
   assert.equal(actions[0].firm, 'Maxim Group');
   assert.equal(actions[0].targetNow, 380);
+  assert.equal(actions[0].analystRankPct, -0.8);
 });
