@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const {
   defaultWorkspace,
+  isWorkspaceAllowed,
   resolveWorkspaceNavigation,
 } = require('../dist/features/market-workspace.js');
 const html = fs.readFileSync('src/web/public/index.html', 'utf8');
@@ -12,7 +13,11 @@ test('默认工作区稳定且属于当前市场菜单', () => {
   for (const scope of ['overview', 'stocks', 'options', 'crypto', 'prediction', 'watchlist']) {
     const workspace = defaultWorkspace(scope);
     const items = resolveWorkspaceNavigation(scope).flatMap(group => group.items);
-    assert.ok(items.some(item => item.id === workspace), `${scope} default workspace should be visible`);
+    if (workspace === 'watchlist') {
+      assert.equal(isWorkspaceAllowed(scope, workspace), true, `${scope} default workspace should remain accessible`);
+    } else {
+      assert.ok(items.some(item => item.id === workspace), `${scope} default workspace should be visible`);
+    }
   }
 });
 

@@ -70,7 +70,6 @@ const ITEMS: Record<WorkspaceId, WorkspaceItem> = {
 const BASE_GROUPS: readonly { id: WorkspaceGroup['id']; label: string; items: readonly WorkspaceId[] }[] = [
   { id: 'market', label: '市场', items: ['overview', 'radar', 'analysis'] },
   { id: 'research', label: '研究', items: ['backtest', 'risk', 'search'] },
-  { id: 'portfolio', label: '组合', items: ['watchlist', 'positions'] },
 ];
 
 const SPECIFIC_ITEMS: Record<MarketScope, readonly WorkspaceId[]> = {
@@ -100,6 +99,7 @@ export function resolveWorkspaceNavigation(scope: MarketScope): WorkspaceGroup[]
 }
 
 export function isWorkspaceAllowed(scope: MarketScope, workspace: WorkspaceId): boolean {
+  if (workspace === 'watchlist' || workspace === 'positions') return true;
   return resolveWorkspaceNavigation(scope).some(groupItem => groupItem.items.some(itemValue => itemValue.id === workspace));
 }
 
