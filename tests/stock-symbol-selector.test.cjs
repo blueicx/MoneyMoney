@@ -103,6 +103,19 @@ test('stock library keeps the Magnificent Seven without a center quote request',
   assert.doesNotMatch(html, /stock\/quotes\?symbols=usAAPL,usMSFT,usNVDA,usAMZN,usGOOGL,usMETA,usTSLA/);
 });
 
+test('instrument selection refreshes the active workspace with the selected instrument', () => {
+  assert.match(html, /function loadMarketTimeline\(\)[\s\S]*currentInstrumentFilterId\(\)/);
+  assert.match(html, /function loadActiveWorkspaceInstrument\([\s\S]*activeWorkspaceId === 'events'[\s\S]*loadMarketTimeline/);
+  assert.match(html, /function selectStockFromInstrumentLibrary\([\s\S]*loadActiveWorkspaceInstrument/);
+  assert.match(html, /window\.openWorkspace = function\(id\)[\s\S]*loadActiveWorkspaceInstrument/);
+  assert.match(html, /function selectCryptoLibraryAsset\([\s\S]*activeWorkspaceId = 'crypto-quotes'/);
+  assert.match(html, /function selectOptionLibraryAsset\([\s\S]*activeWorkspaceId = 'option-chain'/);
+});
+
+test('collapsed instrument library keeps a visible expand control', () => {
+  assert.match(html, /\.layout\.sidebar-collapsed \+ \.sidebar-expand-fab\s*\{[^}]*display:flex/s);
+});
+
 test('watchlist page exposes the actual stock favorites above holdings', () => {
   const watchlistLibrary = html.indexOf('id="watchlist-stock-library"');
   const holdings = html.indexOf('id="positions-list"');

@@ -1835,6 +1835,7 @@
     .sidebar-expand-fab { position:fixed; right:0; top:50%; transform:translateY(-50%); width:28px; height:72px; background:var(--bg-card); border:1px solid var(--border); border-right:none; border-radius:10px 0 0 10px; display:none; align-items:center; justify-content:center; cursor:pointer; font-size:14px; color:var(--purple); box-shadow:-2px 4px 12px rgba(0,0,0,.12); z-index:99; }
     .sidebar-expand-fab:hover { background:var(--purple); color:white; border-color:var(--purple); }
     .layout.sidebar-collapsed .sidebar-expand-fab { display:flex !important; }
+    .layout.sidebar-collapsed + .sidebar-expand-fab { display:flex !important; pointer-events:auto; z-index:9999; }
     .layout { transition: grid-template-columns .28s ease; }
     body.guest-mode #guest-banner { display:block; }
     body.guest-mode .guest-admin-only { display:none !important; }
@@ -5797,13 +5798,13 @@ function selectStockFromInstrumentLibrary(symbol, name, apiSymbol) {
   window._stockSelectedSymbol = normalized;
   setWorkspaceInstrument(normalized);
   setStockSelectorActive(normalized);
-  if (activeWorkspaceId === 'insider') loadInsiderRadar(normalized, displayName);
-  else if (activeWorkspaceId === 'institutional') loadInstitutionalOwnership(normalized, displayName);
-  else if (activeWorkspaceId === 'analyst') loadAnalystConsensus(normalized, displayName);
-  else if (activeWorkspaceId === 'fundamentals') loadFundamentalQuality(normalized, displayName);
-  else if (activeWorkspaceId === 'short-interest') loadShortInterest(normalized, displayName);
-  else if (activeWorkspaceId === 'breadth') loadMarketBreadth();
-  else {
+  if (!loadActiveWorkspaceInstrument()) {
+    activeWorkspaceId = 'stock-quotes';
+    syncWorkspaceContextUrl();
+    const groups = workspaceNavigationState.get(activeMarketScope)?.groups || workspaceFallbackNavigation(activeMarketScope);
+    renderWorkspaceMenu(groups);
+    applyWorkspaceView();
+    showTab('stocks', null, { scopeAlreadySynced: true });
     loadUnifiedStockData(normalized);
     loadStockKline('us' + normalized, displayName, apiSymbol);
   }
@@ -5826,8 +5827,10 @@ function selectStockSymbol(symbol, name, apiSymbol, options = {}) {
   window._stockSelectedSymbol = normalized;
   setWorkspaceInstrument(normalized);
   setStockSelectorActive(normalized);
-  loadUnifiedStockData(normalized);
-  loadStockKline(legacySymbol, displayName, apiSymbol);
+  if (!loadActiveWorkspaceInstrument()) {
+    loadUnifiedStockData(normalized);
+    loadStockKline(legacySymbol, displayName, apiSymbol);
+  }
   if (options.refreshRelated === false) return;
   loadInsiderRadar(normalized, displayName);
   loadFundamentalQuality(normalized, displayName);
@@ -8339,7 +8342,10 @@ async function loadMarketTimeline() {
   const scopeToken = marketScopeRequestToken();
   host.innerHTML = '<div class="event-loading">正在加载市场事件与新闻...</div>';
   try {
-    const res = await fetch(scopedUrl('/api/events/timeline'), { signal });
+    const query = new URLSearchParams({ scope: activeMarketScope });
+    const instrumentId = currentInstrumentFilterId();
+    if (instrumentId) query.set('instrumentId', instrumentId);
+    const res = await fetch('/api/events/timeline?' + query.toString(), { signal });
     const payload = await res.json();
     if (!payload.success) throw new Error(payload.error || '无法获取时间线');
     if (!isCurrentMarketScopeToken(scopeToken) || signal.aborted) return;
@@ -10089,6 +10095,60 @@ function workspaceTabFor(id) {
   if (['funding-rate', 'open-interest', 'on-chain', 'order-flow'].includes(id)) return 'binance';
   return 'command';
 }
+function currentInstrumentFilterId() {
+  const raw = String(currentInstrumentId || '').trim();
+  if (!raw) return '';
+  if (raw.includes(':')) return raw;
+  if (activeMarketScope === 'stocks') return `stock:us:${raw.replace(/^us/i, '').toUpperCase()}`;
+  if (activeMarketScope === 'options') return `option:cboe:${raw.toUpperCase()}`;
+  if (activeMarketScope === 'crypto') return `crypto:binance:${raw.toUpperCase()}`;
+  if (activeMarketScope === 'prediction') return `prediction:predictfun:${raw}`;
+  return raw;
+}
+function loadActiveWorkspaceInstrument() {
+  const raw = String(currentInstrumentId || '').trim();
+  if (!raw) return false;
+  if (activeMarketScope === 'stocks') {
+    const symbol = raw.replace(/^us/i, '').toUpperCase();
+    const name = stockNameForSymbol(symbol);
+    window._stockSelectedSymbol = symbol;
+    if (activeWorkspaceId === 'events') return loadMarketTimeline(), true;
+    if (activeWorkspaceId === 'stock-quotes') {
+      loadUnifiedStockData(symbol);
+      loadStockKline('us' + symbol, name);
+      return true;
+    }
+    if (activeWorkspaceId === 'breadth') return loadMarketBreadth(), true;
+    if (activeWorkspaceId === 'insider') return loadInsiderRadar(symbol, name), true;
+    if (activeWorkspaceId === 'institutional') return loadInstitutionalOwnership(symbol, name), true;
+    if (activeWorkspaceId === 'analyst') return loadAnalystConsensus(symbol, name), true;
+    if (activeWorkspaceId === 'fundamentals') return loadFundamentalQuality(symbol, name), true;
+    if (activeWorkspaceId === 'short-interest') return loadShortInterest(symbol, name), true;
+    return false;
+  }
+  if (activeMarketScope === 'crypto') {
+    const symbol = raw.toUpperCase();
+    bnCurrentSymbol = symbol;
+    if (activeWorkspaceId === 'events') return loadMarketTimeline(), true;
+    if (activeWorkspaceId === 'crypto-quotes') return loadBinanceDashboard(), true;
+    if (activeWorkspaceId === 'funding-rate') return loadFundingCarry(), true;
+    if (activeWorkspaceId === 'open-interest') return loadPerpetualCrowding(), true;
+    if (activeWorkspaceId === 'on-chain') return loadBitcoinOnchain(), true;
+    if (activeWorkspaceId === 'order-flow') return loadOrderFlowLiquidity(), true;
+    return false;
+  }
+  if (activeMarketScope === 'options') {
+    const symbol = raw.toUpperCase();
+    const input = document.getElementById('option-symbol');
+    if (input) input.value = symbol;
+    if (activeWorkspaceId === 'events') return loadMarketTimeline(), true;
+    if (['option-chain', 'volatility', 'greeks'].includes(activeWorkspaceId)) return loadOptions(), true;
+    return false;
+  }
+  if (activeMarketScope === 'prediction' && activeWorkspaceId === 'prediction-radar') return loadPredictionRadar(), true;
+  if (activeMarketScope === 'prediction' && activeWorkspaceId === 'events') return loadMarketTimeline(), true;
+  return false;
+}
 window.openWorkspace = function(id) {
   const groups = workspaceNavigationState.get(activeMarketScope)?.groups || workspaceFallbackNavigation(activeMarketScope);
   if (!groups.some(group => group.items.some(item => item.id === id))) return;
@@ -10104,6 +10164,7 @@ window.openWorkspace = function(id) {
   }
   const targetTab = workspaceTabFor(id);
   if (targetTab) showTab(targetTab, null, { scopeAlreadySynced: true });
+  if (currentInstrumentId) loadActiveWorkspaceInstrument();
   closeWorkspaceDrawer();
   const section = document.querySelector(`[data-workspace-id="${id}"].dash-collapse`);
   if (section) {
@@ -10205,13 +10266,16 @@ function applyMarketScopeView() {
   }
 }
 function selectOptionLibraryAsset(symbol) {
+  activeWorkspaceId = 'option-chain';
   const market = document.getElementById('option-market');
   if (market) market.value = 'us';
   setOptionMarket('us');
   setEquitySymbol(symbol);
+  showTab('options', null, { scopeAlreadySynced: true });
 }
 function selectCryptoLibraryAsset(symbol) {
   if (typeof bnSetSymbol !== 'function') return;
+  activeWorkspaceId = 'crypto-quotes';
   bnSetSymbol(String(symbol || '').toUpperCase());
   showTab('binance', null, { scopeAlreadySynced: true });
 }
@@ -11934,6 +11998,7 @@ loadMarketTimeline();
   }
   showTab(defaultTabForMarketScope(activeMarketScope), null, { scopeAlreadySynced: true });
 })();
+if (currentInstrumentId) loadActiveWorkspaceInstrument();
 loadMarketOverview();
 loadResearchBriefing();
 initializeDashboardCollapses();
