@@ -63,26 +63,25 @@ test('Theme toggle logic: 3 states loop, old values, icon sync', () => {
   context.localStorage.data['mm-theme'] = 'dark';
   vm.runInContext('initTheme()', context);
   assert.equal(context.document.documentElement.getAttribute('data-theme'), 'dark');
-  assert.equal(context.document.getElementById('theme-toggle-btn').textContent, '🌙');
   assert.equal(context.document.getElementById('theme-toggle').textContent, '🌙');
   
   // Test 2: Cycle Sequence (dark -> money)
   vm.runInContext('toggleTheme()', context);
   assert.equal(context.document.documentElement.getAttribute('data-theme'), 'money');
   assert.equal(context.localStorage.data['theme'], 'money');
-  assert.equal(context.document.getElementById('theme-toggle-btn').textContent, '🪙');
+  assert.equal(context.document.getElementById('theme-toggle').textContent, '🪙');
   
   // Test 3: Cycle Sequence (money -> light)
   vm.runInContext('toggleTheme()', context);
   assert.equal(context.document.documentElement.getAttribute('data-theme'), null);
   assert.equal(context.localStorage.data['theme'], 'light');
-  assert.equal(context.document.getElementById('theme-toggle-btn').textContent, '☀️');
+  assert.equal(context.document.getElementById('theme-toggle').textContent, '☀️');
   
   // Test 4: Cycle Sequence (light -> dark)
   vm.runInContext('toggleTheme()', context);
   assert.equal(context.document.documentElement.getAttribute('data-theme'), 'dark');
   assert.equal(context.localStorage.data['theme'], 'dark');
-  assert.equal(context.document.getElementById('theme-toggle-btn').textContent, '🌙');
+  assert.equal(context.document.getElementById('theme-toggle').textContent, '🌙');
   
   // Test 5: Fallback logic for unsupported old value
   context.localStorage.data['mm-theme'] = 'purple';

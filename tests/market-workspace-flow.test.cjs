@@ -141,3 +141,16 @@ test('基本面工作区展示历史趋势、支持因素和风险因素', () =>
   assert.match(html, /riskFactors/);
   assert.match(html, /missingFields/);
 });
+
+test('左侧不再提供重复的标的搜索，保留顶部全局搜索', () => {
+  assert.doesNotMatch(html, /search: \['⌕', '搜索标的'\]/);
+  assert.match(html, /WORKSPACE_BASE_GROUPS[\s\S]*\['backtest', 'risk'\]/);
+  assert.match(html, /id="global-search-input"/);
+});
+
+test('主题切换只保留顶部入口，移除内容区右上角重复按钮', () => {
+  assert.match(html, /id="theme-toggle"/);
+  assert.match(html, /id="theme-toggle"[\s\S]*?onclick="refresh\(\)"/);
+  assert.doesNotMatch(html, /id="theme-toggle-btn"/);
+  assert.doesNotMatch(html, /getElementById\('theme-toggle-btn'\)/);
+});

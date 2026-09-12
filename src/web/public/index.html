@@ -1987,7 +1987,6 @@
       <div id="utility-nav-bar" class="utility-nav-bar"></div>
       <button id="workspace-drawer-open" class="workspace-drawer-open" type="button" onclick="openWorkspaceDrawer()">☰ 功能区</button>
       <div id="mm-toast-container"></div>
-      <button id="theme-toggle-btn" onclick="toggleTheme()" title="浅色" aria-current="page" aria-label="浅色" style="position:fixed;top:14px;right:18px;z-index:9999;width:38px;height:38px;border-radius:50%;border:1px solid var(--border);background:var(--bg-card);backdrop-filter:blur(10px);cursor:pointer;font-size:17px;display:flex;align-items:center;justify-content:center;box-shadow:var(--shadow);transition:transform .15s;" onmouseover="this.style.transform='scale(1.1)'" onmouseout="this.style.transform='scale(1)'">☀️</button>
       <!-- Market Overview Bar -->
       <div id="market-overview" data-market-scopes="overview stocks options crypto prediction watchlist" data-workspace-ids="overview" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:16px;padding:12px 14px;background:var(--bg-card);border-radius:12px;border:1px solid var(--border);overflow-x:auto;">
         <span id="market-overview-heading" style="flex:0 0 auto;font-size:11px;font-weight:800;color:var(--purple);white-space:nowrap;">总体大盘</span>
@@ -9687,18 +9686,11 @@ function updateThemeButtons(theme) {
   const icon = theme === 'money' ? '🪙' : (theme === 'dark' ? '🌙' : '☀️');
   const title = theme === 'money' ? '纸醉金迷' : (theme === 'dark' ? '深色' : '浅色');
 
-  const btn1 = document.getElementById('theme-toggle-btn');
-  if (btn1) {
-    btn1.textContent = icon;
-    btn1.title = title;
-    btn1.setAttribute('aria-label', title);
-  }
-
-  const btn2 = document.getElementById('theme-toggle');
-  if (btn2) {
-    btn2.textContent = icon;
-    btn2.title = title;
-    btn2.setAttribute('aria-label', title);
+  const button = document.getElementById('theme-toggle');
+  if (button) {
+    button.textContent = icon;
+    button.title = title;
+    button.setAttribute('aria-label', title);
   }
 }
 
@@ -9778,7 +9770,7 @@ const CORE_NAV_ITEMS = [
 const WORKSPACE_ITEM_CATALOG = {
   overview: ['⌂', '市场总览'], radar: ['◉', '市场雷达'], analysis: ['⌁', '标的分析'],
   backtest: ['⌘', '策略回测'], watchlist: ['★', '我的自选'], positions: ['▣', '我的持仓'],
-  risk: ['♡', '风险监控'], search: ['⌕', '搜索标的'], breadth: ['▥', '市场宽度'],
+  risk: ['♡', '风险监控'], breadth: ['▥', '市场宽度'],
   insider: ['♟', '内部人交易'], institutional: ['♜', '机构持仓'], analyst: ['◎', '分析师共识'],
   fundamentals: ['▥', '基本面质量'], 'short-interest': ['♟', '空头利息'],
   'option-chain': ['◌', '期权链'], volatility: ['∿', '隐含波动率'], greeks: ['Δ', 'Greeks'],
@@ -9787,7 +9779,7 @@ const WORKSPACE_ITEM_CATALOG = {
 };
 const WORKSPACE_BASE_GROUPS = [
   ['market', '市场', ['overview', 'radar', 'analysis']],
-  ['research', '研究', ['backtest', 'risk', 'search']],
+  ['research', '研究', ['backtest', 'risk']],
 ];
 const WORKSPACE_SPECIFIC_IDS = {
   overview: [], watchlist: [],
