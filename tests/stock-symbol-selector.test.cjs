@@ -123,6 +123,10 @@ test('restored stock context is not overwritten by the default AAPL loader', () 
   assert.match(html, /restoreWorkspaceContextFromUrl\(\)[\s\S]*const restoredSymbol = currentInstrumentId\.replace\(\/\^us\/i, ''\)\.toUpperCase\(\)[\s\S]*window\._stockSelectedSymbol = restoredSymbol/);
 });
 
+test('stock quote loading keeps the right library current card in sync', () => {
+  assert.match(html, /function selectStockSymbol\([\s\S]*setStockSelectorActive\(normalized\)[\s\S]*updateStockLibraryCurrent\(normalized, displayName\)/);
+});
+
 test('overview does not render an empty instrument-library column', () => {
   assert.match(html, /\.layout\.instrument-library-hidden\s*\{[^}]*grid-template-columns:\s*1fr 0/s);
   assert.match(html, /\.layout\.instrument-library-hidden #right-instrument-library\s*\{[^}]*display:none/s);

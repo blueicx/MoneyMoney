@@ -5830,6 +5830,7 @@ function selectStockSymbol(symbol, name, apiSymbol, options = {}) {
   window._stockSelectedSymbol = normalized;
   setWorkspaceInstrument(normalized);
   setStockSelectorActive(normalized);
+  updateStockLibraryCurrent(normalized, displayName);
   if (!loadActiveWorkspaceInstrument()) {
     loadUnifiedStockData(normalized);
     loadStockKline(legacySymbol, displayName, apiSymbol);
