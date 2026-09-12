@@ -2283,7 +2283,7 @@
       </div>
       <!-- Binance Tab -->
       <div id="binance-tab" class="tab-content">
-        <div data-workspace-id="crypto-quotes" data-market-scopes="crypto">
+        <div data-workspace-ids="crypto-quotes radar" data-market-scopes="crypto">
           <!-- Timeframe Controls; the right instrument library is the sole symbol selector. -->
           <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:16px;">
           <div style="display:flex;gap:4px;" id="bn-timeframes">
@@ -2425,7 +2425,7 @@
       <div id="stocks-tab" class="tab-content">
         <div class="section-title">📈 全球股票市场</div>
         <div id="market-scope-empty" class="empty-tip" hidden="" style="margin-bottom:16px;"></div>
-        <details class="dash-collapse" data-collapse-key="stocks-market" data-market-scopes="stocks" data-workspace-id="stock-quotes" open="">
+        <details class="dash-collapse" data-collapse-key="stocks-market" data-market-scopes="stocks" data-workspace-ids="stock-quotes radar" open="">
           <summary>
             <span class="collapse-title">📈 行情与选股</span>
             <span class="collapse-hint">全球指标 · 主要指数 · K线 · 热门股 · 搜索</span>
@@ -2617,7 +2617,7 @@
         </details>
       </div>
       <!-- Options Market Tab -->
-      <div id="options-tab" class="tab-content" data-workspace-ids="option-chain volatility greeks">
+      <div id="options-tab" class="tab-content" data-workspace-ids="option-chain volatility greeks radar">
         <div class="section-title">🎯 期权市场雷达</div>
         <div style="display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap;">
           <select id="option-market" onchange="setOptionMarket(this.value)" style="padding:9px 12px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);font-weight:700;">
@@ -2653,7 +2653,7 @@
         <p style="margin-top:10px;font-size:11px;color:var(--text-secondary);">加密数据来自 Deribit；美股/ETF 延迟行情来自 CBOE。PCR = Put/OI ÷ Call/OI；GEX 为一阶近似，仅用于观察持仓结构，不构成投资建议。</p>
       </div>
       <!-- Cross-platform Prediction Radar Tab -->
-      <div id="radar-tab" class="tab-content" data-market-scopes="overview prediction" data-workspace-id="prediction-radar">
+      <div id="radar-tab" class="tab-content" data-market-scopes="overview prediction" data-workspace-ids="prediction-radar radar">
         <div class="section-title">🌐 跨平台预测雷达</div>
         <div class="radar-controls">
           <div class="radar-field">
@@ -2827,7 +2827,7 @@
         </div>
         <button class="sidebar-collapse-btn" onclick="toggleSidebar()" title="收起侧栏，全屏查看左侧">⤢</button>
       </div>
-      <div class="sidebar-content">
+      <div id="sidebar-content" class="sidebar-content">
         <div id="stock-instrument-library" data-stock-library-scope="stocks" data-market-library="stocks" style="display:none;">
           <div class="stock-library-current" id="stock-library-current" aria-live="polite">
             <strong id="stock-library-current-symbol">AAPL</strong>
@@ -2858,7 +2858,6 @@
             <div class="stock-library-group-title">🔒 真实持仓（暂未接入）</div>
             <div>当前仅支持模拟持仓，不读取真实交易账户。</div>
           </div>
-        </div>
         </div>
         <div id="market-instrument-library" class="market-instrument-library" hidden>
           <div data-market-library="options" hidden>
@@ -12077,7 +12076,7 @@ function mobileTab(tab) {
     }
     // Register service worker for PWA
     if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('/sw.js?v=39').catch(() => {});
+    navigator.serviceWorker.register('/sw.js?v=40').catch(() => {});
       let refreshing = false;
       navigator.serviceWorker.addEventListener('controllerchange', () => {
         if (!refreshing) {

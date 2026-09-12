@@ -74,8 +74,8 @@ test('具体工作区只显示当前正文模块，并在总览时恢复市场�
   assert.match(html, /data-workspace-id="insider"/);
   assert.match(html, /data-workspace-id="institutional"/);
   assert.match(html, /data-workspace-id="order-flow"/);
-  assert.match(html, /data-workspace-ids="option-chain volatility greeks"/);
-  assert.match(html, /data-workspace-id="prediction-radar"/);
+  assert.match(html, /data-workspace-ids="option-chain volatility greeks radar"/);
+  assert.match(html, /data-workspace-ids="prediction-radar radar"/);
   assert.match(html, /function workspaceAllowsView\(/);
   assert.match(html, /function applyWorkspaceView\(/);
   assert.match(html, /node\?\.dataset\?\.workspaceId/);
@@ -97,10 +97,11 @@ test('独立功能面板在选中后扁平展示并保持展开', () => {
   assert.match(html, /if \(flatPanel\) node\.open = true/);
   assert.match(html, /!section\.classList\.contains\(['"]workspace-panel-flat['"]\)/);
   assert.match(html, /section\.classList\.contains\(['"]workspace-panel-flat['"]\) && !section\.open/);
-  for (const id of ['breadth', 'insider', 'institutional', 'analyst', 'fundamentals', 'short-interest', 'funding-rate', 'open-interest', 'on-chain', 'order-flow', 'prediction-radar']) {
+  for (const id of ['breadth', 'insider', 'institutional', 'analyst', 'fundamentals', 'short-interest', 'funding-rate', 'open-interest', 'on-chain', 'order-flow']) {
     assert.match(html, new RegExp(`data-workspace-id="${id}"`));
   }
-  assert.match(html, /data-workspace-ids="option-chain volatility greeks"/);
+  assert.match(html, /data-workspace-ids="option-chain volatility greeks radar"/);
+  assert.match(html, /data-workspace-ids="prediction-radar radar"/);
 });
 
 test('股票选择入口集中在右侧标的库并保持当前功能工作区', () => {

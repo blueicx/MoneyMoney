@@ -41,9 +41,16 @@ test('all market instrument libraries stay at the top while the center scrolls',
   }
 });
 
+test('market radar keeps the current market main panel visible', () => {
+  assert.match(html, /data-workspace-ids="stock-quotes radar"/);
+  assert.match(html, /data-workspace-ids="crypto-quotes radar"/);
+  assert.match(html, /id="options-tab"[^>]*data-workspace-ids="option-chain volatility greeks radar"/);
+  assert.match(html, /id="radar-tab"[^>]*data-workspace-ids="prediction-radar radar"/);
+});
+
 test('layout changes invalidate the cached service worker shell', () => {
-  assert.match(serviceWorker, /const CACHE_NAME = "moneymoney-v55"/);
-  assert.match(html, /serviceWorker\.register\('\/sw\.js\?v=39'\)/);
+  assert.match(serviceWorker, /const CACHE_NAME = "moneymoney-v56"/);
+  assert.match(html, /serviceWorker\.register\('\/sw\.js\?v=40'\)/);
 });
 
 test('stock exclusive workspaces keep the shared market bar and scope selection tools', () => {

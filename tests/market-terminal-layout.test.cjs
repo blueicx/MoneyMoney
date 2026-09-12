@@ -28,6 +28,7 @@ test('stock chart exposes user-selectable analysis overlays and replay controls'
 test('right library has market-specific entry point instead of generic event fallback', () => {
   const library = document.querySelector('#market-instrument-library');
   assert.ok(library);
+  assert.equal(library.parentElement?.id, 'sidebar-content');
   assert.ok(document.querySelector('#stock-instrument-library[data-market-library="stocks"]'));
   assert.ok(library.querySelector('[data-market-library="options"]'));
   assert.ok(library.querySelector('[data-market-library="crypto"]'));
