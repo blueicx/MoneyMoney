@@ -10067,6 +10067,7 @@ function workspaceIdsForNode(node) {
     .split(/[\s,|]+/).filter(Boolean);
 }
 function workspaceAllowsView(node) {
+  if (node.classList?.contains('workspace-item')) return true;
   return workspaceIdsForNode(node).includes(activeWorkspaceId);
 }
 function applyWorkspaceView() {

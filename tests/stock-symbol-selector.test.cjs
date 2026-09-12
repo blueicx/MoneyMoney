@@ -37,6 +37,7 @@ test('stock exclusive workspaces hide shared overview and selection tools', () =
   }
   assert.match(html, /id="market-research-tools"[^>]*data-market-scopes="overview"/);
   assert.match(html, /const visible = \(!node\.dataset\.marketScopes \|\| scopeAllowsView\(node\.dataset\.marketScopes\)\) && workspaceAllowsView\(node\);/);
+  assert.match(html, /if \(node\.classList\?\.contains\(['"]workspace-item['"]\)\) return true;/);
   assert.match(html, /function workspaceAllowsView\(node\) \{[\s\S]*?return workspaceIdsForNode\(node\)\.includes\(activeWorkspaceId\);/);
   assert.match(html, /function applyWorkspaceView\(\)[\s\S]*querySelectorAll\('\[data-workspace-id\], \[data-workspace-ids\]'\)/);
 });
