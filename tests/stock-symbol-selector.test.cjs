@@ -58,6 +58,12 @@ test('stock exclusive workspaces keep the shared market bar and scope selection 
 
 test('switching to a workspace unhides its tab content after scoped rendering', () => {
   assert.match(html, /function showTab\(tab, clicked, options = \{\}\)[\s\S]*?const targetContent = document\.getElementById\(targetTab \+ '-tab'\)[\s\S]*?targetContent\.hidden = false/);
+  assert.match(html, /function renderNavigationState\(\)[\s\S]*?const activeContent = document\.querySelector\('\.tab-content\.active'\)[\s\S]*?activeContent\.hidden = false/);
+  assert.match(html, /section\.hidden = false;[\s\S]*?section\.classList\.remove\(['"]workspace-hidden['"], ['"]scope-hidden['"]\)/);
+});
+
+test('market tab containers are sibling nodes instead of nested market tabs', () => {
+  assert.match(html, /id="binance-portfolio"><\/div>\s*<\/div>\s*<\/div>\s*<div id="macro-tab"/);
 });
 
 test('stock feature panels keep only their feature content', () => {

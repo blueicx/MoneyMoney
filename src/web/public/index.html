@@ -2410,6 +2410,7 @@
         <div class="section-title">💼 币安资产组合</div>
         <div id="binance-portfolio"></div>
       </div>
+      </div>
       <div id="macro-tab" class="tab-content">
         <div class="section-title">🌍 宏观与全球背景</div>
         <div class="collapse-toolbar">
@@ -10178,6 +10179,7 @@ window.openWorkspace = function(id) {
   const section = document.querySelector(`[data-workspace-id="${id}"].dash-collapse`);
   if (section) {
     section.hidden = false;
+    section.classList.remove('workspace-hidden', 'scope-hidden');
     section.open = true;
     setTimeout(() => section.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0);
   }
@@ -10377,6 +10379,8 @@ function renderNavigationState() {
   applyMarketScopeView();
   applyWorkspaceView();
   applySidebarScope();
+  const activeContent = document.querySelector('.tab-content.active');
+  if (activeContent) activeContent.hidden = false;
   if (activeMarketScope !== 'overview' && activeMarketScope !== 'watchlist') loadMarketResearch();
   if (activeMarketScope === 'watchlist') loadStockWatchlistLibrary();
 }
