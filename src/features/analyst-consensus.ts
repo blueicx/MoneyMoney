@@ -500,8 +500,8 @@ async function requestSnapshot(symbolInput: string): Promise<AnalystConsensusSna
   const targetsRecord = asRecord(extractSerialized(rawHtml, 'targets:{', '{'));
   // Some page variants omit the recent-action list; consensus and targets are
   // the required core, so this section degrades to empty rather than failing.
-  const recentRows = rawHtml.includes('}],ratings:[')
-    ? asArray(extractSerialized(rawHtml, '}],ratings:[', '['))
+  const recentRows = rawHtml.includes('}]},ratings:[')
+    ? asArray(extractSerialized(rawHtml, '}]},ratings:[', '['))
       .map(row => mapRecentAction(asRecord(row), url))
       .filter((row): row is RecentAnalystAction => row !== null)
       .slice(0, 8)

@@ -1,7 +1,9 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
 
 const { buildAnalystActionSummary } = require('../dist/features/analyst-consensus.js');
+const source = fs.readFileSync('src/features/analyst-consensus.ts', 'utf8');
 
 test('分析师动态生成可追溯的结构化事实摘要', () => {
   const action = {
@@ -39,4 +41,9 @@ test('没有观点原文时不伪造引用文本', () => {
   };
   assert.equal(action.sourceExcerpt ?? null, null);
   assert.doesNotMatch(buildAnalystActionSummary(action), /表示|认为|预计/);
+});
+
+test('兼容当前 StockAnalysis ratings payload 的对象闭合标记', () => {
+  assert.match(source, /rawHtml\.includes\('\}\]\},ratings:\['\)/);
+  assert.match(source, /extractSerialized\(rawHtml, '\}\]\},ratings:\['/);
 });
