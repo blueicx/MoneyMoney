@@ -13,6 +13,12 @@ test('macro workspace declares independent market sections', () => {
   assert.match(html, /data-market-scopes="stocks overview"><div[^>]*>🏛️ CME 机构持仓雷达/);
 });
 
+test('unified detail contract is explicit and rejects mismatched market scopes', () => {
+  assert.match(server, /validateInstrumentScope\(type, scope\)/);
+  assert.match(server, /sections[\s\S]*timeline[\s\S]*status/);
+  assert.match(server, /\['stock', 'option', 'crypto', 'prediction'\]/);
+});
+
 test('generic function navigation preserves the selected market', () => {
   assert.match(html, /function marketScopeForTab\(\) \{ return null; \}/);
   assert.match(html, /function scopedUrl\(path\)/);

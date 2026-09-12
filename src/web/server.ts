@@ -5202,6 +5202,14 @@ app.get('/api/settings', (req, res) => {
 
 // Canonical cross-asset entry points. Existing /api/stock, /api/binance and
 // /api/markets routes stay intact; these routes provide one stable contract.
+function validateInstrumentScope(type: InstrumentType, scope: string): boolean {
+  if (!scope || scope === 'overview' || scope === 'watchlist') return true;
+  return (scope === 'stocks' && type === 'stock')
+    || (scope === 'options' && type === 'option')
+    || (scope === 'crypto' && type === 'crypto')
+    || (scope === 'prediction' && type === 'prediction');
+}
+
 app.get('/api/instruments/search', async (req, res) => {
   try {
     const q = String(req.query.q || '').trim();
@@ -5218,10 +5226,12 @@ app.get('/api/instruments/search', async (req, res) => {
 app.get('/api/instruments/:type/:venue/:symbol/overview', async (req, res) => {
   try {
     const type = String(req.params.type).toLowerCase() as InstrumentType;
-    if (!['stock', 'crypto', 'prediction'].includes(type)) return res.status(400).json({ success: false, error: '不支持的标的类型' });
+    const scope = String(req.query.scope || '');
+    if (!['stock', 'option', 'crypto', 'prediction'].includes(type)) return res.status(400).json({ success: false, error: '不支持的标的类型' });
+    if (!validateInstrumentScope(type, scope)) return res.status(400).json({ success: false, error: '标的与市场范围不匹配', code: 'INSTRUMENT_SCOPE_MISMATCH' });
     const instrument = normalizeInstrumentRef({ type, venue: String(req.params.venue), symbol: decodeURIComponent(String(req.params.symbol)), title: String(req.query.title || ''), aliases: [] });
     const data = await unifiedInstrumentService.overview(instrument);
-    res.json({ success: true, data });
+    res.json({ success: true, data, sections: data.sections, timeline: data.timeline, status: data.status });
   } catch (error: any) {
     res.status(502).json({ success: false, error: error?.message || '标的详情暂不可用' });
   }
@@ -5230,7 +5240,9 @@ app.get('/api/instruments/:type/:venue/:symbol/overview', async (req, res) => {
 app.get('/api/instruments/:type/:venue/:symbol/timeline', async (req, res) => {
   try {
     const type = String(req.params.type).toLowerCase() as InstrumentType;
-    if (!['stock', 'crypto', 'prediction'].includes(type)) return res.status(400).json({ success: false, error: '不支持的标的类型' });
+    const scope = String(req.query.scope || '');
+    if (!['stock', 'option', 'crypto', 'prediction'].includes(type)) return res.status(400).json({ success: false, error: '不支持的标的类型' });
+    if (!validateInstrumentScope(type, scope)) return res.status(400).json({ success: false, error: '标的与市场范围不匹配', code: 'INSTRUMENT_SCOPE_MISMATCH' });
     const instrument = normalizeInstrumentRef({ type, venue: String(req.params.venue), symbol: decodeURIComponent(String(req.params.symbol)), title: String(req.query.title || ''), aliases: [] });
     const data = await unifiedInstrumentService.timeline(instrument);
     res.json({ success: true, data });

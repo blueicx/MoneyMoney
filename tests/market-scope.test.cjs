@@ -13,6 +13,7 @@ const instrumentsSource = fs.readFileSync('src/features/unified-instruments.ts',
 test('maps instrument types to market scopes', () => {
   assert.equal(marketScopeForInstrumentType('stock'), 'stocks');
   assert.equal(marketScopeForInstrumentType('crypto'), 'crypto');
+  assert.equal(marketScopeForInstrumentType('option'), 'options');
   assert.equal(marketScopeForInstrumentType('prediction'), 'prediction');
 });
 
