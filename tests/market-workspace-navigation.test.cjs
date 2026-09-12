@@ -14,6 +14,7 @@ test('股票左栏包含研究功能但不包含虚拟币和预测市场专属�
 
   assert.ok(stockIds.includes('insider'));
   assert.ok(stockIds.includes('backtest'));
+  assert.equal(stockIds.includes('search'), false);
   assert.equal(stockIds.includes('watchlist'), false);
   assert.equal(stockIds.includes('positions'), false);
   assert.equal(stockIds.includes('funding-rate'), false);
