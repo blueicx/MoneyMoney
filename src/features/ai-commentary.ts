@@ -40,6 +40,42 @@ const SCOPE_LABELS: Record<MarketScope, string> = {
   watchlist: '自选标的',
 };
 
+export interface MarketContext {
+  scope: MarketScope;
+  workspace: string;
+  instrument: string;
+  dataStatus: string;
+  sourceRefs: string[];
+}
+
+export interface AiAction {
+  type: 'open_detail' | 'add_watchlist' | 'create_alert' | 'run_backtest';
+  label: string;
+  scope: MarketScope;
+  instrument: string;
+}
+
+export function buildMarketContext(scope: MarketScope = 'prediction', input: Partial<MarketContext> = {}): MarketContext {
+  return {
+    scope,
+    workspace: String(input.workspace || 'analysis').replace(/[\r\n]+/g, ' ').trim().slice(0, 80),
+    instrument: String(input.instrument || '').replace(/[\r\n]+/g, ' ').trim().slice(0, 120),
+    dataStatus: String(input.dataStatus || 'unknown').replace(/[\r\n]+/g, ' ').trim().slice(0, 40),
+    sourceRefs: Array.from(new Set((Array.isArray(input.sourceRefs) ? input.sourceRefs : []).map(item => String(item).replace(/[\r\n]+/g, ' ').trim()).filter(Boolean))).slice(0, 12),
+  };
+}
+
+export function allowedAiActions(context: MarketContext): AiAction[] {
+  if (!context.instrument) return [];
+  const actions: AiAction[] = [
+    { type: 'open_detail', label: '打开标的详情', scope: context.scope, instrument: context.instrument },
+    { type: 'add_watchlist', label: '加入自选', scope: context.scope, instrument: context.instrument },
+    { type: 'create_alert', label: '设置提醒', scope: context.scope, instrument: context.instrument },
+  ];
+  if (context.scope === 'stocks' || context.scope === 'crypto') actions.push({ type: 'run_backtest', label: '运行回测', scope: context.scope, instrument: context.instrument });
+  return actions;
+}
+
 const SCOPE_REPORT_KEYS: Record<MarketScope, string[]> = {
   overview: ['stockActions', 'sectorActions', 'optionActions', 'cryptoActions', 'predictionPicks'],
   stocks: ['stockActions', 'sectorActions'],
@@ -82,11 +118,16 @@ export function buildAiMarketPrompt(
   radar: PredictionRadarInput,
   report: Record<string, unknown> = {},
   instrumentRef = '',
+  context: Partial<MarketContext> = {},
 ): string {
-  const selectedInstrument = String(instrumentRef || '').replace(/[\r\n]+/g, ' ').trim().slice(0, 120);
+  const marketContext = buildMarketContext(scope, { ...context, instrument: context.instrument || instrumentRef });
+  const selectedInstrument = marketContext.instrument;
   const sections: string[] = [
     `当前市场作用域：${SCOPE_LABELS[scope]}`,
     `当前标的：${selectedInstrument || '未指定'}`,
+    `当前工作区：${marketContext.workspace}`,
+    `数据状态：${marketContext.dataStatus}`,
+    `来源引用：${marketContext.sourceRefs.length ? marketContext.sourceRefs.join('、') : '暂无'}`,
   ];
   if (scope === 'prediction' || scope === 'overview') {
     sections.push(`预测市场快照：\n${buildRadarRows(radar) || '暂无预测市场数据'}`);
@@ -110,7 +151,7 @@ async function callOpenRouter(model: string, prompt: string): Promise<string> {
     body: JSON.stringify({
       model,
       messages: [
-        { role: 'system', content: '你擅长把预测市场数据转成简洁、谨慎、可核对的中文研究点评。' },
+        { role: 'system', content: '你擅长把当前市场作用域的数据转成简洁、谨慎、可核对的中文研究点评。严格遵守给定作用域。' },
         { role: 'user', content: prompt },
       ],
       max_tokens: 650,
@@ -138,13 +179,18 @@ export async function getAiMarketCommentary(
   scope: MarketScope = 'prediction',
   report: Record<string, unknown> = {},
   instrumentRef: string = '',
+  context: Partial<MarketContext> = {},
 ): Promise<{
   configured: boolean;
   analysis: string;
   model: string;
   updatedAt: string;
   cached: boolean;
+  context: MarketContext;
+  actions: AiAction[];
 }> {
+  const marketContext = buildMarketContext(scope, { ...context, instrument: context.instrument || instrumentRef });
+  const actions = allowedAiActions(marketContext);
   const runtime = getAiRuntimeConfig('openrouter');
   if (!runtime.configured) {
     return {
@@ -153,11 +199,13 @@ export async function getAiMarketCommentary(
       model: '',
       updatedAt: new Date().toISOString(),
       cached: false,
+      context: marketContext,
+      actions,
     };
   }
 
-  const prompt = buildAiMarketPrompt(scope, radar, report, instrumentRef);
-  const signature = `${scope}|${radarSignature(radar)}|${prompt}|${instrumentRef}`;
+  const prompt = buildAiMarketPrompt(scope, radar, report, marketContext.instrument, marketContext);
+  const signature = `${scope}|${radarSignature(radar)}|${prompt}|${JSON.stringify(marketContext)}`;
   const isCacheValid = cache && cache.signature === signature && (Date.now() - new Date(cache.createdAt).getTime() < 15 * 60 * 1000);
   if (!force && isCacheValid) {
     return {
@@ -166,6 +214,8 @@ export async function getAiMarketCommentary(
       model: cache!.model,
       updatedAt: cache!.createdAt,
       cached: true,
+      context: marketContext,
+      actions,
     };
   }
   if (!force && pending && pendingSignature === signature) {
@@ -176,6 +226,8 @@ export async function getAiMarketCommentary(
       model: result.model,
       updatedAt: result.createdAt,
       cached: false,
+      context: marketContext,
+      actions,
     };
   }
 
@@ -202,6 +254,8 @@ export async function getAiMarketCommentary(
       model: result.model,
       updatedAt: result.createdAt,
       cached: false,
+      context: marketContext,
+      actions,
     };
   } finally {
     if (pendingSignature === signature) {

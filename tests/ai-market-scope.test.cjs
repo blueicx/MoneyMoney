@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const test = require('node:test');
-const { buildAiMarketPrompt } = require('../dist/features/ai-commentary');
+const { buildAiMarketPrompt, buildMarketContext, allowedAiActions } = require('../dist/features/ai-commentary');
 const server = fs.readFileSync('src/web/server.ts', 'utf8');
 const commentary = fs.readFileSync('src/features/ai-commentary.ts', 'utf8');
 
@@ -52,7 +52,7 @@ test('prediction AI context uses radar only for prediction scope', () => {
 
 test('AI commentary route forwards the selected scope and avoids prediction fetches elsewhere', () => {
   assert.match(server, /const scope = requestedMarketScope\(req\.body\?\.scope\) \|\| 'prediction'/);
-  assert.match(server, /getAiMarketCommentary\(radar, force, scope, report, instrumentRef\)/);
+  assert.match(server, /getAiMarketCommentary\(radar, force, scope, report, instrumentRef, context\)/);
   assert.match(server, /scope === 'prediction' \|\| scope === 'overview'/);
 });
 
@@ -60,10 +60,23 @@ test('frontend sends the active instrument for stock, option and crypto AI comme
   assert.match(fs.readFileSync('src/web/public/index.html', 'utf8'), /activeMarketScope === 'stocks'[\s\S]*currentStockSymbol/);
   assert.match(fs.readFileSync('src/web/public/index.html', 'utf8'), /activeMarketScope === 'options'[\s\S]*option-symbol/);
   assert.match(fs.readFileSync('src/web/public/index.html', 'utf8'), /activeMarketScope === 'crypto'[\s\S]*bnCurrentSymbol/);
+  assert.match(fs.readFileSync('src/web/public/index.html', 'utf8'), /workspace: typeof activeWorkspaceId/);
+  assert.match(fs.readFileSync('src/web/public/index.html', 'utf8'), /handleAiMarketAction/);
 });
 
 test('AI commentary pending requests are isolated by scope signature', () => {
   assert.match(commentary, /let pendingSignature: string \| null = null/);
   assert.match(commentary, /pendingSignature === signature/);
   assert.match(commentary, /pendingSignature = signature/);
+});
+
+test('AI context carries workspace, data status, source references and scoped actions', () => {
+  const context = buildMarketContext('stocks', { workspace: 'insider', instrument: 'stock:us:AAPL', dataStatus: 'cached', sourceRefs: ['nasdaq-public-quote', 'sec-edgar'] });
+  assert.deepEqual(context, { scope: 'stocks', workspace: 'insider', instrument: 'stock:us:AAPL', dataStatus: 'cached', sourceRefs: ['nasdaq-public-quote', 'sec-edgar'] });
+  const prompt = buildAiMarketPrompt('stocks', radar, report, context.instrument, context);
+  assert.match(prompt, /工作区：insider/);
+  assert.match(prompt, /数据状态：cached/);
+  assert.match(prompt, /来源引用：nasdaq-public-quote、sec-edgar/);
+  assert.ok(allowedAiActions(context).some(action => action.type === 'open_detail'));
+  assert.ok(allowedAiActions(context).some(action => action.type === 'run_backtest'));
 });

@@ -11045,18 +11045,30 @@ async function loadAiMarketCommentary(force = false) {
     const res = await fetch('/api/ai/market-commentary', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ force, scope: activeMarketScope, instrumentRef }),
+      body: JSON.stringify({ force, scope: activeMarketScope, instrumentRef, workspace: typeof activeWorkspaceId !== 'undefined' ? activeWorkspaceId : 'analysis', dataStatus: 'requested', sourceRefs: [] }),
     });
     const body = await res.json();
     if (!body.success) throw new Error(body.error || 'AI 点评不可用');
     const item = body.data;
-    output.innerHTML = `<div style="white-space:pre-wrap;">${radarEscape(item.analysis)}</div><div style="margin-top:8px;font-size:11px;">模型 ${radarEscape(item.model || 'OpenRouter')} · ${new Date(item.updatedAt).toLocaleString()}${item.cached ? ' · 缓存' : ''} · 仅研究参考</div>`;
+    const actionButtons = (item.actions || []).filter(action => action.scope === activeMarketScope).map(action => `<button type="button" class="tab" onclick="handleAiMarketAction('${encodeURIComponent(action.type)}','${encodeURIComponent(action.instrument)}')">${radarEscape(action.label)}</button>`).join('');
+    output.innerHTML = `<div style="white-space:pre-wrap;">${radarEscape(item.analysis)}</div><div style="margin-top:8px;font-size:11px;">模型 ${radarEscape(item.model || 'OpenRouter')} · ${new Date(item.updatedAt).toLocaleString()}${item.cached ? ' · 缓存' : ''} · 仅研究参考</div>${actionButtons ? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px;">${actionButtons}</div>` : ''}`;
   } catch (error) {
     output.textContent = `❌ ${error.message}`;
   } finally {
     if (button) { button.disabled = false; button.textContent = '✨ 生成点评'; }
   }
 }
+window.handleAiMarketAction = function(encodedType, encodedInstrument) {
+  const type = decodeURIComponent(encodedType || '');
+  const instrumentId = decodeURIComponent(encodedInstrument || '');
+  if (!instrumentId || !instrumentId.startsWith(`${activeMarketScope === 'stocks' ? 'stock' : activeMarketScope === 'options' ? 'option' : activeMarketScope === 'crypto' ? 'crypto' : 'prediction'}:`)) return;
+  const parts = instrumentId.split(':');
+  const instrument = { id: instrumentId, type: parts[0], venue: parts[1] || '', symbol: parts.slice(2).join(':'), title: parts.slice(2).join(':'), aliases: [] };
+  if (type === 'open_detail') return openUnifiedInstrument(instrument);
+  if (type === 'add_watchlist') return fetch('/api/watchlist', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ instrumentId }) }).then(() => typeof window.showToast === 'function' && window.showToast('已加入自选', 'success'));
+  if (type === 'create_alert') { window.mm_pendingAlertInstrument = instrument; setWorkspaceInstrument(instrument.symbol); return showTab('alerts'); }
+  if (type === 'run_backtest') { const input = document.getElementById('bt-market-id'); if (input) input.value = instrument.symbol; showTab('backtest'); return setTimeout(() => runBacktest(), 0); }
+};
 async function loadPredictionRadar(force = false) {
   if (currentRadarController) currentRadarController.abort();
   currentRadarController = new AbortController();
