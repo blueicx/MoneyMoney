@@ -1492,6 +1492,28 @@
     .dash-collapse summary:hover {
       background: color-mix(in srgb, var(--purple-light) 52%, transparent) !important;
     }
+    .dash-collapse.workspace-panel-flat {
+      background: transparent !important;
+      border: 0 !important;
+      border-radius: 0;
+      overflow: visible;
+    }
+    .dash-collapse.workspace-panel-flat > summary {
+      min-height: 0;
+      padding: 0 0 12px;
+      cursor: default;
+      pointer-events: none;
+      background: transparent !important;
+    }
+    .dash-collapse.workspace-panel-flat > summary:hover {
+      background: transparent !important;
+    }
+    .dash-collapse.workspace-panel-flat > summary .collapse-chevron {
+      display: none;
+    }
+    .dash-collapse.workspace-panel-flat > .collapse-body {
+      padding: 0;
+    }
     .data-table th,
     .chain-table th {
       background: color-mix(in srgb, var(--bg-secondary) 72%, var(--bg-card)) !important;
@@ -10048,8 +10070,14 @@ function applyWorkspaceView() {
   const exclusive = EXCLUSIVE_WORKSPACE_IDS.has(activeWorkspaceId);
   document.querySelectorAll('[data-workspace-id], [data-workspace-ids]').forEach(node => {
     const visible = scopeAllowsView(node.dataset.marketScopes) && workspaceAllowsView(node);
+    const flatPanel = exclusive
+      && visible
+      && node.matches('details.dash-collapse')
+      && workspaceIdsForNode(node).includes(activeWorkspaceId);
     node.hidden = !visible;
     node.classList.toggle('workspace-hidden', !visible);
+    node.classList.toggle('workspace-panel-flat', flatPanel);
+    if (flatPanel) node.open = true;
     if (!visible && node.tagName === 'DETAILS') node.open = false;
   });
   ['stocks-tab', 'binance-tab'].forEach(tabId => {
