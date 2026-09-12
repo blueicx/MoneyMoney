@@ -17,7 +17,7 @@ test('market result controls use the active theme', () => {
 test('market workspace sidebar uses the MoneyMoney theme and responsive shell', () => {
   assert.match(html, /id="market-workspace-shell"/);
   assert.match(html, /id="market-workspace-sidebar"/);
-  assert.match(html, /id="market-workspace-main"/);
+  assert.match(html, /id="center-workspace"/);
   assert.match(html, /data-sidebar-state="expanded"/);
   assert.match(html, /aria-label="市场功能区"/);
   assert.match(html, /workspace-sidebar-toggle/);

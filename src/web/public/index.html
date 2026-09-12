@@ -1,6 +1,4 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
+<!DOCTYPE html><html lang="en"><head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>💰 MoneyMoney 多市场交易助手</title>
@@ -231,6 +229,14 @@
     .workspace-main { min-width:0; }
     .workspace-drawer-open { display:none; border:1px solid var(--border); border-radius:9px; padding:8px 11px; background:var(--bg-card); color:var(--text-secondary); cursor:pointer; }
     .workspace-drawer { display:none; }
+    .stock-chart-overlays { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin:0 0 10px; font-size:11px; color:var(--text-secondary); }
+    .stock-chart-overlays label { display:inline-flex; align-items:center; gap:4px; cursor:pointer; white-space:nowrap; }
+    .stock-chart-overlays input { accent-color:var(--purple); }
+    .stock-chart-replay-label { margin-left:auto; color:var(--yellow); font-weight:700; }
+    .stock-chart-replay-status { min-width:68px; text-align:right; font-variant-numeric:tabular-nums; }
+    .stock-chart-stage { position:relative; min-height:340px; }
+    .market-library-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:7px; }
+    .market-instrument-library { display:block; }
     .workspace-dashboard-cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:8px; margin:-6px 0 16px; }
     .workspace-dashboard-card { min-width:0; padding:10px 11px; border:1px solid var(--border); border-radius:11px; background:linear-gradient(135deg,var(--glass-highlight),var(--bg-card)); box-shadow:var(--shadow); }
     .workspace-dashboard-card-title { font-size:12px; font-weight:800; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
@@ -263,8 +269,13 @@
     .market-workspace-shell[data-sidebar-state="rail"] .workspace-sidebar-header { justify-content:center; padding-left:0; padding-right:0; }
     .market-workspace-shell[data-sidebar-state="rail"] .workspace-item { justify-content:center; padding-left:4px; padding-right:4px; }
     @media (max-width: 1100px) {
-      .layout { grid-template-columns: 1fr; }
-      .sidebar { display: none; }
+      .layout { grid-template-columns:minmax(0, 1fr) 320px; }
+      .sidebar { display:block; }
+    }
+    @media (max-width: 760px) {
+      .layout { grid-template-columns:1fr; }
+      .layout > .sidebar { display:none; }
+      .stock-chart-replay-label { margin-left:0; }
     }
     .main { padding: 24px; overflow-y: auto; }
     /* Tabs */
@@ -1790,6 +1801,7 @@
       .market-workspace-shell[data-sidebar-state="rail"] { grid-template-columns:1fr; }
     }
     </style>
+<script src="/chart-analysis.js"></script>
 <script>
 // MoneyMoney 登录守卫：以 Cookie(HttpOnly) 为主，localStorage 兼容；统一 credentials:include
 (function(){
@@ -1850,7 +1862,7 @@
 </script>
 </head>
 <body>
-  <header class="header">
+  <header class="header" id="top-market-bar">
     <div class="logo">
       <div class="logo-icon">P</div>
       MoneyMoney 多市场交易助手
@@ -1903,7 +1915,7 @@
     <div class="global-search-panel" role="dialog" aria-modal="true" aria-label="全局搜索">
       <div class="global-search-input-wrap">
         <span>🔍</span>
-        <input id="global-search-input" class="global-search-input" type="search" autocomplete="off" placeholder="搜索功能、股票、预测市场、宏观指标..." oninput="globalSearchDebounce()" />
+        <input id="global-search-input" class="global-search-input" type="search" autocomplete="off" placeholder="搜索功能、股票、预测市场、宏观指标..." oninput="globalSearchDebounce()">
         <button class="global-search-kbd" onclick="closeGlobalSearch()">ESC</button>
       </div>
       <div id="global-search-results" class="global-search-results"></div>
@@ -1926,14 +1938,14 @@
     </div>
   <div class="layout">
     <div id="market-workspace-shell" class="market-workspace-shell" data-market-scope="overview" data-sidebar-state="expanded">
-      <aside id="market-workspace-sidebar" class="workspace-sidebar" aria-label="市场功能区">
+      <aside id="market-workspace-sidebar" class="workspace-sidebar" data-region="market-features" aria-label="市场功能区">
         <div class="workspace-sidebar-header">
           <div class="workspace-sidebar-title">市场功能区</div>
           <button id="workspace-sidebar-toggle" class="workspace-sidebar-toggle" type="button" aria-expanded="true" aria-controls="workspace-sidebar-content" title="折叠功能区">‹</button>
         </div>
         <div id="workspace-sidebar-content"></div>
       </aside>
-    <main id="market-workspace-main" class="main workspace-main">
+    <main id="center-workspace" class="main workspace-main">
       <div id="market-scope-bar" class="market-scope-bar"></div>
       <div id="utility-nav-bar" class="utility-nav-bar"></div>
       <button id="workspace-drawer-open" class="workspace-drawer-open" type="button" onclick="openWorkspaceDrawer()">☰ 功能区</button>
@@ -1972,7 +1984,7 @@
         <div id="command-actions" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px;margin-bottom:18px;"></div>
         <div class="section-title" style="margin-top:14px;">🧭 研究与运行状态</div>
         <div id="command-workstreams" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;"></div>
-        <details class="dash-collapse" data-collapse-key="overview-cross-asset-correlation" data-market-scopes="overview" open>
+        <details class="dash-collapse" data-collapse-key="overview-cross-asset-correlation" data-market-scopes="overview" open="">
           <summary>
             <span class="collapse-title">🧩 跨资产联动回撤雷达</span>
             <span class="collapse-hint">相关性 · 回撤 · 波动 · 分散度</span>
@@ -2023,15 +2035,15 @@
               <button type="button" class="tab" onclick="toggleWorkspaceWatchlistColumns()">⚙ 列</button>
             </div>
           </div>
-          <div id="workspace-watchlist-columns" class="workspace-watchlist-columns" hidden aria-label="自选表格列配置">
+          <div id="workspace-watchlist-columns" class="workspace-watchlist-columns" hidden="" aria-label="自选表格列配置">
             <span>显示列：</span>
-            <label><input type="checkbox" data-watchlist-column-toggle="market" checked onchange="setWorkspaceWatchlistColumn('market', this.checked)">市场</label>
-            <label><input type="checkbox" data-watchlist-column-toggle="status" checked onchange="setWorkspaceWatchlistColumn('status', this.checked)">状态</label>
-            <label><input type="checkbox" data-watchlist-column-toggle="actions" checked onchange="setWorkspaceWatchlistColumn('actions', this.checked)">操作</label>
+            <label><input type="checkbox" data-watchlist-column-toggle="market" checked="" onchange="setWorkspaceWatchlistColumn('market', this.checked)">市场</label>
+            <label><input type="checkbox" data-watchlist-column-toggle="status" checked="" onchange="setWorkspaceWatchlistColumn('status', this.checked)">状态</label>
+            <label><input type="checkbox" data-watchlist-column-toggle="actions" checked="" onchange="setWorkspaceWatchlistColumn('actions', this.checked)">操作</label>
           </div>
           <div id="workspace-watchlist-groups" class="workspace-watchlist-groups"><div class="empty-tip">正在读取当前市场自选...</div></div>
         </div>
-        <div id="watchlist-stock-library" data-stock-library-item="workspace-watchlist" hidden></div>
+        <div id="watchlist-stock-library" data-stock-library-item="workspace-watchlist" hidden=""></div>
         <div class="section-title">我的持仓</div>
         <table class="data-table">
           <thead>
@@ -2093,13 +2105,13 @@
             <option value="Predict.fun">🎯 Predict.fun</option>
             <option value="Stocks">📈 美股</option>
           </select>
-          <input id="ai-runner-symbol" placeholder="如 BTCUSDT / 市场ID" style="width:120px;padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);font-size:12px;text-transform:uppercase;" />
-          <input id="ai-runner-budget" type="number" placeholder="预算 $" min="1" step="1" style="width:90px;padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);font-size:12px;" />
-          <input id="ai-runner-max-trade" type="number" placeholder="单笔上限 $" min="1" step="1" style="width:92px;padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);font-size:12px;" />
-          <input id="ai-runner-max-positions" type="number" placeholder="最大持仓" min="1" step="1" value="1" style="width:82px;padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);font-size:12px;" />
-          <input id="ai-runner-daily-loss" type="number" placeholder="日损上限 $" min="1" step="1" style="width:92px;padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);font-size:12px;" />
-          <input id="ai-runner-max-dd" type="number" placeholder="回撤上限 %" min="1" max="100" step="1" value="20" style="width:88px;padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);font-size:12px;" />
-          <input id="ai-runner-cooldown" type="number" placeholder="冷却分钟" min="0" step="1" value="15" style="width:82px;padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);font-size:12px;" />
+          <input id="ai-runner-symbol" placeholder="如 BTCUSDT / 市场ID" style="width:120px;padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);font-size:12px;text-transform:uppercase;">
+          <input id="ai-runner-budget" type="number" placeholder="预算 $" min="1" step="1" style="width:90px;padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);font-size:12px;">
+          <input id="ai-runner-max-trade" type="number" placeholder="单笔上限 $" min="1" step="1" style="width:92px;padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);font-size:12px;">
+          <input id="ai-runner-max-positions" type="number" placeholder="最大持仓" min="1" step="1" value="1" style="width:82px;padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);font-size:12px;">
+          <input id="ai-runner-daily-loss" type="number" placeholder="日损上限 $" min="1" step="1" style="width:92px;padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);font-size:12px;">
+          <input id="ai-runner-max-dd" type="number" placeholder="回撤上限 %" min="1" max="100" step="1" value="20" style="width:88px;padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);font-size:12px;">
+          <input id="ai-runner-cooldown" type="number" placeholder="冷却分钟" min="0" step="1" value="15" style="width:82px;padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);font-size:12px;">
           <button class="tab active" onclick="createAiRunner()" style="padding:7px 16px;font-size:12.5px;">▶ 启动</button>
           <button class="tab" onclick="tickAiRunners()" style="padding:7px 14px;font-size:12.5px;">⚡ 执行一轮</button>
         </div>
@@ -2372,8 +2384,8 @@
       <!-- Stock Market Tab -->
       <div id="stocks-tab" class="tab-content">
         <div class="section-title">📈 全球股票市场</div>
-        <div id="market-scope-empty" class="empty-tip" hidden style="margin-bottom:16px;"></div>
-        <details class="dash-collapse" data-collapse-key="stocks-market" data-market-scopes="stocks overview" data-workspace-id="overview" open>
+        <div id="market-scope-empty" class="empty-tip" hidden="" style="margin-bottom:16px;"></div>
+        <details class="dash-collapse" data-collapse-key="stocks-market" data-market-scopes="stocks overview" data-workspace-id="overview" open="">
           <summary>
             <span class="collapse-title">📈 行情与选股</span>
             <span class="collapse-hint">全球指标 · 主要指数 · K线 · 热门股 · 搜索</span>
@@ -2391,9 +2403,24 @@
                 <button class="tab stock-kline-range" data-days="250" onclick="setStockKlineRange(250)">一年</button>
               </div>
             </div>
-            <div style="background:var(--bg-card);border-radius:12px;padding:16px;border:1px solid var(--border);margin-bottom:20px;">
+              <div style="background:var(--bg-card);border-radius:12px;padding:16px;border:1px solid var(--border);margin-bottom:20px;">
               <div id="stock-chart-title" style="font-weight:700;font-size:15px;margin-bottom:8px;"></div>
-              <canvas id="stock-kline" width="640" height="360" style="width:100%;height:340px;display:block;"></canvas>
+              <div id="stock-chart-overlays" class="stock-chart-overlays" aria-label="K线显示选项">
+                <label><input type="checkbox" data-chart-overlay="signals" checked onchange="setStockChartOverlay('signals', this.checked)"> 策略点位</label>
+                <label><input type="checkbox" data-chart-overlay="patterns" onchange="setStockChartOverlay('patterns', this.checked)"> 蜡烛形态</label>
+                <label><input type="checkbox" data-chart-overlay="structures" onchange="setStockChartOverlay('structures', this.checked)"> 结构标记</label>
+                <label><input type="checkbox" data-chart-overlay="ma" checked onchange="setStockChartOverlay('ma', this.checked)"> 均线</label>
+                <label><input type="checkbox" data-chart-overlay="boll" onchange="setStockChartOverlay('boll', this.checked)"> 布林带</label>
+                <label><input type="checkbox" data-chart-overlay="volume" checked onchange="setStockChartOverlay('volume', this.checked)"> 成交量</label>
+                <span class="stock-chart-replay-label">回放</span>
+                <button class="tab" type="button" data-chart-replay="reset" onclick="stepStockChartReplay('reset')">⏮</button>
+                <button class="tab" type="button" data-chart-replay="previous" onclick="stepStockChartReplay('previous')">‹</button>
+                <button class="tab" type="button" data-chart-replay="next" onclick="stepStockChartReplay('next')">›</button>
+                <span id="stock-chart-replay-status" class="stock-chart-replay-status" aria-live="polite"></span>
+              </div>
+              <div class="stock-chart-stage">
+                <canvas id="stock-kline" width="640" height="360" style="width:100%;height:340px;display:block;"></canvas>
+              </div>
             </div>
             <div style="display:flex;justify-content:flex-end;align-items:center;margin:4px 0 10px;">
               <button class="tab active" type="button" onclick="loadStockQuotes()">🔄 刷新行情</button>
@@ -2493,7 +2520,7 @@
             <div id="global-spot-radar"></div>
           </div>
         </details>
-        <details class="dash-collapse" data-collapse-key="stocks-macro" data-market-scopes="stocks crypto options overview" data-workspace-id="overview" open>
+        <details class="dash-collapse" data-collapse-key="stocks-macro" data-market-scopes="stocks crypto options overview" data-workspace-id="overview" open="">
           <summary>
             <span class="collapse-title">🌍 宏观与流动性</span>
             <span class="collapse-hint">宏观指标 · 稳定币 · 美国经济 · 美债曲线</span>
@@ -2506,7 +2533,7 @@
           </div>
         </details>
 
-        <details class="dash-collapse" data-collapse-key="stocks-timeline" data-market-scopes="stocks options crypto prediction overview" data-workspace-id="overview" open>
+        <details class="dash-collapse" data-collapse-key="stocks-timeline" data-market-scopes="stocks options crypto prediction overview" data-workspace-id="overview" open="">
           <summary>
             <span class="collapse-title">📰 市场事件与新闻</span>
             <span class="collapse-hint">近期公开证据与垂直动态</span>
@@ -2543,7 +2570,7 @@
               <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-secondary);"><input type="checkbox" id="calendar-upcoming" onchange="loadMacroCalendar()"> 只看即将公布</label>
             </div>
             <div id="macro-calendar"></div></div>
-            <div data-market-scopes="crypto overview"><div style="font-weight:700;font-size:13px;margin-bottom:10px;margin-top:24px;">😱 恐贪指数 & 💸 资金费率</div><div id="fear-greed-card" style="margin-bottom:16px;"></div><div id="funding-rates-card"></div></div>
+            <div data-market-scopes="crypto overview"><div style="font-weight:700;font-size:13px;margin-bottom:10px;margin-top:24px;">😱 恐贪指数 &amp; 💸 资金费率</div><div id="fear-greed-card" style="margin-bottom:16px;"></div><div id="funding-rates-card"></div></div>
             <div data-market-scopes="stocks overview"><div style="font-weight:700;font-size:13px;margin-bottom:10px;margin-top:24px;">🏛️ CME 机构持仓雷达</div><div id="cot-radar"></div></div>
           </div>
         </details>
@@ -2595,7 +2622,7 @@
           <select id="option-expiry" onchange="renderOptionChain()" style="padding:9px 12px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);min-width:170px;"></select>
           <select id="option-range" onchange="renderOptionChain()" style="padding:9px 12px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);">
             <option value="10">现价 ±10 档</option>
-            <option value="20" selected>现价 ±20 档</option>
+            <option value="20" selected="">现价 ±20 档</option>
             <option value="0">全部行权价</option>
           </select>
           <button class="tab active" onclick="loadOptions()">🔄 刷新</button>
@@ -2771,10 +2798,10 @@
         <div id="ops-overview" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:16px;"></div>
         <div id="ops-jobs" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;"></div>
       </div>
-      <nav id="core-workspace-nav" class="core-workspace-nav" aria-label="核心工作区"></nav>
+
     </main>
     </div>
-    <aside class="sidebar" id="app-sidebar">
+    <aside class="sidebar" id="right-instrument-library" data-region="instrument-library">
       <button class="sidebar-toggle" id="sidebar-edge-toggle" onclick="toggleSidebar()" title="收起侧栏">‹</button>
       <div class="sidebar-header">
         <div class="sidebar-header-main">
@@ -2784,7 +2811,7 @@
         <button class="sidebar-collapse-btn" onclick="toggleSidebar()" title="收起侧栏，全屏查看左侧">⤢</button>
       </div>
       <div class="sidebar-content">
-        <div id="stock-instrument-library" data-stock-library-scope="stocks" style="display:none;">
+        <div id="stock-instrument-library" data-stock-library-scope="stocks" data-market-library="stocks" style="display:none;">
           <div class="stock-library-current" id="stock-library-current" aria-live="polite">
             <strong id="stock-library-current-symbol">AAPL</strong>
             <small id="stock-library-current-workspace">当前功能：市场总览</small>
@@ -2815,6 +2842,40 @@
             <div>当前仅支持模拟持仓，不读取真实交易账户。</div>
           </div>
         </div>
+        <div id="market-instrument-library" class="market-instrument-library" hidden>
+          <div data-market-library="options" hidden>
+            <div class="stock-library-group-title">🎯 期权标的库</div>
+            <div class="market-library-grid">
+              <button type="button" class="stock-library-item" onclick="selectOptionLibraryAsset('SPY')"><strong>SPY</strong><small>标普500 ETF</small></button>
+              <button type="button" class="stock-library-item" onclick="selectOptionLibraryAsset('QQQ')"><strong>QQQ</strong><small>纳指100 ETF</small></button>
+              <button type="button" class="stock-library-item" onclick="selectOptionLibraryAsset('AAPL')"><strong>AAPL</strong><small>苹果</small></button>
+              <button type="button" class="stock-library-item" onclick="selectOptionLibraryAsset('NVDA')"><strong>NVDA</strong><small>英伟达</small></button>
+              <button type="button" class="stock-library-item" onclick="selectOptionLibraryAsset('TSLA')"><strong>TSLA</strong><small>特斯拉</small></button>
+            </div>
+          </div>
+          <div data-market-library="crypto" hidden>
+            <div class="stock-library-group-title">₿ 虚拟币标的库</div>
+            <div class="market-library-grid">
+              <button type="button" class="stock-library-item" onclick="selectCryptoLibraryAsset('BTCUSDT')"><strong>BTC/USDT</strong><small>Bitcoin</small></button>
+              <button type="button" class="stock-library-item" onclick="selectCryptoLibraryAsset('ETHUSDT')"><strong>ETH/USDT</strong><small>Ethereum</small></button>
+              <button type="button" class="stock-library-item" onclick="selectCryptoLibraryAsset('SOLUSDT')"><strong>SOL/USDT</strong><small>Solana</small></button>
+              <button type="button" class="stock-library-item" onclick="selectCryptoLibraryAsset('BNBUSDT')"><strong>BNB/USDT</strong><small>BNB</small></button>
+            </div>
+          </div>
+          <div data-market-library="prediction" hidden>
+            <div class="stock-library-group-title">🎯 预测市场标的库</div>
+            <button type="button" class="tab" style="width:100%;" onclick="showTab('radar')">打开预测市场雷达</button>
+            <div class="empty-tip">从预测雷达选择具体市场后，当前工作区会跟随切换。</div>
+          </div>
+          <div data-market-library="overview" hidden>
+            <div class="stock-library-group-title">🌐 总体标的库</div>
+            <div class="empty-tip">请先从顶部选择股票、期权、虚拟币或预测市场。</div>
+          </div>
+          <div data-market-library="watchlist" hidden>
+            <div class="stock-library-group-title">⭐ 自选标的库</div>
+            <div class="empty-tip">请在对应市场中选择自选标的。</div>
+          </div>
+        </div>
         <div id="no-selection" class="no-selection">
           <div class="no-selection-icon">👈</div>
           <div>请从左侧列表选择一个事件。</div>
@@ -2824,9 +2885,9 @@
     </aside>
     <button class="sidebar-expand-fab" id="sidebar-expand-fab" onclick="toggleSidebar()" title="展开侧栏">›</button>
   </div>
-  <div id="workspace-drawer" class="workspace-drawer" hidden>
+  <div id="workspace-drawer" class="workspace-drawer" hidden="">
     <div class="workspace-drawer-panel" role="dialog" aria-modal="true" aria-label="市场功能区">
-      <button id="workspace-drawer-close" class="workspace-drawer-close" type="button" data-workspace-drawer-close onclick="closeWorkspaceDrawer()">关闭</button>
+      <button id="workspace-drawer-close" class="workspace-drawer-close" type="button" data-workspace-drawer-close="" onclick="closeWorkspaceDrawer()">关闭</button>
       <div id="workspace-drawer-content"></div>
     </div>
   </div>
@@ -2877,7 +2938,7 @@
     <div class="modal-content" style="max-width:450px">
       <div class="modal-header">
         <h3>卖出持仓</h3>
-        <button class="modal-close" onclick="closeSellModal()">&times;</button>
+        <button class="modal-close" onclick="closeSellModal()">×</button>
       </div>
       <div class="modal-body">
         <div class="setup-section">
@@ -7228,6 +7289,48 @@ let currentStockSymbol = 'sh600519';
 let currentStockName = '贵州茅台';
 let currentStockApiSymbol = '';
 let currentStockDays = 60;
+let stockChartReplayIndex = -1;
+let stockChartKlines = [];
+let stockChartOverlayConfig = window.MoneyChartAnalysis?.normalizeOverlayConfig() || { signals:true, patterns:false, structures:false, volume:true, indicators:{ ma:true, boll:false, macd:false }, maxLabels:80 };
+function stockChartStorageKey() {
+  return `mm-chart-overlays:${activeMarketScope || 'stocks'}:${window._stockSelectedSymbol || currentStockSymbol || 'AAPL'}`;
+}
+function loadStockChartOverlayConfig() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(stockChartStorageKey()) || 'null');
+    stockChartOverlayConfig = window.MoneyChartAnalysis?.normalizeOverlayConfig(raw || {}) || stockChartOverlayConfig;
+  } catch (e) {}
+  document.querySelectorAll('[data-chart-overlay]').forEach(input => {
+    const name = input.dataset.chartOverlay;
+    input.checked = ['ma', 'boll', 'macd'].includes(name)
+      ? Boolean(stockChartOverlayConfig.indicators?.[name])
+      : Boolean(stockChartOverlayConfig[name]);
+  });
+}
+function setStockChartOverlay(name, enabled) {
+  if (['ma', 'boll', 'macd'].includes(name)) stockChartOverlayConfig.indicators[name] = Boolean(enabled);
+  else stockChartOverlayConfig[name] = Boolean(enabled);
+  try { localStorage.setItem(stockChartStorageKey(), JSON.stringify(stockChartOverlayConfig)); } catch (e) {}
+  if (stockChartKlines.length) drawStockKline(document.getElementById('stock-kline'), stockChartKlines);
+}
+function buildStockStrategySignals(bars) {
+  const analysis = window.MoneyChartAnalysis;
+  if (!analysis) return [];
+  const fast = analysis.movingAverage(bars, 5);
+  const slow = analysis.movingAverage(bars, 20);
+  const signals = [];
+  for (let index = 1; index < bars.length; index += 1) {
+    if (fast[index] == null || slow[index] == null || fast[index - 1] == null || slow[index - 1] == null) continue;
+    if (fast[index] >= slow[index] && fast[index - 1] < slow[index - 1]) signals.push({ index, side:'buy', label:'均线金叉' });
+    if (fast[index] <= slow[index] && fast[index - 1] > slow[index - 1]) signals.push({ index, side:'sell', label:'均线死叉' });
+  }
+  return signals;
+}
+function stepStockChartReplay(action) {
+  if (!stockChartKlines.length || !window.MoneyChartAnalysis) return;
+  stockChartReplayIndex = window.MoneyChartAnalysis.stepReplay(stockChartReplayIndex < 0 ? stockChartKlines.length - 1 : stockChartReplayIndex, stockChartKlines.length, action);
+  drawStockKline(document.getElementById('stock-kline'), stockChartKlines);
+}
 function setStockKlineRange(days) {
   currentStockDays = Number(days) || 60;
   document.querySelectorAll('.stock-kline-range').forEach(btn => {
@@ -7252,10 +7355,21 @@ async function loadStockKline(symbol, name, apiSymbol) {
       context.clearRect(0, 0, canvas.width, canvas.height);
       return;
     }
-    drawStockKline(canvas, d.data);
+    stockChartKlines = d.data;
+    stockChartReplayIndex = stockChartKlines.length - 1;
+    loadStockChartOverlayConfig();
+    drawStockKline(canvas, stockChartKlines);
   } catch(e) {}
 }
 function drawStockKline(canvas, klines) {
+  if (!canvas || !window.MoneyChartAnalysis) return;
+  const fullKlines = Array.isArray(klines) ? klines : [];
+  const visibleCount = stockChartReplayIndex >= 0 ? Math.min(fullKlines.length, stockChartReplayIndex + 1) : fullKlines.length;
+  klines = fullKlines.slice(0, visibleCount);
+  if (!klines.length) return;
+  const overlays = window.MoneyChartAnalysis.buildChartOverlays({ bars: klines, signals: buildStockStrategySignals(klines), config: stockChartOverlayConfig });
+  const replayStatus = document.getElementById('stock-chart-replay-status');
+  if (replayStatus) replayStatus.textContent = `${visibleCount}/${fullKlines.length}`;
   // Render at the display's physical pixel density. Without this, the browser
   // stretches the old 640-pixel bitmap and the chart looks soft on Windows.
   const dpr = Math.max(1, window.devicePixelRatio || 1);
@@ -7317,14 +7431,17 @@ function drawStockKline(canvas, klines) {
     const bodyW = Math.max(1.2, Math.min(cw * 0.68, 18));
     ctx.fillStyle = color;
     ctx.fillRect(x - bodyW / 2, bodyTop, bodyW, bodyH);
-    const vh = (k.volume || 0) / maxV * volH;
-    ctx.globalAlpha = 0.42; ctx.fillStyle = color;
-    ctx.fillRect(x - bodyW / 2, volTop + volH - vh, bodyW, vh);
-    ctx.globalAlpha = 1;
+    if (overlays.config.volume) {
+      const vh = (k.volume || 0) / maxV * volH;
+      ctx.globalAlpha = 0.42; ctx.fillStyle = color;
+      ctx.fillRect(x - bodyW / 2, volTop + volH - vh, bodyW, vh);
+      ctx.globalAlpha = 1;
+    }
   });
-  const maLines = [[movingAverage(5), '#f59e0b'], [movingAverage(10), '#8b5cf6'], [movingAverage(20), '#38bdf8']];
-  maLines.forEach(([values, color]) => {
-    ctx.strokeStyle = color; ctx.lineWidth = 1.4; ctx.beginPath();
+  const lineColors = { 5:'#f59e0b', 10:'#8b5cf6', 20:'#38bdf8', boll:'#fb7185' };
+  overlays.lines.forEach(line => {
+    const values = line.type === 'boll' ? line.values.map(item => item.middle) : line.values;
+    ctx.strokeStyle = lineColors[line.period || line.type] || '#94a3b8'; ctx.lineWidth = line.type === 'boll' ? 1 : 1.4; ctx.beginPath();
     let started = false;
     values.forEach((value, idx) => {
       if (value == null) return;
@@ -7332,6 +7449,37 @@ function drawStockKline(canvas, klines) {
       if (!started) { ctx.moveTo(x, y); started = true; } else ctx.lineTo(x, y);
     });
     ctx.stroke();
+    if (line.type === 'boll') ['upper', 'lower'].forEach(bound => {
+      ctx.setLineDash([3, 3]); ctx.beginPath(); started = false;
+      line.values.forEach((item, idx) => {
+        const value = item[bound]; if (value == null) return;
+        const x = xCenter(idx), y = yPrice(value);
+        if (!started) { ctx.moveTo(x, y); started = true; } else ctx.lineTo(x, y);
+      });
+      ctx.stroke(); ctx.setLineDash([]);
+    });
+  });
+  overlays.signals.forEach(signal => {
+    const bar = klines[signal.index]; if (!bar) return;
+    const x = xCenter(signal.index), y = signal.side === 'buy' ? yPrice(bar.low) + 14 : yPrice(bar.high) - 14;
+    const color = signal.side === 'buy' ? '#22c55e' : '#ef4444';
+    ctx.fillStyle = color; ctx.beginPath();
+    if (signal.side === 'buy') { ctx.moveTo(x, y - 8); ctx.lineTo(x - 6, y + 3); ctx.lineTo(x + 6, y + 3); }
+    else { ctx.moveTo(x, y + 8); ctx.lineTo(x - 6, y - 3); ctx.lineTo(x + 6, y - 3); }
+    ctx.closePath(); ctx.fill();
+  });
+  overlays.patterns.forEach(item => {
+    const bar = klines[item.index]; if (!bar) return;
+    const x = xCenter(item.index), y = item.direction === 'bearish' ? yPrice(bar.high) - 18 : yPrice(bar.low) + 18;
+    ctx.fillStyle = item.direction === 'bearish' ? '#fb7185' : item.direction === 'bullish' ? '#34d399' : '#fbbf24';
+    ctx.font = '10px Inter, system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(item.label, x, y);
+  });
+  overlays.structures.forEach(item => {
+    const bar = klines[item.index]; if (!bar) return;
+    const x = xCenter(item.index), y = item.type === 'swing-high' ? yPrice(bar.high) - 5 : yPrice(bar.low) + 5;
+    ctx.fillStyle = item.direction === 'bullish' ? '#60a5fa' : '#f97316';
+    ctx.font = '9px Inter, system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = item.type === 'swing-high' ? 'bottom' : 'top';
+    ctx.fillText(item.type === 'swing-high' ? 'H' : 'L', x, y);
   });
   const first = klines[0], last = klines[klines.length - 1];
   const changePct = ((last.close - first.close) / (first.close || 1)) * 100;
@@ -7339,9 +7487,12 @@ function drawStockKline(canvas, klines) {
   ctx.fillStyle = changePct >= 0 ? green : red;
   ctx.fillText(`${currentStockName} ${fmtPrice(last.close)}  区间${changePct >= 0 ? '+' : ''}${changePct.toFixed(2)}%`, padL, 12);
   ctx.textAlign = 'right';
-  ctx.fillStyle = '#f59e0b'; ctx.fillText('MA5', W - 118, 12);
-  ctx.fillStyle = '#8b5cf6'; ctx.fillText('MA10', W - 82, 12);
-  ctx.fillStyle = '#38bdf8'; ctx.fillText('MA20', W - 46, 12);
+  const legend = [];
+  if (overlays.config.indicators.ma) legend.push(['MA', '#f59e0b']);
+  if (overlays.config.indicators.boll) legend.push(['BOLL', '#fb7185']);
+  if (overlays.config.signals) legend.push(['策略点位', '#22c55e']);
+  ctx.textAlign = 'right';
+  legend.forEach(([label, color], index) => { ctx.fillStyle = color; ctx.fillText(label, W - 8 - index * 58, 12); });
 }
 // --- DeFi Data ---
 async function loadDefiData() {
@@ -9928,14 +10079,30 @@ function applyMarketScopeView() {
     empty.textContent = `${labels[activeMarketScope] || '当前市场'}暂无可用的宏观工作区。请从对应市场首页进入专属功能。`;
   }
 }
+function selectOptionLibraryAsset(symbol) {
+  const market = document.getElementById('option-market');
+  if (market) market.value = 'us';
+  setOptionMarket('us');
+  setEquitySymbol(symbol);
+}
+function selectCryptoLibraryAsset(symbol) {
+  if (typeof bnSetSymbol !== 'function') return;
+  bnSetSymbol(String(symbol || '').toUpperCase());
+  showTab('binance', null, { scopeAlreadySynced: true });
+}
 function applySidebarScope() {
   const library = document.getElementById('stock-instrument-library');
+  const marketLibrary = document.getElementById('market-instrument-library');
   const empty = document.getElementById('no-selection');
   const outcomes = document.getElementById('outcomes-container');
   const title = document.getElementById('sidebar-title');
   const subtitle = document.getElementById('sidebar-subtitle');
   const stockScope = activeMarketScope === 'stocks';
   if (library) library.style.display = stockScope ? 'block' : 'none';
+  if (marketLibrary) {
+    marketLibrary.hidden = stockScope;
+    marketLibrary.querySelectorAll('[data-market-library]').forEach(node => { node.hidden = node.dataset.marketLibrary !== activeMarketScope; });
+  }
   if (stockScope) {
     if (empty) empty.style.display = 'none';
     if (outcomes) outcomes.style.display = 'none';
@@ -9944,10 +10111,10 @@ function applySidebarScope() {
     loadStockInstrumentLibrary();
     return;
   }
-  if (title) title.textContent = '选择事件';
-  if (subtitle) subtitle.textContent = '点击事件查看结果';
-  if (empty) empty.style.display = selectedCategory ? 'none' : '';
-  if (outcomes) outcomes.style.display = selectedCategory ? 'block' : 'none';
+  if (title) title.textContent = activeMarketScope === 'overview' ? '总体标的库' : activeMarketScope === 'watchlist' ? '自选标的库' : `${marketResearchLabel(activeMarketScope)}标的库`;
+  if (subtitle) subtitle.textContent = '点击标的切换当前市场工作区';
+  if (empty) empty.style.display = 'none';
+  if (outcomes) outcomes.style.display = 'none';
 }
 function ensureMacroWorkspace() {
   const macro = document.getElementById('macro-tab');
@@ -11711,5 +11878,6 @@ function mobileTab(tab) {
       </div>
       <div id="notif-list" style="max-height:360px;overflow-y:auto;"></div>
     </div>
-  </body>
-</html>
+
+
+</body></html>

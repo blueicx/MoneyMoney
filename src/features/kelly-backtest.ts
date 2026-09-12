@@ -83,7 +83,7 @@ export interface BacktestResult {
   }>;
 }
 
-export type AssetMarket = 'stocks' | 'crypto';
+export type AssetMarket = 'stocks' | 'crypto' | 'options';
 
 export interface AssetBar {
   time: number;
@@ -109,6 +109,8 @@ export interface AssetBacktestInput {
 }
 
 export interface AssetBacktestResult {
+  availability: 'ready' | 'unavailable';
+  reason?: string;
   market: AssetMarket;
   instrumentId: string;
   dataSource: string;
@@ -125,7 +127,6 @@ export interface AssetBacktestResult {
   maxDrawdownPct: number;
   sharpeRatio: number;
   avgHoldMinutes: number;
-  availability: 'ready';
   assumptions: {
     session: 'US regular session' | '24/7';
     settlement: 'T+1' | 'instant';
@@ -142,6 +143,7 @@ export interface AssetBacktestResult {
     slippageImpactPct: number;
     benchmarkReturnPct: number;
     benchmarkDiffPct: number;
+    monthlyReturnsPct?: Record<string, number>;
   };
   equityCurve: Array<{ time: number; equity: number }>;
   trades: Array<{
@@ -165,6 +167,20 @@ function roundNumber(value: number, digits = 4): number {
  * backtests: trades are long positions in an instrument, never YES/NO bets.
  */
 export function runAssetBacktest(input: AssetBacktestInput): AssetBacktestResult {
+  if (input.market === 'options') {
+    return {
+      availability: 'unavailable',
+      reason: '期权回测不可用：缺失历史隐含波动率（IV）和希腊字母（Greeks）数据',
+      market: 'options', instrumentId: String(input.instrumentId || '').trim().toUpperCase(), dataSource: 'unavailable',
+      barCount: 0, startTime: 0, endTime: 0, strategyName: '期权策略回测', periodDays: 0,
+      totalTrades: 0, winningTrades: 0, losingTrades: 0, winRate: 0, totalReturnPct: 0,
+      maxDrawdownPct: 0, sharpeRatio: 0, avgHoldMinutes: 0,
+      assumptions: { session: 'US regular session', settlement: 'T+1', positionPct: 0, feesBps: 0, slippageBps: 0 },
+      metrics: { cagrPct: 0, sortinoRatio: 0, profitFactor: 0, turnoverPct: 0, feesImpactPct: 0, slippageImpactPct: 0, benchmarkReturnPct: 0, benchmarkDiffPct: 0 },
+      equityCurve: [], trades: [],
+    };
+  }
+
   const instrumentId = String(input.instrumentId || '').trim().toUpperCase();
   const lookback = Math.max(1, Math.floor(input.lookback));
   const holding = Math.max(1, Math.floor(input.holding));
@@ -227,18 +243,27 @@ export function runAssetBacktest(input: AssetBacktestInput): AssetBacktestResult
   }
 
   const wins = trades.filter(trade => trade.pnlPct > 0).length;
-  const averageReturn = returns.length ? returns.reduce((sum, value) => sum + value, 0) / returns.length : 0;
+  const averageReturn = returns.length ? returns.reduce((sum: number, value: number) => sum + value, 0) / returns.length : 0;
   const variance = returns.length > 1
-    ? returns.reduce((sum, value) => sum + Math.pow(value - averageReturn, 2), 0) / (returns.length - 1)
+    ? returns.reduce((sum: number, value: number) => sum + Math.pow(value - averageReturn, 2), 0) / (returns.length - 1)
     : 0;
   const deviation = Math.sqrt(variance);
   const holdTimes = trades.map(trade => trade.exitTime - trade.entryTime).filter(value => value > 0);
   const downsideDeviation = returns.length
-    ? Math.sqrt(returns.reduce((sum, value) => sum + Math.pow(Math.min(0, value), 2), 0) / returns.length)
+    ? Math.sqrt(returns.reduce((sum: number, value: number) => sum + Math.pow(Math.min(0, value), 2), 0) / returns.length)
     : 0;
-  const grossProfit = returns.filter(value => value > 0).reduce((sum, value) => sum + value, 0);
-  const grossLoss = Math.abs(returns.filter(value => value < 0).reduce((sum, value) => sum + value, 0));
-  const periodDays = Math.max(0, (cleanBars[cleanBars.length - 1].time - cleanBars[0].time) / 86_400_000);
+  const grossProfit = trades.reduce((sum, trade) => sum + Math.max(0, trade.pnlPct), 0);
+  const grossLoss = Math.abs(trades.reduce((sum, trade) => sum + Math.min(0, trade.pnlPct), 0));
+  const sortinoRatio = downsideDeviation > 0 ? roundNumber((averageReturn / downsideDeviation) * Math.sqrt(Math.min(returns.length, 252)), 2) : 0;
+
+  const monthlyReturnAmounts: Record<string, number> = {};
+  for (const trade of trades) {
+    const date = new Date(trade.exitTime);
+    const monthKey = `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`;
+    monthlyReturnAmounts[monthKey] = (monthlyReturnAmounts[monthKey] || 0) + trade.pnlPct;
+  }
+
+  const periodDays = Math.max(1, (cleanBars[cleanBars.length - 1].time - cleanBars[0].time) / 86400_000);
   const cagrPct = periodDays > 0 ? (Math.pow(balance / startingBalance, 365 / periodDays) - 1) * 100 : 0;
   const benchmarkReturnPct = ((cleanBars[cleanBars.length - 1].close - cleanBars[0].close) / cleanBars[0].close) * 100;
 
@@ -249,7 +274,7 @@ export function runAssetBacktest(input: AssetBacktestInput): AssetBacktestResult
     barCount: cleanBars.length,
     startTime: cleanBars[0].time,
     endTime: cleanBars[cleanBars.length - 1].time,
-    strategyName: input.strategy === 'momentum' ? '动量（做多）' : '均值回归（做多）',
+    strategyName: input.strategy === 'momentum' ? '趋势动量' : '均值回归（逆势）',
     periodDays: Math.round(periodDays),
     totalTrades: trades.length,
     winningTrades: wins,
@@ -258,7 +283,7 @@ export function runAssetBacktest(input: AssetBacktestInput): AssetBacktestResult
     totalReturnPct: roundNumber(((balance - startingBalance) / startingBalance) * 100, 2),
     maxDrawdownPct: roundNumber(maxDrawdown, 2),
     sharpeRatio: deviation > 0 ? roundNumber((averageReturn / deviation) * Math.sqrt(Math.min(returns.length, 252)), 2) : 0,
-    avgHoldMinutes: holdTimes.length ? roundNumber(holdTimes.reduce((sum, value) => sum + value, 0) / holdTimes.length / 60_000, 1) : 0,
+    avgHoldMinutes: holdTimes.length ? roundNumber(holdTimes.reduce((sum: number, value: number) => sum + value, 0) / holdTimes.length / 60_000, 1) : 0,
     availability: 'ready',
     assumptions: {
       session: input.market === 'crypto' ? '24/7' : 'US regular session',
@@ -276,6 +301,7 @@ export function runAssetBacktest(input: AssetBacktestInput): AssetBacktestResult
       slippageImpactPct: roundNumber((slippageImpactUsd / startingBalance) * 100, 2),
       benchmarkReturnPct: roundNumber(benchmarkReturnPct, 2),
       benchmarkDiffPct: roundNumber(((balance - startingBalance) / startingBalance) * 100 - benchmarkReturnPct, 2),
+      monthlyReturnsPct: Object.fromEntries(Object.entries(monthlyReturnAmounts).map(([month, value]) => [month, roundNumber(value, 2)])),
     },
     equityCurve,
     trades: trades.slice(-50),
