@@ -45,3 +45,27 @@ test('Performance cache reports an expired refresh failure', async () => {
   assert.deepStrictEqual(failed.data, { spot: 500 });
   assert.match(failed.error.message, /upstream down/);
 });
+
+test('Performance cache isolates identical keys by scope and source', async () => {
+  const { createPerformanceCache } = await import('../dist/features/performance-cache.js');
+  const cache = createPerformanceCache();
+  let stockCalls = 0;
+  let cryptoCalls = 0;
+  const stock = await cache.fetch('ticker', async () => ({ market: 'stocks', call: ++stockCalls }), { scope: 'stocks', source: 'nasdaq', ttl: 1000 });
+  const crypto = await cache.fetch('ticker', async () => ({ market: 'crypto', call: ++cryptoCalls }), { scope: 'crypto', source: 'binance', ttl: 1000 });
+  assert.deepEqual(stock.data, { market: 'stocks', call: 1 });
+  assert.deepEqual(crypto.data, { market: 'crypto', call: 1 });
+  assert.equal(stockCalls, 1);
+  assert.equal(cryptoCalls, 1);
+});
+
+test('Performance cache bounds a slow fetch and keeps the previous value', async () => {
+  const { createPerformanceCache } = await import('../dist/features/performance-cache.js');
+  const cache = createPerformanceCache();
+  await cache.fetch('ticker', async () => ({ price: 100 }), { scope: 'stocks', source: 'nasdaq', ttl: 1, staleTtl: 1 });
+  await new Promise(resolve => setTimeout(resolve, 10));
+  const result = await cache.fetch('ticker', () => new Promise(() => {}), { scope: 'stocks', source: 'nasdaq', ttl: 1, staleTtl: 1, timeoutMs: 5 });
+  assert.equal(result.status, 'expired');
+  assert.deepEqual(result.data, { price: 100 });
+  assert.match(result.error.message, /timed out/i);
+});

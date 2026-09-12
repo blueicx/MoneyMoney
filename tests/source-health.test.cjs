@@ -8,6 +8,13 @@ test('data status distinguishes live, cached, degraded and unavailable', async (
   assert.equal(normalizeDataStatus({ state: 'bad', source: 'nasdaq' }).state, 'unavailable');
 });
 
+test('source health exposes capabilities for each source family', async () => {
+  const { capabilitiesForSource } = await import('../dist/features/source-health.js');
+  assert.deepEqual(capabilitiesForSource('nasdaq-public-quote'), ['quote']);
+  assert.deepEqual(capabilitiesForSource('sec-edgar-companyfacts'), ['fundamentals', 'filings']);
+  assert.deepEqual(capabilitiesForSource('unknown-source'), []);
+});
+
 test('readiness should not be blocked by single slow source', async () => {
   const { getSourceHealth } = await import('../dist/features/source-health.js');
   const start = Date.now();

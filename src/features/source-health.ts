@@ -14,6 +14,7 @@ export interface SourceHealthItem {
   checkedAt: string;
   status?: SourceStatus;
   expiresAt?: string;
+  capabilities?: string[];
 }
 
 export interface SourceHealthReport {
@@ -30,6 +31,21 @@ interface HealthCache {
 }
 
 const caches = new Map<string, HealthCache>();
+
+const SOURCE_CAPABILITIES: Record<string, string[]> = {
+  'nasdaq-public-quote': ['quote'],
+  'nasdaq-public-history': ['history'],
+  'sec-edgar-submissions': ['filings'],
+  'sec-edgar-companyfacts': ['fundamentals', 'filings'],
+  'binance-public': ['quote', 'history', 'derivatives'],
+  'predict-graphql': ['markets', 'orderbook'],
+  'open-meteo': ['weather-evidence'],
+  openrouter: ['ai-commentary'],
+};
+
+export function capabilitiesForSource(source: string): string[] {
+  return [...(SOURCE_CAPABILITIES[source] || [])];
+}
 
 function friendlyError(value: unknown): string {
   const text = String(value || '未知错误');
@@ -252,7 +268,7 @@ async function buildSourceHealth(scope = 'all'): Promise<SourceHealthReport> {
     radarItem('Metaculus', source.metaculus || { ok: false, count: 0, error: '尚未检查', checkedAt }, /未配置/.test(String(source.metaculus?.error || '')) ? false : undefined),
     ...resolvedStockItems,
     ...extraItems,
-  ];
+  ].map(item => ({ ...item, capabilities: capabilitiesForSource(item.id) }));
 
   return {
     updatedAt: checkedAt,
