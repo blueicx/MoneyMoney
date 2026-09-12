@@ -116,6 +116,20 @@ test('collapsed instrument library keeps a visible expand control', () => {
   assert.match(html, /\.layout\.sidebar-collapsed \+ \.sidebar-expand-fab\s*\{[^}]*display:flex/s);
 });
 
+test('restored stock context is not overwritten by the default AAPL loader', () => {
+  assert.match(html, /restoreWorkspaceContextFromUrl\(\)[\s\S]*currentInstrumentId = String\(params\.get\('instrument'\)/);
+  assert.match(html, /function loadStockQuotes\(\)[\s\S]*const selectedSymbol = window\._stockSelectedSymbol \|\| currentInstrumentId \|\| 'AAPL'/);
+  assert.match(html, /loadStockQuotes\(\)[\s\S]*selectStockSymbol\(selectedSymbol, stockNameForSymbol\(selectedSymbol\)/);
+  assert.match(html, /restoreWorkspaceContextFromUrl\(\)[\s\S]*const restoredSymbol = currentInstrumentId\.replace\(\/\^us\/i, ''\)\.toUpperCase\(\)[\s\S]*window\._stockSelectedSymbol = restoredSymbol/);
+});
+
+test('overview does not render an empty instrument-library column', () => {
+  assert.match(html, /\.layout\.instrument-library-hidden\s*\{[^}]*grid-template-columns:\s*1fr 0/s);
+  assert.match(html, /\.layout\.instrument-library-hidden #right-instrument-library\s*\{[^}]*display:none/s);
+  assert.match(html, /function applySidebarScope\(\)[\s\S]*instrumentLibraryHidden/);
+  assert.match(html, /data-market-library="overview"/);
+});
+
 test('watchlist page exposes the actual stock favorites above holdings', () => {
   const watchlistLibrary = html.indexOf('id="watchlist-stock-library"');
   const holdings = html.indexOf('id="positions-list"');

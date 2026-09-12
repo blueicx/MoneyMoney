@@ -1836,6 +1836,9 @@
     .sidebar-expand-fab:hover { background:var(--purple); color:white; border-color:var(--purple); }
     .layout.sidebar-collapsed .sidebar-expand-fab { display:flex !important; }
     .layout.sidebar-collapsed + .sidebar-expand-fab { display:flex !important; pointer-events:auto; z-index:9999; }
+    .layout.instrument-library-hidden { grid-template-columns:1fr 0 !important; }
+    .layout.instrument-library-hidden #right-instrument-library { display:none !important; }
+    .layout.instrument-library-hidden + .sidebar-expand-fab { display:none !important; }
     .layout { transition: grid-template-columns .28s ease; }
     body.guest-mode #guest-banner { display:block; }
     body.guest-mode .guest-admin-only { display:none !important; }
@@ -5864,7 +5867,8 @@ async function loadStockQuotes() {
   const signal = controller.signal;
   try {
     await Promise.allSettled([loadStockIndices(signal)]);
-    if (!signal.aborted && ['stocks', 'overview', 'watchlist'].includes(activeMarketScope)) selectStockSymbol(window._stockSelectedSymbol || 'AAPL', stockNameForSymbol(window._stockSelectedSymbol || 'AAPL'), undefined, { refreshRelated: false });
+    const selectedSymbol = window._stockSelectedSymbol || currentInstrumentId || 'AAPL';
+    if (!signal.aborted && ['stocks', 'overview', 'watchlist'].includes(activeMarketScope)) selectStockSymbol(selectedSymbol, stockNameForSymbol(selectedSymbol), undefined, { refreshRelated: false });
   } finally {
     if (currentStockDashboardController === controller) currentStockDashboardController = null;
   }
@@ -9831,6 +9835,10 @@ function restoreWorkspaceContextFromUrl() {
     .some(group => group.items.some(item => item.id === requestedWorkspace));
   activeWorkspaceId = allowed ? requestedWorkspace : defaultWorkspaceForMarketScope(activeMarketScope);
   currentInstrumentId = String(params.get('instrument') || '').trim() || null;
+  if (activeMarketScope === 'stocks' && currentInstrumentId) {
+    const restoredSymbol = currentInstrumentId.replace(/^us/i, '').toUpperCase();
+    if (stockInstrumentId(restoredSymbol)) window._stockSelectedSymbol = restoredSymbol;
+  }
   workspaceContext.scope = activeMarketScope;
   workspaceContext.workspace = activeWorkspaceId;
   workspaceContext.instrument = currentInstrumentId;
@@ -10280,6 +10288,9 @@ function selectCryptoLibraryAsset(symbol) {
   showTab('binance', null, { scopeAlreadySynced: true });
 }
 function applySidebarScope() {
+  const layout = document.querySelector('.layout');
+  const instrumentLibraryHidden = activeMarketScope === 'overview';
+  layout?.classList.toggle('instrument-library-hidden', instrumentLibraryHidden);
   const library = document.getElementById('stock-instrument-library');
   const marketLibrary = document.getElementById('market-instrument-library');
   const empty = document.getElementById('no-selection');
