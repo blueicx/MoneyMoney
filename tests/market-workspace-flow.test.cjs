@@ -154,3 +154,20 @@ test('主题切换只保留顶部入口，移除内容区右上角重复按钮',
   assert.doesNotMatch(html, /id="theme-toggle-btn"/);
   assert.doesNotMatch(html, /getElementById\('theme-toggle-btn'\)/);
 });
+
+test('行情与事件成为左侧工作区，中心不再提供重复的虚拟币选择器和价格卡片', () => {
+  assert.match(html, /stock-quotes/);
+  assert.match(html, /crypto-quotes/);
+  assert.match(html, /data-workspace-id="events"/);
+  assert.doesNotMatch(html, /<input[^>]*id="bn-search"/);
+  assert.doesNotMatch(html, /<select[^>]*id="bn-symbol"/);
+  assert.doesNotMatch(html, /<div id="binance-prices"/);
+});
+
+test('总体页不加载虚拟币专属指标，且股票筛选不再属于总体页', () => {
+  assert.doesNotMatch(html, /id="global-crypto-metrics"[^>]*data-market-scopes="crypto overview"/);
+  assert.doesNotMatch(html, /id="market-research-tools"[^>]*data-market-scopes="overview"/);
+  assert.doesNotMatch(html, /else if \(scope === 'overview'\)[\s\S]*?\/api\/binance\/price\/BTCUSDT/);
+  assert.match(html, /market-screener-results/);
+  assert.match(html, /binance-prices/);
+});

@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const {
   resolveWorkspaceNavigation,
   isWorkspaceAllowed,
+  defaultWorkspace,
 } = require('../dist/features/market-workspace.js');
 
 function ids(scope) {
@@ -36,4 +37,20 @@ test('各市场保留自己的专属工作区边界', () => {
   assert.equal(isWorkspaceAllowed('stocks', 'funding-rate'), false);
   assert.equal(isWorkspaceAllowed('stocks', 'watchlist'), true);
   assert.equal(isWorkspaceAllowed('stocks', 'positions'), true);
+});
+
+test('股票和虚拟币把行情及事件放入左侧，虚拟币不包含预测雷达', () => {
+  const stockIds = ids('stocks');
+  const cryptoIds = ids('crypto');
+
+  assert.ok(stockIds.includes('stock-quotes'));
+  assert.ok(stockIds.includes('events'));
+  assert.ok(cryptoIds.includes('crypto-quotes'));
+  assert.equal(cryptoIds.includes('prediction-radar'), false);
+  assert.equal(isWorkspaceAllowed('crypto', 'prediction-radar'), false);
+});
+
+test('股票和虚拟币进入市场时默认打开各自行情工作区', () => {
+  assert.equal(defaultWorkspace('stocks'), 'stock-quotes');
+  assert.equal(defaultWorkspace('crypto'), 'crypto-quotes');
 });

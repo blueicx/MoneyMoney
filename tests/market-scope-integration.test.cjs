@@ -189,3 +189,9 @@ test('analysis loader requests the active market scope and rejects stale respons
   assert.match(html, /function abortMarketScopedRequests\(\)[\s\S]*currentMarketAnalysisController\?\.abort\(\)/);
   assert.equal(html.includes('if (!isCurrentMarketScopeToken(scopeToken) || signal.aborted) return;'), true);
 });
+
+test('虚拟币专属工作区和内容不会泄漏到总体页', () => {
+  assert.doesNotMatch(html, /id="stocks-defi"[^>]*data-market-scopes="crypto overview"/);
+  assert.doesNotMatch(html, /data-market-scopes="crypto overview"><div[^>]*>💧 加密流动性与链上背景/);
+  assert.match(html, /function scopeAllowsView\(declared\)[\s\S]*scopes\.includes\(activeMarketScope\)/);
+});
