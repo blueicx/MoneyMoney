@@ -10,3 +10,11 @@ test('Market loading performance is wired to scoped server caches', () => {
   assert.match(server, /createCacheEtag/);
   assert.match(server, /if-none-match/);
 });
+
+test('frontend renders one consistent data status badge for market cards', () => {
+  const html = fs.readFileSync(path.join(__dirname, '../src/web/public/index.html'), 'utf8');
+  assert.match(html, /function renderDataStatus\(status/);
+  assert.match(html, /data-status-state=/);
+  assert.match(html, /实时|缓存|部分可用|不可用/);
+  assert.match(html, /renderDataStatus\(\{/);
+});

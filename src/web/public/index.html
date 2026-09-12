@@ -1446,6 +1446,10 @@
     .backtest-result-card .metric-label { color:var(--text-secondary); font-size:11px; }
     .backtest-result-card .metric-value { margin-top:4px; font-size:20px; font-weight:800; }
     .backtest-meta { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px; color:var(--text-secondary); font-size:11px; }
+    .data-status-badge { display:inline-flex; align-items:center; gap:4px; padding:3px 7px; border:1px solid var(--border); border-radius:999px; color:var(--text-secondary); background:var(--bg-secondary); }
+    .data-status-badge[data-status-state="live"] { color:var(--green); }
+    .data-status-badge[data-status-state="degraded"], .data-status-badge[data-status-state="delayed"], .data-status-badge[data-status-state="cached"] { color:var(--yellow); }
+    .data-status-badge[data-status-state="unavailable"] { color:var(--red); }
     /* News Ticker */
     .news-ticker { background:var(--purple); color:white; overflow:hidden; white-space:nowrap; padding:6px 0; font-size:12px; position:relative; }
     .news-ticker-inner { display:inline-block; animation:ticker-scroll 60s linear infinite; padding-left:100%; }
@@ -7794,6 +7798,17 @@ const MARKET_OVERVIEW_CACHE_TTL_MS = 30000;
 const MARKET_OVERVIEW_REQUEST_TIMEOUT_MS = 12000;
 let currentMarketOverviewController = null;
 
+function renderDataStatus(status = {}, detail = '') {
+  const aliases = { stale: 'cached', fallback: 'degraded', unconfigured: 'unavailable', error: 'unavailable' };
+  const state = aliases[status.state] || aliases[status.status] || status.state || status.status || 'unavailable';
+  const labels = { live: '实时', delayed: '延迟', cached: '缓存', degraded: '部分可用', unavailable: '不可用' };
+  const source = status.source || '';
+  const reason = status.reason || '';
+  const safe = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
+  const suffix = detail || reason || source;
+  return `<span class="data-status-badge" data-status-state="${safe(state)}">${safe(labels[state] || '不可用')}${suffix ? ` · ${safe(suffix)}` : ''}</span>`;
+}
+
 function fetchMarketOverviewJson(path, signal) {
   const controller = new AbortController();
   const relayAbort = () => controller.abort();
@@ -7833,14 +7848,14 @@ async function loadMarketOverview() {
   if (cached?.html) {
     if (Date.now() - cached.fetchedAt < MARKET_OVERVIEW_CACHE_TTL_MS) {
       itemsEl.innerHTML = cached.html;
-      if (statusEl) statusEl.textContent = `数据更新时间：${new Date(cached.fetchedAt).toLocaleTimeString()} · ${cached.source} · 缓存可用`;
+      if (statusEl) statusEl.innerHTML = `数据更新时间：${new Date(cached.fetchedAt).toLocaleTimeString()} · ${renderDataStatus({ state: 'cached', source: cached.source })}`;
       return;
     }
     itemsEl.innerHTML = cached.html;
-    if (statusEl) statusEl.textContent = `数据更新时间：${new Date(cached.fetchedAt).toLocaleTimeString()} · ${cached.source} · 缓存 · 正在刷新`;
+    if (statusEl) statusEl.innerHTML = `数据更新时间：${new Date(cached.fetchedAt).toLocaleTimeString()} · ${renderDataStatus({ state: 'cached', source: cached.source }, '正在刷新')}`;
   } else {
     itemsEl.innerHTML = Array(4).fill('<span class="skl" style="min-width:100px;height:36px;"></span>').join('');
-    if (statusEl) statusEl.textContent = '正在读取当前市场大盘…';
+    if (statusEl) statusEl.innerHTML = renderDataStatus({ state: 'delayed', source: '公开数据源' }, '正在读取');
   }
 
   const chips = [];
@@ -7991,18 +8006,18 @@ async function loadMarketOverview() {
     const html = chips.join('');
     if (hasPartialFailure && cached?.html) {
       itemsEl.innerHTML = cached.html;
-      if (statusEl) statusEl.textContent = `数据更新时间：${new Date(cached.fetchedAt).toLocaleTimeString()} · ${cached.source} · 部分成功，显示上一份完整缓存`;
+      if (statusEl) statusEl.innerHTML = `数据更新时间：${new Date(cached.fetchedAt).toLocaleTimeString()} · ${renderDataStatus({ state: 'degraded', source: cached.source }, '部分成功，显示上一份完整缓存')}`;
       return;
     }
     marketOverviewCache.set(scope, { html, fetchedAt: Date.now(), source: sourceLabel });
     itemsEl.innerHTML = html;
-    if (statusEl) statusEl.textContent = `数据更新时间：${new Date().toLocaleTimeString()} · ${sourceLabel} · ${finalStatus}`;
+    if (statusEl) statusEl.innerHTML = `数据更新时间：${new Date().toLocaleTimeString()} · ${renderDataStatus({ state: finalStatus === '实时' ? 'live' : 'degraded', source: sourceLabel }, finalStatus)}`;
   } else if (cached?.html) {
     itemsEl.innerHTML = cached.html;
-    if (statusEl) statusEl.textContent = `数据更新时间：${new Date(cached.fetchedAt).toLocaleTimeString()} · ${cached.source} · 刷新失败，显示缓存`;
+    if (statusEl) statusEl.innerHTML = `数据更新时间：${new Date(cached.fetchedAt).toLocaleTimeString()} · ${renderDataStatus({ state: 'cached', source: cached.source }, '刷新失败，显示缓存')}`;
   } else {
     itemsEl.innerHTML = chip(headings[scope] || '当前市场', '暂无数据');
-    if (statusEl) statusEl.textContent = `数据更新时间：${new Date().toLocaleTimeString()} · ${sourceLabel} · ${finalStatus}`;
+    if (statusEl) statusEl.innerHTML = `数据更新时间：${new Date().toLocaleTimeString()} · ${renderDataStatus({ state: 'unavailable', source: sourceLabel }, finalStatus)}`;
   }
 }
 // --- Market-scoped persistent ticker ---
