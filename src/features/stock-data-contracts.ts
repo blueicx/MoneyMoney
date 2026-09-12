@@ -1,5 +1,28 @@
 import type { SourceSnapshot, SourceStatus } from '../data/source-adapter';
 
+export type DataState = 'live' | 'delayed' | 'cached' | 'degraded' | 'unavailable';
+
+export interface DataStatus {
+  state: DataState;
+  source: string;
+  observedAt: string | null;
+  expiresAt: string | null;
+  latencyMs: number | null;
+  reason: string | null;
+}
+
+export function normalizeDataStatus(input: Partial<DataStatus>): DataStatus {
+  const states: DataState[] = ['live', 'delayed', 'cached', 'degraded', 'unavailable'];
+  return {
+    state: states.includes(input.state as DataState) ? input.state as DataState : 'unavailable',
+    source: String(input.source || 'unknown'),
+    observedAt: input.observedAt || null,
+    expiresAt: input.expiresAt || null,
+    latencyMs: Number.isFinite(input.latencyMs) ? Number(input.latencyMs) : null,
+    reason: input.reason || null,
+  };
+}
+
 export interface StockQuote {
   symbol: string;
   price: number;

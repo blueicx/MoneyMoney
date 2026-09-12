@@ -1,6 +1,13 @@
 const test = require('node:test');
 const assert = require('node:assert');
 
+test('data status distinguishes live, cached, degraded and unavailable', async () => {
+  const { normalizeDataStatus } = await import('../dist/features/stock-data-contracts.js');
+  assert.equal(normalizeDataStatus({ state: 'live', source: 'nasdaq' }).state, 'live');
+  assert.equal(normalizeDataStatus({ state: 'cached', source: 'nasdaq', observedAt: '2026-09-12T00:00:00Z' }).state, 'cached');
+  assert.equal(normalizeDataStatus({ state: 'bad', source: 'nasdaq' }).state, 'unavailable');
+});
+
 test('readiness should not be blocked by single slow source', async () => {
   const { getSourceHealth } = await import('../dist/features/source-health.js');
   const start = Date.now();
