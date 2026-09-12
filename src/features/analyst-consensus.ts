@@ -395,6 +395,14 @@ function mapRecentAction(row: Record<string, any>, sourceUrl: string): RecentAna
   return { ...actionRecord, summaryZh: buildAnalystActionSummary(actionRecord) };
 }
 
+export function parseRecentAnalystActions(rawHtml: string, sourceUrl: string): RecentAnalystAction[] {
+  if (!rawHtml.includes('}]},ratings:[')) return [];
+  return asArray(extractSerialized(rawHtml, '}]},ratings:[', '['))
+    .map(row => mapRecentAction(asRecord(row), sourceUrl))
+    .filter((row): row is RecentAnalystAction => row !== null)
+    .slice(0, 8);
+}
+
 function normalizeHistory(rows: any[]): AnalystRatingPeriod[] {
   return rows.map(row => {
     const record = asRecord(row);
@@ -500,12 +508,7 @@ async function requestSnapshot(symbolInput: string): Promise<AnalystConsensusSna
   const targetsRecord = asRecord(extractSerialized(rawHtml, 'targets:{', '{'));
   // Some page variants omit the recent-action list; consensus and targets are
   // the required core, so this section degrades to empty rather than failing.
-  const recentRows = rawHtml.includes('}]},ratings:[')
-    ? asArray(extractSerialized(rawHtml, '}]},ratings:[', '['))
-      .map(row => mapRecentAction(asRecord(row), url))
-      .filter((row): row is RecentAnalystAction => row !== null)
-      .slice(0, 8)
-    : [];
+  const recentRows = parseRecentAnalystActions(rawHtml, url);
 
   const period = buildCurrentPeriod(currentRatings, recommendations);
   if (!period || period.total <= 0) throw new Error('暂无分析师共识覆盖');
