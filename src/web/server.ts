@@ -143,6 +143,14 @@ import os from 'os';
 import { parseRssItems } from '../utils/rss';
 
 export const app = express();
+// A rejected optional/background data refresh must not take down the dashboard.
+// Route handlers still report their own errors; this last-resort observer keeps
+// long-lived local sessions alive and records the source error without secrets.
+process.on('unhandledRejection', (reason) => {
+  logger.error('unhandled_promise_rejection', {
+    error: reason instanceof Error ? reason.message : String(reason),
+  });
+});
 // The dashboard is local-first. Same-origin browser requests work normally;
 // cross-origin callers must be explicitly enabled by the deployment layer.
 app.use(cors({ origin: false }));
