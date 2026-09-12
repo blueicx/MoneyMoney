@@ -32,6 +32,11 @@ test('stock backtest uses asset semantics and preserves the stock identity', () 
   assert.ok(result.totalTrades > 0);
   assert.equal(result.trades[0].instrumentId, 'AAPL');
   assert.equal(result.trades[0].side, 'long');
+  assert.equal(result.availability, 'ready');
+  assert.equal(result.assumptions.settlement, 'T+1');
+  assert.ok(Number.isFinite(result.metrics.cagrPct));
+  assert.ok(Number.isFinite(result.metrics.sortinoRatio));
+  assert.ok(Number.isFinite(result.metrics.turnoverPct));
   assert.equal('marketId' in result.trades[0], false);
   assert.equal('action' in result.trades[0], false);
 });
@@ -55,6 +60,8 @@ test('crypto backtest uses crypto bars and crypto identity', () => {
   assert.ok(result.totalTrades > 0);
   assert.equal(result.trades[0].instrumentId, 'BTCUSDT');
   assert.equal(result.trades[0].side, 'long');
+  assert.equal(result.assumptions.session, '24/7');
+  assert.ok(Number.isFinite(result.metrics.feesImpactPct));
 });
 
 test('asset backtest rejects insufficient history instead of fabricating results', () => {

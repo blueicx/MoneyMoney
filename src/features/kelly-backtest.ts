@@ -125,6 +125,24 @@ export interface AssetBacktestResult {
   maxDrawdownPct: number;
   sharpeRatio: number;
   avgHoldMinutes: number;
+  availability: 'ready';
+  assumptions: {
+    session: 'US regular session' | '24/7';
+    settlement: 'T+1' | 'instant';
+    positionPct: number;
+    feesBps: number;
+    slippageBps: number;
+  };
+  metrics: {
+    cagrPct: number;
+    sortinoRatio: number;
+    profitFactor: number;
+    turnoverPct: number;
+    feesImpactPct: number;
+    slippageImpactPct: number;
+    benchmarkReturnPct: number;
+    benchmarkDiffPct: number;
+  };
   equityCurve: Array<{ time: number; equity: number }>;
   trades: Array<{
     instrumentId: string;
@@ -169,7 +187,12 @@ export function runAssetBacktest(input: AssetBacktestInput): AssetBacktestResult
   let balance = startingBalance;
   let peak = startingBalance;
   let maxDrawdown = 0;
-  const roundTripCost = ((feesBps + slippageBps) * 2) / 10_000;
+  const roundTripFee = (feesBps * 2) / 10_000;
+  const roundTripSlippage = (slippageBps * 2) / 10_000;
+  const roundTripCost = roundTripFee + roundTripSlippage;
+  let feeImpactUsd = 0;
+  let slippageImpactUsd = 0;
+  let turnoverUsd = 0;
 
   for (let index = lookback; index + holding < cleanBars.length; index += holding) {
     const previous = cleanBars[index - lookback].close;
@@ -183,6 +206,9 @@ export function runAssetBacktest(input: AssetBacktestInput): AssetBacktestResult
     const grossReturn = (exit - entry) / entry;
     const netReturn = grossReturn - roundTripCost;
     const betSize = balance * 0.05;
+    feeImpactUsd += betSize * roundTripFee;
+    slippageImpactUsd += betSize * roundTripSlippage;
+    turnoverUsd += betSize * 2;
     const pnl = betSize * netReturn;
     balance += pnl;
     returns.push(netReturn);
@@ -207,6 +233,14 @@ export function runAssetBacktest(input: AssetBacktestInput): AssetBacktestResult
     : 0;
   const deviation = Math.sqrt(variance);
   const holdTimes = trades.map(trade => trade.exitTime - trade.entryTime).filter(value => value > 0);
+  const downsideDeviation = returns.length
+    ? Math.sqrt(returns.reduce((sum, value) => sum + Math.pow(Math.min(0, value), 2), 0) / returns.length)
+    : 0;
+  const grossProfit = returns.filter(value => value > 0).reduce((sum, value) => sum + value, 0);
+  const grossLoss = Math.abs(returns.filter(value => value < 0).reduce((sum, value) => sum + value, 0));
+  const periodDays = Math.max(0, (cleanBars[cleanBars.length - 1].time - cleanBars[0].time) / 86_400_000);
+  const cagrPct = periodDays > 0 ? (Math.pow(balance / startingBalance, 365 / periodDays) - 1) * 100 : 0;
+  const benchmarkReturnPct = ((cleanBars[cleanBars.length - 1].close - cleanBars[0].close) / cleanBars[0].close) * 100;
 
   return {
     market: input.market,
@@ -216,7 +250,7 @@ export function runAssetBacktest(input: AssetBacktestInput): AssetBacktestResult
     startTime: cleanBars[0].time,
     endTime: cleanBars[cleanBars.length - 1].time,
     strategyName: input.strategy === 'momentum' ? '动量（做多）' : '均值回归（做多）',
-    periodDays: Math.round((cleanBars[cleanBars.length - 1].time - cleanBars[0].time) / 86_400_000),
+    periodDays: Math.round(periodDays),
     totalTrades: trades.length,
     winningTrades: wins,
     losingTrades: trades.length - wins,
@@ -225,6 +259,24 @@ export function runAssetBacktest(input: AssetBacktestInput): AssetBacktestResult
     maxDrawdownPct: roundNumber(maxDrawdown, 2),
     sharpeRatio: deviation > 0 ? roundNumber((averageReturn / deviation) * Math.sqrt(Math.min(returns.length, 252)), 2) : 0,
     avgHoldMinutes: holdTimes.length ? roundNumber(holdTimes.reduce((sum, value) => sum + value, 0) / holdTimes.length / 60_000, 1) : 0,
+    availability: 'ready',
+    assumptions: {
+      session: input.market === 'crypto' ? '24/7' : 'US regular session',
+      settlement: input.market === 'crypto' ? 'instant' : 'T+1',
+      positionPct: 5,
+      feesBps,
+      slippageBps,
+    },
+    metrics: {
+      cagrPct: roundNumber(cagrPct, 2),
+      sortinoRatio: downsideDeviation > 0 ? roundNumber((averageReturn / downsideDeviation) * Math.sqrt(Math.min(returns.length, 252)), 2) : 0,
+      profitFactor: grossLoss > 0 ? roundNumber(grossProfit / grossLoss, 2) : grossProfit > 0 ? 99 : 0,
+      turnoverPct: roundNumber((turnoverUsd / startingBalance) * 100, 2),
+      feesImpactPct: roundNumber((feeImpactUsd / startingBalance) * 100, 2),
+      slippageImpactPct: roundNumber((slippageImpactUsd / startingBalance) * 100, 2),
+      benchmarkReturnPct: roundNumber(benchmarkReturnPct, 2),
+      benchmarkDiffPct: roundNumber(((balance - startingBalance) / startingBalance) * 100 - benchmarkReturnPct, 2),
+    },
     equityCurve,
     trades: trades.slice(-50),
   };

@@ -125,6 +125,9 @@ export function calculateUnifiedPerformance(ledger: UnifiedPaperLedger): {
   isRecovered: boolean;
   concentrationPct: number;
   attributionByAsset: Record<UnifiedPaperInstrumentType, number>;
+  marketExposure: Record<UnifiedPaperInstrumentType, number>;
+  strategyAttribution: Record<string, number>;
+  stressTests: Array<{ shockPct: number; equity: number; totalPnl: number }>;
 } {
   const positions = Array.isArray(ledger.positions) ? ledger.positions : [];
   const orders = Array.isArray(ledger.orders) ? ledger.orders : [];
@@ -136,12 +139,24 @@ export function calculateUnifiedPerformance(ledger: UnifiedPaperLedger): {
   const wins = closed.filter(order => (order.pnlUsd || 0) > 0).length;
   const feeSlippageTotal = orders.reduce((sum, order) => sum + orderCosts(order), 0);
   const attributionByAsset: Record<UnifiedPaperInstrumentType, number> = { stock: 0, crypto: 0, prediction: 0 };
+  const marketExposure: Record<UnifiedPaperInstrumentType, number> = { stock: 0, crypto: 0, prediction: 0 };
+  const strategyAttribution: Record<string, number> = {};
   for (const order of closed) if (order.instrumentType) attributionByAsset[order.instrumentType] += Number(order.pnlUsd) || 0;
   for (const position of positions) {
     if (position.instrumentType) attributionByAsset[position.instrumentType] += ((position.currentPrice || 0) - (position.averageEntryPrice || 0)) * (position.quantity || 0);
+    if (position.instrumentType) marketExposure[position.instrumentType] += (position.currentPrice || 0) * (position.quantity || 0);
   }
-  for (const order of orders) if (order.instrumentType) attributionByAsset[order.instrumentType] -= orderCosts(order);
+  for (const order of orders) {
+    const strategy = String(order.strategy || 'unattributed');
+    strategyAttribution[strategy] = (strategyAttribution[strategy] || 0) + (order.side === 'SELL' ? Number(order.pnlUsd) || 0 : 0) - orderCosts(order);
+    if (order.instrumentType) attributionByAsset[order.instrumentType] -= orderCosts(order);
+  }
   const largestPositionValue = positionValues.length ? Math.max(...positionValues) : 0;
+  const stressTests = [-10, -5, 5].map(shockPct => ({
+    shockPct,
+    equity: round(equity + positionsValue * (shockPct / 100), 2),
+    totalPnl: round(ledger.realizedPnl + unrealizedPnl + positionsValue * (shockPct / 100) - feeSlippageTotal, 2),
+  }));
   return {
     cash: round(ledger.cash, 2),
     equity: round(equity, 2),
@@ -160,6 +175,13 @@ export function calculateUnifiedPerformance(ledger: UnifiedPaperLedger): {
       crypto: round(attributionByAsset.crypto, 2),
       prediction: round(attributionByAsset.prediction, 2),
     },
+    marketExposure: {
+      stock: round(marketExposure.stock, 2),
+      crypto: round(marketExposure.crypto, 2),
+      prediction: round(marketExposure.prediction, 2),
+    },
+    strategyAttribution: Object.fromEntries(Object.entries(strategyAttribution).map(([key, value]) => [key, round(value, 2)])),
+    stressTests,
   };
 }
 

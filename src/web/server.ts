@@ -5141,7 +5141,7 @@ app.get('/api/backtest', async (req, res) => {
     const result = strategy === 'meanReversion'
       ? backtester.runMeanReversionBacktest(lookback, threshold, holding, 1000, marketId)
       : backtester.runMomentumBacktest(lookback, threshold, holding, 1000, marketId);
-    return res.json({ success: true, scope, data: result });
+    return res.json({ success: true, scope, availability: 'ready', dataSource: 'local-prediction-history', instrumentId: instrumentId || 'all', data: result });
   }
 
   if (!['stocks', 'crypto'].includes(scope)) {

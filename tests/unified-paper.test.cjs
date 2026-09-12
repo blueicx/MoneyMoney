@@ -33,6 +33,9 @@ assert.equal(performance.feeSlippageTotal, 0);
 assert.equal(performance.isRecovered, true);
 assert.ok(performance.concentrationPct > 0);
 assert.ok(performance.attributionByAsset['stock'] !== undefined);
+assert.ok(performance.marketExposure.stock > 0);
+assert.ok(performance.strategyAttribution.unattributed !== undefined);
+assert.equal(performance.stressTests.length, 3);
 
 const replay = replayUnifiedPaperOrders({ startingCash: 1000, orders: [
   { instrumentId: 'crypto:binance:BTCUSDT', instrumentType: 'crypto', side: 'BUY', price: 100, quantity: 1, timestamp: '2026-09-08T00:00:00.000Z' },
@@ -49,6 +52,7 @@ assert.equal(costLedger.cash, 885);
 assert.equal(costPerformance.equity, 985);
 assert.equal(costPerformance.feeSlippageTotal, 15);
 assert.equal(costPerformance.totalPnl, -15);
+assert.equal(typeof costPerformance.strategyAttribution, 'object');
 
 
 const fsNode = require('fs');

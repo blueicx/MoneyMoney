@@ -3865,6 +3865,7 @@ async function loadPaperPortfolio() {
                 <div style="font-size:11px;color:var(--text-secondary);">综合胜率</div>
                 <div style="font-size:18px;font-weight:700;">${((p.winRate || 0) * 100).toFixed(0)}%</div>
               </div>
+              ${Object.entries(p.marketExposure || {}).map(([market, value]) => `<div style="background:var(--bg-card);padding:14px;border-radius:12px;box-shadow:var(--shadow);text-align:center;"><div style="font-size:11px;color:var(--text-secondary);">${({ stock: '股票', crypto: '加密', prediction: '预测市场' }[market] || market)}敞口</div><div style="font-size:18px;font-weight:700;">$${Number(value || 0).toFixed(2)}</div></div>`).join('')}
             `;
             const catsEl = document.getElementById('admin-paper-unified-categories');
             catsEl.innerHTML = '';
@@ -4045,6 +4046,9 @@ async function runBacktest() {
       totalTrades: Number(r.totalTrades || 0),
     };
     const retColor = r.totalReturnPct >= 0 ? 'var(--green)' : 'var(--red)';
+    const metrics = r.metrics || {};
+    const assumptions = r.assumptions || {};
+    const metricText = value => Number.isFinite(Number(value)) ? Number(value).toFixed(2) : '—';
     const isAsset = ['stocks', 'crypto'].includes(r.market);
     const tradeRows = r.trades.slice(-15).reverse().map((t) => {
       const direction = t.side === 'long' ? '做多' : translateAction(t.action);
@@ -4075,6 +4079,8 @@ async function runBacktest() {
               <div style="font-size:20px;font-weight:700;">${r.totalTrades}</div>
             </div>
           </div>
+          ${r.metrics ? `<div class="backtest-meta"><span>CAGR：${metricText(metrics.cagrPct)}%</span><span>Sortino：${metricText(metrics.sortinoRatio)}</span><span>盈亏比：${metricText(metrics.profitFactor)}</span><span>换手率：${metricText(metrics.turnoverPct)}%</span><span>费用影响：-${metricText(metrics.feesImpactPct)}%</span><span>滑点影响：-${metricText(metrics.slippageImpactPct)}%</span><span>基准差异：${metricText(metrics.benchmarkDiffPct)}%</span></div>` : ''}
+          ${r.assumptions ? `<div class="backtest-meta"><span>交易时段：${marketResearchEscape(assumptions.session || '—')}</span><span>结算：${marketResearchEscape(assumptions.settlement || '—')}</span><span>仓位：${metricText(assumptions.positionPct)}%</span><span>费用：${metricText(assumptions.feesBps)} bps</span><span>滑点：${metricText(assumptions.slippageBps)} bps</span></div>` : ''}
           <div class="section-title">资金曲线</div>
           <canvas id="equity-chart" width="800" height="200" class="backtest-equity-chart"></canvas>
           <div class="section-title" style="margin-top:16px;">最近交易</div>

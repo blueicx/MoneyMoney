@@ -34,4 +34,6 @@ test('backtest route dispatches by scope and does not silently reuse prediction 
   assert.match(server, /期权历史数据暂不可用/);
   assert.match(server, /availability:\s*'unavailable'/);
   assert.match(html, /backtestInput\.value\s*=\s*''/);
+  assert.match(html, /metrics\.cagrPct/);
+  assert.match(html, /assumptions\.settlement/);
 });
