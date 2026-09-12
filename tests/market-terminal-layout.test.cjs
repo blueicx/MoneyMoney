@@ -37,3 +37,8 @@ test('right library has market-specific entry point instead of generic event fal
 test('inline dashboard scripts remain syntactically valid after layout changes', () => {
   [...document.querySelectorAll('script:not([src])')].forEach(script => new Function(script.textContent));
 });
+
+test('workspace visibility overrides inline display styles', () => {
+  assert.match(html, /\.workspace-hidden[^}]*display:\s*none\s*!important/);
+  assert.match(html, /classList\.toggle\(['"]workspace-hidden['"],\s*!visible\)/);
+});

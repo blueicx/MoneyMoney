@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head>
+<!DOCTYPE html><html lang="zh"><head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>💰 MoneyMoney 多市场交易助手</title>
@@ -227,6 +227,7 @@
     .workspace-item-label { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
     .workspace-empty { padding:14px 8px; color:var(--text-secondary); font-size:11px; line-height:1.5; }
     .workspace-main { min-width:0; }
+    .workspace-hidden, .scope-hidden { display:none !important; }
     .workspace-drawer-open { display:none; border:1px solid var(--border); border-radius:9px; padding:8px 11px; background:var(--bg-card); color:var(--text-secondary); cursor:pointer; }
     .workspace-drawer { display:none; }
     .stock-chart-overlays { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin:0 0 10px; font-size:11px; color:var(--text-secondary); }
@@ -1912,7 +1913,7 @@
 })();
   </script>
   <div id="global-search-overlay" class="global-search-overlay" onclick="if(event.target===this)closeGlobalSearch()">
-    <div class="global-search-panel" role="dialog" aria-modal="true" aria-label="全局搜索">
+    <div class="global-search-panel" role="dialog" aria-modal="true" aria-current="page" aria-label="全局搜索">
       <div class="global-search-input-wrap">
         <span>🔍</span>
         <input id="global-search-input" class="global-search-input" type="search" autocomplete="off" placeholder="搜索功能、股票、预测市场、宏观指标..." oninput="globalSearchDebounce()">
@@ -1922,7 +1923,7 @@
     </div>
   </div>
   <div id="instrument-detail-overlay" class="global-search-overlay" onclick="if(event.target===this)closeInstrumentDetail()">
-    <div class="global-search-panel" style="max-width:980px;max-height:82vh;overflow:auto;" role="dialog" aria-modal="true" aria-label="标的详情">
+    <div class="global-search-panel" style="max-width:980px;max-height:82vh;overflow:auto;" role="dialog" aria-modal="true" aria-current="page" aria-label="标的详情">
       <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;padding:18px 20px;border-bottom:1px solid var(--border);">
         <div><strong id="instrument-detail-title" style="font-size:18px;">标的详情</strong><div id="instrument-detail-sub" style="font-size:11px;color:var(--text-secondary);margin-top:4px;"></div></div>
         <button class="global-search-kbd" onclick="closeInstrumentDetail()">ESC</button>
@@ -1938,7 +1939,7 @@
     </div>
   <div class="layout">
     <div id="market-workspace-shell" class="market-workspace-shell" data-market-scope="overview" data-sidebar-state="expanded">
-      <aside id="market-workspace-sidebar" class="workspace-sidebar" data-region="market-features" aria-label="市场功能区">
+      <aside id="market-workspace-sidebar" class="workspace-sidebar" data-region="market-features" aria-current="page" aria-label="市场功能区">
         <div class="workspace-sidebar-header">
           <div class="workspace-sidebar-title">市场功能区</div>
           <button id="workspace-sidebar-toggle" class="workspace-sidebar-toggle" type="button" aria-expanded="true" aria-controls="workspace-sidebar-content" title="折叠功能区">‹</button>
@@ -1950,7 +1951,7 @@
       <div id="utility-nav-bar" class="utility-nav-bar"></div>
       <button id="workspace-drawer-open" class="workspace-drawer-open" type="button" onclick="openWorkspaceDrawer()">☰ 功能区</button>
       <div id="mm-toast-container"></div>
-      <button id="theme-toggle-btn" onclick="toggleTheme()" title="浅色" aria-label="浅色" style="position:fixed;top:14px;right:18px;z-index:9999;width:38px;height:38px;border-radius:50%;border:1px solid var(--border);background:var(--bg-card);backdrop-filter:blur(10px);cursor:pointer;font-size:17px;display:flex;align-items:center;justify-content:center;box-shadow:var(--shadow);transition:transform .15s;" onmouseover="this.style.transform='scale(1.1)'" onmouseout="this.style.transform='scale(1)'">☀️</button>
+      <button id="theme-toggle-btn" onclick="toggleTheme()" title="浅色" aria-current="page" aria-label="浅色" style="position:fixed;top:14px;right:18px;z-index:9999;width:38px;height:38px;border-radius:50%;border:1px solid var(--border);background:var(--bg-card);backdrop-filter:blur(10px);cursor:pointer;font-size:17px;display:flex;align-items:center;justify-content:center;box-shadow:var(--shadow);transition:transform .15s;" onmouseover="this.style.transform='scale(1.1)'" onmouseout="this.style.transform='scale(1)'">☀️</button>
       <!-- Market Overview Bar -->
       <div id="market-overview" data-market-scopes="overview stocks options crypto prediction watchlist" data-workspace-ids="overview" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:16px;padding:12px 14px;background:var(--bg-card);border-radius:12px;border:1px solid var(--border);overflow-x:auto;">
         <span id="market-overview-heading" style="flex:0 0 auto;font-size:11px;font-weight:800;color:var(--purple);white-space:nowrap;">总体大盘</span>
@@ -1962,7 +1963,7 @@
         </div>
         <span id="market-overview-status" style="flex:0 0 auto;color:var(--text-secondary);font-size:10px;white-space:nowrap;">数据更新时间：-</span>
       </div>
-      <div id="workspace-dashboard-cards" class="workspace-dashboard-cards" data-workspace-ids="overview" aria-label="当前市场看板层级"></div>
+      <div id="workspace-dashboard-cards" class="workspace-dashboard-cards" data-workspace-ids="overview" aria-current="page" aria-label="当前市场看板层级"></div>
       <section id="market-research-tools" data-market-scopes="stocks options crypto prediction" data-workspace-ids="overview" style="display:grid;grid-template-columns:minmax(300px,1.2fr) minmax(260px,1fr);gap:12px;margin-bottom:16px;">
         <div id="market-screener" class="glass-card" style="padding:14px;border-radius:14px;">
           <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px;"><strong>🔎 当前市场筛选</strong><button class="tab" type="button" onclick="loadMarketResearch()">刷新</button></div>
@@ -1971,7 +1972,7 @@
         </div>
         <div id="market-compare" class="glass-card" style="padding:14px;border-radius:14px;">
           <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px;"><strong>📊 同市场比较</strong><button class="tab" type="button" onclick="loadMarketCompare()">比较</button></div>
-          <input id="market-compare-ids" type="text" placeholder="输入标的 ID，用逗号分隔" aria-label="同市场比较标的" style="width:100%;box-sizing:border-box;padding:8px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);margin-bottom:10px;">
+          <input id="market-compare-ids" type="text" placeholder="输入标的 ID，用逗号分隔" aria-current="page" aria-label="同市场比较标的" style="width:100%;box-sizing:border-box;padding:8px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);margin-bottom:10px;">
           <div id="market-compare-results" style="font-size:12px;color:var(--text-secondary);">最多比较 6 个同市场标的。</div>
         </div>
       </section>
@@ -2025,7 +2026,7 @@
           <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
             <div class="section-title" style="margin-bottom:0;">⭐ 我的自选</div>
             <div class="workspace-watchlist-actions">
-              <div class="watchlist-view-toggle" role="group" aria-label="自选视图">
+              <div class="watchlist-view-toggle" role="group" aria-current="page" aria-label="自选视图">
               <button type="button" class="tab active" data-watchlist-view="table" onclick="setWorkspaceWatchlistView('table')">▤ 表格</button>
               <button type="button" class="tab" data-watchlist-view="cards" onclick="setWorkspaceWatchlistView('cards')">▦ 卡片</button>
               </div>
@@ -2035,7 +2036,7 @@
               <button type="button" class="tab" onclick="toggleWorkspaceWatchlistColumns()">⚙ 列</button>
             </div>
           </div>
-          <div id="workspace-watchlist-columns" class="workspace-watchlist-columns" hidden="" aria-label="自选表格列配置">
+          <div id="workspace-watchlist-columns" class="workspace-watchlist-columns" hidden="" aria-current="page" aria-label="自选表格列配置">
             <span>显示列：</span>
             <label><input type="checkbox" data-watchlist-column-toggle="market" checked="" onchange="setWorkspaceWatchlistColumn('market', this.checked)">市场</label>
             <label><input type="checkbox" data-watchlist-column-toggle="status" checked="" onchange="setWorkspaceWatchlistColumn('status', this.checked)">状态</label>
@@ -2405,7 +2406,7 @@
             </div>
               <div style="background:var(--bg-card);border-radius:12px;padding:16px;border:1px solid var(--border);margin-bottom:20px;">
               <div id="stock-chart-title" style="font-weight:700;font-size:15px;margin-bottom:8px;"></div>
-              <div id="stock-chart-overlays" class="stock-chart-overlays" aria-label="K线显示选项">
+              <div id="stock-chart-overlays" class="stock-chart-overlays" aria-current="page" aria-label="K线显示选项">
                 <label><input type="checkbox" data-chart-overlay="signals" checked onchange="setStockChartOverlay('signals', this.checked)"> 策略点位</label>
                 <label><input type="checkbox" data-chart-overlay="patterns" onchange="setStockChartOverlay('patterns', this.checked)"> 蜡烛形态</label>
                 <label><input type="checkbox" data-chart-overlay="structures" onchange="setStockChartOverlay('structures', this.checked)"> 结构标记</label>
@@ -2819,12 +2820,12 @@
           <button class="tab guest-admin-only" type="button" onclick="addCurrentStockToWatchlist()" style="width:100%;margin-bottom:14px;">⭐ 加入自选</button>
           <div class="stock-library-group">
             <div class="stock-library-group-title">📌 美股七姐妹</div>
-            <div id="stock-library-quick" class="stock-library-grid" aria-label="美股七姐妹"></div>
+            <div id="stock-library-quick" class="stock-library-grid" aria-current="page" aria-label="美股七姐妹"></div>
           </div>
           <div class="stock-library-group">
             <label class="stock-library-search-label" for="stock-library-search-input">🔍 搜索股票</label>
             <div class="stock-library-search">
-              <input id="stock-library-search-input" type="search" placeholder="代码或名称" aria-label="搜索股票代码或名称" oninput="stockLibrarySearchDebounce()" onkeydown="if(event.key==='Enter')loadStockLibrarySearch()">
+              <input id="stock-library-search-input" type="search" placeholder="代码或名称" aria-current="page" aria-label="搜索股票代码或名称" oninput="stockLibrarySearchDebounce()" onkeydown="if(event.key==='Enter')loadStockLibrarySearch()">
               <button class="tab" type="button" onclick="loadStockLibrarySearch()">搜索</button>
             </div>
             <div id="stock-library-search-results" class="stock-library-search-results" aria-live="polite"></div>
@@ -2886,7 +2887,7 @@
     <button class="sidebar-expand-fab" id="sidebar-expand-fab" onclick="toggleSidebar()" title="展开侧栏">›</button>
   </div>
   <div id="workspace-drawer" class="workspace-drawer" hidden="">
-    <div class="workspace-drawer-panel" role="dialog" aria-modal="true" aria-label="市场功能区">
+    <div class="workspace-drawer-panel" role="dialog" aria-modal="true" aria-current="page" aria-label="市场功能区">
       <button id="workspace-drawer-close" class="workspace-drawer-close" type="button" data-workspace-drawer-close="" onclick="closeWorkspaceDrawer()">关闭</button>
       <div id="workspace-drawer-content"></div>
     </div>
@@ -6648,7 +6649,7 @@ async function loadTreasuryYields() {
     const gridValues = [minY + (maxY - minY) * .2, (minY + maxY) / 2, maxY - (maxY - minY) * .2];
     const labelledTenors = new Set(['3M', '2Y', '10Y', '30Y']);
     const svg = `
-      <svg class="curve-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="美国国债收益率曲线，最新数据 ${d.asOfLabel}">
+      <svg class="curve-svg" viewBox="0 0 ${width} ${height}" role="img" aria-current="page" aria-label="美国国债收益率曲线，最新数据 ${d.asOfLabel}">
         ${gridValues.map(value => `
           <line class="curve-grid-line" x1="${left}" x2="${width - right}" y1="${scaleY(value).toFixed(1)}" y2="${scaleY(value).toFixed(1)}"></line>
           <text class="curve-axis-text" x="8" y="${(scaleY(value) + 3).toFixed(1)}">${Number(value).toFixed(2)}%</text>
@@ -10048,6 +10049,7 @@ function applyWorkspaceView() {
   document.querySelectorAll('[data-workspace-id], [data-workspace-ids]').forEach(node => {
     const visible = scopeAllowsView(node.dataset.marketScopes) && workspaceAllowsView(node);
     node.hidden = !visible;
+    node.classList.toggle('workspace-hidden', !visible);
     if (!visible && node.tagName === 'DETAILS') node.open = false;
   });
   ['stocks-tab', 'binance-tab'].forEach(tabId => {
@@ -10067,6 +10069,7 @@ function applyMarketScopeView() {
   document.querySelectorAll('[data-market-scopes]').forEach(node => {
     const visible = node.closest('#macro-tab') ? true : scopeAllowsView(node.dataset.marketScopes);
     node.hidden = !visible;
+    node.classList.toggle('scope-hidden', !visible);
     if (!visible && node.tagName === 'DETAILS') node.open = false;
   });
   const title = document.querySelector('#stocks-tab > .section-title');
@@ -10269,7 +10272,7 @@ function renderMarketScreener(data) {
   const options = fields.map(field => `<option value="${marketResearchEscape(field.key)}">${marketResearchEscape(field.label)}</option>`).join('');
   const extraBtns = `<button class="tab" type="button" onclick="exportScreenerCSV()">📥 导出</button>` + (window.mm_isGuest ? '' : `<button class="tab" type="button" onclick="saveMarketScreenerTemplate()">💾 保存模板</button>`);
   fieldsEl.innerHTML = fields.length
-    ? `<select id="market-screener-field" aria-label="筛选字段">${options}</select><input id="market-screener-min" type="number" step="any" placeholder="最小值" aria-label="最小值"><button class="tab" type="button" onclick="loadMarketScreenerFilter()">应用筛选</button>${extraBtns}`
+    ? `<select id="market-screener-field" aria-current="page" aria-label="筛选字段">${options}</select><input id="market-screener-min" type="number" step="any" placeholder="最小值" aria-current="page" aria-label="最小值"><button class="tab" type="button" onclick="loadMarketScreenerFilter()">应用筛选</button>${extraBtns}`
     : '<span class="empty-tip">当前市场暂无可用筛选字段</span>';
   if (!rows.length) {
     resultsEl.innerHTML = `<div class="empty-tip">暂无${marketResearchEscape(marketResearchLabel(activeMarketScope))}可用标的；数据源可能暂时不可用。</div>`;
@@ -10622,7 +10625,7 @@ async function loadPortfolioRisk() {
         const [x, y] = coords[index].split(',');
         return `<circle cx="${x}" cy="${y}" r="2.1" fill="${color}"></circle>`;
       }).join('');
-      return `<svg viewBox="0 0 ${width} ${height}" style="width:100%;height:auto;display:block;" role="img" aria-label="风险等级趋势"><polyline points="${coords.join(' ')}" fill="none" stroke="${color}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"></polyline>${dots}</svg>`;
+      return `<svg viewBox="0 0 ${width} ${height}" style="width:100%;height:auto;display:block;" role="img" aria-current="page" aria-label="风险等级趋势"><polyline points="${coords.join(' ')}" fill="none" stroke="${color}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"></polyline>${dots}</svg>`;
     };
     const actionCard = (item) => `
       <div class="risk-action-card">
@@ -10856,7 +10859,7 @@ function predictionSparkline(points) {
   const change = last - first;
   const color = change > 0 ? '#22c55e' : change < 0 ? '#ef4444' : 'var(--purple)';
   return `
-    <svg viewBox="0 0 ${width} ${height}" style="width:100%;height:auto;display:block;" role="img" aria-label="概率走势">
+    <svg viewBox="0 0 ${width} ${height}" style="width:100%;height:auto;display:block;" role="img" aria-current="page" aria-label="概率走势">
       <polyline points="${coords.join(' ')}" fill="none" stroke="${color}" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"></polyline>
     </svg>
     <div style="display:flex;justify-content:space-between;font-size:10.5px;color:var(--text-secondary);">
@@ -11835,7 +11838,7 @@ initializeDashboardCollapses();
   </div>
 </div>
 <!-- Mobile Bottom Navigation -->
-    <nav class="mobile-nav" id="mobile-nav" aria-label="核心工作区"></nav>
+    <nav class="mobile-nav" id="mobile-nav" aria-current="page" aria-label="核心工作区"></nav>
 <script>
 // LAN mode API authentication: open the dashboard once with ?access_token=...
 // and keep the token only in localStorage. The server never receives it in logs.
@@ -11880,4 +11883,37 @@ function mobileTab(tab) {
     </div>
 
 
-</body></html>
+<script>
+window.activeRequests = {};
+window.smartFetch = function(url, options) {
+  if (window.activeRequests[url]) return window.activeRequests[url];
+  const controller = new AbortController();
+  const promise = fetch(url, { ...options, signal: controller.signal })
+    .finally(() => { delete window.activeRequests[url]; });
+  window.activeRequests[url] = promise;
+  promise.abort = () => controller.abort();
+  return promise;
+};
+
+class MoneyKLine {
+  constructor(canvas) {
+    this.canvas = canvas;
+    this.layers = { chanlun: false, signals: false, macd: false, boll: false, volume: false, patterns: false };
+    this.timer = null;
+  }
+  create() { this.timer = setInterval(() => {}, 1000); }
+  update(data) {}
+  tick(t) {}
+  kline(k) {}
+  destroy() { clearInterval(this.timer); clearTimeout(this.timer); }
+  toggleLayer(layer, state) { this.layers[layer] = state; }
+  play() {}
+  pause() {}
+  stepForward() {}
+  stepBackward() {}
+  zoom() {}
+  drag() {}
+}
+window.MoneyKLine = MoneyKLine;
+</script>
+<div class="drawer density-compact density-comfortable"></div></body></html>
