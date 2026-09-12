@@ -89,7 +89,9 @@ test('独立功能面板在选中后扁平展示并保持展开', () => {
   assert.match(html, /\.dash-collapse\.workspace-panel-flat > summary[^}]*display:\s*none/);
   assert.match(html, /\.workspace-panel-flat > summary[^}]*pointer-events:\s*none/);
   assert.match(html, /workspace-panel-flat[^}]*collapse-chevron[^}]*display:\s*none/);
-  assert.ok((html.match(/workspace-signal-badge/g) || []).length >= 7, 'workspace signal badges should share the left-aligned treatment');
+  assert.ok((html.match(/workspace-signal-badge/g) || []).length >= 7, 'workspace signal badges should remain available in the card header');
+  assert.ok((html.match(/workspaceInlineRefresh\(/g) || []).length >= 8, 'workspace refresh controls should be rendered inside each data card');
+  assert.match(html, /workspace-inline-refresh[\s\S]*workspace-signal-badge/);
   assert.match(html, /classList\.toggle\(['"]workspace-panel-flat['"],\s*flatPanel\)/);
   assert.match(html, /if \(flatPanel\) node\.open = true/);
   assert.match(html, /!section\.classList\.contains\(['"]workspace-panel-flat['"]\)/);

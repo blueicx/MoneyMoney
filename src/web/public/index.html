@@ -1515,12 +1515,15 @@
     .dash-collapse.workspace-panel-flat > .collapse-body {
       padding: 0;
     }
-    .workspace-signal-header {
-      justify-content: flex-start !important;
+    .workspace-signal-header > div:first-child {
+      flex: 1;
+      min-width: 0;
     }
-    .workspace-signal-badge {
-      order: -1;
-      margin-right: 2px;
+    .workspace-inline-refresh {
+      flex-shrink: 0;
+      margin-left: auto;
+      margin-right: 8px;
+      white-space: nowrap;
     }
     .data-table th,
     .chain-table th {
@@ -2465,10 +2468,6 @@
             <span class="collapse-chevron">▾</span>
           </summary>
           <div class="collapse-body">
-            <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap;">
-              <button class="tab" onclick="loadMarketBreadth()">🔄 刷新宽度雷达</button>
-              <span id="market-breadth-updated" style="font-size:11px;color:var(--text-secondary);"></span>
-            </div>
             <div id="market-breadth-radar"></div>
           </div>
         </details>
@@ -2479,9 +2478,6 @@
             <span class="collapse-chevron">▾</span>
           </summary>
           <div class="collapse-body">
-            <div style="display:flex;justify-content:flex-end;align-items:center;margin-bottom:12px;">
-              <button class="tab" onclick="loadInsiderRadar()">🔄 刷新</button>
-            </div>
             <div id="insider-radar"></div>
           </div>
         </details>
@@ -2492,9 +2488,6 @@
             <span class="collapse-chevron">▾</span>
           </summary>
           <div class="collapse-body">
-            <div style="display:flex;justify-content:flex-end;align-items:center;margin-bottom:12px;">
-              <button class="tab" onclick="loadInstitutionalOwnership()">🔄 刷新</button>
-            </div>
             <div id="institutional-radar"></div>
           </div>
         </details>
@@ -2505,9 +2498,6 @@
             <span class="collapse-chevron">▾</span>
           </summary>
           <div class="collapse-body">
-            <div style="display:flex;justify-content:flex-end;align-items:center;margin-bottom:12px;">
-              <button class="tab" onclick="loadAnalystConsensus()">🔄 刷新</button>
-            </div>
             <div id="analyst-radar"></div>
           </div>
         </details>
@@ -2518,9 +2508,6 @@
             <span class="collapse-chevron">▾</span>
           </summary>
           <div class="collapse-body">
-            <div style="display:flex;justify-content:flex-end;align-items:center;margin-bottom:12px;">
-              <button class="tab" onclick="loadFundamentalQuality()">🔄 刷新</button>
-            </div>
             <div id="fundamental-radar"></div>
           </div>
         </details>
@@ -2531,9 +2518,6 @@
             <span class="collapse-chevron">▾</span>
           </summary>
           <div class="collapse-body">
-            <div style="display:flex;justify-content:flex-end;align-items:center;margin-bottom:12px;">
-              <button class="tab" onclick="loadShortInterest()">🔄 刷新</button>
-            </div>
             <div id="short-interest-radar"></div>
           </div>
         </details>
@@ -2544,10 +2528,6 @@
             <span class="collapse-chevron">▾</span>
           </summary>
           <div class="collapse-body">
-            <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap;">
-              <button class="tab" onclick="loadGlobalMacroSpot()">🔄 刷新宏观雷达</button>
-              <span id="global-spot-updated" style="font-size:11px;color:var(--text-secondary);"></span>
-            </div>
             <div id="global-spot-radar"></div>
           </div>
         </details>
@@ -5969,6 +5949,9 @@ async function loadInsiderRadar(symbol, name) {
     el.innerHTML = '<div class="empty-tip">' + stockEscapeHtml(currentInsiderSymbol) + ' 暂无可读的 SEC 内部人申报，或数据暂时不可用。</div>';
   }
 }
+function workspaceInlineRefresh(handler, label = '刷新') {
+  return `<button type="button" class="tab workspace-inline-refresh" onclick="${handler}">🔄 ${label}</button>`;
+}
 function renderInsiderRadar(data) {
   const el = document.getElementById('insider-radar');
   if (!el) return;
@@ -5999,6 +5982,7 @@ function renderInsiderRadar(data) {
           <div style="font-weight:800;font-size:14px;">${safeNewsText(data.companyName)}</div>
           <div style="font-size:11px;color:var(--text-secondary);margin-top:3px;">${safeNewsText(data.symbol)} · 近 ${data.windowDays} 天 · 扫描 ${data.scannedFilings} 份 Form 4</div>
         </div>
+        ${workspaceInlineRefresh('loadInsiderRadar()', '刷新')}
         <span class="workspace-signal-badge" style="color:white;background:${signalColor};border-radius:99px;padding:5px 9px;font-size:10.5px;flex-shrink:0;">${safeNewsText(data.signalZh)}</span>
       </div>
       <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:12px;">
@@ -6083,6 +6067,7 @@ function renderFundamentalQuality(data) {
           <div style="font-weight:800;font-size:14px;">${safeNewsText(data.companyName)}</div>
           <small style="color:var(--text-secondary);display:block;margin-top:3px;">${safeNewsText(data.symbol)} · 财年截止 ${safeNewsText(data.fiscalPeriodEnd)} · 申报 ${safeNewsText(data.reportFiledAt)}</small>
         </div>
+        ${workspaceInlineRefresh('loadFundamentalQuality()', '刷新')}
         <span class="workspace-signal-badge" style="color:white;background:${scoreColor};border-radius:99px;padding:5px 10px;font-size:11px;flex-shrink:0;">${score}/100 · ${safeNewsText(data.signalZh)}</span>
       </div>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(105px,1fr));gap:7px;margin-top:11px;">${cards}</div>
@@ -6195,6 +6180,7 @@ function renderMarketBreadth(data) {
       <div class="workspace-signal-header" style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;">
         <div style="min-width:0;"><div style="font-weight:800;font-size:14px;">美股整体参与度</div>
           <small style="color:var(--text-secondary);display:block;margin-top:3px;">Nasdaq 公共筛选器快照 · 覆盖 ${data.totalCount.toLocaleString()} 家</small></div>
+        ${workspaceInlineRefresh('loadMarketBreadth()', '刷新宽度雷达')}
         <span class="workspace-signal-badge" style="color:white;background:${color};border-radius:99px;padding:5px 10px;font-size:11px;flex-shrink:0;">${safeNewsText(data.signalZh)}</span>
       </div>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(108px,1fr));gap:7px;margin-top:11px;">${cards}</div>
@@ -6292,6 +6278,7 @@ function renderGlobalMacroSpot(data) {
           <div style="font-weight:800;font-size:15px;">全球宏观现货锚点</div>
           <small style="color:var(--text-secondary);display:block;margin-top:3px;line-height:1.45;">${safeNewsText(data.summaryZh)}</small>
         </div>
+        ${workspaceInlineRefresh('loadGlobalMacroSpot()', '刷新宏观雷达')}
         <span class="workspace-signal-badge" style="color:white;background:${signalColor};border-radius:99px;padding:5px 10px;font-size:11px;flex-shrink:0;">${safeNewsText(data.signalZh)}</span>
       </div>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:9px;margin-top:12px;">${assetCards}</div>
@@ -6368,6 +6355,7 @@ function renderShortInterest(data) {
           <div style="font-weight:800;font-size:14px;">${safeNewsText(window._shortName || data.companyName || data.symbol)}</div>
           <small style="color:var(--text-secondary);display:block;margin-top:3px;">${safeNewsText(data.symbol)} · 结算日 ${safeNewsText(data.latest.settlementDate)}</small>
         </div>
+        ${workspaceInlineRefresh('loadShortInterest()', '刷新')}
         <span class="workspace-signal-badge" style="color:white;background:${color};border-radius:99px;padding:5px 10px;font-size:11px;flex-shrink:0;">${safeNewsText(data.signalZh)}</span>
       </div>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(105px,1fr));gap:7px;margin-top:11px;">${cards}</div>
@@ -6455,6 +6443,7 @@ function renderInstitutionalOwnership(data) {
           <div style="font-weight:800;font-size:14px;">${safeNewsText(window._institutionalName || data.symbol)}</div>
           <small style="color:var(--text-secondary);display:block;margin-top:3px;">${safeNewsText(data.symbol)} · 报告日 ${safeNewsText(data.latestReportDate || '--')}</small>
         </div>
+        ${workspaceInlineRefresh('loadInstitutionalOwnership()', '刷新')}
         <span class="workspace-signal-badge" style="color:white;background:${color};border-radius:99px;padding:5px 10px;font-size:11px;flex-shrink:0;">${safeNewsText(data.signalZh)}</span>
       </div>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(108px,1fr));gap:7px;margin-top:11px;">${cards}</div>
@@ -6552,6 +6541,7 @@ function renderAnalystConsensus(data) {
             ${safeNewsText(data.symbol)} · 现价 $${Number(data.currentPrice).toFixed(2)} · 更新 ${safeNewsText(data.latestUpdated)}
           </small>
         </div>
+        ${workspaceInlineRefresh('loadAnalystConsensus()', '刷新')}
         <span class="workspace-signal-badge" style="color:white;background:${color};border-radius:99px;padding:5px 10px;font-size:11px;flex-shrink:0;">${safeNewsText(data.consensusZh)}</span>
       </div>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(104px,1fr));gap:7px;margin-top:11px;">${cards}</div>
