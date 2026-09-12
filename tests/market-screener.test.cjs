@@ -1,6 +1,6 @@
 const test = require('node:test');
 const { strict: assert } = require('node:assert');
-const { filterRows, serializeTemplate, sortRows, paginateRows } = require('../dist/features/market-screener');
+const { filterRows, serializeTemplate, sortRows, paginateRows, actionsForScreener, validateScreenerAction } = require('../dist/features/market-screener');
 
 test('prediction screener rejects stock-only fields', () => {
   assert.throws(() => filterRows('prediction', [], { marketCap: { gte: 100 } }), /不属于/);
@@ -27,4 +27,11 @@ test('screener sorts stably and paginates', () => {
   assert.equal(paginated.rows.length, 2);
   assert.equal(paginated.page, 1);
   assert.equal(paginated.totalPages, 2);
+});
+
+test('screener exposes only actions supported by the selected market', () => {
+  assert.deepEqual(actionsForScreener('stocks').map(action => action.id), ['detail', 'compare', 'watchlist', 'candidate', 'alert', 'backtest']);
+  assert.deepEqual(actionsForScreener('options').map(action => action.id), ['detail', 'compare', 'watchlist', 'candidate', 'alert']);
+  assert.equal(validateScreenerAction('crypto', 'backtest'), true);
+  assert.throws(() => validateScreenerAction('prediction', 'backtest'), /不支持/);
 });

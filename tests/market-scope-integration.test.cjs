@@ -19,6 +19,12 @@ test('unified detail contract is explicit and rejects mismatched market scopes',
   assert.match(server, /\['stock', 'option', 'crypto', 'prediction'\]/);
 });
 
+test('screener actions keep watchlist and alert entry points in the current scope', () => {
+  assert.match(server, /actions: actionsForScreener\(scope\)/);
+  assert.match(html, /addScreenerToWatchlist\(/);
+  assert.match(html, /createScreenerAlert\(/);
+});
+
 test('generic function navigation preserves the selected market', () => {
   assert.match(html, /function marketScopeForTab\(\) \{ return null; \}/);
   assert.match(html, /function scopedUrl\(path\)/);

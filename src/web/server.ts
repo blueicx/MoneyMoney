@@ -112,7 +112,7 @@ import { paperTradingExecutor } from '../features/trading-executor';
 import { unifiedPaperLedgerStore, calculateUnifiedPerformance, replayUnifiedPaperOrders, type UnifiedPaperOrder } from '../features/unified-paper-trading';
 import { logger } from '../utils/logger';
 import { curlCommand } from '../utils/platform-command';
-import { fieldsForScreener, filterRows, isScreenerScope, paginateRows, serializeTemplate, sortRows, type ScreenerFilter, type ScreenerScope, type ScreenerSort } from '../features/market-screener';
+import { actionsForScreener, fieldsForScreener, filterRows, isScreenerScope, paginateRows, serializeTemplate, sortRows, type ScreenerFilter, type ScreenerScope, type ScreenerSort } from '../features/market-screener';
 import { compareInstruments, createCompareSnapshot, type CompareInstrument, type CompareScope } from '../features/instrument-compare';
 import {
   addResearchNote,
@@ -435,7 +435,7 @@ app.get('/api/screener', async (req, res) => {
     const page = paginateRows(rows, Number(req.query.pageSize) || 50, Number(req.query.page) || 1);
     sendPerformanceJson(req, res, {
       success: true,
-      data: { scope, fields: fieldsForScreener(scope), ...page },
+      data: { scope, fields: fieldsForScreener(scope), actions: actionsForScreener(scope), ...page },
       freshness: { fetchedAt: new Date().toISOString(), status: cachedRows.status },
       sourceStatus: page.rows.length ? 'ok' : 'unavailable',
     }, cachedRows.status);

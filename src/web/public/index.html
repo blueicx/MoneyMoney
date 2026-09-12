@@ -10104,10 +10104,23 @@ function renderMarketScreener(data) {
   }
   const page = window.mm_screenerState.page || 1;
   const totalPages = window.mm_screenerState.totalPages || 1;
+  const screenerActions = Array.isArray(data.actions) ? data.actions : [];
+  const actionButton = (action, index) => {
+    const handlers = {
+      detail: `openScreenerDetail(${index})`,
+      compare: `addScreenerIdToCompare(this.closest('[data-instrument-id]').dataset.instrumentId)`,
+      watchlist: `addScreenerToWatchlist(${index})`,
+      candidate: `saveScreenerCandidate(${index})`,
+      alert: `createScreenerAlert(${index})`,
+      backtest: `runScreenerBacktest(${index})`,
+    };
+    const icons = { detail: '详情', compare: '比较', watchlist: '⭐ 自选', candidate: '☆ 候选', alert: '🔔 提醒', backtest: '🧪 回测' };
+    return handlers[action.id] ? `<button class="tab${action.id === 'backtest' ? ' active' : ''}" type="button" onclick="${handlers[action.id]}">${icons[action.id] || marketResearchEscape(action.label)}</button>` : '';
+  };
   const listHtml = rows.map((row, index) => {
     const values = fields.slice(0, 3).map(field => `${marketResearchEscape(field.label)}: ${marketResearchEscape(row[field.key] ?? '—')}`).join(' · ');
     const id = marketResearchEscape(row.id || row.symbol || '');
-    return `<article class="market-research-row" data-instrument-id="${id}"><strong>${marketResearchEscape(row.title || row.symbol || row.id)}</strong><span>${values}</span><div class="market-research-actions"><button class="tab" type="button" onclick="addScreenerIdToCompare(this.closest('[data-instrument-id]').dataset.instrumentId)">比较</button><button class="tab" type="button" onclick="openScreenerDetail(${index})">详情</button><button class="tab" type="button" onclick="saveScreenerCandidate(${index})">☆ 候选</button><button class="tab active" type="button" onclick="runScreenerBacktest(${index})">🧪 回测</button></div></article>`;
+    return `<article class="market-research-row" data-instrument-id="${id}"><strong>${marketResearchEscape(row.title || row.symbol || row.id)}</strong><span>${values}</span><div class="market-research-actions">${screenerActions.map(action => actionButton(action, index)).join('')}</div></article>`;
   }).join('');
   const paginationHtml = totalPages > 1 ? `<div style="display:flex;justify-content:center;gap:10px;margin-top:10px;"><button class="tab" onclick="loadMarketScreenerPage(${Math.max(1, page - 1)})">上一页</button><span style="padding:10px;font-size:12px;">${page} / ${totalPages}</span><button class="tab" onclick="loadMarketScreenerPage(${Math.min(totalPages, page + 1)})">下一页</button></div>` : '';
   resultsEl.innerHTML = listHtml + paginationHtml;
@@ -10189,6 +10202,10 @@ function screenerInstrumentRef(index) {
     const symbol = raw.split(':').pop().replace(/^us/i, '').toUpperCase();
     return { id: raw.includes(':') ? raw : `stock:us:${symbol}`, type: 'stock', venue: 'us', symbol, title: String(row.title || symbol), aliases: [] };
   }
+  if (activeMarketScope === 'options') {
+    const symbol = raw.split(':').pop().toUpperCase();
+    return { id: raw.includes(':') ? raw : `option:cboe:${symbol}`, type: 'option', venue: 'cboe', symbol, title: String(row.title || symbol), aliases: [] };
+  }
   if (activeMarketScope === 'crypto') {
     const symbol = raw.split(':').pop().toUpperCase();
     return { id: raw.includes(':') ? raw : `crypto:binance:${symbol}`, type: 'crypto', venue: 'binance', symbol, title: String(row.title || symbol), aliases: [] };
@@ -10223,6 +10240,24 @@ window.saveScreenerCandidate = function(index) {
   const existing = readBacktestCandidates().filter(item => !(item.scope === activeMarketScope && item.instrument === instrument.symbol && item.source === 'screener'));
   writeBacktestCandidates([{ scope: activeMarketScope, instrument: instrument.symbol, strategy: 'momentum', strategyLabel: '筛选候选', source: 'screener', returnPct: 0, winRatePct: 0, maxDrawdownPct: 0, totalTrades: 0, savedAt: new Date().toISOString() }, ...existing]);
   if (typeof window.showToast === 'function') window.showToast(`已保存 ${instrument.symbol} 为当前市场候选`, 'success');
+};
+window.addScreenerToWatchlist = async function(index) {
+  const instrument = screenerInstrumentRef(index);
+  if (!instrument || window.mm_isGuest) { if (typeof window.showToast === 'function') window.showToast(window.mm_isGuest ? '访客模式不能修改自选' : '当前标的暂不可加入自选', 'info'); return; }
+  try {
+    const response = await fetch('/api/watchlist', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ instrumentId: instrument.id }) });
+    const payload = await response.json();
+    if (!response.ok || !payload.success) throw new Error(payload.error || '加入自选失败');
+    if (typeof window.showToast === 'function') window.showToast(`已加入 ${instrument.symbol} 自选`, 'success');
+  } catch (error) { if (typeof window.showToast === 'function') window.showToast(error.message || '加入自选失败', 'error'); }
+};
+window.createScreenerAlert = function(index) {
+  const instrument = screenerInstrumentRef(index);
+  if (!instrument) { if (typeof window.showToast === 'function') window.showToast('当前标的暂无提醒入口', 'info'); return; }
+  setWorkspaceInstrument(instrument.symbol);
+  window.mm_pendingAlertInstrument = instrument;
+  showTab('alerts');
+  if (typeof window.showToast === 'function') window.showToast(`已带入 ${instrument.symbol}，请在提醒区设置条件`, 'info');
 };
 function addScreenerIdToCompare(id) {
   const input = document.getElementById('market-compare-ids');

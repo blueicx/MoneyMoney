@@ -25,6 +25,32 @@ export interface ScreenerTemplate {
   sort?: ScreenerSort;
 }
 
+export type ScreenerActionId = 'detail' | 'compare' | 'watchlist' | 'candidate' | 'alert' | 'backtest';
+
+export interface ScreenerAction {
+  id: ScreenerActionId;
+  label: string;
+}
+
+const SCREENER_ACTIONS: readonly ScreenerAction[] = [
+  { id: 'detail', label: '详情' },
+  { id: 'compare', label: '比较' },
+  { id: 'watchlist', label: '加入自选' },
+  { id: 'candidate', label: '候选' },
+  { id: 'alert', label: '设置提醒' },
+  { id: 'backtest', label: '回测' },
+];
+
+export function actionsForScreener(scope: ScreenerScope): ScreenerAction[] {
+  if (!isScreenerScope(scope)) throw new Error(`不支持的筛选市场: ${scope}`);
+  return SCREENER_ACTIONS.filter(action => scope !== 'options' && scope !== 'prediction' || action.id !== 'backtest').map(action => ({ ...action }));
+}
+
+export function validateScreenerAction(scope: ScreenerScope, action: string): true {
+  if (!actionsForScreener(scope).some(item => item.id === action)) throw new Error(`动作 ${action} 不支持 ${scope} 市场`);
+  return true;
+}
+
 const FIELD_DEFINITIONS: Record<ScreenerScope, readonly ScreenerField[]> = {
   stocks: [
     { key: 'changePct', label: '涨跌幅', kind: 'number' },
