@@ -52,6 +52,9 @@ export interface RecentAnalystAction {
   targetNow: number | null;
   targetOld: number | null;
   analystRankPct: number | null;
+  sourceUrl: string;
+  sourceExcerpt: string | null;
+  summaryZh: string;
 }
 
 export interface AnalystConsensusSnapshot {
@@ -347,7 +350,21 @@ function pageFallbackPrice(rawHtml: string): number {
   return num(scope.match(/[,{]p:(-?\d+(?:\.\d+)?)/)?.[1]);
 }
 
-function mapRecentAction(row: Record<string, any>): RecentAnalystAction | null {
+export function buildAnalystActionSummary(action: Pick<RecentAnalystAction, 'firm' | 'analyst' | 'date' | 'actionZh' | 'ratingNew' | 'ratingOld' | 'targetNow' | 'targetOld'>): string {
+  const identity = action.analyst && action.firm
+    ? `${action.analyst}（${action.firm}）`
+    : action.analyst || action.firm || '未注明分析师';
+  const rating = action.ratingOld && action.ratingNew && action.ratingOld !== action.ratingNew
+    ? `，评级 ${action.ratingOld} → ${action.ratingNew}`
+    : action.ratingNew ? `，评级 ${action.ratingNew}` : '';
+  const target = action.targetOld != null || action.targetNow != null
+    ? `，目标价 ${action.targetOld == null ? '—' : action.targetOld} → ${action.targetNow == null ? '—' : action.targetNow}`
+    : '';
+  const date = action.date ? `（${action.date}）` : '';
+  return `${identity}${date}${action.actionZh || '更新'}${rating}${target}。`;
+}
+
+function mapRecentAction(row: Record<string, any>, sourceUrl: string): RecentAnalystAction | null {
   const firm = text(row.firm);
   if (!firm) return null;
   const action = text(row.action_rt);
@@ -361,7 +378,7 @@ function mapRecentAction(row: Record<string, any>): RecentAnalystAction | null {
         : '维持';
   const targetNow = row.pt_now == null ? null : num(row.pt_now);
   const targetOld = row.pt_old == null ? null : num(row.pt_old);
-  return {
+  const actionRecord = {
     firm,
     analyst: text(row.analyst),
     date: text(row.date),
@@ -372,7 +389,10 @@ function mapRecentAction(row: Record<string, any>): RecentAnalystAction | null {
     targetNow: Number.isFinite(targetNow) ? targetNow : null,
     targetOld: Number.isFinite(targetOld) ? targetOld : null,
     analystRankPct: Number.isFinite(num(asRecord(row.scores).score)) ? num(asRecord(row.scores).score) : null,
+    sourceUrl,
+    sourceExcerpt: text(row.comment || row.comment_text || row.note || row.description) || null,
   };
+  return { ...actionRecord, summaryZh: buildAnalystActionSummary(actionRecord) };
 }
 
 function normalizeHistory(rows: any[]): AnalystRatingPeriod[] {
@@ -482,7 +502,7 @@ async function requestSnapshot(symbolInput: string): Promise<AnalystConsensusSna
   // the required core, so this section degrades to empty rather than failing.
   const recentRows = rawHtml.includes('}],ratings:[')
     ? asArray(extractSerialized(rawHtml, '}],ratings:[', '['))
-      .map(row => mapRecentAction(asRecord(row)))
+      .map(row => mapRecentAction(asRecord(row), url))
       .filter((row): row is RecentAnalystAction => row !== null)
       .slice(0, 8)
     : [];
