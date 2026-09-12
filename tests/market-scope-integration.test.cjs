@@ -7,9 +7,9 @@ const server = fs.readFileSync('src/web/server.ts', 'utf8');
 
 test('macro workspace declares independent market sections', () => {
   assert.match(html, /data-collapse-key="stocks-macro" data-market-scopes="stocks crypto options overview"/);
-  assert.match(html, /id="global-crypto-metrics" data-market-scopes="crypto overview"/);
+  assert.match(html, /id="global-crypto-metrics" data-market-scopes="crypto"/);
   assert.match(html, /id="stablecoin-liquidity"/);
-  assert.match(html, /data-market-scopes="crypto overview"><div[^>]*>😱 恐贪指数/);
+  assert.match(html, /data-market-scopes="crypto"><div[^>]*>😱 恐贪指数/);
   assert.match(html, /data-market-scopes="stocks overview"><div[^>]*>🏛️ CME 机构持仓雷达/);
 });
 

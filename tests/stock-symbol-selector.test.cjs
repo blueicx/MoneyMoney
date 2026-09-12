@@ -31,14 +31,13 @@ test('stock market does not render popular stock cards in the center', () => {
   assert.doesNotMatch(html, /loadPopularStocks\(signal\)/);
 });
 
-test('stock exclusive workspaces hide shared overview and selection tools', () => {
-  for (const id of ['market-overview', 'workspace-dashboard-cards', 'market-research-tools']) {
-    assert.match(html, new RegExp(`id="${id}"[^>]*data-workspace-ids="overview"`));
-  }
-  assert.match(html, /id="market-research-tools"[^>]*data-market-scopes="overview"/);
+test('stock exclusive workspaces keep the shared market bar and scope selection tools', () => {
+  assert.match(html, /id="market-overview"[^>]*data-market-scopes="overview stocks options crypto prediction watchlist"/);
+  assert.match(html, /id="workspace-dashboard-cards"[^>]*data-workspace-ids="overview"/);
+  assert.match(html, /id="market-research-tools"[^>]*data-market-scopes="stocks"[^>]*data-workspace-ids="stock-quotes"/);
   assert.match(html, /const visible = \(!node\.dataset\.marketScopes \|\| scopeAllowsView\(node\.dataset\.marketScopes\)\) && workspaceAllowsView\(node\);/);
   assert.match(html, /if \(node\.classList\?\.contains\(['"]workspace-item['"]\)\) return true;/);
-  assert.match(html, /function workspaceAllowsView\(node\) \{[\s\S]*?return workspaceIdsForNode\(node\)\.includes\(activeWorkspaceId\);/);
+  assert.match(html, /function workspaceAllowsView\(node\) \{[\s\S]*?const ids = workspaceIdsForNode\(node\);[\s\S]*?ids\.length === 0 \|\| ids\.includes\(activeWorkspaceId\);/);
   assert.match(html, /function applyWorkspaceView\(\)[\s\S]*querySelectorAll\('\[data-workspace-id\], \[data-workspace-ids\]'\)/);
 });
 

@@ -2,6 +2,9 @@ import { MARKET_SCOPES, type MarketScope } from './market-scope';
 
 export type WorkspaceId =
   | 'overview'
+  | 'stock-quotes'
+  | 'crypto-quotes'
+  | 'events'
   | 'radar'
   | 'analysis'
   | 'backtest'
@@ -43,6 +46,9 @@ const ASSET_SCOPES: readonly MarketScope[] = ['stocks', 'options', 'crypto', 'pr
 
 const ITEMS: Record<WorkspaceId, WorkspaceItem> = {
   overview: { id: 'overview', label: '市场总览', icon: '⌂', scopes: ALL_SCOPES },
+  'stock-quotes': { id: 'stock-quotes', label: '行情与选股', icon: '▥', scopes: ['stocks'] },
+  'crypto-quotes': { id: 'crypto-quotes', label: '行情与K线', icon: '₿', scopes: ['crypto'], requiresInstrument: true },
+  events: { id: 'events', label: '市场事件与新闻', icon: '▤', scopes: ASSET_SCOPES },
   radar: { id: 'radar', label: '市场雷达', icon: '◉', scopes: ASSET_SCOPES },
   analysis: { id: 'analysis', label: '标的分析', icon: '⌁', scopes: ASSET_SCOPES, requiresInstrument: true },
   backtest: { id: 'backtest', label: '策略回测', icon: '⌘', scopes: ASSET_SCOPES, requiresInstrument: true },
@@ -72,10 +78,10 @@ const BASE_GROUPS: readonly { id: WorkspaceGroup['id']; label: string; items: re
 
 const SPECIFIC_ITEMS: Record<MarketScope, readonly WorkspaceId[]> = {
   overview: [],
-  stocks: ['breadth', 'insider', 'institutional', 'analyst', 'fundamentals', 'short-interest'],
-  options: ['option-chain', 'volatility', 'greeks'],
-  crypto: ['funding-rate', 'open-interest', 'on-chain', 'order-flow'],
-  prediction: ['prediction-radar'],
+  stocks: ['stock-quotes', 'events', 'breadth', 'insider', 'institutional', 'analyst', 'fundamentals', 'short-interest'],
+  options: ['events', 'option-chain', 'volatility', 'greeks'],
+  crypto: ['crypto-quotes', 'events', 'funding-rate', 'open-interest', 'on-chain', 'order-flow'],
+  prediction: ['events', 'prediction-radar'],
   watchlist: [],
 };
 
@@ -102,5 +108,8 @@ export function isWorkspaceAllowed(scope: MarketScope, workspace: WorkspaceId): 
 }
 
 export function defaultWorkspace(scope: MarketScope): WorkspaceId {
-  return scope === 'watchlist' ? 'watchlist' : 'overview';
+  if (scope === 'watchlist') return 'watchlist';
+  if (scope === 'stocks') return 'stock-quotes';
+  if (scope === 'crypto') return 'crypto-quotes';
+  return 'overview';
 }
