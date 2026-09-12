@@ -86,8 +86,10 @@ test('具体工作区只显示当前正文模块，并在总览时恢复市场�
 test('独立功能面板在选中后扁平展示并保持展开', () => {
   assert.match(html, /\.dash-collapse\.workspace-panel-flat[\s\S]*border:\s*0/);
   assert.match(html, /\.dash-collapse\.workspace-panel-flat[^}]*background:\s*transparent/);
+  assert.match(html, /\.dash-collapse\.workspace-panel-flat > summary[^}]*display:\s*none/);
   assert.match(html, /\.workspace-panel-flat > summary[^}]*pointer-events:\s*none/);
   assert.match(html, /workspace-panel-flat[^}]*collapse-chevron[^}]*display:\s*none/);
+  assert.ok((html.match(/workspace-signal-badge/g) || []).length >= 7, 'workspace signal badges should share the left-aligned treatment');
   assert.match(html, /classList\.toggle\(['"]workspace-panel-flat['"],\s*flatPanel\)/);
   assert.match(html, /if \(flatPanel\) node\.open = true/);
   assert.match(html, /!section\.classList\.contains\(['"]workspace-panel-flat['"]\)/);

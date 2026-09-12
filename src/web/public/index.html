@@ -1503,6 +1503,7 @@
       padding: 0 0 12px;
       cursor: default;
       pointer-events: none;
+      display: none;
       background: transparent !important;
     }
     .dash-collapse.workspace-panel-flat > summary:hover {
@@ -1513,6 +1514,13 @@
     }
     .dash-collapse.workspace-panel-flat > .collapse-body {
       padding: 0;
+    }
+    .workspace-signal-header {
+      justify-content: flex-start !important;
+    }
+    .workspace-signal-badge {
+      order: -1;
+      margin-right: 2px;
     }
     .data-table th,
     .chain-table th {
@@ -5986,12 +5994,12 @@ function renderInsiderRadar(data) {
   }).join('');
   el.innerHTML = `
     <div style="background:var(--bg-card);border-radius:12px;padding:14px;border:1px solid var(--border);">
-      <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;">
+      <div class="workspace-signal-header" style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;">
         <div style="min-width:0;">
           <div style="font-weight:800;font-size:14px;">${safeNewsText(data.companyName)}</div>
           <div style="font-size:11px;color:var(--text-secondary);margin-top:3px;">${safeNewsText(data.symbol)} · 近 ${data.windowDays} 天 · 扫描 ${data.scannedFilings} 份 Form 4</div>
         </div>
-        <span style="color:white;background:${signalColor};border-radius:99px;padding:5px 9px;font-size:10.5px;flex-shrink:0;">${safeNewsText(data.signalZh)}</span>
+        <span class="workspace-signal-badge" style="color:white;background:${signalColor};border-radius:99px;padding:5px 9px;font-size:10.5px;flex-shrink:0;">${safeNewsText(data.signalZh)}</span>
       </div>
       <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:12px;">
         <div style="background:var(--bg-secondary);border-radius:10px;padding:9px;"><div style="font-size:10px;color:var(--text-secondary);">买入</div><strong style="color:var(--green);">$${compactUsd(data.buyValueUsd)}</strong><div style="font-size:10px;color:var(--text-secondary);">${data.buyCount} 笔</div></div>
@@ -6070,12 +6078,12 @@ function renderFundamentalQuality(data) {
   ).join('');
   el.innerHTML = `
     <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:12px;padding:14px;">
-      <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;">
+      <div class="workspace-signal-header" style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;">
         <div style="min-width:0;">
           <div style="font-weight:800;font-size:14px;">${safeNewsText(data.companyName)}</div>
           <small style="color:var(--text-secondary);display:block;margin-top:3px;">${safeNewsText(data.symbol)} · 财年截止 ${safeNewsText(data.fiscalPeriodEnd)} · 申报 ${safeNewsText(data.reportFiledAt)}</small>
         </div>
-        <span style="color:white;background:${scoreColor};border-radius:99px;padding:5px 10px;font-size:11px;flex-shrink:0;">${score}/100 · ${safeNewsText(data.signalZh)}</span>
+        <span class="workspace-signal-badge" style="color:white;background:${scoreColor};border-radius:99px;padding:5px 10px;font-size:11px;flex-shrink:0;">${score}/100 · ${safeNewsText(data.signalZh)}</span>
       </div>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(105px,1fr));gap:7px;margin-top:11px;">${cards}</div>
       ${historyRows ? `
@@ -6184,10 +6192,10 @@ function renderMarketBreadth(data) {
     </div>`;
   el.innerHTML = `
     <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:12px;padding:14px;">
-      <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;">
+      <div class="workspace-signal-header" style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;">
         <div style="min-width:0;"><div style="font-weight:800;font-size:14px;">美股整体参与度</div>
           <small style="color:var(--text-secondary);display:block;margin-top:3px;">Nasdaq 公共筛选器快照 · 覆盖 ${data.totalCount.toLocaleString()} 家</small></div>
-        <span style="color:white;background:${color};border-radius:99px;padding:5px 10px;font-size:11px;flex-shrink:0;">${safeNewsText(data.signalZh)}</span>
+        <span class="workspace-signal-badge" style="color:white;background:${color};border-radius:99px;padding:5px 10px;font-size:11px;flex-shrink:0;">${safeNewsText(data.signalZh)}</span>
       </div>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(108px,1fr));gap:7px;margin-top:11px;">${cards}</div>
       <div style="margin-top:11px;padding:10px;border-radius:10px;background:color-mix(in srgb,${color} 8%,transparent);font-size:11px;line-height:1.55;">
@@ -6279,12 +6287,12 @@ function renderGlobalMacroSpot(data) {
     ratio > 75 ? '中性偏高' : ratio > 55 ? '中性偏低' : '白银相对偏强';
   el.innerHTML = `
     <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:14px;padding:14px;">
-      <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;">
+      <div class="workspace-signal-header" style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;">
         <div style="min-width:0;">
           <div style="font-weight:800;font-size:15px;">全球宏观现货锚点</div>
           <small style="color:var(--text-secondary);display:block;margin-top:3px;line-height:1.45;">${safeNewsText(data.summaryZh)}</small>
         </div>
-        <span style="color:white;background:${signalColor};border-radius:99px;padding:5px 10px;font-size:11px;flex-shrink:0;">${safeNewsText(data.signalZh)}</span>
+        <span class="workspace-signal-badge" style="color:white;background:${signalColor};border-radius:99px;padding:5px 10px;font-size:11px;flex-shrink:0;">${safeNewsText(data.signalZh)}</span>
       </div>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:9px;margin-top:12px;">${assetCards}</div>
       ${ratio == null ? '' : `
@@ -6355,12 +6363,12 @@ function renderShortInterest(data) {
   ).join('');
   el.innerHTML = `
     <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:12px;padding:14px;">
-      <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;">
+      <div class="workspace-signal-header" style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;">
         <div style="min-width:0;">
           <div style="font-weight:800;font-size:14px;">${safeNewsText(window._shortName || data.companyName || data.symbol)}</div>
           <small style="color:var(--text-secondary);display:block;margin-top:3px;">${safeNewsText(data.symbol)} · 结算日 ${safeNewsText(data.latest.settlementDate)}</small>
         </div>
-        <span style="color:white;background:${color};border-radius:99px;padding:5px 10px;font-size:11px;flex-shrink:0;">${safeNewsText(data.signalZh)}</span>
+        <span class="workspace-signal-badge" style="color:white;background:${color};border-radius:99px;padding:5px 10px;font-size:11px;flex-shrink:0;">${safeNewsText(data.signalZh)}</span>
       </div>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(105px,1fr));gap:7px;margin-top:11px;">${cards}</div>
       ${historyRows ? `
@@ -6442,12 +6450,12 @@ function renderInstitutionalOwnership(data) {
   ).join('');
   el.innerHTML = `
     <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:12px;padding:14px;">
-      <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;">
+      <div class="workspace-signal-header" style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;">
         <div style="min-width:0;">
           <div style="font-weight:800;font-size:14px;">${safeNewsText(window._institutionalName || data.symbol)}</div>
           <small style="color:var(--text-secondary);display:block;margin-top:3px;">${safeNewsText(data.symbol)} · 报告日 ${safeNewsText(data.latestReportDate || '--')}</small>
         </div>
-        <span style="color:white;background:${color};border-radius:99px;padding:5px 10px;font-size:11px;flex-shrink:0;">${safeNewsText(data.signalZh)}</span>
+        <span class="workspace-signal-badge" style="color:white;background:${color};border-radius:99px;padding:5px 10px;font-size:11px;flex-shrink:0;">${safeNewsText(data.signalZh)}</span>
       </div>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(108px,1fr));gap:7px;margin-top:11px;">${cards}</div>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin-top:10px;">
@@ -6537,14 +6545,14 @@ function renderAnalystConsensus(data) {
   ).join('');
   el.innerHTML = `
     <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:12px;padding:14px;">
-      <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;">
+      <div class="workspace-signal-header" style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;">
         <div style="min-width:0;">
           <div style="font-weight:800;font-size:14px;">${safeNewsText(window._analystName || data.nameFull || data.symbol)}</div>
           <small style="color:var(--text-secondary);display:block;margin-top:3px;">
             ${safeNewsText(data.symbol)} · 现价 $${Number(data.currentPrice).toFixed(2)} · 更新 ${safeNewsText(data.latestUpdated)}
           </small>
         </div>
-        <span style="color:white;background:${color};border-radius:99px;padding:5px 10px;font-size:11px;flex-shrink:0;">${safeNewsText(data.consensusZh)}</span>
+        <span class="workspace-signal-badge" style="color:white;background:${color};border-radius:99px;padding:5px 10px;font-size:11px;flex-shrink:0;">${safeNewsText(data.consensusZh)}</span>
       </div>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(104px,1fr));gap:7px;margin-top:11px;">${cards}</div>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(88px,1fr));gap:7px;margin-top:10px;">
