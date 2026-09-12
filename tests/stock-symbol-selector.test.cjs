@@ -31,6 +31,15 @@ test('stock market does not render popular stock cards in the center', () => {
   assert.doesNotMatch(html, /loadPopularStocks\(signal\)/);
 });
 
+test('all market instrument libraries stay at the top while the center scrolls', () => {
+  assert.match(html, /#right-instrument-library\s*\{[^}]*position:\s*sticky;[^}]*top:\s*61px;[^}]*align-self:\s*start;/s);
+  assert.match(html, /#right-instrument-library\s*\{[^}]*height:\s*calc\(100vh - 61px\);[^}]*overflow:\s*hidden;/s);
+  assert.match(html, /#right-instrument-library \.sidebar-content\s*\{[^}]*min-height:\s*0;[^}]*overflow-y:\s*auto;/s);
+  for (const scope of ['stocks', 'options', 'crypto', 'prediction']) {
+    assert.match(html, new RegExp(`data-market-library="${scope}"`));
+  }
+});
+
 test('stock exclusive workspaces keep the shared market bar and scope selection tools', () => {
   assert.match(html, /id="market-overview"[^>]*data-market-scopes="overview stocks options crypto prediction watchlist"/);
   assert.match(html, /id="workspace-dashboard-cards"[^>]*data-workspace-ids="overview"/);
