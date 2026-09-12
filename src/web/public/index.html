@@ -236,6 +236,14 @@
     .stock-chart-replay-label { margin-left:auto; color:var(--yellow); font-weight:700; }
     .stock-chart-replay-status { min-width:68px; text-align:right; font-variant-numeric:tabular-nums; }
     .stock-chart-stage { position:relative; min-height:340px; }
+    .chart-strategy-controls { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin:0 0 8px; font-size:11px; color:var(--text-secondary); }
+    .chart-strategy-controls label { display:inline-flex; align-items:center; gap:4px; cursor:pointer; white-space:nowrap; }
+    .chart-strategy-controls input { accent-color:var(--purple); }
+    .chart-signal-list { display:flex; gap:6px; flex-wrap:wrap; margin-top:8px; min-height:20px; }
+    .chart-signal-item { display:inline-flex; align-items:center; gap:5px; border:1px solid var(--border); border-radius:7px; padding:4px 7px; font-size:10px; background:var(--bg-secondary); }
+    .chart-signal-item.buy { color:var(--green); }
+    .chart-signal-item.sell { color:var(--red); }
+    .chart-signal-empty { color:var(--text-secondary); font-size:11px; }
     .market-library-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:7px; }
     .market-instrument-library { display:block; }
     .workspace-dashboard-cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:8px; margin:-6px 0 16px; }
@@ -2306,7 +2314,15 @@
           <!-- Candlestick Chart -->
           <div style="background:var(--bg-card);border-radius:12px;padding:16px;border:1px solid var(--border);position:relative;">
             <div id="bn-chart-title" style="font-weight:700;font-size:15px;margin-bottom:8px;">BTC/USDT · 15m</div>
+            <div id="bn-chart-strategies" class="chart-strategy-controls" aria-label="虚拟币K线策略点位">
+              <span style="font-weight:700;color:var(--yellow);">策略点位</span>
+              <label><input type="checkbox" data-crypto-strategy="maCross" checked onchange="setCryptoChartStrategy('maCross', this.checked)"> 均线交叉</label>
+              <label><input type="checkbox" data-crypto-strategy="rsiReversal" onchange="setCryptoChartStrategy('rsiReversal', this.checked)"> RSI反转</label>
+              <label><input type="checkbox" data-crypto-strategy="bollinger" onchange="setCryptoChartStrategy('bollinger', this.checked)"> 布林反转</label>
+              <label><input type="checkbox" data-crypto-strategy="volumeBreakout" onchange="setCryptoChartStrategy('volumeBreakout', this.checked)"> 放量突破</label>
+            </div>
             <canvas id="bn-candlestick" width="640" height="360" style="width:100%;height:auto;"></canvas>
+            <div id="bn-chart-signals" class="chart-signal-list" aria-live="polite"></div>
             <div id="bn-hover-tip" style="display:none;position:absolute;background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:8px 12px;font-size:12px;pointer-events:none;z-index:10;box-shadow:0 4px 12px rgba(0,0,0,.15);white-space:nowrap;"></div>
             <div style="font-size:11px;color:var(--text-secondary);margin-top:8px;">RSI(14) <span id="bn-rsi-value" style="font-weight:700;"></span></div>
             <canvas id="bn-rsi" width="640" height="80" style="width:100%;height:auto;margin-top:4px;"></canvas>
@@ -2447,6 +2463,11 @@
               <div id="stock-chart-title" style="font-weight:700;font-size:15px;margin-bottom:8px;"></div>
               <div id="stock-chart-overlays" class="stock-chart-overlays" aria-current="page" aria-label="K线显示选项">
                 <label><input type="checkbox" data-chart-overlay="signals" checked onchange="setStockChartOverlay('signals', this.checked)"> 策略点位</label>
+                <span style="color:var(--border-light);">|</span>
+                <label><input type="checkbox" data-chart-strategy="maCross" checked onchange="setStockChartStrategy('maCross', this.checked)"> 均线交叉</label>
+                <label><input type="checkbox" data-chart-strategy="rsiReversal" onchange="setStockChartStrategy('rsiReversal', this.checked)"> RSI反转</label>
+                <label><input type="checkbox" data-chart-strategy="bollinger" onchange="setStockChartStrategy('bollinger', this.checked)"> 布林反转</label>
+                <label><input type="checkbox" data-chart-strategy="volumeBreakout" onchange="setStockChartStrategy('volumeBreakout', this.checked)"> 放量突破</label>
                 <label><input type="checkbox" data-chart-overlay="patterns" onchange="setStockChartOverlay('patterns', this.checked)"> 蜡烛形态</label>
                 <label><input type="checkbox" data-chart-overlay="structures" onchange="setStockChartOverlay('structures', this.checked)"> 结构标记</label>
                 <label><input type="checkbox" data-chart-overlay="ma" checked onchange="setStockChartOverlay('ma', this.checked)"> 均线</label>
@@ -2461,6 +2482,7 @@
               <div class="stock-chart-stage">
                 <canvas id="stock-kline" width="640" height="360" style="width:100%;height:340px;display:block;"></canvas>
               </div>
+              <div id="stock-chart-signals" class="chart-signal-list" aria-live="polite"></div>
             </div>
             <div style="display:flex;justify-content:flex-end;align-items:center;margin:4px 0 10px;">
               <button class="tab active" type="button" onclick="loadStockQuotes()">🔄 刷新行情</button>
@@ -4835,6 +4857,26 @@ async function loadBinancePrices() {
     el.innerHTML = '<div class="empty-tip"><div class="empty-tip-icon">⚠️</div>加载失败<button class="tf-btn" onclick="loadBinancePrices()" style="margin-left:8px;">重试</button></div>';
   }
 }
+function cryptoChartStorageKey() {
+  return `mm-crypto-chart-strategies:${bnCurrentSymbol || 'BTCUSDT'}:${bnCurrentInterval || '15m'}`;
+}
+function loadCryptoChartStrategyConfig() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(cryptoChartStorageKey()) || 'null');
+    if (raw && typeof raw === 'object') cryptoChartStrategyConfig = { ...cryptoChartStrategyConfig, ...raw };
+  } catch (e) {}
+  document.querySelectorAll('[data-crypto-strategy]').forEach(input => {
+    input.checked = cryptoChartStrategyConfig[input.dataset.cryptoStrategy] === true;
+  });
+}
+function setCryptoChartStrategy(name, enabled) {
+  cryptoChartStrategyConfig[name] = Boolean(enabled);
+  try { localStorage.setItem(cryptoChartStorageKey(), JSON.stringify(cryptoChartStrategyConfig)); } catch (e) {}
+  if (bnKlineData.length) drawCandles(document.getElementById('bn-candlestick'), bnKlineData);
+}
+function buildCryptoStrategySignals(bars) {
+  return window.MoneyChartAnalysis?.detectStrategySignals(bars, cryptoChartStrategyConfig) || [];
+}
 function drawCandles(canvas, klines) {
   const ctx = canvas.getContext('2d');
   const W = canvas.width, H = canvas.height;
@@ -4847,6 +4889,8 @@ function drawCandles(canvas, klines) {
   const green = '#22c55e', red = '#ef4444';
   ctx.clearRect(0, 0, W, H);
   if (!klines.length) return;
+  loadCryptoChartStrategyConfig();
+  const strategySignals = buildCryptoStrategySignals(klines);
   const highs = klines.map(k => k.high), lows = klines.map(k => k.low);
   const maxP = Math.max(...highs), minP = Math.min(...lows);
   const range = maxP - minP || 1;
@@ -4930,6 +4974,20 @@ function drawCandles(canvas, klines) {
   drawBandLine(bb.upper, 'rgba(59,130,246,.5)');
   drawBandLine(bb.middle, 'rgba(156,163,175,.4)', true);
   drawBandLine(bb.lower, 'rgba(59,130,246,.5)');
+  strategySignals.forEach(signal => {
+    const bar = klines[signal.index]; if (!bar) return;
+    const x = padL + signal.index * cw + cw / 2;
+    const anchor = signal.side === 'buy' ? bar.low : bar.high;
+    const y = padT + chartH - ((anchor - minP) / range) * chartH + (signal.side === 'buy' ? 14 : -14);
+    const color = signal.side === 'buy' ? green : red;
+    ctx.fillStyle = color; ctx.beginPath();
+    if (signal.side === 'buy') { ctx.moveTo(x, y - 7); ctx.lineTo(x - 5, y + 3); ctx.lineTo(x + 5, y + 3); }
+    else { ctx.moveTo(x, y + 7); ctx.lineTo(x - 5, y - 3); ctx.lineTo(x + 5, y - 3); }
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = color; ctx.font = 'bold 9px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = signal.side === 'buy' ? 'top' : 'bottom';
+    ctx.fillText(signal.label, x, signal.side === 'buy' ? y + 5 : y - 5);
+  });
+  renderChartSignalList('bn-chart-signals', strategySignals, '当前周期未触发所选策略信号');
   // Legend
   ctx.font = '10px sans-serif';
   ctx.fillStyle = '#f59e0b';
@@ -7414,7 +7472,8 @@ let currentStockApiSymbol = '';
 let currentStockDays = 60;
 let stockChartReplayIndex = -1;
 let stockChartKlines = [];
-let stockChartOverlayConfig = window.MoneyChartAnalysis?.normalizeOverlayConfig() || { signals:true, patterns:false, structures:false, volume:true, indicators:{ ma:true, boll:false, macd:false }, maxLabels:80 };
+let stockChartOverlayConfig = window.MoneyChartAnalysis?.normalizeOverlayConfig({ strategies:{ maCross:true, rsiReversal:false, bollinger:false, volumeBreakout:false } }) || { signals:true, patterns:false, structures:false, volume:true, indicators:{ ma:true, boll:false, macd:false }, strategies:{ maCross:true, rsiReversal:false, bollinger:false, volumeBreakout:false }, maxLabels:80 };
+let cryptoChartStrategyConfig = { maCross:true, rsiReversal:false, bollinger:false, volumeBreakout:false };
 function stockChartStorageKey() {
   return `mm-chart-overlays:${activeMarketScope || 'stocks'}:${window._stockSelectedSymbol || currentStockSymbol || 'AAPL'}`;
 }
@@ -7429,6 +7488,9 @@ function loadStockChartOverlayConfig() {
       ? Boolean(stockChartOverlayConfig.indicators?.[name])
       : Boolean(stockChartOverlayConfig[name]);
   });
+  document.querySelectorAll('[data-chart-strategy]').forEach(input => {
+    input.checked = stockChartOverlayConfig.strategies?.[input.dataset.chartStrategy] === true;
+  });
 }
 function setStockChartOverlay(name, enabled) {
   if (['ma', 'boll', 'macd'].includes(name)) stockChartOverlayConfig.indicators[name] = Boolean(enabled);
@@ -7436,18 +7498,30 @@ function setStockChartOverlay(name, enabled) {
   try { localStorage.setItem(stockChartStorageKey(), JSON.stringify(stockChartOverlayConfig)); } catch (e) {}
   if (stockChartKlines.length) drawStockKline(document.getElementById('stock-kline'), stockChartKlines);
 }
+function setStockChartStrategy(name, enabled) {
+  if (!stockChartOverlayConfig.strategies) stockChartOverlayConfig.strategies = {};
+  stockChartOverlayConfig.strategies[name] = Boolean(enabled);
+  try { localStorage.setItem(stockChartStorageKey(), JSON.stringify(stockChartOverlayConfig)); } catch (e) {}
+  if (stockChartKlines.length) drawStockKline(document.getElementById('stock-kline'), stockChartKlines);
+}
 function buildStockStrategySignals(bars) {
   const analysis = window.MoneyChartAnalysis;
-  if (!analysis) return [];
-  const fast = analysis.movingAverage(bars, 5);
-  const slow = analysis.movingAverage(bars, 20);
-  const signals = [];
-  for (let index = 1; index < bars.length; index += 1) {
-    if (fast[index] == null || slow[index] == null || fast[index - 1] == null || slow[index - 1] == null) continue;
-    if (fast[index] >= slow[index] && fast[index - 1] < slow[index - 1]) signals.push({ index, side:'buy', label:'均线金叉' });
-    if (fast[index] <= slow[index] && fast[index - 1] > slow[index - 1]) signals.push({ index, side:'sell', label:'均线死叉' });
+  return analysis?.detectStrategySignals(bars, stockChartOverlayConfig.strategies || {}) || [];
+}
+function renderChartSignalList(targetId, signals, emptyText) {
+  const el = document.getElementById(targetId);
+  if (!el) return;
+  const recent = (signals || []).slice(-6).reverse();
+  if (!recent.length) {
+    el.innerHTML = `<span class="chart-signal-empty">${emptyText}</span>`;
+    return;
   }
-  return signals;
+  el.innerHTML = recent.map(signal => {
+    const time = signal.time ? new Date(signal.time).toLocaleDateString('zh-CN', { month:'numeric', day:'numeric' }) : '--';
+    const price = Number(signal.price);
+    const priceText = Number.isFinite(price) ? (price >= 1000 ? price.toFixed(0) : price.toFixed(2)) : '--';
+    return `<span class="chart-signal-item ${signal.side === 'buy' ? 'buy' : 'sell'}" title="${stockEscapeHtml(signal.reason || '')}">${signal.side === 'buy' ? '▲' : '▼'} ${stockEscapeHtml(signal.label)} · ${time} · ${priceText}</span>`;
+  }).join('');
 }
 function stepStockChartReplay(action) {
   if (!stockChartKlines.length || !window.MoneyChartAnalysis) return;
@@ -7590,6 +7664,8 @@ function drawStockKline(canvas, klines) {
     if (signal.side === 'buy') { ctx.moveTo(x, y - 8); ctx.lineTo(x - 6, y + 3); ctx.lineTo(x + 6, y + 3); }
     else { ctx.moveTo(x, y + 8); ctx.lineTo(x - 6, y - 3); ctx.lineTo(x + 6, y - 3); }
     ctx.closePath(); ctx.fill();
+    ctx.font = 'bold 9px Inter, system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = signal.side === 'buy' ? 'top' : 'bottom';
+    ctx.fillText(signal.label, x, signal.side === 'buy' ? y + 5 : y - 5);
   });
   overlays.patterns.forEach(item => {
     const bar = klines[item.index]; if (!bar) return;
@@ -7616,6 +7692,7 @@ function drawStockKline(canvas, klines) {
   if (overlays.config.signals) legend.push(['策略点位', '#22c55e']);
   ctx.textAlign = 'right';
   legend.forEach(([label, color], index) => { ctx.fillStyle = color; ctx.fillText(label, W - 8 - index * 58, 12); });
+  renderChartSignalList('stock-chart-signals', overlays.signals, '当前周期未触发所选策略信号');
 }
 // --- DeFi Data ---
 async function loadDefiData() {
@@ -8356,7 +8433,11 @@ async function loadMarketTimeline() {
     if (!isCurrentMarketScopeToken(scopeToken) || signal.aborted) return;
 
     if (!payload.data || !payload.data.length) {
-      host.innerHTML = '<div style="color:var(--text-secondary);padding:14px 0;">当前市场暂无事件与新闻。</div>';
+      const statuses = Object.values(payload.sourceStatus || {});
+      const unavailable = statuses.length > 0 && statuses.every(status => status === 'unavailable');
+      host.innerHTML = unavailable
+        ? '<div style="color:var(--yellow);padding:14px 0;">事件数据源暂未接入或暂时不可用，请稍后刷新。</div>'
+        : '<div style="color:var(--text-secondary);padding:14px 0;">当前市场暂无事件与新闻。</div>';
       return;
     }
 

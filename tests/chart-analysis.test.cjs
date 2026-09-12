@@ -40,3 +40,14 @@ test('replay actions stay within the available bar range', () => {
   assert.equal(analysis.stepReplay(4, 5, 'reset'), 0);
   assert.equal(analysis.stepReplay(4, 0, 'next'), -1);
 });
+
+test('detects selectable strategy signals with a strategy label and price', () => {
+  const series = Array.from({ length: 35 }, (_, index) => {
+    const close = index < 20 ? 100 - index * 0.8 : 84 + (index - 20) * 1.5;
+    return { time: index + 1, open: close - 0.4, high: close + 0.6, low: close - 0.8, close, volume: 100 + index };
+  });
+  const found = analysis.detectStrategySignals(series, { maCross: true, rsiReversal: true, bollinger: true, volumeBreakout: true });
+  assert.ok(found.length > 0);
+  assert.ok(found.every(item => Number.isInteger(item.index) && item.price > 0 && item.strategy && item.label));
+  assert.ok(found.some(item => item.strategy === 'maCross'));
+});

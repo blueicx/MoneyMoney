@@ -135,6 +135,91 @@
     return structures;
   }
 
+  function relativeStrengthIndex(inputBars, period = 14) {
+    const bars = inputBars.map(normalizeBar);
+    const size = Math.max(2, Math.floor(period));
+    const values = bars.map(() => null);
+    if (bars.length <= size) return values;
+    let gains = 0;
+    let losses = 0;
+    for (let index = 1; index <= size; index += 1) {
+      const change = bars[index].close - bars[index - 1].close;
+      if (change >= 0) gains += change;
+      else losses -= change;
+    }
+    const toRsi = () => {
+      if (losses === 0) return gains === 0 ? 50 : 100;
+      return 100 - (100 / (1 + gains / losses));
+    };
+    values[size] = toRsi();
+    for (let index = size + 1; index < bars.length; index += 1) {
+      const change = bars[index].close - bars[index - 1].close;
+      const gain = Math.max(0, change);
+      const loss = Math.max(0, -change);
+      gains = ((gains * (size - 1)) + gain) / size;
+      losses = ((losses * (size - 1)) + loss) / size;
+      values[index] = toRsi();
+    }
+    return values;
+  }
+
+  function detectStrategySignals(inputBars = [], enabled = {}) {
+    const bars = inputBars.map(normalizeBar);
+    const options = {
+      maCross: enabled.maCross !== false,
+      rsiReversal: enabled.rsiReversal === true,
+      bollinger: enabled.bollinger === true,
+      volumeBreakout: enabled.volumeBreakout === true,
+    };
+    const found = [];
+    const add = (index, side, strategy, label, reason) => {
+      const bar = bars[index];
+      if (!bar) return;
+      found.push({ index, side, strategy, label, reason, price: bar.close, time: bar.time });
+    };
+
+    if (options.maCross) {
+      const fast = movingAverage(bars, 5);
+      const slow = movingAverage(bars, 20);
+      for (let index = 1; index < bars.length; index += 1) {
+        if ([fast[index], slow[index], fast[index - 1], slow[index - 1]].some(value => value == null)) continue;
+        if (fast[index] >= slow[index] && fast[index - 1] < slow[index - 1]) add(index, 'buy', 'maCross', '均线金叉', 'MA5 上穿 MA20');
+        if (fast[index] <= slow[index] && fast[index - 1] > slow[index - 1]) add(index, 'sell', 'maCross', '均线死叉', 'MA5 下穿 MA20');
+      }
+    }
+
+    if (options.rsiReversal) {
+      const rsi = relativeStrengthIndex(bars);
+      for (let index = 1; index < bars.length; index += 1) {
+        if (rsi[index] == null || rsi[index - 1] == null) continue;
+        if (rsi[index - 1] <= 30 && rsi[index] > 30) add(index, 'buy', 'rsiReversal', 'RSI反转买入', `RSI ${rsi[index].toFixed(1)} 收复30`);
+        if (rsi[index - 1] >= 70 && rsi[index] < 70) add(index, 'sell', 'rsiReversal', 'RSI反转卖出', `RSI ${rsi[index].toFixed(1)} 跌破70`);
+      }
+    }
+
+    if (options.bollinger) {
+      const bands = bollingerBands(bars);
+      for (let index = 1; index < bars.length; index += 1) {
+        const previous = bands[index - 1], current = bands[index];
+        if (!previous || !current || previous.lower == null || current.lower == null) continue;
+        if (bars[index - 1].close <= previous.lower && bars[index].close > current.lower) add(index, 'buy', 'bollinger', '布林下轨反转', '价格重新站回布林下轨');
+        if (bars[index - 1].close >= previous.upper && bars[index].close < current.upper) add(index, 'sell', 'bollinger', '布林上轨反转', '价格重新跌回布林上轨');
+      }
+    }
+
+    if (options.volumeBreakout) {
+      const period = 20;
+      for (let index = period; index < bars.length; index += 1) {
+        const average = bars.slice(index - period, index).reduce((sum, bar) => sum + bar.volume, 0) / period;
+        if (!average || bars[index].volume < average * 1.5) continue;
+        const change = bars[index].close - bars[index - 1].close;
+        if (change > 0) add(index, 'buy', 'volumeBreakout', '放量突破买入', `成交量是20日均量的 ${(bars[index].volume / average).toFixed(1)} 倍`);
+        if (change < 0) add(index, 'sell', 'volumeBreakout', '放量突破卖出', `成交量是20日均量的 ${(bars[index].volume / average).toFixed(1)} 倍`);
+      }
+    }
+    return found.sort((left, right) => left.index - right.index || left.strategy.localeCompare(right.strategy));
+  }
+
   function buildChartOverlays({ bars = [], signals = [], config = {} } = {}) {
     const normalized = bars.map(normalizeBar);
     const options = normalizeOverlayConfig(config);
@@ -163,5 +248,5 @@
     return current;
   }
 
-  return { DEFAULT_CONFIG, normalizeOverlayConfig, detectCandlestickPatterns, detectStructures, movingAverage, bollingerBands, buildChartOverlays, stepReplay };
+  return { DEFAULT_CONFIG, normalizeOverlayConfig, detectCandlestickPatterns, detectStructures, detectStrategySignals, movingAverage, bollingerBands, buildChartOverlays, stepReplay };
 });

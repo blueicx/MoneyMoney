@@ -22,6 +22,11 @@ test('stock chart exposes user-selectable analysis overlays and replay controls'
   assert.ok(document.querySelector('[data-chart-overlay="signals"]'));
   assert.ok(document.querySelector('[data-chart-overlay="patterns"]'));
   assert.ok(document.querySelector('[data-chart-overlay="boll"]'));
+  assert.ok(document.querySelector('[data-chart-strategy="maCross"]'));
+  assert.ok(document.querySelector('[data-chart-strategy="rsiReversal"]'));
+  assert.ok(document.querySelector('#stock-chart-signals'));
+  assert.ok(document.querySelector('#bn-chart-strategies'));
+  assert.ok(document.querySelector('#bn-chart-signals'));
   assert.ok(document.querySelector('[data-chart-replay="next"]'));
 });
 

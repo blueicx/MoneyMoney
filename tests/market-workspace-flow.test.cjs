@@ -70,6 +70,11 @@ test('筛选结果提供同市场详情、候选和回测动作', () => {
   assert.match(html, /setWorkspaceInstrument\(instrument\.symbol\)/);
 });
 
+test('事件时间线区分无事件和事件数据源不可用', () => {
+  assert.match(html, /payload\.sourceStatus/);
+  assert.match(html, /数据源暂未接入或暂时不可用/);
+});
+
 test('具体工作区只显示当前正文模块，并在总览时恢复市场模块', () => {
   assert.match(html, /data-workspace-id="insider"/);
   assert.match(html, /data-workspace-id="institutional"/);
