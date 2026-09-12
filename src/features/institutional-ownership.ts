@@ -67,7 +67,7 @@ export interface InstitutionalOwnershipRadar {
   source: string;
 }
 
-const ADVISOR_SYMBOLS = ['AAPL', 'MSFT', 'NVDA', 'TSLA'];
+const ADVISOR_SYMBOLS = ['AAPL', 'MSFT', 'NVDA', 'AMZN', 'GOOGL', 'META', 'TSLA'];
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 MoneyMoney/1.0';
 const CACHE_TTL_MS = 6 * 60 * 60_000;
 

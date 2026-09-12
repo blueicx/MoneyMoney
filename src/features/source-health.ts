@@ -1,6 +1,7 @@
 import { getPredictionRadar } from './prediction-radar';
 import { aiCommentaryConfigured } from './ai-commentary';
 import { ResilientDataSourceAdapter, type SourceStatus } from '../data/source-adapter';
+import { stockDataService } from './stock-data-service';
 
 export interface SourceHealthItem {
   id: string;
@@ -13,6 +14,7 @@ export interface SourceHealthItem {
   checkedAt: string;
   status?: SourceStatus;
   expiresAt?: string;
+  capabilities?: string[];
 }
 
 export interface SourceHealthReport {
@@ -28,7 +30,22 @@ interface HealthCache {
   expiresAt: number;
 }
 
-let cache: HealthCache | null = null;
+const caches = new Map<string, HealthCache>();
+
+const SOURCE_CAPABILITIES: Record<string, string[]> = {
+  'nasdaq-public-quote': ['quote'],
+  'nasdaq-public-history': ['history'],
+  'sec-edgar-submissions': ['filings'],
+  'sec-edgar-companyfacts': ['fundamentals', 'filings'],
+  'binance-public': ['quote', 'history', 'derivatives'],
+  'predict-graphql': ['markets', 'orderbook'],
+  'open-meteo': ['weather-evidence'],
+  openrouter: ['ai-commentary'],
+};
+
+export function capabilitiesForSource(source: string): string[] {
+  return [...(SOURCE_CAPABILITIES[source] || [])];
+}
 
 function friendlyError(value: unknown): string {
   const text = String(value || '未知错误');
@@ -51,7 +68,7 @@ async function timedJson(
       id: key,
       group: 'health-check',
       timeoutMs,
-      retries: 2,
+      retries: 0,
       fetcher: async (_input, signal) => {
         const response = await fetch(url, {
           ...init,
@@ -70,7 +87,7 @@ async function timedJson(
   }
   const snapshot = await adapter.fetch();
   return {
-    ok: snapshot.status === 'fresh' || snapshot.status === 'stale',
+    ok: snapshot.status === 'live' || snapshot.status === 'stale',
     latencyMs: snapshot.latencyMs || 0,
     payload: snapshot.data,
     error: snapshot.error ? new Error(snapshot.error) : undefined,
@@ -98,21 +115,80 @@ function radarItem(
       ? (state.count > 0 ? `${state.count} 个市场` : '连接成功，暂无开放市场')
       : friendlyError(state.error),
     checkedAt: state.checkedAt || new Date().toISOString(),
-    status: unconfigured ? 'unconfigured' : state.ok ? 'fresh' : 'failed',
+    status: unconfigured ? 'unconfigured' : state.ok ? 'live' : 'unavailable',
     expiresAt: new Date(Date.now() + 30_000).toISOString(),
   };
 }
 
-async function buildSourceHealth(): Promise<SourceHealthReport> {
-  // This normally reuses the warm radar cache, so the panel does not duplicate
-  // the radar's network work. On a fresh install it may wait for one warm-up.
-  const radar = await getPredictionRadar('', 1);
-  const checkedAt = new Date().toISOString();
-  const source = radar.sources || {};
-  const optionalConfigured: boolean[] = [];
+async function stockHealthItems(quick = false): Promise<SourceHealthItem[]> {
+  const data = quick
+    ? { snapshots: [(await stockDataService.quote('AAPL')).snapshot] }
+    : await stockDataService.overview('AAPL');
+  const names: Record<string, string> = {
+    'nasdaq-public-quote': 'Nasdaq 公共报价',
+    'nasdaq-public-history': 'Nasdaq 公共历史行情',
+    'sec-edgar-submissions': 'SEC EDGAR 申报',
+    'sec-edgar-companyfacts': 'SEC EDGAR 公司事实',
+  };
+  return data.snapshots.map(snapshot => {
+    const hasData = snapshot.data != null;
+    const usable = hasData && (snapshot.status === 'live' || snapshot.status === 'fallback' || snapshot.status === 'stale');
+    return {
+      id: snapshot.source,
+      name: names[snapshot.source] || snapshot.source,
+      group: '股票数据',
+      ok: usable,
+      configured: true,
+      latencyMs: snapshot.latencyMs,
+      detail: usable
+        ? `${snapshot.status === 'fallback' ? '使用降级源' : snapshot.status === 'stale' ? '使用旧缓存' : '正常'} · 数据时间 ${snapshot.fetchedAt}`
+        : friendlyError(snapshot.error),
+      checkedAt: snapshot.fetchedAt,
+      status: snapshot.status,
+      expiresAt: snapshot.expiresAt,
+    };
+  });
+}
 
-  const [predict, binance, openMeteo] = await Promise.all([
-    timedJson('https://graphql.predict.fun/graphql', 6_000, {
+async function buildSourceHealth(scope = 'all'): Promise<SourceHealthReport> {
+  const checkedAt = new Date().toISOString();
+
+  const safeStockHealth = async (quick = false) => {
+    try {
+      return await Promise.race([
+        stockHealthItems(quick),
+        new Promise<SourceHealthItem[]>((_, reject) => {
+          const t = setTimeout(() => reject(new Error('timeout')), 1500);
+          if (t.unref) t.unref();
+        })
+      ]);
+    } catch {
+      return [];
+    }
+  };
+
+  if (scope === 'stocks') {
+    const items = await safeStockHealth(true);
+    return { updatedAt: checkedAt, total: items.length, online: items.filter(item => item.ok).length, configuredOptional: 0, items };
+  }
+
+  const optionalConfigured: boolean[] = [];
+  const aiConfigured = aiCommentaryConfigured();
+  optionalConfigured.push(aiConfigured);
+
+  const radarCheck = scope === 'prediction'
+    ? Promise.race([
+      getPredictionRadar('', 1),
+      new Promise<any>((_, reject) => {
+        const t = setTimeout(() => reject(new Error('timeout')), 1500);
+        if (t.unref) t.unref();
+      })
+    ])
+    : Promise.resolve({ sources: {} });
+
+  const [radarSettled, predictSettled, binanceSettled, openMeteoSettled, stockSettled] = await Promise.allSettled([
+    radarCheck,
+    timedJson('https://graphql.predict.fun/graphql', 1500, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -120,12 +196,19 @@ async function buildSourceHealth(): Promise<SourceHealthReport> {
         variables: {},
       }),
     }),
-    timedJson('https://api.binance.com/api/v3/ping', 4_000),
-    timedJson('https://api.open-meteo.com/v1/forecast?latitude=39.9042&longitude=116.4074&current=temperature_2m', 5_000),
+    timedJson('https://api.binance.com/api/v3/ping', 1500),
+    timedJson('https://api.open-meteo.com/v1/forecast?latitude=39.9042&longitude=116.4074&current=temperature_2m', 1500),
+    Promise.resolve([])
   ]);
 
-  const aiConfigured = aiCommentaryConfigured();
-  optionalConfigured.push(aiConfigured);
+  const radar = radarSettled.status === 'fulfilled' ? radarSettled.value : { sources: {} };
+  const source = radar?.sources || {};
+
+  const extractJson = (res: any) => res.status === 'fulfilled' ? res.value : { ok: false, error: new Error('unavailable') };
+  const predict = extractJson(predictSettled);
+  const binance = extractJson(binanceSettled);
+  const openMeteo = extractJson(openMeteoSettled);
+  const resolvedStockItems = stockSettled.status === 'fulfilled' ? stockSettled.value : [];
 
   const extraItems: SourceHealthItem[] = [
     {
@@ -133,12 +216,12 @@ async function buildSourceHealth(): Promise<SourceHealthReport> {
       name: 'Predict.fun GraphQL',
       group: '交易数据',
       ok: predict.ok && !!predict.payload?.data?.categories,
-      latencyMs: predict.latencyMs,
+      latencyMs: predict.latencyMs || null,
       detail: predict.ok
         ? `正常 · ${Number(predict.payload?.data?.categories?.totalCount || 0)} 个事件`
         : friendlyError(predict.error),
       checkedAt,
-      status: predict.ok ? 'fresh' : 'failed',
+      status: predict.ok ? 'live' : 'unavailable',
       expiresAt: new Date(Date.now() + 30_000).toISOString(),
     },
     {
@@ -146,10 +229,10 @@ async function buildSourceHealth(): Promise<SourceHealthReport> {
       name: '币安公共行情',
       group: '加密与宏观',
       ok: binance.ok,
-      latencyMs: binance.latencyMs,
+      latencyMs: binance.latencyMs || null,
       detail: binance.ok ? '正常' : friendlyError(binance.error),
       checkedAt,
-      status: binance.ok ? 'fresh' : 'failed',
+      status: binance.ok ? 'live' : 'unavailable',
       expiresAt: new Date(Date.now() + 30_000).toISOString(),
     },
     {
@@ -157,10 +240,10 @@ async function buildSourceHealth(): Promise<SourceHealthReport> {
       name: 'Open-Meteo 天气',
       group: '天气证据',
       ok: openMeteo.ok && openMeteo.payload?.current != null,
-      latencyMs: openMeteo.latencyMs,
+      latencyMs: openMeteo.latencyMs || null,
       detail: openMeteo.ok ? '预报接口正常' : friendlyError(openMeteo.error),
       checkedAt,
-      status: openMeteo.ok ? 'fresh' : 'failed',
+      status: openMeteo.ok ? 'live' : 'unavailable',
       expiresAt: new Date(Date.now() + 30_000).toISOString(),
     },
     {
@@ -172,7 +255,7 @@ async function buildSourceHealth(): Promise<SourceHealthReport> {
       latencyMs: null,
       detail: aiConfigured ? '已配置；实际生成时检查模型可用性' : '未配置 OPENROUTER_API_KEY',
       checkedAt,
-      status: aiConfigured ? 'fresh' : 'unconfigured',
+      status: aiConfigured ? 'live' : 'unconfigured',
       expiresAt: new Date(Date.now() + 30_000).toISOString(),
     },
   ];
@@ -183,8 +266,9 @@ async function buildSourceHealth(): Promise<SourceHealthReport> {
     radarItem('Manifold', source.manifold || { ok: false, count: 0, error: '尚未检查', checkedAt }),
     radarItem('Good Judgment Open', source.gjopen || { ok: false, count: 0, error: '尚未检查', checkedAt }),
     radarItem('Metaculus', source.metaculus || { ok: false, count: 0, error: '尚未检查', checkedAt }, /未配置/.test(String(source.metaculus?.error || '')) ? false : undefined),
+    ...resolvedStockItems,
     ...extraItems,
-  ];
+  ].map(item => ({ ...item, capabilities: capabilitiesForSource(item.id) }));
 
   return {
     updatedAt: checkedAt,
@@ -195,9 +279,61 @@ async function buildSourceHealth(): Promise<SourceHealthReport> {
   };
 }
 
-export async function getSourceHealth(): Promise<SourceHealthReport> {
-  if (cache && cache.expiresAt > Date.now()) return cache.value;
-  const value = await buildSourceHealth();
-  cache = { value, expiresAt: Date.now() + 30_000 };
-  return value;
+function buildDegradedReport(scope: string): SourceHealthReport {
+  return {
+    updatedAt: new Date().toISOString(),
+    total: 1,
+    online: 0,
+    configuredOptional: 0,
+    items: [{
+      id: 'system-degraded',
+      name: '系统状态',
+      group: '系统',
+      ok: false,
+      latencyMs: null,
+      detail: '健康检查超时，后台尝试中...',
+      checkedAt: new Date().toISOString(),
+      status: 'unavailable'
+    }]
+  };
+}
+
+let refreshPromise = new Map<string, Promise<SourceHealthReport>>();
+
+export async function getSourceHealth(scope = 'all'): Promise<SourceHealthReport> {
+  const cache = caches.get(scope);
+  const now = Date.now();
+
+  if (!refreshPromise.has(scope) && (!cache || cache.expiresAt <= now)) {
+    const promise = buildSourceHealth(scope).then(value => {
+      caches.set(scope, { value, expiresAt: Date.now() + 30_000 });
+      return value;
+    }).catch(err => {
+      console.error('Background refresh failed for health scope:', scope, err);
+      const fallback = buildDegradedReport(scope);
+      if (!caches.has(scope)) {
+        caches.set(scope, { value: fallback, expiresAt: Date.now() + 10_000 });
+      }
+      return fallback;
+    }).finally(() => {
+      refreshPromise.delete(scope);
+    });
+    refreshPromise.set(scope, promise);
+  }
+
+  if (cache) {
+    return cache.value;
+  }
+
+  try {
+    return await Promise.race([
+      refreshPromise.get(scope)!,
+      new Promise<SourceHealthReport>((_, reject) => {
+        const t = setTimeout(() => reject(new Error('timeout')), 1500);
+        if (t.unref) t.unref();
+      })
+    ]);
+  } catch (error) {
+    return buildDegradedReport(scope);
+  }
 }

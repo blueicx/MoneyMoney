@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { stateStore } from '../storage/sqlite-state';
+import { MARKET_SCOPES, type MarketScope } from './market-scope';
 
 export interface TelegramNotificationPreferences {
   signals: boolean;
@@ -89,6 +90,7 @@ export interface TelegramAuditRecord {
 
 interface TelegramCommandCenterState {
   version: 2;
+  activeMarketScopes: Record<string, MarketScope>;
   preferences: Record<string, TelegramChatPreferences>;
   priceAlerts: TelegramPriceAlert[];
   smartAlerts: TelegramSmartAlert[];
@@ -200,7 +202,7 @@ export function sparkline(values: number[]): string {
 }
 
 function emptyState(): TelegramCommandCenterState {
-  return { version: 2, preferences: {}, priceAlerts: [], smartAlerts: [], watchlists: {}, policies: {}, journal: [], pending: [], audits: [] };
+  return { version: 2, activeMarketScopes: {}, preferences: {}, priceAlerts: [], smartAlerts: [], watchlists: {}, policies: {}, journal: [], pending: [], audits: [] };
 }
 
 function defaultAlertPolicy(): TelegramAlertPolicy {
@@ -225,6 +227,19 @@ export class TelegramCommandCenterStore {
     this.useSqlite = !stateFile;
     this.stateFile = stateFile || path.resolve('data/telegram-command-center.json');
     this.state = this.load();
+  }
+
+  getActiveMarketScope(chatId: string): MarketScope {
+    const scope = this.state.activeMarketScopes[String(chatId)];
+    return scope && MARKET_SCOPES.includes(scope) ? scope : 'overview';
+  }
+
+  setActiveMarketScope(chatId: string, scope: string): MarketScope {
+    const normalized = String(scope || '').trim().toLowerCase() as MarketScope;
+    const selected = MARKET_SCOPES.includes(normalized) ? normalized : 'overview';
+    this.state.activeMarketScopes[String(chatId)] = selected;
+    this.save();
+    return selected;
   }
 
   getPreferences(chatId: string): TelegramChatPreferences {
@@ -505,6 +520,7 @@ export class TelegramCommandCenterStore {
           ...emptyState(),
           ...stored,
           version: 2,
+          activeMarketScopes: stored.activeMarketScopes || {},
           preferences: stored.preferences || {},
           priceAlerts: Array.isArray(stored.priceAlerts) ? stored.priceAlerts : [],
           smartAlerts: Array.isArray(stored.smartAlerts) ? stored.smartAlerts : [],
@@ -522,6 +538,7 @@ export class TelegramCommandCenterStore {
       if (version === 1 || version === 2) {
         return {
           version: 2,
+          activeMarketScopes: (parsed as any).activeMarketScopes || {},
           preferences: parsed.preferences || {},
           priceAlerts: Array.isArray(parsed.priceAlerts) ? parsed.priceAlerts : [],
           smartAlerts: Array.isArray((parsed as any).smartAlerts) ? (parsed as any).smartAlerts : [],

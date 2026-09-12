@@ -72,7 +72,7 @@ export class BinanceFeed {
     } catch { return []; }
   }
 
-  async getDepth(symbol: string, limit: number = 20): Promise<{ bids: number[][]; asks: number[][] } | null> {
+  async getDepth(symbol: string, limit: number = 20): Promise<{ bids: number[][]; asks: number[][]; spread?: number; liquidity?: number; sourceStatus: string; freshness: number } | null> {
     const key = 'depth:' + symbol + ':' + limit;
     const cached = this.cache.get(key);
     if (cached && Date.now() - cached.time < this.ttlMs * 3) return cached.data;
@@ -81,15 +81,73 @@ export class BinanceFeed {
         `${this.baseUrl}/api/v3/depth?symbol=${symbol}&limit=${limit}`,
         { signal: AbortSignal.timeout(8000) }
       );
-      if (!res.ok) return null;
+      if (!res.ok) {
+        return { bids: [], asks: [], sourceStatus: res.status === 429 ? 'rate-limited' : 'error', freshness: Date.now() };
+      }
       const d: any = await res.json() as any;
-      const depth = {
-        bids: d.bids.map((b: string[]) => [parseFloat(b[0]), parseFloat(b[1])]),
-        asks: d.asks.map((a: string[]) => [parseFloat(a[0]), parseFloat(a[1])]),
-      };
+      const bids = d.bids.map((b: string[]) => [parseFloat(b[0]), parseFloat(b[1])]);
+      const asks = d.asks.map((a: string[]) => [parseFloat(a[0]), parseFloat(a[1])]);
+
+      let spread = 0;
+      if (bids.length > 0 && asks.length > 0) {
+        spread = asks[0][0] - bids[0][0];
+      }
+
+      let liquidity = 0;
+      bids.forEach((b: number[]) => liquidity += b[1]);
+      asks.forEach((a: number[]) => liquidity += a[1]);
+
+      const depth = { bids, asks, spread, liquidity, sourceStatus: 'ok', freshness: Date.now() };
       this.cache.set(key, { data: depth, time: Date.now() });
       return depth;
-    } catch { return null; }
+    } catch (e: any) {
+      return { bids: [], asks: [], sourceStatus: e.name === 'TimeoutError' ? 'timeout' : 'error', freshness: Date.now() };
+    }
+  }
+
+  async getDerivatives(symbol: string): Promise<{ symbol: string; openInterest: number; fundingRate: number; sourceStatus: string; freshness: number } | null> {
+    const key = 'derivatives:' + symbol;
+    const cached = this.cache.get(key);
+    if (cached && Date.now() - cached.time < this.ttlMs * 5) return cached.data;
+    try {
+      // Free public endpoints for Futures
+      const [oiRes, premiumRes] = await Promise.all([
+        fetch(`https://fapi.binance.com/fapi/v1/openInterest?symbol=${symbol}`, { signal: AbortSignal.timeout(8000) }).catch(() => null),
+        fetch(`https://fapi.binance.com/fapi/v1/premiumIndex?symbol=${symbol}`, { signal: AbortSignal.timeout(8000) }).catch(() => null)
+      ]);
+
+      let openInterest = 0;
+      let fundingRate = 0;
+      let sourceStatus = 'ok';
+      let successfulSources = 0;
+      let failedSources = 0;
+
+      if (oiRes) {
+        if (oiRes.status === 429) sourceStatus = 'rate-limited';
+        else if (oiRes.ok) {
+          const oiData = await oiRes.json() as any;
+          openInterest = parseFloat(oiData.openInterest || '0');
+          successfulSources += 1;
+        } else {
+          failedSources += 1;
+        }
+      } else failedSources += 1;
+
+      if (premiumRes && premiumRes.ok) {
+        const premiumData = await premiumRes.json() as any;
+        fundingRate = parseFloat(premiumData.lastFundingRate || '0');
+        successfulSources += 1;
+      } else failedSources += 1;
+
+      if (successfulSources === 0) sourceStatus = sourceStatus === 'rate-limited' ? 'rate-limited' : 'error';
+      else if (failedSources > 0 && sourceStatus === 'ok') sourceStatus = 'partial';
+
+      const result = { symbol, openInterest, fundingRate, sourceStatus, freshness: Date.now() };
+      this.cache.set(key, { data: result, time: Date.now() });
+      return result;
+    } catch (e: any) {
+      return { symbol, openInterest: 0, fundingRate: 0, sourceStatus: e.name === 'TimeoutError' ? 'timeout' : 'error', freshness: Date.now() };
+    }
   }
 
   async getTopMovers(): Promise<{ gainers: any[]; losers: any[] }> {

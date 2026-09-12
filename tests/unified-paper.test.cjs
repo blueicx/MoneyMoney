@@ -29,6 +29,13 @@ ledger = markUnifiedPaperPrices(ledger, new Map([['stock:us:AAPL', 120], ['predi
 const performance = calculateUnifiedPerformance(ledger);
 assert.equal(performance.unrealizedPnl, 10);
 assert.equal(performance.totalTrades, 3);
+assert.equal(performance.feeSlippageTotal, 0);
+assert.equal(performance.isRecovered, true);
+assert.ok(performance.concentrationPct > 0);
+assert.ok(performance.attributionByAsset['stock'] !== undefined);
+assert.ok(performance.marketExposure.stock > 0);
+assert.ok(performance.strategyAttribution.unattributed !== undefined);
+assert.equal(performance.stressTests.length, 3);
 
 const replay = replayUnifiedPaperOrders({ startingCash: 1000, orders: [
   { instrumentId: 'crypto:binance:BTCUSDT', instrumentType: 'crypto', side: 'BUY', price: 100, quantity: 1, timestamp: '2026-09-08T00:00:00.000Z' },
@@ -36,6 +43,16 @@ const replay = replayUnifiedPaperOrders({ startingCash: 1000, orders: [
 ] });
 assert.equal(replay.realizedPnl, 20);
 assert.throws(() => replayUnifiedPaperOrders({ startingCash: 1000, orders: [{ instrumentId: 'crypto:binance:BTCUSDT', instrumentType: 'crypto', side: 'BUY', price: 100, quantity: 1, timestamp: '2026-09-08T00:00:00.000Z' }], prices: {} }), /历史价格/);
+
+let costLedger = emptyUnifiedPaperLedger(1000);
+costLedger = applyUnifiedPaperOrder(costLedger, { instrumentId: 'stock:us:MSFT', instrumentType: 'stock', side: 'BUY', price: 100, quantity: 1, timestamp: '2026-09-08T04:00:00.000Z', feeUsd: 10, slippageUsd: 5 });
+costLedger = markUnifiedPaperPrices(costLedger, new Map([['stock:us:MSFT', 100]]));
+const costPerformance = calculateUnifiedPerformance(costLedger);
+assert.equal(costLedger.cash, 885);
+assert.equal(costPerformance.equity, 985);
+assert.equal(costPerformance.feeSlippageTotal, 15);
+assert.equal(costPerformance.totalPnl, -15);
+assert.equal(typeof costPerformance.strategyAttribution, 'object');
 
 
 const fsNode = require('fs');

@@ -25,6 +25,8 @@ const withSnapshot = {
     modelProbability: 0.71,
     confidence: 76,
     sources: [{ name: 'Binance', status: 'fresh', capturedAt: '2026-08-30T09:00:00Z' }],
+    strategyVersion: 'v1.2',
+    experimentParams: { threshold: 0.5 }
   }],
 };
 const summary = summarizeResearchEntry(withSnapshot);

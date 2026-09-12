@@ -10,7 +10,7 @@ test('Telegram timeline command exists and calls unifiedInstrumentService.timeli
   assert.match(server, /const \[type, venue, \.\.\.symbolParts\] = id\.split\(':'\)/);
   assert.match(server, /unifiedInstrumentService\.timeline/);
   // Invalid path check
-  assert.match(server, /'用法：\/timeline <InstrumentRef>\\n支持 stock:us:AAPL、crypto:binance:BTCUSDT、prediction:predictfun:<marketId>'/);
+  assert.match(server, /'用法：\/timeline <InstrumentRef>\\n支持 stock:us:AAPL、option:cboe:SPY、crypto:binance:BTCUSDT、prediction:predictfun:<marketId>'/);
   // Empty data check
   assert.match(server, /时间线数据暂不可用/);
   // Empty items check

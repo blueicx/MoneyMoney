@@ -52,6 +52,9 @@ export interface RecentAnalystAction {
   targetNow: number | null;
   targetOld: number | null;
   analystRankPct: number | null;
+  sourceUrl: string;
+  sourceExcerpt: string | null;
+  summaryZh: string;
 }
 
 export interface AnalystConsensusSnapshot {
@@ -104,7 +107,7 @@ export interface AnalystConsensusRadar {
   source: string;
 }
 
-const ADVISOR_SYMBOLS = ['AAPL', 'MSFT', 'NVDA', 'TSLA'];
+const ADVISOR_SYMBOLS = ['AAPL', 'MSFT', 'NVDA', 'AMZN', 'GOOGL', 'META', 'TSLA'];
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 MoneyMoney/1.0';
 const CACHE_TTL_MS = 8 * 60 * 60_000;
 
@@ -244,7 +247,7 @@ class JsLiteralParser {
           return false;
       }
     }
-    const numberMatch = /^[-+]?(?:0[xX][\da-fA-F]+|\d+(?:\.\d+)?(?:[eE][-+]?\d+)?)/.exec(rest);
+    const numberMatch = /^[-+]?(?:0[xX][\da-fA-F]+|(?:\d+(?:\.\d+)?|\.\d+)(?:[eE][-+]?\d+)?)/.exec(rest);
     if (numberMatch) {
       this.pos += numberMatch[0].length;
       const value = Number(numberMatch[0]);
@@ -347,7 +350,21 @@ function pageFallbackPrice(rawHtml: string): number {
   return num(scope.match(/[,{]p:(-?\d+(?:\.\d+)?)/)?.[1]);
 }
 
-function mapRecentAction(row: Record<string, any>): RecentAnalystAction | null {
+export function buildAnalystActionSummary(action: Pick<RecentAnalystAction, 'firm' | 'analyst' | 'date' | 'actionZh' | 'ratingNew' | 'ratingOld' | 'targetNow' | 'targetOld'>): string {
+  const identity = action.analyst && action.firm
+    ? `${action.analyst}（${action.firm}）`
+    : action.analyst || action.firm || '未注明分析师';
+  const rating = action.ratingOld && action.ratingNew && action.ratingOld !== action.ratingNew
+    ? `，评级 ${action.ratingOld} → ${action.ratingNew}`
+    : action.ratingNew ? `，评级 ${action.ratingNew}` : '';
+  const target = action.targetOld != null || action.targetNow != null
+    ? `，目标价 ${action.targetOld == null ? '—' : action.targetOld} → ${action.targetNow == null ? '—' : action.targetNow}`
+    : '';
+  const date = action.date ? `（${action.date}）` : '';
+  return `${identity}${date}${action.actionZh || '更新'}${rating}${target}。`;
+}
+
+function mapRecentAction(row: Record<string, any>, sourceUrl: string): RecentAnalystAction | null {
   const firm = text(row.firm);
   if (!firm) return null;
   const action = text(row.action_rt);
@@ -361,7 +378,7 @@ function mapRecentAction(row: Record<string, any>): RecentAnalystAction | null {
         : '维持';
   const targetNow = row.pt_now == null ? null : num(row.pt_now);
   const targetOld = row.pt_old == null ? null : num(row.pt_old);
-  return {
+  const actionRecord = {
     firm,
     analyst: text(row.analyst),
     date: text(row.date),
@@ -372,7 +389,18 @@ function mapRecentAction(row: Record<string, any>): RecentAnalystAction | null {
     targetNow: Number.isFinite(targetNow) ? targetNow : null,
     targetOld: Number.isFinite(targetOld) ? targetOld : null,
     analystRankPct: Number.isFinite(num(asRecord(row.scores).score)) ? num(asRecord(row.scores).score) : null,
+    sourceUrl,
+    sourceExcerpt: text(row.comment || row.comment_text || row.note || row.description) || null,
   };
+  return { ...actionRecord, summaryZh: buildAnalystActionSummary(actionRecord) };
+}
+
+export function parseRecentAnalystActions(rawHtml: string, sourceUrl: string): RecentAnalystAction[] {
+  if (!rawHtml.includes('}]},ratings:[')) return [];
+  return asArray(extractSerialized(rawHtml, '}]},ratings:[', '['))
+    .map(row => mapRecentAction(asRecord(row), sourceUrl))
+    .filter((row): row is RecentAnalystAction => row !== null)
+    .slice(0, 8);
 }
 
 function normalizeHistory(rows: any[]): AnalystRatingPeriod[] {
@@ -480,12 +508,7 @@ async function requestSnapshot(symbolInput: string): Promise<AnalystConsensusSna
   const targetsRecord = asRecord(extractSerialized(rawHtml, 'targets:{', '{'));
   // Some page variants omit the recent-action list; consensus and targets are
   // the required core, so this section degrades to empty rather than failing.
-  const recentRows = rawHtml.includes('}],ratings:[')
-    ? asArray(extractSerialized(rawHtml, '}],ratings:[', '['))
-      .map(row => mapRecentAction(asRecord(row)))
-      .filter((row): row is RecentAnalystAction => row !== null)
-      .slice(0, 8)
-    : [];
+  const recentRows = parseRecentAnalystActions(rawHtml, url);
 
   const period = buildCurrentPeriod(currentRatings, recommendations);
   if (!period || period.total <= 0) throw new Error('暂无分析师共识覆盖');
