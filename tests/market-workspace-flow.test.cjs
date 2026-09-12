@@ -123,3 +123,21 @@ test('右侧标的选择按当前股票工作区刷新对应数据', () => {
   assert.match(html, /setWorkspaceInstrument\(normalized\)/);
   assert.match(html, /stock-library-search-results/);
 });
+
+test('分析师工作区展示具体分析师动态、目标区间和历史趋势', () => {
+  assert.match(html, /analyst-actions/);
+  assert.match(html, /analyst-price-target-range/);
+  assert.match(html, /analyst-history-trend/);
+  assert.match(html, /sourceExcerpt/);
+  assert.match(html, /summaryZh/);
+  assert.match(html, /sourceUrl/);
+});
+
+test('基本面工作区展示历史趋势、支持因素和风险因素', () => {
+  assert.match(html, /fundamental-history-trend/);
+  assert.match(html, /fundamental-supporting-factors/);
+  assert.match(html, /fundamental-risk-factors/);
+  assert.match(html, /supportingFactors/);
+  assert.match(html, /riskFactors/);
+  assert.match(html, /missingFields/);
+});

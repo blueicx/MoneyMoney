@@ -6030,6 +6030,34 @@ async function loadFundamentalQuality(symbol, name) {
     el.innerHTML = '<div class="empty-tip"><div class="empty-tip-icon">' + (isAuthFailure ? '🔐' : '⚠️') + '</div><div><strong>' + stockEscapeHtml(currentFundamentalSymbol) + '</strong> ' + stockEscapeHtml(detail) + '</div><button class="tab" type="button" onclick="loadFundamentalQuality()" style="margin-top:10px;">🔄 重试</button></div>';
   }
 }
+function workspaceTrendSvg(values, color, label) {
+  const numbers = (Array.isArray(values) ? values : []).map(value => Number(value)).filter(Number.isFinite);
+  if (numbers.length < 2) return '<div style="height:58px;display:flex;align-items:center;color:var(--text-secondary);font-size:10.5px;">暂无足够历史数据</div>';
+  const width = 320;
+  const height = 58;
+  const pad = 5;
+  const min = Math.min(...numbers);
+  const max = Math.max(...numbers);
+  const span = max - min || 1;
+  const points = numbers.map((value, index) => {
+    const x = pad + (index * (width - pad * 2)) / Math.max(1, numbers.length - 1);
+    const y = height - pad - ((value - min) / span) * (height - pad * 2);
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(' ');
+  const first = numbers[0].toFixed(1);
+  const last = numbers[numbers.length - 1].toFixed(1);
+  const delta = (numbers[numbers.length - 1] - numbers[0]).toFixed(1);
+  return `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${safeNewsText(label)}历史趋势" style="width:100%;height:58px;margin-top:6px;overflow:visible;">
+    <line x1="5" y1="53" x2="315" y2="53" stroke="var(--border)" stroke-width="1" />
+    <polyline points="${points}" fill="none" stroke="${color}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" />
+    <text x="5" y="12" fill="var(--text-secondary)" font-size="9">${first}</text>
+    <text x="315" y="12" text-anchor="end" fill="${color}" font-size="9">${last} (${delta > 0 ? '+' : ''}${delta})</text>
+  </svg>`;
+}
+function workspaceExternalHref(value) {
+  const raw = String(value || '').trim();
+  return /^https?:\/\//i.test(raw) ? safeNewsText(raw) : '';
+}
 function renderFundamentalQuality(data) {
   const el = document.getElementById('fundamental-radar');
   if (!el) return;
@@ -6039,6 +6067,9 @@ function renderFundamentalQuality(data) {
     score >= 48 ? '#b7791f' : 'var(--red)';
   const pct = value => value == null ? '--' : (Number(value) > 0 ? '+' : '') + Number(value).toFixed(1) + '%';
   const ratio = value => value == null ? '--' : Number(value).toFixed(2);
+  const history = Array.isArray(data.history) ? data.history : [];
+  const trendValues = history.map(point => point.netMarginPct);
+  const cashTrendValues = history.map(point => point.operatingCashFlowMarginPct);
   const cards = [
     ['营收增长', pct(m.revenueGrowthPct)],
     ['毛利率', pct(m.grossMarginPct)],
@@ -6063,6 +6094,19 @@ function renderFundamentalQuality(data) {
       '<td style="padding:6px 4px;">' + ratio(point.currentRatio) + '</td>' +
     '</tr>'
   ).join('');
+  const factorCard = (item, tone) => `
+    <div style="padding:9px 10px;border-radius:9px;background:var(--bg-secondary);border-left:3px solid ${tone};">
+      <div style="display:flex;justify-content:space-between;gap:8px;font-size:11px;font-weight:800;">
+        <span>${safeNewsText(item.label)}</span><span style="color:${tone};">${safeNewsText(item.value)}</span>
+      </div>
+      <div style="margin-top:4px;color:var(--text-secondary);font-size:10.5px;line-height:1.45;">${safeNewsText(item.reason)}</div>
+    </div>`;
+  const factorPanel = (id, title, items, tone, emptyText) => `
+    <section id="${id}" style="background:var(--bg-secondary);border-radius:10px;padding:10px;min-width:0;">
+      <div style="font-weight:800;font-size:12px;color:${tone};">${title}</div>
+      <div style="display:grid;gap:7px;margin-top:8px;">${items.length ? items.map(item => factorCard(item, tone)).join('') : `<div style="font-size:10.5px;color:var(--text-secondary);padding:5px 0;">${emptyText}</div>`}</div>
+    </section>`;
+  const missing = Array.isArray(data.missingFields) ? data.missingFields : [];
   el.innerHTML = `
     <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:12px;padding:14px;">
       <div class="workspace-signal-header" style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;">
@@ -6074,6 +6118,16 @@ function renderFundamentalQuality(data) {
         <span class="workspace-signal-badge" style="color:white;background:${scoreColor};border-radius:99px;padding:5px 10px;font-size:11px;flex-shrink:0;">${score}/100 · ${safeNewsText(data.signalZh)}</span>
       </div>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(105px,1fr));gap:7px;margin-top:11px;">${cards}</div>
+      <div id="fundamental-history-trend" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:8px;margin-top:10px;">
+        <div style="background:var(--bg-secondary);border-radius:10px;padding:10px;">
+          <div style="display:flex;justify-content:space-between;gap:8px;font-size:11px;font-weight:800;"><span>净利率趋势</span><span style="color:var(--text-secondary);">${history.length ? safeNewsText(String(history[history.length - 1].endDate || '').slice(0, 10)) : '暂无历史'}</span></div>
+          ${workspaceTrendSvg(trendValues, 'var(--green)', '净利率')}
+        </div>
+        <div style="background:var(--bg-secondary);border-radius:10px;padding:10px;">
+          <div style="display:flex;justify-content:space-between;gap:8px;font-size:11px;font-weight:800;"><span>经营现金流率趋势</span><span style="color:var(--text-secondary);">${history.length ? `${history.length} 年` : '暂无历史'}</span></div>
+          ${workspaceTrendSvg(cashTrendValues, 'var(--purple)', '经营现金流率')}
+        </div>
+      </div>
       ${historyRows ? `
         <div style="overflow-x:auto;margin-top:11px;border:1px solid var(--border);border-radius:10px;">
           <table style="width:100%;border-collapse:collapse;font-size:11px;min-width:430px;">
@@ -6084,10 +6138,15 @@ function renderFundamentalQuality(data) {
             <tbody>${historyRows}</tbody>
           </table>
         </div>` : ''}
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px;margin-top:10px;">
+        ${factorPanel('fundamental-supporting-factors', '支持因素', data.supportingFactors || [], 'var(--green)', '暂无明显支持项，需结合原始指标判断。')}
+        ${factorPanel('fundamental-risk-factors', '风险因素', data.riskFactors || [], 'var(--red)', '暂无已触发风险项，不代表没有风险。')}
+      </div>
       <div style="margin-top:10px;padding:10px;border-radius:10px;background:color-mix(in srgb,${scoreColor} 8%,transparent);font-size:11px;line-height:1.55;">
         <strong>解读：</strong>${safeNewsText(data.adviceZh)}<br>
-        <span style="color:var(--text-secondary);">置信度 ${data.confidence}/100 · 官方年报天然滞后 ${data.dataAgeDays} 天${data.missingFields?.length ? ' · 缺失字段 ' + data.missingFields.length + ' 个' : ''}。</span>
+        <span style="color:var(--text-secondary);">置信度 ${data.confidence}/100 · 官方年报天然滞后 ${data.dataAgeDays} 天${missing.length ? ' · 缺失字段 ' + missing.length + ' 个' : ''}。</span>
       </div>
+      ${missing.length ? `<div style="margin-top:8px;font-size:10.5px;color:var(--text-secondary);line-height:1.45;"><strong>未覆盖字段：</strong>${missing.map(item => `<span style="display:inline-block;margin:2px 4px 0 0;padding:3px 6px;border-radius:99px;background:var(--bg-secondary);">${safeNewsText(item)}</span>`).join('')}</div>` : ''}
       <div style="margin-top:8px;font-size:10.5px;color:var(--text-secondary);line-height:1.45;">
         来源：SEC EDGAR XBRL / 10-K。基本面质量是筛选背景，不是买卖指令；估值、行业周期、最新季报和市场风险仍要一起看。
       </div>
@@ -6513,14 +6572,49 @@ function renderAnalystConsensus(data) {
       <div style="font-size:10px;color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${safeNewsText(label)}</div>
       <strong style="font-size:15px;color:${tone};">${Number(count || 0).toLocaleString()}</strong>
     </div>`;
-  const actionRows = (data.recentActions || []).map(row => `
-    <tr>
-      <td style="padding:6px 5px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${safeNewsText(row.firm)}">${safeNewsText(row.firm)}</td>
-      <td style="padding:6px 5px;">${safeNewsText(row.actionZh)}</td>
-      <td style="padding:6px 5px;">${safeNewsText(row.ratingNew || '--')}</td>
-      <td style="padding:6px 5px;text-align:right;">${row.targetNow == null ? '--' : '$' + Number(row.targetNow).toFixed(2)}</td>
-      <td style="padding:6px 5px;color:var(--text-secondary);">${safeNewsText(row.date)}</td>
-    </tr>`).join('');
+  const target = data.priceTargets || {};
+  const targetLow = Number(target.low);
+  const targetHigh = Number(target.high);
+  const currentPrice = Number(data.currentPrice);
+  const targetMedian = Number(target.median);
+  const targetMarker = Number.isFinite(currentPrice) && Number.isFinite(targetLow) && Number.isFinite(targetHigh) && targetHigh > targetLow
+    ? Math.max(0, Math.min(100, ((currentPrice - targetLow) / (targetHigh - targetLow)) * 100))
+    : 50;
+  const targetRange = Number.isFinite(targetLow) && Number.isFinite(targetHigh)
+    ? `<div id="analyst-price-target-range" style="margin-top:10px;padding:10px;border-radius:10px;background:var(--bg-secondary);">
+        <div style="display:flex;justify-content:space-between;gap:8px;font-size:11px;font-weight:800;"><span>分析师目标价区间</span><span style="color:var(--text-secondary);">${target.count || 0} 位分析师 · ${safeNewsText(target.updated || '--')}</span></div>
+        <div style="position:relative;height:12px;margin:13px 6px 7px;border-radius:99px;background:linear-gradient(90deg,var(--red),#b7791f 48%,var(--green));">
+          <span style="position:absolute;left:${targetMarker}%;top:-4px;width:3px;height:20px;border-radius:4px;background:var(--text);transform:translateX(-50%);" title="现价"></span>
+        </div>
+        <div style="display:flex;justify-content:space-between;gap:8px;color:var(--text-secondary);font-size:10.5px;"><span>低 $${Number.isFinite(targetLow) ? targetLow.toFixed(2) : '--'}</span><span>中位 $${Number.isFinite(targetMedian) ? targetMedian.toFixed(2) : '--'} · 现价 $${Number.isFinite(currentPrice) ? currentPrice.toFixed(2) : '--'}</span><span>高 $${Number.isFinite(targetHigh) ? targetHigh.toFixed(2) : '--'}</span></div>
+      </div>`
+    : '';
+  const actionCard = row => {
+    const excerpt = row.sourceExcerpt ? `“${safeNewsText(row.sourceExcerpt)}”` : safeNewsText(row.summaryZh || '暂无可验证原文，以下为结构化事实摘要。');
+    const href = workspaceExternalHref(row.sourceUrl);
+    const rating = row.ratingOld && row.ratingNew && row.ratingOld !== row.ratingNew
+      ? `${row.ratingOld} → ${row.ratingNew}` : row.ratingNew || '--';
+    const targetText = row.targetOld != null || row.targetNow != null
+      ? `$${row.targetOld == null ? '--' : Number(row.targetOld).toFixed(2)} → $${row.targetNow == null ? '--' : Number(row.targetNow).toFixed(2)}` : '--';
+    return `<article style="padding:10px;border-radius:10px;background:var(--bg-secondary);border-left:3px solid ${row.actionZh === '上调' ? 'var(--green)' : row.actionZh === '下调' ? 'var(--red)' : '#b7791f'};">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
+        <div style="min-width:0;"><strong style="font-size:12px;">${safeNewsText(row.analyst || '未注明分析师')}</strong><div style="margin-top:2px;color:var(--text-secondary);font-size:10.5px;">${safeNewsText(row.firm || '未注明机构')} · ${safeNewsText(row.date || '--')}</div></div>
+        <span style="flex:0 0 auto;color:${row.actionZh === '上调' ? 'var(--green)' : row.actionZh === '下调' ? 'var(--red)' : '#b7791f'};font-weight:800;font-size:11px;">${safeNewsText(row.actionZh || '更新')}</span>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:7px;font-size:10.5px;color:var(--text-secondary);"><span style="padding:3px 6px;border-radius:99px;background:var(--bg-card);">评级 ${safeNewsText(rating)}</span><span style="padding:3px 6px;border-radius:99px;background:var(--bg-card);">目标价 ${safeNewsText(targetText)}</span>${row.analystRankPct != null ? `<span style="padding:3px 6px;border-radius:99px;background:var(--bg-card);">历史排名 ${safeNewsText(row.analystRankPct)}%</span>` : ''}</div>
+      <div style="margin-top:7px;font-size:10.5px;line-height:1.5;color:var(--text);">${excerpt}</div>
+      ${href ? `<a href="${href}" target="_blank" rel="noreferrer" style="display:inline-block;margin-top:6px;color:var(--purple);font-size:10.5px;">查看来源 ↗</a>` : ''}
+    </article>`;
+  };
+  const actionRows = (data.recentActions || []).map(actionCard).join('');
+  const history = Array.isArray(data.history) ? data.history : [];
+  const historyScores = history.map(point => point.score);
+  const firstScore = history.length ? Number(history[0].score) : NaN;
+  const lastScore = history.length ? Number(history[history.length - 1].score) : NaN;
+  const historyPanel = `<div id="analyst-history-trend" style="margin-top:10px;padding:10px;border-radius:10px;background:var(--bg-secondary);">
+    <div style="display:flex;justify-content:space-between;gap:8px;font-size:11px;font-weight:800;"><span>共识评分历史趋势</span><span style="color:var(--text-secondary);">${history.length ? `${history.length} 个周期 · ${Number.isFinite(firstScore) && Number.isFinite(lastScore) ? (lastScore - firstScore >= 0 ? '+' : '') + (lastScore - firstScore).toFixed(2) : '--'}` : '暂无历史数据'}</span></div>
+    ${workspaceTrendSvg(historyScores, color, '共识评分')}
+  </div>`;
   const cards = [
     ['共识评分', `${Number(data.score).toFixed(2)} / 5`],
     ['覆盖分析师', data.totalAnalysts.toLocaleString()],
@@ -6555,19 +6649,16 @@ function renderAnalystConsensus(data) {
         ${ratingCard('卖出', data.ratings.sell, '#ea580c')}
         ${ratingCard('强卖', data.ratings.strongSell, 'var(--red)')}
       </div>
+      ${targetRange}
+      ${historyPanel}
       <div style="margin-top:10px;padding:10px;border-radius:10px;background:color-mix(in srgb,${color} 8%,transparent);font-size:11px;line-height:1.55;">
         <strong>解读：</strong>${safeNewsText(data.adviceZh)}
       </div>
       ${actionRows ? `
-        <div style="overflow-x:auto;margin-top:11px;border:1px solid var(--border);border-radius:10px;">
-          <table style="width:100%;border-collapse:collapse;font-size:11px;min-width:460px;">
-            <thead><tr style="background:var(--bg-secondary);color:var(--text-secondary);">
-              <th style="text-align:left;padding:7px 5px;">机构</th><th style="text-align:left;padding:7px 5px;">动作</th>
-              <th style="text-align:left;padding:7px 5px;">最新评级</th><th style="text-align:right;padding:7px 5px;">目标价</th>
-              <th style="text-align:left;padding:7px 5px;">日期</th></tr></thead>
-            <tbody>${actionRows}</tbody>
-          </table>
-        </div>` : ''}
+        <section id="analyst-actions" style="margin-top:11px;display:grid;gap:8px;">
+          <div style="font-size:12px;font-weight:800;">最近分析师动态 <span style="color:var(--text-secondary);font-weight:400;font-size:10.5px;">${(data.recentActions || []).length} 条</span></div>
+          ${actionRows}
+        </section>` : '<section id="analyst-actions" style="margin-top:11px;font-size:10.5px;color:var(--text-secondary);">暂无可读的分析师动态。</section>'}
       <small style="display:block;margin-top:9px;font-size:10.5px;color:var(--text-secondary);line-height:1.45;">
         来源：StockAnalysis 公共分析师共识 + 腾讯公共现价；评级和目标价可能滞后，置信度 ${data.confidence}/100。这是研究背景，不是买卖指令。
       </small>
