@@ -78,6 +78,18 @@ test('具体工作区只显示当前正文模块，并在总览时恢复市场�
   assert.match(html, /applyWorkspaceView\(\);/);
 });
 
+test('独立功能面板在选中后扁平展示并保持展开', () => {
+  assert.match(html, /\.dash-collapse\.workspace-panel-flat[\s\S]*border:\s*0/);
+  assert.match(html, /\.dash-collapse\.workspace-panel-flat[^}]*background:\s*transparent/);
+  assert.match(html, /\.workspace-panel-flat > summary[^}]*pointer-events:\s*none/);
+  assert.match(html, /workspace-panel-flat[^}]*collapse-chevron[^}]*display:\s*none/);
+  assert.match(html, /classList\.toggle\(['"]workspace-panel-flat['"],\s*flatPanel\)/);
+  assert.match(html, /if \(flatPanel\) node\.open = true/);
+  for (const id of ['breadth', 'insider', 'institutional', 'analyst', 'fundamentals', 'short-interest', 'option-chain', 'volatility', 'greeks', 'funding-rate', 'open-interest', 'on-chain', 'order-flow', 'prediction-radar']) {
+    assert.match(html, new RegExp(`data-workspace-id="${id}"`));
+  }
+});
+
 test('股票选择入口集中在右侧标的库并保持当前功能工作区', () => {
   assert.match(html, /id="stock-library-quick"/);
   assert.match(html, /id="stock-library-search-input"/);
