@@ -11991,7 +11991,7 @@ function mobileTab(tab) {
     }
     // Register service worker for PWA
     if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('/sw.js?v=38').catch(() => {});
+    navigator.serviceWorker.register('/sw.js?v=39').catch(() => {});
       let refreshing = false;
       navigator.serviceWorker.addEventListener('controllerchange', () => {
         if (!refreshing) {

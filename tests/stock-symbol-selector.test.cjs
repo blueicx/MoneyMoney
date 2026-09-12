@@ -3,6 +3,7 @@ const fs = require('node:fs');
 const test = require('node:test');
 
 const html = fs.readFileSync('src/web/public/index.html', 'utf8');
+const serviceWorker = fs.readFileSync('src/web/public/sw.js', 'utf8');
 
 test('stock market exposes all Magnificent Seven shortcuts', () => {
   for (const symbol of ['AAPL', 'MSFT', 'NVDA', 'AMZN', 'GOOGL', 'META', 'TSLA']) {
@@ -38,6 +39,11 @@ test('all market instrument libraries stay at the top while the center scrolls',
   for (const scope of ['stocks', 'options', 'crypto', 'prediction']) {
     assert.match(html, new RegExp(`data-market-library="${scope}"`));
   }
+});
+
+test('layout changes invalidate the cached service worker shell', () => {
+  assert.match(serviceWorker, /const CACHE_NAME = "moneymoney-v55"/);
+  assert.match(html, /serviceWorker\.register\('\/sw\.js\?v=39'\)/);
 });
 
 test('stock exclusive workspaces keep the shared market bar and scope selection tools', () => {
