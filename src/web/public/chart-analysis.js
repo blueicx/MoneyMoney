@@ -9,6 +9,7 @@
     structures: false,
     volume: true,
     indicators: { ma: true, boll: false, macd: false },
+    strategies: { maCross: true, rsiReversal: false, bollinger: false, volumeBreakout: false },
     maxLabels: 80,
   };
 
@@ -31,6 +32,7 @@
       ...DEFAULT_CONFIG,
       ...input,
       indicators: { ...DEFAULT_CONFIG.indicators, ...indicators },
+      strategies: { ...DEFAULT_CONFIG.strategies, ...(input.strategies || {}) },
       maxLabels: Math.max(1, Math.floor(finite(input.maxLabels, DEFAULT_CONFIG.maxLabels))),
     };
   }

@@ -51,3 +51,11 @@ test('detects selectable strategy signals with a strategy label and price', () =
   assert.ok(found.every(item => Number.isInteger(item.index) && item.price > 0 && item.strategy && item.label));
   assert.ok(found.some(item => item.strategy === 'maCross'));
 });
+
+test('keeps strategy defaults when loading an older overlay preference', () => {
+  const config = analysis.normalizeOverlayConfig({ signals: true, indicators: { ma: true } });
+  assert.equal(config.strategies.maCross, true);
+  assert.equal(config.strategies.rsiReversal, false);
+  assert.equal(config.strategies.bollinger, false);
+  assert.equal(config.strategies.volumeBreakout, false);
+});

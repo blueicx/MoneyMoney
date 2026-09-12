@@ -1,4 +1,4 @@
-const CACHE_NAME = "moneymoney-v56";
+const CACHE_NAME = "moneymoney-v57";
 const STATIC_ASSETS = ["/", "/manifest.json"];
 
 self.addEventListener("install", (event) => {

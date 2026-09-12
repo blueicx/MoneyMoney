@@ -49,8 +49,8 @@ test('market radar keeps the current market main panel visible', () => {
 });
 
 test('layout changes invalidate the cached service worker shell', () => {
-  assert.match(serviceWorker, /const CACHE_NAME = "moneymoney-v56"/);
-  assert.match(html, /serviceWorker\.register\('\/sw\.js\?v=40'\)/);
+  assert.match(serviceWorker, /const CACHE_NAME = "moneymoney-v57"/);
+  assert.match(html, /serviceWorker\.register\('\/sw\.js\?v=41'\)/);
 });
 
 test('stock exclusive workspaces keep the shared market bar and scope selection tools', () => {
