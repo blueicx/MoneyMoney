@@ -2529,10 +2529,27 @@ function telegramScopeHeader(scope: MarketScope): string {
   return `当前市场：${TELEGRAM_SCOPE_LABELS[scope]} · scope=${scope}`;
 }
 
+function telegramScopedCallback(prefix: string, scope: MarketScope, instrumentId: string): string {
+  return `${prefix}:${scope}:${encodeURIComponent(String(instrumentId || ''))}`;
+}
+
+function parseScopedTelegramCallback(data: string, prefix: string): { scope: MarketScope | null; id: string } {
+  const raw = String(data || '').slice(prefix.length + 1);
+  const separator = raw.indexOf(':');
+  if (separator > 0) {
+    const maybeScope = raw.slice(0, separator) as MarketScope;
+    if (MARKET_SCOPES.includes(maybeScope)) {
+      return { scope: maybeScope, id: decodeURIComponent(raw.slice(separator + 1)) };
+    }
+  }
+  return { scope: null, id: decodeURIComponent(raw) };
+}
+
 function telegramScopeForWatchId(id: string): MarketScope | null {
   const value = String(id || '').trim().toLowerCase();
   if (!value) return null;
   if (value.startsWith('stock:') || isTelegramWatchableStockId(value)) return 'stocks';
+  if (value.startsWith('option:')) return 'options';
   if (value.startsWith('crypto:')) return 'crypto';
   if (value.startsWith('prediction:') || /^\d+$/.test(value)) return 'prediction';
   return null;
@@ -2821,8 +2838,8 @@ export function getTelegramCommandHandlers(): Record<string, TelegramCommandHand
     detail: async ({ args }) => {
       const id = String(args[0] || '').trim();
       const [type, venue, ...symbolParts] = id.split(':');
-      if (!id || !['stock', 'crypto', 'prediction'].includes(type) || !venue || !symbolParts.join(':').trim()) {
-        return '用法：/detail <InstrumentRef>\n支持 stock:us:AAPL、crypto:binance:BTCUSDT、prediction:predictfun:<marketId>';
+      if (!id || !['stock', 'option', 'crypto', 'prediction'].includes(type) || !venue || !symbolParts.join(':').trim()) {
+        return '用法：/detail <InstrumentRef>\n支持 stock:us:AAPL、option:cboe:SPY、crypto:binance:BTCUSDT、prediction:predictfun:<marketId>';
       }
       const detailInfo = await unifiedInstrumentService.overview({ id, type: type as any, venue, symbol: symbolParts.join(':'), title: '', aliases: [] }).catch(() => null);
       if (!detailInfo) return '标的详情暂不可用';
@@ -2832,8 +2849,8 @@ export function getTelegramCommandHandlers(): Record<string, TelegramCommandHand
     timeline: async ({ args }) => {
       const id = String(args[0] || '').trim();
       const [type, venue, ...symbolParts] = id.split(':');
-      if (!id || !['stock', 'crypto', 'prediction'].includes(type) || !venue || !symbolParts.join(':').trim()) {
-        return '用法：/timeline <InstrumentRef>\n支持 stock:us:AAPL、crypto:binance:BTCUSDT、prediction:predictfun:<marketId>';
+      if (!id || !['stock', 'option', 'crypto', 'prediction'].includes(type) || !venue || !symbolParts.join(':').trim()) {
+        return '用法：/timeline <InstrumentRef>\n支持 stock:us:AAPL、option:cboe:SPY、crypto:binance:BTCUSDT、prediction:predictfun:<marketId>';
       }
       const data = await unifiedInstrumentService.timeline({ id, type: type as any, venue, symbol: symbolParts.join(':'), title: '', aliases: [] }).catch(() => null);
       if (!data) return '时间线数据暂不可用';
@@ -3182,7 +3199,7 @@ export function getTelegramCommandHandlers(): Record<string, TelegramCommandHand
       const unified = filterInstrumentResults(await unifiedInstrumentService.search(query).catch(() => []), scope);
       if (unified.length) {
         const lines = [`<b>${TELEGRAM_SCOPE_LABELS[scope]}标的搜索</b> · ${escapeTelegramHtml(query)}`, telegramScopeHeader(scope), ...unified.slice(0, 8).map((item, index) => `${index + 1}. ${escapeTelegramHtml(item.title)}\n   ${escapeTelegramHtml(item.id)} · ${escapeTelegramHtml(item.subtitle || '')}${item.price == null ? '' : ` · ${formatTelegramNumber(item.price, item.type === 'prediction' ? 3 : 4)}`}`)];
-        const kb = unified.slice(0, 8).map(item => [{ text: `加自选 ${String(item.title).slice(0, 8)}`, callback_data: `watch:add:${item.id}` }, { text: '查看详情', callback_data: `unified:show:${item.id}` }]);
+        const kb = unified.slice(0, 8).map(item => [{ text: `加自选 ${String(item.title).slice(0, 8)}`, callback_data: telegramScopedCallback('watch:add', scope, item.id) }, { text: '查看详情', callback_data: telegramScopedCallback('unified:show', scope, item.id) }]);
         return telegramInlineReply(lines.join('\n'), kb);
       }
       if (scope === 'options' && /^[a-z][a-z0-9.-]{0,9}$/i.test(query)) {
@@ -3198,11 +3215,11 @@ export function getTelegramCommandHandlers(): Record<string, TelegramCommandHand
         const tList = parseTencentSearch(tRaw).slice(0,4);
         if(tList.length){
           stockLines = tList.map((it, idx)=> `${idx+1}. ${escapeTelegramHtml(it.zhName||it.name||it.code)} (${escapeTelegramHtml(it.code)}) · ${escapeTelegramHtml(it.market||'')} ${it.price?(' ¥'+formatTelegramNumber(it.price,2)):''}`);
-          stockKb = buildTelegramStockSearchRows(tList);
+          stockKb = buildTelegramStockSearchRows(tList, scope === 'watchlist' ? 'watchlist' : 'stocks');
           for (let i = 0; i < tList.length; i++) {
             if (tList[i].market === '美股' || String(tList[i].code).startsWith('us')) {
               const ticker = String(tList[i].exchangeSymbol || tList[i].code).replace(/^us/i, '').replace(/\.[A-Z]+$/i, '').toUpperCase();
-              if (ticker && stockKb[i]) stockKb[i].push({ text: '查看详情', callback_data: 'unified:show:stock:us:' + ticker });
+              if (ticker && stockKb[i]) stockKb[i].push({ text: '查看详情', callback_data: telegramScopedCallback('unified:show', scope === 'watchlist' ? 'watchlist' : 'stocks', 'stock:us:' + ticker) });
             }
           }
         }
@@ -3216,7 +3233,7 @@ export function getTelegramCommandHandlers(): Record<string, TelegramCommandHand
       const allLines = [...radarLines, ...(radarLines.length && stockHeader.length ? [''] : []), ...stockHeader, '', (matches.length? '\u9884\u6d4b\u7ed3\u679c\u6765\u81ea\u96f7\u8fbe\u5feb\u7167\uff1b' : '') + (stockLines.length? '\u80a1\u7968\u884c\u60c5\u6765\u81ea\u817e\u8baf\u884c\u60c5\uff1b':'') + '\u70b9\u51fb\u6309\u94ae\u53ef\u5feb\u901f\u52a0\u5165\u81ea\u9009/\u89e3\u91ca/\u5f00\u4ed3/\u67e5\u770b\u884c\u60c5\u3002'].join('\n');
       const kb = [];
       for(const item of matches){
-        kb.push([{ text: `\u52a0\u81ea\u9009 ${String(item.titleZh || item.title).slice(0,8)}`, callback_data: `watch:add:${item.id}` }, { text: `\u89e3\u91ca`, callback_data: `explain:${item.id}` }, { text: `\u5f00\u4ed3`, callback_data: `paper:pick:${item.id}` }, { text: `查看详情`, callback_data: `unified:show:prediction:predictfun:${item.id}` }]);
+        kb.push([{ text: `\u52a0\u81ea\u9009 ${String(item.titleZh || item.title).slice(0,8)}`, callback_data: telegramScopedCallback('watch:add', scope, `prediction:predictfun:${item.id}`) }, { text: `\u89e3\u91ca`, callback_data: `explain:${item.id}` }, { text: `\u5f00\u4ed3`, callback_data: `paper:pick:${item.id}` }, { text: `查看详情`, callback_data: telegramScopedCallback('unified:show', scope, `prediction:predictfun:${item.id}`) }]);
       }
       for(const row of stockKb) kb.push(row);
       if(!kb.length) return telegramReply(allLines || '\u6682\u65e0\u7ed3\u679c');
@@ -3663,11 +3680,15 @@ ${escapeTelegramHtml(position.marketTitle)} · ${escapeTelegramHtml(position.out
 价格：${price}`, pending.nonce);
       }
       if (data.startsWith('unified:show:')) {
-        const id = data.slice('unified:show:'.length);
         const currentScope = telegramScopeForChat(ctx.chatId);
+        const parsed = parseScopedTelegramCallback(data, 'unified:show');
+        const id = parsed.id;
+        if (parsed.scope && parsed.scope !== 'overview' && parsed.scope !== 'watchlist' && currentScope !== 'overview' && currentScope !== 'watchlist' && parsed.scope !== currentScope) {
+          return telegramReply(`该按钮属于${TELEGRAM_SCOPE_LABELS[parsed.scope]}市场，请先切换当前市场。`);
+        }
         const [type, venue, ...symbolParts] = id.split(':');
-        if (!['stock', 'crypto', 'prediction'].includes(type) || !symbolParts.length) return telegramReply('统一标的 ID 无效');
-        const itemScope = type === 'stock' ? 'stocks' : type === 'crypto' ? 'crypto' : 'prediction';
+        if (!['stock', 'option', 'crypto', 'prediction'].includes(type) || !symbolParts.length) return telegramReply('统一标的 ID 无效');
+        const itemScope = type === 'stock' ? 'stocks' : type === 'option' ? 'options' : type === 'crypto' ? 'crypto' : 'prediction';
         if (currentScope !== 'overview' && currentScope !== 'watchlist' && itemScope !== currentScope) return telegramReply(`当前为${TELEGRAM_SCOPE_LABELS[currentScope]}市场，不能查看${TELEGRAM_SCOPE_LABELS[itemScope]}标的。`);
         const detail = await unifiedInstrumentService.overview({ id, type: type as any, venue, symbol: symbolParts.join(':'), title: '', aliases: [] }).catch(() => null);
         if (!detail) return telegramReply('标的详情暂不可用');
@@ -3675,8 +3696,12 @@ ${escapeTelegramHtml(position.marketTitle)} · ${escapeTelegramHtml(position.out
         return telegramReply(`<b>标的详情</b>\n${escapeTelegramHtml(detail.instrument.title)}\n${escapeTelegramHtml(detail.instrument.id)}\n价格/概率：${escapeTelegramHtml(String((q as any).price ?? (q as any).yesPrice ?? '暂无'))}\nAI：${escapeTelegramHtml(detail.analysis.text.slice(0, 500))}`);
       }
       if (data.startsWith('watch:add:')) {
-        const mid = data.slice('watch:add:'.length);
         const currentScope = telegramScopeForChat(ctx.chatId);
+        const parsed = parseScopedTelegramCallback(data, 'watch:add');
+        const mid = parsed.id;
+        if (parsed.scope && parsed.scope !== 'overview' && parsed.scope !== 'watchlist' && currentScope !== 'overview' && currentScope !== 'watchlist' && parsed.scope !== currentScope) {
+          return telegramReply(`该按钮属于${TELEGRAM_SCOPE_LABELS[parsed.scope]}市场，请先切换当前市场。`);
+        }
         const itemScope = telegramScopeForWatchId(mid);
         if (itemScope && currentScope !== 'overview' && currentScope !== 'watchlist' && itemScope !== currentScope) return telegramReply(`当前为${TELEGRAM_SCOPE_LABELS[currentScope]}市场，不能把${TELEGRAM_SCOPE_LABELS[itemScope]}标的加入此处自选。`);
         const m = telegramFindMarket(mid);

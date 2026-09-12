@@ -51,6 +51,9 @@ test('server wires the chat scope into the menu and filters Telegram search resu
   assert.match(serverSource, /filterInstrumentResults\(await unifiedInstrumentService\.search\(query\)/);
   assert.match(serverSource, /getTelegramMenuEntries\(scope\)/);
   assert.match(serverSource, /market:\s*\(\{\s*chatId,\s*args\s*\}\)/);
+  assert.match(serverSource, /telegramScopedCallback\('watch:add', scope/);
+  assert.match(serverSource, /parseScopedTelegramCallback\(data, 'watch:add'/);
+  assert.match(serverSource, /parseScopedTelegramCallback\(data, 'unified:show'/);
 });
 
 setTimeout(() => process.exit(0), 10);
