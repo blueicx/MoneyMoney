@@ -10750,8 +10750,13 @@ function showTab(tab, clicked, options = {}) {
   document.querySelectorAll('.tab').forEach((t) => t.classList.remove('active'));
   const button = clicked || [...document.querySelectorAll('.tabs .tab')].find(item => (item.getAttribute('onclick') || '').includes(`'${targetTab}'`));
   if (button) button.classList.add('active');
-  document.querySelectorAll('.tab-content').forEach((c) => c.classList.remove('active'));
-  document.getElementById(targetTab + '-tab').classList.add('active');
+  const targetContent = document.getElementById(targetTab + '-tab');
+  if (!targetContent) return;
+  document.querySelectorAll('.tab-content').forEach((c) => {
+    c.classList.toggle('active', c === targetContent);
+    c.hidden = c !== targetContent;
+  });
+  targetContent.hidden = false;
   document.querySelectorAll('.nav-sub-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === targetTab));
   document.querySelectorAll('.utility-nav-btn, .core-workspace-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === targetTab));
   document.querySelectorAll('.mnav-btn').forEach(button => button.classList.toggle('active', button.dataset.tab === targetTab));

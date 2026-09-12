@@ -56,6 +56,10 @@ test('stock exclusive workspaces keep the shared market bar and scope selection 
   assert.match(html, /function applyWorkspaceView\(\)[\s\S]*querySelectorAll\('\[data-workspace-id\], \[data-workspace-ids\]'\)/);
 });
 
+test('switching to a workspace unhides its tab content after scoped rendering', () => {
+  assert.match(html, /function showTab\(tab, clicked, options = \{\}\)[\s\S]*?const targetContent = document\.getElementById\(targetTab \+ '-tab'\)[\s\S]*?targetContent\.hidden = false/);
+});
+
 test('stock feature panels keep only their feature content', () => {
   for (const key of ['insider', 'institutional', 'analyst', 'fundamentals', 'short-interest']) {
     assert.doesNotMatch(html, new RegExp(`data-stock-radar-toolbar=["']${key}["']`));
