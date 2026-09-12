@@ -9301,8 +9301,12 @@ function initializeDashboardCollapses() {
   const state = readDashboardCollapseState();
   document.querySelectorAll('.dash-collapse[data-collapse-key]').forEach(section => {
     const key = section.dataset.collapseKey;
-    if (Object.prototype.hasOwnProperty.call(state, key)) section.open = !!state[key];
+    if (!section.classList.contains('workspace-panel-flat') && Object.prototype.hasOwnProperty.call(state, key)) section.open = !!state[key];
     section.addEventListener('toggle', () => {
+      if (section.classList.contains('workspace-panel-flat') && !section.open) {
+        section.open = true;
+        return;
+      }
       writeDashboardCollapseState(key, section.open);
       if (section.open && (document.getElementById('stocks-tab')?.classList.contains('active') || document.getElementById('macro-tab')?.classList.contains('active'))) {
         runStockSectionOnce(key);

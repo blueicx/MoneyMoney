@@ -85,6 +85,8 @@ test('独立功能面板在选中后扁平展示并保持展开', () => {
   assert.match(html, /workspace-panel-flat[^}]*collapse-chevron[^}]*display:\s*none/);
   assert.match(html, /classList\.toggle\(['"]workspace-panel-flat['"],\s*flatPanel\)/);
   assert.match(html, /if \(flatPanel\) node\.open = true/);
+  assert.match(html, /!section\.classList\.contains\(['"]workspace-panel-flat['"]\)/);
+  assert.match(html, /section\.classList\.contains\(['"]workspace-panel-flat['"]\) && !section\.open/);
   for (const id of ['breadth', 'insider', 'institutional', 'analyst', 'fundamentals', 'short-interest', 'funding-rate', 'open-interest', 'on-chain', 'order-flow', 'prediction-radar']) {
     assert.match(html, new RegExp(`data-workspace-id="${id}"`));
   }
