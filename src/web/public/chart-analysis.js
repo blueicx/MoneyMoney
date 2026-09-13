@@ -46,10 +46,10 @@
     return { ...item, body, range, upper, lower };
   }
 
-  function pattern(index, type, label, direction, bars, confidence, condition) {
+  function pattern(index, type, label, direction, bars, confidence, condition, meaning) {
     return {
       index, type, label, direction, time: bars[index].time,
-      confidence, condition, disclaimer: '形态仅供参考，不作为买卖建议。'
+      confidence, condition, meaning, disclaimer: '形态仅供参考，不作为买卖建议。'
     };
   }
 
@@ -60,22 +60,22 @@
       const current = candleParts(bars[index]);
       const previous = index > 0 ? candleParts(bars[index - 1]) : null;
       const bodyRatio = current.body / current.range;
-      if (bodyRatio <= 0.1) found.push(pattern(index, 'doji', '十字星', 'neutral', bars, 'Medium', '实体极小'));
+      if (bodyRatio <= 0.1) found.push(pattern(index, 'doji', '十字星', 'neutral', bars, 'Medium', '实体极小', '市场多空力量均衡，可能面临方向选择或趋势反转'));
 
       if (current.lower >= Math.max(current.body * 2, current.range * 0.45) && current.upper <= current.range * 0.25) {
         if (previous && previous.close > previous.open) {
-          found.push(pattern(index, 'hanging-man', '上吊线', 'bearish', bars, 'Medium', '上升趋势中下影线极长'));
+          found.push(pattern(index, 'hanging-man', '上吊线', 'bearish', bars, 'Medium', '上升趋势中下影线极长', '高位买盘力量减弱，可能暗示上升趋势即将结束'));
         } else {
-          found.push(pattern(index, 'hammer', '锤头线', 'bullish', bars, 'Medium', '下影线极长且实体靠上'));
+          found.push(pattern(index, 'hammer', '锤头线', 'bullish', bars, 'Medium', '下影线极长且实体靠上', '低位买盘支撑强劲，可能暗示下跌趋势见底反转'));
         }
       }
 
       if (current.upper >= Math.max(current.body * 2, current.range * 0.45) && current.lower <= current.range * 0.25) {
-        found.push(pattern(index, 'shooting-star', '流星线', 'bearish', bars, 'Medium', '上影线极长且实体靠下'));
+        found.push(pattern(index, 'shooting-star', '流星线', 'bearish', bars, 'Medium', '上影线极长且实体靠下', '高位遭遇强抛压，多头受挫，可能预示短线回调或趋势反转'));
       }
 
       if (current.upper >= current.range * 0.6 || current.lower >= current.range * 0.6) {
-        found.push(pattern(index, 'long-shadow', '长影线', 'neutral', bars, 'Low', '单边影线超过全长60%'));
+        found.push(pattern(index, 'long-shadow', '长影线', 'neutral', bars, 'Low', '单边影线超过全长60%', '遇到较强阻力或支撑，当前单边趋势动能可能衰竭'));
       }
 
       if (previous) {
@@ -85,33 +85,33 @@
         const currentBearish = current.close < current.open;
 
         if (previousBearish && currentBullish && current.open <= previous.close && current.close >= previous.open) {
-          found.push(pattern(index, 'bullish-engulfing', '看涨吞没', 'bullish', bars, 'High', '阳线完全包围前阴线实体'));
+          found.push(pattern(index, 'bullish-engulfing', '看涨吞没', 'bullish', bars, 'High', '阳线完全包围前阴线实体', '多头力量爆发并完全压倒空头，强烈的见底看涨信号'));
         }
         if (previousBullish && currentBearish && current.open >= previous.close && current.close <= previous.open) {
-          found.push(pattern(index, 'bearish-engulfing', '看跌吞没', 'bearish', bars, 'High', '阴线完全包围前阳线实体'));
+          found.push(pattern(index, 'bearish-engulfing', '看跌吞没', 'bearish', bars, 'High', '阴线完全包围前阳线实体', '空头力量爆发并完全压倒多头，强烈的见顶看跌信号'));
         }
 
         if (previousBearish && currentBullish && current.open < previous.close && current.close > (previous.open + previous.close)/2) {
-          found.push(pattern(index, 'piercing', '刺透', 'bullish', bars, 'Medium', '阳线深入前阴线实体过半'));
+          found.push(pattern(index, 'piercing', '刺透', 'bullish', bars, 'Medium', '阳线深入前阴线实体过半', '多头开始反击，跌势受阻，有较强的反转意味'));
         }
         if (previousBullish && currentBearish && current.open > previous.close && current.close < (previous.open + previous.close)/2) {
-          found.push(pattern(index, 'dark-cloud', '乌云盖顶', 'bearish', bars, 'Medium', '阴线深入前阳线实体过半'));
+          found.push(pattern(index, 'dark-cloud', '乌云盖顶', 'bearish', bars, 'Medium', '阴线深入前阳线实体过半', '空头开始反击，涨势受阻，有较强的反转意味'));
         }
 
         if (previousBearish && currentBullish && current.open > previous.close && current.close < previous.open) {
-          found.push(pattern(index, 'bullish-harami', '孕线', 'bullish', bars, 'Medium', '前大实体完全包含当前小实体'));
+          found.push(pattern(index, 'bullish-harami', '孕线', 'bullish', bars, 'Medium', '前大实体完全包含当前小实体', '下跌动能减弱，市场进入犹豫期，可能正在构筑底部'));
         }
         if (previousBullish && currentBearish && current.open < previous.close && current.close > previous.open) {
-          found.push(pattern(index, 'bearish-harami', '孕线', 'bearish', bars, 'Medium', '前大实体完全包含当前小实体'));
+          found.push(pattern(index, 'bearish-harami', '孕线', 'bearish', bars, 'Medium', '前大实体完全包含当前小实体', '上涨动能减弱，市场进入犹豫期，可能正在构筑顶部'));
         }
 
         if (index >= 2) {
           const twoBack = candleParts(bars[index - 2]);
           if (twoBack.close < twoBack.open && previous.body <= previous.range * 0.35 && currentBullish && current.close > (twoBack.open + twoBack.close) / 2) {
-            found.push(pattern(index, 'morning-star', '早晨之星', 'bullish', bars, 'High', '阴线-十字/小实体-阳线'));
+            found.push(pattern(index, 'morning-star', '早晨之星', 'bullish', bars, 'High', '阴线-十字/小实体-阳线', '经过犹豫期后多头掌握主动，经典且可靠的底部反转信号'));
           }
           if (twoBack.close > twoBack.open && previous.body <= previous.range * 0.35 && currentBearish && current.close < (twoBack.open + twoBack.close) / 2) {
-            found.push(pattern(index, 'evening-star', '黄昏之星', 'bearish', bars, 'High', '阳线-十字/小实体-阴线'));
+            found.push(pattern(index, 'evening-star', '黄昏之星', 'bearish', bars, 'High', '阳线-十字/小实体-阴线', '经过犹豫期后空头掌握主动，经典且可靠的顶部反转信号'));
           }
         }
       }
@@ -119,10 +119,10 @@
         const first = candleParts(bars[index - 2]);
         const second = candleParts(bars[index - 1]);
         if ([first, second, current].every(item => item.close > item.open) && first.close < second.close && second.close < current.close) {
-          found.push(pattern(index, 'three-white-soldiers', '三白兵', 'bullish', bars, 'High', '连续三根阳线且收盘价递增'));
+          found.push(pattern(index, 'three-white-soldiers', '三白兵', 'bullish', bars, 'High', '连续三根阳线且收盘价递增', '多头持续发力，通常标志着强劲的上升趋势已经确立'));
         }
         if ([first, second, current].every(item => item.close < item.open) && first.close > second.close && second.close > current.close) {
-          found.push(pattern(index, 'three-black-crows', '三只乌鸦', 'bearish', bars, 'High', '连续三根阴线且收盘价递减'));
+          found.push(pattern(index, 'three-black-crows', '三只乌鸦', 'bearish', bars, 'High', '连续三根阴线且收盘价递减', '空头持续发力，通常标志着强劲的下降趋势已经确立'));
         }
       }
     }

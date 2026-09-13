@@ -16,7 +16,7 @@ test('detects candlestick patterns with stable labels and directions', () => {
   const found = analysis.detectCandlestickPatterns(bars());
   assert.ok(found.some(item => (item.type === 'hammer' || item.type === 'hanging-man')));
   assert.ok(found.some(item => item.type === 'bullish-engulfing' && item.direction === 'bullish'));
-  assert.ok(found.every(item => item.label && Number.isInteger(item.index) && item.confidence && item.condition));
+  assert.ok(found.every(item => item.label && Number.isInteger(item.index) && item.confidence && item.condition && item.meaning && item.disclaimer));
 });
 
 test('overlay configuration gates patterns, signals, indicators and volume', () => {

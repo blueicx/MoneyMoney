@@ -51,3 +51,18 @@ test('screener keeps requested stock identities under concurrent quote fallback'
   assert.match(server, /const symbol = SCREENER_STOCK_SYMBOLS\[index\]/, 'Row identity comes from requested symbol');
   assert.match(server, /id: `stock:us:\$\{symbol\}`/, 'Canonical row ID uses requested symbol');
 });
+
+test('candlestick annotations are accessible, touch-friendly, and share one pattern dataset', () => {
+  assert.match(html, /id="stock-chart-pattern-list"/, 'Pattern explanation list exists');
+  assert.match(html, /function renderChartPatternList\(targetId, patterns, emptyText\)/, 'Pattern list renderer exists');
+  assert.match(html, /renderChartPatternList\('stock-chart-pattern-list', overlays\.patterns/, 'List uses rendered overlay patterns');
+  assert.match(html, /marker\.type = 'button'/, 'Chart markers are non-submitting buttons');
+  assert.match(html, /role = 'tooltip'/, 'Tooltip has an accessible role');
+  assert.match(html, /aria-describedby/, 'Marker describes its tooltip');
+  assert.match(html, /is-open \.chart-pattern-tooltip/, 'Touch/click can keep the explanation open');
+  assert.match(html, /overflow:visible/, 'Tooltip is not clipped by the chart layer');
+  assert.match(html, /if \(!klines\.length\) \{[\s\S]*renderChartPatternMarkers\('stock-chart-patterns', \[\]/, 'Empty stock data clears stale pattern markers');
+  assert.match(html, /const cryptoPatterns = cryptoChartOverlayConfig\.patterns/, 'Crypto patterns use the same analysis dataset');
+  assert.match(html, /renderChartPatternMarkers\('bn-chart-patterns', cryptoPatterns/, 'Crypto chart renders selectable pattern markers');
+  assert.match(html, /renderChartPatternList\('bn-chart-pattern-list', cryptoPatterns/, 'Crypto chart renders pattern explanations');
+});

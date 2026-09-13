@@ -244,6 +244,19 @@
     .chart-signal-item.buy { color:var(--green); }
     .chart-signal-item.sell { color:var(--red); }
     .chart-signal-empty { color:var(--text-secondary); font-size:11px; }
+    .chart-pattern-marker { position:relative; }
+    .chart-pattern-marker:hover, .chart-pattern-marker:focus { outline:none; z-index:10; }
+    .chart-pattern-marker.is-open .chart-pattern-tooltip { opacity:1; pointer-events:auto; }
+    .chart-pattern-tooltip { position:absolute; bottom:100%; left:50%; transform:translateX(-50%); margin-bottom:8px; width:220px; background:var(--bg); border:1px solid var(--border); border-radius:8px; padding:10px; font-size:11px; text-align:left; color:var(--text); box-shadow:var(--shadow); opacity:0; pointer-events:none; transition:opacity 0.2s; z-index:20; white-space:normal; line-height:1.4; }
+    .chart-pattern-marker:hover .chart-pattern-tooltip, .chart-pattern-marker:focus .chart-pattern-tooltip { opacity:1; }
+    .chart-pattern-marker.tooltip-below .chart-pattern-tooltip { top:100%; bottom:auto; margin-top:8px; margin-bottom:0; }
+    .chart-pattern-list { display:grid; gap:6px; margin-top:8px; }
+    .chart-pattern-item { border:1px solid var(--border); border-radius:8px; padding:8px 10px; background:var(--bg-secondary); font-size:10px; line-height:1.45; }
+    .chart-pattern-item strong { color:var(--text); }
+    .chart-pattern-item.bullish strong { color:var(--green); }
+    .chart-pattern-item.bearish strong { color:var(--red); }
+    .chart-pattern-item-meta { color:var(--text-secondary); margin-top:2px; }
+    @media (max-width: 600px) { .chart-pattern-tooltip { width:180px; font-size:10px; padding:8px; } }
     .market-library-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:7px; }
     .market-instrument-library { display:block; }
     .workspace-dashboard-cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:8px; margin:-6px 0 16px; }
@@ -2320,9 +2333,14 @@
               <label><input type="checkbox" data-crypto-strategy="rsiReversal" onchange="setCryptoChartStrategy('rsiReversal', this.checked)"> RSI反转</label>
               <label><input type="checkbox" data-crypto-strategy="bollinger" onchange="setCryptoChartStrategy('bollinger', this.checked)"> 布林反转</label>
               <label><input type="checkbox" data-crypto-strategy="volumeBreakout" onchange="setCryptoChartStrategy('volumeBreakout', this.checked)"> 放量突破</label>
+              <label><input type="checkbox" data-crypto-overlay="patterns" onchange="setCryptoChartOverlay('patterns', this.checked)"> 蜡烛形态</label>
             </div>
-            <canvas id="bn-candlestick" width="640" height="360" style="width:100%;height:auto;"></canvas>
+            <div style="position:relative;">
+              <canvas id="bn-candlestick" width="640" height="360" style="width:100%;height:auto;"></canvas>
+              <div id="bn-chart-patterns" style="position:absolute;inset:0;pointer-events:none;overflow:visible;"></div>
+            </div>
             <div id="bn-chart-signals" class="chart-signal-list" aria-live="polite"></div>
+            <div id="bn-chart-pattern-list" class="chart-pattern-list" aria-live="polite"></div>
             <div id="bn-hover-tip" style="display:none;position:absolute;background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:8px 12px;font-size:12px;pointer-events:none;z-index:10;box-shadow:0 4px 12px rgba(0,0,0,.15);white-space:nowrap;"></div>
             <div style="font-size:11px;color:var(--text-secondary);margin-top:8px;">RSI(14) <span id="bn-rsi-value" style="font-weight:700;"></span></div>
             <canvas id="bn-rsi" width="640" height="80" style="width:100%;height:auto;margin-top:4px;"></canvas>
@@ -2479,10 +2497,12 @@
                 <button class="tab" type="button" data-chart-replay="next" onclick="stepStockChartReplay('next')">›</button>
                 <span id="stock-chart-replay-status" class="stock-chart-replay-status" aria-live="polite"></span>
               </div>
-              <div class="stock-chart-stage">
+              <div class="stock-chart-stage" style="position:relative;">
                 <canvas id="stock-kline" width="640" height="360" style="width:100%;height:340px;display:block;"></canvas>
+                <div id="stock-chart-patterns" style="position:absolute; inset:0; pointer-events:none; overflow:visible;"></div>
               </div>
               <div id="stock-chart-signals" class="chart-signal-list" aria-live="polite"></div>
+              <div id="stock-chart-pattern-list" class="chart-pattern-list" aria-live="polite"></div>
             </div>
             <div style="display:flex;justify-content:flex-end;align-items:center;margin:4px 0 10px;">
               <button class="tab active" type="button" onclick="loadStockQuotes()">🔄 刷新行情</button>
@@ -4880,6 +4900,7 @@ if (!navigator.onLine) showOfflineBanner();
 let bnCurrentSymbol = 'BTCUSDT';
 let bnCurrentInterval = '15m';
 let bnKlineData = [];
+let cryptoChartOverlayConfig = { patterns: false };
 function bnSetSymbol(sym) {
   if (bnCurrentSymbol !== sym) {
     const aiOutput = document.getElementById('ai-commentary');
@@ -4954,6 +4975,23 @@ function setCryptoChartStrategy(name, enabled) {
   try { localStorage.setItem(cryptoChartStorageKey(), JSON.stringify(cryptoChartStrategyConfig)); } catch (e) {}
   if (bnKlineData.length) drawCandles(document.getElementById('bn-candlestick'), bnKlineData);
 }
+function cryptoChartOverlayStorageKey() {
+  return `mm-crypto-chart-overlays:${bnCurrentSymbol || 'BTCUSDT'}:${bnCurrentInterval || '15m'}`;
+}
+function loadCryptoChartOverlayConfig() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(cryptoChartOverlayStorageKey()) || 'null');
+    if (raw && typeof raw === 'object') cryptoChartOverlayConfig = { ...cryptoChartOverlayConfig, ...raw };
+  } catch (e) {}
+  document.querySelectorAll('[data-crypto-overlay]').forEach(input => {
+    input.checked = cryptoChartOverlayConfig[input.dataset.cryptoOverlay] === true;
+  });
+}
+function setCryptoChartOverlay(name, enabled) {
+  cryptoChartOverlayConfig[name] = Boolean(enabled);
+  try { localStorage.setItem(cryptoChartOverlayStorageKey(), JSON.stringify(cryptoChartOverlayConfig)); } catch (e) {}
+  if (bnKlineData.length) drawCandles(document.getElementById('bn-candlestick'), bnKlineData);
+}
 function buildCryptoStrategySignals(bars) {
   return window.MoneyChartAnalysis?.detectStrategySignals(bars, cryptoChartStrategyConfig) || [];
 }
@@ -4968,9 +5006,17 @@ function drawCandles(canvas, klines) {
   const textColor = cs.getPropertyValue('--text-secondary')?.trim() || '#888';
   const green = '#22c55e', red = '#ef4444';
   ctx.clearRect(0, 0, W, H);
-  if (!klines.length) return;
+  if (!klines.length) {
+    renderChartPatternMarkers('bn-chart-patterns', [], () => null);
+    renderChartPatternList('bn-chart-pattern-list', [], '当前周期未识别到所选蜡烛形态');
+    return;
+  }
   loadCryptoChartStrategyConfig();
+  loadCryptoChartOverlayConfig();
   const strategySignals = buildCryptoStrategySignals(klines);
+  const cryptoPatterns = cryptoChartOverlayConfig.patterns
+    ? (window.MoneyChartAnalysis?.detectCandlestickPatterns(klines) || [])
+    : [];
   const highs = klines.map(k => k.high), lows = klines.map(k => k.low);
   const maxP = Math.max(...highs), minP = Math.min(...lows);
   const range = maxP - minP || 1;
@@ -5068,6 +5114,15 @@ function drawCandles(canvas, klines) {
     ctx.fillText(signal.label, x, signal.side === 'buy' ? y + 5 : y - 5);
   });
   renderChartSignalList('bn-chart-signals', strategySignals, '当前周期未触发所选策略信号');
+  renderChartPatternMarkers('bn-chart-patterns', cryptoPatterns, item => {
+    const bar = klines[item.index];
+    if (!bar) return null;
+    const x = padL + item.index * cw + cw / 2;
+    const highY = padT + chartH - ((bar.high - minP) / range) * chartH;
+    const lowY = padT + chartH - ((bar.low - minP) / range) * chartH;
+    return { x, y: item.direction === 'bearish' ? highY - 24 : lowY + 8 };
+  });
+  renderChartPatternList('bn-chart-pattern-list', cryptoPatterns, '当前周期未识别到所选蜡烛形态');
   // Legend
   ctx.font = '10px sans-serif';
   ctx.fillStyle = '#f59e0b';
@@ -7603,6 +7658,64 @@ function renderChartSignalList(targetId, signals, emptyText) {
     return `<span class="chart-signal-item ${signal.side === 'buy' ? 'buy' : 'sell'}" title="${stockEscapeHtml(signal.reason || '')}">${signal.side === 'buy' ? '▲' : '▼'} ${stockEscapeHtml(signal.label)} · ${time} · ${priceText}</span>`;
   }).join('');
 }
+function renderChartPatternList(targetId, patterns, emptyText) {
+  const el = document.getElementById(targetId);
+  if (!el) return;
+  const recent = (patterns || []).slice(-8).reverse();
+  if (!recent.length) {
+    el.innerHTML = `<span class="chart-signal-empty">${stockEscapeHtml(emptyText)}</span>`;
+    return;
+  }
+  el.innerHTML = recent.map(item => {
+    const direction = item.direction === 'bullish' ? '看涨' : item.direction === 'bearish' ? '看跌' : '中性';
+    const time = item.time ? new Date(item.time).toLocaleDateString('zh-CN', { month:'numeric', day:'numeric' }) : '--';
+    return `<article class="chart-pattern-item ${stockEscapeHtml(item.direction || 'neutral')}" data-pattern-index="${Number(item.index)}">
+      <strong>${stockEscapeHtml(item.label)} · ${direction}</strong>
+      <div class="chart-pattern-item-meta">${time} · 置信度 ${stockEscapeHtml(item.confidence || '未知')} · ${stockEscapeHtml(item.condition || '条件未知')}</div>
+      <div><b>通常含义：</b>${stockEscapeHtml(item.meaning || '暂无说明')}</div>
+      <div class="chart-pattern-item-meta">${stockEscapeHtml(item.disclaimer || '形态仅供参考，不作为买卖建议。')}</div>
+    </article>`;
+  }).join('');
+}
+function renderChartPatternMarkers(targetId, patterns, getPosition) {
+  const layer = document.getElementById(targetId);
+  if (!layer) return;
+  layer.innerHTML = '';
+  (patterns || []).forEach((item, index) => {
+    const position = getPosition(item);
+    if (!position) return;
+    const direction = item.direction === 'bullish' ? '看涨' : item.direction === 'bearish' ? '看跌' : '中性';
+    const color = item.direction === 'bearish' ? '#fb7185' : item.direction === 'bullish' ? '#34d399' : '#fbbf24';
+    const marker = document.createElement('button');
+    marker.type = 'button';
+    marker.className = 'chart-pattern-marker';
+    marker.style.cssText = `position:absolute;left:${position.x - 20}px;top:${Math.max(4, position.y)}px;width:40px;text-align:center;background:transparent;border:none;color:${color};font:10px Inter,system-ui,sans-serif;cursor:pointer;pointer-events:auto;`;
+    marker.tabIndex = 0;
+    marker.textContent = item.label;
+    const tooltipId = `${targetId}-tooltip-${item.index}-${index}`;
+    marker.setAttribute('aria-label', `${item.label}，${direction}，点击查看形态说明`);
+    marker.setAttribute('aria-expanded', 'false');
+    marker.setAttribute('aria-describedby', tooltipId);
+    if (position.y < 74) marker.classList.add('tooltip-below');
+
+    const tooltip = document.createElement('div');
+    tooltip.className = 'chart-pattern-tooltip';
+    tooltip.id = tooltipId;
+    tooltip.role = 'tooltip';
+    tooltip.innerHTML = `
+      <div style="font-weight:bold;margin-bottom:4px;color:var(--text)">${stockEscapeHtml(item.label)} <span style="font-size:10px;font-weight:normal;color:var(--text-secondary)">(${direction} · 置信度 ${stockEscapeHtml(item.confidence || '未知')})</span></div>
+      <div style="margin-bottom:4px"><strong>触发条件：</strong>${stockEscapeHtml(item.condition || '条件未知')}</div>
+      <div style="margin-bottom:6px"><strong>通常含义：</strong>${stockEscapeHtml(item.meaning || '暂无说明')}</div>
+      <div style="font-size:9px;color:var(--text-secondary)">${stockEscapeHtml(item.disclaimer || '形态仅供参考，不作为买卖建议。')}</div>
+    `;
+    marker.addEventListener('click', () => {
+      const open = marker.classList.toggle('is-open');
+      marker.setAttribute('aria-expanded', String(open));
+    });
+    marker.appendChild(tooltip);
+    layer.appendChild(marker);
+  });
+}
 function stepStockChartReplay(action) {
   if (!stockChartKlines.length || !window.MoneyChartAnalysis) return;
   stockChartReplayIndex = window.MoneyChartAnalysis.stepReplay(stockChartReplayIndex < 0 ? stockChartKlines.length - 1 : stockChartReplayIndex, stockChartKlines.length, action);
@@ -7630,6 +7743,11 @@ async function loadStockKline(symbol, name, apiSymbol) {
       const context = canvas.getContext('2d');
       context.setTransform(1, 0, 0, 1, 0, 0);
       context.clearRect(0, 0, canvas.width, canvas.height);
+      stockChartKlines = [];
+      stockChartReplayIndex = -1;
+      renderChartPatternMarkers('stock-chart-patterns', [], () => null);
+      renderChartPatternList('stock-chart-pattern-list', [], '当前周期未识别到所选蜡烛形态');
+      renderChartSignalList('stock-chart-signals', [], '当前周期未触发所选策略信号');
       return;
     }
     stockChartKlines = d.data;
@@ -7643,7 +7761,12 @@ function drawStockKline(canvas, klines) {
   const fullKlines = Array.isArray(klines) ? klines : [];
   const visibleCount = stockChartReplayIndex >= 0 ? Math.min(fullKlines.length, stockChartReplayIndex + 1) : fullKlines.length;
   klines = fullKlines.slice(0, visibleCount);
-  if (!klines.length) return;
+  if (!klines.length) {
+    renderChartPatternMarkers('stock-chart-patterns', [], () => null);
+    renderChartPatternList('stock-chart-pattern-list', [], '当前周期未识别到所选蜡烛形态');
+    renderChartSignalList('stock-chart-signals', [], '当前周期未触发所选策略信号');
+    return;
+  }
   const overlays = window.MoneyChartAnalysis.buildChartOverlays({ bars: klines, signals: buildStockStrategySignals(klines), config: stockChartOverlayConfig });
   const replayStatus = document.getElementById('stock-chart-replay-status');
   if (replayStatus) replayStatus.textContent = `${visibleCount}/${fullKlines.length}`;
@@ -7747,11 +7870,10 @@ function drawStockKline(canvas, klines) {
     ctx.font = 'bold 9px Inter, system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = signal.side === 'buy' ? 'top' : 'bottom';
     ctx.fillText(signal.label, x, signal.side === 'buy' ? y + 5 : y - 5);
   });
-  overlays.patterns.forEach(item => {
-    const bar = klines[item.index]; if (!bar) return;
-    const x = xCenter(item.index), y = item.direction === 'bearish' ? yPrice(bar.high) - 18 : yPrice(bar.low) + 18;
-    ctx.fillStyle = item.direction === 'bearish' ? '#fb7185' : item.direction === 'bullish' ? '#34d399' : '#fbbf24';
-    ctx.font = '10px Inter, system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(item.label, x, y);
+  renderChartPatternMarkers('stock-chart-patterns', overlays.patterns, item => {
+    const bar = klines[item.index];
+    if (!bar) return null;
+    return { x: xCenter(item.index), y: item.direction === 'bearish' ? yPrice(bar.high) - 24 : yPrice(bar.low) + 8 };
   });
   overlays.structures.forEach(item => {
     const bar = klines[item.index]; if (!bar) return;
@@ -7773,6 +7895,7 @@ function drawStockKline(canvas, klines) {
   ctx.textAlign = 'right';
   legend.forEach(([label, color], index) => { ctx.fillStyle = color; ctx.fillText(label, W - 8 - index * 58, 12); });
   renderChartSignalList('stock-chart-signals', overlays.signals, '当前周期未触发所选策略信号');
+  renderChartPatternList('stock-chart-pattern-list', overlays.patterns, '当前周期未识别到所选蜡烛形态');
 }
 // --- DeFi Data ---
 async function loadDefiData() {
