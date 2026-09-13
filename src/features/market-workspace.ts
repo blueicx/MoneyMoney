@@ -8,6 +8,7 @@ export type WorkspaceId =
   | 'radar'
   | 'analysis'
   | 'backtest'
+  | 'screener'
   | 'watchlist'
   | 'positions'
   | 'risk'
@@ -52,6 +53,7 @@ const ITEMS: Record<WorkspaceId, WorkspaceItem> = {
   radar: { id: 'radar', label: '市场雷达', icon: '◉', scopes: ASSET_SCOPES },
   analysis: { id: 'analysis', label: '标的分析', icon: '⌁', scopes: ASSET_SCOPES, requiresInstrument: true },
   backtest: { id: 'backtest', label: '策略回测', icon: '⌘', scopes: ASSET_SCOPES, requiresInstrument: true },
+  screener: { id: 'screener', label: '筛选与比较', icon: '⌕', scopes: ASSET_SCOPES },
   watchlist: { id: 'watchlist', label: '我的自选', icon: '★', scopes: ALL_SCOPES },
   positions: { id: 'positions', label: '我的持仓', icon: '▣', scopes: ALL_SCOPES },
   risk: { id: 'risk', label: '风险监控', icon: '♡', scopes: ASSET_SCOPES, requiresInstrument: true },
@@ -73,7 +75,7 @@ const ITEMS: Record<WorkspaceId, WorkspaceItem> = {
 
 const BASE_GROUPS: readonly { id: WorkspaceGroup['id']; label: string; items: readonly WorkspaceId[] }[] = [
   { id: 'market', label: '市场', items: ['overview', 'radar', 'analysis'] },
-  { id: 'research', label: '研究', items: ['backtest', 'risk'] },
+  { id: 'research', label: '研究', items: ['screener', 'backtest', 'risk'] },
 ];
 
 const SPECIFIC_ITEMS: Record<MarketScope, readonly WorkspaceId[]> = {

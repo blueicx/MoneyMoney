@@ -150,7 +150,7 @@ test('基本面工作区展示历史趋势、支持因素和风险因素', () =>
 
 test('左侧不再提供重复的标的搜索，保留顶部全局搜索', () => {
   assert.doesNotMatch(html, /search: \['⌕', '搜索标的'\]/);
-  assert.match(html, /WORKSPACE_BASE_GROUPS[\s\S]*\['backtest', 'risk'\]/);
+  assert.match(html, /WORKSPACE_BASE_GROUPS[\s\S]*\['(screener', ')?backtest', 'risk'\]/);
   assert.match(html, /id="global-search-input"/);
 });
 

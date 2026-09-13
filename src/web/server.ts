@@ -383,10 +383,13 @@ function withScreenerTimeout<T>(promise: Promise<T>, timeoutMs = 8000): Promise<
 async function loadScopedScreenerRows(scope: ScreenerScope): Promise<Record<string, unknown>[]> {
   if (scope === 'stocks') {
     const settled = await Promise.allSettled(SCREENER_STOCK_SYMBOLS.map(symbol => withScreenerTimeout(stockDataService.quote(symbol))));
-    return settled.flatMap(result => {
+    return settled.flatMap((result, index) => {
       if (result.status !== 'fulfilled' || !result.value.quote) return [];
       const quote = result.value.quote;
-      return [{ id: `stock:us:${quote.symbol}`, symbol: quote.symbol, title: quote.symbol, price: quote.price, changePct: quote.changePct, marketCap: null, dataTime: quote.asOf, source: result.value.snapshot.source }];
+      // Keep the identity requested by the screener. Some upstream quote
+      // fallbacks echo the last completed symbol when requests are concurrent.
+      const symbol = SCREENER_STOCK_SYMBOLS[index];
+      return [{ id: `stock:us:${symbol}`, symbol, title: symbol, price: quote.price, changePct: quote.changePct, marketCap: null, dataTime: quote.asOf, source: result.value.snapshot.source }];
     });
   }
   if (scope === 'options') {

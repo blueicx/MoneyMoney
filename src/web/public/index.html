@@ -2024,7 +2024,7 @@
         <span id="market-overview-status" style="flex:0 0 auto;color:var(--text-secondary);font-size:10px;white-space:nowrap;">数据更新时间：-</span>
       </div>
       <div id="workspace-dashboard-cards" class="workspace-dashboard-cards" data-workspace-ids="overview" aria-current="page" aria-label="当前市场看板层级"></div>
-      <section id="market-research-tools" data-market-scopes="stocks" data-workspace-ids="stock-quotes" style="display:grid;grid-template-columns:minmax(300px,1.2fr) minmax(260px,1fr);gap:12px;margin-bottom:16px;">
+      <section id="market-research-tools" data-market-scopes="stocks options crypto prediction" data-workspace-ids="screener" style="display:grid;grid-template-columns:minmax(300px,1.2fr) minmax(260px,1fr);gap:12px;margin-bottom:16px;">
         <div id="market-screener" class="glass-card" style="padding:14px;border-radius:14px;">
           <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px;"><strong>🔎 当前市场筛选</strong><button class="tab" type="button" onclick="loadMarketResearch()">刷新</button></div>
           <div id="market-screener-fields" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;"><span class="empty-tip">选择市场后加载筛选字段</span></div>
@@ -2316,7 +2316,7 @@
             <div id="bn-chart-title" style="font-weight:700;font-size:15px;margin-bottom:8px;">BTC/USDT · 15m</div>
             <div id="bn-chart-strategies" class="chart-strategy-controls" aria-label="虚拟币K线策略点位">
               <span style="font-weight:700;color:var(--yellow);">策略点位</span>
-              <label><input type="checkbox" data-crypto-strategy="maCross" checked onchange="setCryptoChartStrategy('maCross', this.checked)"> 均线交叉</label>
+              <label><input type="checkbox" data-crypto-strategy="maCross" checked="" onchange="setCryptoChartStrategy('maCross', this.checked)"> 均线交叉</label>
               <label><input type="checkbox" data-crypto-strategy="rsiReversal" onchange="setCryptoChartStrategy('rsiReversal', this.checked)"> RSI反转</label>
               <label><input type="checkbox" data-crypto-strategy="bollinger" onchange="setCryptoChartStrategy('bollinger', this.checked)"> 布林反转</label>
               <label><input type="checkbox" data-crypto-strategy="volumeBreakout" onchange="setCryptoChartStrategy('volumeBreakout', this.checked)"> 放量突破</label>
@@ -2462,17 +2462,17 @@
               <div style="background:var(--bg-card);border-radius:12px;padding:16px;border:1px solid var(--border);margin-bottom:20px;">
               <div id="stock-chart-title" style="font-weight:700;font-size:15px;margin-bottom:8px;"></div>
               <div id="stock-chart-overlays" class="stock-chart-overlays" aria-current="page" aria-label="K线显示选项">
-                <label><input type="checkbox" data-chart-overlay="signals" checked onchange="setStockChartOverlay('signals', this.checked)"> 策略点位</label>
+                <label><input type="checkbox" data-chart-overlay="signals" checked="" onchange="setStockChartOverlay('signals', this.checked)"> 策略点位</label>
                 <span style="color:var(--border-light);">|</span>
-                <label><input type="checkbox" data-chart-strategy="maCross" checked onchange="setStockChartStrategy('maCross', this.checked)"> 均线交叉</label>
+                <label><input type="checkbox" data-chart-strategy="maCross" checked="" onchange="setStockChartStrategy('maCross', this.checked)"> 均线交叉</label>
                 <label><input type="checkbox" data-chart-strategy="rsiReversal" onchange="setStockChartStrategy('rsiReversal', this.checked)"> RSI反转</label>
                 <label><input type="checkbox" data-chart-strategy="bollinger" onchange="setStockChartStrategy('bollinger', this.checked)"> 布林反转</label>
                 <label><input type="checkbox" data-chart-strategy="volumeBreakout" onchange="setStockChartStrategy('volumeBreakout', this.checked)"> 放量突破</label>
                 <label><input type="checkbox" data-chart-overlay="patterns" onchange="setStockChartOverlay('patterns', this.checked)"> 蜡烛形态</label>
                 <label><input type="checkbox" data-chart-overlay="structures" onchange="setStockChartOverlay('structures', this.checked)"> 结构标记</label>
-                <label><input type="checkbox" data-chart-overlay="ma" checked onchange="setStockChartOverlay('ma', this.checked)"> 均线</label>
+                <label><input type="checkbox" data-chart-overlay="ma" checked="" onchange="setStockChartOverlay('ma', this.checked)"> 均线</label>
                 <label><input type="checkbox" data-chart-overlay="boll" onchange="setStockChartOverlay('boll', this.checked)"> 布林带</label>
-                <label><input type="checkbox" data-chart-overlay="volume" checked onchange="setStockChartOverlay('volume', this.checked)"> 成交量</label>
+                <label><input type="checkbox" data-chart-overlay="volume" checked="" onchange="setStockChartOverlay('volume', this.checked)"> 成交量</label>
                 <span class="stock-chart-replay-label">回放</span>
                 <button class="tab" type="button" data-chart-replay="reset" onclick="stepStockChartReplay('reset')">⏮</button>
                 <button class="tab" type="button" data-chart-replay="previous" onclick="stepStockChartReplay('previous')">‹</button>
@@ -2881,36 +2881,116 @@
             <div>当前仅支持模拟持仓，不读取真实交易账户。</div>
           </div>
         </div>
-        <div id="market-instrument-library" class="market-instrument-library" hidden>
-          <div data-market-library="options" hidden>
-            <div class="stock-library-group-title">🎯 期权标的库</div>
-            <div class="market-library-grid">
-              <button type="button" class="stock-library-item" onclick="selectOptionLibraryAsset('SPY')"><strong>SPY</strong><small>标普500 ETF</small></button>
-              <button type="button" class="stock-library-item" onclick="selectOptionLibraryAsset('QQQ')"><strong>QQQ</strong><small>纳指100 ETF</small></button>
-              <button type="button" class="stock-library-item" onclick="selectOptionLibraryAsset('AAPL')"><strong>AAPL</strong><small>苹果</small></button>
-              <button type="button" class="stock-library-item" onclick="selectOptionLibraryAsset('NVDA')"><strong>NVDA</strong><small>英伟达</small></button>
-              <button type="button" class="stock-library-item" onclick="selectOptionLibraryAsset('TSLA')"><strong>TSLA</strong><small>特斯拉</small></button>
-            </div>
+        <div id="market-instrument-library" class="market-instrument-library" hidden="">
+          <div data-market-library="options" hidden="">
+        <div class="stock-library-current" id="options-library-current" aria-live="polite">
+          <strong id="options-library-current-symbol">--</strong>
+          <small id="options-library-current-workspace">当前功能：市场总览</small>
+        </div>
+        <button class="tab guest-admin-only" type="button" onclick="addCurrentInstrumentToWatchlist()" style="width:100%;margin-bottom:14px;">⭐ 加入自选</button>
+        <div class="stock-library-group">
+          <div class="stock-library-group-title">📌 热门标的</div>
+          <div id="options-library-quick" class="stock-library-grid"></div>
+        </div>
+        <div class="stock-library-group">
+          <label class="stock-library-search-label" for="options-library-search-input">🔍 搜索标的</label>
+          <div class="stock-library-search">
+            <input id="options-library-search-input" type="search" placeholder="代码或名称" onkeydown="if(event.key==='Enter')loadLibrarySearch('options')">
+            <button class="tab" type="button" onclick="loadLibrarySearch('options')">搜索</button>
           </div>
-          <div data-market-library="crypto" hidden>
-            <div class="stock-library-group-title">₿ 虚拟币标的库</div>
-            <div class="market-library-grid">
-              <button type="button" class="stock-library-item" onclick="selectCryptoLibraryAsset('BTCUSDT')"><strong>BTC/USDT</strong><small>Bitcoin</small></button>
-              <button type="button" class="stock-library-item" onclick="selectCryptoLibraryAsset('ETHUSDT')"><strong>ETH/USDT</strong><small>Ethereum</small></button>
-              <button type="button" class="stock-library-item" onclick="selectCryptoLibraryAsset('SOLUSDT')"><strong>SOL/USDT</strong><small>Solana</small></button>
-              <button type="button" class="stock-library-item" onclick="selectCryptoLibraryAsset('BNBUSDT')"><strong>BNB/USDT</strong><small>BNB</small></button>
-            </div>
+          <div id="options-library-search-results" class="stock-library-search-results" aria-live="polite"></div>
+        </div>
+        <div class="stock-library-group">
+          <div class="stock-library-group-title">⭐ 我的自选</div>
+          <div id="options-library-watchlist" data-stock-library-item="sidebar-watchlist"></div>
+        </div>
+        <div class="stock-library-group">
+          <div class="stock-library-group-title">📈 模拟持仓</div>
+          <div id="options-library-paper" data-stock-library-item="sidebar-paper"></div>
+        </div>
+      </div>
+          <div data-market-library="crypto" hidden="">
+        <div class="stock-library-current" id="crypto-library-current" aria-live="polite">
+          <strong id="crypto-library-current-symbol">--</strong>
+          <small id="crypto-library-current-workspace">当前功能：市场总览</small>
+        </div>
+        <button class="tab guest-admin-only" type="button" onclick="addCurrentInstrumentToWatchlist()" style="width:100%;margin-bottom:14px;">⭐ 加入自选</button>
+        <div class="stock-library-group">
+          <div class="stock-library-group-title">📌 热门标的</div>
+          <div id="crypto-library-quick" class="stock-library-grid"></div>
+        </div>
+        <div class="stock-library-group">
+          <label class="stock-library-search-label" for="crypto-library-search-input">🔍 搜索标的</label>
+          <div class="stock-library-search">
+            <input id="crypto-library-search-input" type="search" placeholder="代码或名称" onkeydown="if(event.key==='Enter')loadLibrarySearch('crypto')">
+            <button class="tab" type="button" onclick="loadLibrarySearch('crypto')">搜索</button>
           </div>
-          <div data-market-library="prediction" hidden>
-            <div class="stock-library-group-title">🎯 预测市场标的库</div>
-            <button type="button" class="tab" style="width:100%;" onclick="showTab('radar')">打开预测市场雷达</button>
-            <div class="empty-tip">从预测雷达选择具体市场后，当前工作区会跟随切换。</div>
+          <div id="crypto-library-search-results" class="stock-library-search-results" aria-live="polite"></div>
+        </div>
+        <div class="stock-library-group">
+          <div class="stock-library-group-title">⭐ 我的自选</div>
+          <div id="crypto-library-watchlist" data-stock-library-item="sidebar-watchlist"></div>
+        </div>
+        <div class="stock-library-group">
+          <div class="stock-library-group-title">📈 模拟持仓</div>
+          <div id="crypto-library-paper" data-stock-library-item="sidebar-paper"></div>
+        </div>
+      </div>
+          <div data-market-library="prediction" hidden="">
+        <div class="stock-library-current" id="prediction-library-current" aria-live="polite">
+          <strong id="prediction-library-current-symbol">--</strong>
+          <small id="prediction-library-current-workspace">当前功能：市场总览</small>
+        </div>
+        <button class="tab guest-admin-only" type="button" onclick="addCurrentInstrumentToWatchlist()" style="width:100%;margin-bottom:14px;">⭐ 加入自选</button>
+        <div class="stock-library-group">
+          <div class="stock-library-group-title">📌 热门标的</div>
+          <div id="prediction-library-quick" class="stock-library-grid"></div>
+        </div>
+        <div class="stock-library-group">
+          <label class="stock-library-search-label" for="prediction-library-search-input">🔍 搜索标的</label>
+          <div class="stock-library-search">
+            <input id="prediction-library-search-input" type="search" placeholder="代码或名称" onkeydown="if(event.key==='Enter')loadLibrarySearch('prediction')">
+            <button class="tab" type="button" onclick="loadLibrarySearch('prediction')">搜索</button>
           </div>
-          <div data-market-library="overview" hidden>
-            <div class="stock-library-group-title">🌐 总体标的库</div>
-            <div class="empty-tip">请先从顶部选择股票、期权、虚拟币或预测市场。</div>
+          <div id="prediction-library-search-results" class="stock-library-search-results" aria-live="polite"></div>
+        </div>
+        <div class="stock-library-group">
+          <div class="stock-library-group-title">⭐ 我的自选</div>
+          <div id="prediction-library-watchlist" data-stock-library-item="sidebar-watchlist"></div>
+        </div>
+        <div class="stock-library-group">
+          <div class="stock-library-group-title">📈 模拟持仓</div>
+          <div id="prediction-library-paper" data-stock-library-item="sidebar-paper"></div>
+        </div>
+      </div>
+          <div data-market-library="overview" hidden="">
+        <div class="stock-library-current" id="overview-library-current" aria-live="polite">
+          <strong id="overview-library-current-symbol">--</strong>
+          <small id="overview-library-current-workspace">当前功能：市场总览</small>
+        </div>
+        <button class="tab guest-admin-only" type="button" onclick="addCurrentInstrumentToWatchlist()" style="width:100%;margin-bottom:14px;">⭐ 加入自选</button>
+        <div class="stock-library-group">
+          <div class="stock-library-group-title">📌 热门标的</div>
+          <div id="overview-library-quick" class="stock-library-grid"></div>
+        </div>
+        <div class="stock-library-group">
+          <label class="stock-library-search-label" for="overview-library-search-input">🔍 搜索标的</label>
+          <div class="stock-library-search">
+            <input id="overview-library-search-input" type="search" placeholder="代码或名称" onkeydown="if(event.key==='Enter')loadLibrarySearch('overview')">
+            <button class="tab" type="button" onclick="loadLibrarySearch('overview')">搜索</button>
           </div>
-          <div data-market-library="watchlist" hidden>
+          <div id="overview-library-search-results" class="stock-library-search-results" aria-live="polite"></div>
+        </div>
+        <div class="stock-library-group">
+          <div class="stock-library-group-title">⭐ 我的自选</div>
+          <div id="overview-library-watchlist" data-stock-library-item="sidebar-watchlist"></div>
+        </div>
+        <div class="stock-library-group">
+          <div class="stock-library-group-title">📈 模拟持仓</div>
+          <div id="overview-library-paper" data-stock-library-item="sidebar-paper"></div>
+        </div>
+      </div>
+          <div data-market-library="watchlist" hidden="">
             <div class="stock-library-group-title">⭐ 自选标的库</div>
             <div class="empty-tip">请在对应市场中选择自选标的。</div>
           </div>
@@ -8441,18 +8521,7 @@ async function loadMarketTimeline() {
       return;
     }
 
-    host.innerHTML = payload.data.map(item => `
-      <div style="padding:10px 0;border-bottom:1px solid var(--border);">
-        <a href="${/^https?:\/\//i.test(String(item.url || '')) ? instrumentDetailEscape(item.url) : '#'}" target="_blank" rel="noopener noreferrer" style="text-decoration:none;font-weight:600;color:var(--text);display:block;margin-bottom:4px;">${instrumentDetailEscape(item.title)}</a>
-        <div style="font-size:11px;color:var(--text-secondary);display:flex;gap:8px;flex-wrap:wrap;">
-          ${item.date ? `<span>${instrumentDetailEscape(new Date(item.date).toLocaleString('zh-CN'))}</span>` : ''}
-          <span>${instrumentDetailEscape(item.source || '未知来源')}</span>
-          ${item.direction !== 'unavailable' ? `<span style="color:${item.direction==='bullish'?'var(--green)':item.direction==='bearish'?'var(--red)':'var(--text)'};">${item.direction === 'bullish' ? '🟢 利好' : item.direction === 'bearish' ? '🔴 利空' : '⚪ 中性'}</span>` : ''}
-          ${item.actual !== null ? `<span>实际: ${instrumentDetailEscape(String(item.actual))}</span>` : ''}
-          ${item.forecast !== null ? `<span>预测: ${instrumentDetailEscape(String(item.forecast))}</span>` : ''}
-        </div>
-      </div>
-    `).join('');
+    host.innerHTML = payload.data.map(item => formatSourceEvidence(item)).join('');
   } catch (error) {
     if (error.name === 'AbortError') return;
     host.innerHTML = `<div style="color:var(--red);padding:14px 0;">${safeNewsText(error.message)}</div>`;
@@ -9860,7 +9929,7 @@ const CORE_NAV_ITEMS = [
 const WORKSPACE_ITEM_CATALOG = {
   overview: ['⌂', '市场总览'], radar: ['◉', '市场雷达'], analysis: ['⌁', '标的分析'],
   'stock-quotes': ['▥', '行情与选股'], 'crypto-quotes': ['₿', '行情与K线'], events: ['▤', '市场事件与新闻'],
-  backtest: ['⌘', '策略回测'], watchlist: ['★', '我的自选'], positions: ['▣', '我的持仓'],
+  backtest: ['⌘', '策略回测'], screener: ['⌕', '筛选与比较'], watchlist: ['★', '我的自选'], positions: ['▣', '我的持仓'],
   risk: ['♡', '风险监控'], breadth: ['▥', '市场宽度'],
   insider: ['♟', '内部人交易'], institutional: ['♜', '机构持仓'], analyst: ['◎', '分析师共识'],
   fundamentals: ['▥', '基本面质量'], 'short-interest': ['♟', '空头利息'],
@@ -9870,7 +9939,7 @@ const WORKSPACE_ITEM_CATALOG = {
 };
 const WORKSPACE_BASE_GROUPS = [
   ['market', '市场', ['overview', 'radar', 'analysis']],
-  ['research', '研究', ['backtest', 'risk']],
+  ['research', '研究', ['screener', 'backtest', 'risk']],
 ];
 const WORKSPACE_SPECIFIC_IDS = {
   overview: [], watchlist: [],
@@ -10173,6 +10242,7 @@ window.closeWorkspaceDrawer = function() {
 function workspaceTabFor(id) {
   if (id === 'overview') return 'command';
   if (id === 'stock-quotes' || id === 'events') return 'stocks';
+  if (id === 'screener') return defaultTabForMarketScope(activeMarketScope);
   if (id === 'crypto-quotes') return 'binance';
   if (id === 'radar' || id === 'prediction-radar') return marketRadarTab();
   if (id === 'backtest') return 'backtest';
@@ -10299,7 +10369,7 @@ function scopeAllowsView(declared) {
   return scopes.includes('all') || scopes.includes('common') || scopes.includes(activeMarketScope);
 }
 const EXCLUSIVE_WORKSPACE_IDS = new Set([
-  'stock-quotes', 'crypto-quotes', 'events', 'breadth', 'insider', 'institutional', 'analyst', 'fundamentals', 'short-interest',
+  'stock-quotes', 'crypto-quotes', 'events', 'breadth', 'insider', 'institutional', 'analyst', 'fundamentals', 'short-interest', 'screener',
   'option-chain', 'volatility', 'greeks', 'funding-rate', 'open-interest', 'on-chain', 'order-flow',
   'prediction-radar',
 ]);
@@ -10461,7 +10531,7 @@ function renderNavigationState() {
   applySidebarScope();
   const activeContent = document.querySelector('.tab-content.active');
   if (activeContent) activeContent.hidden = false;
-  if (activeMarketScope !== 'overview' && activeMarketScope !== 'watchlist') loadMarketResearch();
+  if (activeWorkspaceId === 'screener') loadMarketResearch();
   if (activeMarketScope === 'watchlist') loadStockWatchlistLibrary();
 }
 function setMarketScope(scope, options = {}) {
@@ -10752,6 +10822,37 @@ function closeInstrumentDetail() {
   document.getElementById('instrument-detail-overlay')?.classList.remove('open');
 }
 function instrumentDetailEscape(value) { return globalSearchEscape(value); }
+function formatSourceEvidence(item = {}) {
+  const url = String(item.sourceUrl || item.url || '').trim();
+  const safeUrl = /^https?:\/\//i.test(url) ? url : '';
+  const sourceName = item.sourceName || item.source || '未知来源';
+  const sourceType = item.sourceType || 'media';
+  const typeLabel = { media: '媒体', official: '官方', company: '公司', 'market-data': '市场数据', prediction: '预测市场' }[sourceType] || sourceType;
+  const status = item.sourceStatus || 'live';
+  const statusLabel = { live: '实时', ok: '可用', stale: '缓存', cached: '缓存', partial: '部分可用', unavailable: '不可用', error: '错误' }[status] || status;
+  const publishedAt = item.publishedAt || item.date || item.time;
+  const fetchedAt = item.fetchedAt;
+  const formatTime = value => {
+    if (!value) return '时间未知';
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? String(value) : parsed.toLocaleString('zh-CN');
+  };
+  const statusText = status === 'live' || status === 'ok'
+    ? `来源：${instrumentDetailEscape(statusLabel)}`
+    : `来源：${instrumentDetailEscape(statusLabel)}${fetchedAt ? ` · 抓取 ${instrumentDetailEscape(formatTime(fetchedAt))}` : ''}`;
+  return `<article class="source-evidence-card">
+    <div class="source-evidence-title">${instrumentDetailEscape(item.title || '未命名事件')}</div>
+    <div class="source-evidence-meta">
+      <span>${instrumentDetailEscape(sourceName)}</span><span>·</span>
+      <span>${instrumentDetailEscape(typeLabel)}</span><span>·</span>
+      <span>${instrumentDetailEscape(formatTime(publishedAt))}</span><span>·</span>
+      <span>${statusText}</span>
+    </div>
+    ${safeUrl
+      ? `<a class="source-evidence-link" href="${instrumentDetailEscape(safeUrl)}" target="_blank" rel="noopener noreferrer">查看原文 ↗</a>`
+      : '<span class="source-evidence-link source-evidence-link-disabled">暂无可用原文</span>'}
+  </article>`;
+}
 function renderInstrumentDetail(data) {
   const instrument = data.instrument || {};
   const title = document.getElementById('instrument-detail-title');
@@ -12210,4 +12311,5 @@ class MoneyKLine {
 }
 window.MoneyKLine = MoneyKLine;
 </script>
-<div class="drawer density-compact density-comfortable"></div></body></html>
+<div class="drawer density-compact density-comfortable"></div>
+</body></html>
