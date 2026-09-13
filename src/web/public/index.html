@@ -195,11 +195,31 @@
     }
     .market-workspace-shell {
       display: grid;
-      grid-template-columns: 224px minmax(0, 1fr);
+      grid-template-columns: 224px minmax(0, 1fr) 280px;
       min-width: 0;
       min-height: calc(100vh - 61px);
       transition: grid-template-columns .2s ease;
     }
+    .market-workspace-shell[data-right-library="collapsed"] { grid-template-columns: 224px minmax(0, 1fr) 48px; }
+    .workspace-right-library {
+      min-width: 0;
+      position: sticky;
+      top: 61px;
+      height: calc(100vh - 61px);
+      overflow-y: auto;
+      padding: 14px 10px;
+      border-left: 1px solid var(--border);
+      background: linear-gradient(180deg, color-mix(in srgb, var(--glass-highlight) 82%, transparent), var(--bg-card));
+      backdrop-filter: blur(18px) saturate(140%);
+      -webkit-backdrop-filter: blur(18px) saturate(140%);
+      transition: opacity .2s ease, padding .2s ease;
+      z-index: 10;
+    }
+    .workspace-right-library-header { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:4px 6px 12px; }
+    .market-workspace-shell[data-right-library="collapsed"] .workspace-right-library { padding-left:7px; padding-right:7px; }
+    .market-workspace-shell[data-right-library="collapsed"] .workspace-right-library .workspace-sidebar-title,
+    .market-workspace-shell[data-right-library="collapsed"] .workspace-right-library .market-instrument-library { display:none; }
+    .market-workspace-shell[data-right-library="collapsed"] .workspace-right-library .workspace-right-library-header { justify-content:center; padding-left:0; padding-right:0; }
     .workspace-sidebar {
       min-width: 0;
       position: sticky;
@@ -283,7 +303,8 @@
     .workspace-watchlist-columns input { accent-color:var(--purple); }
     .market-research-actions { display:flex; gap:5px; flex-wrap:wrap; margin-top:7px; }
     .market-research-actions .tab { padding:4px 7px; font-size:11px; }
-    .market-workspace-shell[data-sidebar-state="rail"] { grid-template-columns:56px minmax(0, 1fr); }
+    .market-workspace-shell[data-sidebar-state="rail"] { grid-template-columns:56px minmax(0, 1fr) 280px; }
+    .market-workspace-shell[data-sidebar-state="rail"][data-right-library="collapsed"] { grid-template-columns:56px minmax(0, 1fr) 48px; }
     .market-workspace-shell[data-sidebar-state="rail"] .workspace-sidebar { padding-left:7px; padding-right:7px; }
     .market-workspace-shell[data-sidebar-state="rail"] .workspace-sidebar-title,
     .market-workspace-shell[data-sidebar-state="rail"] .workspace-group-label,
@@ -1875,6 +1896,50 @@
       .workspace-drawer-panel .workspace-sidebar-header { clear:both; padding-top:14px; }
       .market-workspace-shell[data-sidebar-state="rail"] { grid-template-columns:1fr; }
     }
+    .chart-fullscreen-overlay {
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: var(--bg);
+      z-index: 9999;
+      display: flex;
+      flex-direction: column;
+      padding: 16px;
+    }
+    .chart-fullscreen-overlay .stock-chart-stage {
+      flex: 1;
+      min-height: 0;
+      height: 100%;
+    }
+    .chart-fullscreen-overlay canvas {
+      height: 100% !important;
+    }
+    .chart-fullscreen-toolbar {
+      display: flex;
+      gap: 12px;
+      margin-bottom: 12px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .chart-fullscreen-toolbar .tab { font-size: 13px; }
+    .chart-card-fullscreen {
+      position: fixed !important;
+      inset: 0 !important;
+      z-index: 10000 !important;
+      box-sizing: border-box;
+      overflow: auto;
+      margin: 0 !important;
+      border-radius: 0 !important;
+      padding: 18px !important;
+      background: var(--bg-card) !important;
+    }
+    body[data-chart-fullscreen] > * { visibility: hidden; }
+    body[data-chart-fullscreen] .chart-card-fullscreen { visibility: visible; }
+    body[data-chart-fullscreen] .chart-card-fullscreen .chart-fullscreen-button { background: var(--purple); color: #fff; }
+    body[data-chart-fullscreen="stocks"] #stock-kline { height: max(420px, calc(100vh - 270px)) !important; }
+    body[data-chart-fullscreen="crypto"] #bn-candlestick { height: max(420px, calc(100vh - 360px)) !important; }
+    @media (max-width: 768px) {
+      .chart-card-fullscreen { padding: 12px !important; }
+    }
     </style>
 <script src="/chart-analysis.js"></script>
 <script>
@@ -2325,8 +2390,11 @@
         <!-- Main Grid: Chart + Sidebar -->
         <div style="display:grid;grid-template-columns:2fr 1fr;gap:16px;margin-bottom:20px;" class="bn-main-grid">
           <!-- Candlestick Chart -->
-          <div style="background:var(--bg-card);border-radius:12px;padding:16px;border:1px solid var(--border);position:relative;">
-            <div id="bn-chart-title" style="font-weight:700;font-size:15px;margin-bottom:8px;">BTC/USDT · 15m</div>
+          <div id="crypto-chart-card" style="background:var(--bg-card);border-radius:12px;padding:16px;border:1px solid var(--border);position:relative;">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px;">
+              <div id="bn-chart-title" style="font-weight:700;font-size:15px;">BTC/USDT · 15m</div>
+              <button class="tab chart-fullscreen-button" type="button" data-chart-fullscreen="crypto" onclick="toggleChartFullscreen('crypto')" title="放大查看虚拟币K线">⛶ 全屏</button>
+            </div>
             <div id="bn-chart-strategies" class="chart-strategy-controls" aria-label="虚拟币K线策略点位">
               <span style="font-weight:700;color:var(--yellow);">策略点位</span>
               <label><input type="checkbox" data-crypto-strategy="maCross" checked="" onchange="setCryptoChartStrategy('maCross', this.checked)"> 均线交叉</label>
@@ -2477,8 +2545,11 @@
                 <button class="tab stock-kline-range" data-days="250" onclick="setStockKlineRange(250)">一年</button>
               </div>
             </div>
-              <div style="background:var(--bg-card);border-radius:12px;padding:16px;border:1px solid var(--border);margin-bottom:20px;">
-              <div id="stock-chart-title" style="font-weight:700;font-size:15px;margin-bottom:8px;"></div>
+              <div id="stock-chart-card" style="background:var(--bg-card);border-radius:12px;padding:16px;border:1px solid var(--border);margin-bottom:20px;">
+              <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px;">
+                <div id="stock-chart-title" style="font-weight:700;font-size:15px;"></div>
+                <button class="tab chart-fullscreen-button" type="button" data-chart-fullscreen="stocks" onclick="toggleChartFullscreen('stocks')" title="放大查看股票K线">⛶ 全屏</button>
+              </div>
               <div id="stock-chart-overlays" class="stock-chart-overlays" aria-current="page" aria-label="K线显示选项">
                 <label><input type="checkbox" data-chart-overlay="signals" checked="" onchange="setStockChartOverlay('signals', this.checked)"> 策略点位</label>
                 <span style="color:var(--border-light);">|</span>
@@ -4997,7 +5068,15 @@ function buildCryptoStrategySignals(bars) {
 }
 function drawCandles(canvas, klines) {
   const ctx = canvas.getContext('2d');
-  const W = canvas.width, H = canvas.height;
+  const fullscreen = document.body?.dataset.chartFullscreen === 'crypto';
+  const W = Math.max(320, canvas.clientWidth || 640);
+  const H = fullscreen ? Math.max(420, Math.floor((window.innerHeight || 720) - 360)) : 360;
+  const dpr = Math.max(1, window.devicePixelRatio || 1);
+  canvas.width = Math.round(W * dpr);
+  canvas.height = Math.round(H * dpr);
+  if (fullscreen) canvas.style.height = `${H}px`;
+  else canvas.style.height = 'auto';
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   const padL = 60, padR = 10, padT = 10, padB = 50;
   const chartH = H - padT - padB - 40; // leave room for volume
   const volTop = padT + chartH + 20;
@@ -7774,7 +7853,9 @@ function drawStockKline(canvas, klines) {
   // stretches the old 640-pixel bitmap and the chart looks soft on Windows.
   const dpr = Math.max(1, window.devicePixelRatio || 1);
   const cssWidth = Math.max(280, canvas.clientWidth || 640);
-  const cssHeight = 340;
+  const cssHeight = document.body?.dataset.chartFullscreen === 'stocks'
+    ? Math.max(420, Math.floor((window.innerHeight || 720) - 270))
+    : 340;
   canvas.width = Math.round(cssWidth * dpr);
   canvas.height = Math.round(cssHeight * dpr);
   const ctx = canvas.getContext('2d');
@@ -10941,6 +11022,18 @@ async function loadMarketCompare() {
     resultsEl.textContent = error?.message || '比较数据暂不可用';
   }
 }
+
+function toggleRightLibrary() {
+  const shell = document.getElementById('market-workspace-shell');
+  const toggleBtn = document.getElementById('right-library-toggle');
+  if (shell.getAttribute('data-right-library') === 'collapsed') {
+    shell.removeAttribute('data-right-library');
+    if (toggleBtn) toggleBtn.textContent = '›';
+  } else {
+    shell.setAttribute('data-right-library', 'collapsed');
+    if (toggleBtn) toggleBtn.textContent = '‹';
+  }
+}
 function closeInstrumentDetail() {
   document.getElementById('instrument-detail-overlay')?.classList.remove('open');
 }
@@ -12413,26 +12506,84 @@ window.smartFetch = function(url, options) {
   return promise;
 };
 
+const chartFullscreenCards = { stocks: 'stock-chart-card', crypto: 'crypto-chart-card' };
+function redrawVisibleChart(kind) {
+  if (kind === 'stocks' && typeof drawStockKline === 'function' && stockChartKlines?.length) {
+    drawStockKline(document.getElementById('stock-kline'), stockChartKlines);
+  }
+  if (kind === 'crypto' && typeof drawCandles === 'function' && bnKlineData?.length) {
+    drawCandles(document.getElementById('bn-candlestick'), bnKlineData);
+    const rsi = document.getElementById('bn-rsi');
+    const macd = document.getElementById('bn-macd');
+    if (rsi && typeof drawRSI === 'function') drawRSI(rsi, bnKlineData);
+    if (macd && typeof drawMACD === 'function') drawMACD(macd, bnKlineData);
+  }
+}
+function syncChartFullscreenButtons() {
+  const active = document.body?.dataset.chartFullscreen || '';
+  document.querySelectorAll('[data-chart-fullscreen]').forEach(button => {
+    const kind = button.dataset.chartFullscreen;
+    const isActive = kind === active;
+    button.setAttribute('aria-pressed', String(isActive));
+    button.title = isActive ? '退出全屏' : (kind === 'stocks' ? '放大查看股票K线' : '放大查看虚拟币K线');
+  });
+}
+window.toggleChartFullscreen = function(kind) {
+  const cardId = chartFullscreenCards[kind];
+  const card = cardId ? document.getElementById(cardId) : null;
+  if (!card) return false;
+  const current = document.body.dataset.chartFullscreen;
+  document.querySelectorAll('.chart-card-fullscreen').forEach(node => node.classList.remove('chart-card-fullscreen'));
+  if (current === kind) {
+    delete document.body.dataset.chartFullscreen;
+    syncChartFullscreenButtons();
+    return false;
+  }
+  document.body.dataset.chartFullscreen = kind;
+  card.classList.add('chart-card-fullscreen');
+  syncChartFullscreenButtons();
+  const schedule = window.requestAnimationFrame || (callback => window.setTimeout(callback, 0));
+  schedule(() => redrawVisibleChart(kind));
+  return true;
+};
+document.addEventListener('keydown', event => {
+  if (event.key === 'Escape' && document.body.dataset.chartFullscreen) window.toggleChartFullscreen(document.body.dataset.chartFullscreen);
+});
+window.addEventListener('resize', () => {
+  const active = document.body?.dataset.chartFullscreen;
+  if (active) redrawVisibleChart(active);
+});
+
 class MoneyKLine {
   constructor(canvas) {
     this.canvas = canvas;
     this.layers = { chanlun: false, signals: false, macd: false, boll: false, volume: false, patterns: false };
+    this.data = [];
+    this.cursor = -1;
+    this.zoomLevel = 1;
     this.timer = null;
   }
-  create() { this.timer = setInterval(() => {}, 1000); }
-  update(data) {}
-  tick(t) {}
-  kline(k) {}
-  destroy() { clearInterval(this.timer); clearTimeout(this.timer); }
-  toggleLayer(layer, state) { this.layers[layer] = state; }
-  play() {}
-  pause() {}
-  stepForward() {}
-  stepBackward() {}
-  zoom() {}
-  drag() {}
+  create(data = []) { this.update(data); return this; }
+  update(data) { this.data = Array.isArray(data) ? data.slice() : []; this.cursor = this.data.length - 1; this.render(); return this; }
+  tick(t) { if (t) this.kline(t); return this; }
+  kline(k) { if (k) this.data.push(k); this.cursor = this.data.length - 1; this.render(); return this; }
+  destroy() { this.pause(); this.data = []; }
+  toggleLayer(layer, state) { this.layers[layer] = Boolean(state); this.render(); return this.layers[layer]; }
+  play(interval = 1000) { this.pause(); this.timer = setInterval(() => this.stepForward(), interval); return this; }
+  pause() { if (this.timer) clearInterval(this.timer); this.timer = null; return this; }
+  stepForward() { this.cursor = Math.min(this.data.length - 1, this.cursor + 1); this.render(); return this.cursor; }
+  stepBackward() { this.cursor = Math.max(0, this.cursor - 1); this.render(); return this.cursor; }
+  zoom(delta = 1) { this.zoomLevel = Math.max(.5, Math.min(4, this.zoomLevel + Number(delta || 0))); this.render(); return this.zoomLevel; }
+  drag(offset = 0) { this.cursor = Math.max(0, Math.min(this.data.length - 1, this.cursor + Number(offset || 0))); this.render(); return this.cursor; }
+  render() {
+    if (!this.canvas?.isConnected || !this.data.length) return;
+    const visible = this.cursor >= 0 ? this.data.slice(0, this.cursor + 1) : this.data;
+    if (this.canvas.id === 'stock-kline' && typeof drawStockKline === 'function') drawStockKline(this.canvas, visible);
+    else if (this.canvas.id === 'bn-candlestick' && typeof drawCandles === 'function') drawCandles(this.canvas, visible);
+  }
 }
 window.MoneyKLine = MoneyKLine;
 </script>
 <div class="drawer density-compact density-comfortable"></div>
+<div id="chart-fullscreen-overlay" aria-hidden="true" hidden></div>
 </body></html>
