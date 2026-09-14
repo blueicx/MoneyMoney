@@ -5812,6 +5812,52 @@ function stockSearchDebounce() {
   clearTimeout(window._stockSearchTimer);
   window._stockSearchTimer = setTimeout(() => loadStockSearch(), 500);
 }
+
+const CRYPTO_QUICK_SYMBOLS = Object.freeze([['BTCUSDT', '比特币'], ['ETHUSDT', '以太坊'], ['SOLUSDT', 'SOL'], ['BNBUSDT', 'BNB']]);
+
+function renderCryptoLibraryQuick() {
+  const element = document.getElementById('crypto-library-quick');
+  if (!element) return;
+  element.innerHTML = CRYPTO_QUICK_SYMBOLS.map(([symbol, name]) => `
+    <button type="button" class="stock-library-item" onclick="selectCryptoFromInstrumentLibrary('${stockEscapeHtml(symbol)}','${stockEscapeHtml(name)}')">
+      <strong>${stockEscapeHtml(symbol)}</strong><small>${stockEscapeHtml(name)}</small>
+    </button>`).join('');
+  const selected = String(window._cryptoSelectedSymbol || '').toUpperCase();
+  element.querySelectorAll('.stock-library-item').forEach(btn => btn.classList.toggle('active', btn.textContent.includes(selected)));
+}
+
+function selectCryptoFromInstrumentLibrary(symbol, name) {
+  const normalized = String(symbol || '').trim().toUpperCase();
+  if (activeMarketScope !== 'crypto') return;
+  const displayName = name || normalized;
+  window._cryptoSelectedSymbol = normalized;
+  
+  // Render quick again to update selection
+  renderCryptoLibraryQuick();
+  
+  // Switch workspace and load
+  activeWorkspaceId = 'crypto-trading';
+  syncWorkspaceContextUrl();
+  const groups = workspaceNavigationState.get(activeMarketScope)?.groups || workspaceFallbackNavigation(activeMarketScope);
+  renderWorkspaceMenu(groups);
+  applyWorkspaceView();
+  showTab('crypto', null, { scopeAlreadySynced: true });
+  
+  // Sync crypto title/data
+  if (typeof loadCryptoWorkspace === 'function') loadCryptoWorkspace(normalized);
+  else if (typeof loadBnQuotes === 'function') loadBnQuotes();
+}
+
+function renderOptionsLibraryQuick() {
+  const element = document.getElementById('options-library-quick');
+  if (element) element.innerHTML = '<div class="empty-tip">期权市场实盘级标的库开发中，暂不可用</div>';
+}
+
+function renderPredictionLibraryQuick() {
+  const element = document.getElementById('prediction-library-quick');
+  if (element) element.innerHTML = '<div class="empty-tip">预测市场标的需通过中心区发现进入，快捷库未挂载</div>';
+}
+
 const STOCK_QUICK_SYMBOLS = Object.freeze([
   ['AAPL', 'Apple'], ['MSFT', 'Microsoft'], ['NVDA', 'NVIDIA'], ['AMZN', 'Amazon'],
   ['GOOGL', 'Alphabet'], ['META', 'Meta'], ['TSLA', 'Tesla']
@@ -10673,13 +10719,27 @@ function applySidebarScope() {
     marketLibrary.querySelectorAll('[data-market-library]').forEach(node => { node.hidden = node.dataset.marketLibrary !== activeMarketScope; });
   }
   if (stockScope) {
-    if (empty) empty.style.display = 'none';
-    if (outcomes) outcomes.style.display = 'none';
-    if (title) title.textContent = '股票标的库';
-    if (subtitle) subtitle.textContent = '点击自选或模拟持仓，加载全部股票工作区';
-    loadStockInstrumentLibrary();
-    return;
-  }
+      if (empty) empty.style.display = 'none';
+      if (outcomes) outcomes.style.display = 'none';
+      if (title) title.textContent = '股票标的库';
+      if (subtitle) subtitle.textContent = '点击自选或模拟持仓，加载全部股票工作区';
+      loadStockInstrumentLibrary();
+      return;
+    }
+    
+    if (activeMarketScope === 'crypto') {
+        if (typeof renderCryptoLibraryQuick === 'function') renderCryptoLibraryQuick();
+    } else if (activeMarketScope === 'options') {
+        if (typeof renderOptionsLibraryQuick === 'function') renderOptionsLibraryQuick();
+    } else if (activeMarketScope === 'prediction') {
+        if (typeof renderPredictionLibraryQuick === 'function') renderPredictionLibraryQuick();
+      }
+      
+      if (title) title.textContent = activeMarketScope === 'overview' ? '总体标的库' : activeMarketScope === 'watchlist' ? '自选标的库' : `${marketResearchLabel(activeMarketScope)}标的库`;
+      if (subtitle) subtitle.textContent = '点击标的切换当前市场工作区';
+      if (empty) empty.style.display = 'none';
+      if (outcomes) outcomes.style.display = 'none';
+
   if (title) title.textContent = activeMarketScope === 'overview' ? '总体标的库' : activeMarketScope === 'watchlist' ? '自选标的库' : `${marketResearchLabel(activeMarketScope)}标的库`;
   if (subtitle) subtitle.textContent = '点击标的切换当前市场工作区';
   if (empty) empty.style.display = 'none';

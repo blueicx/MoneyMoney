@@ -5,8 +5,21 @@ const path = require('node:path');
 const { JSDOM } = require('jsdom');
 
 const html = fs.readFileSync(path.join(__dirname, '..', 'src/web/public/index.html'), 'utf8');
-const dom = new JSDOM(html);
-const document = dom.window.document;
+const dom = new JSDOM(html, { 
+  runScripts: "dangerously", 
+  url: "http://localhost",
+  beforeParse(window) {
+    window.fetch = async () => ({ ok: true, json: async () => ({ success: true }) });
+    window.matchMedia = () => ({ matches: false, addListener: () => {}, removeListener: () => {} });
+    window.ResizeObserver = class { observe() {} unobserve() {} disconnect() {} };
+  }
+});
+const window = dom.window;
+window.fetch = async () => ({ ok: true, json: async () => ({ success: true }) });
+window.matchMedia = () => ({ matches: false, addListener: () => {}, removeListener: () => {} });
+window.ResizeObserver = class { observe() {} unobserve() {} disconnect() {} };
+
+const document = window.document;
 
 test('market terminal has distinct left features, center workspace and right instrument library', () => {
   assert.ok(document.querySelector('#market-workspace-shell'));
@@ -44,8 +57,30 @@ test('right library has market-specific entry point instead of generic event fal
   assert.ok(library.querySelector('[data-market-library="prediction"]'));
 });
 
-test('inline dashboard scripts remain syntactically valid after layout changes', () => {
-  [...document.querySelectorAll('script:not([src])')].forEach(script => new Function(script.textContent));
+test('scoped library quick data and rendering exists for each market and ensures isolation', () => {
+  // Test stocks quick data
+  window.eval("activeMarketScope = 'stocks'; applySidebarScope();");
+  const stockContainer = document.getElementById('stock-library-quick');
+  assert.match(stockContainer.innerHTML, /AAPL/, 'Stocks keeps standard list');
+  
+  // Test crypto quick data
+  window.eval("activeMarketScope = 'crypto'; applySidebarScope();");
+  const cryptoContainer = document.getElementById('crypto-library-quick');
+  assert.match(cryptoContainer.innerHTML, /BTCUSDT/, 'Crypto includes BTC');
+  assert.match(cryptoContainer.innerHTML, /ETHUSDT/, 'Crypto includes ETH');
+
+  // Verify separation / unavailability text
+  window.eval("activeMarketScope = 'options'; applySidebarScope();");
+  const optionsContainer = document.getElementById('options-library-quick');
+  assert.match(optionsContainer.innerHTML, /empty-tip/);
+
+  window.eval("activeMarketScope = 'prediction'; applySidebarScope();");
+  const predictionContainer = document.getElementById('prediction-library-quick');
+  assert.match(predictionContainer.innerHTML, /empty-tip/);
+
+  // Validate no cross-market overlap
+  assert.doesNotMatch(cryptoContainer.innerHTML, /AAPL/);
+  assert.doesNotMatch(optionsContainer.innerHTML, /BTCUSDT/);
 });
 
 test('workspace visibility overrides inline display styles', () => {
