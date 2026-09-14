@@ -8,6 +8,10 @@ import { config, validateConfig } from './config';
 import { api } from './api';
 import { tradingEngine, TradingEngine } from './trading';
 import { Market, Side } from './types';
+import { globalStrategyRegistry } from './features/strategy-registry';
+import { SignalMonitor } from './features/signal-monitor';
+import { DataSourceRouter } from './features/data-source-router';
+import { BacktestEngine } from './features/backtest-engine';
 
 // ============================================
 // PREDICT.FUN TRADING BOT

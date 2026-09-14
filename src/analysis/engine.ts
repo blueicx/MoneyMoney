@@ -5,6 +5,10 @@
 import { MarketSnapshot, Signal, Recommendation, AnalysisReport } from './types';
 import { SentimentAnalyzer } from './sentiment';
 import { DataCollector } from './collector';
+import { globalStrategyRegistry } from '../features/strategy-registry';
+import { SignalMonitor } from '../features/signal-monitor';
+import { DataSourceRouter } from '../features/data-source-router';
+import { BacktestEngine } from '../features/backtest-engine';
 
 export class AnalysisEngine {
   private collector: DataCollector;
