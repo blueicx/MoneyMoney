@@ -32,6 +32,11 @@ test('Phase 0: old intermediate instrument list is not rendered in center', () =
   assert.equal(stockLib?.parentElement?.parentElement?.id, 'right-instrument-library', 'Stock library must be in right sidebar');
 });
 
+test('news links do not fallback to javascript: urls', () => {
+  assert.doesNotMatch(html, /javascript:alert/i, 'No javascript:alert used in the codebase');
+  assert.doesNotMatch(html, /href=['"]javascript:/i, 'No javascript: href used in the codebase');
+});
+
 test('news timeline renders safe source evidence links', () => {
   assert.match(html, /function formatSourceEvidence\(item = \{\}\)/, 'Source evidence renderer exists');
   assert.match(html, /payload\.data\.map\(item => formatSourceEvidence\(item\)/, 'Timeline uses source evidence renderer');
