@@ -7714,7 +7714,10 @@ function setStockChartOverlay(name, enabled) {
   if (window.stockMoneyKLine) {
      window.stockMoneyKLine.toggleLayer(name, enabled);
   } else {
-     if (stockChartKlines.length) if (window.stockMoneyKLine) { window.stockMoneyKLine.create(stockChartKlines); } else { drawStockKline(document.getElementById('stock-kline'), stockChartKlines); }
+     if (stockChartKlines.length) {
+         drawStockKline(document.getElementById('stock-kline'), stockChartKlines);
+     }
+  }
 }
 function setStockChartStrategy(name, enabled) {
   if (!stockChartOverlayConfig.strategies) stockChartOverlayConfig.strategies = {};
@@ -12594,14 +12597,7 @@ class MoneyKLine {
 window.MoneyKLine = MoneyKLine;
 </script>
 
-      <aside class="workspace-right-library" id="market-right-library">
-        <div class="workspace-right-library-header">
-          <div class="workspace-sidebar-title" id="right-library-title">标的库</div>
-          <button class="workspace-sidebar-toggle" id="right-library-toggle" onclick="toggleRightLibrary()" title="折叠标的库">›</button>
-        </div>
-        <div class="market-instrument-library" id="global-right-library-content">
-        </div>
-      </aside>
+      
       <div class="drawer density-compact density-comfortable"></div>
 <div id="chart-fullscreen-overlay" aria-hidden="true" hidden></div>
 </body></html>
