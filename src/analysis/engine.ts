@@ -14,6 +14,7 @@ export class AnalysisEngine {
   private collector: DataCollector;
   private sentimentAnalyzer: SentimentAnalyzer;
   private cachedSentimentSignals: Signal[] = [];
+  private signalMonitor = new SignalMonitor(60000); // 1-minute cooldown
 
   constructor(collector: DataCollector) {
     this.collector = collector;
@@ -45,17 +46,37 @@ export class AnalysisEngine {
     };
   }
 
+  private dataSourceRouter = new DataSourceRouter();
+
   /**
    * Run full analysis on all open markets
    */
   async analyzeAll(): Promise<AnalysisReport> {
-    const snapshots = await this.collector.collectAllMarkets();
+    this.dataSourceRouter.register('predict-fun', {
+        fetchLive: async () => await this.collector.collectAllMarkets(),
+        fetchCached: async () => [], // Dummy empty cache
+        lastUpdated: Date.now()
+    });
+
+    const routeRes = await this.dataSourceRouter.fetch('predict-fun', {});
+    const snapshots: MarketSnapshot[] = routeRes.data || [];
     const recommendations: Recommendation[] = [];
 
     for (const snap of snapshots) {
       try {
         const rec = this.analyzeMarket(snap);
-        if (rec) recommendations.push(rec);
+        if (rec && rec.action !== 'HOLD') {
+            const status = this.signalMonitor.processSignal({
+                id: `${rec.marketId}-${Date.now()}`,
+                strategyId: 'engine-default',
+                marketId: String(rec.marketId),
+                timestamp: Date.now(),
+                direction: rec.action.includes('YES') ? 'buy' : 'sell'
+            });
+            if (status === 'confirmed') recommendations.push(rec);
+        } else if (rec) {
+            recommendations.push(rec);
+        }
       } catch {
         // Skip markets that fail analysis
       }
@@ -94,6 +115,37 @@ export class AnalysisEngine {
       });
     }
 
+    // --- Strategy Registry Integration ---
+    try {
+      if (!globalStrategyRegistry.get('momentum')) {
+        globalStrategyRegistry.register('momentum', {
+          analyze: (ctx: any) => {
+             const points: any[] = [];
+             if (ctx.prices.length >= 2) {
+                const diff = ctx.prices[ctx.prices.length-1] - ctx.prices[ctx.prices.length-2];
+                if (Math.abs(diff) > 0.005) {
+                   points.push({ price: ctx.prices[ctx.prices.length-1], time: Date.now(), direction: diff > 0 ? 'buy' : 'sell' });
+                }
+             }
+             return points;
+          }
+        });
+      }
+      
+      const prices = history.map(h => h.midPrice).filter(p => p !== null) as number[];
+      const points = globalStrategyRegistry.evaluatePoints('momentum', { marketId: String(snap.marketId), timeframe: '1h', prices });
+      
+      for (const p of points) {
+         signals.push({
+           type: 'MOMENTUM',
+           direction: p.direction === 'buy' ? 'BULLISH' : 'BEARISH',
+           strength: 50,
+           reason: `Strategy registry evaluated ${p.direction} momentum`
+         });
+      }
+    } catch (e) {
+      console.error(e);
+    }
     // --- Signal 2: Spread Quality ---
     if (snap.spread !== null && snap.spread > 0.02) {
       signals.push({
