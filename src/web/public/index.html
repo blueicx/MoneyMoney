@@ -2742,7 +2742,7 @@
             <option value="ETH">ETH</option>
           </select>
           <div id="equity-symbol-group" style="display:none;align-items:center;gap:6px;flex-wrap:wrap;">
-            <input id="option-symbol" class="option-symbol-input" value="SPY" placeholder="AAPL / SPY" maxlength="6" onkeydown="if(event.key==='Enter')loadOptions()">
+            <input id="option-symbol" class="option-symbol-input" value="SPY" placeholder="AAPL / SPY" maxlength="6" onkeydown="if(event.key==='Enter')loadOptions(true)">
             <button class="option-quick" onclick="setEquitySymbol('SPY')">SPY</button>
             <button class="option-quick" onclick="setEquitySymbol('QQQ')">QQQ</button>
             <button class="option-quick" onclick="setEquitySymbol('AAPL')">AAPL</button>
@@ -2755,7 +2755,7 @@
             <option value="20" selected="">现价 ±20 档</option>
             <option value="0">全部行权价</option>
           </select>
-          <button class="tab active" onclick="loadOptions()">🔄 刷新</button>
+          <button class="tab active" onclick="loadOptions(true)">🔄 刷新</button>
           <span id="options-updated" style="font-size:11px;color:var(--text-secondary);"></span>
         </div>
         <div id="options-summary" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;margin-bottom:16px;"></div>
@@ -4973,6 +4973,7 @@ let bnCurrentInterval = '15m';
 let bnKlineData = [];
 let cryptoChartOverlayConfig = { patterns: false };
 function bnSetSymbol(sym) {
+    if (activeMarketScope !== "crypto") return;
   if (bnCurrentSymbol !== sym) {
     const aiOutput = document.getElementById('ai-commentary');
     if (aiOutput) aiOutput.textContent = '暂无当前标的大局观和事件解读';
@@ -5827,25 +5828,34 @@ function renderCryptoLibraryQuick() {
 }
 
 function selectCryptoFromInstrumentLibrary(symbol, name) {
-  const normalized = String(symbol || '').trim().toUpperCase();
-  if (activeMarketScope !== 'crypto') return;
-  const displayName = name || normalized;
-  window._cryptoSelectedSymbol = normalized;
-  
-  // Render quick again to update selection
-  renderCryptoLibraryQuick();
-  
-  // Switch workspace and load
-  activeWorkspaceId = 'crypto-trading';
-  syncWorkspaceContextUrl();
-  const groups = workspaceNavigationState.get(activeMarketScope)?.groups || workspaceFallbackNavigation(activeMarketScope);
-  renderWorkspaceMenu(groups);
-  applyWorkspaceView();
-  showTab('crypto', null, { scopeAlreadySynced: true });
-  
-  // Sync crypto title/data
-  if (typeof loadCryptoWorkspace === 'function') loadCryptoWorkspace(normalized);
-  else if (typeof loadBnQuotes === 'function') loadBnQuotes();
+    const normalized = String(symbol || '').trim().toUpperCase();
+    if (activeMarketScope !== 'crypto') return;
+    const displayName = name || normalized;
+    window._cryptoSelectedSymbol = normalized;
+    
+    // update quick DOM class active
+    renderCryptoLibraryQuick();
+    
+    // update current library card
+    const currentContainer = document.getElementById('crypto-library-current-symbol');
+    if (currentContainer) currentContainer.textContent = normalized;
+
+    // Set central instrument
+    setWorkspaceInstrument(normalized);
+    
+    if (!loadActiveWorkspaceInstrument()) {
+        activeWorkspaceId = 'crypto-quotes';
+        syncWorkspaceContextUrl();
+        const groups = workspaceNavigationState.get(activeMarketScope)?.groups || workspaceFallbackNavigation(activeMarketScope);
+        renderWorkspaceMenu(groups);
+        applyWorkspaceView();
+        showTab('crypto', null, { scopeAlreadySynced: true });
+        
+        // Sync center KLine & Title
+        if (typeof bnSetSymbol === 'function') {
+            bnSetSymbol(normalized);
+        }
+    }
 }
 
 function renderOptionsLibraryQuick() {
@@ -7594,11 +7604,11 @@ function setEquitySymbol(symbol) {
   setWorkspaceInstrument(normalized);
   loadOptions();
 }
-async function loadOptions() {
+async function loadOptions(isSubmit = false) {
   const market = document.getElementById('option-market')?.value || 'crypto';
   const asset = document.getElementById('option-asset')?.value || 'BTC';
   const symbol = (document.getElementById('option-symbol')?.value || 'SPY').trim().toUpperCase();
-  setWorkspaceInstrument(market === 'us' ? symbol : asset);
+  if (isSubmit) setWorkspaceInstrument(market === "us" ? symbol : asset);
   if (market === 'us' && !symbol) throw new Error('请输入美股/ETF 代码');
   const loading = document.getElementById('options-loading');
   const errorEl = document.getElementById('options-error');
@@ -10735,6 +10745,20 @@ function applySidebarScope() {
         if (typeof renderPredictionLibraryQuick === 'function') renderPredictionLibraryQuick();
       }
       
+      
+    const cryptoCurrent = document.getElementById('crypto-library-current-symbol');
+    if (cryptoCurrent && activeMarketScope !== 'crypto') {
+      cryptoCurrent.textContent = '--';
+    }
+    const optionsCurrent = document.getElementById('options-library-current-symbol');
+    if (optionsCurrent) optionsCurrent.textContent = '--';
+    const predictionCurrent = document.getElementById('prediction-library-current-symbol');
+    if (predictionCurrent) predictionCurrent.textContent = '--';
+    const stockCurrent = document.getElementById('stock-library-current-symbol');
+    if (stockCurrent && activeMarketScope !== 'stocks') {
+      stockCurrent.textContent = '--';
+    }
+
       if (title) title.textContent = activeMarketScope === 'overview' ? '总体标的库' : activeMarketScope === 'watchlist' ? '自选标的库' : `${marketResearchLabel(activeMarketScope)}标的库`;
       if (subtitle) subtitle.textContent = '点击标的切换当前市场工作区';
       if (empty) empty.style.display = 'none';
@@ -10817,6 +10841,7 @@ function setMarketScope(scope, options = {}) {
   activeWorkspaceId = defaultWorkspaceForMarketScope(scope);
   currentInstrumentId = null;
   marketScopeRequestEpoch += 1;
+    syncWorkspaceContextUrl(); // clear url instrument
   if (typeof loadedStockSections !== 'undefined') loadedStockSections.clear();
   if (typeof eventCalendarState !== 'undefined') { eventCalendarState.cache = null; eventCalendarState.cacheAt = 0; }
   if (window.mm_screenerState) window.mm_screenerState.page = 1;

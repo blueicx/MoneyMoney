@@ -83,6 +83,43 @@ test('scoped library quick data and rendering exists for each market and ensures
   assert.doesNotMatch(optionsContainer.innerHTML, /BTCUSDT/);
 });
 
+test('clicking crypto library asset syncs URL, center title, and current card while keeping crypto scope', () => {
+  window.eval("setInterval = () => {}; setTimeout = (cb) => { cb(); return 1; }; loadBinanceDashboard = () => {}; setMarketScope('crypto');");
+  const ethBtn = document.querySelector('#crypto-library-quick button:nth-child(2)'); // Should be ETHUSDT
+  
+  if (ethBtn) {
+    ethBtn.click();
+    
+    // Check URL update (instrument=ETHUSDT)
+    const url = new URL(window.location.href);
+    assert.equal(url.searchParams.get('instrument'), 'ETHUSDT');
+    
+    // Check center title
+    const bnSymbolSelect = document.getElementById('bn-symbol');
+    if (bnSymbolSelect) assert.equal(bnSymbolSelect.value, 'ETHUSDT');
+    
+    // Check current card update
+    const currentContainer = document.getElementById('crypto-library-current-symbol');
+    if (currentContainer) assert.equal(currentContainer.textContent, 'ETHUSDT');
+    
+    // Check active class on button
+    assert.ok(ethBtn.classList.contains('active'));
+    
+    // Check scope remains crypto
+    assert.equal(window.eval('activeMarketScope'), 'crypto');
+  }
+
+  // Cross scope test: go to options, URL instrument should NOT be ETHUSDT
+  window.eval("setMarketScope('options');");
+  const urlAfter = new URL(window.location.href);
+  assert.notEqual(urlAfter.searchParams.get('instrument'), 'ETHUSDT');
+  
+  // Go to stocks, URL instrument should NOT be ETHUSDT
+  window.eval("setMarketScope('stocks');");
+  const urlStocks = new URL(window.location.href);
+  assert.notEqual(urlStocks.searchParams.get('instrument'), 'ETHUSDT');
+});
+
 test('workspace visibility overrides inline display styles', () => {
   assert.match(html, /\.workspace-hidden[^}]*display:\s*none\s*!important/);
   assert.match(html, /classList\.toggle\(['"]workspace-hidden['"],\s*!visible\)/);
