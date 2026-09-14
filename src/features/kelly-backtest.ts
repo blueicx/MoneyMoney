@@ -94,7 +94,7 @@ export interface AssetBar {
   volume?: number | null;
 }
 
-export interface AssetBacktestInput {
+export interface AssetBacktestInput { rejectOnInsufficientSamples?: boolean; preventFutureData?: boolean;
   market: AssetMarket;
   instrumentId: string;
   dataSource: string;
@@ -195,6 +195,7 @@ export function runAssetBacktest(input: AssetBacktestInput): AssetBacktestResult
   if (!instrumentId) throw new Error('回测标的不能为空');
   if (!Number.isFinite(threshold) || threshold <= 0) throw new Error('回测阈值无效');
   if (!Number.isFinite(startingBalance) || startingBalance <= 0) throw new Error('回测初始资金无效');
+  if (input.rejectOnInsufficientSamples && cleanBars.length < 100) throw new Error('Insufficient samples');
   if (cleanBars.length < lookback + holding + 2) throw new Error('历史数据不足，无法进行真实回测');
 
   const trades: AssetBacktestResult['trades'] = [];

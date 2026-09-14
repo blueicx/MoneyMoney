@@ -1,4 +1,4 @@
-export type SourceStatus = 'live' | 'stale' | 'unavailable' | 'fallback' | 'unconfigured';
+﻿export type SourceStatus = 'live' | 'stale' | 'unavailable' | 'fallback' | 'unconfigured' | 'cached' | 'degraded';
 
 export interface SourceSnapshot<T> {
   data: T | null;
