@@ -58,6 +58,7 @@ export interface DailyResearchBriefing {
   };
   checklistZh: string[];
   noteZh: string;
+  sourceStatus?: 'ok' | 'unavailable' | 'degraded';
 }
 
 function round(value: number, digits = 2): number {
@@ -101,6 +102,7 @@ function dueLabel(endDate: string | undefined): string {
  * responsive even when external prediction APIs are slow.
  */
 export function buildDailyResearchBriefing(input: {
+  scope?: string;
   markets: PredictionMarket[];
   radarReady: boolean;
   paper: ResearchBriefingPaper;
@@ -109,7 +111,8 @@ export function buildDailyResearchBriefing(input: {
 }): DailyResearchBriefing {
   const now = new Date();
   const date = shanghaiDateParts(now);
-  const focus = input.markets
+  const isPredictionOrOverview = !input.scope || input.scope === 'overview' || input.scope === 'prediction';
+  const focus = (isPredictionOrOverview ? input.markets : [])
     .map(market => {
       const marketPct = clamp((market.yesPrice || 0) * 100, 0, 100);
       const modelPct = clamp((market.modelProbability ?? (market.yesPrice || 0)) * 100, 0, 100);
@@ -176,11 +179,17 @@ export function buildDailyResearchBriefing(input: {
     .filter(group => group.samples >= 5)
     .sort((a, b) => a.modelBrier - b.modelBrier);
   const bestGroup = labGroups[0];
+  const sourceStatus = isPredictionOrOverview ? 'ok' : 'unavailable';
+
   const focusText = focus.length
     ? `今日有 ${focus.length} 个值得先看的研究对象，重点是${focus[0].titleZh}。`
+    : !isPredictionOrOverview
+      ? '当前市场暂无专用研究简报数据，请使用通用工具面板。'
     : input.radarReady
       ? '当前快照中没有足够突出的分歧机会，更适合观察和积累校准样本。'
-      : '预测雷达还在准备首次快照；本简报稍后刷新会自动补上重点。';
+      : isPredictionOrOverview
+        ? '预测雷达还在准备首次快照；本简报稍后刷新会自动补上重点。'
+        : '当前市场暂无专用研究简报数据，请使用通用工具面板。';
 
   return {
     dateKey: date.key,
@@ -188,6 +197,7 @@ export function buildDailyResearchBriefing(input: {
     generatedAt: now.toISOString(),
     headlineZh: focusText,
     radarReady: input.radarReady,
+    sourceStatus,
     focusMarkets: focus,
     risk: {
       levelZh: riskLevel,
@@ -210,18 +220,22 @@ export function buildDailyResearchBriefing(input: {
       modelBrier: round(input.forecastLab.model?.brier || 0, 3),
       marketBrier: round(input.forecastLab.market?.brier || 0, 3),
       modelEdgePct: round(input.forecastLab.modelEdgePct || 0, 1),
-      verdictZh: input.forecastLab.verdictZh || '样本还不足，继续让策略实验室记录快照。',
-      bestGroupZh: bestGroup
+      verdictZh: isPredictionOrOverview ? (input.forecastLab.verdictZh || '样本还不足，继续让策略实验室记录快照。') : '非预测市场视图',
+      bestGroupZh: isPredictionOrOverview ? (bestGroup
         ? `当前表现较好的方向是「${bestGroup.name}」，模型 Brier ${round(bestGroup.modelBrier, 3)}。`
-        : '分组样本还不够，暂不评选优势方向。',
+        : '分组样本还不够，暂不评选优势方向。') : '非预测市场视图',
     },
-    checklistZh: [
+    checklistZh: isPredictionOrOverview ? [
       '核对事件定义、结算来源和截止时区',
       '确认流动性、买卖价差是否容得下研究仓位',
       '用凯利分数和单仓上限约束金额',
       focus.some(item => item.edgePct >= 18)
         ? '高分歧标的先查延迟、规则陷阱和跨平台含义'
         : '记录入场理由，方便到期后复盘',
+    ] : [
+      '确认流动性、买卖价差是否容得下研究仓位',
+      '用凯利分数和单仓上限约束金额',
+      '记录入场理由，方便到期后复盘'
     ],
     noteZh: '这是自动整理的研究起点，不是投资建议；所有机会仍需人工核对后决定。',
   };

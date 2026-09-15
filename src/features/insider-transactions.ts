@@ -40,17 +40,11 @@ export interface InsiderRadarResult {
   sources: string[];
 }
 
-export interface TickerRecord {
-  cik: string;
-  ticker: string;
-  title: string;
-  exchange: string;
-}
+import { buildSecHeaders, loadSecTickerDirectory, type SecTickerRecord } from './sec-edgar-client';
 
-const USER_AGENT = 'MoneyMoney/1.0 (keyless research; contact@moneymoney.app)';
+export interface TickerRecord extends SecTickerRecord {}
+
 const WINDOW_DAYS = 90;
-let tickerCache: { ts: number; records: TickerRecord[] } | null = null;
-let tickerFetch: Promise<TickerRecord[]> | null = null;
 const resultCache = new Map<string, { ts: number; value: InsiderRadarResult }>();
 
 function round(value: number, digits = 2): number {
@@ -83,7 +77,7 @@ function number(value: string): number {
 
 async function fetchJson<T>(url: string): Promise<T> {
   const response = await fetch(url, {
-    headers: { 'User-Agent': USER_AGENT },
+    headers: buildSecHeaders(),
     signal: AbortSignal.timeout(15_000),
   });
   if (!response.ok) throw new Error(`SEC HTTP ${response.status}`);
@@ -92,7 +86,7 @@ async function fetchJson<T>(url: string): Promise<T> {
 
 async function fetchText(url: string): Promise<string> {
   const response = await fetch(url, {
-    headers: { 'User-Agent': USER_AGENT },
+    headers: buildSecHeaders(),
     signal: AbortSignal.timeout(12_000),
   });
   if (!response.ok) throw new Error(`SEC HTTP ${response.status}`);
@@ -100,28 +94,7 @@ async function fetchText(url: string): Promise<string> {
 }
 
 export async function loadTickerRecords(): Promise<TickerRecord[]> {
-  if (tickerCache && Date.now() - tickerCache.ts < 24 * 60 * 60_000) return tickerCache.records;
-  if (tickerFetch) return tickerFetch;
-
-  tickerFetch = (async () => {
-    const payload = await fetchJson<Record<string, { cik_str?: number; ticker?: string; title?: string; exchange?: string }>>(
-      'https://www.sec.gov/files/company_tickers.json'
-    );
-    const records: TickerRecord[] = Object.values(payload || {}).map(item => ({
-      cik: String(item?.cik_str ?? ''),
-      ticker: String(item?.ticker ?? '').toUpperCase(),
-      title: String(item?.title ?? ''),
-      exchange: String(item?.exchange ?? ''),
-    }));
-    tickerCache = { ts: Date.now(), records };
-    return records;
-  })();
-
-  try {
-    return await tickerFetch;
-  } finally {
-    tickerFetch = null;
-  }
+  return loadSecTickerDirectory();
 }
 
 interface SubmissionEntry {

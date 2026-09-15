@@ -10,7 +10,7 @@ test('retries a transient source failure and returns a fresh snapshot', async ()
     return { value: 42 };
   }});
   const snapshot = await adapter.fetch();
-  assert.equal(snapshot.status, 'fresh');
+  assert.equal(snapshot.status, 'live');
   assert.deepEqual(snapshot.data, { value: 42 });
   assert.equal(attempts, 2);
 });
@@ -21,7 +21,7 @@ test('serves stale cached data after later failures', async () => {
     if (fail) throw new Error('offline');
     return 'cached';
   }});
-  assert.equal((await adapter.fetch()).status, 'fresh');
+  assert.equal((await adapter.fetch()).status, 'live');
   await new Promise(resolve => setTimeout(resolve, 5));
   fail = true;
   const stale = await adapter.fetch();

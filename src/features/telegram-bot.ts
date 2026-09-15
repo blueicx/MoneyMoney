@@ -104,6 +104,7 @@ export interface TelegramInteractionBotOptions {
   unknownCallbackHandler?: TelegramCallbackHandler;
   transport?: TelegramTransport;
   stateFile?: string;
+  menuScope?: (chatId: string) => string;
   pollTimeoutSeconds?: number;
   logger?: Pick<Console, 'error'>;
 }
@@ -234,6 +235,7 @@ export class TelegramInteractionBot {
   private readonly unknownCallbackHandler?: TelegramCallbackHandler;
   private readonly transport: TelegramTransport;
   private readonly stateFile: string;
+  private readonly menuScope: (chatId: string) => string;
   private readonly pollTimeoutSeconds: number;
   private readonly logger: Pick<Console, 'error'>;
   private nextOffset = 0;
@@ -252,6 +254,7 @@ export class TelegramInteractionBot {
     this.unknownCallbackHandler = options.unknownCallbackHandler;
     this.transport = options.transport || new TelegramApiTransport(options.token || '', options.proxyUrl || '');
     this.stateFile = options.stateFile || path.resolve('data/telegram-bot-state.json');
+    this.menuScope = options.menuScope || (() => 'overview');
     this.pollTimeoutSeconds = Math.max(1, Math.min(50, options.pollTimeoutSeconds || 25));
     this.logger = options.logger || console;
     this.nextOffset = this.readState().nextOffset;
@@ -352,7 +355,7 @@ export class TelegramInteractionBot {
     if (reply === undefined || reply === '') return;
     const normalized = typeof reply === 'string' ? { text: reply } : reply;
     const replyMarkup = normalized.replyKeyboard === 'menu'
-      ? buildTelegramBottomMenu(chatId)
+      ? buildTelegramBottomMenu(chatId, this.menuScope(chatId))
       : normalized.replyMarkup;
     const parts = splitTelegramMessage(normalized.text);
     for (const part of parts) {

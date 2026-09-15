@@ -4,8 +4,10 @@ import { getUpcomingEventCalendar, type UpcomingEvent } from './event-calendar';
 import { getCachedPredictionRadarSlice, getPredictionRadar, type PredictionMarket } from './prediction-radar';
 import { getAiRuntimeConfig } from './ai-runtime-config';
 import { filterInstrumentResults, type MarketScope } from './market-scope';
+import { stockDataService } from './stock-data-service';
+import { getEquityOptionsSnapshot } from './options-market';
 
-export type InstrumentType = 'stock' | 'crypto' | 'prediction';
+export type InstrumentType = 'stock' | 'option' | 'crypto' | 'prediction';
 
 export interface InstrumentRef {
   id: string;
@@ -30,6 +32,19 @@ export interface Freshness {
   status: 'fresh' | 'stale' | 'unavailable';
 }
 
+export type InstrumentSectionStatus = 'live' | 'cached' | 'degraded' | 'unavailable';
+
+export interface InstrumentOverviewSection {
+  id: 'quote' | 'history' | 'events' | 'news' | 'analysis' | 'timeline';
+  label: string;
+  status: InstrumentSectionStatus;
+}
+
+export interface OverviewDataStatus {
+  state: InstrumentSectionStatus;
+  reason: string | null;
+}
+
 export interface UnifiedInstrumentOverview {
   instrument: InstrumentRef;
   quote: Record<string, unknown> | null;
@@ -46,6 +61,9 @@ export interface UnifiedInstrumentOverview {
   };
   freshness: Freshness;
   sourceStatus: Record<string, 'ok' | 'stale' | 'unavailable'>;
+  sections: InstrumentOverviewSection[];
+  timeline: Array<Record<string, unknown>>;
+  status: OverviewDataStatus;
 }
 
 export const UNIFIED_AI_CACHE_TTL_MS = 15 * 60_000;
@@ -59,6 +77,7 @@ function clean(value: unknown): string { return String(value ?? '').trim(); }
 
 function normalizedVenue(type: InstrumentType, venue: string): string {
   if (type === 'stock') return clean(venue || 'us').toLowerCase();
+  if (type === 'option') return clean(venue || 'cboe').toLowerCase();
   if (type === 'crypto') return clean(venue || 'binance').toLowerCase();
   return clean(venue || 'predictfun').toLowerCase();
 }
@@ -92,7 +111,7 @@ export function normalizeInstrumentRef(input: InstrumentInput): InstrumentRef {
 
 export function parseInstrumentQuery(query: string): { type: InstrumentType; venue: string; symbol: string } | null {
   const value = clean(query);
-  const canonical = value.match(/^(stock|crypto|prediction):([^:]+):(.+)$/i);
+  const canonical = value.match(/^(stock|option|crypto|prediction):([^:]+):(.+)$/i);
   if (canonical) {
     return { type: canonical[1].toLowerCase() as InstrumentType, venue: canonical[2].toLowerCase(), symbol: canonical[3] };
   }
@@ -110,6 +129,45 @@ export function dedupeInstrumentRefs(items: InstrumentRef[]): InstrumentRef[] {
     seen.add(item.id);
     return true;
   });
+}
+
+export function overviewDataStatus(sourceStatus: Record<string, 'ok' | 'stale' | 'unavailable'>): OverviewDataStatus {
+  const statuses = Object.values(sourceStatus);
+  const hasOk = statuses.includes('ok');
+  const hasStale = statuses.includes('stale');
+  const hasUnavailable = statuses.includes('unavailable');
+  if (!hasOk && hasStale) return { state: 'cached', reason: '当前仅有缓存数据' };
+  if (!hasOk) return { state: 'unavailable', reason: '当前没有可用数据源' };
+  if (hasStale || hasUnavailable) return { state: 'degraded', reason: '部分数据源不可用或已过期' };
+  return { state: 'live', reason: null };
+}
+
+function sectionStatus(sourceStatus: Record<string, 'ok' | 'stale' | 'unavailable'>, fallback: 'unavailable' | 'ok' = 'unavailable'): InstrumentSectionStatus {
+  const keys = Object.keys(sourceStatus);
+  return overviewDataStatus(keys.length ? sourceStatus : { value: fallback }).state;
+}
+
+export function buildInstrumentOverviewSections(input: Pick<UnifiedInstrumentOverview, 'quote' | 'marketData' | 'klines' | 'events' | 'news' | 'analysis' | 'sourceStatus'>): InstrumentOverviewSection[] {
+  const quoteAvailable = Boolean(input.quote || input.marketData);
+  const historyAvailable = Array.isArray(input.klines) && input.klines.length > 0;
+  const eventsAvailable = Array.isArray(input.events) && input.events.length > 0;
+  const newsAvailable = Array.isArray(input.news) && input.news.length > 0;
+  const timelineAvailable = eventsAvailable || newsAvailable;
+  return [
+    { id: 'quote', label: '行情', status: quoteAvailable ? sectionStatus({ quote: input.sourceStatus.quote || 'unavailable' }) : 'unavailable' },
+    { id: 'history', label: '历史', status: historyAvailable ? sectionStatus({ klines: input.sourceStatus.klines || 'unavailable' }) : 'unavailable' },
+    { id: 'events', label: '事件', status: eventsAvailable ? sectionStatus({ events: input.sourceStatus.events || 'unavailable' }) : 'unavailable' },
+    { id: 'news', label: '新闻', status: newsAvailable ? sectionStatus({ news: input.sourceStatus.news || 'unavailable' }) : 'unavailable' },
+    { id: 'analysis', label: 'AI 分析', status: input.analysis.status === 'ready' ? 'live' : 'unavailable' },
+    { id: 'timeline', label: '时间线', status: timelineAvailable ? 'live' : 'unavailable' },
+  ];
+}
+
+function buildInstrumentTimeline(events: UpcomingEvent[], news: NewsItem[]): Array<Record<string, unknown>> {
+  return [
+    ...events.map(event => ({ kind: 'event', at: event.date, title: event.titleZh || event.title, impact: event.impact, result: event.actual ? { actual: event.actual, forecast: event.forecast } : null })),
+    ...news.map(item => ({ kind: 'news', at: item.publishedAt, title: item.title, source: item.source, url: item.url, sentimentScore: item.sentimentScore ?? null })),
+  ].sort((a, b) => new Date(String(b.at)).getTime() - new Date(String(a.at)).getTime());
 }
 
 export function freshnessStatus(fetchedAt: string | null | undefined, staleAfterMs: number, now = Date.now()): Freshness {
@@ -150,7 +208,7 @@ async function fetchStockSearch(query: string): Promise<InstrumentSearchResult[]
 }
 
 const POPULAR_STOCKS = [
-  ['AAPL', 'Apple'], ['MSFT', 'Microsoft'], ['NVDA', 'NVIDIA'], ['TSLA', 'Tesla'], ['AMZN', 'Amazon'], ['GOOG', 'Alphabet'], ['META', 'Meta'],
+  ['AAPL', 'Apple'], ['MSFT', 'Microsoft'], ['NVDA', 'NVIDIA'], ['AMZN', 'Amazon'], ['GOOGL', 'Alphabet'], ['META', 'Meta'], ['TSLA', 'Tesla'],
 ] as const;
 
 async function searchStocks(query: string): Promise<InstrumentSearchResult[]> {
@@ -181,7 +239,7 @@ export class UnifiedInstrumentService {
     if (!q) return [];
     const parsed = parseInstrumentQuery(q);
     const [stocks, crypto] = await Promise.all([
-      parsed?.type === 'crypto' ? Promise.resolve([]) : searchStocks(q),
+      parsed?.type === 'crypto' || parsed?.type === 'option' ? Promise.resolve([]) : searchStocks(q),
       searchCrypto(q),
     ]);
     const radar = getCachedPredictionRadarSlice(q, 12);
@@ -210,10 +268,35 @@ export class UnifiedInstrumentService {
         const radar = getCachedPredictionRadarSlice('', 100) || await getPredictionRadar('', 100);
         const market = radar.markets.find(item => String(item.id) === normalized.symbol);
         if (market) { marketData = market as unknown as Record<string, unknown>; quote = { yesPrice: market.yesPrice, noPrice: market.noPrice, modelProbability: market.modelProbability }; fetchedAt = radar.updatedAt; sourceStatus.market = 'ok'; sourceStatus.quote = 'ok'; }
+      } else if (normalized.type === 'option') {
+        const snapshot = await getEquityOptionsSnapshot(normalized.symbol);
+        quote = {
+          price: snapshot.spot,
+          change: snapshot.quote?.change ?? null,
+          changePct: snapshot.quote?.changePercent ?? null,
+          volume: snapshot.quote?.volume ?? null,
+          iv30Pct: snapshot.quote?.iv30Pct ?? null,
+        };
+        marketData = {
+          source: snapshot.source,
+          asset: snapshot.asset,
+          totalCallOpenInterest: snapshot.totalCallOpenInterest,
+          totalPutOpenInterest: snapshot.totalPutOpenInterest,
+          totalPutCallOIRatio: snapshot.totalPutCallOIRatio,
+          expiries: snapshot.expiries,
+        };
+        fetchedAt = snapshot.fetchedAt;
+        sourceStatus.quote = 'ok';
+        sourceStatus.market = 'ok';
       } else {
-        const response = await fetch(`https://qt.gtimg.cn/q=us${normalized.symbol}`, { signal: AbortSignal.timeout(8000) });
-        const stock = stockFromTencent(await response.text());
-        if (stock) { quote = stock as unknown as Record<string, unknown>; fetchedAt = new Date().toISOString(); sourceStatus.quote = 'ok'; }
+        const stockData = await stockDataService.overview(normalized.symbol);
+        if (stockData.quote) {
+          quote = stockData.quote as unknown as Record<string, unknown>;
+          fetchedAt = stockData.quote.asOf || stockData.snapshots.map(item => item.fetchedAt).filter(Boolean).sort().pop() || new Date().toISOString();
+        }
+        klines = stockData.bars;
+        sourceStatus.quote = stockStatus(stockData.sourceStatus['nasdaq-public-quote']);
+        sourceStatus.klines = stockStatus(stockData.sourceStatus['nasdaq-public-history']);
       }
     } catch { /* each source is independently optional */ }
     const [eventsResult, newsResult] = await Promise.allSettled([getUpcomingEventCalendar(7), newsFeed.getNews()]);
@@ -224,20 +307,25 @@ export class UnifiedInstrumentService {
     const base: UnifiedInstrumentOverview = {
       instrument: normalized, quote, marketData, klines, events, news, analysis: emptyAnalysis,
       freshness: freshnessStatus(fetchedAt, normalized.type === 'crypto' ? 30_000 : 5 * 60_000), sourceStatus,
+      sections: [], timeline: [], status: overviewDataStatus(sourceStatus),
     };
     base.analysis = await getInstrumentAnalysis(normalized, base);
+    base.timeline = buildInstrumentTimeline(events, news);
+    base.sections = buildInstrumentOverviewSections(base);
     overviewCache.set(normalized.id, { at: Date.now(), value: base });
     return base;
   }
 
   async timeline(ref: InstrumentRef): Promise<{ instrument: InstrumentRef; items: Array<Record<string, unknown>>; generatedAt: string }> {
     const overview = await this.overview(ref);
-    const items = [
-      ...overview.events.map(event => ({ kind: 'event', at: event.date, title: event.titleZh || event.title, impact: event.impact, result: event.actual ? { actual: event.actual, forecast: event.forecast } : null })),
-      ...overview.news.map(item => ({ kind: 'news', at: item.publishedAt, title: item.title, source: item.source, url: item.url, sentimentScore: item.sentimentScore ?? null })),
-    ].sort((a, b) => new Date(String(b.at)).getTime() - new Date(String(a.at)).getTime());
-    return { instrument: overview.instrument, items, generatedAt: new Date().toISOString() };
+    return { instrument: overview.instrument, items: overview.timeline, generatedAt: new Date().toISOString() };
   }
+}
+
+function stockStatus(status: string | undefined): UnifiedInstrumentOverview['sourceStatus'][string] {
+  if (status === 'fresh') return 'ok';
+  if (status === 'stale') return 'stale';
+  return 'unavailable';
 }
 
 async function getInstrumentAnalysis(ref: InstrumentRef, overview: Omit<UnifiedInstrumentOverview, 'analysis'>): Promise<UnifiedInstrumentOverview['analysis']> {
