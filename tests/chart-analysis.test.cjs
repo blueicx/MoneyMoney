@@ -59,3 +59,24 @@ test('keeps strategy defaults when loading an older overlay preference', () => {
   assert.equal(config.strategies.bollinger, false);
   assert.equal(config.strategies.volumeBreakout, false);
 });
+
+test('chart analysis exposes extended candlestick patterns and Chan structure graph', () => {
+  const input = [
+    { time: 1, open: 10, high: 10, low: 10, close: 10, volume: 1 },
+    { time: 2, open: 10, high: 12, low: 10, close: 12, volume: 1 },
+    { time: 3, open: 12, high: 12, low: 12, close: 12, volume: 1 },
+    { time: 4, open: 12, high: 13, low: 11, close: 11, volume: 1 },
+    { time: 5, open: 11, high: 11, low: 9, close: 9, volume: 1 },
+    { time: 6, open: 9, high: 10, low: 9, close: 10, volume: 1 },
+    { time: 7, open: 10, high: 11, low: 10, close: 11, volume: 1 },
+  ];
+  const patterns = analysis.detectCandlestickPatterns(input);
+  assert.ok(patterns.some(item => ['spinning-top', 'marubozu', 'tweezer-top', 'tweezer-bottom', 'three-inside-up', 'three-inside-down'].includes(item.type)));
+  const graph = analysis.detectChanStructures(input);
+  assert.ok(Array.isArray(graph.fractals));
+  assert.ok(Array.isArray(graph.strokes));
+  assert.ok(Array.isArray(graph.segments));
+  assert.ok(Array.isArray(graph.hubs));
+  assert.ok(Array.isArray(graph.tradePoints));
+  assert.ok(graph.fractals.every(item => item.index > 0 && item.index < input.length - 1));
+});

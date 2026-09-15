@@ -1,3 +1,5 @@
+import { calculateBacktestMetrics, type BacktestMetrics } from './backtest-analysis';
+
 export type BacktestDirection = 'buy' | 'sell';
 
 export interface BacktestSignal {
@@ -6,6 +8,8 @@ export interface BacktestSignal {
   strategyId?: string;
   source?: string;
   price?: number;
+  tag?: string;
+  exitReason?: string;
 }
 
 export interface BacktestRules {
@@ -37,6 +41,7 @@ export interface BacktestOptions {
   useCache?: boolean;
   experimentContext?: ExperimentContext | null;
   segmentSize?: number;
+  startingBalance?: number;
 }
 
 export interface BacktestTrade {
@@ -48,6 +53,9 @@ export interface BacktestTrade {
   slippage: number;
   strategyId?: string;
   source?: string;
+  tag?: string;
+  exitReason?: string;
+  pnl: number;
 }
 
 export interface BacktestSegmentStatistic {
@@ -69,6 +77,9 @@ export interface BacktestResult {
   preventFutureData: boolean;
   lookAheadBiasDetected: boolean;
   cached: boolean;
+  startingBalance: number;
+  equityCurve: number[];
+  metrics: BacktestMetrics;
 }
 
 function cloneResult(result: BacktestResult): BacktestResult {
@@ -81,6 +92,7 @@ export class BacktestEngine {
   constructor(private readonly options: BacktestOptions) {
     if (!Number.isFinite(options.feeRate) || options.feeRate < 0) throw new Error('feeRate must be a non-negative number');
     if (!Number.isFinite(options.slippage) || options.slippage < 0) throw new Error('slippage must be a non-negative number');
+    if (options.startingBalance !== undefined && (!Number.isFinite(options.startingBalance) || options.startingBalance <= 0)) throw new Error('startingBalance must be positive');
   }
 
   run(prices: number[], signals: readonly BacktestSignal[], explicitCacheKey?: string): BacktestResult {
@@ -104,8 +116,10 @@ export class BacktestEngine {
     let lookAheadBiasDetected = false;
     const trades: BacktestTrade[] = [];
     const segments = new Map<number, BacktestSegmentStatistic>();
+    const startingBalance = this.options.startingBalance ?? 1000;
+    const equityCurve = [startingBalance];
 
-    for (const signal of signals) {
+    for (const signal of [...signals].sort((left, right) => left.timeIndex - right.timeIndex)) {
       if (!Number.isInteger(signal.timeIndex) || signal.timeIndex < 0 || signal.timeIndex >= prices.length) {
         if (this.options.preventFutureData && signal.timeIndex >= prices.length) lookAheadBiasDetected = true;
         continue;
@@ -128,8 +142,12 @@ export class BacktestEngine {
         timeIndex: signal.timeIndex, direction: signal.direction, price, executionPrice, fee, slippage,
         ...(signal.strategyId ? { strategyId: signal.strategyId } : {}),
         ...(signal.source ? { source: signal.source } : {}),
+        ...(signal.tag ? { tag: signal.tag } : {}),
+        ...(signal.exitReason ? { exitReason: signal.exitReason } : {}),
+        pnl: tradePnl,
       };
       trades.push(trade);
+      equityCurve.push((equityCurve[equityCurve.length - 1] ?? startingBalance) + tradePnl);
 
       const segment = Math.floor(signal.timeIndex / segmentSize);
       const current = segments.get(segment) ?? { segment, fromIndex: segment * segmentSize, toIndex: Math.min(prices.length - 1, (segment + 1) * segmentSize - 1), pnl: 0, trades: 0 };
@@ -145,6 +163,9 @@ export class BacktestEngine {
       preventFutureData: this.options.preventFutureData ?? false,
       lookAheadBiasDetected,
       cached: false,
+      startingBalance,
+      equityCurve,
+      metrics: calculateBacktestMetrics({ startingBalance, equityCurve, trades }),
     };
     if (cacheKey !== undefined) this.cache.set(cacheKey, cloneResult(result));
     return result;

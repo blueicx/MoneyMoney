@@ -36,3 +36,24 @@ test('router retries, falls back to cache, and distinguishes empty data', async 
   assert.deepEqual(cached.data, { event: 'cached' });
   assert.equal(cached.capability.status, 'cached');
 });
+
+test('router exposes discoverable capability matrix and request cache', async () => {
+  const router = new DataSourceRouter();
+  let calls = 0;
+  router.register('stocks-bars', { markets: ['stocks'], capabilities: ['bars'], quality: 'high', ttlMs: 10_000, budget: 30, fetchLive: async () => { calls += 1; return [{ close: 120 + calls }]; } });
+  router.register('crypto-depth', { markets: ['crypto'], capabilities: ['depth'], quality: 'medium', fetchLive: async () => ({ bids: [] }) });
+  assert.deepEqual(router.listSources('stocks'), [{ name: 'stocks-bars', markets: ['stocks'], capabilities: ['bars'], quality: 'high', budget: 30 }]);
+  const first = await router.fetch('stocks-bars', { marketId: 'stocks', capability: 'bars', symbol: 'MSFT' });
+  const second = await router.fetch('stocks-bars', { marketId: 'stocks', capability: 'bars', symbol: 'MSFT' });
+  assert.equal(first.capability.status, 'live');
+  assert.equal(second.capability.status, 'cached');
+  assert.equal(calls, 1);
+  const forced = await router.fetch('stocks-bars', { marketId: 'stocks', capability: 'bars', symbol: 'MSFT', forceRefresh: true });
+  assert.equal(forced.capability.status, 'live');
+  assert.equal(calls, 2);
+  const afterRefresh = await router.fetch('stocks-bars', { marketId: 'stocks', capability: 'bars', symbol: 'MSFT' });
+  assert.equal(afterRefresh.capability.status, 'cached');
+  assert.deepEqual(afterRefresh.data, forced.data);
+  assert.equal(calls, 2);
+  assert.deepEqual(router.listSources('crypto', 'bars'), []);
+});

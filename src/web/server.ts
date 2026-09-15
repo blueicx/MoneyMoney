@@ -104,6 +104,8 @@ import { exportJournalCsv, exportPaperCsv, exportCalibrationCsv, exportForecastL
 import { generateAssistantReport } from '../features/trade-assistant';
 import { getSourceHealth } from '../features/source-health';
 import { testNotificationChannels } from '../features/notification-channels';
+import { runResearchExperiment } from '../features/experiment-runner';
+import type { MarketId } from '../features/research-contracts';
 import { riskPatrol } from '../features/risk-patrol';
 import { createAccessMiddleware, validateAccessConfiguration } from './access-control';
 import { createLoginToken, verifyLoginToken, createLoginRateLimiter, extractAuthToken, requireAuth, safeEqual, blacklistToken, buildAuthCookie, buildClearCookie, GUEST_TOKEN_EXPIRY_MS, isGuestRequestAllowed } from './auth';
@@ -4691,6 +4693,35 @@ app.get('/api/notifications', (req, res) => {
 });
 
 // --- Research Workspace ---
+
+app.post('/api/research/experiments', express.json(), (req, res) => {
+  try {
+    const body = req.body || {};
+    const context = {
+      market: String(body.market || body.scope || '').trim() as MarketId,
+      workspace: String(body.workspace || 'backtest'),
+      instrument: body.instrument ? String(body.instrument) : undefined,
+      timeframe: body.timeframe ? String(body.timeframe) : undefined,
+      dataStatus: body.dataStatus,
+      dataSource: body.dataSource ? String(body.dataSource) : undefined,
+      dataFrom: body.dataFrom ? String(body.dataFrom) : undefined,
+      dataTo: body.dataTo ? String(body.dataTo) : undefined,
+      strategyId: body.strategyId ? String(body.strategyId) : undefined,
+      strategyVersion: body.strategyVersion ? String(body.strategyVersion) : undefined,
+      feeRate: Number(body.feeRate || 0), slippage: Number(body.slippage || 0), seed: body.seed,
+    };
+    const result = runResearchExperiment({
+      context,
+      prices: Array.isArray(body.prices) ? body.prices.map(Number) : [],
+      signals: Array.isArray(body.signals) ? body.signals : [],
+      split: body.split,
+      promotion: body.promotion,
+    });
+    return res.json({ success: true, data: result });
+  } catch (error) {
+    return res.status(400).json({ success: false, error: error instanceof Error ? error.message : '实验配置无效' });
+  }
+});
 
 app.get('/api/research', (req, res) => {
   const scope = requestedMarketScope(req.query.scope);

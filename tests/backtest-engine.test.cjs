@@ -35,3 +35,16 @@ test('backtest experiment context, segmentation and cache are reproducible', () 
   assert.equal(first.segmentStatistics.length, 2);
   assert.deepEqual(second.trades, first.trades);
 });
+
+test('backtest exposes an equity curve and research metrics with a fixed starting balance', () => {
+  const engine = new BacktestEngine({ marketId: 'stocks', rules: {}, feeRate: 0, slippage: 0, startingBalance: 1000 });
+  const result = engine.run([100, 110, 105, 120], [
+    { timeIndex: 0, direction: 'buy', source: 'maCross' },
+    { timeIndex: 1, direction: 'sell', source: 'maCross' },
+  ]);
+  assert.equal(result.startingBalance, 1000);
+  assert.equal(result.equityCurve.length, 3);
+  assert.equal(result.metrics.totalReturnPct, 1);
+  assert.equal(result.metrics.winRatePct, 50);
+  assert.equal(result.trades[0].source, 'maCross');
+});

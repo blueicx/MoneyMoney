@@ -125,6 +125,30 @@
           found.push(pattern(index, 'three-black-crows', '三只乌鸦', 'bearish', bars, 'High', '连续三根阴线且收盘价递减', '空头持续发力，通常标志着强劲的下降趋势已经确立'));
         }
       }
+
+      if (current.body / current.range <= 0.35 && current.upper / current.range >= 0.2 && current.lower / current.range >= 0.2) {
+        found.push(pattern(index, 'spinning-top', '纺锤线', 'neutral', bars, 'Low', '实体较小且上下影线均明显', '多空双方暂时僵持，单独出现时需要等待后续K线确认方向'));
+      }
+      if (current.body / current.range >= 0.8 && current.upper / current.range <= 0.05 && current.lower / current.range <= 0.05) {
+        const direction = current.close >= current.open ? 'bullish' : 'bearish';
+        found.push(pattern(index, 'marubozu', direction === 'bullish' ? '光头光脚阳线' : '光头光脚阴线', direction, bars, 'Medium', '实体占比至少80%且上下影线很短', direction === 'bullish' ? '买方从开盘到收盘持续占优，趋势动能较强' : '卖方从开盘到收盘持续占优，趋势动能较强'));
+      }
+      if (previous && Math.abs(current.high - previous.high) <= Math.max(current.range, previous.range) * 0.08 && current.close < current.open && previous.close > previous.open) {
+        found.push(pattern(index, 'tweezer-top', '镊子顶', 'bearish', bars, 'Medium', '相邻K线高点近似相等且方向反转', '同一价位遇阻，顶部反转风险上升，需结合趋势和后续确认'));
+      }
+      if (previous && Math.abs(current.low - previous.low) <= Math.max(current.range, previous.range) * 0.08 && current.close > current.open && previous.close < previous.open) {
+        found.push(pattern(index, 'tweezer-bottom', '镊子底', 'bullish', bars, 'Medium', '相邻K线低点近似相等且方向反转', '同一价位获得支撑，底部反转概率增加，需结合趋势和后续确认'));
+      }
+      if (index >= 2) {
+        const first = candleParts(bars[index - 2]);
+        const second = candleParts(bars[index - 1]);
+        if (first.close < first.open && second.close > second.open && second.close < first.open && current.close > current.open && current.close > first.open) {
+          found.push(pattern(index, 'three-inside-up', '三 inside 上涨', 'bullish', bars, 'High', '阴线-被包含的小阳线-向上确认阳线', '下跌趋势中的反转确认，说明买方已突破前一根阴线开盘价'));
+        }
+        if (first.close > first.open && second.close < second.open && second.close > first.open && current.close < current.open && current.close < first.open) {
+          found.push(pattern(index, 'three-inside-down', '三 inside 下跌', 'bearish', bars, 'High', '阳线-被包含的小阴线-向下确认阴线', '上涨趋势中的反转确认，说明卖方已跌破前一根阳线开盘价'));
+        }
+      }
     }
     return found;
   }
@@ -165,6 +189,47 @@
       }
     }
     return structures;
+  }
+
+  function detectChanStructures(inputBars = []) {
+    const bars = inputBars.map(normalizeBar);
+    const fractals = [];
+    for (let index = 1; index < bars.length - 1; index += 1) {
+      const previous = bars[index - 1], current = bars[index], next = bars[index + 1];
+      if (current.high >= previous.high && current.high > next.high) fractals.push({ index, kind: 'top', price: current.high, time: current.time, confirmed: true });
+      if (current.low <= previous.low && current.low < next.low) fractals.push({ index, kind: 'bottom', price: current.low, time: current.time, confirmed: true });
+    }
+    const alternating = [];
+    fractals.forEach(item => {
+      const last = alternating[alternating.length - 1];
+      if (last && last.kind === item.kind) {
+        const moreExtreme = item.kind === 'top' ? item.price > last.price : item.price < last.price;
+        if (moreExtreme) alternating[alternating.length - 1] = item;
+      } else if (!last || item.index > last.index) alternating.push(item);
+    });
+    const strokes = alternating.slice(1).map((item, index) => {
+      const start = alternating[index];
+      return { startIndex: start.index, endIndex: item.index, startPrice: start.price, endPrice: item.price, direction: item.price >= start.price ? 'up' : 'down', confirmed: item.confirmed };
+    });
+    const segments = [];
+    for (let index = 2; index < strokes.length; index += 2) {
+      const first = strokes[index - 2], last = strokes[index];
+      segments.push({ startIndex: first.startIndex, endIndex: last.endIndex, direction: last.endPrice >= first.startPrice ? 'up' : 'down', strokeCount: 3, confirmed: first.confirmed && last.confirmed });
+    }
+    const hubs = [];
+    for (let index = 2; index < strokes.length; index += 1) {
+      const window = strokes.slice(index - 2, index + 1);
+      const high = Math.min(...window.map(item => Math.max(item.startPrice, item.endPrice)));
+      const low = Math.max(...window.map(item => Math.min(item.startPrice, item.endPrice)));
+      if (low <= high) hubs.push({ startIndex: window[0].startIndex, endIndex: window[2].endIndex, low, high, confirmed: window.every(item => item.confirmed) });
+    }
+    const tradePoints = [];
+    segments.forEach((segment, index) => {
+      const next = segments[index + 1];
+      if (!next || next.direction === segment.direction) return;
+      tradePoints.push({ index: next.startIndex, type: segment.direction === 'down' ? 1 : 1, side: segment.direction === 'down' ? 'buy' : 'sell', status: next.confirmed ? 'confirmed' : 'preparing', confidence: next.confirmed ? 'medium' : 'low', time: bars[next.startIndex]?.time });
+    });
+    return { fractals, strokes, segments, hubs, tradePoints };
   }
 
   function relativeStrengthIndex(inputBars, period = 14) {
@@ -265,6 +330,7 @@
       signals: options.signals ? signals.filter(item => Number.isInteger(item.index) && item.index >= 0 && item.index < normalized.length).slice(-options.maxLabels) : [],
       patterns: options.patterns ? detectCandlestickPatterns(normalized).slice(-options.maxLabels) : [],
       structures: options.structures ? detectStructures(normalized).slice(-options.maxLabels) : [],
+      chan: options.structures ? detectChanStructures(normalized) : { fractals: [], strokes: [], segments: [], hubs: [], tradePoints: [] },
       volume: options.volume ? normalized.map(item => item.volume) : [],
       lines,
     };
@@ -280,5 +346,5 @@
     return current;
   }
 
-  return { DEFAULT_CONFIG, normalizeOverlayConfig, detectCandlestickPatterns, detectStructures, detectStrategySignals, movingAverage, bollingerBands, buildChartOverlays, stepReplay };
+  return { DEFAULT_CONFIG, normalizeOverlayConfig, detectCandlestickPatterns, detectStructures, detectChanStructures, detectStrategySignals, movingAverage, bollingerBands, buildChartOverlays, stepReplay };
 });

@@ -7779,7 +7779,7 @@ function setStockChartStrategy(name, enabled) {
   if (!stockChartOverlayConfig.strategies) stockChartOverlayConfig.strategies = {};
   stockChartOverlayConfig.strategies[name] = Boolean(enabled);
   try { localStorage.setItem(stockChartStorageKey(), JSON.stringify(stockChartOverlayConfig)); } catch (e) {}
-  if (stockChartKlines.length) if (window.stockMoneyKLine) { window.stockMoneyKLine.create(stockChartKlines); } else { drawStockKline(document.getElementById('stock-kline'), stockChartKlines); }
+  if (stockChartKlines.length) if (window.stockMoneyKLine?.setReplayCursor) { window.stockMoneyKLine.setReplayCursor(stockChartReplayIndex); } else if (window.stockMoneyKLine) { window.stockMoneyKLine.create(stockChartKlines); } else { drawStockKline(document.getElementById('stock-kline'), stockChartKlines); }
 }
 function buildStockStrategySignals(bars) {
   const analysis = window.MoneyChartAnalysis;
@@ -7818,6 +7818,15 @@ function renderChartPatternList(targetId, patterns, emptyText) {
       <div class="chart-pattern-item-meta">${stockEscapeHtml(item.disclaimer || '形态仅供参考，不作为买卖建议。')}</div>
     </article>`;
   }).join('');
+  if (targetId === 'stock-chart-pattern-list') {
+    el.querySelectorAll('[data-pattern-index]').forEach(item => item.addEventListener('click', () => {
+      const index = Number(item.dataset.patternIndex);
+      if (!Number.isInteger(index) || !stockChartKlines.length) return;
+      stockChartReplayIndex = Math.max(0, Math.min(stockChartKlines.length - 1, index));
+      if (window.stockMoneyKLine?.setReplayCursor) window.stockMoneyKLine.setReplayCursor(stockChartReplayIndex);
+      else drawStockKline(document.getElementById('stock-kline'), stockChartKlines);
+    }));
+  }
 }
 function renderChartPatternMarkers(targetId, patterns, getPosition) {
   const layer = document.getElementById(targetId);
@@ -7861,7 +7870,9 @@ function renderChartPatternMarkers(targetId, patterns, getPosition) {
 function stepStockChartReplay(action) {
   if (!stockChartKlines.length || !window.MoneyChartAnalysis) return;
   stockChartReplayIndex = window.MoneyChartAnalysis.stepReplay(stockChartReplayIndex < 0 ? stockChartKlines.length - 1 : stockChartReplayIndex, stockChartKlines.length, action);
-  if (window.stockMoneyKLine) { window.stockMoneyKLine.create(stockChartKlines); } else { drawStockKline(document.getElementById('stock-kline'), stockChartKlines); }
+  if (window.stockMoneyKLine?.setReplayCursor) window.stockMoneyKLine.setReplayCursor(stockChartReplayIndex);
+  else if (window.stockMoneyKLine) window.stockMoneyKLine.create(stockChartKlines);
+  else drawStockKline(document.getElementById('stock-kline'), stockChartKlines);
 }
 function setStockKlineRange(days) {
   currentStockDays = Number(days) || 60;
@@ -7900,7 +7911,8 @@ async function loadStockKline(symbol, name, apiSymbol) {
     stockChartKlines = d.data;
     stockChartReplayIndex = stockChartKlines.length - 1;
     loadStockChartOverlayConfig();
-    drawStockKline(canvas, stockChartKlines);
+    if (window.stockMoneyKLine?.update) window.stockMoneyKLine.update(stockChartKlines, { resetReplay: true });
+    else drawStockKline(canvas, stockChartKlines);
   } catch(e) {}
 }
 function drawStockKline(canvas, klines) {
@@ -8031,6 +8043,29 @@ function drawStockKline(canvas, klines) {
     ctx.font = '9px Inter, system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = item.type === 'swing-high' ? 'bottom' : 'top';
     ctx.fillText(item.type === 'swing-high' ? 'H' : 'L', x, y);
   });
+  if (overlays.config.structures && overlays.chan) {
+    ctx.strokeStyle = '#60a5fa'; ctx.lineWidth = 1.1; ctx.setLineDash([4, 3]);
+    overlays.chan.strokes.forEach(stroke => {
+      const start = klines[stroke.startIndex], end = klines[stroke.endIndex];
+      if (!start || !end) return;
+      ctx.beginPath(); ctx.moveTo(xCenter(stroke.startIndex), yPrice(stroke.startPrice)); ctx.lineTo(xCenter(stroke.endIndex), yPrice(stroke.endPrice)); ctx.stroke();
+    });
+    ctx.setLineDash([]);
+    overlays.chan.hubs.forEach(hub => {
+      const start = klines[hub.startIndex], end = klines[hub.endIndex];
+      if (!start || !end) return;
+      const x = xCenter(hub.startIndex), width = Math.max(cw, xCenter(hub.endIndex) - x);
+      const top = yPrice(hub.high), height = Math.max(3, yPrice(hub.low) - top);
+      ctx.fillStyle = 'rgba(96,165,250,.12)'; ctx.strokeStyle = 'rgba(96,165,250,.65)';
+      ctx.fillRect(x, top, width, height); ctx.strokeRect(x, top, width, height);
+    });
+    overlays.chan.tradePoints.forEach(point => {
+      const bar = klines[point.index]; if (!bar) return;
+      const x = xCenter(point.index), y = point.side === 'buy' ? yPrice(bar.low) + 25 : yPrice(bar.high) - 25;
+      ctx.fillStyle = point.side === 'buy' ? '#34d399' : '#fb7185'; ctx.font = 'bold 9px Inter, system-ui, sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText(`${point.type}类${point.side === 'buy' ? '买' : '卖'}${point.status === 'confirmed' ? '✓' : '…'}`, x, y);
+    });
+  }
   const first = klines[0], last = klines[klines.length - 1];
   const changePct = ((last.close - first.close) / (first.close || 1)) * 100;
   ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
@@ -12663,7 +12698,14 @@ class MoneyKLine {
     this.timer = null;
   }
   create(data = []) { this.update(data); return this; }
-  update(data) { this.data = Array.isArray(data) ? data.slice() : []; this.cursor = this.data.length - 1; this.render(); return this; }
+  update(data, options = {}) {
+    const previousLength = this.data.length;
+    const previousCursor = this.cursor;
+    this.data = Array.isArray(data) ? data.slice() : [];
+    if (options.resetReplay === true || previousLength === 0) this.cursor = this.data.length - 1;
+    else this.cursor = this.data.length ? Math.min(this.data.length - 1, Math.max(0, previousCursor)) : -1;
+    this.render(); return this;
+  }
   tick(t) { if (t) this.kline(t); return this; }
   kline(k) { if (k) this.data.push(k); this.cursor = this.data.length - 1; this.render(); return this; }
   destroy() { this.pause(); this.data = []; }
@@ -12672,8 +12714,10 @@ class MoneyKLine {
   pause() { if (this.timer) clearInterval(this.timer); this.timer = null; return this; }
   stepForward() { this.cursor = Math.min(this.data.length - 1, this.cursor + 1); this.render(); return this.cursor; }
   stepBackward() { this.cursor = Math.max(0, this.cursor - 1); this.render(); return this.cursor; }
+  setReplayCursor(index) { this.cursor = this.data.length ? Math.min(this.data.length - 1, Math.max(0, Math.floor(Number(index)))) : -1; this.render(); return this.cursor; }
   zoom(delta = 1) { this.zoomLevel = Math.max(.5, Math.min(4, this.zoomLevel + Number(delta || 0))); this.render(); return this.zoomLevel; }
   drag(offset = 0) { this.cursor = Math.max(0, Math.min(this.data.length - 1, this.cursor + Number(offset || 0))); this.render(); return this.cursor; }
+  replayState() { return { cursor: this.cursor, total: this.data.length, visible: Math.max(0, this.cursor + 1), playing: Boolean(this.timer) }; }
   render() {
     if (!this.canvas?.isConnected || !this.data.length) return;
     const visible = this.cursor >= 0 ? this.data.slice(0, this.cursor + 1) : this.data;
