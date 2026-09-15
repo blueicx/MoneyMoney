@@ -152,3 +152,63 @@ export function serializeTemplate(input: Omit<ScreenerTemplate, 'id'>): Omit<Scr
 export function fieldsForScreener(scope: ScreenerScope): ScreenerField[] {
   return fieldsFor(scope).map(field => ({ ...field }));
 }
+
+
+export interface CandidatePromotion {
+  scope: ScreenerScope;
+  marketId: string;
+  score: number;
+  factors: string[];
+  status: 'draft' | 'candidate' | 'approved' | 'rejected';
+  promotedAt: number;
+  gate: { minScore: number; passed: boolean };
+}
+
+export class ResearchLedger {
+  private candidates = new Map<string, CandidatePromotion>();
+
+  constructor(private readonly minScore = 90) {
+    if (!Number.isFinite(minScore) || minScore < 0 || minScore > 100) throw new Error('Promotion threshold must be between 0 and 100');
+  }
+
+  promote(scope: ScreenerScope, marketId: string, score: number, factors: readonly string[]): CandidatePromotion {
+    if (!isScreenerScope(scope)) throw new Error(`不支持的筛选市场: ${scope}`);
+    if (!marketId.trim()) throw new Error('Candidate market id is required');
+    if (!Number.isFinite(score) || score < this.minScore) {
+      throw new Error('Score below promotion threshold');
+    }
+    const key = `${scope}:${marketId}`;
+    const candidate: CandidatePromotion = {
+      scope,
+      marketId,
+      score,
+      factors: [...factors],
+      status: 'candidate',
+      promotedAt: Date.now(),
+      gate: { minScore: this.minScore, passed: true },
+    };
+    this.candidates.set(key, candidate);
+    return { ...candidate, factors: [...candidate.factors], gate: { ...candidate.gate } };
+  }
+
+  updateStatus(scope: ScreenerScope, marketId: string, status: 'approved' | 'rejected'): boolean {
+    const key = `${scope}:${marketId}`;
+    const candidate = this.candidates.get(key);
+    if (candidate) {
+      candidate.status = status;
+      return true;
+    }
+    return false;
+  }
+
+  get(scope: ScreenerScope, marketId: string): CandidatePromotion | undefined {
+    const candidate = this.candidates.get(`${scope}:${marketId}`);
+    return candidate ? { ...candidate, factors: [...candidate.factors], gate: { ...candidate.gate } } : undefined;
+  }
+
+  getCandidates(scope: ScreenerScope): CandidatePromotion[] {
+    return Array.from(this.candidates.values())
+      .filter(candidate => candidate.scope === scope)
+      .map(candidate => ({ ...candidate, factors: [...candidate.factors], gate: { ...candidate.gate } }));
+  }
+}

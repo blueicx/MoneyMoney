@@ -59,7 +59,7 @@ export class AnalysisEngine {
     });
 
     const routeRes = await this.dataSourceRouter.fetch('predict-fun', {});
-    const snapshots: MarketSnapshot[] = routeRes.data || [];
+    const snapshots: MarketSnapshot[] = Array.isArray(routeRes.data) ? routeRes.data as MarketSnapshot[] : [];
     const recommendations: Recommendation[] = [];
 
     for (const snap of snapshots) {

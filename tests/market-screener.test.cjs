@@ -1,6 +1,6 @@
 const test = require('node:test');
 const { strict: assert } = require('node:assert');
-const { filterRows, serializeTemplate, sortRows, paginateRows, actionsForScreener, validateScreenerAction } = require('../dist/features/market-screener');
+const { filterRows, serializeTemplate, sortRows, paginateRows, actionsForScreener, validateScreenerAction, ResearchLedger } = require('../dist/features/market-screener.js');
 
 test('prediction screener rejects stock-only fields', () => {
   assert.throws(() => filterRows('prediction', [], { marketCap: { gte: 100 } }), /不属于/);
@@ -34,4 +34,24 @@ test('screener exposes only actions supported by the selected market', () => {
   assert.deepEqual(actionsForScreener('options').map(action => action.id), ['detail', 'compare', 'watchlist', 'candidate', 'alert']);
   assert.equal(validateScreenerAction('crypto', 'backtest'), true);
   assert.throws(() => validateScreenerAction('prediction', 'backtest'), /不支持/);
+});
+
+test('Research ledger supports candidate promotion with scope and threshold', () => {
+    const ledger = new ResearchLedger(90);
+
+    // Test failing threshold
+    assert.throws(() => ledger.promote('crypto', 'BTC', 70, ['trend']), /Score below promotion threshold/);
+
+    // Test passing threshold
+    const candidate = ledger.promote('crypto', 'ETH', 95, ['trend', 'volume']);
+    assert.deepEqual(candidate.gate, { minScore: 90, passed: true });
+    ledger.updateStatus('crypto', 'ETH', 'approved');
+
+    const candidates = ledger.getCandidates('crypto');
+    assert.equal(candidates.length, 1);
+    assert.equal(candidates[0].marketId, 'ETH');
+    assert.equal(candidates[0].status, 'approved');
+    assert.equal(candidates[0].scope, 'crypto');
+    assert.equal(ledger.get('stocks', 'ETH'), undefined);
+    assert.equal(ledger.updateStatus('stocks', 'ETH', 'rejected'), false);
 });
