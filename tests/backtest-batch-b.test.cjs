@@ -14,7 +14,7 @@ test('Batch B - partial fill maintains consistent fee and trade value', () => {
     const result = engine.run([50, 60], [
         { timeIndex: 0, direction: 'buy', volume: 3 }
     ]);
-
+    
     assert.strictEqual(result.trades[0].volume, 1);
     assert.strictEqual(result.trades[0].fee, 5); // 50 * 0.1 * 1
     assert.strictEqual(result.totalFees, 5);

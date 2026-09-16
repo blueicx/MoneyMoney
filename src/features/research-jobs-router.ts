@@ -5,6 +5,7 @@ import { createResearchJob, JobStatus, MARKET_IDS, MarketId } from './research-c
 export const researchJobsRouter = express.Router();
 
 import { runResearchExperiment, generateExperimentArtifacts } from './experiment-runner';
+import { unifiedInstrumentService } from './unified-instruments';
 
 researchJobsRouter.post('/jobs', express.json(), (req, res) => {
   try {
@@ -12,24 +13,64 @@ researchJobsRouter.post('/jobs', express.json(), (req, res) => {
     researchRepository.saveJob(job);
     res.status(201).json({ success: true, data: job, id: job.id });
     // Simulate background execution
-    setTimeout(() => {
+    setTimeout(async () => {
        try {
            try { researchRepository.updateJobStatus(job.id, 'running'); } catch (e) { return; }
-           // Dummy data for execution loop
+
+           const reqInstrument = String(req.body.instrument || 'UNKNOWN');
+           const reqTimeframe = String(req.body.timeframe || '1d');
+
+           const instrumentRef = {
+               id: reqInstrument,
+               symbol: reqInstrument.split(':').pop() || reqInstrument,
+               type: job.market as any,
+               venue: 'us',
+               title: '',
+               aliases: []
+           };
+
+           const overview = await unifiedInstrumentService.overview(instrumentRef).catch(() => null);
+
+           if (!overview || !overview.klines || overview.klines.length < 2) {
+               researchRepository.addEvent(job.id, 'ERROR', { reason: 'Insufficient or unavailable data for instrument' });
+               researchRepository.updateJobStatus(job.id, 'failed', 0, 'Unavailable data');
+               return;
+           }
+
+           const prices = overview.klines.map((k: any) => k.close);
+           const signals = [
+               { timeIndex: 0, direction: 'buy' as const },
+               { timeIndex: Math.floor(prices.length / 2), direction: 'sell' as const }
+           ];
+
            const result = runResearchExperiment({
-               context: { market: job.market, instrument: 'UNKNOWN', timeframe: '1d', workspace: job.workspace, dataSource: 'internal' },
-               prices: [100, 110, 105, 120, 115, 130],
-               signals: [{ timeIndex: 0, direction: 'buy' }, { timeIndex: 5, direction: 'sell' }]
+               context: {
+                   market: job.market,
+                   instrument: reqInstrument,
+                   timeframe: reqTimeframe,
+                   workspace: job.workspace,
+                   dataSource: overview.sourceStatus?.source || 'unified'
+               },
+               prices,
+               signals
            });
+
+           if (!result.gate.passed) {
+               researchRepository.addEvent(job.id, 'INFO', { message: `Promotion gate failed: ${result.gate.reasons.join(', ')}` });
+           }
+
            const artifacts = generateExperimentArtifacts(job.id, result);
            artifacts.manifests.forEach(m => {
               researchRepository.saveEvidenceBundle({
                  id: m.id, context: { market: job.market, workspace: job.workspace }, artifacts: [m.uri], createdAt: m.createdAt
               });
            });
-           try { researchRepository.updateJobStatus(job.id, 'succeeded'); } catch(e) {}
-       } catch (err) {
-           try { researchRepository.updateJobStatus(job.id, 'failed'); } catch (ignore) {}
+           try { researchRepository.updateJobStatus(job.id, 'succeeded', 100); } catch(e) {}
+       } catch (err: any) {
+           try {
+               researchRepository.addEvent(job.id, 'ERROR', { reason: err.message || 'Execution failed' });
+               researchRepository.updateJobStatus(job.id, 'failed', 0, err.message);
+           } catch (ignore) {}
        }
     }, 100);
   } catch (err: any) {

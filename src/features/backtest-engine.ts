@@ -142,14 +142,14 @@ export class BacktestEngine {
     const trades: BacktestTrade[] = [];
     const segments = new Map<number, BacktestSegmentStatistic>();
     const startingBalance = this.options.startingBalance ?? 1000;
-    const equityCurve = [startingBalance];
-    const underwaterCurve = [0];
 
     let cashBalance = startingBalance;
     let peak = startingBalance;
     let maxDrawdown = 0;
     let positionCost = 0;
     let entryIndex = -1;
+    let equityCurve: number[] = [];
+    let underwaterCurve: number[] = [];
     let lastTradeIndex = -1;
     let consecutiveLosses = 0;
 
