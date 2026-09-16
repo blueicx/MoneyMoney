@@ -10,8 +10,19 @@
     volume: true,
     indicators: { ma: true, boll: false, macd: false },
     strategies: { maCross: true, rsiReversal: false, bollinger: false, volumeBreakout: false },
+    patternTypes: {},
     maxLabels: 80,
   };
+
+  const CANDLE_PATTERN_CATALOG = Object.freeze([
+    ['doji', '十字星'], ['hammer', '锤头线'], ['hanging-man', '上吊线'], ['shooting-star', '流星线'],
+    ['long-shadow', '长影线'], ['bullish-engulfing', '看涨吞没'], ['bearish-engulfing', '看跌吞没'],
+    ['piercing', '刺透'], ['dark-cloud', '乌云盖顶'], ['bullish-harami', '看涨孕线'], ['bearish-harami', '看跌孕线'],
+    ['morning-star', '早晨之星'], ['evening-star', '黄昏之星'], ['three-white-soldiers', '三白兵'],
+    ['three-black-crows', '三只乌鸦'], ['spinning-top', '纺锤线'], ['marubozu', '光头光脚线'],
+    ['tweezer-top', '镊子顶'], ['tweezer-bottom', '镊子底'], ['three-inside-up', '三内上涨'],
+    ['three-inside-down', '三内下跌'],
+  ]);
 
   function finite(value, fallback = 0) {
     const number = Number(value);
@@ -28,11 +39,13 @@
 
   function normalizeOverlayConfig(input = {}) {
     const indicators = input.indicators || {};
+    const patternTypes = Object.fromEntries(CANDLE_PATTERN_CATALOG.map(([type]) => [type, true]));
     return {
       ...DEFAULT_CONFIG,
       ...input,
       indicators: { ...DEFAULT_CONFIG.indicators, ...indicators },
       strategies: { ...DEFAULT_CONFIG.strategies, ...(input.strategies || {}) },
+      patternTypes: { ...patternTypes, ...(input.patternTypes || {}) },
       maxLabels: Math.max(1, Math.floor(finite(input.maxLabels, DEFAULT_CONFIG.maxLabels))),
     };
   }
@@ -143,10 +156,10 @@
         const first = candleParts(bars[index - 2]);
         const second = candleParts(bars[index - 1]);
         if (first.close < first.open && second.close > second.open && second.close < first.open && current.close > current.open && current.close > first.open) {
-          found.push(pattern(index, 'three-inside-up', '三 inside 上涨', 'bullish', bars, 'High', '阴线-被包含的小阳线-向上确认阳线', '下跌趋势中的反转确认，说明买方已突破前一根阴线开盘价'));
+          found.push(pattern(index, 'three-inside-up', '三内上涨', 'bullish', bars, 'High', '阴线-被包含的小阳线-向上确认阳线', '下跌趋势中的反转确认，说明买方已突破前一根阴线开盘价'));
         }
         if (first.close > first.open && second.close < second.open && second.close > first.open && current.close < current.open && current.close < first.open) {
-          found.push(pattern(index, 'three-inside-down', '三 inside 下跌', 'bearish', bars, 'High', '阳线-被包含的小阴线-向下确认阴线', '上涨趋势中的反转确认，说明卖方已跌破前一根阳线开盘价'));
+          found.push(pattern(index, 'three-inside-down', '三内下跌', 'bearish', bars, 'High', '阳线-被包含的小阴线-向下确认阴线', '上涨趋势中的反转确认，说明卖方已跌破前一根阳线开盘价'));
         }
       }
     }
@@ -219,10 +232,14 @@
     const structures = [];
     for (let index = 1; index < bars.length - 1; index += 1) {
       if (bars[index].high > bars[index - 1].high && bars[index].high >= bars[index + 1].high) {
-        structures.push({ index, type: 'swing-high', label: '摆动高点', direction: 'bearish', time: bars[index].time });
+        structures.push({ index, type: 'swing-high', label: '摆动高点', direction: 'bearish', time: bars[index].time,
+          confidence: 'Medium', condition: '当前高点高于相邻K线高点', meaning: '短线遇阻或卖方开始占优，需等待后续K线确认',
+          disclaimer: '结构标记仅供研究参考，不构成交易指令。' });
       }
       if (bars[index].low < bars[index - 1].low && bars[index].low <= bars[index + 1].low) {
-        structures.push({ index, type: 'swing-low', label: '摆动低点', direction: 'bullish', time: bars[index].time });
+        structures.push({ index, type: 'swing-low', label: '摆动低点', direction: 'bullish', time: bars[index].time,
+          confidence: 'Medium', condition: '当前低点低于相邻K线低点', meaning: '短线获得支撑或买方开始占优，需等待后续K线确认',
+          disclaimer: '结构标记仅供研究参考，不构成交易指令。' });
       }
     }
     return structures;
@@ -391,7 +408,9 @@
     if (options.indicators.boll) lines.push({ type: 'boll', period: 20, values: bollingerBands(normalized) });
     if (options.indicators.macd) lines.push({ type: 'macd', period: { fast: 12, slow: 26, signal: 9 }, values: calculateMACD(normalized) });
     const signalsOutput = options.signals ? signals.filter(item => Number.isInteger(item.index) && item.index >= 0 && item.index < normalized.length).slice(-options.maxLabels) : [];
-    const patternsOutput = options.patterns ? detectCandlestickPatterns(normalized).slice(-options.maxLabels) : [];
+    const patternsOutput = options.patterns
+      ? detectCandlestickPatterns(normalized).filter(item => options.patternTypes[item.type] !== false).slice(-options.maxLabels)
+      : [];
     const structuresOutput = options.structures ? detectStructures(normalized).slice(-options.maxLabels) : [];
     const chanOutput = options.structures ? detectChanStructures(normalized) : { fractals: [], strokes: [], segments: [], hubs: [], tradePoints: [], trends: [], macd: { available: false, reason: 'Layer disabled', macdLine: [], signalLine: [], histogram: [] }, divergence: [], smallToLarge: [] };
     const annotations = [
@@ -485,5 +504,5 @@
     };
   }
 
-  return { DEFAULT_CONFIG, normalizeOverlayConfig, detectCandlestickPatterns, detectStructures, detectChanStructures, detectStrategySignals, movingAverage, bollingerBands, calculateMACD, buildChartOverlays, stepReplay, protectReplayContext, createDrawingTool };
+  return { DEFAULT_CONFIG, CANDLE_PATTERN_CATALOG, normalizeOverlayConfig, detectCandlestickPatterns, detectStructures, detectChanStructures, detectStrategySignals, movingAverage, bollingerBands, calculateMACD, buildChartOverlays, stepReplay, protectReplayContext, createDrawingTool };
 });

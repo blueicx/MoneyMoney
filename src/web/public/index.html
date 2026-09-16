@@ -195,12 +195,12 @@
     }
     .market-workspace-shell {
       display: grid;
-      grid-template-columns: 224px minmax(0, 1fr) 280px;
+      grid-template-columns: 224px minmax(0, 1fr);
       min-width: 0;
       min-height: calc(100vh - 61px);
       transition: grid-template-columns .2s ease;
     }
-    .market-workspace-shell[data-right-library="collapsed"] { grid-template-columns: 224px minmax(0, 1fr) 48px; }
+    .market-workspace-shell[data-right-library="collapsed"] { grid-template-columns: 224px minmax(0, 1fr); }
     .workspace-right-library {
       min-width: 0;
       position: sticky;
@@ -276,6 +276,17 @@
     .chart-pattern-item.bullish strong { color:var(--green); }
     .chart-pattern-item.bearish strong { color:var(--red); }
     .chart-pattern-item-meta { color:var(--text-secondary); margin-top:2px; }
+    .chart-pattern-controls { display:flex; align-items:center; gap:6px 9px; flex-wrap:wrap; margin:0 0 8px; padding:7px 9px; border:1px solid color-mix(in srgb,var(--border) 75%,transparent); border-radius:9px; background:color-mix(in srgb,var(--bg-secondary) 66%,transparent); font-size:10px; color:var(--text-secondary); }
+    .chart-pattern-controls-title { color:var(--yellow); font-weight:800; margin-right:2px; }
+    .chart-pattern-controls label { display:inline-flex; align-items:center; gap:3px; cursor:pointer; white-space:nowrap; }
+    .chart-pattern-controls input { accent-color:var(--purple); }
+    .chart-structure-list { display:grid; gap:6px; margin-top:8px; }
+    .chart-structure-item { border:1px solid color-mix(in srgb,var(--border) 78%,transparent); border-radius:8px; padding:8px 10px; background:var(--bg-secondary); font-size:10px; line-height:1.45; }
+    .chart-structure-item.bullish strong { color:var(--green); }
+    .chart-structure-item.bearish strong { color:var(--red); }
+    .chart-structure-item.neutral strong { color:var(--yellow); }
+    .chart-ma-values { display:flex; gap:8px 12px; flex-wrap:wrap; margin:0 0 8px; font-size:10px; font-variant-numeric:tabular-nums; }
+    .chart-ma-value { font-weight:800; white-space:nowrap; }
     @media (max-width: 600px) { .chart-pattern-tooltip { width:180px; font-size:10px; padding:8px; } }
     .market-library-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:7px; }
     .market-instrument-library { display:block; }
@@ -303,8 +314,8 @@
     .workspace-watchlist-columns input { accent-color:var(--purple); }
     .market-research-actions { display:flex; gap:5px; flex-wrap:wrap; margin-top:7px; }
     .market-research-actions .tab { padding:4px 7px; font-size:11px; }
-    .market-workspace-shell[data-sidebar-state="rail"] { grid-template-columns:56px minmax(0, 1fr) 280px; }
-    .market-workspace-shell[data-sidebar-state="rail"][data-right-library="collapsed"] { grid-template-columns:56px minmax(0, 1fr) 48px; }
+    .market-workspace-shell[data-sidebar-state="rail"] { grid-template-columns:56px minmax(0, 1fr); }
+    .market-workspace-shell[data-sidebar-state="rail"][data-right-library="collapsed"] { grid-template-columns:56px minmax(0, 1fr); }
     .market-workspace-shell[data-sidebar-state="rail"] .workspace-sidebar { padding-left:7px; padding-right:7px; }
     .market-workspace-shell[data-sidebar-state="rail"] .workspace-sidebar-title,
     .market-workspace-shell[data-sidebar-state="rail"] .workspace-group-label,
@@ -1903,8 +1914,10 @@
       z-index: 9999;
       display: flex;
       flex-direction: column;
-      padding: 16px;
+      padding: 0;
     }
+    .chart-fullscreen-overlay[hidden] { display:none !important; pointer-events:none !important; }
+    .chart-fullscreen-overlay:not([hidden]) { display:flex; }
     .chart-fullscreen-overlay .stock-chart-stage {
       flex: 1;
       min-height: 0;
@@ -1922,17 +1935,22 @@
     }
     .chart-fullscreen-toolbar .tab { font-size: 13px; }
     .chart-card-fullscreen {
-      position: fixed !important;
-      inset: 0 !important;
-      z-index: 10000 !important;
+      position: static !important;
+      inset: auto !important;
+      z-index: auto !important;
       box-sizing: border-box;
-      overflow: auto;
+      overflow: auto !important;
       margin: 0 !important;
       border-radius: 0 !important;
       padding: 18px !important;
       background: var(--bg-card) !important;
+      width: 100% !important;
+      height: 100% !important;
+      flex: 1 1 auto;
+      min-height: 0;
     }
     body[data-chart-fullscreen] > * { visibility: hidden; }
+    body[data-chart-fullscreen] > #chart-fullscreen-overlay { visibility: visible; }
     body[data-chart-fullscreen] .chart-card-fullscreen { visibility: visible; }
     body[data-chart-fullscreen] .chart-card-fullscreen .chart-fullscreen-button { background: var(--purple); color: #fff; }
     body[data-chart-fullscreen="stocks"] #stock-kline { height: max(420px, calc(100vh - 270px)) !important; }
@@ -2419,7 +2437,9 @@
               <label><input type="checkbox" data-crypto-strategy="bollinger" onchange="setCryptoChartStrategy('bollinger', this.checked)"> 布林反转</label>
               <label><input type="checkbox" data-crypto-strategy="volumeBreakout" onchange="setCryptoChartStrategy('volumeBreakout', this.checked)"> 放量突破</label>
               <label><input type="checkbox" data-crypto-overlay="patterns" onchange="setCryptoChartOverlay('patterns', this.checked)"> 蜡烛形态</label>
+              <div id="crypto-chart-pattern-controls" class="chart-pattern-controls" aria-label="逐项蜡烛形态开关"><span class="chart-pattern-controls-title">逐项形态</span><label><input type="checkbox" data-chart-pattern="doji" data-chart-pattern-scope="crypto"> 十字星</label></div>
             </div>
+            <div id="bn-chart-ma-values" class="chart-ma-values" aria-live="polite"></div>
             <div style="position:relative;">
               <canvas id="bn-candlestick" width="640" height="360" style="width:100%;height:auto;"></canvas>
               <div id="bn-chart-patterns" style="position:absolute;inset:0;pointer-events:none;overflow:visible;"></div>
@@ -2575,6 +2595,7 @@
                 <label><input type="checkbox" data-chart-strategy="bollinger" onchange="setStockChartStrategy('bollinger', this.checked)"> 布林反转</label>
                 <label><input type="checkbox" data-chart-strategy="volumeBreakout" onchange="setStockChartStrategy('volumeBreakout', this.checked)"> 放量突破</label>
                 <label><input type="checkbox" data-chart-overlay="patterns" onchange="setStockChartOverlay('patterns', this.checked)"> 蜡烛形态</label>
+                <div id="stock-chart-pattern-controls" class="chart-pattern-controls" aria-label="逐项蜡烛形态开关"><span class="chart-pattern-controls-title">逐项形态</span><label><input type="checkbox" data-chart-pattern="doji" data-chart-pattern-scope="stock"> 十字星</label></div>
                 <label><input type="checkbox" data-chart-overlay="structures" onchange="setStockChartOverlay('structures', this.checked)"> 结构标记</label>
                 <label><input type="checkbox" data-chart-overlay="ma" checked="" onchange="setStockChartOverlay('ma', this.checked)"> 均线</label>
                 <label><input type="checkbox" data-chart-overlay="boll" onchange="setStockChartOverlay('boll', this.checked)"> 布林带</label>
@@ -2585,12 +2606,14 @@
                 <button class="tab" type="button" data-chart-replay="next" onclick="stepStockChartReplay('next')">›</button>
                 <span id="stock-chart-replay-status" class="stock-chart-replay-status" aria-live="polite"></span>
               </div>
+              <div id="stock-chart-ma-values" class="chart-ma-values" aria-live="polite"></div>
               <div class="stock-chart-stage" style="position:relative;">
                 <canvas id="stock-kline" width="640" height="360" style="width:100%;height:340px;display:block;"></canvas>
                 <div id="stock-chart-patterns" style="position:absolute; inset:0; pointer-events:none; overflow:visible;"></div>
               </div>
               <div id="stock-chart-signals" class="chart-signal-list" aria-live="polite"></div>
               <div id="stock-chart-pattern-list" class="chart-pattern-list" aria-live="polite"></div>
+              <div id="stock-chart-structure-list" class="chart-structure-list" aria-live="polite"></div>
             </div>
             <div style="display:flex;justify-content:flex-end;align-items:center;margin:4px 0 10px;">
               <button class="tab active" type="button" onclick="loadStockQuotes()">🔄 刷新行情</button>
@@ -4988,7 +5011,7 @@ if (!navigator.onLine) showOfflineBanner();
 let bnCurrentSymbol = 'BTCUSDT';
 let bnCurrentInterval = '15m';
 let bnKlineData = [];
-let cryptoChartOverlayConfig = { patterns: false };
+let cryptoChartOverlayConfig = { patterns: false, patternTypes: {} };
 function bnSetSymbol(sym) {
     if (activeMarketScope !== "crypto") return;
   if (bnCurrentSymbol !== sym) {
@@ -5070,14 +5093,20 @@ function cryptoChartOverlayStorageKey() {
 function loadCryptoChartOverlayConfig() {
   try {
     const raw = JSON.parse(localStorage.getItem(cryptoChartOverlayStorageKey()) || 'null');
-    if (raw && typeof raw === 'object') cryptoChartOverlayConfig = { ...cryptoChartOverlayConfig, ...raw };
+    if (raw && typeof raw === 'object') cryptoChartOverlayConfig = { ...cryptoChartOverlayConfig, ...raw, patternTypes: { ...cryptoChartOverlayConfig.patternTypes, ...(raw.patternTypes || {}) } };
   } catch (e) {}
   document.querySelectorAll('[data-crypto-overlay]').forEach(input => {
     input.checked = cryptoChartOverlayConfig[input.dataset.cryptoOverlay] === true;
   });
+  syncChartPatternControls({ patternTypes: cryptoChartOverlayConfig.patternTypes }, 'crypto');
 }
 function setCryptoChartOverlay(name, enabled) {
   cryptoChartOverlayConfig[name] = Boolean(enabled);
+  try { localStorage.setItem(cryptoChartOverlayStorageKey(), JSON.stringify(cryptoChartOverlayConfig)); } catch (e) {}
+  if (bnKlineData.length) drawCandles(document.getElementById('bn-candlestick'), bnKlineData);
+}
+function setCryptoChartPattern(name, enabled) {
+  cryptoChartOverlayConfig.patternTypes[name] = Boolean(enabled);
   try { localStorage.setItem(cryptoChartOverlayStorageKey(), JSON.stringify(cryptoChartOverlayConfig)); } catch (e) {}
   if (bnKlineData.length) drawCandles(document.getElementById('bn-candlestick'), bnKlineData);
 }
@@ -5106,14 +5135,16 @@ function drawCandles(canvas, klines) {
   if (!klines.length) {
     renderChartPatternMarkers('bn-chart-patterns', [], () => null);
     renderChartPatternList('bn-chart-pattern-list', [], '当前周期未识别到所选蜡烛形态');
+    renderMovingAverageValues('bn-chart-ma-values', [], [7, 25]);
     return;
   }
   loadCryptoChartStrategyConfig();
   loadCryptoChartOverlayConfig();
   const strategySignals = buildCryptoStrategySignals(klines);
   const cryptoPatterns = cryptoChartOverlayConfig.patterns
-    ? (window.MoneyChartAnalysis?.detectCandlestickPatterns(klines) || [])
+    ? (window.MoneyChartAnalysis?.detectCandlestickPatterns(klines) || []).filter(item => cryptoChartOverlayConfig.patternTypes?.[item.type] !== false)
     : [];
+  renderMovingAverageValues('bn-chart-ma-values', klines, [7, 25]);
   const highs = klines.map(k => k.high), lows = klines.map(k => k.low);
   const maxP = Math.max(...highs), minP = Math.min(...lows);
   const range = maxP - minP || 1;
@@ -7759,8 +7790,48 @@ let currentStockApiSymbol = '';
 let currentStockDays = 60;
 let stockChartReplayIndex = -1;
 let stockChartKlines = [];
-let stockChartOverlayConfig = window.MoneyChartAnalysis?.normalizeOverlayConfig({ strategies:{ maCross:true, rsiReversal:false, bollinger:false, volumeBreakout:false } }) || { signals:true, patterns:false, structures:false, volume:true, indicators:{ ma:true, boll:false, macd:false }, strategies:{ maCross:true, rsiReversal:false, bollinger:false, volumeBreakout:false }, maxLabels:80 };
+let stockChartOverlayConfig = window.MoneyChartAnalysis?.normalizeOverlayConfig({ strategies:{ maCross:true, rsiReversal:false, bollinger:false, volumeBreakout:false } }) || { signals:true, patterns:false, structures:false, volume:true, indicators:{ ma:true, boll:false, macd:false }, strategies:{ maCross:true, rsiReversal:false, bollinger:false, volumeBreakout:false }, patternTypes:{}, maxLabels:80 };
 let cryptoChartStrategyConfig = { maCross:true, rsiReversal:false, bollinger:false, volumeBreakout:false };
+var INLINE_CANDLE_PATTERN_CATALOG = [
+  ['doji','十字星'], ['hammer','锤头线'], ['hanging-man','上吊线'], ['shooting-star','流星线'], ['long-shadow','长影线'],
+  ['bullish-engulfing','看涨吞没'], ['bearish-engulfing','看跌吞没'], ['piercing','刺透'], ['dark-cloud','乌云盖顶'],
+  ['bullish-harami','看涨孕线'], ['bearish-harami','看跌孕线'], ['morning-star','早晨之星'], ['evening-star','黄昏之星'],
+  ['three-white-soldiers','三白兵'], ['three-black-crows','三只乌鸦'], ['spinning-top','纺锤线'], ['marubozu','光头光脚线'],
+  ['tweezer-top','镊子顶'], ['tweezer-bottom','镊子底'], ['three-inside-up','三内上涨'], ['three-inside-down','三内下跌'],
+];
+function candlePatternCatalog() {
+  return window.MoneyChartAnalysis?.CANDLE_PATTERN_CATALOG || INLINE_CANDLE_PATTERN_CATALOG;
+}
+function renderChartPatternControls() {
+  const catalog = candlePatternCatalog();
+  document.querySelectorAll('[id$="-chart-pattern-controls"]').forEach(host => {
+    const scope = host.id.startsWith('crypto-') ? 'crypto' : 'stock';
+    host.innerHTML = '<span class="chart-pattern-controls-title">逐项形态</span>' + catalog.map(([type, label]) =>
+      `<label><input type="checkbox" data-chart-pattern="${type}" data-chart-pattern-scope="${scope}" onchange="${scope === 'crypto' ? 'setCryptoChartPattern' : 'setStockChartPattern'}('${type}', this.checked)"> ${label}</label>`
+    ).join('');
+    syncChartPatternControls(scope === 'crypto' ? cryptoChartOverlayConfig : stockChartOverlayConfig, scope);
+  });
+}
+function syncChartPatternControls(config, scope) {
+  document.querySelectorAll(`[data-chart-pattern-scope="${scope}"]`).forEach(input => {
+    input.checked = config.patternTypes?.[input.dataset.chartPattern] !== false;
+  });
+}
+function movingAverageValue(bars, period) {
+  if (!Array.isArray(bars) || bars.length < period) return null;
+  return bars.slice(-period).reduce((sum, item) => sum + Number(item.close || 0), 0) / period;
+}
+function formatChartPrice(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return '--';
+  return number >= 1000 ? number.toFixed(0) : number.toFixed(2);
+}
+function renderMovingAverageValues(targetId, bars, periods) {
+  const host = document.getElementById(targetId);
+  if (!host) return;
+  const colors = { 5:'#f59e0b', 7:'#f59e0b', 10:'#8b5cf6', 20:'#38bdf8', 25:'#8b5cf6' };
+  host.innerHTML = periods.map(period => `<span class="chart-ma-value" style="color:${colors[period] || 'var(--text-secondary)'}">MA${period} ${formatChartPrice(movingAverageValue(bars, period))}</span>`).join('');
+}
 function stockChartStorageKey() {
   return `mm-chart-overlays:${activeMarketScope || 'stocks'}:${window._stockSelectedSymbol || currentStockSymbol || 'AAPL'}`;
 }
@@ -7778,6 +7849,7 @@ function loadStockChartOverlayConfig() {
   document.querySelectorAll('[data-chart-strategy]').forEach(input => {
     input.checked = stockChartOverlayConfig.strategies?.[input.dataset.chartStrategy] === true;
   });
+  syncChartPatternControls(stockChartOverlayConfig, 'stock');
 }
 function setStockChartOverlay(name, enabled) {
   if (['ma', 'boll', 'macd'].includes(name)) stockChartOverlayConfig.indicators[name] = Boolean(enabled);
@@ -7797,6 +7869,15 @@ function setStockChartStrategy(name, enabled) {
   stockChartOverlayConfig.strategies[name] = Boolean(enabled);
   try { localStorage.setItem(stockChartStorageKey(), JSON.stringify(stockChartOverlayConfig)); } catch (e) {}
   if (stockChartKlines.length) if (window.stockMoneyKLine?.setReplayCursor) { window.stockMoneyKLine.setReplayCursor(stockChartReplayIndex); } else if (window.stockMoneyKLine) { window.stockMoneyKLine.create(stockChartKlines); } else { drawStockKline(document.getElementById('stock-kline'), stockChartKlines); }
+}
+function setStockChartPattern(name, enabled) {
+  if (!stockChartOverlayConfig.patternTypes) stockChartOverlayConfig.patternTypes = {};
+  stockChartOverlayConfig.patternTypes[name] = Boolean(enabled);
+  try { localStorage.setItem(stockChartStorageKey(), JSON.stringify(stockChartOverlayConfig)); } catch (e) {}
+  if (stockChartKlines.length) {
+    if (window.stockMoneyKLine?.setReplayCursor) window.stockMoneyKLine.setReplayCursor(stockChartReplayIndex);
+    else drawStockKline(document.getElementById('stock-kline'), stockChartKlines);
+  }
 }
 function buildStockStrategySignals(bars) {
   const analysis = window.MoneyChartAnalysis;
@@ -7844,6 +7925,28 @@ function renderChartPatternList(targetId, patterns, emptyText) {
       else drawStockKline(document.getElementById('stock-kline'), stockChartKlines);
     }));
   }
+}
+function renderChartStructureList(targetId, structures, chan, emptyText) {
+  const el = document.getElementById(targetId);
+  if (!el) return;
+  const items = [];
+  (structures || []).slice(-6).forEach(item => items.push({
+    label: item.label || (item.type === 'swing-high' ? '摆动高点' : '摆动低点'),
+    direction: item.direction || 'neutral', time: item.time, confidence: item.confidence,
+    condition: item.condition, meaning: item.meaning, disclaimer: item.disclaimer,
+  }));
+  (chan?.tradePoints || []).slice(-6).forEach(item => items.push({
+    label: `${item.type === 1 ? '一' : item.type === 2 ? '二' : item.type === 3 ? '三' : ''}类${item.side === 'buy' ? '买点' : '卖点'}`,
+    direction: item.side === 'buy' ? 'bullish' : 'bearish', time: item.time, confidence: item.confidence,
+    condition: item.status === 'confirmed' ? '结构已确认' : '结构仍在准备中', meaning: item.meaning,
+    disclaimer: item.disclaimer,
+  }));
+  if (!items.length) { el.innerHTML = `<span class="chart-signal-empty">${stockEscapeHtml(emptyText)}</span>`; return; }
+  el.innerHTML = '<div class="chart-pattern-controls-title">结构说明</div>' + items.reverse().map(item => {
+    const direction = item.direction === 'bullish' ? '看涨' : item.direction === 'bearish' ? '看跌' : '中性';
+    const time = item.time ? new Date(item.time).toLocaleDateString('zh-CN', { month:'numeric', day:'numeric' }) : '--';
+    return `<article class="chart-structure-item ${stockEscapeHtml(item.direction || 'neutral')}"><strong>${stockEscapeHtml(item.label)} · ${direction}</strong><div class="chart-pattern-item-meta">${time} · 置信度 ${stockEscapeHtml(item.confidence || '未知')} · ${stockEscapeHtml(item.condition || '条件未知')}</div><div><b>通常含义：</b>${stockEscapeHtml(item.meaning || '暂无说明')}</div><div class="chart-pattern-item-meta">${stockEscapeHtml(item.disclaimer || '结构仅供研究参考，不构成交易指令。')}</div></article>`;
+  }).join('');
 }
 function renderChartPatternMarkers(targetId, patterns, getPosition) {
   const layer = document.getElementById(targetId);
@@ -7938,12 +8041,17 @@ function drawStockKline(canvas, klines) {
   const visibleCount = stockChartReplayIndex >= 0 ? Math.min(fullKlines.length, stockChartReplayIndex + 1) : fullKlines.length;
   klines = fullKlines.slice(0, visibleCount);
   if (!klines.length) {
+    const replayStatus = document.getElementById('stock-chart-replay-status');
+    if (replayStatus) replayStatus.textContent = '暂无K线数据';
     renderChartPatternMarkers('stock-chart-patterns', [], () => null);
     renderChartPatternList('stock-chart-pattern-list', [], '当前周期未识别到所选蜡烛形态');
+    renderChartStructureList('stock-chart-structure-list', [], null, '当前周期未识别到结构标记');
+    renderMovingAverageValues('stock-chart-ma-values', [], [5, 10, 20]);
     renderChartSignalList('stock-chart-signals', [], '当前周期未触发所选策略信号');
     return;
   }
   const overlays = window.MoneyChartAnalysis.buildChartOverlays({ bars: klines, signals: buildStockStrategySignals(klines), config: stockChartOverlayConfig });
+  renderMovingAverageValues('stock-chart-ma-values', klines, [5, 10, 20]);
   const replayStatus = document.getElementById('stock-chart-replay-status');
   if (replayStatus) replayStatus.textContent = `${visibleCount}/${fullKlines.length}`;
   // Render at the display's physical pixel density. Without this, the browser
@@ -8097,6 +8205,7 @@ function drawStockKline(canvas, klines) {
   legend.forEach(([label, color], index) => { ctx.fillStyle = color; ctx.fillText(label, W - 8 - index * 58, 12); });
   renderChartSignalList('stock-chart-signals', overlays.signals, '当前周期未触发所选策略信号');
   renderChartPatternList('stock-chart-pattern-list', overlays.patterns, '当前周期未识别到所选蜡烛形态');
+  renderChartStructureList('stock-chart-structure-list', overlays.structures, overlays.chan, '当前周期未识别到结构标记');
 }
 // --- DeFi Data ---
 async function loadDefiData() {
@@ -12552,6 +12661,7 @@ loadAll();
 loadCommandCenter();
 loadNewsTicker();
 loadMarketTimeline();
+renderChartPatternControls();
 // Restore last visited tab from localStorage.
 (function restoreLastTab() {
   const saved = localStorage.getItem('mm-last-tab');
@@ -12658,6 +12768,7 @@ window.smartFetch = function(url, options) {
 };
 
 const chartFullscreenCards = { stocks: 'stock-chart-card', crypto: 'crypto-chart-card' };
+const chartFullscreenPortal = { card: null, parent: null, nextSibling: null };
 function redrawVisibleChart(kind) {
   if (kind === 'stocks' && typeof drawStockKline === 'function' && stockChartKlines?.length) {
     if (window.stockMoneyKLine) { window.stockMoneyKLine.create(stockChartKlines); } else { drawStockKline(document.getElementById('stock-kline'), stockChartKlines); }
@@ -12683,13 +12794,38 @@ window.toggleChartFullscreen = function(kind) {
   const cardId = chartFullscreenCards[kind];
   const card = cardId ? document.getElementById(cardId) : null;
   if (!card) return false;
+  const overlay = document.getElementById('chart-fullscreen-overlay');
+  if (!overlay) return false;
   const current = document.body.dataset.chartFullscreen;
-  document.querySelectorAll('.chart-card-fullscreen').forEach(node => node.classList.remove('chart-card-fullscreen'));
   if (current === kind) {
+    card.classList.remove('chart-card-fullscreen');
+    if (chartFullscreenPortal.card === card && chartFullscreenPortal.parent) {
+      chartFullscreenPortal.parent.insertBefore(card, chartFullscreenPortal.nextSibling);
+    }
+    chartFullscreenPortal.card = null;
+    chartFullscreenPortal.parent = null;
+    chartFullscreenPortal.nextSibling = null;
+    overlay.hidden = true;
+    overlay.setAttribute('aria-hidden', 'true');
     delete document.body.dataset.chartFullscreen;
     syncChartFullscreenButtons();
+    const scheduleExit = window.requestAnimationFrame || (callback => window.setTimeout(callback, 0));
+    scheduleExit(() => redrawVisibleChart(kind));
     return false;
   }
+  if (current) {
+    const previous = document.getElementById(chartFullscreenCards[current]);
+    previous?.classList.remove('chart-card-fullscreen');
+    if (chartFullscreenPortal.card === previous && chartFullscreenPortal.parent) {
+      chartFullscreenPortal.parent.insertBefore(previous, chartFullscreenPortal.nextSibling);
+    }
+  }
+  chartFullscreenPortal.card = card;
+  chartFullscreenPortal.parent = card.parentElement;
+  chartFullscreenPortal.nextSibling = card.nextSibling;
+  overlay.hidden = false;
+  overlay.setAttribute('aria-hidden', 'false');
+  overlay.appendChild(card);
   document.body.dataset.chartFullscreen = kind;
   card.classList.add('chart-card-fullscreen');
   syncChartFullscreenButtons();
@@ -12747,5 +12883,5 @@ window.MoneyKLine = MoneyKLine;
 
       
       <div class="drawer density-compact density-comfortable"></div>
-<div id="chart-fullscreen-overlay" aria-hidden="true" hidden></div>
+<div id="chart-fullscreen-overlay" class="chart-fullscreen-overlay" aria-hidden="true" hidden></div>
 </body></html>

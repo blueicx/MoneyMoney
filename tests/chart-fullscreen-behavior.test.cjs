@@ -35,11 +35,13 @@ describe('Chart fullscreen behavior', () => {
     window.toggleChartFullscreen('stocks');
     assert.equal(document.body.dataset.chartFullscreen, 'stocks');
     assert.ok(document.getElementById('stock-chart-card').classList.contains('chart-card-fullscreen'));
+    assert.equal(document.getElementById('stock-chart-card').parentElement.id, 'chart-fullscreen-overlay');
     assert.equal(document.getElementById('crypto-chart-card').classList.contains('chart-card-fullscreen'), false);
 
     window.toggleChartFullscreen('stocks');
     assert.equal(document.body.dataset.chartFullscreen, undefined);
     assert.equal(document.getElementById('stock-chart-card').classList.contains('chart-card-fullscreen'), false);
+    assert.equal(document.getElementById('stock-chart-card').parentElement.classList.contains('collapse-body'), true);
   });
 
   it('Escape exits fullscreen without changing the selected layer settings', () => {

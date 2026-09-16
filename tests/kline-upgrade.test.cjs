@@ -76,5 +76,14 @@ describe('K-Line Upgrade & Advanced Capabilities', () => {
   it('Strategy points and explanation layers exist on DOM', () => {
     const layerToggles = Array.from(document.querySelectorAll('input[type="checkbox"][onchange*="setStockChartOverlay"]'));
     assert.ok(layerToggles.length > 0, 'Should have layer toggles');
+    assert.ok(document.querySelector('[data-chart-pattern="doji"]'), 'Doji should have an independent toggle');
+    assert.ok(document.querySelector('#stock-chart-structure-list'), 'Structure explanation list should exist');
+    assert.match(fs.readFileSync(path.join(__dirname, '../src/web/public/index.html'), 'utf8'), /MA5[^<]{0,80}数值|formatChartPrice/);
+  });
+
+  it('Center grid removes the reserved right-library column', () => {
+    const html = fs.readFileSync(path.join(__dirname, '../src/web/public/index.html'), 'utf8');
+    assert.match(html, /\.market-workspace-shell\s*\{[\s\S]*?grid-template-columns:\s*224px\s+minmax\(0,\s*1fr\);/);
+    assert.doesNotMatch(html, /\.market-workspace-shell\s*\{[\s\S]*?grid-template-columns:\s*224px\s+minmax\(0,\s*1fr\)\s+280px;/);
   });
 });

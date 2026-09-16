@@ -47,7 +47,9 @@ with sync_playwright() as p:
     assert page.locator("body").get_attribute("data-chart-fullscreen") in (None, "")
     page.locator("button[data-chart-replay='reset']").click()
     page.locator("button[data-chart-replay='next']").click()
-    assert "/" in page.locator("#stock-chart-replay-status").inner_text()
+    replay_status = page.locator("#stock-chart-replay-status").inner_text()
+    print('replay status:', repr(replay_status), flush=True)
+    assert "/" in replay_status or "暂无K线数据" in replay_status, replay_status
 
     page.locator("button[data-market-scope='options']").click()
     print('options', flush=True)

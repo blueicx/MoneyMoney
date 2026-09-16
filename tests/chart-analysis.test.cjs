@@ -60,6 +60,14 @@ test('keeps strategy defaults when loading an older overlay preference', () => {
   assert.equal(config.strategies.volumeBreakout, false);
 });
 
+test('keeps candlestick patterns independently selectable', () => {
+  const config = analysis.normalizeOverlayConfig({ patterns: true, patternTypes: { doji: false } });
+  assert.equal(config.patternTypes.doji, false);
+  assert.equal(config.patternTypes.hammer, true);
+  const output = analysis.buildChartOverlays({ bars: bars(), config });
+  assert.equal(output.patterns.some(item => item.type === 'doji'), false);
+});
+
 test('chart analysis exposes extended candlestick patterns and Chan structure graph', () => {
   const input = [
     { time: 1, open: 10, high: 10, low: 10, close: 10, volume: 1 },
@@ -94,6 +102,13 @@ test('Chan structures with trends and buy/sell points', () => {
   const graph = analysis.detectChanStructures(input);
   assert.ok(Array.isArray(graph.trends));
   assert.ok(Array.isArray(graph.tradePoints));
+});
+
+test('structure markers expose an explanation for the UI', () => {
+  const output = analysis.buildChartOverlays({ bars: bars(), config: { structures: true } });
+  assert.ok(output.structures.length > 0);
+  assert.ok(output.structures.every(item => item.label && item.condition && item.meaning && item.disclaimer));
+  assert.ok(output.explanations.some(item => item.kind === 'structure'));
 });
 
 test('Replay bounds and context protection', () => {
