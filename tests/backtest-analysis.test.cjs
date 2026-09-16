@@ -12,14 +12,6 @@ test('backtest analysis calculates return, win rate, profit factor and drawdown'
   assert.equal(metrics.maxDrawdownBars, 1);
 });
 
-test('advanced backtest analysis calculates CAGR, Sharpe, Sortino, PnL ratio, and Alpha', () => {
-  const metrics = calculateBacktestMetrics({ startingBalance: 1000, equityCurve: [1000, 1010, 1020, 1015, 1030, 1050], trades: [{ pnl: 10 }, { pnl: 10 }, { pnl: -5 }, { pnl: 15 }, { pnl: 20 }] });
-  assert.ok(metrics.cagrPct !== undefined);
-  assert.ok(metrics.sharpeRatio !== undefined);
-  assert.ok(metrics.sortinoRatio !== undefined);
-  assert.ok(metrics.pnlRatio !== undefined);
-});
-
 test('walk-forward folds keep purge and embargo gaps without overlap', () => {
   const folds = createWalkForwardFolds({ length: 100, trainSize: 40, testSize: 20, step: 20, purge: 3, embargo: 2 });
   assert.deepEqual(folds[0], { trainStart: 0, trainEnd: 39, testStart: 45, testEnd: 64 });

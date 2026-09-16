@@ -85,7 +85,7 @@ export function runResearchExperiment(input: ResearchExperimentInput): ResearchE
       marketScope: { passed: true, detail: `已校验 ${context.market} 市场边界` },
       data: { passed: Boolean(input.context.dataSource), detail: input.context.dataSource ? `数据源：${input.context.dataSource}` : '未声明数据源' },
     },
-    outOfSample: oos, generatedAt: experiment.createdAt,
+    outOfSample: oos, generatedAt: new Date().toISOString(),
   };
   const rules = input.promotion || {};
   const reasons: string[] = [];
@@ -95,32 +95,4 @@ export function runResearchExperiment(input: ResearchExperimentInput): ResearchE
   if (oos.tradesCount < Number(rules.minTrades ?? 0)) reasons.push('样本外交易数未达到门槛');
   const passed = reasons.length === 0;
   return { experiment, backtest: result, folds, evidence, gate: { passed, status: passed ? 'candidate' : 'draft', monitoringAllowed: false, reasons } };
-}
-
-import { createArtifactManifest, type ArtifactManifest } from './research-contracts';
-
-export function generateExperimentArtifacts(jobId: string, result: ResearchExperimentResult): { manifests: ArtifactManifest[], files: Record<string, string> } {
-  const jsonContent = JSON.stringify(result, null, 2);
-  const csvContent = `timeIndex,direction,price,executionPrice,volume,fee,slippage,pnl\n` + result.backtest.trades.map(t => `${t.timeIndex},${t.direction},${t.price},${t.executionPrice},${t.volume},${t.fee},${t.slippage},${t.pnl}`).join('\n');
-  const mdContent = `# Experiment ${result.experiment.id}\n\n## Evidence\n${result.evidence.summary}\n\n## Metrics\nTotal Return: ${result.backtest.metrics.totalReturnPct}%\nWin Rate: ${result.backtest.metrics.winRatePct}%`;
-
-  const hashString = (str: string) => {
-    let hash = 2166136261;
-    for (let index = 0; index < str.length; index += 1) hash = Math.imul(hash ^ str.charCodeAt(index), 16777619);
-    return (hash >>> 0).toString(16);
-  };
-
-  const files = {
-    'result.json': jsonContent,
-    'trades.csv': csvContent,
-    'report.md': mdContent
-  };
-
-  const manifests = [
-    createArtifactManifest({ id: `art_${jobId}_json`, jobId, hash: hashString(jsonContent), uri: 'file://result.json', createdAt: result.evidence.generatedAt }),
-    createArtifactManifest({ id: `art_${jobId}_csv`, jobId, hash: hashString(csvContent), uri: 'file://trades.csv', createdAt: result.evidence.generatedAt }),
-    createArtifactManifest({ id: `art_${jobId}_md`, jobId, hash: hashString(mdContent), uri: 'file://report.md', createdAt: result.evidence.generatedAt })
-  ];
-
-  return { manifests, files };
 }
