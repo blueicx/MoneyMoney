@@ -322,9 +322,9 @@ export class BacktestEngine {
       pendingOrders = nextPending;
 
       currentEquity = cashBalance + positions * currentPrice;
-      if (i > 0) equityCurve.push(currentEquity);
+      equityCurve.push(currentEquity);
       const drawdownPost = peak > 0 ? (peak - currentEquity) / peak : 0;
-      if (i > 0) underwaterCurve.push(-drawdownPost * 100);
+      underwaterCurve.push(-drawdownPost * 100);
     }
 
     const unrealizedPnl = positions > 0 ? positions * (prices[prices.length - 1] || 0) - positionCost * positions : 0;

@@ -43,7 +43,7 @@ test('backtest exposes an equity curve and research metrics with a fixed startin
     { timeIndex: 1, direction: 'sell', source: 'maCross' },
   ]);
   assert.equal(result.startingBalance, 1000);
-  assert.equal(result.equityCurve.length, 4);
+  assert.equal(result.equityCurve.length, 5);
   assert.equal(result.metrics.totalReturnPct, 1);
   assert.equal(result.metrics.winRatePct, 50);
   assert.equal(result.trades[0].source, 'maCross');

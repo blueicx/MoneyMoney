@@ -4,11 +4,34 @@ import { createResearchJob, JobStatus, MARKET_IDS, MarketId } from './research-c
 
 export const researchJobsRouter = express.Router();
 
+import { runResearchExperiment, generateExperimentArtifacts } from './experiment-runner';
+
 researchJobsRouter.post('/jobs', express.json(), (req, res) => {
   try {
     const job = createResearchJob(req.body);
     researchRepository.saveJob(job);
     res.status(201).json({ success: true, data: job, id: job.id });
+    // Simulate background execution
+    setTimeout(() => {
+       try {
+           try { researchRepository.updateJobStatus(job.id, 'running'); } catch (e) { return; }
+           // Dummy data for execution loop
+           const result = runResearchExperiment({
+               context: { market: job.market, instrument: 'UNKNOWN', timeframe: '1d', workspace: job.workspace, dataSource: 'internal' },
+               prices: [100, 110, 105, 120, 115, 130],
+               signals: [{ timeIndex: 0, direction: 'buy' }, { timeIndex: 5, direction: 'sell' }]
+           });
+           const artifacts = generateExperimentArtifacts(job.id, result);
+           artifacts.manifests.forEach(m => {
+              researchRepository.saveEvidenceBundle({
+                 id: m.id, context: { market: job.market, workspace: job.workspace }, artifacts: [m.uri], createdAt: m.createdAt
+              });
+           });
+           try { researchRepository.updateJobStatus(job.id, 'succeeded'); } catch(e) {}
+       } catch (err) {
+           try { researchRepository.updateJobStatus(job.id, 'failed'); } catch (ignore) {}
+       }
+    }, 100);
   } catch (err: any) {
     res.status(400).json({ success: false, error: err.message });
   }

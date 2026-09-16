@@ -50,7 +50,7 @@ test('Batch B - prevents selling more than held', () => {
 test('Batch B - metrics boundaries do not produce NaN or Infinity', () => {
     const metrics = calculateBacktestMetrics({ startingBalance: 1000, equityCurve: [1000, 1000, 1000], trades: [] });
     assert.ok(!Number.isNaN(metrics.profitFactor));
-    // removed;
+    assert.ok(Number.isFinite(metrics.profitFactor));
     assert.ok(!Number.isNaN(metrics.pnlRatio));
     assert.ok(Number.isFinite(metrics.pnlRatio));
     assert.ok(!Number.isNaN(metrics.sharpeRatio));
