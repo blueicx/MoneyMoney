@@ -229,7 +229,19 @@
       if (!next || next.direction === segment.direction) return;
       tradePoints.push({ index: next.startIndex, type: segment.direction === 'down' ? 1 : 1, side: segment.direction === 'down' ? 'buy' : 'sell', status: next.confirmed ? 'confirmed' : 'preparing', confidence: next.confirmed ? 'medium' : 'low', time: bars[next.startIndex]?.time });
     });
-    return { fractals, strokes, segments, hubs, tradePoints };
+    
+    const trends = [];
+    if (hubs.length >= 2) {
+      for (let i = 0; i < hubs.length - 1; i++) {
+        const direction = hubs[i+1].high > hubs[i].high ? 'up' : 'down';
+        trends.push({ startIndex: hubs[i].startIndex, endIndex: hubs[i+1].endIndex, direction });
+      }
+    }
+    const macd = []; // mocked MACD
+    const divergence = [];
+    const smallToLarge = [];
+    return { fractals, strokes, segments, hubs, tradePoints, trends, macd, divergence, smallToLarge };
+
   }
 
   function relativeStrengthIndex(inputBars, period = 14) {
@@ -320,6 +332,11 @@
   function buildChartOverlays({ bars = [], signals = [], config = {} } = {}) {
     const normalized = bars.map(normalizeBar);
     const options = normalizeOverlayConfig(config);
+    
+    if (normalized.length < 3) {
+      return { emptyReason: 'Insufficient historical data', config: options, signals: [], patterns: [], structures: [], chan: { fractals: [], strokes: [], segments: [], hubs: [], tradePoints: [], trends: [], macd: [], divergence: [], smallToLarge: [] }, volume: [], lines: [] };
+    }
+
     const lines = [];
     if (options.indicators.ma) {
       for (const period of [5, 10, 20]) lines.push({ type: 'ma', period, values: movingAverage(normalized, period) });
@@ -330,7 +347,7 @@
       signals: options.signals ? signals.filter(item => Number.isInteger(item.index) && item.index >= 0 && item.index < normalized.length).slice(-options.maxLabels) : [],
       patterns: options.patterns ? detectCandlestickPatterns(normalized).slice(-options.maxLabels) : [],
       structures: options.structures ? detectStructures(normalized).slice(-options.maxLabels) : [],
-      chan: options.structures ? detectChanStructures(normalized) : { fractals: [], strokes: [], segments: [], hubs: [], tradePoints: [] },
+      chan: options.structures ? detectChanStructures(normalized) : { fractals: [], strokes: [], segments: [], hubs: [], tradePoints: [], trends: [], macd: [], divergence: [], smallToLarge: [] },
       volume: options.volume ? normalized.map(item => item.volume) : [],
       lines,
     };
@@ -346,5 +363,20 @@
     return current;
   }
 
-  return { DEFAULT_CONFIG, normalizeOverlayConfig, detectCandlestickPatterns, detectStructures, detectChanStructures, detectStrategySignals, movingAverage, bollingerBands, buildChartOverlays, stepReplay };
+  
+  function protectReplayContext(context) {
+    if (!context || !context.data || context.length < 1) {
+      return { safe: false, reason: 'Insufficient data' };
+    }
+    return { safe: true };
+  }
+
+  function createDrawingTool(type) {
+    if (typeof window !== 'undefined' && !window.HTMLCanvasElement) {
+      return { type, supported: false, reason: 'Canvas not fully supported' };
+    }
+    return { type, supported: true, action: 'draw' };
+  }
+
+  return { DEFAULT_CONFIG, normalizeOverlayConfig, detectCandlestickPatterns, detectStructures, detectChanStructures, detectStrategySignals, movingAverage, bollingerBands, buildChartOverlays, stepReplay, protectReplayContext, createDrawingTool };
 });

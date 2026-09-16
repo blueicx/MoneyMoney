@@ -80,3 +80,35 @@ test('chart analysis exposes extended candlestick patterns and Chan structure gr
   assert.ok(Array.isArray(graph.tradePoints));
   assert.ok(graph.fractals.every(item => item.index > 0 && item.index < input.length - 1));
 });
+
+test('Chan structures with trends and buy/sell points', () => {
+  const input = [
+    { time: 1, open: 10, high: 10, low: 10, close: 10, volume: 1 },
+    { time: 2, open: 10, high: 12, low: 10, close: 12, volume: 1 },
+    { time: 3, open: 12, high: 12, low: 12, close: 12, volume: 1 },
+    { time: 4, open: 12, high: 13, low: 11, close: 11, volume: 1 },
+    { time: 5, open: 11, high: 11, low: 9, close: 9, volume: 1 },
+    { time: 6, open: 9, high: 10, low: 9, close: 10, volume: 1 },
+    { time: 7, open: 10, high: 11, low: 10, close: 11, volume: 1 },
+  ];
+  const graph = analysis.detectChanStructures(input);
+  assert.ok(Array.isArray(graph.trends));
+  assert.ok(Array.isArray(graph.tradePoints));
+});
+
+test('Replay bounds and context protection', () => {
+  assert.equal(analysis.stepReplay(0, 5, 'previous'), 0);
+  assert.equal(analysis.stepReplay(4, 5, 'next'), 4);
+  const state = analysis.protectReplayContext({ data: [], length: 0 });
+  assert.equal(state.reason, 'Insufficient data');
+});
+
+test('Custom drawing tools interface', () => {
+  const drawing = analysis.createDrawingTool('trendline');
+  assert.equal(drawing.type, 'trendline');
+});
+
+test('Data shortage yields explanation', () => {
+  const result = analysis.buildChartOverlays({ bars: [], config: {} });
+  assert.equal(result.emptyReason, 'Insufficient historical data');
+});
