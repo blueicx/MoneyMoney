@@ -1,6 +1,6 @@
 const test = require('node:test');
 const { strict: assert } = require('node:assert');
-const { runResearchExperiment } = require('../dist/features/experiment-runner.js');
+const { runResearchExperiment, generateExperimentArtifacts } = require('../dist/features/experiment-runner.js');
 
 test('research experiment records reproducible configuration, folds, evidence and gate', () => {
   const result = runResearchExperiment({
@@ -42,4 +42,17 @@ test('experiment refuses cross-market instrument and failed promotion stays rese
   assert.equal(result.gate.passed, false);
   assert.equal(result.gate.status, 'draft');
   assert.equal(result.gate.monitoringAllowed, false);
+});
+
+test('experiment artifacts are generated correctly as JSON, CSV and Markdown', () => {
+  const result = runResearchExperiment({
+    context: { market: 'stocks', workspace: 'backtest', instrument: 'AAPL' },
+    prices: [100, 110, 105], signals: [{ timeIndex: 0, direction: 'buy' }],
+  });
+  const { manifests, files } = generateExperimentArtifacts('test_job', result);
+  assert.equal(manifests.length, 3);
+  assert.ok(files['result.json'].includes('stocks'));
+  assert.ok(files['trades.csv'].includes('timeIndex,direction'));
+  assert.ok(files['report.md'].includes('# Experiment'));
+  assert.ok(manifests.every(m => m.hash.length > 0));
 });
