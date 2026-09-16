@@ -359,6 +359,17 @@ app.get('/api/workspace/context', (req, res) => {
   return res.json({ success: true, scope, workspace, instrument: instrument || null });
 });
 
+app.get('/api/data/capabilities', async (req, res) => {
+  try {
+    const marketId = typeof req.query.market === 'string' ? req.query.market : undefined;
+    const sources = await getSourceHealth();
+    // Return relevant sources for the requested market
+    res.json({ success: true, data: sources.items.filter(s => !marketId || s.group === marketId || s.id.includes(marketId)) });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 // Lightweight identity check used by the desktop launcher.
 app.get('/api/health', (_req, res) => {
   res.json({

@@ -17,31 +17,53 @@ researchJobsRouter.post('/jobs', express.json(), (req, res) => {
        try {
            try { researchRepository.updateJobStatus(job.id, 'running'); } catch (e) { return; }
 
-           const reqInstrument = String(req.body.instrument || 'UNKNOWN');
+           const reqInstrument = String(req.body.instrument || '').trim();
+           if (!reqInstrument || reqInstrument === 'UNKNOWN') {
+               researchRepository.addEvent(job.id, 'ERROR', { reason: 'Missing or invalid instrument' });
+               researchRepository.updateJobStatus(job.id, 'failed', 0, 'Missing or invalid instrument');
+               return;
+           }
            const reqTimeframe = String(req.body.timeframe || '1d');
 
            const instrumentRef = {
                id: reqInstrument,
                symbol: reqInstrument.split(':').pop() || reqInstrument,
-               type: job.market as any,
+               type: job.market === 'stocks' ? 'stock' : job.market === 'options' ? 'option' : job.market as any,
                venue: 'us',
                title: '',
-               aliases: []
+               aliases: [],
+               marketId: job.market
            };
 
-           const overview = await unifiedInstrumentService.overview(instrumentRef).catch(() => null);
+           const overview = await unifiedInstrumentService.overview(instrumentRef).catch((err) => {
+               researchRepository.addEvent(job.id, 'ERROR', { reason: `Source unavailable: ${err.message}` });
+               return null;
+           });
 
-           if (!overview || !overview.klines || overview.klines.length < 2) {
+           if (!overview) {
+               researchRepository.updateJobStatus(job.id, 'failed', 0, 'Unavailable data');
+               return;
+           }
+           
+           const expectedType = job.market === 'stocks' ? 'stock' : job.market === 'options' ? 'option' : job.market;
+           if (overview.instrument.type !== expectedType && overview.instrument.type !== job.market) {
+               researchRepository.addEvent(job.id, 'ERROR', { reason: 'Instrument does not belong to the requested market' });
+               researchRepository.updateJobStatus(job.id, 'failed', 0, 'Market mismatch');
+               return;
+           }
+
+           if (!overview.klines || overview.klines.length < 2) {
                researchRepository.addEvent(job.id, 'ERROR', { reason: 'Insufficient or unavailable data for instrument' });
                researchRepository.updateJobStatus(job.id, 'failed', 0, 'Unavailable data');
                return;
            }
 
-           const prices = overview.klines.map((k: any) => k.close);
-           const signals = [
-               { timeIndex: 0, direction: 'buy' as const },
-               { timeIndex: Math.floor(prices.length / 2), direction: 'sell' as const }
-           ];
+           const prices = overview.klines.map((k: any) => Number(k.close));
+           const signals: Array<{ timeIndex: number, direction: 'buy' | 'sell' }> = [];
+           for (let i = 1; i < prices.length; i++) {
+               if (prices[i] > prices[i-1] * 1.02) signals.push({ timeIndex: i, direction: 'buy' });
+               else if (prices[i] < prices[i-1] * 0.98) signals.push({ timeIndex: i, direction: 'sell' });
+           }
 
            const result = runResearchExperiment({
                context: {
