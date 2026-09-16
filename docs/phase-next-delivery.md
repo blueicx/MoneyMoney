@@ -1,7 +1,7 @@
 # 交付结果记录
 
 ## 改动文件
-- `src/features/research-jobs-router.ts`: 修复了 UNKNOWN 标的兜底和固定买卖信号问题，改用真实的 K 线数据生成买卖信号，并增强了针对请求市场的标的类型校验和失败状态返回。
+- `src/features/research-jobs-router.ts`: 修复了 UNKNOWN 标的兜底和固定买卖信号问题，改用真实的 K 线数据生成买卖信号，并增强了针对请求市场的标的类型校验和失败状态返回。缺失或者明确是 `UNKNOWN` 的请求现在会直接返回 400 响应。
 - `src/features/research-repository.ts`: 增加了 `assertMarketContext`，保障存储层面的数据隔离和约束。
 - `src/web/server.ts`: 新增了 `/api/data/capabilities` 接口，支持根据市场作用域 (`market`) 过滤数据源健康状态。
 - `tests/research-jobs-execution.test.cjs`: 补充了回归测试，验证 UNKNOWN 无法通过，无写死信号，隔离正确，路由入口完整。

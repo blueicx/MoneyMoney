@@ -9,11 +9,12 @@ import { unifiedInstrumentService } from './unified-instruments';
 
 researchJobsRouter.post('/jobs', express.json(), (req, res) => {
   try {
-    const job = createResearchJob(req.body);
     const requestedInstrument = String(req.body?.instrument || '').trim();
-    if (requestedInstrument) {
-      assertMarketContext({ market: job.market, workspace: job.workspace, instrument: requestedInstrument });
+    if (!requestedInstrument || requestedInstrument === 'UNKNOWN') {
+        return res.status(400).json({ success: false, error: 'Missing or invalid instrument' });
     }
+    const job = createResearchJob(req.body);
+    assertMarketContext({ market: job.market, workspace: job.workspace, instrument: requestedInstrument });
     researchRepository.saveJob(job);
     res.status(201).json({ success: true, data: job, id: job.id });
     // Simulate background execution
