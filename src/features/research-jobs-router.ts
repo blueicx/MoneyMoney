@@ -72,7 +72,7 @@ researchJobsRouter.post('/jobs', express.json(), (req, res) => {
                researchRepository.updateJobStatus(job.id, 'failed', 0, err.message);
            } catch (ignore) {}
        }
-    }, 100);
+    }, 1000);
   } catch (err: any) {
     res.status(400).json({ success: false, error: err.message });
   }
@@ -147,7 +147,11 @@ researchJobsRouter.post('/jobs/:id/cancel', (req, res) => {
 
 researchJobsRouter.post('/jobs/:id/resume', (req, res) => {
   try {
-    researchRepository.updateJobStatus(req.params.id, 'running');
+    const job = researchRepository.getJob(req.params.id);
+    if (!job) return res.status(404).json({ success: false, error: 'Job not found' });
+    if (job.status !== 'running') {
+      researchRepository.updateJobStatus(req.params.id, 'running');
+    }
     res.json({ success: true, data: researchRepository.getJob(req.params.id) });
   } catch (err: any) {
     res.status(400).json({ success: false, error: err.message });
