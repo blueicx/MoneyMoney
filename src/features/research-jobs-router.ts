@@ -1,0 +1,93 @@
+import express from 'express';
+import { researchRepository } from './research-repository';
+import { createResearchJob, JobStatus } from './research-contracts';
+
+export const researchJobsRouter = express.Router();
+
+researchJobsRouter.post('/jobs', express.json(), (req, res) => {
+  try {
+    const job = createResearchJob(req.body);
+    researchRepository.saveJob(job);
+    res.status(201).json({ success: true, data: job, id: job.id });
+  } catch (err: any) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+researchJobsRouter.get('/jobs', (req, res) => {
+  res.status(200).json({ success: true, data: [] });
+});
+
+researchJobsRouter.get('/jobs/:id', (req, res) => {
+  const job = researchRepository.getJob(req.params.id);
+  if (!job) return res.status(404).json({ success: false, error: 'Job not found' });
+  res.json({ success: true, data: job });
+});
+
+researchJobsRouter.get('/jobs/:id/events', (req, res) => {
+  const job = researchRepository.getJob(req.params.id);
+  if (!job) return res.status(404).json({ success: false, error: 'Job not found' });
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders?.();
+
+  const lastEventId = Number(req.headers['last-event-id']) || Number(req.query.lastEventId) || 0;
+  let currentLastId = lastEventId;
+
+  const sendEvents = () => {
+    const events = researchRepository.getEvents(req.params.id, currentLastId);
+    events.forEach((ev: any) => {
+      res.write(`id: ${ev.id}\n`);
+      res.write(`data: ${JSON.stringify(ev)}\n\n`);
+      currentLastId = ev.id;
+    });
+  };
+
+  sendEvents();
+
+  const interval = setInterval(() => {
+    sendEvents();
+    res.write(':\\n\\n'); // Heartbeat
+
+    const currentJob = researchRepository.getJob(req.params.id);
+    if (!currentJob || ['succeeded', 'failed', 'cancelled'].includes(currentJob.status)) {
+      clearInterval(interval);
+      res.write(`event: end\ndata: {}\n\n`);
+      res.end();
+    }
+  }, 1000);
+
+  req.on('close', () => clearInterval(interval));
+});
+
+researchJobsRouter.post('/jobs/:id/cancel', (req, res) => {
+  try {
+    const job = researchRepository.getJob(req.params.id);
+    if (!job) return res.status(404).json({ success: false, error: 'Job not found' });
+    if (['succeeded', 'failed', 'cancelled'].includes(job.status)) {
+      return res.status(400).json({ success: false, error: 'Job already finished' });
+    }
+    const newStatus: JobStatus = job.status === 'queued' ? 'cancelled' : 'cancelling';
+    researchRepository.updateJobStatus(req.params.id, newStatus);
+    res.json({ success: true, data: researchRepository.getJob(req.params.id) });
+  } catch (err: any) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+researchJobsRouter.post('/jobs/:id/resume', (req, res) => {
+  try {
+    researchRepository.updateJobStatus(req.params.id, 'running');
+    res.json({ success: true, data: researchRepository.getJob(req.params.id) });
+  } catch (err: any) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+researchJobsRouter.get('/artifacts/:id', (req, res) => {
+  const artifacts = researchRepository.getArtifacts(req.params.id);
+  if (!artifacts.length) return res.status(404).json({ success: false, error: 'No artifacts found for this job' });
+  res.json({ success: true, data: artifacts });
+});

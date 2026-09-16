@@ -4692,7 +4692,11 @@ app.get('/api/notifications', (req, res) => {
   res.json({ success: true, data: getNotifications() });
 });
 
+import { researchJobsRouter } from '../features/research-jobs-router';
+
 // --- Research Workspace ---
+
+app.use('/api/research', researchJobsRouter);
 
 app.post('/api/research/experiments', express.json(), (req, res) => {
   try {
@@ -4717,6 +4721,10 @@ app.post('/api/research/experiments', express.json(), (req, res) => {
       split: body.split,
       promotion: body.promotion,
     });
+
+    // Save to SQLite for persistence
+    import('../features/research-repository').then(m => m.researchRepository.saveExperiment(result.experiment.id, result));
+
     return res.json({ success: true, data: result });
   } catch (error) {
     return res.status(400).json({ success: false, error: error instanceof Error ? error.message : '实验配置无效' });

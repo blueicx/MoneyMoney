@@ -307,6 +307,7 @@ export async function getSourceHealth(scope = 'all'): Promise<SourceHealthReport
   if (!refreshPromise.has(scope) && (!cache || cache.expiresAt <= now)) {
     const promise = buildSourceHealth(scope).then(value => {
       caches.set(scope, { value, expiresAt: Date.now() + 30_000 });
+      import('./research-repository').then(m => (m.researchRepository as any).saveSourceHealth(scope, value));
       return value;
     }).catch(err => {
       console.error('Background refresh failed for health scope:', scope, err);
@@ -324,6 +325,16 @@ export async function getSourceHealth(scope = 'all'): Promise<SourceHealthReport
   if (cache) {
     return cache.value;
   }
+
+  // Try to load from SQLite if no memory cache
+  try {
+    const repo = require('./research-repository').researchRepository;
+    const dbVal = (repo as any).getSourceHealth(scope);
+    if (dbVal) {
+       caches.set(scope, { value: dbVal, expiresAt: Date.now() + 30_000 });
+       return dbVal;
+    }
+  } catch(e) {}
 
   try {
     return await Promise.race([

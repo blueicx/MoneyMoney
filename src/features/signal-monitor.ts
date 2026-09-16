@@ -1,4 +1,5 @@
 import { transitionSignal, type SignalEvent, type SignalState } from './research-contracts';
+import { researchRepository } from './research-repository';
 
 export interface Signal {
     id: string;
@@ -18,7 +19,6 @@ export interface SignalLifecycle {
 
 export class SignalMonitor {
     private recentSignals = new Map<string, number>();
-    private lifecycles = new Map<string, SignalLifecycle>();
 
     constructor(private cooldownMs: number) {}
 
@@ -30,7 +30,8 @@ export class SignalMonitor {
         const lastTime = this.recentSignals.get(key) || 0;
 
         const remember = (accepted: boolean, reason?: string) => {
-            this.lifecycles.set(signal.id, { signal: { ...signal }, state: 'generated', accepted, ...(reason ? { reason } : {}), updatedAt: Date.now() });
+            const lc: SignalLifecycle = { signal: { ...signal }, state: 'generated', accepted, ...(reason ? { reason } : {}), updatedAt: Date.now() };
+            (researchRepository as any).saveSignal(signal.id, lc);
         };
         if (signal.timestamp === lastTime) {
             remember(false, 'duplicate signal');
@@ -48,23 +49,22 @@ export class SignalMonitor {
     }
 
     getLifecycle(signalId: string): SignalLifecycle {
-        const record = this.lifecycles.get(signalId);
+        const record = (researchRepository as any).getSignal(signalId);
         if (!record) throw new Error(`Signal ${signalId} not found`);
-        return { ...record, signal: { ...record.signal } };
+        return record;
     }
 
     advance(signalId: string, event: SignalEvent): SignalLifecycle {
-        const record = this.lifecycles.get(signalId);
-        if (!record) throw new Error(`Signal ${signalId} not found`);
+        const record = this.getLifecycle(signalId);
         record.state = transitionSignal(record.state, event);
         record.updatedAt = Date.now();
-        return this.getLifecycle(signalId);
+        (researchRepository as any).saveSignal(signalId, record);
+        return record;
     }
 
     listLifecycles(marketId?: string): SignalLifecycle[] {
-        return [...this.lifecycles.values()]
-            .filter(record => !marketId || record.signal.marketId === marketId)
-            .sort((left, right) => right.updatedAt - left.updatedAt)
-            .map(record => ({ ...record, signal: { ...record.signal } }));
+        return (researchRepository as any).getAllSignals()
+            .filter((record: any) => !marketId || record.signal.marketId === marketId)
+            .sort((left: any, right: any) => right.updatedAt - left.updatedAt);
     }
 }

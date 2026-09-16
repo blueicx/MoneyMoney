@@ -129,3 +129,110 @@ export function transitionSignal(state: SignalState, event: SignalEvent): Signal
   if (!next) throw new Error(`Invalid signal transition: ${state} -> ${event}`);
   return next;
 }
+
+export interface StrategyDefinition {
+  id: string;
+  name: string;
+  version: string;
+  description?: string;
+  market: MarketId;
+  cycle: string;
+  capability: string[];
+  source: string;
+  availability: string;
+}
+
+export function createStrategyDefinition(input: Partial<StrategyDefinition>): StrategyDefinition {
+  if (!input.id || !input.version) throw new Error('Strategy ID and version are required');
+  assertMarketContext({ market: input.market as MarketId, workspace: 'strategy' });
+  return {
+    id: input.id,
+    name: input.name || input.id,
+    version: input.version,
+    description: input.description,
+    market: input.market as MarketId,
+    cycle: input.cycle || 'unknown',
+    capability: Array.isArray(input.capability) ? input.capability : [],
+    source: input.source || 'unknown',
+    availability: input.availability || 'unknown'
+  };
+}
+
+export interface DataSourceDefinition {
+  id: string;
+  name: string;
+  type: SourceType;
+  quality: 'high' | 'medium' | 'low';
+  market: MarketId;
+  cycle: string;
+  capability: string[];
+  source: string;
+  availability: string;
+}
+
+export function createDataSourceDefinition(input: Partial<DataSourceDefinition>): DataSourceDefinition {
+  if (!input.id || !input.name) throw new Error('DataSource ID and name are required');
+  assertMarketContext({ market: input.market as MarketId, workspace: 'datasource' });
+  return {
+    id: input.id,
+    name: input.name,
+    type: input.type || 'internal',
+    quality: input.quality || 'medium',
+    market: input.market as MarketId,
+    cycle: input.cycle || 'unknown',
+    capability: Array.isArray(input.capability) ? input.capability : [],
+    source: input.source || 'unknown',
+    availability: input.availability || 'unknown'
+  };
+}
+
+export type JobStatus = 'queued' | 'running' | 'paused' | 'cancelling' | 'succeeded' | 'failed' | 'cancelled';
+export interface ResearchJob {
+  id: string;
+  market: MarketId;
+  workspace: string;
+  status: JobStatus;
+  progress: number;
+  errorReason?: string;
+  inputSummary: string;
+  strategyVersion?: string;
+  dataSnapshotId?: string;
+  artifactHash?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export function createResearchJob(input: Partial<ResearchJob>): ResearchJob {
+  assertMarketContext({ market: input.market as MarketId, workspace: input.workspace as string });
+  const now = new Date().toISOString();
+  return {
+    id: input.id || `job_${Date.now()}_${Math.floor(Math.random()*1000)}`,
+    market: input.market as MarketId,
+    workspace: input.workspace as string,
+    status: input.status || 'queued',
+    progress: input.progress || 0,
+    errorReason: input.errorReason,
+    inputSummary: input.inputSummary || '',
+    strategyVersion: input.strategyVersion,
+    dataSnapshotId: input.dataSnapshotId,
+    artifactHash: input.artifactHash,
+    createdAt: input.createdAt || now,
+    updatedAt: input.updatedAt || now
+  };
+}
+
+export interface ArtifactManifest { id: string; jobId: string; hash: string; uri: string; createdAt: string; }
+export function createArtifactManifest(input: Partial<ArtifactManifest>): ArtifactManifest {
+  if (!input.id || !input.jobId || !input.uri) throw new Error('Artifact ID, jobId and uri are required');
+  return { id: input.id, jobId: input.jobId, hash: input.hash || '', uri: input.uri, createdAt: input.createdAt || new Date().toISOString() };
+}
+export interface ReviewRecord { id: string; targetId: string; reviewer: string; outcome: 'approved' | 'rejected' | 'needs_work'; notes?: string; createdAt: string; }
+export function createReviewRecord(input: Partial<ReviewRecord>): ReviewRecord {
+  if (!input.id || !input.targetId || !input.reviewer) throw new Error('ReviewRecord ID, targetId and reviewer are required');
+  return { id: input.id, targetId: input.targetId, reviewer: input.reviewer, outcome: input.outcome || 'needs_work', notes: input.notes, createdAt: input.createdAt || new Date().toISOString() };
+}
+export interface SignalLifecycle { signalId: string; state: SignalState; history: { state: SignalState, at: string }[]; }
+export function createSignalLifecycle(input: Partial<SignalLifecycle>): SignalLifecycle {
+  if (!input.signalId) throw new Error('SignalLifecycle signalId is required');
+  return { signalId: input.signalId, state: input.state || 'generated', history: Array.isArray(input.history) ? input.history : [] };
+}
