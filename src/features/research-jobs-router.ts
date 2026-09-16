@@ -1,6 +1,6 @@
 import express from 'express';
 import { researchRepository } from './research-repository';
-import { createResearchJob, JobStatus, MARKET_IDS, MarketId } from './research-contracts';
+import { assertMarketContext, createResearchJob, JobStatus, MARKET_IDS, MarketId } from './research-contracts';
 
 export const researchJobsRouter = express.Router();
 
@@ -10,6 +10,10 @@ import { unifiedInstrumentService } from './unified-instruments';
 researchJobsRouter.post('/jobs', express.json(), (req, res) => {
   try {
     const job = createResearchJob(req.body);
+    const requestedInstrument = String(req.body?.instrument || '').trim();
+    if (requestedInstrument) {
+      assertMarketContext({ market: job.market, workspace: job.workspace, instrument: requestedInstrument });
+    }
     researchRepository.saveJob(job);
     res.status(201).json({ success: true, data: job, id: job.id });
     // Simulate background execution
@@ -83,8 +87,9 @@ researchJobsRouter.post('/jobs', express.json(), (req, res) => {
 
            const artifacts = generateExperimentArtifacts(job.id, result);
            artifacts.manifests.forEach(m => {
+              researchRepository.saveArtifact(m);
               researchRepository.saveEvidenceBundle({
-                 id: m.id, context: { market: job.market, workspace: job.workspace }, artifacts: [m.uri], createdAt: m.createdAt
+                 id: m.id, context: { market: job.market, workspace: job.workspace, instrument: reqInstrument, timeframe: reqTimeframe }, artifacts: [m.uri], createdAt: m.createdAt
               });
            });
            try { researchRepository.updateJobStatus(job.id, 'succeeded', 100); } catch(e) {}

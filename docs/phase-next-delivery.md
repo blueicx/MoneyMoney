@@ -9,9 +9,9 @@
 ## 命令运行结果
 ### npm test
 ```
-ℹ tests 339
+ℹ tests 340
 ℹ suites 2
-ℹ pass 339
+ℹ pass 340
 ℹ fail 0
 ℹ cancelled 0
 ℹ skipped 0
@@ -31,7 +31,7 @@ Web smoke passed: health, AI settings redaction, AI test validation, and real-tr
 
 > moneymoney@1.0.0 security:scan
 > node scripts/secret-scan.cjs
-Secret scan passed: 357 tracked files checked.
+Secret scan passed: 359 tracked files checked.
 ```
 
 ### git diff --check
@@ -40,3 +40,10 @@ Secret scan passed: 357 tracked files checked.
 ## 已知限制
 - TradingView/期权实时数据的自动接入未在本次实现范围内（保持其现状并遵守禁令）。
 - 因为未实际连接实时数据库和远端环境进行真实行情获取，部分单元测试使用了本地静态或模拟文件；对于数据接口，如果 K 线过少仍会返回 `Unavailable data` (此行为在预期内)。
+
+## Codex 接管复核
+- 研究任务新增严格的市场标的校验：缺少标的会以明确失败原因结束，跨市场标的直接拒绝；真实标的任务使用对应概览 K 线并保存 3 个产物清单。
+- 新增 `/api/data/snapshots/:id`，并对 `/api/data/capabilities?market=` 做市场参数校验和源 ID 隔离；无可用源时返回明确的不可用占位。
+- 增加裸 `BTC/ETH/BNB/SOL/XRP/DOGE` 不得作为股票标的的回归测试。
+- 独立实测：缺标的任务 `failed / Missing or invalid instrument`；AAPL 任务 `succeeded` 且产物数为 3；股票提交 BTCUSDT 返回 400；右侧库收缩、恢复和滚轮跟随通过。
+- 当前全套测试为 340/340，通过构建、冒烟、安全扫描和 `git diff --check`；真实部署仍需远端推送与生产验收后才能宣称完成。

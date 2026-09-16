@@ -105,7 +105,7 @@ import { generateAssistantReport } from '../features/trade-assistant';
 import { getSourceHealth } from '../features/source-health';
 import { testNotificationChannels } from '../features/notification-channels';
 import { runResearchExperiment } from '../features/experiment-runner';
-import type { MarketId } from '../features/research-contracts';
+import { MARKET_IDS, type MarketId } from '../features/research-contracts';
 import { riskPatrol } from '../features/risk-patrol';
 import { createAccessMiddleware, validateAccessConfiguration } from './access-control';
 import { createLoginToken, verifyLoginToken, createLoginRateLimiter, extractAuthToken, requireAuth, safeEqual, blacklistToken, buildAuthCookie, buildClearCookie, GUEST_TOKEN_EXPIRY_MS, isGuestRequestAllowed } from './auth';
@@ -362,9 +362,35 @@ app.get('/api/workspace/context', (req, res) => {
 app.get('/api/data/capabilities', async (req, res) => {
   try {
     const marketId = typeof req.query.market === 'string' ? req.query.market : undefined;
-    const sources = await getSourceHealth();
-    // Return relevant sources for the requested market
-    res.json({ success: true, data: sources.items.filter(s => !marketId || s.group === marketId || s.id.includes(marketId)) });
+    if (marketId && !MARKET_IDS.includes(marketId as MarketId)) {
+      return res.status(400).json({ success: false, error: 'Invalid market context' });
+    }
+    const sources = await getSourceHealth(marketId || 'all');
+    const sourceIdsByMarket: Record<MarketId, string[]> = {
+      stocks: ['nasdaq-', 'sec-edgar-', 'stock-'],
+      options: ['option-', 'cboe-', 'deribit-'],
+      crypto: ['binance-', 'crypto-'],
+      prediction: ['predict-', 'polymarket', 'kalshi', 'manifold', 'good-judgment', 'metaculus', 'open-meteo'],
+    };
+    const items = marketId
+      ? sources.items.filter(item => sourceIdsByMarket[marketId as MarketId].some(prefix => item.id === prefix || item.id.startsWith(prefix)))
+      : sources.items;
+    const scopedItems = items.length || !marketId ? items : [{
+      id: `${marketId}-capabilities`, name: `${marketId} 数据能力`, group: marketId,
+      ok: false, configured: false, latencyMs: null, detail: '当前市场暂无已启用的数据源',
+      checkedAt: sources.updatedAt, status: 'unavailable' as const, capabilities: [],
+    }];
+    res.json({ success: true, market: marketId || 'all', data: scopedItems, updatedAt: sources.updatedAt });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.get('/api/data/snapshots/:id', (req, res) => {
+  try {
+    const snapshot = require('../features/research-repository').researchRepository.getDataSnapshot(String(req.params.id));
+    if (!snapshot) return res.status(404).json({ success: false, error: 'Data snapshot not found' });
+    res.json({ success: true, data: snapshot, market: snapshot.context.market, instrument: snapshot.context.instrument || null, dataStatus: snapshot.context.dataStatus || 'cached', updatedAt: snapshot.context.updatedAt || null });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });
   }

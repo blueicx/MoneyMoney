@@ -22,7 +22,10 @@ function matchesMarketInstrument(market: MarketId, instrument: string): boolean 
   const value = instrument.trim();
   if (!value) return true;
   const lower = value.toLowerCase();
-  if (market === 'stocks') return !/^(crypto:|binance:|prediction:|predict:|option:|usoption:)/i.test(value);
+  if (market === 'stocks') {
+    if (/^(crypto:|binance:|prediction:|predict:|option:|usoption:)/i.test(value)) return false;
+    return !/^(BTC|ETH|BNB|SOL|XRP|DOGE)(USDT|USDC)?$/i.test(value);
+  }
   if (market === 'options') return /^(option:|usoption:)/i.test(value);
   if (market === 'crypto') return /^(crypto:|binance:)/i.test(value) || MARKET_PREFIXES.crypto.some(prefix => value.toUpperCase().startsWith(prefix));
   return /^(prediction:|predict:|market:)/i.test(value);
@@ -284,4 +287,4 @@ export interface AlertDelivery { id: string; context: MarketContext; alertId: st
 export function createAlertDelivery(input: Partial<AlertDelivery>): AlertDelivery {
   if (!input.id || !input.context || !input.alertId || !input.status) throw new Error('AlertDelivery requires id, context, alertId, status');
   return { id: input.id, context: assertMarketContext(input.context), alertId: input.alertId, status: input.status, deliveredAt: input.deliveredAt };
-}
+}

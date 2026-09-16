@@ -16,6 +16,7 @@ test('research contracts validate market context and preserve scoped identity', 
   });
   assert.equal(context.market, 'stocks');
   assert.throws(() => assertMarketContext({ market: 'stocks', workspace: 'chart', instrument: 'crypto:BTCUSDT' }), /scope|market|标的/i);
+  assert.throws(() => assertMarketContext({ market: 'stocks', workspace: 'chart', instrument: 'BTCUSDT' }), /scope|market|标的/i);
   assert.throws(() => assertMarketContext({ market: 'crypto', workspace: 'chart', instrument: 'usMSFT' }), /scope|market|标的/i);
 });
 

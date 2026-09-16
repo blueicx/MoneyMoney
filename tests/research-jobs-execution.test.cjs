@@ -15,12 +15,20 @@ test('research jobs return clear reason for missing instrument or data', () => {
   assert.match(routerSource, /updateJobStatus.*'failed'/i);
 });
 
+test('research jobs validate the requested instrument against its market context', () => {
+  assert.match(routerSource, /assertMarketContext\(\{[\s\S]*instrument:\s*reqInstrument/);
+  assert.match(routerSource, /Instrument does not belong to the requested market|Market mismatch/);
+});
+
 test('server exposes capabilities endpoint', () => {
   const serverSource = fs.readFileSync(path.join(__dirname, '../src/web/server.ts'), 'utf8');
   // OR the router might contain it
   const combined = serverSource + routerSource;
   assert.match(combined, /\/capabilities/);
   assert.match(combined, /req\.query\.market/);
+  assert.match(serverSource, /MARKET_IDS|Invalid market context/);
+  assert.match(serverSource, /status\(400\).*market/i);
+  assert.match(serverSource, /scopedSourceIds|marketSourceIds|sourceIdsByMarket/);
 });
 
 test('research jobs router has stable APIs', () => {
@@ -29,4 +37,5 @@ test('research jobs router has stable APIs', () => {
   assert.match(routerSource, /\/:id\/cancel/);
   assert.match(routerSource, /\/:id\/resume/);
   assert.match(routerSource, /\/artifacts\/:id/);
+  assert.match(routerSource, /researchRepository\.saveArtifact\(/);
 });
