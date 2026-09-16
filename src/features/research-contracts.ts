@@ -236,3 +236,52 @@ export function createSignalLifecycle(input: Partial<SignalLifecycle>): SignalLi
   if (!input.signalId) throw new Error('SignalLifecycle signalId is required');
   return { signalId: input.signalId, state: input.state || 'generated', history: Array.isArray(input.history) ? input.history : [] };
 }
+
+// newly added domain contracts
+export interface InstrumentRef { id: string; symbol: string; exchange?: string; context: MarketContext; }
+export function createInstrumentRef(input: Partial<InstrumentRef>): InstrumentRef {
+  if (!input.id || !input.symbol || !input.context) throw new Error('InstrumentRef requires id, symbol, and context');
+  return { id: input.id, symbol: input.symbol, exchange: input.exchange, context: assertMarketContext(input.context) };
+}
+
+export interface DataSnapshot { id: string; context: MarketContext; fromTime: string; toTime: string; hash: string; }
+export function createDataSnapshot(input: Partial<DataSnapshot>): DataSnapshot {
+  if (!input.id || !input.context || !input.fromTime || !input.toTime || !input.hash) throw new Error('DataSnapshot requires id, context, fromTime, toTime, hash');
+  return { id: input.id, context: assertMarketContext(input.context), fromTime: input.fromTime, toTime: input.toTime, hash: input.hash };
+}
+
+export interface FeatureSpec { id: string; context: MarketContext; parameters: Record<string, unknown>; version: string; }
+export function createFeatureSpec(input: Partial<FeatureSpec>): FeatureSpec {
+  if (!input.id || !input.context || !input.version) throw new Error('FeatureSpec requires id, context, version');
+  return { id: input.id, context: assertMarketContext(input.context), parameters: input.parameters || {}, version: input.version };
+}
+
+export interface OrderEvent { id: string; context: MarketContext; orderType: string; status: string; price: number; amount: number; timestamp: string; }
+export function createOrderEvent(input: Partial<OrderEvent>): OrderEvent {
+  if (!input.id || !input.context || !input.orderType || !input.status || input.price === undefined || input.amount === undefined) throw new Error('OrderEvent missing required fields');
+  return { id: input.id, context: assertMarketContext(input.context), orderType: input.orderType, status: input.status, price: input.price, amount: input.amount, timestamp: input.timestamp || new Date().toISOString() };
+}
+
+export interface PaperPosition { id: string; context: MarketContext; instrument: string; averagePrice: number; amount: number; unrealizedPnl: number; }
+export function createPaperPosition(input: Partial<PaperPosition>): PaperPosition {
+  if (!input.id || !input.context || !input.instrument || input.averagePrice === undefined || input.amount === undefined) throw new Error('PaperPosition missing required fields');
+  return { id: input.id, context: assertMarketContext(input.context), instrument: input.instrument, averagePrice: input.averagePrice, amount: input.amount, unrealizedPnl: input.unrealizedPnl || 0 };
+}
+
+export interface EvidenceBundle { id: string; context: MarketContext; artifacts: string[]; createdAt: string; }
+export function createEvidenceBundle(input: Partial<EvidenceBundle>): EvidenceBundle {
+  if (!input.id || !input.context) throw new Error('EvidenceBundle requires id and context');
+  return { id: input.id, context: assertMarketContext(input.context), artifacts: input.artifacts || [], createdAt: input.createdAt || new Date().toISOString() };
+}
+
+export interface LineageRef { id: string; context: MarketContext; sourceId: string; derivedId: string; operation: string; }
+export function createLineageRef(input: Partial<LineageRef>): LineageRef {
+  if (!input.id || !input.context || !input.sourceId || !input.derivedId || !input.operation) throw new Error('LineageRef requires id, context, sourceId, derivedId, operation');
+  return { id: input.id, context: assertMarketContext(input.context), sourceId: input.sourceId, derivedId: input.derivedId, operation: input.operation };
+}
+
+export interface AlertDelivery { id: string; context: MarketContext; alertId: string; status: string; deliveredAt?: string; }
+export function createAlertDelivery(input: Partial<AlertDelivery>): AlertDelivery {
+  if (!input.id || !input.context || !input.alertId || !input.status) throw new Error('AlertDelivery requires id, context, alertId, status');
+  return { id: input.id, context: assertMarketContext(input.context), alertId: input.alertId, status: input.status, deliveredAt: input.deliveredAt };
+}

@@ -1,4 +1,4 @@
-﻿export type SourceStatus = 'live' | 'stale' | 'unavailable' | 'fallback' | 'unconfigured' | 'cached' | 'degraded';
+export type SourceStatus = 'live' | 'stale' | 'unavailable' | 'fallback' | 'unconfigured' | 'cached' | 'degraded';
 
 export interface SourceSnapshot<T> {
   data: T | null;
@@ -85,3 +85,25 @@ export class ResilientDataSourceAdapter<T> implements DataSourceAdapter<T> {
     return { data: null, source: this.id, fetchedAt: nowIso, expiresAt: nowIso, latencyMs: Date.now() - started, status: 'unavailable', error: String(lastError), consecutiveFailures: this.failures };
   }
 }
+
+export class TradingViewAdapter<T> implements DataSourceAdapter<T> {
+  readonly id = 'tradingview';
+  readonly group = 'vendor';
+  private enabled = false;
+
+  constructor(enabled: boolean = false) {
+    this.enabled = enabled;
+  }
+
+  enable() { this.enabled = true; }
+  disable() { this.enabled = false; }
+
+  async fetch(input?: unknown): Promise<SourceSnapshot<T>> {
+    const nowIso = new Date().toISOString();
+    if (!this.enabled) {
+      return { data: null, source: this.id, fetchedAt: nowIso, expiresAt: nowIso, latencyMs: 0, status: 'unconfigured', error: 'TradingView adapter is disabled by default' };
+    }
+    return { data: null, source: this.id, fetchedAt: nowIso, expiresAt: nowIso, latencyMs: 0, status: 'unavailable', error: 'Not implemented' };
+  }
+}
+
