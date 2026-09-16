@@ -1941,22 +1941,24 @@
       .chart-card-fullscreen { padding: 12px !important; }
     }
     </style>
-<script src="/chart-analysis.js">
-  function selectInstrument(market, symbol) {
+<script src="/chart-analysis.js"></script>
+<script>
+  window.selectInstrument = function selectInstrument(market, symbol) {
     const centerTitle = document.getElementById('center-title');
     if (centerTitle) centerTitle.textContent = `${market} - ${symbol}`;
     const emptyState = document.getElementById('chart-empty-state');
     if (emptyState) emptyState.style.display = 'none';
-  }
-  function toggleFullScreen() {
+    document.dispatchEvent(new CustomEvent('moneymoney:instrument-selected', { detail: { market, instrument: symbol } }));
+  };
+  window.toggleFullScreen = function toggleFullScreen() {
     const chart = document.getElementById('main-chart-area');
-    if (chart && !document.fullscreenElement) {
-      chart.requestFullscreen().catch(err => console.log(err));
+    if (chart && !document.fullscreenElement && chart.requestFullscreen) {
+      chart.requestFullscreen().catch(() => {});
     } else if (document.exitFullscreen) {
       document.exitFullscreen();
     }
-  }
-  </script>
+  };
+</script>
 <script>
 // MoneyMoney 登录守卫：以 Cookie(HttpOnly) 为主，localStorage 兼容；统一 credentials:include
 (function(){

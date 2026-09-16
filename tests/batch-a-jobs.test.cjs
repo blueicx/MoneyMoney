@@ -53,6 +53,17 @@ test('Batch A: API Integration and SQLite persistence', async () => {
     const jobId = body1.id;
     assert.equal(body1.data.market, 'stocks');
 
+    const listedStocks = await fetch(`${baseUrl}/jobs?market=stocks`);
+    const listedBody = await listedStocks.json();
+    assert.equal(listedStocks.status, 200);
+    assert.ok(listedBody.data.some((job) => job.id === jobId));
+    assert.ok(listedBody.data.every((job) => job.market === 'stocks'));
+
+    const listedOptions = await fetch(`${baseUrl}/jobs?market=options`);
+    const listedOptionsBody = await listedOptions.json();
+    assert.equal(listedOptions.status, 200);
+    assert.ok(listedOptionsBody.data.every((job) => job.market === 'options'));
+
     // Cross market rejection check
     const resCross = await fetch(`${baseUrl}/jobs`, {
       method: 'POST',

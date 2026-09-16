@@ -97,6 +97,13 @@ export const researchRepository = {
     return row as ResearchJob;
   },
 
+  listJobs(market?: MarketId): ResearchJob[] {
+    const rows = market
+      ? db.prepare('SELECT * FROM research_jobs WHERE market = ? ORDER BY updatedAt DESC').all(market)
+      : db.prepare('SELECT * FROM research_jobs ORDER BY updatedAt DESC').all();
+    return rows as ResearchJob[];
+  },
+
   updateJobStatus(id: string, status: JobStatus, progress?: number, errorReason?: string) {
     const job = this.getJob(id);
     if (!job) throw new Error('Job not found');

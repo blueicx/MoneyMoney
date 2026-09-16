@@ -1,6 +1,6 @@
 import express from 'express';
 import { researchRepository } from './research-repository';
-import { createResearchJob, JobStatus } from './research-contracts';
+import { createResearchJob, JobStatus, MARKET_IDS, MarketId } from './research-contracts';
 
 export const researchJobsRouter = express.Router();
 
@@ -15,7 +15,11 @@ researchJobsRouter.post('/jobs', express.json(), (req, res) => {
 });
 
 researchJobsRouter.get('/jobs', (req, res) => {
-  res.status(200).json({ success: true, data: [] });
+  const requestedMarket = typeof req.query.market === 'string' ? req.query.market : undefined;
+  if (requestedMarket && !MARKET_IDS.includes(requestedMarket as MarketId)) {
+    return res.status(400).json({ success: false, error: 'Invalid market context' });
+  }
+  res.status(200).json({ success: true, data: researchRepository.listJobs(requestedMarket as MarketId | undefined) });
 });
 
 researchJobsRouter.get('/jobs/:id', (req, res) => {

@@ -177,6 +177,43 @@
     });
   }
 
+  function calculateMACD(inputBars = [], fastPeriod = 12, slowPeriod = 26, signalPeriod = 9) {
+    const bars = inputBars.map(normalizeBar);
+    const fast = Math.max(1, Math.floor(fastPeriod));
+    const slow = Math.max(fast + 1, Math.floor(slowPeriod));
+    const signalSize = Math.max(1, Math.floor(signalPeriod));
+    if (bars.length < slow + signalSize - 1) {
+      return { available: false, reason: 'Insufficient historical data for MACD', macdLine: [], signalLine: [], histogram: [] };
+    }
+    const ema = (values, period) => {
+      const output = Array(values.length).fill(null);
+      const multiplier = 2 / (period + 1);
+      let previous = null;
+      values.forEach((value, index) => {
+        if (index + 1 < period) return;
+        if (previous === null) {
+          previous = values.slice(index - period + 1, index + 1).reduce((sum, item) => sum + item, 0) / period;
+        } else {
+          previous = (value - previous) * multiplier + previous;
+        }
+        output[index] = previous;
+      });
+      return output;
+    };
+    const closes = bars.map(item => item.close);
+    const fastLine = ema(closes, fast);
+    const slowLine = ema(closes, slow);
+    const macdLine = slowLine.map((value, index) => value === null ? null : fastLine[index] - value);
+    const signalLine = ema(macdLine.filter(value => value !== null), signalSize);
+    const alignedSignal = Array(macdLine.length).fill(null);
+    let signalIndex = 0;
+    macdLine.forEach((value, index) => {
+      if (value !== null) alignedSignal[index] = signalLine[signalIndex++];
+    });
+    const histogram = macdLine.map((value, index) => value === null || alignedSignal[index] === null ? null : value - alignedSignal[index]);
+    return { available: true, fastPeriod: fast, slowPeriod: slow, signalPeriod: signalSize, macdLine, signalLine: alignedSignal, histogram };
+  }
+
   function detectStructures(inputBars = []) {
     const bars = inputBars.map(normalizeBar);
     const structures = [];
@@ -227,7 +264,17 @@
     segments.forEach((segment, index) => {
       const next = segments[index + 1];
       if (!next || next.direction === segment.direction) return;
-      tradePoints.push({ index: next.startIndex, type: segment.direction === 'down' ? 1 : 1, side: segment.direction === 'down' ? 'buy' : 'sell', status: next.confirmed ? 'confirmed' : 'preparing', confidence: next.confirmed ? 'medium' : 'low', time: bars[next.startIndex]?.time });
+      const side = segment.direction === 'down' ? 'buy' : 'sell';
+      tradePoints.push({
+        index: next.startIndex,
+        type: side === 'buy' ? 1 : -1,
+        side,
+        status: next.confirmed ? 'confirmed' : 'preparing',
+        confidence: next.confirmed ? 'medium' : 'low',
+        time: bars[next.startIndex]?.time,
+        meaning: side === 'buy' ? '下行结构结束后出现潜在买点，等待后续确认' : '上行结构结束后出现潜在卖点，等待后续确认',
+        disclaimer: '缠论结构仅供研究参考，不构成交易指令。'
+      });
     });
     
     const trends = [];
@@ -237,7 +284,7 @@
         trends.push({ startIndex: hubs[i].startIndex, endIndex: hubs[i+1].endIndex, direction });
       }
     }
-    const macd = []; // mocked MACD
+    const macd = calculateMACD(bars);
     const divergence = [];
     const smallToLarge = [];
     return { fractals, strokes, segments, hubs, tradePoints, trends, macd, divergence, smallToLarge };
@@ -342,12 +389,25 @@
       for (const period of [5, 10, 20]) lines.push({ type: 'ma', period, values: movingAverage(normalized, period) });
     }
     if (options.indicators.boll) lines.push({ type: 'boll', period: 20, values: bollingerBands(normalized) });
+    if (options.indicators.macd) lines.push({ type: 'macd', period: { fast: 12, slow: 26, signal: 9 }, values: calculateMACD(normalized) });
+    const signalsOutput = options.signals ? signals.filter(item => Number.isInteger(item.index) && item.index >= 0 && item.index < normalized.length).slice(-options.maxLabels) : [];
+    const patternsOutput = options.patterns ? detectCandlestickPatterns(normalized).slice(-options.maxLabels) : [];
+    const structuresOutput = options.structures ? detectStructures(normalized).slice(-options.maxLabels) : [];
+    const chanOutput = options.structures ? detectChanStructures(normalized) : { fractals: [], strokes: [], segments: [], hubs: [], tradePoints: [], trends: [], macd: { available: false, reason: 'Layer disabled', macdLine: [], signalLine: [], histogram: [] }, divergence: [], smallToLarge: [] };
+    const annotations = [
+      ...signalsOutput.map(item => ({ ...item, kind: 'strategy', meaning: item.reason || '策略条件已触发', disclaimer: '策略信号仅供研究参考，不构成交易指令。' })),
+      ...patternsOutput.map(item => ({ ...item, kind: 'pattern' })),
+      ...structuresOutput.map(item => ({ ...item, kind: 'structure' })),
+      ...chanOutput.tradePoints.map(item => ({ ...item, kind: 'chan' })),
+    ].sort((left, right) => (left.index ?? 0) - (right.index ?? 0)).slice(-options.maxLabels);
     return {
       config: options,
-      signals: options.signals ? signals.filter(item => Number.isInteger(item.index) && item.index >= 0 && item.index < normalized.length).slice(-options.maxLabels) : [],
-      patterns: options.patterns ? detectCandlestickPatterns(normalized).slice(-options.maxLabels) : [],
-      structures: options.structures ? detectStructures(normalized).slice(-options.maxLabels) : [],
-      chan: options.structures ? detectChanStructures(normalized) : { fractals: [], strokes: [], segments: [], hubs: [], tradePoints: [], trends: [], macd: [], divergence: [], smallToLarge: [] },
+      signals: signalsOutput,
+      patterns: patternsOutput,
+      structures: structuresOutput,
+      chan: chanOutput,
+      annotations,
+      explanations: annotations,
       volume: options.volume ? normalized.map(item => item.volume) : [],
       lines,
     };
@@ -365,18 +425,65 @@
 
   
   function protectReplayContext(context) {
-    if (!context || !context.data || context.length < 1) {
-      return { safe: false, reason: 'Insufficient data' };
-    }
-    return { safe: true };
+    const data = Array.isArray(context?.data) ? context.data : [];
+    if (!data.length) return { safe: false, reason: 'Insufficient data' };
+    if (!context.market || !context.instrument) return { safe: false, reason: 'Missing market context' };
+    return { safe: true, market: context.market, instrument: context.instrument, timeframe: context.timeframe, length: data.length };
+  }
+
+  const SUPPORTED_DRAWINGS = new Set(['horizontal', 'trendline', 'rectangle', 'text']);
+
+  function createDrawingManager(type) {
+    let sequence = 0;
+    let items = [];
+    const clone = value => JSON.parse(JSON.stringify(value));
+    return {
+      create(properties = {}) {
+        if (!SUPPORTED_DRAWINGS.has(type)) throw new Error(`Unsupported drawing type: ${type}`);
+        const item = { id: `${type}_${++sequence}`, type, ...clone(properties) };
+        items = [...items, item];
+        return clone(item);
+      },
+      update(id, patch = {}) {
+        const index = items.findIndex(item => item.id === id);
+        if (index < 0) return null;
+        const next = { ...items[index], ...clone(patch), id, type };
+        items = items.map((item, itemIndex) => itemIndex === index ? next : item);
+        return clone(next);
+      },
+      remove(id) {
+        const exists = items.some(item => item.id === id);
+        items = items.filter(item => item.id !== id);
+        return exists;
+      },
+      delete(id) { return this.remove(id); },
+      list() { return clone(items); },
+      serialize() { return JSON.stringify({ version: 1, type, items }); },
+      restore(serialized) {
+        const payload = typeof serialized === 'string' ? JSON.parse(serialized) : serialized;
+        if (!payload || payload.type !== type || !Array.isArray(payload.items)) throw new Error('Invalid drawing payload');
+        items = payload.items.filter(item => item && item.type === type && typeof item.id === 'string').map(clone);
+        sequence = items.reduce((max, item) => Math.max(max, Number(item.id.split('_').pop()) || 0), 0);
+        return this.list();
+      },
+    };
   }
 
   function createDrawingTool(type) {
-    if (typeof window !== 'undefined' && !window.HTMLCanvasElement) {
-      return { type, supported: false, reason: 'Canvas not fully supported' };
-    }
-    return { type, supported: true, action: 'draw' };
+    const manager = createDrawingManager(type);
+    return {
+      type,
+      supported: SUPPORTED_DRAWINGS.has(type),
+      action: 'draw',
+      create: manager.create.bind(manager),
+      update: manager.update.bind(manager),
+      remove: manager.remove.bind(manager),
+      delete: manager.delete.bind(manager),
+      list: manager.list.bind(manager),
+      serialize: manager.serialize.bind(manager),
+      restore: manager.restore.bind(manager),
+    };
   }
 
-  return { DEFAULT_CONFIG, normalizeOverlayConfig, detectCandlestickPatterns, detectStructures, detectChanStructures, detectStrategySignals, movingAverage, bollingerBands, buildChartOverlays, stepReplay, protectReplayContext, createDrawingTool };
+  return { DEFAULT_CONFIG, normalizeOverlayConfig, detectCandlestickPatterns, detectStructures, detectChanStructures, detectStrategySignals, movingAverage, bollingerBands, calculateMACD, buildChartOverlays, stepReplay, protectReplayContext, createDrawingTool };
 });

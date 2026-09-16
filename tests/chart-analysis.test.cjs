@@ -101,11 +101,41 @@ test('Replay bounds and context protection', () => {
   assert.equal(analysis.stepReplay(4, 5, 'next'), 4);
   const state = analysis.protectReplayContext({ data: [], length: 0 });
   assert.equal(state.reason, 'Insufficient data');
+  const safe = analysis.protectReplayContext({ market: 'stocks', instrument: 'AAPL', timeframe: '1d', data: [{ close: 1 }] });
+  assert.equal(safe.safe, true);
 });
 
 test('Custom drawing tools interface', () => {
   const drawing = analysis.createDrawingTool('trendline');
   assert.equal(drawing.type, 'trendline');
+  const item = drawing.create({ points: [{ time: 1, price: 10 }, { time: 2, price: 11 }] });
+  assert.equal(item.type, 'trendline');
+  assert.equal(drawing.update(item.id, { label: '阻力线' }).label, '阻力线');
+  assert.equal(drawing.list().length, 1);
+  const restored = analysis.createDrawingTool('trendline');
+  restored.restore(drawing.serialize());
+  assert.equal(restored.list()[0].label, '阻力线');
+  assert.equal(restored.remove(item.id), true);
+  assert.equal(restored.list().length, 0);
+});
+
+test('MACD overlay is calculated from bars and exposes an explicit empty reason', () => {
+  const series = Array.from({ length: 50 }, (_, index) => ({ time: index + 1, open: 100 + index, high: 101 + index, low: 99 + index, close: 100 + index, volume: 100 }));
+  const macd = analysis.calculateMACD(series);
+  assert.equal(macd.available, true);
+  assert.equal(macd.macdLine.length, series.length);
+  assert.ok(macd.histogram.some(value => Number.isFinite(value)));
+  const empty = analysis.calculateMACD(series.slice(0, 5));
+  assert.equal(empty.available, false);
+  assert.match(empty.reason, /historical data/i);
+});
+
+test('chart page loads runtime handlers outside the external script tag', () => {
+  const html = require('fs').readFileSync(require('path').join(__dirname, '../src/web/public/index.html'), 'utf8');
+  const script = html.match(/<script\s+src="\/chart-analysis\.js">([\s\S]*?)<\/script>/i);
+  assert.ok(script);
+  assert.equal(script[1].trim(), '');
+  assert.match(html, /window\.selectInstrument\s*=|function\s+selectInstrument\s*\(/i);
 });
 
 test('Data shortage yields explanation', () => {
