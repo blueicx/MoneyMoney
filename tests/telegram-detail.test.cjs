@@ -11,5 +11,8 @@ test('Telegram detail command exists and calls unifiedInstrumentService.overview
   assert.match(server, /unifiedInstrumentService\.overview/);
   assert.match(server, /'用法：\/detail <InstrumentRef>\\n支持 stock:us:AAPL、option:cboe:SPY、crypto:binance:BTCUSDT、prediction:predictfun:<marketId>'/);
   assert.match(server, /标的详情暂不可用/);
-  assert.match(server, /<b>标的详情<\/b>\\n\$\{escapeTelegramHtml\(detailInfo\.instrument\.title\)\}\\n\$\{escapeTelegramHtml\(detailInfo\.instrument\.id\)\}\\n价格\/概率：\$\{escapeTelegramHtml\(String\(\(q as any\)\.price \?\? \(q as any\)\.yesPrice \?\? '暂无'\)\)\}\\nAI：\$\{escapeTelegramHtml\(detailInfo\.analysis\.text\.slice\(0, 500\)\)\}/);
+  assert.match(server, /const text = `<b>标的详情<\/b>/);
+  assert.match(server, /价格\/概率：\$\{escapeTelegramHtml\(String\(\(q as any\)\.price \?\? \(q as any\)\.yesPrice \?\? '暂无'\)\)\}/);
+  assert.match(server, /telegramQuickDeepLink\(detailInfo\.instrument/);
+  assert.match(server, /打开网页详情\/K线/);
 });

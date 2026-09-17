@@ -189,6 +189,29 @@ export function routeNaturalLanguage(input: string): string | null {
   return null;
 }
 
+const TELEGRAM_NON_SYMBOL_WORDS = new Set([
+  'HELP', 'START', 'STATUS', 'RISK', 'SIGNAL', 'SIGNALS', 'SEARCH', 'DETAIL', 'TIMELINE', 'EVENTS', 'SOURCES',
+  'HISTORY', 'WATCHLIST', 'PORTFOLIO', 'POSITIONS', 'CLOSE', 'RESET', 'REVIEW', 'RESEARCH', 'NOTE', 'JOURNAL',
+  'ALERTS', 'ALERT', 'DIGEST', 'OPS', 'STRATEGIES', 'BACKTEST', 'EXPORT', 'HEALTH', 'ASK', 'CHART', 'AUDIT',
+  'WHOAMI', 'WEB', 'TEST', 'TODAY', 'PAPER', 'BINANCE', 'RADAR', 'MACRO', 'HELLO', 'HI', 'OK',
+]);
+
+/**
+ * Conservative classifier for the mobile quick-lookup path. Slash commands,
+ * canonical InstrumentRefs, prose and menu labels must remain on their own
+ * handlers instead of being sent to the market searcher.
+ */
+export function isTelegramBareSymbol(value: string): boolean {
+  const raw = String(value || '').trim();
+  if (!raw || raw.length > 20 || /\s|[\u4e00-\u9fff]/.test(raw)) return false;
+  if (/^(stock|option|crypto|prediction):/i.test(raw)) return false;
+  if (!/^[a-z0-9]+(?:[._/-]?[a-z0-9]+)?$/i.test(raw)) return false;
+  const compact = raw.replace(/[._/-]/g, '').toUpperCase();
+  if (TELEGRAM_NON_SYMBOL_WORDS.has(compact)) return false;
+  return /^[A-Z]{1,6}$/.test(compact)
+    || /^[A-Z0-9]{2,12}(?:USDT|USDC)$/.test(compact);
+}
+
 export function sparkline(values: number[]): string {
   if (!values.length) return '暂无';
   const glyphs = '▁▂▃▄▅▆▇█';

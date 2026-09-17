@@ -8004,7 +8004,12 @@ function setStockKlineRange(days) {
 async function loadStockKline(symbol, name, apiSymbol) {
   if (!window.stockMoneyKLine) {
       const canvas = document.getElementById('stock-kline');
-      if (canvas) window.stockMoneyKLine = new MoneyKLine(canvas);
+      // The initial dashboard bootstrap runs before the late chart runtime
+      // script is evaluated. Read the constructor from window so that the
+      // first async load can safely use the canvas fallback instead of
+      // throwing a temporal-dead-zone ReferenceError.
+      const KlineRuntime = window.MoneyKLine;
+      if (canvas && typeof KlineRuntime === 'function') window.stockMoneyKLine = new KlineRuntime(canvas);
   }
 
   if (symbol) currentStockSymbol = symbol;

@@ -49,6 +49,7 @@ export interface TelegramCommandContext {
 export interface TelegramInlineKeyboardButton {
   text: string;
   callback_data?: string;
+  url?: string;
 }
 
 export interface TelegramInlineKeyboardMarkup {
@@ -100,6 +101,7 @@ export interface TelegramInteractionBotOptions {
   allowedChatIds: Iterable<string> | string;
   handlers: Record<string, TelegramCommandHandler>;
   textHandlers?: Record<string, TelegramCommandHandler>;
+  textFallback?: TelegramCommandHandler;
   callbackHandlers?: Record<string, TelegramCallbackHandler>;
   unknownCallbackHandler?: TelegramCallbackHandler;
   transport?: TelegramTransport;
@@ -231,6 +233,7 @@ export class TelegramInteractionBot {
   private readonly allowedChatIds: Set<string>;
   private readonly handlers: Record<string, TelegramCommandHandler>;
   private readonly textHandlers: Record<string, TelegramCommandHandler>;
+  private readonly textFallback?: TelegramCommandHandler;
   private readonly callbackHandlers: Record<string, TelegramCallbackHandler>;
   private readonly unknownCallbackHandler?: TelegramCallbackHandler;
   private readonly transport: TelegramTransport;
@@ -250,6 +253,7 @@ export class TelegramInteractionBot {
       : new Set([...options.allowedChatIds].map(String));
     this.handlers = options.handlers;
     this.textHandlers = options.textHandlers || {};
+    this.textFallback = options.textFallback;
     this.callbackHandlers = options.callbackHandlers || {};
     this.unknownCallbackHandler = options.unknownCallbackHandler;
     this.transport = options.transport || new TelegramApiTransport(options.token || '', options.proxyUrl || '');
@@ -337,7 +341,7 @@ export class TelegramInteractionBot {
     const textHandler = this.textHandlers[message.text.trim()];
     const command = parsed?.command || '';
     const args = parsed?.args || [];
-    const handler = parsed ? (this.handlers[command] || this.handlers.help) : textHandler;
+    const handler = parsed ? (this.handlers[command] || this.handlers.help) : (textHandler || this.textFallback);
     if (!handler) return { handled: false, reason: parsed ? 'unknown_command' : 'not_a_command' };
 
     const reply = await handler({
