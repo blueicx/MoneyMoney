@@ -2466,6 +2466,7 @@ const TELEGRAM_HELP = [
   '/watchlist 查看自选市场和股票；/watch add|remove &lt;ID&gt;',
   '/explain 解释当前信号，例如 /explain 1',
   '/portfolio 查看模拟盘账户总览',
+  '/paper    预测市场开仓，或 /paper buy|sell <InstrumentRef> <价格> <数量> 提交股票/虚拟币纸面订单',
   '/positions 查看或关闭当前持仓',
   '/close    请求模拟平仓，例如 /close &lt;持仓ID&gt; &lt;价格&gt;',
   '/reset    请求重置模拟账户（需二次确认）',
@@ -3483,7 +3484,40 @@ export function getTelegramCommandHandlers(): Record<string, TelegramCommandHand
       const kb = actionable.map((_, idx) => [{ text: `解释 #${idx+1}`, callback_data: `explain:${idx+1}` }]);
       return telegramInlineReply(sigLines, kb);
     },
-    paper: ({ chatId, args }) => {
+    paper: async ({ chatId, args }) => {
+      const paperVerb = String(args[0] || '').toLowerCase();
+      if (['buy', 'sell', 'order'].includes(paperVerb)) {
+        const isExplicitOrder = paperVerb === 'order';
+        const refText = String(args[1] || '').trim();
+        const side = (isExplicitOrder ? String(args[2] || '') : paperVerb).toUpperCase();
+        const priceIndex = isExplicitOrder ? 3 : 2;
+        const quantityIndex = isExplicitOrder ? 4 : 3;
+        const price = Number(args[priceIndex]);
+        const quantity = Number(args[quantityIndex]);
+        if (!refText || !['BUY', 'SELL'].includes(side) || !Number.isFinite(price) || price <= 0 || !Number.isFinite(quantity) || quantity <= 0) {
+          return '用法：/paper buy|sell <InstrumentRef> <价格> <数量>\n例如：/paper buy stock:us:AAPL 200 1\n或：/paper order crypto:binance:BTCUSDT BUY 60000 0.01';
+        }
+        const candidates = await telegramQuickCandidates(refText);
+        if (candidates.length !== 1) return candidates.length ? telegramQuickCandidateReply(refText, candidates) : `未找到“${escapeTelegramHtml(refText)}”，请使用完整 InstrumentRef。`;
+        const ref = candidates[0];
+        const itemScope = telegramInstrumentScope(ref.type);
+        const currentScope = telegramScopeForChat(chatId);
+        if (itemScope === 'options') return '期权纸面订单需要期权链、Greeks 和合约乘数，当前 Telegram 入口暂不可用，请从网页期权工作区操作。';
+        if (!['stock', 'crypto'].includes(ref.type)) return '该 Telegram 订单入口只支持股票和虚拟币；预测市场请使用 /paper open，期权请从网页工作区操作。';
+        if (currentScope !== 'overview' && currentScope !== 'watchlist' && currentScope !== itemScope) return `当前为${escapeTelegramHtml(TELEGRAM_SCOPE_LABELS[currentScope])}市场，不能提交${escapeTelegramHtml(TELEGRAM_SCOPE_LABELS[itemScope])}纸面订单。`;
+        const pending = telegramCommandCenterStore.createPendingAction(chatId, {
+          type: 'unified_paper_order',
+          instrumentId: ref.id,
+          instrumentType: ref.type as 'stock' | 'crypto',
+          instrumentTitle: ref.title || ref.symbol,
+          side: side as 'BUY' | 'SELL',
+          price,
+          quantity,
+        });
+        telegramCommandCenterStore.setActiveMarketScope(chatId, itemScope);
+        telegramCommandCenterStore.recordAudit(chatId, 'unified_paper_order_form', `${ref.id}:${side}:${price}:${quantity}`);
+        return telegramPendingReply(`⚠️ 请确认股票/虚拟币纸面订单\n标的：${escapeTelegramHtml(ref.title || ref.symbol)} · <code>${escapeTelegramHtml(ref.id)}</code>\n方向：${side} · 价格 ${formatTelegramNumber(price, ref.type === 'crypto' ? 4 : 2)} · 数量 ${formatTelegramNumber(quantity, 8)}\n\n确认码：${pending.nonce}（5分钟有效）`, pending.nonce);
+      }
       if (args[0] === 'open') {
         const marketId = Number(args[1]);
         const outcome = String(args[2] || '').toLowerCase();
@@ -3651,6 +3685,25 @@ export function getTelegramCommandHandlers(): Record<string, TelegramCommandHand
     confirm: ({ chatId, args }) => {
       const pending = args[0] ? telegramCommandCenterStore.consumePendingAction(chatId, args[0]) : null;
       if (!pending) return '确认码不存在、已使用或已过期。请重新发送模拟盘操作。';
+      if (pending.type === 'unified_paper_order') {
+        if (!pending.instrumentId || !pending.instrumentType || !pending.side || !Number.isFinite(Number(pending.price)) || !Number.isFinite(Number(pending.quantity))) return '纸面订单数据不完整，已拒绝执行。';
+        try {
+          const ledger = unifiedPaperLedgerStore.apply({
+            instrumentId: pending.instrumentId,
+            instrumentType: pending.instrumentType,
+            title: pending.instrumentTitle || pending.instrumentId,
+            side: pending.side,
+            price: Number(pending.price),
+            quantity: Number(pending.quantity),
+            timestamp: new Date().toISOString(),
+            reason: 'Telegram 二次确认',
+          });
+          telegramCommandCenterStore.recordAudit(chatId, 'unified_paper_order_confirm', `${pending.instrumentId}:${pending.side}`);
+          return `✅ 纸面订单已提交：${escapeTelegramHtml(pending.instrumentId)} · ${pending.side} · 数量 ${formatTelegramNumber(Number(pending.quantity), 8)} · 价格 ${formatTelegramNumber(Number(pending.price), 8)}\n当前权益：$${formatTelegramNumber(calculateUnifiedPerformance(ledger).equity)}`;
+        } catch (error: any) {
+          return `❌ 纸面订单未成交：${escapeTelegramHtml(error?.message || '模拟撮合失败')}`;
+        }
+      }
       if (pending.type === 'paper_open') {
         const result = paperEngine.openPosition(
           pending.marketId || 0,
@@ -3996,6 +4049,25 @@ ${escapeTelegramHtml(position.marketTitle)} · ${escapeTelegramHtml(position.out
         const nonce = data.slice('pending:confirm:'.length);
         const pending = telegramCommandCenterStore.consumePendingAction(ctx.chatId, nonce);
         if (!pending) return telegramReply('确认码不存在、已使用或已过期。请重新发送模拟盘操作。');
+        if (pending.type === 'unified_paper_order') {
+          if (!pending.instrumentId || !pending.instrumentType || !pending.side || !Number.isFinite(Number(pending.price)) || !Number.isFinite(Number(pending.quantity))) return telegramReply('纸面订单数据不完整，已拒绝执行。');
+          try {
+            const ledger = unifiedPaperLedgerStore.apply({
+              instrumentId: pending.instrumentId,
+              instrumentType: pending.instrumentType,
+              title: pending.instrumentTitle || pending.instrumentId,
+              side: pending.side,
+              price: Number(pending.price),
+              quantity: Number(pending.quantity),
+              timestamp: new Date().toISOString(),
+              reason: 'Telegram 二次确认',
+            });
+            telegramCommandCenterStore.recordAudit(ctx.chatId, 'unified_paper_order_confirm', `${pending.instrumentId}:${pending.side}`);
+            return telegramReply(`✅ 纸面订单已提交：${escapeTelegramHtml(pending.instrumentId)} · ${pending.side} · 数量 ${formatTelegramNumber(Number(pending.quantity), 8)} · 价格 ${formatTelegramNumber(Number(pending.price), 8)}\n当前权益：$${formatTelegramNumber(calculateUnifiedPerformance(ledger).equity)}`);
+          } catch (error: any) {
+            return telegramReply(`❌ 纸面订单未成交：${escapeTelegramHtml(error?.message || '模拟撮合失败')}`);
+          }
+        }
         if (pending.type === 'paper_open') {
           const result = paperEngine.openPosition(pending.marketId || 0, getCachedPredictionRadarSlice('', 240)?.markets.find(item => String(item.id) === String(pending.marketId))?.titleZh || `市场 ${pending.marketId}`, pending.outcomeIndex || 0, pending.outcomeName || 'YES', pending.price || 0, pending.amountUsd || 0, 'Telegram 内联确认');
           telegramCommandCenterStore.recordAudit(ctx.chatId, 'paper_open_confirm', result.message);

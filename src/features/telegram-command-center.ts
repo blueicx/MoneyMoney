@@ -69,13 +69,18 @@ export interface TelegramJournalEntry {
 export interface TelegramPendingAction {
   nonce: string;
   chatId: string;
-  type: 'paper_open' | 'paper_close' | 'paper_reset';
+  type: 'paper_open' | 'paper_close' | 'paper_reset' | 'unified_paper_order';
   marketId?: number;
   outcomeIndex?: 0 | 1;
   outcomeName?: string;
   price?: number;
   amountUsd?: number;
   positionId?: string;
+  instrumentId?: string;
+  instrumentType?: 'stock' | 'crypto';
+  instrumentTitle?: string;
+  side?: 'BUY' | 'SELL';
+  quantity?: number;
   createdAt: string;
   expiresAt: string;
 }
