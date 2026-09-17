@@ -92,7 +92,7 @@ export function runResearchExperiment(input: ResearchExperimentInput): ResearchE
   if (!evidence.checks.futureData.passed) reasons.push('未来数据检查未通过');
   if (!evidence.checks.data.passed) reasons.push('未声明数据源');
   if (oos.totalReturnPct < Number(rules.minOutOfSampleReturnPct ?? -Infinity)) reasons.push('样本外收益未达到门槛');
-  if (oos.tradesCount < Number(rules.minTrades ?? 0)) reasons.push('样本外交易数未达到门槛');
+  if ((oos.tradesCount || 0) < Number(rules.minTrades ?? 0)) reasons.push('样本外交易数未达到门槛');
   const passed = reasons.length === 0;
   return { experiment, backtest: result, folds, evidence, gate: { passed, status: passed ? 'candidate' : 'draft', monitoringAllowed: false, reasons } };
 }

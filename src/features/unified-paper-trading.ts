@@ -4,6 +4,7 @@ export type UnifiedPaperInstrumentType = 'stock' | 'crypto' | 'prediction';
 export type UnifiedPaperSide = 'BUY' | 'SELL' | 'YES' | 'NO';
 
 export interface UnifiedPaperOrder {
+  id?: string;
   instrumentId: string;
   instrumentType: UnifiedPaperInstrumentType;
   title?: string;

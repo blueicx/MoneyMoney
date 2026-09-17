@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3';
 import path from 'path';
 import fs from 'fs';
-import { ResearchJob, JobStatus, ArtifactManifest, MarketId } from './research-contracts';
+import { ResearchJob, JobStatus, ArtifactManifest, MarketId, DataSnapshot, EvidenceBundle, LineageRef, AlertDelivery, assertMarketContext } from './research-contracts';
 import { DATA_ROOT, ensureDir } from '../utils/paths';
 
 let db: Database.Database;
@@ -63,6 +63,23 @@ function initDb(db: Database.Database) {
       data TEXT NOT NULL
     );
 
+
+    CREATE TABLE IF NOT EXISTS data_snapshots (
+      id TEXT PRIMARY KEY,
+      data TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS evidence_bundles (
+      id TEXT PRIMARY KEY,
+      data TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS lineage_refs (
+      id TEXT PRIMARY KEY,
+      data TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS alert_deliveries (
+      id TEXT PRIMARY KEY,
+      data TEXT NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS data_source_health (
       id TEXT PRIMARY KEY,
       data TEXT NOT NULL
@@ -163,6 +180,10 @@ export const researchRepository = {
     const row = stmt.get(id) as any;
     return row ? JSON.parse(row.data) : null;
   },
+  listExperiments(limit = 100) {
+    const size = Math.max(1, Math.min(500, Number(limit) || 100));
+    return db.prepare('SELECT data FROM experiments ORDER BY rowid DESC LIMIT ?').all(size).map((row: any) => JSON.parse(row.data));
+  },
 
   close() {
     if (db) {
@@ -189,6 +210,54 @@ export const researchRepository = {
   },
   getAllSignals() {
     return db.prepare('SELECT data FROM signal_monitor').all().map((row: any) => JSON.parse(row.data));
+  },
+
+  saveDataSnapshot(snapshot: DataSnapshot) {
+    assertMarketContext(snapshot.context);
+    if (!snapshot.id || !snapshot.hash) throw new Error('Invalid DataSnapshot integrity');
+    db.prepare("INSERT OR REPLACE INTO data_snapshots (id, data) VALUES (?, ?)").run(snapshot.id, JSON.stringify(snapshot));
+  },
+  getDataSnapshot(id: string): DataSnapshot | null {
+    const row = db.prepare("SELECT data FROM data_snapshots WHERE id = ?").get(id) as any;
+    return row ? JSON.parse(row.data) : null;
+  },
+  saveEvidenceBundle(bundle: EvidenceBundle) {
+    assertMarketContext(bundle.context);
+    if (!bundle.id || !Array.isArray(bundle.artifacts)) throw new Error('Invalid EvidenceBundle integrity');
+    db.prepare("INSERT OR REPLACE INTO evidence_bundles (id, data) VALUES (?, ?)").run(bundle.id, JSON.stringify(bundle));
+  },
+  getEvidenceBundle(id: string): EvidenceBundle | null {
+    const row = db.prepare("SELECT data FROM evidence_bundles WHERE id = ?").get(id) as any;
+    return row ? JSON.parse(row.data) : null;
+  },
+  saveLineageRef(lineage: LineageRef) {
+    assertMarketContext(lineage.context);
+    if (!lineage.id || !lineage.sourceId || !lineage.operation) throw new Error('Invalid LineageRef integrity');
+    db.prepare("INSERT OR REPLACE INTO lineage_refs (id, data) VALUES (?, ?)").run(lineage.id, JSON.stringify(lineage));
+  },
+  getLineageRef(id: string): LineageRef | null {
+    const row = db.prepare("SELECT data FROM lineage_refs WHERE id = ?").get(id) as any;
+    return row ? JSON.parse(row.data) : null;
+  },
+  saveAlertDelivery(delivery: AlertDelivery) {
+    assertMarketContext(delivery.context);
+    if (!delivery.id || !delivery.alertId) throw new Error('Invalid AlertDelivery integrity');
+    db.prepare("INSERT OR REPLACE INTO alert_deliveries (id, data) VALUES (?, ?)").run(delivery.id, JSON.stringify(delivery));
+  },
+  getAlertDelivery(id: string): AlertDelivery | null {
+    const row = db.prepare("SELECT data FROM alert_deliveries WHERE id = ?").get(id) as any;
+    return row ? JSON.parse(row.data) : null;
+  },
+  listAlertDeliveries(limit = 100) {
+    const size = Math.max(1, Math.min(500, Number(limit) || 100));
+    return db.prepare('SELECT data FROM alert_deliveries ORDER BY rowid DESC LIMIT ?').all(size).map((row: any) => JSON.parse(row.data));
+  },
+  updateAlertDeliveryStatus(id: string, status: string, deliveredAt?: string) {
+    const delivery = this.getAlertDelivery(id);
+    if (!delivery) return null;
+    const next = { ...delivery, status, ...(deliveredAt ? { deliveredAt } : {}) };
+    this.saveAlertDelivery(next);
+    return next;
   },
   saveSourceHealth(id: string, data: any) {
     db.prepare('INSERT OR REPLACE INTO data_source_health (id, data) VALUES (?, ?)').run(id, JSON.stringify(data));
