@@ -2473,7 +2473,7 @@ const TELEGRAM_HELP = [
   '',
   '<b>研究、提醒与自动化</b>',
   '/research 查看研究工作区',
-  '/tasks    查看可恢复的研究/回测任务',
+  '/tasks    查看研究/回测任务；/tasks <ID> 查看详情；/tasks cancel|resume <ID>',
   '/note     记录研究笔记，例如 /note 观察到概率变化',
   '/journal  查看研究和交易日志',
   '/alerts  查看或修改通知订阅',
@@ -2989,9 +2989,47 @@ export function getTelegramCommandHandlers(): Record<string, TelegramCommandHand
       }).filter(row => row.length).slice(0, 6);
       return sourceButtons.length ? telegramInlineReply(text, sourceButtons) : text;
     },
-    tasks: ({ chatId }) => {
+    tasks: ({ chatId, args }) => {
       const scope = telegramScopeForChat(chatId);
       const market = scope === 'overview' || scope === 'watchlist' ? undefined : scope === 'stocks' ? 'stocks' : scope === 'options' ? 'options' : scope === 'crypto' ? 'crypto' : 'prediction';
+      const action = String(args[0] || '').toLowerCase();
+      const actionJobId = ['cancel', 'resume', 'events', 'artifact', 'artifacts'].includes(action) ? String(args[1] || '') : '';
+      const jobId = actionJobId || String(args[0] || '');
+      if (jobId) {
+        const job = researchRepository.getJob(jobId);
+        if (!job) return `未找到任务 ${escapeTelegramHtml(jobId)}。发送 /tasks 查看当前作用域任务。`;
+        if (market && job.market !== market) return `该任务属于${escapeTelegramHtml(TELEGRAM_SCOPE_LABELS[job.market as MarketScope] || job.market)}市场，当前为${escapeTelegramHtml(TELEGRAM_SCOPE_LABELS[scope])}，已拒绝跨市场操作。`;
+        if (action === 'cancel') {
+          if (['succeeded', 'failed', 'cancelled'].includes(job.status)) return `任务已结束：${escapeTelegramHtml(job.status)}。`;
+          if (job.status === 'cancelling') return `任务已经在取消中：<code>${escapeTelegramHtml(job.id)}</code>。`;
+          try {
+            researchRepository.updateJobStatus(job.id, job.status === 'queued' || job.status === 'paused' ? 'cancelled' : 'cancelling');
+            const updated = researchRepository.getJob(job.id);
+            return `✅ 已请求取消任务 <code>${escapeTelegramHtml(job.id)}</code>，当前状态：${escapeTelegramHtml(updated?.status || 'unknown')}。`;
+          } catch (error: any) {
+            return `任务取消失败：${escapeTelegramHtml(error?.message || '状态转换失败')}`;
+          }
+        }
+        if (action === 'resume') {
+          if (job.status === 'running') return `任务正在运行：<code>${escapeTelegramHtml(job.id)}</code> · ${formatTelegramNumber(Number(job.progress || 0), 0)}%。`;
+          if (job.status !== 'paused') return `只有 paused 任务可以恢复，当前状态为 ${escapeTelegramHtml(job.status)}。`;
+          try {
+            researchRepository.updateJobStatus(job.id, 'running');
+            return `✅ 已恢复任务 <code>${escapeTelegramHtml(job.id)}</code>。`;
+          } catch (error: any) {
+            return `任务恢复失败：${escapeTelegramHtml(error?.message || '状态转换失败')}`;
+          }
+        }
+        if (action === 'events') {
+          const events = researchRepository.getEvents(job.id).slice(-8);
+          return ['<b>🛰 任务事件</b>', `<code>${escapeTelegramHtml(job.id)}</code> · ${escapeTelegramHtml(job.status)} · ${formatTelegramNumber(Number(job.progress || 0), 0)}%`, ...(events.length ? events.map((event: any) => `· ${escapeTelegramHtml(String(event.createdAt || '').slice(0, 19))} · ${escapeTelegramHtml(event.eventType)} · ${escapeTelegramHtml(JSON.stringify(event.payload || {}).slice(0, 260))}`) : ['· 暂无事件'])].join('\n');
+        }
+        if (action === 'artifact' || action === 'artifacts') {
+          const artifacts = researchRepository.getArtifacts(job.id);
+          return ['<b>📦 任务证据包</b>', `<code>${escapeTelegramHtml(job.id)}</code>`, ...(artifacts.length ? artifacts.slice(0, 8).map(item => `· ${escapeTelegramHtml(item.id)} · hash ${escapeTelegramHtml(item.hash || '-')} · ${escapeTelegramHtml(item.uri)}`) : ['· 暂无证据包；任务可能仍在运行或没有可导出产物。'])].join('\n');
+        }
+        return ['<b>🧰 研究任务详情</b>', `<code>${escapeTelegramHtml(job.id)}</code>`, `市场：${escapeTelegramHtml(TELEGRAM_SCOPE_LABELS[job.market as MarketScope] || job.market)} · 工作区：${escapeTelegramHtml(job.workspace)}`, `状态：${escapeTelegramHtml(job.status)} · 进度：${formatTelegramNumber(Number(job.progress || 0), 0)}%`, `说明：${escapeTelegramHtml(job.inputSummary || '未提供')}`, job.errorReason ? `失败原因：${escapeTelegramHtml(job.errorReason)}` : '', '', '事件：/tasks events ' + escapeTelegramHtml(job.id), '证据包：/tasks artifact ' + escapeTelegramHtml(job.id), job.status === 'paused' ? '恢复：/tasks resume ' + escapeTelegramHtml(job.id) : ['queued', 'running'].includes(job.status) ? '取消：/tasks cancel ' + escapeTelegramHtml(job.id) : '该任务已结束。'].filter(Boolean).join('\n');
+      }
       const jobs = researchRepository.listJobs(market as any).slice(0, 10);
       if (!jobs.length) return `<b>🧰 研究任务</b>\n${telegramScopeHeader(scope)}\n暂无可恢复的研究/回测任务。`;
       return [
