@@ -15,25 +15,19 @@ const activeJobs = new Set<string>();
 async function processJob(job: ResearchJob) {
     if (activeJobs.has(job.id)) return;
 
-    // Check lock via stateStore
+    // Acquire the durable lease atomically so another process cannot run the same job.
     const lockKey = `job_lock_${job.id}`;
     const owner = process.pid.toString() + '_' + Date.now();
     const now = Date.now();
     const leaseTimeMs = 30000;
 
-    const existingLock = stateStore.get<{owner: string, expiresAt: number}>(lockKey);
-    if (existingLock && existingLock.expiresAt && now < existingLock.expiresAt) {
-        return;
-    }
+    if (!stateStore.acquireLease(lockKey, owner, now, leaseTimeMs)) return;
 
     activeJobs.add(job.id);
     stateStore.set(lockKey, { owner, expiresAt: now + leaseTimeMs, lockedAt: new Date().toISOString() });
 
     const heartbeat = setInterval(() => {
-        const lock = stateStore.get<{owner: string, expiresAt: number}>(lockKey);
-        if (lock && lock.owner === owner) {
-             stateStore.set(lockKey, { ...lock, expiresAt: Date.now() + leaseTimeMs });
-        }
+        stateStore.refreshLease(lockKey, owner, Date.now(), leaseTimeMs);
     }, 10000);
     heartbeat.unref();
 
@@ -158,10 +152,7 @@ async function processJob(job: ResearchJob) {
     } finally {
         clearInterval(heartbeat);
         activeJobs.delete(job.id);
-        const lock = stateStore.get<{owner: string}>(lockKey);
-        if (lock && lock.owner === owner) {
-             stateStore.set(lockKey, { owner: '', expiresAt: 0 });
-        }
+        stateStore.releaseLease(lockKey, owner);
     }
 }
 
