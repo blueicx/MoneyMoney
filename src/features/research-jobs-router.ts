@@ -5,6 +5,8 @@ import { runResearchExperiment, generateExperimentArtifacts } from './experiment
 import { unifiedInstrumentService } from './unified-instruments';
 import { stateStore } from '../storage/sqlite-state';
 
+import { globalStrategyRegistry } from './strategy-registry';
+
 export const researchJobsRouter = express.Router();
 
 let runnerInterval: NodeJS.Timeout | null = null;
@@ -12,27 +14,55 @@ const activeJobs = new Set<string>();
 
 async function processJob(job: ResearchJob) {
     if (activeJobs.has(job.id)) return;
-    activeJobs.add(job.id);
-    
-    // Check single-flight lock via stateStore or simple set
+
+    // Check lock via stateStore
     const lockKey = `job_lock_${job.id}`;
-    if (stateStore.getIdempotent(lockKey)) {
-        activeJobs.delete(job.id);
+    const owner = process.pid.toString() + '_' + Date.now();
+    const now = Date.now();
+    const leaseTimeMs = 30000;
+
+    const existingLock = stateStore.get<{owner: string, expiresAt: number}>(lockKey);
+    if (existingLock && existingLock.expiresAt && now < existingLock.expiresAt) {
         return;
     }
-    stateStore.setIdempotent(lockKey, { lockedAt: new Date().toISOString() });
+
+    activeJobs.add(job.id);
+    stateStore.set(lockKey, { owner, expiresAt: now + leaseTimeMs, lockedAt: new Date().toISOString() });
+
+    const heartbeat = setInterval(() => {
+        const lock = stateStore.get<{owner: string, expiresAt: number}>(lockKey);
+        if (lock && lock.owner === owner) {
+             stateStore.set(lockKey, { ...lock, expiresAt: Date.now() + leaseTimeMs });
+        }
+    }, 10000);
+    heartbeat.unref();
 
     try {
+        // Re-check status before running in case it was cancelled while waiting
+        const currentJob = researchRepository.getJob(job.id);
+        if (currentJob && currentJob.status === 'cancelling') {
+            researchRepository.updateJobStatus(job.id, 'cancelled');
+            return;
+        }
+
         researchRepository.updateJobStatus(job.id, 'running');
-        const reqInstrument = String(job.inputSummary || '').trim();
+
+        let jobInput: any = {};
+        try {
+            jobInput = JSON.parse(job.inputSummary || '{}');
+        } catch (e) {
+            jobInput = { instrument: job.inputSummary };
+        }
+
+        const reqInstrument = String(jobInput.instrument || '').trim();
         if (!reqInstrument) {
             researchRepository.addEvent(job.id, 'ERROR', { reason: 'Missing or invalid instrument' });
             researchRepository.updateJobStatus(job.id, 'failed', 0, 'Missing or invalid instrument');
             return;
         }
-        
-        // Timeframe would be parsed from inputSummary or stored in the job, here defaulting to 1d
-        const reqTimeframe = '1d';
+
+        const reqTimeframe = String(jobInput.timeframe || '1d').trim();
+        const reqStrategy = String(jobInput.strategy || 'default').trim();
 
         const instrumentRef = {
             id: reqInstrument,
@@ -67,18 +97,33 @@ async function processJob(job: ResearchJob) {
             return;
         }
 
+        const strategyDef = globalStrategyRegistry.get(reqStrategy);
+        if (!strategyDef) {
+            researchRepository.addEvent(job.id, 'ERROR', { reason: `Strategy unavailable: ${reqStrategy}` });
+            researchRepository.updateJobStatus(job.id, 'failed', 0, `Strategy unavailable: ${reqStrategy}`);
+            return;
+        }
+
         const prices = overview.klines.map((k: any) => Number(k.close));
-        // Calculate realistic signals instead of random
-        const signals: Array<{ timeIndex: number, direction: 'buy' | 'sell' }> = [];
-        let rsi = 50; // simple mock of indicator logic based on real prices
-        for (let i = 1; i < prices.length; i++) {
-            const diff = prices[i] - prices[i-1];
-            // Just a basic mock for signals, not fixed arrays
-            if (diff > prices[i-1] * 0.05) {
-                signals.push({ timeIndex: i, direction: 'buy' });
-            } else if (diff < -prices[i-1] * 0.05) {
-                signals.push({ timeIndex: i, direction: 'sell' });
-            }
+        const times = overview.klines.map((k: any) => Number(k.timestamp || 0));
+        let signals: Array<{ timeIndex: number, direction: 'buy' | 'sell' | 'neutral' }> = [];
+
+        try {
+            const points = strategyDef.analyze({
+                marketId: job.market,
+                timeframe: reqTimeframe,
+                prices,
+                times,
+                volumes: overview.klines.map((k: any) => Number(k.volume || 0))
+            });
+            signals = points.map(p => ({
+                timeIndex: p.index ?? prices.length - 1,
+                direction: p.direction
+            }));
+        } catch (err: any) {
+            researchRepository.addEvent(job.id, 'ERROR', { reason: `Strategy evaluation failed: ${err.message}` });
+            researchRepository.updateJobStatus(job.id, 'failed', 0, err.message);
+            return;
         }
 
         const result = runResearchExperiment({
@@ -91,7 +136,7 @@ async function processJob(job: ResearchJob) {
                 dataStatus: (overview.sourceStatus?.status === 'ok' ? 'live' : overview.sourceStatus?.status === 'stale' ? 'delayed' : 'unavailable')
             },
             prices,
-            signals
+            signals: signals as any
         });
 
         if (!result.gate.passed) {
@@ -105,13 +150,18 @@ async function processJob(job: ResearchJob) {
                 id: m.id, context: { market: job.market, workspace: job.workspace, instrument: reqInstrument, timeframe: reqTimeframe }, artifacts: [m.uri], createdAt: m.createdAt
             });
         });
-        
+
         researchRepository.updateJobStatus(job.id, 'succeeded', 100);
     } catch (err: any) {
         researchRepository.addEvent(job.id, 'ERROR', { reason: err.message || 'Execution failed' });
         researchRepository.updateJobStatus(job.id, 'failed', 0, err.message);
     } finally {
+        clearInterval(heartbeat);
         activeJobs.delete(job.id);
+        const lock = stateStore.get<{owner: string}>(lockKey);
+        if (lock && lock.owner === owner) {
+             stateStore.set(lockKey, { owner: '', expiresAt: 0 });
+        }
     }
 }
 
@@ -119,16 +169,17 @@ function startBackgroundRunner() {
     if (runnerInterval) return;
     runnerInterval = setInterval(() => {
         const jobs = researchRepository.listJobs();
-        const queuedJobs = jobs.filter(j => j.status === 'queued' || j.status === 'running');
+        const queuedJobs = jobs.filter(j => j.status === 'queued' || j.status === 'running' || j.status === 'cancelling');
         for (const job of queuedJobs) {
-            if (job.status === 'running' && !activeJobs.has(job.id)) {
-                // Recover stuck running jobs
+            if ((job.status === 'running' || job.status === 'cancelling') && !activeJobs.has(job.id)) {
+                // Recover stuck jobs
                 processJob(job).catch(console.error);
             } else if (job.status === 'queued') {
                 processJob(job).catch(console.error);
             }
         }
     }, 5000);
+    runnerInterval.unref();
 }
 
 // Start runner
@@ -140,10 +191,14 @@ researchJobsRouter.post('/jobs', express.json(), (req, res) => {
     const reqInstrument = String(req.body?.instrument || '').trim();
     if (reqInstrument) {
       assertMarketContext({ market: job.market, workspace: job.workspace, instrument: reqInstrument });
-      // Store instrument in inputSummary for the background worker
-      job.inputSummary = reqInstrument;
+      job.inputSummary = JSON.stringify({
+          instrument: reqInstrument,
+          timeframe: req.body?.timeframe || '1d',
+          strategy: req.body?.strategy || 'default',
+          dataSource: req.body?.dataSource || 'unified'
+      });
     }
-    
+
     // Idempotency key from header
     const idempotencyKey = req.headers['x-idempotency-key'];
     if (idempotencyKey) {
@@ -154,13 +209,13 @@ researchJobsRouter.post('/jobs', express.json(), (req, res) => {
     }
 
     researchRepository.saveJob(job);
-    
+
     if (idempotencyKey) {
         stateStore.setIdempotent(`job_idem_${idempotencyKey}`, job);
     }
 
     res.status(201).json({ success: true, data: job, id: job.id });
-    
+
     // Background execution will pick this up
   } catch (err: any) {
     res.status(400).json({ success: false, error: err.message });
