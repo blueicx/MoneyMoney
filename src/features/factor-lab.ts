@@ -1,5 +1,45 @@
+import { assertMarketContext, type MarketId } from './research-contracts';
+
 export interface FactorQuantile { quantile: number; count: number; averageReturn: number; }
 export interface FactorAnalysis { market: string; factorId: string; rankIc: number; ir: number; stability: number; quantiles: FactorQuantile[]; }
+export interface FactorCatalogEntry {
+  id: string;
+  name: string;
+  description: string;
+  market: MarketId;
+  field: string;
+  unit: string;
+  direction: 'higher-is-better' | 'lower-is-better' | 'contextual';
+  source: string;
+}
+
+const FACTOR_CATALOG: Record<MarketId, FactorCatalogEntry[]> = {
+  stocks: [
+    { id: 'momentum_12m', name: '12个月动量', description: '过去 12 个月风险调整后的价格趋势强度。', market: 'stocks', field: 'quote.return12m', unit: '%', direction: 'higher-is-better', source: 'quote/bars' },
+    { id: 'earnings_revision', name: '盈利修正', description: '分析师盈利预期相对上一期的修正方向。', market: 'stocks', field: 'fundamentals.earningsRevision', unit: '%', direction: 'higher-is-better', source: 'fundamentals' },
+    { id: 'quality_score', name: '基本面质量', description: '盈利质量、杠杆和现金流稳定性的综合研究因子。', market: 'stocks', field: 'fundamentals.qualityScore', unit: 'score', direction: 'higher-is-better', source: 'fundamentals' },
+  ],
+  options: [
+    { id: 'iv_rank', name: '隐含波动率分位', description: '当前隐含波动率在历史区间中的位置。', market: 'options', field: 'options.ivRank', unit: 'score', direction: 'contextual', source: 'optionsChain' },
+    { id: 'put_call_ratio', name: 'Put/Call 比率', description: '看跌与看涨成交或持仓的相对强度。', market: 'options', field: 'options.putCallRatio', unit: 'ratio', direction: 'contextual', source: 'optionsChain' },
+    { id: 'gamma_exposure', name: 'Gamma 暴露', description: '期权链按执行价聚合后的 Gamma 暴露方向。', market: 'options', field: 'options.gammaExposure', unit: 'USD', direction: 'contextual', source: 'optionsChain' },
+  ],
+  crypto: [
+    { id: 'funding_rate', name: '资金费率', description: '永续合约多空双方定期支付的资金费率。', market: 'crypto', field: 'derivatives.fundingRate', unit: '%', direction: 'contextual', source: 'funding' },
+    { id: 'open_interest_change', name: '持仓量变化', description: '未平仓合约数量的变化，用于观察杠杆参与度。', market: 'crypto', field: 'derivatives.openInterestChange', unit: '%', direction: 'contextual', source: 'openInterest' },
+    { id: 'orderbook_imbalance', name: '订单簿失衡', description: '买卖盘深度差异，反映可见流动性倾斜。', market: 'crypto', field: 'depth.imbalance', unit: 'ratio', direction: 'contextual', source: 'depth' },
+  ],
+  prediction: [
+    { id: 'implied_probability', name: '隐含概率', description: '由市场价格推导的 YES/NO 事件概率。', market: 'prediction', field: 'quote.impliedProbability', unit: 'probability', direction: 'contextual', source: 'quote' },
+    { id: 'market_liquidity', name: '市场流动性', description: '事件市场可成交深度与价差的综合指标。', market: 'prediction', field: 'depth.liquidity', unit: 'USD', direction: 'higher-is-better', source: 'depth' },
+    { id: 'settlement_confidence', name: '结算证据置信度', description: '结算来源、规则和证据完整度的研究评分。', market: 'prediction', field: 'settlementEvidence.confidence', unit: 'score', direction: 'higher-is-better', source: 'settlementEvidence' },
+  ],
+};
+
+export function getFactorCatalog(market: MarketId): FactorCatalogEntry[] {
+  assertMarketContext({ market, workspace: 'factor-catalog' });
+  return FACTOR_CATALOG[market].map(entry => ({ ...entry }));
+}
 
 function rank(values: readonly number[]): number[] {
   return values.map(value => values.filter(other => other < value).length + 1);
