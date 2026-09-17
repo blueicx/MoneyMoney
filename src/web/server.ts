@@ -107,6 +107,8 @@ import { testNotificationChannels } from '../features/notification-channels';
 import { runResearchExperiment } from '../features/experiment-runner';
 import { assertMarketContext, MARKET_IDS, type MarketId } from '../features/research-contracts';
 import { researchRepository } from '../features/research-repository';
+import { analyzeFactor, getFactorCatalog } from '../features/factor-lab';
+import { StrategyCandidateRegistry } from '../features/strategy-candidates';
 import { riskPatrol } from '../features/risk-patrol';
 import { createAccessMiddleware, validateAccessConfiguration } from './access-control';
 import { createLoginToken, verifyLoginToken, createLoginRateLimiter, extractAuthToken, requireAuth, safeEqual, blacklistToken, buildAuthCookie, buildClearCookie, GUEST_TOKEN_EXPIRY_MS, isGuestRequestAllowed } from './auth';
@@ -146,6 +148,7 @@ import os from 'os';
 import { parseRssItems } from '../utils/rss';
 
 export const app = express();
+const strategyCandidateRegistry = new StrategyCandidateRegistry();
 // A rejected optional/background data refresh must not take down the dashboard.
 // Route handlers still report their own errors; this last-resort observer keeps
 // long-lived local sessions alive and records the source error without secrets.
@@ -4059,16 +4062,16 @@ async function monitorUnifiedAlertRules(): Promise<void> {
     const alertMarket: MarketId = entry.instrumentId.startsWith('crypto:') ? 'crypto' : entry.instrumentId.startsWith('option:') ? 'options' : entry.instrumentId.startsWith('prediction:') ? 'prediction' : 'stocks';
     if (entry.channels.web) {
       pushNotification('alert', message);
-      researchRepository.saveAlertDelivery({ id: `delivery_${entry.id}_web`, context: { market: alertMarket, workspace: 'alerts', instrument: entry.instrumentId }, alertId: entry.id, status: 'sent', deliveredAt: new Date().toISOString() });
+      researchRepository.saveAlertDelivery({ id: `delivery_${entry.id}_web`, context: { market: alertMarket, workspace: 'alerts', instrument: entry.instrumentId }, alertId: entry.id, channel: 'web', payload: { message }, status: 'sent', attempts: 1, lastAttemptAt: new Date().toISOString(), deliveredAt: new Date().toISOString() });
     }
     if (entry.channels.telegram && telegramInteractionBot) {
       for (const chatId of chats) {
         const deliveryId = `delivery_${entry.id}_telegram_${chatId}`;
         try {
           await telegramInteractionBot.sendToChat(chatId, telegramReply(escapeTelegramHtml(message)));
-          researchRepository.saveAlertDelivery({ id: deliveryId, context: { market: alertMarket, workspace: 'alerts', instrument: entry.instrumentId }, alertId: entry.id, status: 'sent', deliveredAt: new Date().toISOString() });
-        } catch {
-          researchRepository.saveAlertDelivery({ id: deliveryId, context: { market: alertMarket, workspace: 'alerts', instrument: entry.instrumentId }, alertId: entry.id, status: 'failed' });
+          researchRepository.saveAlertDelivery({ id: deliveryId, context: { market: alertMarket, workspace: 'alerts', instrument: entry.instrumentId }, alertId: entry.id, channel: 'telegram', payload: { message, chatId }, status: 'sent', attempts: 1, lastAttemptAt: new Date().toISOString(), deliveredAt: new Date().toISOString() });
+        } catch (error: any) {
+          researchRepository.saveAlertDelivery({ id: deliveryId, context: { market: alertMarket, workspace: 'alerts', instrument: entry.instrumentId }, alertId: entry.id, channel: 'telegram', payload: { message, chatId }, status: 'failed', attempts: 1, lastAttemptAt: new Date().toISOString(), lastError: error?.message || 'Telegram 投递失败' });
         }
       }
     }
@@ -4747,6 +4750,81 @@ import { researchJobsRouter } from '../features/research-jobs-router';
 // --- Research Workspace ---
 
 app.use('/api/research', researchJobsRouter);
+
+// Factor research and candidate promotion are intentionally server-gated.
+// The catalog describes available calculations only; it never fabricates
+// observations when the corresponding market dataset is unavailable.
+app.get('/api/research/factors/catalog', (req, res) => {
+  try {
+    const market = String(req.query.market || '').trim() as MarketId;
+    if (!MARKET_IDS.includes(market)) return res.status(400).json({ success: false, error: '必须指定有效市场' });
+    const data = getFactorCatalog(market);
+    return res.json({ success: true, data, market, instrument: null, dataStatus: 'live', source: 'moneymoney-factor-catalog', updatedAt: new Date().toISOString(), reason: null });
+  } catch (error: any) { return res.status(400).json({ success: false, error: error?.message || '因子目录不可用' }); }
+});
+
+app.post('/api/research/factors/analyze', express.json(), (req, res) => {
+  try {
+    const body = req.body || {};
+    const market = String(body.market || '').trim() as MarketId;
+    const instrument = body.instrument ? String(body.instrument).trim() : undefined;
+    assertMarketContext({ market, workspace: 'factor-analysis', instrument });
+    if (!Array.isArray(body.values) || !Array.isArray(body.forwardReturns)) throw new Error('因子分析需要 values 和 forwardReturns 数组');
+    const result = analyzeFactor({
+      market, factorId: String(body.factorId || '').trim(),
+      values: body.values.map(Number), forwardReturns: body.forwardReturns.map(Number),
+      quantiles: body.quantiles,
+    });
+    return res.json({ success: true, data: { ...result, instrument: instrument || null }, market, instrument: instrument || null, dataStatus: 'live', source: 'local-factor-engine', updatedAt: new Date().toISOString(), reason: null });
+  } catch (error: any) { return res.status(400).json({ success: false, error: error?.message || '因子分析失败' }); }
+});
+
+app.get('/api/research/candidates', (req, res) => {
+  try {
+    const rawMarket = String(req.query.market || '').trim();
+    const market = rawMarket ? rawMarket as MarketId : undefined;
+    if (market && !MARKET_IDS.includes(market)) return res.status(400).json({ success: false, error: '市场范围无效' });
+    const data = strategyCandidateRegistry.list(market);
+    return res.json({ success: true, data, market: market || 'all', instrument: null, dataStatus: 'live', source: 'research-repository', updatedAt: new Date().toISOString(), reason: null });
+  } catch (error: any) { return res.status(400).json({ success: false, error: error?.message || '候选策略读取失败' }); }
+});
+
+app.post('/api/research/candidates', express.json(), (req, res) => {
+  try {
+    const body = req.body || {};
+    const metrics = body.metrics && typeof body.metrics === 'object' ? {
+      ...(body.metrics.oosReturnPct !== undefined ? { oosReturnPct: Number(body.metrics.oosReturnPct) } : {}),
+      ...(body.metrics.trades !== undefined ? { trades: Number(body.metrics.trades) } : {}),
+    } : {};
+    const candidate = strategyCandidateRegistry.saveDraft({ id: String(body.id || '').trim(), market: String(body.market || '').trim() as MarketId, instrument: body.instrument ? String(body.instrument).trim() : undefined, version: String(body.version || '').trim(), metrics });
+    return res.status(201).json({ success: true, data: candidate, market: candidate.market, instrument: candidate.instrument || null, dataStatus: 'live', source: 'research-repository', updatedAt: new Date(candidate.updatedAt).toISOString(), reason: null });
+  } catch (error: any) { return res.status(400).json({ success: false, error: error?.message || '候选策略无效' }); }
+});
+
+app.post('/api/research/candidates/:id/evaluate', express.json(), (req, res) => {
+  try {
+    const body = req.body || {};
+    const candidate = strategyCandidateRegistry.evaluate(String(req.params.id), {
+      minOutOfSampleReturnPct: body.minOutOfSampleReturnPct === undefined ? 0 : Number(body.minOutOfSampleReturnPct),
+      minTrades: body.minTrades === undefined ? 1 : Number(body.minTrades),
+    });
+    return res.json({ success: true, data: candidate, market: candidate.market, instrument: candidate.instrument || null, dataStatus: 'live', source: 'research-repository', updatedAt: new Date(candidate.updatedAt).toISOString(), reason: candidate.gate.passed ? null : candidate.gate.reasons.join('、') });
+  } catch (error: any) { return res.status(400).json({ success: false, error: error?.message || '候选策略评估失败' }); }
+});
+
+app.post('/api/research/candidates/:id/approve', express.json(), (req, res) => {
+  try {
+    const candidate = strategyCandidateRegistry.approve(String(req.params.id));
+    return res.json({ success: true, data: candidate, market: candidate.market, instrument: candidate.instrument || null, dataStatus: 'live', source: 'research-repository', updatedAt: new Date(candidate.updatedAt).toISOString(), reason: null });
+  } catch (error: any) { return res.status(409).json({ success: false, error: error?.message || '候选策略未达到发布门槛' }); }
+});
+
+app.post('/api/research/candidates/:id/reject', express.json(), (req, res) => {
+  try {
+    const candidate = strategyCandidateRegistry.reject(String(req.params.id));
+    return res.json({ success: true, data: candidate, market: candidate.market, instrument: candidate.instrument || null, dataStatus: 'live', source: 'research-repository', updatedAt: new Date(candidate.updatedAt).toISOString(), reason: null });
+  } catch (error: any) { return res.status(400).json({ success: false, error: error?.message || '候选策略处理失败' }); }
+});
 
 app.post('/api/research/experiments', express.json(), (req, res) => {
   try {
@@ -5563,6 +5641,30 @@ app.delete('/api/alert-rules/:id', (req, res) => res.json({ success: unifiedAler
 app.get('/api/alerts/history', (req, res) => res.json({ success: true, data: unifiedAlertStore.listHistory(Number(req.query.limit) || 100) }));
 app.get('/api/alerts/deliveries', (req, res) => {
   res.json({ success: true, data: researchRepository.listAlertDeliveries(Number(req.query.limit) || 100) });
+});
+app.post('/api/alerts/deliveries/:id/retry', express.json(), async (req, res) => {
+  let queued: any;
+  try {
+    queued = researchRepository.retryAlertDelivery(String(req.params.id));
+    if (!queued) return res.status(404).json({ success: false, error: '提醒投递记录不存在' });
+  } catch (error: any) { return res.status(409).json({ success: false, error: error?.message || '提醒投递不可重试' }); }
+
+  try {
+    if (queued.channel === 'web' && queued.payload?.message) {
+      pushNotification('alert', queued.payload.message);
+    } else if (queued.channel === 'telegram' && queued.payload?.chatId && telegramInteractionBot) {
+      await telegramInteractionBot.sendToChat(queued.payload.chatId, telegramReply(escapeTelegramHtml(queued.payload.message || 'MoneyMoney 提醒')));
+    } else {
+      throw new Error(queued.channel === 'telegram' ? 'Telegram 未运行或投递记录缺少 chatId' : '投递记录缺少可重试的渠道和内容');
+    }
+    const delivered = { ...queued, status: 'sent', lastError: undefined, deliveredAt: new Date().toISOString() };
+    researchRepository.saveAlertDelivery(delivered);
+    return res.json({ success: true, data: delivered });
+  } catch (error: any) {
+    const failed = { ...queued, status: 'failed', lastError: error?.message || '提醒投递失败' };
+    researchRepository.saveAlertDelivery(failed);
+    return res.status(502).json({ success: false, error: failed.lastError, data: failed });
+  }
 });
 app.post('/api/alerts/:id/ack', express.json(), (req, res) => {
   const delivery = researchRepository.updateAlertDeliveryStatus(String(req.params.id), 'acknowledged', new Date().toISOString());

@@ -259,6 +259,21 @@ export const researchRepository = {
     this.saveAlertDelivery(next);
     return next;
   },
+  retryAlertDelivery(id: string) {
+    const delivery = this.getAlertDelivery(id);
+    if (!delivery) return null;
+    if (!['failed', 'queued'].includes(String(delivery.status))) throw new Error('只有失败或排队中的投递可以重试');
+    const next = {
+      ...delivery,
+      status: 'queued',
+      attempts: Number(delivery.attempts || 0) + 1,
+      lastAttemptAt: new Date().toISOString(),
+      lastError: undefined,
+      deliveredAt: undefined,
+    };
+    this.saveAlertDelivery(next);
+    return next;
+  },
   saveSourceHealth(id: string, data: any) {
     db.prepare('INSERT OR REPLACE INTO data_source_health (id, data) VALUES (?, ?)').run(id, JSON.stringify(data));
   },

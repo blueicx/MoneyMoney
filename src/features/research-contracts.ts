@@ -283,8 +283,23 @@ export function createLineageRef(input: Partial<LineageRef>): LineageRef {
   return { id: input.id, context: assertMarketContext(input.context), sourceId: input.sourceId, derivedId: input.derivedId, operation: input.operation };
 }
 
-export interface AlertDelivery { id: string; context: MarketContext; alertId: string; status: string; deliveredAt?: string; }
+export interface AlertDelivery {
+  id: string;
+  context: MarketContext;
+  alertId: string;
+  status: string;
+  channel?: 'web' | 'telegram';
+  payload?: { message?: string; chatId?: string };
+  attempts?: number;
+  lastError?: string;
+  lastAttemptAt?: string;
+  deliveredAt?: string;
+}
 export function createAlertDelivery(input: Partial<AlertDelivery>): AlertDelivery {
   if (!input.id || !input.context || !input.alertId || !input.status) throw new Error('AlertDelivery requires id, context, alertId, status');
-  return { id: input.id, context: assertMarketContext(input.context), alertId: input.alertId, status: input.status, deliveredAt: input.deliveredAt };
+  return {
+    id: input.id, context: assertMarketContext(input.context), alertId: input.alertId, status: input.status,
+    channel: input.channel, payload: input.payload, attempts: input.attempts ?? 0,
+    lastError: input.lastError, lastAttemptAt: input.lastAttemptAt, deliveredAt: input.deliveredAt,
+  };
 }
