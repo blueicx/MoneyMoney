@@ -105,7 +105,8 @@ import { generateAssistantReport } from '../features/trade-assistant';
 import { getSourceHealth } from '../features/source-health';
 import { testNotificationChannels } from '../features/notification-channels';
 import { runResearchExperiment } from '../features/experiment-runner';
-import { MARKET_IDS, type MarketId } from '../features/research-contracts';
+import { assertMarketContext, MARKET_IDS, type MarketId } from '../features/research-contracts';
+import { researchRepository } from '../features/research-repository';
 import { riskPatrol } from '../features/risk-patrol';
 import { createAccessMiddleware, validateAccessConfiguration } from './access-control';
 import { createLoginToken, verifyLoginToken, createLoginRateLimiter, extractAuthToken, requireAuth, safeEqual, blacklistToken, buildAuthCookie, buildClearCookie, GUEST_TOKEN_EXPIRY_MS, isGuestRequestAllowed } from './auth';
@@ -4055,9 +4056,21 @@ async function monitorUnifiedAlertRules(): Promise<void> {
   for (const entry of triggered) {
     const direction = entry.direction === 'bullish' ? '偏利好' : entry.direction === 'bearish' ? '偏利空' : entry.direction === 'neutral' ? '中性/无法判断' : entry.direction;
     const message = `🔔 ${entry.message} · ${direction} · ${entry.instrumentId}`;
-    if (entry.channels.web) pushNotification('alert', message);
+    const alertMarket: MarketId = entry.instrumentId.startsWith('crypto:') ? 'crypto' : entry.instrumentId.startsWith('option:') ? 'options' : entry.instrumentId.startsWith('prediction:') ? 'prediction' : 'stocks';
+    if (entry.channels.web) {
+      pushNotification('alert', message);
+      researchRepository.saveAlertDelivery({ id: `delivery_${entry.id}_web`, context: { market: alertMarket, workspace: 'alerts', instrument: entry.instrumentId }, alertId: entry.id, status: 'sent', deliveredAt: new Date().toISOString() });
+    }
     if (entry.channels.telegram && telegramInteractionBot) {
-      for (const chatId of chats) await telegramInteractionBot.sendToChat(chatId, telegramReply(escapeTelegramHtml(message))).catch(() => {});
+      for (const chatId of chats) {
+        const deliveryId = `delivery_${entry.id}_telegram_${chatId}`;
+        try {
+          await telegramInteractionBot.sendToChat(chatId, telegramReply(escapeTelegramHtml(message)));
+          researchRepository.saveAlertDelivery({ id: deliveryId, context: { market: alertMarket, workspace: 'alerts', instrument: entry.instrumentId }, alertId: entry.id, status: 'sent', deliveredAt: new Date().toISOString() });
+        } catch {
+          researchRepository.saveAlertDelivery({ id: deliveryId, context: { market: alertMarket, workspace: 'alerts', instrument: entry.instrumentId }, alertId: entry.id, status: 'failed' });
+        }
+      }
     }
   }
 }
@@ -4760,11 +4773,34 @@ app.post('/api/research/experiments', express.json(), (req, res) => {
     });
 
     // Save to SQLite for persistence
-    import('../features/research-repository').then(m => m.researchRepository.saveExperiment(result.experiment.id, result));
+    researchRepository.saveExperiment(result.experiment.id, {
+      ...result,
+      input: { context, prices: body.prices || [], signals: body.signals || [], split: body.split, promotion: body.promotion },
+    });
 
     return res.json({ success: true, data: result });
   } catch (error) {
     return res.status(400).json({ success: false, error: error instanceof Error ? error.message : '实验配置无效' });
+  }
+});
+
+app.get('/api/research/experiments/:id', (req, res) => {
+  const result = researchRepository.getExperiment(String(req.params.id));
+  if (!result) return res.status(404).json({ success: false, error: '实验不存在' });
+  const experiment = result.experiment || {};
+  res.json({ success: true, data: result, market: experiment.market || null, instrument: experiment.instrument || null, dataStatus: result.evidence?.checks?.data?.passed ? 'live' : 'unavailable', source: experiment.dataSource || null, updatedAt: experiment.createdAt || null, reason: result.evidence?.checks?.data?.passed ? null : '实验未声明可用数据源' });
+});
+
+app.post('/api/research/experiments/:id/rerun', express.json(), (req, res) => {
+  try {
+    const previous = researchRepository.getExperiment(String(req.params.id)) as any;
+    if (!previous?.input) return res.status(409).json({ success: false, error: '实验缺少可复现输入，无法重跑' });
+    const input = { ...previous.input, ...(req.body?.overrides || {}) };
+    const result = runResearchExperiment(input);
+    researchRepository.saveExperiment(result.experiment.id, { ...result, input });
+    res.json({ success: true, data: result, rerunOf: String(req.params.id) });
+  } catch (error: any) {
+    res.status(400).json({ success: false, error: error?.message || '实验重跑失败' });
   }
 });
 
@@ -4840,6 +4876,7 @@ app.post('/api/paper/orders', (req, res) => {
   try {
     const body = req.body || {};
     const order: UnifiedPaperOrder = {
+      id: String(body.id || `paper_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`),
       instrumentId: String(body.instrumentId || ''), instrumentType: body.instrumentType, title: String(body.title || ''), side: body.side,
       price: Number(body.price), quantity: Number(body.quantity), timestamp: String(body.timestamp || new Date().toISOString()), strategy: body.strategy ? String(body.strategy) : undefined, reason: body.reason ? String(body.reason) : undefined,
       feeUsd: Number.isFinite(Number(body.feeUsd)) ? Number(body.feeUsd) : undefined,
@@ -4848,6 +4885,11 @@ app.post('/api/paper/orders', (req, res) => {
     const ledger = unifiedPaperLedgerStore.apply(order);
     res.status(201).json({ success: true, data: { order, ledger, performance: calculateUnifiedPerformance(ledger) } });
   } catch (error: any) { res.status(400).json({ success: false, error: error?.message || '统一模拟订单无效' }); }
+});
+app.get('/api/paper/orders/:id', (req, res) => {
+  const order = unifiedPaperLedgerStore.get().orders.find(item => item.id === String(req.params.id));
+  if (!order) return res.status(404).json({ success: false, error: '模拟订单不存在' });
+  res.json({ success: true, data: order, market: order.instrumentType, instrument: order.instrumentId, dataStatus: 'live', source: 'paper-ledger', updatedAt: order.timestamp, reason: null });
 });
 app.post('/api/paper/replay', (req, res) => {
   try {
@@ -5325,6 +5367,82 @@ app.get('/api/settings', (req, res) => {
 
 // Canonical cross-asset entry points. Existing /api/stock, /api/binance and
 // /api/markets routes stay intact; these routes provide one stable contract.
+const chartAnalysis: any = require('../web/public/chart-analysis.js');
+function scopedInstrumentType(market: MarketId): InstrumentType {
+  return market === 'stocks' ? 'stock' : market === 'options' ? 'option' : market === 'crypto' ? 'crypto' : 'prediction';
+}
+function scopedVenue(market: MarketId): string {
+  return market === 'stocks' ? 'us' : market === 'options' ? 'cboe' : market === 'crypto' ? 'binance' : 'predictfun';
+}
+function overlayQueryConfig(query: Record<string, unknown>): Record<string, unknown> {
+  return {
+    signals: String(query.signals || 'true') !== 'false',
+    patterns: String(query.patterns || 'false') === 'true',
+    structures: String(query.structures || 'false') === 'true',
+    volume: String(query.volume || 'true') !== 'false',
+    indicators: { ma: String(query.ma || 'true') !== 'false', boll: String(query.boll || 'false') === 'true', macd: String(query.macd || 'false') === 'true' },
+  };
+}
+async function scopedKlinePayload(marketInput: string, instrumentInput: string, query: Record<string, unknown>) {
+  if (!MARKET_IDS.includes(marketInput as MarketId)) throw new Error('Invalid market context');
+  const market = marketInput as MarketId;
+  const rawInstrument = decodeURIComponent(String(instrumentInput || '')).trim();
+  if (!rawInstrument) throw new Error('Instrument is required');
+  const instrument = normalizeInstrumentRef({ type: scopedInstrumentType(market), venue: scopedVenue(market), symbol: rawInstrument, title: rawInstrument, aliases: [], marketId: market });
+  assertMarketContext({ market, workspace: 'kline', instrument: instrument.id });
+  const overview = await unifiedInstrumentService.overview(instrument);
+  const bars = Array.isArray(overview.klines) ? overview.klines : [];
+  const klineSource = Object.entries(overview.sourceStatus).find(([key, status]) => key.toLowerCase().includes('kline') && status !== 'unavailable')?.[0] || null;
+  const dataStatus = bars.length ? (overview.sourceStatus.klines === 'stale' ? 'cached' : 'live') : (overview.status.state === 'unavailable' ? 'unavailable' : 'empty');
+  const reason = bars.length ? null : (overview.status.reason || (market === 'options' || market === 'prediction' ? '当前市场暂未提供 K 线数据' : '来源不可用'));
+  const normalizedBars = bars.map((bar: any) => ({ ...bar, time: Number(bar.time), open: Number(bar.open), high: Number(bar.high), low: Number(bar.low), close: Number(bar.close), volume: Number(bar.volume || 0) })).filter((bar: any) => [bar.time, bar.open, bar.high, bar.low, bar.close].every(Number.isFinite));
+  const config = overlayQueryConfig(query);
+  const overlays = normalizedBars.length >= 3 ? chartAnalysis.buildChartOverlays({ bars: normalizedBars, config, signals: [] }) : { emptyReason: reason || '暂无数据', config, signals: [], patterns: [], structures: [], annotations: [], explanations: [], lines: [], volume: [] };
+  return { market, instrument: instrument.id, timeframe: String(query.timeframe || '1h'), dataStatus, source: klineSource, updatedAt: overview.freshness.fetchedAt || new Date().toISOString(), reason, bars: normalizedBars, overlays };
+}
+
+app.get('/api/kline/:market/:instrument', async (req, res) => {
+  try {
+    res.json({ success: true, data: await scopedKlinePayload(String(req.params.market), String(req.params.instrument), req.query as Record<string, unknown>) });
+  } catch (error: any) {
+    res.status(400).json({ success: false, error: error?.message || 'K 线数据请求失败', dataStatus: 'unavailable', reason: error?.message || '请求失败' });
+  }
+});
+
+app.get('/api/kline/:market/:instrument/replay', async (req, res) => {
+  try {
+    const payload = await scopedKlinePayload(String(req.params.market), String(req.params.instrument), req.query as Record<string, unknown>);
+    const currentIndex = Number(req.query.index ?? Math.max(0, payload.bars.length - 1));
+    const action = String(req.query.action || 'current');
+    const nextIndex = chartAnalysis.stepReplay(currentIndex, payload.bars.length, action);
+    const visibleBars = nextIndex >= 0 ? payload.bars.slice(0, nextIndex + 1) : [];
+    res.json({ success: true, data: { ...payload, replay: { action, currentIndex, nextIndex, length: payload.bars.length }, bars: visibleBars, overlays: chartAnalysis.buildChartOverlays({ bars: visibleBars, config: payload.overlays.config, signals: [] }) } });
+  } catch (error: any) {
+    res.status(400).json({ success: false, error: error?.message || 'K 线回放请求失败', dataStatus: 'unavailable', reason: error?.message || '请求失败' });
+  }
+});
+
+app.post('/api/kline/:market/:instrument/drawings', express.json(), (req, res) => {
+  try {
+    const marketInput = String(req.params.market);
+    if (!MARKET_IDS.includes(marketInput as MarketId)) throw new Error('Invalid market context');
+    const market = marketInput as MarketId;
+    const rawInstrument = decodeURIComponent(String(req.params.instrument || '')).trim();
+    const instrument = normalizeInstrumentRef({ type: scopedInstrumentType(market), venue: scopedVenue(market), symbol: rawInstrument, title: rawInstrument, aliases: [], marketId: market });
+    assertMarketContext({ market, workspace: 'kline-drawing', instrument: instrument.id });
+    const key = `kline-drawings:${instrument.id}`;
+    const items = (stateStore.get<any[]>(key) || []).filter(item => item && typeof item.id === 'string');
+    const action = String(req.body?.action || 'create');
+    let next = items;
+    if (action === 'create') next = [...items, { id: String(req.body?.id || `drawing_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`), type: String(req.body?.type || 'text'), ...((req.body?.properties && typeof req.body.properties === 'object') ? req.body.properties : {}) }];
+    else if (action === 'update') next = items.map(item => item.id === String(req.body?.id) ? { ...item, ...((req.body?.properties && typeof req.body.properties === 'object') ? req.body.properties : {}) } : item);
+    else if (action === 'delete') next = items.filter(item => item.id !== String(req.body?.id));
+    else throw new Error('绘图操作无效');
+    stateStore.set(key, next, 1);
+    res.json({ success: true, data: { market, instrument: instrument.id, drawings: next, dataStatus: 'live', source: 'local', updatedAt: new Date().toISOString(), reason: null } });
+  } catch (error: any) { res.status(400).json({ success: false, error: error?.message || '绘图操作失败' }); }
+});
+
 function validateInstrumentScope(type: InstrumentType, scope: string): boolean {
   if (!scope || scope === 'overview' || scope === 'watchlist') return true;
   return (scope === 'stocks' && type === 'stock')
@@ -5443,6 +5561,14 @@ app.patch('/api/alert-rules/:id', (req, res) => {
 });
 app.delete('/api/alert-rules/:id', (req, res) => res.json({ success: unifiedAlertStore.removeRule(String(req.params.id)) }));
 app.get('/api/alerts/history', (req, res) => res.json({ success: true, data: unifiedAlertStore.listHistory(Number(req.query.limit) || 100) }));
+app.get('/api/alerts/deliveries', (req, res) => {
+  res.json({ success: true, data: researchRepository.listAlertDeliveries(Number(req.query.limit) || 100) });
+});
+app.post('/api/alerts/:id/ack', express.json(), (req, res) => {
+  const delivery = researchRepository.updateAlertDeliveryStatus(String(req.params.id), 'acknowledged', new Date().toISOString());
+  if (!delivery) return res.status(404).json({ success: false, error: '提醒投递记录不存在' });
+  res.json({ success: true, data: delivery });
+});
 
 app.post('/api/settings', (req, res) => {
   const updated = settingsManager.update(req.body);

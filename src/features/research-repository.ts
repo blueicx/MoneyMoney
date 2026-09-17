@@ -180,6 +180,10 @@ export const researchRepository = {
     const row = stmt.get(id) as any;
     return row ? JSON.parse(row.data) : null;
   },
+  listExperiments(limit = 100) {
+    const size = Math.max(1, Math.min(500, Number(limit) || 100));
+    return db.prepare('SELECT data FROM experiments ORDER BY rowid DESC LIMIT ?').all(size).map((row: any) => JSON.parse(row.data));
+  },
 
   close() {
     if (db) {
@@ -243,6 +247,17 @@ export const researchRepository = {
   getAlertDelivery(id: string): AlertDelivery | null {
     const row = db.prepare("SELECT data FROM alert_deliveries WHERE id = ?").get(id) as any;
     return row ? JSON.parse(row.data) : null;
+  },
+  listAlertDeliveries(limit = 100) {
+    const size = Math.max(1, Math.min(500, Number(limit) || 100));
+    return db.prepare('SELECT data FROM alert_deliveries ORDER BY rowid DESC LIMIT ?').all(size).map((row: any) => JSON.parse(row.data));
+  },
+  updateAlertDeliveryStatus(id: string, status: string, deliveredAt?: string) {
+    const delivery = this.getAlertDelivery(id);
+    if (!delivery) return null;
+    const next = { ...delivery, status, ...(deliveredAt ? { deliveredAt } : {}) };
+    this.saveAlertDelivery(next);
+    return next;
   },
   saveSourceHealth(id: string, data: any) {
     db.prepare('INSERT OR REPLACE INTO data_source_health (id, data) VALUES (?, ?)').run(id, JSON.stringify(data));
