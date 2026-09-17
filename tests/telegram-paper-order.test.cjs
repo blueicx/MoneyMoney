@@ -19,6 +19,12 @@ test('telegram stock paper order requires confirmation and preserves market scop
 
   try {
     telegramCommandCenterStore.setActiveMarketScope(chatId, 'stocks');
+    const scopedPortfolio = replyText(await handlers.paper({ chatId, args: [] }));
+    assert.match(scopedPortfolio, /股票模拟盘账户/);
+
+    const legacyPredictionOpen = replyText(await handlers.paper({ chatId, args: ['open', '123', 'yes', '0.5', '10'] }));
+    assert.match(legacyPredictionOpen, /不能跨市场执行/);
+
     const preview = await handlers.paper({ chatId, args: ['buy', 'stock:us:AAPL', '200', '2'] });
     const previewText = replyText(preview);
     assert.match(previewText, /请确认股票\/虚拟币纸面订单/);
@@ -42,4 +48,3 @@ test('telegram stock paper order requires confirmation and preserves market scop
 });
 
 setTimeout(() => process.exit(0), 10);
-

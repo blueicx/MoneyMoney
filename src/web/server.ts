@@ -3485,7 +3485,9 @@ export function getTelegramCommandHandlers(): Record<string, TelegramCommandHand
       return telegramInlineReply(sigLines, kb);
     },
     paper: async ({ chatId, args }) => {
+      const currentScope = telegramScopeForChat(chatId);
       const paperVerb = String(args[0] || '').toLowerCase();
+      if (!paperVerb && ['stocks', 'options', 'crypto'].includes(currentScope)) return formatTelegramPortfolio(currentScope);
       if (['buy', 'sell', 'order'].includes(paperVerb)) {
         const isExplicitOrder = paperVerb === 'order';
         const refText = String(args[1] || '').trim();
@@ -3519,6 +3521,7 @@ export function getTelegramCommandHandlers(): Record<string, TelegramCommandHand
         return telegramPendingReply(`⚠️ 请确认股票/虚拟币纸面订单\n标的：${escapeTelegramHtml(ref.title || ref.symbol)} · <code>${escapeTelegramHtml(ref.id)}</code>\n方向：${side} · 价格 ${formatTelegramNumber(price, ref.type === 'crypto' ? 4 : 2)} · 数量 ${formatTelegramNumber(quantity, 8)}\n\n确认码：${pending.nonce}（5分钟有效）`, pending.nonce);
       }
       if (args[0] === 'open') {
+        if (!['overview', 'prediction'].includes(currentScope)) return `当前为${escapeTelegramHtml(TELEGRAM_SCOPE_LABELS[currentScope])}市场，预测市场纸面开仓不能跨市场执行。`;
         const marketId = Number(args[1]);
         const outcome = String(args[2] || '').toLowerCase();
         const outcomeIndex = outcome === 'no' ? 1 : 0;
@@ -3541,6 +3544,7 @@ export function getTelegramCommandHandlers(): Record<string, TelegramCommandHand
         return telegramPendingReply(`\u26a0\uFE0F \u8bf7\u786e\u8ba4\u6a21\u62df\u5f00\u4ed3\n\u5e02\u573a\uFF1A${escapeTelegramHtml(market?.titleZh || market?.title || `\u5e02\u573a ${marketId}`)}\n\u65b9\u5411\uFF1A${outcomeIndex === 0 ? 'YES' : 'NO'} \u00b7 \u4ef7\u683c ${price} \u00b7 \u91d1\u989d ${amountUsd}\n\n\u786e\u8ba4\u7801\uFF1A${pending.nonce}\uFF085\u5206\u949f\u6709\u6548\uFF09`, pending.nonce);
       }
       if (args[0] === 'close') {
+        if (!['overview', 'prediction'].includes(currentScope)) return `当前为${escapeTelegramHtml(TELEGRAM_SCOPE_LABELS[currentScope])}市场，预测市场纸面平仓不能跨市场执行。`;
         const positionId = args[1] || '';
         const exitPrice = Number(args[2]);
         const position = paperEngine.getOpenPositions().find(item => item.id === positionId);
