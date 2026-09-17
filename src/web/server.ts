@@ -105,7 +105,7 @@ import { generateAssistantReport } from '../features/trade-assistant';
 import { getSourceHealth } from '../features/source-health';
 import { testNotificationChannels } from '../features/notification-channels';
 import { runResearchExperiment } from '../features/experiment-runner';
-import { assertMarketContext, MARKET_IDS, type MarketId } from '../features/research-contracts';
+import { assertMarketContext, createResearchJob, MARKET_IDS, type MarketId } from '../features/research-contracts';
 import { researchRepository } from '../features/research-repository';
 import { analyzeFactor, getFactorCatalog } from '../features/factor-lab';
 import { StrategyCandidateRegistry } from '../features/strategy-candidates';
@@ -2482,7 +2482,7 @@ const TELEGRAM_HELP = [
   '/digest   查看或配置定时摘要',
   '/ops     查看自动化任务状态',
   '/strategies 查看 AI 模拟策略',
-  '/backtest   只读策略回测，例如 /backtest momentum 1234 或 /backtest compare 1234',
+  '/backtest   只读策略回测；/backtest start <策略> <标的> 创建可跟踪任务',
   '',
   '<b>工具与诊断</b>',
   '/export   查看最近模拟交易记录',
@@ -3045,6 +3045,25 @@ export function getTelegramCommandHandlers(): Record<string, TelegramCommandHand
       const chatScope = telegramScopeForChat(chatId);
       if (chatScope === 'options') {
         return '<b>🧪 期权策略回测</b>\n当前期权历史链、隐含波动率和 Greeks 数据源尚未覆盖，暂不生成伪造结果。';
+      }
+      if (String(args[0] || '').toLowerCase() === 'start') {
+        const strategy = String(args[1] || 'momentum').trim();
+        const instrument = String(args[2] || '').trim();
+        const strategyAliases: Record<string, string> = { momentum: 'momentum', mean: 'meanReversion', mr: 'meanReversion', meanreversion: 'meanReversion', 'mean-reversion': 'meanReversion' };
+        const strategyId = strategyAliases[strategy.toLowerCase()];
+        if (!strategyId || !instrument) return `用法：/backtest start [momentum|meanReversion] ${chatScope === 'stocks' ? '<股票代码或InstrumentRef>' : chatScope === 'crypto' ? '<交易对或InstrumentRef>' : '<预测市场ID>'}`;
+        if (!['stocks', 'crypto', 'prediction'].includes(chatScope)) return `当前为${escapeTelegramHtml(TELEGRAM_SCOPE_LABELS[chatScope])}市场，暂不支持创建该类回测任务。`;
+        let scopedInstrument = instrument;
+        if (chatScope === 'prediction' && /^\d+$/.test(instrument)) scopedInstrument = `prediction:predictfun:${instrument}`;
+        try {
+          assertMarketContext({ market: chatScope as MarketId, workspace: 'backtest', instrument: scopedInstrument });
+          const job = createResearchJob({ market: chatScope as MarketId, workspace: 'backtest', inputSummary: JSON.stringify({ instrument: scopedInstrument, timeframe: '1d', strategy: strategyId }) });
+          researchRepository.saveJob(job);
+          telegramCommandCenterStore.recordAudit(chatId, 'research_job_create', `${job.id}:${chatScope}:${scopedInstrument}`);
+          return `<b>✅ 回测任务已创建</b>\n任务：<code>${escapeTelegramHtml(job.id)}</code>\n市场：${escapeTelegramHtml(TELEGRAM_SCOPE_LABELS[chatScope])}\n标的：<code>${escapeTelegramHtml(scopedInstrument)}</code>\n策略：${escapeTelegramHtml(strategyId)}\n\n后台将使用真实历史数据执行；查看：/tasks ${escapeTelegramHtml(job.id)}\n取消：/tasks cancel ${escapeTelegramHtml(job.id)}`;
+        } catch (error: any) {
+          return `回测任务创建失败：${escapeTelegramHtml(error?.message || '市场或标的无效')}`;
+        }
       }
       if (chatScope === 'stocks' || chatScope === 'crypto') {
         const firstAssetArg = String(args[0] || '').trim();
