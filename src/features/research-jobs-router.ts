@@ -38,6 +38,9 @@ async function processJob(job: ResearchJob) {
             researchRepository.updateJobStatus(job.id, 'cancelled');
             return;
         }
+        if (!currentJob || currentJob.status === 'paused') {
+            return;
+        }
 
         researchRepository.updateJobStatus(job.id, 'running');
 
@@ -145,6 +148,14 @@ async function processJob(job: ResearchJob) {
             });
         });
 
+        const latestJob = researchRepository.getJob(job.id);
+        if (latestJob?.status === 'cancelling') {
+            researchRepository.updateJobStatus(job.id, 'cancelled');
+            return;
+        }
+        if (latestJob?.status === 'paused') {
+            return;
+        }
         researchRepository.updateJobStatus(job.id, 'succeeded', 100);
     } catch (err: any) {
         researchRepository.addEvent(job.id, 'ERROR', { reason: err.message || 'Execution failed' });
@@ -265,6 +276,23 @@ researchJobsRouter.get('/jobs/:id/events', (req, res) => {
   req.on('close', () => clearInterval(interval));
 });
 
+researchJobsRouter.post('/jobs/:id/pause', (req, res) => {
+  try {
+    const job = researchRepository.getJob(req.params.id);
+    if (!job) return res.status(404).json({ success: false, error: 'Job not found' });
+    if (job.status === 'paused') {
+      return res.json({ success: true, data: job });
+    }
+    if (job.status !== 'running') {
+      return res.status(400).json({ success: false, error: `Cannot pause job in status: ${job.status}` });
+    }
+    researchRepository.updateJobStatus(req.params.id, 'paused');
+    res.json({ success: true, data: researchRepository.getJob(req.params.id) });
+  } catch (err: any) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
 researchJobsRouter.post('/jobs/:id/cancel', (req, res) => {
   try {
     const job = researchRepository.getJob(req.params.id);
@@ -284,8 +312,13 @@ researchJobsRouter.post('/jobs/:id/resume', (req, res) => {
   try {
     const job = researchRepository.getJob(req.params.id);
     if (!job) return res.status(404).json({ success: false, error: 'Job not found' });
-    if (job.status !== 'running') {
+    if (['succeeded', 'failed', 'cancelled'].includes(job.status)) {
+      return res.status(400).json({ success: false, error: 'Job already finished; create a new run to retry' });
+    }
+    if (job.status === 'paused' || job.status === 'queued') {
       researchRepository.updateJobStatus(req.params.id, 'running');
+    } else if (job.status !== 'running') {
+      return res.status(400).json({ success: false, error: `Cannot resume job in status: ${job.status}` });
     }
     res.json({ success: true, data: researchRepository.getJob(req.params.id) });
   } catch (err: any) {

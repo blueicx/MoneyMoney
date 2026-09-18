@@ -12209,6 +12209,9 @@ async function loadSourceHealth(force = false) {
     const rows = (d.items || []).map(item => {
       const color = item.ok ? 'var(--green)' : item.configured === false ? 'var(--yellow)' : 'var(--red)';
       const latency = item.latencyMs == null ? '' : `${item.latencyMs} ms`;
+      const statusLabels = { live: '实时', delayed: '延迟', cached: '缓存', stale: '缓存', fallback: '降级', unavailable: '不可用', unconfigured: '未配置' };
+      const status = statusLabels[item.status] || (item.ok ? '在线' : '不可用');
+      const capabilities = Array.isArray(item.capabilities) && item.capabilities.length ? item.capabilities.join(' · ') : '—';
       return `
         <tr>
           <td style="padding:9px 8px;">
@@ -12216,7 +12219,8 @@ async function loadSourceHealth(force = false) {
             <strong>${safeNewsText(item.name)}</strong>
           </td>
           <td style="padding:9px 8px;color:var(--text-secondary);">${safeNewsText(item.group)}</td>
-          <td style="padding:9px 8px;color:var(--text-secondary);">${safeNewsText(item.detail)}</td>
+          <td style="padding:9px 8px;color:var(--text-secondary);">${safeNewsText(capabilities)}</td>
+          <td style="padding:9px 8px;color:${color};">${safeNewsText(status)} · ${safeNewsText(item.detail)}</td>
           <td style="padding:9px 8px;text-align:right;color:var(--text-secondary);">${latency}</td>
         </tr>`;
     }).join('');
@@ -12227,7 +12231,7 @@ async function loadSourceHealth(force = false) {
       </div>
       <div style="overflow-x:auto;">
         <table style="width:100%;border-collapse:collapse;font-size:12px;min-width:620px;">
-          <thead><tr><th style="text-align:left;padding:8px;">数据源</th><th style="text-align:left;padding:8px;">用途</th><th style="text-align:left;padding:8px;">状态</th><th style="text-align:right;padding:8px;">延迟</th></tr></thead>
+          <thead><tr><th style="text-align:left;padding:8px;">数据源</th><th style="text-align:left;padding:8px;">用途</th><th style="text-align:left;padding:8px;">能力</th><th style="text-align:left;padding:8px;">状态</th><th style="text-align:right;padding:8px;">延迟</th></tr></thead>
           <tbody>${rows}</tbody>
         </table>
       </div>`;
