@@ -280,11 +280,11 @@
     .chart-pattern-controls-title { color:var(--yellow); font-weight:800; margin-right:2px; }
     .chart-pattern-controls label { display:inline-flex; align-items:center; gap:3px; cursor:pointer; white-space:nowrap; }
     .chart-pattern-controls input { accent-color:var(--purple); }
-    .kline-toolbar { display:flex; align-items:center; gap:7px 10px; flex-wrap:wrap; overflow-x:auto; padding:7px 8px; margin:0 0 10px; border:1px solid color-mix(in srgb,var(--border) 78%,transparent); border-radius:9px; background:color-mix(in srgb,var(--bg-secondary) 66%,transparent); font-size:10px; color:var(--text-secondary); }
+    .kline-toolbar { display:flex; align-items:center; gap:7px 10px; flex-wrap:wrap; min-width:0; max-width:100%; overflow:hidden; padding:7px 8px; margin:0 0 10px; border:1px solid color-mix(in srgb,var(--border) 78%,transparent); border-radius:9px; background:color-mix(in srgb,var(--bg-secondary) 66%,transparent); font-size:10px; color:var(--text-secondary); }
     .kline-toolbar .tab { flex:0 0 auto; }
-    .kline-control-group { display:inline-flex; align-items:center; gap:4px; flex:0 0 auto; white-space:nowrap; }
+    .kline-control-group { display:inline-flex; align-items:center; gap:4px; min-width:0; flex:1 1 520px; flex-wrap:wrap; white-space:normal; }
     .kline-control-label { color:var(--yellow); font-weight:800; margin-right:2px; }
-    .kline-data-status { flex:1 1 140px; min-width:120px; color:var(--text-secondary); white-space:normal; }
+    .kline-data-status { flex:1 1 100%; min-width:120px; color:var(--text-secondary); white-space:normal; }
     .pattern-price-snapshot { color:var(--text-secondary); font-variant-numeric:tabular-nums; }
     .chart-structure-list { display:grid; gap:6px; margin-top:8px; }
     .chart-structure-item { border:1px solid color-mix(in srgb,var(--border) 78%,transparent); border-radius:8px; padding:8px 10px; background:var(--bg-secondary); font-size:10px; line-height:1.45; }
@@ -2588,22 +2588,19 @@
             <div id="stock-chart-card" style="background:var(--bg-card);border-radius:12px;padding:16px;border:1px solid var(--border);margin-bottom:20px;">
               <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px;">
                 <div id="stock-chart-title" style="font-weight:700;font-size:15px;"></div>
-                <div class="kline-toolbar" data-kline-controls="stocks" aria-label="股票K线周期与范围">
+                <div class="kline-toolbar" data-kline-controls="stocks" aria-label="股票K线周期">
                   <button class="tab chart-fullscreen-button" type="button" data-chart-fullscreen="stocks" onclick="toggleChartFullscreen('stocks')" title="放大查看股票K线">⛶ 全屏</button>
                   <div class="kline-control-group" aria-label="K线周期"><span class="kline-control-label">周期</span>
-                    <button class="tab stock-kline-period active" data-kline-period="1d" onclick="setStockKlinePeriod('1d')">日线</button>
                     <button class="tab stock-kline-period" data-kline-period="5m" onclick="setStockKlinePeriod('5m')">5分</button>
                     <button class="tab stock-kline-period" data-kline-period="15m" onclick="setStockKlinePeriod('15m')">15分</button>
                     <button class="tab stock-kline-period" data-kline-period="1h" onclick="setStockKlinePeriod('1h')">1小时</button>
-                  </div>
-                  <div class="kline-control-group" aria-label="K线范围"><span class="kline-control-label">范围</span>
-                    <button class="tab stock-kline-range" data-days="1" data-kline-range="1" onclick="setStockKlineRange(1)">1日</button>
-                    <button class="tab stock-kline-range" data-days="3" data-kline-range="3" onclick="setStockKlineRange(3)">3日</button>
-                    <button class="tab stock-kline-range" data-days="5" data-kline-range="5" onclick="setStockKlineRange(5)">5日</button>
-                    <button class="tab stock-kline-range active" data-days="60" data-kline-range="60" onclick="setStockKlineRange(60)">60日</button>
-                    <button class="tab stock-kline-range" data-days="120" data-kline-range="120" onclick="setStockKlineRange(120)">120日</button>
-                    <button class="tab stock-kline-range" data-days="365" data-kline-range="365" onclick="setStockKlineRange(365)">1年</button>
-                    <button class="tab stock-kline-range" data-days="1825" data-kline-range="1825" onclick="setStockKlineRange(1825)">5年</button>
+                    <button class="tab stock-kline-period active" data-kline-period="1d" onclick="setStockKlinePeriod('1d')">1日</button>
+                    <button class="tab stock-kline-period" data-kline-period="3d" onclick="setStockKlinePeriod('3d')">3日</button>
+                    <button class="tab stock-kline-period" data-kline-period="5d" onclick="setStockKlinePeriod('5d')">5日</button>
+                    <button class="tab stock-kline-period" data-kline-period="60d" onclick="setStockKlinePeriod('60d')">60日</button>
+                    <button class="tab stock-kline-period" data-kline-period="120d" onclick="setStockKlinePeriod('120d')">120日</button>
+                    <button class="tab stock-kline-period" data-kline-period="1y" onclick="setStockKlinePeriod('1y')">1年</button>
+                    <button class="tab stock-kline-period" data-kline-period="5y" onclick="setStockKlinePeriod('5y')">5年</button>
                   </div>
                   <span id="stock-chart-data-status" class="kline-data-status" aria-live="polite"></span>
                 </div>
@@ -7809,7 +7806,6 @@ let currentStockSymbol = 'sh600519';
 let currentStockName = '贵州茅台';
 let currentStockApiSymbol = '';
 let currentStockKlinePeriod = '1d';
-let currentStockDays = 60;
 let currentStockKlineReason = '';
 let stockChartReplayIndex = -1;
 let stockChartKlines = [];
@@ -8032,13 +8028,6 @@ function stepStockChartReplay(action) {
   else if (window.stockMoneyKLine) window.stockMoneyKLine.create(stockChartKlines);
   else drawStockKline(document.getElementById('stock-kline'), stockChartKlines);
 }
-function setStockKlineRange(days) {
-  currentStockDays = Number(days) || 60;
-  document.querySelectorAll('.stock-kline-range').forEach(btn => {
-    btn.classList.toggle('active', Number(btn.dataset.days) === currentStockDays);
-  });
-  loadStockKline();
-}
 function setStockKlinePeriod(period) {
   currentStockKlinePeriod = String(period || '1d').toLowerCase();
   document.querySelectorAll('.stock-kline-period').forEach(btn => {
@@ -8067,7 +8056,7 @@ async function loadStockKline(symbol, name, apiSymbol) {
   if (!canvas) return;
   try {
     if (status) status.textContent = '正在加载真实数据…';
-    const res = await fetch('/api/stock/kline?symbol=' + encodeURIComponent(currentStockSymbol) + '&days=' + currentStockDays + '&interval=' + encodeURIComponent(currentStockKlinePeriod) + (currentStockApiSymbol ? '&api=' + encodeURIComponent(currentStockApiSymbol) : ''));
+    const res = await fetch('/api/stock/kline?symbol=' + encodeURIComponent(currentStockSymbol) + '&period=' + encodeURIComponent(currentStockKlinePeriod) + '&interval=' + encodeURIComponent(currentStockKlinePeriod) + (currentStockApiSymbol ? '&api=' + encodeURIComponent(currentStockApiSymbol) : ''));
     const d = await res.json();
     if (!d.success || !d.data || !d.data.length) {
       currentStockKlineReason = d.reason || d.error || '暂无数据';
@@ -8083,7 +8072,8 @@ async function loadStockKline(symbol, name, apiSymbol) {
       return;
     }
     currentStockKlineReason = '';
-    if (status) status.textContent = `${d.dataStatus === 'cached' ? '缓存' : '实时'} · ${d.source || '股票行情'} · ${d.updatedAt ? formatChartTime(d.updatedAt) : ''}`;
+    const freshness = d.dataStatus === 'cached' ? '缓存' : d.dataStatus === 'stale' ? '过期缓存' : d.dataStatus === 'degraded' ? '降级' : '实时';
+    if (status) status.textContent = `${freshness} · ${d.source || '股票行情'} · ${d.updatedAt ? formatChartTime(d.updatedAt) : ''}${d.reason ? ` · ${d.reason}` : ''}`;
     stockChartKlines = d.data;
     stockChartReplayIndex = stockChartKlines.length - 1;
     loadStockChartOverlayConfig();
@@ -11468,7 +11458,9 @@ function showTab(tab, clicked, options = {}) {
   if (!options.scopeAlreadySynced && impliedScope && impliedScope !== activeMarketScope) setMarketScope(impliedScope, { openTab: false });
   window.mm_active_tab = targetTab;
   try { localStorage.setItem('mm-last-tab', targetTab); } catch (e) {}
-  document.querySelectorAll('.tab').forEach((t) => t.classList.remove('active'));
+  // Only navigation tabs belong to showTab. K-line period controls also use
+  // the shared .tab visual class and must retain their own active state.
+  document.querySelectorAll('.tabs .tab').forEach((t) => t.classList.remove('active'));
   const button = clicked || [...document.querySelectorAll('.tabs .tab')].find(item => (item.getAttribute('onclick') || '').includes(`'${targetTab}'`));
   if (button) button.classList.add('active');
   const targetContent = document.getElementById(targetTab + '-tab');

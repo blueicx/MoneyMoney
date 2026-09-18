@@ -118,6 +118,7 @@ import { paperTradingExecutor } from '../features/trading-executor';
 import { unifiedPaperLedgerStore, calculateUnifiedPerformance, replayUnifiedPaperOrders, type UnifiedPaperOrder } from '../features/unified-paper-trading';
 import { logger } from '../utils/logger';
 import { curlCommand } from '../utils/platform-command';
+import { STOCK_KLINE_PERIODS, createYahooStockKlineAdapter } from '../data/yahoo-adapter';
 import { actionsForScreener, fieldsForScreener, filterRows, isScreenerScope, paginateRows, serializeTemplate, sortRows, type ScreenerFilter, type ScreenerScope, type ScreenerSort } from '../features/market-screener';
 import { compareInstruments, createCompareSnapshot, type CompareInstrument, type CompareScope } from '../features/instrument-compare';
 import {
@@ -1443,68 +1444,47 @@ app.get('/api/stock/market-breadth', async (_req, res) => {
 
 // --- Stock K-line ---
 
+const stockKlineAdapters = new Map<string, ReturnType<typeof createYahooStockKlineAdapter>>();
+function getStockKlineAdapter(period: string, symbol: string) {
+  const key = `${period}:${symbol}`;
+  let adapter = stockKlineAdapters.get(key);
+  if (!adapter) {
+    adapter = createYahooStockKlineAdapter();
+    stockKlineAdapters.set(key, adapter);
+  }
+  return adapter;
+}
+
 app.get('/api/stock/kline', async (req, res) => {
   try {
     const symbol = String(req.query.symbol || 'sh600519');
     const rawApiSymbol = String(req.query.api || '').trim().toUpperCase();
-    const interval = String(req.query.interval || '1d').trim().toLowerCase();
-    const supportedIntervals = new Set(['1d']);
-    const days = Math.max(1, Math.min(1825, parseInt(String(req.query.days || '30'), 10) || 30));
-
-    // The current free stock source only exposes daily adjusted bars. Keep
-    // the period selector honest: never substitute daily data for an
-    // intraday request and never borrow bars from another market.
-    if (!supportedIntervals.has(interval)) {
+    const period = String(req.query.period || req.query.interval || '1d').trim().toLowerCase();
+    const periodConfig = STOCK_KLINE_PERIODS[period as keyof typeof STOCK_KLINE_PERIODS];
+    if (!periodConfig) {
       return res.json({
         success: false,
         data: null,
         dataStatus: 'unavailable',
-        source: '腾讯财经日线',
+        source: 'Yahoo Finance 历史K线',
         updatedAt: new Date().toISOString(),
-        reason: `当前股票数据源仅提供日线，${interval} 周期暂不支持`,
+        reason: `当前股票周期不支持：${period}`,
       });
     }
-
-    // Search supplies the actual Tencent exchange suffix; older clients fall
-    // back to Nasdaq, which still covers the popular default list.
-    const normalizedApiSymbol = rawApiSymbol && !rawApiSymbol.startsWith('US')
-      ? 'us' + rawApiSymbol
-      : rawApiSymbol;
-    const apiSymbol = normalizedApiSymbol ||
-      (symbol.startsWith('us') && !symbol.includes('.') ? symbol + '.OQ' : symbol);
-    const url = `https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=${apiSymbol},day,,,${days},qfq`;
-
-    const cacheKey = `kline:${symbol}:${interval}:${days}`;
-    const cached = getCached(cacheKey);
-    if (cached) return res.json({ success: true, data: cached, dataStatus: 'cached', source: '腾讯财经日线', updatedAt: new Date().toISOString() });
-
-    const response = await fetch(url, { signal: AbortSignal.timeout(15000) });
-    if (!response.ok) throw new Error('API failed');
-
-    const json: any = await response.json();
-    const dataKey = Object.keys(json.data || {})[0];
-    if (!dataKey) throw new Error('No data');
-
-    const raw = json.data[dataKey].qfqday || json.data[dataKey].day;
-    if (!raw?.length) throw new Error('Empty');
-
-    const klines = raw.map((k: string[]) => ({
-      time: new Date(k[0]).getTime(),
-      open: parseFloat(k[1]),
-      close: parseFloat(k[2]),
-      high: parseFloat(k[3]),
-      low: parseFloat(k[4]),
-      volume: parseFloat(k[5]) || 0,
-    }));
-
-    setCached(cacheKey, klines);
-    res.json({ success: true, data: klines, dataStatus: 'live', source: '腾讯财经日线', updatedAt: new Date().toISOString() });
+    const requestedSymbol = rawApiSymbol || symbol;
+    const adapter = getStockKlineAdapter(period, requestedSymbol);
+    const snapshot = await adapter.fetch({ symbol: requestedSymbol, period });
+    const updatedAt = snapshot.fetchedAt || new Date().toISOString();
+    if (!snapshot.data?.length) {
+      return res.json({ success: false, data: null, dataStatus: snapshot.status, source: snapshot.source, updatedAt, reason: snapshot.error || `暂无${periodConfig.label}股票K线数据` });
+    }
+    res.json({ success: true, data: snapshot.data, dataStatus: snapshot.status, source: snapshot.source, updatedAt, reason: snapshot.error || undefined });
   } catch (e: any) {
     res.json({
       success: false,
       data: null,
       dataStatus: 'unavailable',
-      source: '腾讯财经日线',
+      source: 'Yahoo Finance 历史K线',
       updatedAt: new Date().toISOString(),
       reason: `股票K线来源不可用：${e.message || '请求失败'}`,
       error: e.message,

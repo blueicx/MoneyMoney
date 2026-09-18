@@ -87,18 +87,25 @@ describe('K-Line Upgrade & Advanced Capabilities', () => {
     assert.doesNotMatch(html, /\.market-workspace-shell\s*\{[\s\S]*?grid-template-columns:\s*224px\s+minmax\(0,\s*1fr\)\s+280px;/);
   });
 
-  it('K-line toolbar keeps period, range and fullscreen controls together', () => {
+  it('K-line toolbar exposes one mutually exclusive period selector', () => {
     const html = fs.readFileSync(path.join(__dirname, '../src/web/public/index.html'), 'utf8');
     const toolbar = document.querySelector('[data-kline-controls="stocks"]');
     assert.ok(toolbar, 'Stock K-line controls should be a single toolbar');
-    assert.ok(toolbar.querySelector('[data-kline-period="1d"]'));
-    assert.ok(toolbar.querySelector('[data-kline-period="5m"]'));
-    for (const range of ['1', '3', '5', '60', '120', '365', '1825']) {
-      assert.ok(toolbar.querySelector(`[data-kline-range="${range}"]`), `Missing ${range} day range`);
+    assert.equal(toolbar.querySelectorAll('.stock-kline-period').length, 10);
+    for (const period of ['5m', '15m', '1h', '1d', '3d', '5d', '60d', '120d', '1y', '5y']) {
+      assert.ok(toolbar.querySelector(`[data-kline-period="${period}"]`), `Missing ${period} period`);
     }
+    assert.equal(toolbar.querySelectorAll('[data-kline-range]').length, 0, 'Range must not be a second selector');
     assert.ok(toolbar.querySelector('[data-chart-fullscreen="stocks"]'));
     assert.match(html, /setStockKlinePeriod\(['"]5m['"]\)/);
     assert.match(html, /interval='?\s*\+?\s*encodeURIComponent\(currentStockKlinePeriod\)/);
+    assert.doesNotMatch(html, /setStockKlineRange\(/);
+  });
+
+  it('switching market tabs does not clear the K-line period active state', () => {
+    const html = fs.readFileSync(path.join(__dirname, '../src/web/public/index.html'), 'utf8');
+    assert.doesNotMatch(html, /document\.querySelectorAll\('\.tab'\)\.forEach\(\(t\) => t\.classList\.remove\('active'\)\)/);
+    assert.match(html, /document\.querySelectorAll\('\.tabs \.tab'\)/);
   });
 
   it('Pattern details expose concrete OHLC prices and explicit unavailable reasons', () => {
