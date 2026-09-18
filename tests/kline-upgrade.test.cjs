@@ -114,4 +114,11 @@ describe('K-Line Upgrade & Advanced Capabilities', () => {
     assert.match(html, /\[['"]O['"],\s*item\?\.open\]/);
     assert.match(html, /当前周期暂不支持|来源不可用|暂无数据/);
   });
+
+  it('structure explanations expose exact price and lifecycle status', () => {
+    const html = fs.readFileSync(path.join(__dirname, '../src/web/public/index.html'), 'utf8');
+    assert.match(html, /item\.price/);
+    assert.match(html, /item\.status/);
+    assert.match(html, /确认状态/);
+  });
 });

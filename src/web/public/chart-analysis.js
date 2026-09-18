@@ -64,6 +64,7 @@
     return {
       index, type, label, direction, time: bars[index].time,
       open: bar.open, high: bar.high, low: bar.low, close: bar.close, volume: bar.volume,
+      price: bar.close, status: 'confirmed',
       confidence, condition, meaning, disclaimer: '形态仅供参考，不作为买卖建议。'
     };
   }
@@ -234,12 +235,12 @@
     const structures = [];
     for (let index = 1; index < bars.length - 1; index += 1) {
       if (bars[index].high > bars[index - 1].high && bars[index].high >= bars[index + 1].high) {
-        structures.push({ index, type: 'swing-high', label: '摆动高点', direction: 'bearish', time: bars[index].time,
+        structures.push({ index, type: 'swing-high', label: '摆动高点', direction: 'bearish', time: bars[index].time, price: bars[index].high, status: 'confirmed',
           confidence: 'Medium', condition: '当前高点高于相邻K线高点', meaning: '短线遇阻或卖方开始占优，需等待后续K线确认',
           disclaimer: '结构标记仅供研究参考，不构成交易指令。' });
       }
       if (bars[index].low < bars[index - 1].low && bars[index].low <= bars[index + 1].low) {
-        structures.push({ index, type: 'swing-low', label: '摆动低点', direction: 'bullish', time: bars[index].time,
+        structures.push({ index, type: 'swing-low', label: '摆动低点', direction: 'bullish', time: bars[index].time, price: bars[index].low, status: 'confirmed',
           confidence: 'Medium', condition: '当前低点低于相邻K线低点', meaning: '短线获得支撑或买方开始占优，需等待后续K线确认',
           disclaimer: '结构标记仅供研究参考，不构成交易指令。' });
       }
@@ -252,8 +253,8 @@
     const fractals = [];
     for (let index = 1; index < bars.length - 1; index += 1) {
       const previous = bars[index - 1], current = bars[index], next = bars[index + 1];
-      if (current.high >= previous.high && current.high > next.high) fractals.push({ index, kind: 'top', price: current.high, time: current.time, confirmed: true });
-      if (current.low <= previous.low && current.low < next.low) fractals.push({ index, kind: 'bottom', price: current.low, time: current.time, confirmed: true });
+      if (current.high >= previous.high && current.high > next.high) fractals.push({ index, kind: 'top', price: current.high, time: current.time, confirmed: true, status: 'confirmed' });
+      if (current.low <= previous.low && current.low < next.low) fractals.push({ index, kind: 'bottom', price: current.low, time: current.time, confirmed: true, status: 'confirmed' });
     }
     const alternating = [];
     fractals.forEach(item => {
@@ -265,19 +266,19 @@
     });
     const strokes = alternating.slice(1).map((item, index) => {
       const start = alternating[index];
-      return { startIndex: start.index, endIndex: item.index, startPrice: start.price, endPrice: item.price, direction: item.price >= start.price ? 'up' : 'down', confirmed: item.confirmed };
+      return { startIndex: start.index, endIndex: item.index, startPrice: start.price, endPrice: item.price, price: item.price, direction: item.price >= start.price ? 'up' : 'down', confirmed: item.confirmed, status: item.confirmed ? 'confirmed' : 'preparing' };
     });
     const segments = [];
     for (let index = 2; index < strokes.length; index += 2) {
       const first = strokes[index - 2], last = strokes[index];
-      segments.push({ startIndex: first.startIndex, endIndex: last.endIndex, direction: last.endPrice >= first.startPrice ? 'up' : 'down', strokeCount: 3, confirmed: first.confirmed && last.confirmed });
+      segments.push({ startIndex: first.startIndex, endIndex: last.endIndex, price: last.endPrice, direction: last.endPrice >= first.startPrice ? 'up' : 'down', strokeCount: 3, confirmed: first.confirmed && last.confirmed, status: first.confirmed && last.confirmed ? 'confirmed' : 'preparing' });
     }
     const hubs = [];
     for (let index = 2; index < strokes.length; index += 1) {
       const window = strokes.slice(index - 2, index + 1);
       const high = Math.min(...window.map(item => Math.max(item.startPrice, item.endPrice)));
       const low = Math.max(...window.map(item => Math.min(item.startPrice, item.endPrice)));
-      if (low <= high) hubs.push({ startIndex: window[0].startIndex, endIndex: window[2].endIndex, low, high, confirmed: window.every(item => item.confirmed) });
+      if (low <= high) hubs.push({ startIndex: window[0].startIndex, endIndex: window[2].endIndex, low, high, price: (low + high) / 2, confirmed: window.every(item => item.confirmed), status: window.every(item => item.confirmed) ? 'confirmed' : 'preparing' });
     }
     const tradePoints = [];
     segments.forEach((segment, index) => {
@@ -286,6 +287,7 @@
       const side = segment.direction === 'down' ? 'buy' : 'sell';
       tradePoints.push({
         index: next.startIndex,
+        price: bars[next.startIndex]?.close,
         type: side === 'buy' ? 1 : -1,
         side,
         status: next.confirmed ? 'confirmed' : 'preparing',
@@ -300,7 +302,7 @@
     if (hubs.length >= 2) {
       for (let i = 0; i < hubs.length - 1; i++) {
         const direction = hubs[i+1].high > hubs[i].high ? 'up' : 'down';
-        trends.push({ startIndex: hubs[i].startIndex, endIndex: hubs[i+1].endIndex, direction });
+        trends.push({ startIndex: hubs[i].startIndex, endIndex: hubs[i+1].endIndex, price: hubs[i + 1].price, direction, status: hubs[i + 1].status });
       }
     }
     const macd = calculateMACD(bars);
@@ -405,7 +407,10 @@
 
     const lines = [];
     if (options.indicators.ma) {
-      for (const period of [5, 10, 20]) lines.push({ type: 'ma', period, values: movingAverage(normalized, period) });
+      for (const period of [5, 10, 20]) {
+        const values = movingAverage(normalized, period);
+        lines.push({ type: 'ma', period, values, latestValue: values.slice().reverse().find(value => value != null) ?? null });
+      }
     }
     if (options.indicators.boll) lines.push({ type: 'boll', period: 20, values: bollingerBands(normalized) });
     if (options.indicators.macd) lines.push({ type: 'macd', period: { fast: 12, slow: 26, signal: 9 }, values: calculateMACD(normalized) });

@@ -1,4 +1,4 @@
-export type DataStatus = 'live' | 'cached' | 'degraded' | 'unavailable' | 'empty';
+export type DataStatus = 'live' | 'cached' | 'partial' | 'degraded' | 'unavailable' | 'empty';
 export type DataQuality = 'high' | 'medium' | 'low';
 export type DataDataset = 'quote' | 'bars' | 'depth' | 'funding' | 'openInterest' | 'optionsChain' | 'fundamentals' | 'filings' | 'news' | 'events' | 'settlementEvidence';
 
@@ -7,6 +7,10 @@ export interface DataCapability {
   reason?: string;
   lastUpdated: number;
   quality?: DataQuality;
+  completeness?: number;
+  latency?: 'live' | 'delayed' | 'cached';
+  health?: 'healthy' | 'degraded' | 'open';
+  failureCount?: number;
   budget?: number;
   marketScope?: readonly string[];
   capabilities?: readonly DataDataset[];
@@ -27,10 +31,13 @@ export interface DataSourceDefinition {
   markets?: readonly string[];
   capabilities?: readonly DataDataset[];
   quality?: DataQuality;
+  completeness?: number;
+  latency?: 'live' | 'delayed' | 'cached';
   budget?: number;
   lastUpdated?: number;
   retry?: RetryPolicy;
   ttlMs?: number;
+  circuit?: { failureThreshold?: number; openMs?: number };
   fetchLive: (params: DataFetchParams) => Promise<unknown>;
   fetchCached?: (params: DataFetchParams) => Promise<unknown>;
 }
@@ -45,12 +52,22 @@ export interface DataSourceSummary {
   markets: string[];
   capabilities: DataDataset[];
   quality: DataQuality;
+  completeness?: number;
+  latency?: 'live' | 'delayed' | 'cached';
+  health?: { status: 'healthy' | 'degraded' | 'open'; failures: number; lastError?: string };
   budget?: number;
 }
 
 interface RouterCacheEntry {
   data: unknown;
   expiresAt: number;
+}
+
+interface SourceHealthState {
+  consecutiveFailures: number;
+  totalFailures: number;
+  lastError?: string;
+  circuitOpenedAt?: number;
 }
 
 function isEmptyData(data: unknown): boolean {
@@ -64,11 +81,51 @@ function errorMessage(error: unknown): string {
 export class DataSourceRouter {
   private readonly sources = new Map<string, DataSourceDefinition>();
   private readonly cache = new Map<string, RouterCacheEntry>();
+  private readonly inFlight = new Map<string, Promise<RoutedData>>();
+  private readonly health = new Map<string, SourceHealthState>();
 
   register(name: string, source: DataSourceDefinition): void {
     if (!name.trim()) throw new Error('Data source name is required');
     if (typeof source.fetchLive !== 'function') throw new Error(`Data source ${name} must define fetchLive()`);
     this.sources.set(name, source);
+    if (!this.health.has(name)) this.health.set(name, { consecutiveFailures: 0, totalFailures: 0 });
+  }
+
+  resetCircuit(name: string): void {
+    const state = this.health.get(name);
+    if (!state) return;
+    state.consecutiveFailures = 0;
+    state.circuitOpenedAt = undefined;
+    state.lastError = undefined;
+  }
+
+  private healthState(name: string): SourceHealthState {
+    const state = this.health.get(name) || { consecutiveFailures: 0, totalFailures: 0 };
+    this.health.set(name, state);
+    return state;
+  }
+
+  private circuitOpen(name: string, source: DataSourceDefinition): boolean {
+    const state = this.healthState(name);
+    if (!state.circuitOpenedAt) return false;
+    const openMs = Math.max(0, Number(source.circuit?.openMs ?? 30_000));
+    if (Date.now() - state.circuitOpenedAt >= openMs) {
+      state.circuitOpenedAt = undefined;
+      return false;
+    }
+    return true;
+  }
+
+  private healthMeta(name: string, source: DataSourceDefinition) {
+    const state = this.healthState(name);
+    const status = state.circuitOpenedAt ? 'open' : state.consecutiveFailures ? 'degraded' : 'healthy';
+    return {
+      health: status as 'healthy' | 'degraded' | 'open',
+      failureCount: state.totalFailures,
+      ...(state.lastError ? { lastError: state.lastError } : {}),
+      completeness: source.completeness,
+      latency: source.latency,
+    };
   }
 
   listSources(marketId?: string, capability?: DataDataset): DataSourceSummary[] {
@@ -79,6 +136,11 @@ export class DataSourceRouter {
         markets: [...(source.markets || [])],
         capabilities: [...(source.capabilities || [])],
         quality: source.quality || 'medium',
+        ...((source.completeness !== undefined || source.latency !== undefined || (this.health.get(name)?.totalFailures || 0) > 0) ? {
+          ...(source.completeness === undefined ? {} : { completeness: Math.max(0, Math.min(1, Number(source.completeness))) }),
+          ...(source.latency === undefined ? {} : { latency: source.latency }),
+          health: { status: this.healthMeta(name, source).health, failures: this.healthMeta(name, source).failureCount, ...(this.healthMeta(name, source).lastError ? { lastError: this.healthMeta(name, source).lastError } : {}) },
+        } : {}),
         ...(source.budget === undefined ? {} : { budget: source.budget }),
       }))
       .sort((left, right) => left.name.localeCompare(right.name));
@@ -124,7 +186,32 @@ export class DataSourceRouter {
       return this.unavailable(`Data source ${name} does not support capability ${params.capability ?? '(missing)'}`, source);
     }
 
+    if (this.circuitOpen(name, source)) {
+      const state = this.healthState(name);
+      return {
+        data: null,
+        capability: {
+          status: 'unavailable', reason: `Data source ${name} circuit is open`, lastUpdated: source.lastUpdated ?? Date.now(),
+          quality: source.quality ?? 'low', budget: source.budget, marketScope: source.markets, capabilities: source.capabilities,
+          ...this.healthMeta(name, source),
+        },
+      };
+    }
+
     const key = this.cacheKey(name, params);
+    const active = this.inFlight.get(key);
+    if (active) return active;
+
+    const request = this.fetchInternal(name, source, params, key);
+    this.inFlight.set(key, request);
+    try {
+      return await request;
+    } finally {
+      if (this.inFlight.get(key) === request) this.inFlight.delete(key);
+    }
+  }
+
+  private async fetchInternal(name: string, source: DataSourceDefinition, params: DataFetchParams, key: string): Promise<RoutedData> {
     const cache = this.cache.get(key);
     const ttlMs = Math.max(0, Math.floor(source.ttlMs ?? 0));
     if (!params.forceRefresh && cache && ttlMs > 0 && cache.expiresAt > Date.now()) {
@@ -133,33 +220,48 @@ export class DataSourceRouter {
         capability: {
           status: 'cached', reason: 'Fresh request cache', lastUpdated: cache.expiresAt - ttlMs,
           quality: source.quality ?? 'medium', budget: source.budget, marketScope: source.markets, capabilities: source.capabilities,
+          ...this.healthMeta(name, source),
         },
       };
     }
 
     try {
       const data = await this.fetchWithRetry(source, params);
+      this.resetCircuit(name);
       if (!isEmptyData(data) && ttlMs > 0) this.cache.set(key, { data, expiresAt: Date.now() + ttlMs });
       const capability: DataCapability = {
         status: isEmptyData(data) ? 'empty' : 'live',
         ...(isEmptyData(data) ? { reason: 'No data returned by the selected source' } : {}),
         lastUpdated: Date.now(), quality: source.quality ?? 'high', budget: source.budget,
         marketScope: source.markets, capabilities: source.capabilities,
+        ...this.healthMeta(name, source),
       };
       return { data, capability };
     } catch (error) {
       const liveReason = errorMessage(error);
+      const state = this.healthState(name);
+      state.consecutiveFailures += 1;
+      state.totalFailures += 1;
+      state.lastError = liveReason;
+      const threshold = Math.max(1, Math.floor(source.circuit?.failureThreshold ?? 3));
+      if (state.consecutiveFailures >= threshold) state.circuitOpenedAt = Date.now();
       if (source.fetchCached) {
         try {
           const cached = await source.fetchCached(params);
           if (!isEmptyData(cached)) {
-            return { data: cached, capability: { status: 'cached', reason: liveReason, lastUpdated: source.lastUpdated ?? Date.now(), quality: source.quality ?? 'medium', budget: source.budget, marketScope: source.markets, capabilities: source.capabilities } };
+            return { data: cached, capability: { status: 'cached', reason: liveReason, lastUpdated: source.lastUpdated ?? Date.now(), quality: source.quality ?? 'medium', budget: source.budget, marketScope: source.markets, capabilities: source.capabilities, ...this.healthMeta(name, source) } };
           }
         } catch (cachedError) {
           return this.unavailable(`${liveReason}; cache unavailable: ${errorMessage(cachedError)}`, source);
         }
       }
-      return this.unavailable(liveReason, source);
+      return {
+        data: null,
+        capability: {
+          status: 'unavailable', reason: liveReason, lastUpdated: source.lastUpdated ?? Date.now(), quality: source.quality ?? 'low', budget: source.budget,
+          marketScope: source.markets, capabilities: source.capabilities, ...this.healthMeta(name, source),
+        },
+      };
     }
   }
 }

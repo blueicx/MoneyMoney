@@ -7965,11 +7965,12 @@ function renderChartStructureList(targetId, structures, chan, emptyText) {
   (structures || []).slice(-6).forEach(item => items.push({
     label: item.label || (item.type === 'swing-high' ? '摆动高点' : '摆动低点'),
     direction: item.direction || 'neutral', time: item.time, confidence: item.confidence,
-    condition: item.condition, meaning: item.meaning, disclaimer: item.disclaimer,
+    price: item.price, status: item.status, condition: item.condition, meaning: item.meaning, disclaimer: item.disclaimer,
   }));
   (chan?.tradePoints || []).slice(-6).forEach(item => items.push({
     label: `${item.type === 1 ? '一' : item.type === 2 ? '二' : item.type === 3 ? '三' : ''}类${item.side === 'buy' ? '买点' : '卖点'}`,
     direction: item.side === 'buy' ? 'bullish' : 'bearish', time: item.time, confidence: item.confidence,
+    price: item.price, status: item.status,
     condition: item.status === 'confirmed' ? '结构已确认' : '结构仍在准备中', meaning: item.meaning,
     disclaimer: item.disclaimer,
   }));
@@ -7977,7 +7978,9 @@ function renderChartStructureList(targetId, structures, chan, emptyText) {
   el.innerHTML = '<div class="chart-pattern-controls-title">结构说明</div>' + items.reverse().map(item => {
     const direction = item.direction === 'bullish' ? '看涨' : item.direction === 'bearish' ? '看跌' : '中性';
     const time = item.time ? new Date(item.time).toLocaleDateString('zh-CN', { month:'numeric', day:'numeric' }) : '--';
-    return `<article class="chart-structure-item ${stockEscapeHtml(item.direction || 'neutral')}"><strong>${stockEscapeHtml(item.label)} · ${direction}</strong><div class="chart-pattern-item-meta">${time} · 置信度 ${stockEscapeHtml(item.confidence || '未知')} · ${stockEscapeHtml(item.condition || '条件未知')}</div><div><b>通常含义：</b>${stockEscapeHtml(item.meaning || '暂无说明')}</div><div class="chart-pattern-item-meta">${stockEscapeHtml(item.disclaimer || '结构仅供研究参考，不构成交易指令。')}</div></article>`;
+    const statusLabel = item.status === 'confirmed' ? '已确认' : item.status === 'invalidated' ? '已失效' : '准备中';
+    const priceText = Number.isFinite(Number(item.price)) ? ` · 点位 ${stockEscapeHtml(formatChartPrice(item.price))}` : '';
+    return `<article class="chart-structure-item ${stockEscapeHtml(item.direction || 'neutral')}"><strong>${stockEscapeHtml(item.label)} · ${direction}</strong><div class="chart-pattern-item-meta">${time}${priceText} · 确认状态 ${statusLabel} · 置信度 ${stockEscapeHtml(item.confidence || '未知')} · ${stockEscapeHtml(item.condition || '条件未知')}</div><div><b>通常含义：</b>${stockEscapeHtml(item.meaning || '暂无说明')}</div><div class="chart-pattern-item-meta">${stockEscapeHtml(item.disclaimer || '结构仅供研究参考，不构成交易指令。')}</div></article>`;
   }).join('');
 }
 function renderChartPatternMarkers(targetId, patterns, getPosition) {

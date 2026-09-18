@@ -121,6 +121,22 @@ test('structure markers expose an explanation for the UI', () => {
   assert.ok(output.explanations.some(item => item.kind === 'structure'));
 });
 
+test('structure and Chan markers expose exact price and confirmation status', () => {
+  const output = analysis.buildChartOverlays({ bars: bars().concat(bars().map((bar, index) => ({ ...bar, time: bar.time + 5, close: bar.close + index * 0.2 }))), config: { structures: true, indicators: { ma: true } } });
+  assert.ok(output.structures.length > 0);
+  assert.ok(output.structures.every(item => Number.isFinite(item.price) && ['confirmed', 'preparing', 'invalidated'].includes(item.status)));
+  assert.ok(output.chan.fractals.every(item => Number.isFinite(item.price) && item.status));
+  assert.ok(output.chan.strokes.every(item => Number.isFinite(item.price) && item.status));
+  assert.ok(output.chan.tradePoints.every(item => Number.isFinite(item.price) && item.status && item.meaning));
+});
+
+test('indicator lines expose the latest usable value for display', () => {
+  const output = analysis.buildChartOverlays({ bars: Array.from({ length: 25 }, (_, index) => ({ time: index + 1, open: 10 + index, high: 11 + index, low: 9 + index, close: 10 + index, volume: 100 })), config: { indicators: { ma: true } } });
+  const ma20 = output.lines.find(item => item.type === 'ma' && item.period === 20);
+  assert.ok(ma20);
+  assert.equal(ma20.latestValue, 24.5);
+});
+
 test('Replay bounds and context protection', () => {
   assert.equal(analysis.stepReplay(0, 5, 'previous'), 0);
   assert.equal(analysis.stepReplay(4, 5, 'next'), 4);
