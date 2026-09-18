@@ -19,6 +19,16 @@ test('detects candlestick patterns with stable labels and directions', () => {
   assert.ok(found.every(item => item.label && Number.isInteger(item.index) && item.confidence && item.condition && item.meaning && item.disclaimer));
 });
 
+test('candlestick patterns carry the triggering candle price snapshot', () => {
+  const found = analysis.detectCandlestickPatterns(bars());
+  assert.ok(found.length > 0);
+  assert.ok(found.every(item => item.open === bars()[item.index].open));
+  assert.ok(found.every(item => item.high === bars()[item.index].high));
+  assert.ok(found.every(item => item.low === bars()[item.index].low));
+  assert.ok(found.every(item => item.close === bars()[item.index].close));
+  assert.ok(found.every(item => item.volume === bars()[item.index].volume));
+});
+
 test('overlay configuration gates patterns, signals, indicators and volume', () => {
   const output = analysis.buildChartOverlays({
     bars: bars(),

@@ -86,4 +86,25 @@ describe('K-Line Upgrade & Advanced Capabilities', () => {
     assert.match(html, /\.market-workspace-shell\s*\{[\s\S]*?grid-template-columns:\s*224px\s+minmax\(0,\s*1fr\);/);
     assert.doesNotMatch(html, /\.market-workspace-shell\s*\{[\s\S]*?grid-template-columns:\s*224px\s+minmax\(0,\s*1fr\)\s+280px;/);
   });
+
+  it('K-line toolbar keeps period, range and fullscreen controls together', () => {
+    const html = fs.readFileSync(path.join(__dirname, '../src/web/public/index.html'), 'utf8');
+    const toolbar = document.querySelector('[data-kline-controls="stocks"]');
+    assert.ok(toolbar, 'Stock K-line controls should be a single toolbar');
+    assert.ok(toolbar.querySelector('[data-kline-period="1d"]'));
+    assert.ok(toolbar.querySelector('[data-kline-period="5m"]'));
+    for (const range of ['1', '3', '5', '60', '120', '365', '1825']) {
+      assert.ok(toolbar.querySelector(`[data-kline-range="${range}"]`), `Missing ${range} day range`);
+    }
+    assert.ok(toolbar.querySelector('[data-chart-fullscreen="stocks"]'));
+    assert.match(html, /setStockKlinePeriod\(['"]5m['"]\)/);
+    assert.match(html, /interval='?\s*\+?\s*encodeURIComponent\(currentStockKlinePeriod\)/);
+  });
+
+  it('Pattern details expose concrete OHLC prices and explicit unavailable reasons', () => {
+    const html = fs.readFileSync(path.join(__dirname, '../src/web/public/index.html'), 'utf8');
+    assert.match(html, /formatPatternOHLC/);
+    assert.match(html, /\[['"]O['"],\s*item\?\.open\]/);
+    assert.match(html, /当前周期暂不支持|来源不可用|暂无数据/);
+  });
 });

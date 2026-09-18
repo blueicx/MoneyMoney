@@ -1447,7 +1447,23 @@ app.get('/api/stock/kline', async (req, res) => {
   try {
     const symbol = String(req.query.symbol || 'sh600519');
     const rawApiSymbol = String(req.query.api || '').trim().toUpperCase();
-    const days = parseInt(String(req.query.days || '30'));
+    const interval = String(req.query.interval || '1d').trim().toLowerCase();
+    const supportedIntervals = new Set(['1d']);
+    const days = Math.max(1, Math.min(1825, parseInt(String(req.query.days || '30'), 10) || 30));
+
+    // The current free stock source only exposes daily adjusted bars. Keep
+    // the period selector honest: never substitute daily data for an
+    // intraday request and never borrow bars from another market.
+    if (!supportedIntervals.has(interval)) {
+      return res.json({
+        success: false,
+        data: null,
+        dataStatus: 'unavailable',
+        source: '腾讯财经日线',
+        updatedAt: new Date().toISOString(),
+        reason: `当前股票数据源仅提供日线，${interval} 周期暂不支持`,
+      });
+    }
 
     // Search supplies the actual Tencent exchange suffix; older clients fall
     // back to Nasdaq, which still covers the popular default list.
@@ -1458,8 +1474,9 @@ app.get('/api/stock/kline', async (req, res) => {
       (symbol.startsWith('us') && !symbol.includes('.') ? symbol + '.OQ' : symbol);
     const url = `https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=${apiSymbol},day,,,${days},qfq`;
 
-    const cached = getCached('kline:' + symbol);
-    if (cached) return res.json({ success: true, data: cached });
+    const cacheKey = `kline:${symbol}:${interval}:${days}`;
+    const cached = getCached(cacheKey);
+    if (cached) return res.json({ success: true, data: cached, dataStatus: 'cached', source: '腾讯财经日线', updatedAt: new Date().toISOString() });
 
     const response = await fetch(url, { signal: AbortSignal.timeout(15000) });
     if (!response.ok) throw new Error('API failed');
@@ -1480,10 +1497,18 @@ app.get('/api/stock/kline', async (req, res) => {
       volume: parseFloat(k[5]) || 0,
     }));
 
-    setCached('kline:' + symbol, klines);
-    res.json({ success: true, data: klines });
+    setCached(cacheKey, klines);
+    res.json({ success: true, data: klines, dataStatus: 'live', source: '腾讯财经日线', updatedAt: new Date().toISOString() });
   } catch (e: any) {
-    res.json({ success: false, error: e.message });
+    res.json({
+      success: false,
+      data: null,
+      dataStatus: 'unavailable',
+      source: '腾讯财经日线',
+      updatedAt: new Date().toISOString(),
+      reason: `股票K线来源不可用：${e.message || '请求失败'}`,
+      error: e.message,
+    });
   }
 });
 

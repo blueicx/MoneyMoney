@@ -29,6 +29,9 @@ describe('Chart fullscreen behavior', () => {
     assert.ok(document.querySelector('[data-chart-fullscreen="stocks"]'));
     assert.ok(document.querySelector('[data-chart-fullscreen="crypto"]'));
     assert.equal(typeof window.toggleChartFullscreen, 'function');
+    const overlay = document.getElementById('chart-fullscreen-overlay');
+    assert.match(document.querySelector('style').textContent + [...document.querySelectorAll('style')].map(node => node.textContent).join(''), /chart-fullscreen-overlay[\s\S]*position:\s*fixed/);
+    assert.match(overlay.className, /chart-fullscreen-overlay/);
   });
 
   it('opens the selected chart in fullscreen and exits cleanly', () => {

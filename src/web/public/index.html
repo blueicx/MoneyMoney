@@ -280,6 +280,12 @@
     .chart-pattern-controls-title { color:var(--yellow); font-weight:800; margin-right:2px; }
     .chart-pattern-controls label { display:inline-flex; align-items:center; gap:3px; cursor:pointer; white-space:nowrap; }
     .chart-pattern-controls input { accent-color:var(--purple); }
+    .kline-toolbar { display:flex; align-items:center; gap:7px 10px; flex-wrap:wrap; overflow-x:auto; padding:7px 8px; margin:0 0 10px; border:1px solid color-mix(in srgb,var(--border) 78%,transparent); border-radius:9px; background:color-mix(in srgb,var(--bg-secondary) 66%,transparent); font-size:10px; color:var(--text-secondary); }
+    .kline-toolbar .tab { flex:0 0 auto; }
+    .kline-control-group { display:inline-flex; align-items:center; gap:4px; flex:0 0 auto; white-space:nowrap; }
+    .kline-control-label { color:var(--yellow); font-weight:800; margin-right:2px; }
+    .kline-data-status { flex:1 1 140px; min-width:120px; color:var(--text-secondary); white-space:normal; }
+    .pattern-price-snapshot { color:var(--text-secondary); font-variant-numeric:tabular-nums; }
     .chart-structure-list { display:grid; gap:6px; margin-top:8px; }
     .chart-structure-item { border:1px solid color-mix(in srgb,var(--border) 78%,transparent); border-radius:8px; padding:8px 10px; background:var(--bg-secondary); font-size:10px; line-height:1.45; }
     .chart-structure-item.bullish strong { color:var(--green); }
@@ -1909,12 +1915,16 @@
     }
     .chart-fullscreen-overlay {
       position: fixed;
-      top: 0; left: 0; right: 0; bottom: 0;
+      inset: 0;
+      width: 100vw;
+      height: 100vh;
+      min-height: 100dvh;
       background: var(--bg);
       z-index: 9999;
       display: flex;
       flex-direction: column;
       padding: 0;
+      overflow: hidden;
     }
     .chart-fullscreen-overlay[hidden] { display:none !important; pointer-events:none !important; }
     .chart-fullscreen-overlay:not([hidden]) { display:flex; }
@@ -1935,8 +1945,8 @@
     }
     .chart-fullscreen-toolbar .tab { font-size: 13px; }
     .chart-card-fullscreen {
-      position: static !important;
-      inset: auto !important;
+      position: relative !important;
+      inset: 0 !important;
       z-index: auto !important;
       box-sizing: border-box;
       overflow: auto !important;
@@ -1946,6 +1956,7 @@
       background: var(--bg-card) !important;
       width: 100% !important;
       height: 100% !important;
+      max-height: 100dvh !important;
       flex: 1 1 auto;
       min-height: 0;
     }
@@ -2574,18 +2585,28 @@
             <div style="display:flex;gap:8px;overflow-x:auto;padding-bottom:4px;margin-bottom:16px;" id="global-crypto-metrics" data-market-scopes="crypto"></div>
             <div style="font-weight:700;font-size:13px;margin-bottom:10px;">🌍 主要指数</div>
             <div id="stock-indices" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-bottom:20px;"></div>
-            <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
-              <div style="font-weight:700;font-size:13px;">📈 股票K线图</div>
-              <div style="display:flex;gap:5px;">
-                <button class="tab stock-kline-range active" data-days="60" onclick="setStockKlineRange(60)">60日</button>
-                <button class="tab stock-kline-range" data-days="120" onclick="setStockKlineRange(120)">120日</button>
-                <button class="tab stock-kline-range" data-days="250" onclick="setStockKlineRange(250)">一年</button>
-              </div>
-            </div>
-              <div id="stock-chart-card" style="background:var(--bg-card);border-radius:12px;padding:16px;border:1px solid var(--border);margin-bottom:20px;">
+            <div id="stock-chart-card" style="background:var(--bg-card);border-radius:12px;padding:16px;border:1px solid var(--border);margin-bottom:20px;">
               <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px;">
                 <div id="stock-chart-title" style="font-weight:700;font-size:15px;"></div>
-                <button class="tab chart-fullscreen-button" type="button" data-chart-fullscreen="stocks" onclick="toggleChartFullscreen('stocks')" title="放大查看股票K线">⛶ 全屏</button>
+                <div class="kline-toolbar" data-kline-controls="stocks" aria-label="股票K线周期与范围">
+                  <button class="tab chart-fullscreen-button" type="button" data-chart-fullscreen="stocks" onclick="toggleChartFullscreen('stocks')" title="放大查看股票K线">⛶ 全屏</button>
+                  <div class="kline-control-group" aria-label="K线周期"><span class="kline-control-label">周期</span>
+                    <button class="tab stock-kline-period active" data-kline-period="1d" onclick="setStockKlinePeriod('1d')">日线</button>
+                    <button class="tab stock-kline-period" data-kline-period="5m" onclick="setStockKlinePeriod('5m')">5分</button>
+                    <button class="tab stock-kline-period" data-kline-period="15m" onclick="setStockKlinePeriod('15m')">15分</button>
+                    <button class="tab stock-kline-period" data-kline-period="1h" onclick="setStockKlinePeriod('1h')">1小时</button>
+                  </div>
+                  <div class="kline-control-group" aria-label="K线范围"><span class="kline-control-label">范围</span>
+                    <button class="tab stock-kline-range" data-days="1" data-kline-range="1" onclick="setStockKlineRange(1)">1日</button>
+                    <button class="tab stock-kline-range" data-days="3" data-kline-range="3" onclick="setStockKlineRange(3)">3日</button>
+                    <button class="tab stock-kline-range" data-days="5" data-kline-range="5" onclick="setStockKlineRange(5)">5日</button>
+                    <button class="tab stock-kline-range active" data-days="60" data-kline-range="60" onclick="setStockKlineRange(60)">60日</button>
+                    <button class="tab stock-kline-range" data-days="120" data-kline-range="120" onclick="setStockKlineRange(120)">120日</button>
+                    <button class="tab stock-kline-range" data-days="365" data-kline-range="365" onclick="setStockKlineRange(365)">1年</button>
+                    <button class="tab stock-kline-range" data-days="1825" data-kline-range="1825" onclick="setStockKlineRange(1825)">5年</button>
+                  </div>
+                  <span id="stock-chart-data-status" class="kline-data-status" aria-live="polite"></span>
+                </div>
               </div>
               <div id="stock-chart-overlays" class="stock-chart-overlays" aria-current="page" aria-label="K线显示选项">
                 <label><input type="checkbox" data-chart-overlay="signals" checked="" onchange="setStockChartOverlay('signals', this.checked)"> 策略点位</label>
@@ -7787,7 +7808,9 @@ function renderOptionStrategies(expiry) {
 let currentStockSymbol = 'sh600519';
 let currentStockName = '贵州茅台';
 let currentStockApiSymbol = '';
+let currentStockKlinePeriod = '1d';
 let currentStockDays = 60;
+let currentStockKlineReason = '';
 let stockChartReplayIndex = -1;
 let stockChartKlines = [];
 let stockChartOverlayConfig = window.MoneyChartAnalysis?.normalizeOverlayConfig({ strategies:{ maCross:true, rsiReversal:false, bollinger:false, volumeBreakout:false } }) || { signals:true, patterns:false, structures:false, volume:true, indicators:{ ma:true, boll:false, macd:false }, strategies:{ maCross:true, rsiReversal:false, bollinger:false, volumeBreakout:false }, patternTypes:{}, maxLabels:80 };
@@ -7824,7 +7847,19 @@ function movingAverageValue(bars, period) {
 function formatChartPrice(value) {
   const number = Number(value);
   if (!Number.isFinite(number)) return '--';
-  return number >= 1000 ? number.toFixed(0) : number.toFixed(2);
+  if (Math.abs(number) >= 1000) return number.toFixed(0);
+  if (Math.abs(number) >= 1) return number.toFixed(2);
+  return number.toFixed(6).replace(/0+$/, '').replace(/\.$/, '');
+}
+function formatPatternOHLC(item) {
+  const values = [['O', item?.open], ['H', item?.high], ['L', item?.low], ['C', item?.close]];
+  return values.map(([label, value]) => `${label} ${formatChartPrice(value)}`).join(' · ');
+}
+function formatChartTime(value) {
+  if (!value) return '--';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '--';
+  return date.toLocaleString('zh-CN', { year:'numeric', month:'numeric', day:'numeric', hour:'2-digit', minute:'2-digit' });
 }
 function renderMovingAverageValues(targetId, bars, periods) {
   const host = document.getElementById(targetId);
@@ -7908,10 +7943,11 @@ function renderChartPatternList(targetId, patterns, emptyText) {
   }
   el.innerHTML = recent.map(item => {
     const direction = item.direction === 'bullish' ? '看涨' : item.direction === 'bearish' ? '看跌' : '中性';
-    const time = item.time ? new Date(item.time).toLocaleDateString('zh-CN', { month:'numeric', day:'numeric' }) : '--';
+    const time = formatChartTime(item.time);
     return `<article class="chart-pattern-item ${stockEscapeHtml(item.direction || 'neutral')}" data-pattern-index="${Number(item.index)}">
       <strong>${stockEscapeHtml(item.label)} · ${direction}</strong>
       <div class="chart-pattern-item-meta">${time} · 置信度 ${stockEscapeHtml(item.confidence || '未知')} · ${stockEscapeHtml(item.condition || '条件未知')}</div>
+      <div class="pattern-price-snapshot"><b>点位：</b>${stockEscapeHtml(formatPatternOHLC(item))}${Number.isFinite(Number(item.volume)) ? ` · V ${stockEscapeHtml(formatChartPrice(item.volume))}` : ''}</div>
       <div><b>通常含义：</b>${stockEscapeHtml(item.meaning || '暂无说明')}</div>
       <div class="chart-pattern-item-meta">${stockEscapeHtml(item.disclaimer || '形态仅供参考，不作为买卖建议。')}</div>
     </article>`;
@@ -7975,6 +8011,8 @@ function renderChartPatternMarkers(targetId, patterns, getPosition) {
     tooltip.role = 'tooltip';
     tooltip.innerHTML = `
       <div style="font-weight:bold;margin-bottom:4px;color:var(--text)">${stockEscapeHtml(item.label)} <span style="font-size:10px;font-weight:normal;color:var(--text-secondary)">(${direction} · 置信度 ${stockEscapeHtml(item.confidence || '未知')})</span></div>
+      <div style="margin-bottom:4px"><strong>时间：</strong>${stockEscapeHtml(formatChartTime(item.time))}</div>
+      <div style="margin-bottom:4px"><strong>点位：</strong>${stockEscapeHtml(formatPatternOHLC(item))}</div>
       <div style="margin-bottom:4px"><strong>触发条件：</strong>${stockEscapeHtml(item.condition || '条件未知')}</div>
       <div style="margin-bottom:6px"><strong>通常含义：</strong>${stockEscapeHtml(item.meaning || '暂无说明')}</div>
       <div style="font-size:9px;color:var(--text-secondary)">${stockEscapeHtml(item.disclaimer || '形态仅供参考，不作为买卖建议。')}</div>
@@ -8001,6 +8039,13 @@ function setStockKlineRange(days) {
   });
   loadStockKline();
 }
+function setStockKlinePeriod(period) {
+  currentStockKlinePeriod = String(period || '1d').toLowerCase();
+  document.querySelectorAll('.stock-kline-period').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.klinePeriod === currentStockKlinePeriod);
+  });
+  loadStockKline();
+}
 async function loadStockKline(symbol, name, apiSymbol) {
   if (!window.stockMoneyKLine) {
       const canvas = document.getElementById('stock-kline');
@@ -8017,28 +8062,38 @@ async function loadStockKline(symbol, name, apiSymbol) {
   if (apiSymbol !== undefined) currentStockApiSymbol = apiSymbol || '';
   const canvas = document.getElementById('stock-kline');
   const title = document.getElementById('stock-chart-title');
+  const status = document.getElementById('stock-chart-data-status');
   if (title) title.textContent = currentStockName + ' · ' + currentStockSymbol;
   if (!canvas) return;
   try {
-    const res = await fetch('/api/stock/kline?symbol=' + encodeURIComponent(currentStockSymbol) + '&days=' + currentStockDays + (currentStockApiSymbol ? '&api=' + encodeURIComponent(currentStockApiSymbol) : ''));
+    if (status) status.textContent = '正在加载真实数据…';
+    const res = await fetch('/api/stock/kline?symbol=' + encodeURIComponent(currentStockSymbol) + '&days=' + currentStockDays + '&interval=' + encodeURIComponent(currentStockKlinePeriod) + (currentStockApiSymbol ? '&api=' + encodeURIComponent(currentStockApiSymbol) : ''));
     const d = await res.json();
     if (!d.success || !d.data || !d.data.length) {
+      currentStockKlineReason = d.reason || d.error || '暂无数据';
+      if (status) status.textContent = currentStockKlineReason;
       const context = canvas.getContext('2d');
       context.setTransform(1, 0, 0, 1, 0, 0);
       context.clearRect(0, 0, canvas.width, canvas.height);
       stockChartKlines = [];
       stockChartReplayIndex = -1;
       renderChartPatternMarkers('stock-chart-patterns', [], () => null);
-      renderChartPatternList('stock-chart-pattern-list', [], '当前周期未识别到所选蜡烛形态');
+      renderChartPatternList('stock-chart-pattern-list', [], currentStockKlineReason);
       renderChartSignalList('stock-chart-signals', [], '当前周期未触发所选策略信号');
       return;
     }
+    currentStockKlineReason = '';
+    if (status) status.textContent = `${d.dataStatus === 'cached' ? '缓存' : '实时'} · ${d.source || '股票行情'} · ${d.updatedAt ? formatChartTime(d.updatedAt) : ''}`;
     stockChartKlines = d.data;
     stockChartReplayIndex = stockChartKlines.length - 1;
     loadStockChartOverlayConfig();
     if (window.stockMoneyKLine?.update) window.stockMoneyKLine.update(stockChartKlines, { resetReplay: true });
     else drawStockKline(canvas, stockChartKlines);
-  } catch(e) {}
+  } catch(e) {
+    currentStockKlineReason = '股票K线来源不可用，请稍后重试';
+    const status = document.getElementById('stock-chart-data-status');
+    if (status) status.textContent = currentStockKlineReason;
+  }
 }
 function drawStockKline(canvas, klines) {
   if (!canvas || !window.MoneyChartAnalysis) return;
@@ -12774,6 +12829,27 @@ window.smartFetch = function(url, options) {
 
 const chartFullscreenCards = { stocks: 'stock-chart-card', crypto: 'crypto-chart-card' };
 const chartFullscreenPortal = { card: null, parent: null, nextSibling: null };
+let chartNativeFullscreen = false;
+function enterNativeChartFullscreen() {
+  const root = document.documentElement;
+  if (typeof root.requestFullscreen !== 'function') return;
+  try {
+    const result = root.requestFullscreen();
+    chartNativeFullscreen = true;
+    if (result?.catch) result.catch(() => { chartNativeFullscreen = false; });
+  } catch (error) {
+    chartNativeFullscreen = false;
+  }
+}
+function exitNativeChartFullscreen() {
+  if (!chartNativeFullscreen || typeof document.exitFullscreen !== 'function') return;
+  try {
+    const result = document.exitFullscreen();
+    if (result?.catch) result.catch(() => {});
+  } finally {
+    chartNativeFullscreen = false;
+  }
+}
 function redrawVisibleChart(kind) {
   if (kind === 'stocks' && typeof drawStockKline === 'function' && stockChartKlines?.length) {
     if (window.stockMoneyKLine) { window.stockMoneyKLine.create(stockChartKlines); } else { drawStockKline(document.getElementById('stock-kline'), stockChartKlines); }
@@ -12813,6 +12889,7 @@ window.toggleChartFullscreen = function(kind) {
     overlay.hidden = true;
     overlay.setAttribute('aria-hidden', 'true');
     delete document.body.dataset.chartFullscreen;
+    exitNativeChartFullscreen();
     syncChartFullscreenButtons();
     const scheduleExit = window.requestAnimationFrame || (callback => window.setTimeout(callback, 0));
     scheduleExit(() => redrawVisibleChart(kind));
@@ -12833,6 +12910,7 @@ window.toggleChartFullscreen = function(kind) {
   overlay.appendChild(card);
   document.body.dataset.chartFullscreen = kind;
   card.classList.add('chart-card-fullscreen');
+  enterNativeChartFullscreen();
   syncChartFullscreenButtons();
   const schedule = window.requestAnimationFrame || (callback => window.setTimeout(callback, 0));
   schedule(() => redrawVisibleChart(kind));

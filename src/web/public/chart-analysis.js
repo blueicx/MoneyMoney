@@ -60,8 +60,10 @@
   }
 
   function pattern(index, type, label, direction, bars, confidence, condition, meaning) {
+    const bar = normalizeBar(bars[index]);
     return {
       index, type, label, direction, time: bars[index].time,
+      open: bar.open, high: bar.high, low: bar.low, close: bar.close, volume: bar.volume,
       confidence, condition, meaning, disclaimer: '形态仅供参考，不作为买卖建议。'
     };
   }
