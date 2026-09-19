@@ -115,6 +115,7 @@ import {
   createDecisionRecord,
   createEvidenceSnapshot,
   createSavedWorkspace,
+  getEvidenceChanges,
   importPortfolioRows,
   reviewDecision,
   runScenario,
@@ -525,10 +526,10 @@ function decisionEnvelope(input: { market: MarketId; instrument?: string | null;
 }
 
 const SCENARIO_PRESETS: ScenarioDefinition[] = [
-  { id: 'equity-risk-off', name: '股票风险收缩', market: 'stocks', shocks: [{ target: 'market', kind: 'pricePct', value: -10 }, { target: 'volatility', kind: 'absolute', value: 8 }] },
+  { id: 'equity-risk-off', name: '股票风险收缩', market: 'stocks', shocks: [{ target: 'market', kind: 'pricePct', value: -10 }, { target: 'rate', kind: 'rateBps', value: 50 }, { target: 'volatility', kind: 'absolute', value: 8 }] },
   { id: 'options-vol-spike', name: '隐含波动率跳升', market: 'options', shocks: [{ target: 'volatility', kind: 'absolute', value: 15 }] },
-  { id: 'crypto-liquidation', name: '加密连锁爆仓', market: 'crypto', shocks: [{ target: 'market', kind: 'pricePct', value: -18 }, { target: 'volatility', kind: 'absolute', value: 20 }] },
-  { id: 'prediction-reprice', name: '预测概率重估', market: 'prediction', shocks: [{ target: 'market', kind: 'pricePct', value: -12 }] },
+  { id: 'crypto-liquidation', name: '加密连锁爆仓', market: 'crypto', shocks: [{ target: 'market', kind: 'pricePct', value: -18 }, { target: 'funding', kind: 'fundingPct', value: 1.5 }, { target: 'volatility', kind: 'absolute', value: 20 }] },
+  { id: 'prediction-reprice', name: '预测概率重估', market: 'prediction', shocks: [{ target: 'probability', kind: 'probabilityPp', value: -12 }] },
 ];
 
 app.get('/api/evidence', async (req, res) => {
@@ -566,6 +567,19 @@ app.post('/api/evidence', express.json(), (req, res) => {
     res.status(201).json(decisionEnvelope({ market: item.market, instrument: item.instrument, data: item, dataStatus: item.dataStatus, source: item.source.name, updatedAt: item.fetchedAt }));
   } catch (error: any) {
     res.status(400).json({ success: false, error: error.message, dataStatus: 'unavailable', reason: error.message });
+  }
+});
+
+app.get('/api/evidence/changes', (req, res) => {
+  try {
+    const market = decisionMarket(req.query.market);
+    const instrument = String(req.query.instrument || '').trim() || undefined;
+    const since = String(req.query.since || '');
+    assertMarketContext({ market, workspace: 'evidence', instrument });
+    const data = getEvidenceChanges(decisionIntelligenceStore.listEvidence(market, instrument), market, instrument, since);
+    res.json(decisionEnvelope({ market, instrument, data, dataStatus: data.dataStatus, source: 'saved evidence changes', reason: data.reason }));
+  } catch (error: any) {
+    res.status(/market|Instrument|instrument/i.test(error.message) ? 400 : 500).json({ success: false, error: error.message, dataStatus: 'unavailable', reason: error.message });
   }
 });
 
@@ -624,7 +638,7 @@ app.post('/api/scenarios/run', express.json(), (req, res) => {
     if (!scenario) throw new Error('Scenario not found');
     let positions = Array.isArray(req.body?.positions) ? req.body.positions : decisionIntelligenceStore.listPortfolio(market);
     if (!positions.length) {
-      const typeByMarket: Record<string, string> = { stocks: 'stock', crypto: 'crypto', prediction: 'prediction' };
+      const typeByMarket: Record<string, string> = { stocks: 'stock', options: 'option', crypto: 'crypto', prediction: 'prediction' };
       positions = unifiedPaperLedgerStore.get().positions.filter(item => item.instrumentType === typeByMarket[market]).map(item => ({ instrument: item.instrumentId, market, quantity: item.quantity, price: item.currentPrice }));
     }
     if (!positions.length) throw new Error('当前市场暂无可用于压力测试的模拟或导入仓位');
@@ -636,6 +650,7 @@ app.post('/api/scenarios/run', express.json(), (req, res) => {
 });
 
 app.get('/api/decisions', (req, res) => {
+  if (!adminOnly(req, res)) return;
   try {
     const market = decisionMarket(req.query.market);
     const instrument = String(req.query.instrument || '').trim() || undefined;
@@ -710,10 +725,11 @@ app.post('/api/portfolio/import', express.json(), (req, res) => {
 });
 
 app.get('/api/portfolio/analytics', (req, res) => {
+  if (!adminOnly(req, res)) return;
   try {
     const market = decisionMarket(req.query.market);
     const imported = decisionIntelligenceStore.listPortfolio(market);
-    const typeByMarket: Record<string, string> = { stocks: 'stock', crypto: 'crypto', prediction: 'prediction' };
+    const typeByMarket: Record<string, string> = { stocks: 'stock', options: 'option', crypto: 'crypto', prediction: 'prediction' };
     const paper: PortfolioRow[] = unifiedPaperLedgerStore.get().positions.filter(item => item.instrumentType === typeByMarket[market]).map(item => ({ instrument: item.instrumentId, market, quantity: item.quantity, price: item.currentPrice, currency: 'USD' }));
     const rows = [...imported, ...paper];
     const data = analyzePortfolio(rows, { benchmarkReturnPct: Number(req.query.benchmarkReturnPct || 0), portfolioReturnPct: Number(req.query.portfolioReturnPct || 0) });
@@ -756,6 +772,7 @@ app.post('/api/signals/outcomes', express.json(), (req, res) => {
 });
 
 app.get('/api/workspaces', (req, res) => {
+  if (!adminOnly(req, res)) return;
   try {
     const market = decisionMarket(req.query.market);
     const data = decisionIntelligenceStore.listWorkspaces(market);

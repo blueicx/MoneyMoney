@@ -1,6 +1,7 @@
-const CACHE_NAME = "moneymoney-v58-trusted-research";
+const CACHE_NAME = "moneymoney-v59-trusted-research";
 const STATIC_ASSETS = ["/", "/manifest.json"];
-const OFFLINE_SAFE_API_PATHS = ["/api/evidence", "/api/scenarios", "/api/signals/quality"];
+const OFFLINE_SAFE_API_PATHS = ["/api/evidence", "/api/evidence/changes", "/api/evidence/source-health/history", "/api/scenarios", "/api/signals/quality"];
+const OFFLINE_SAFE_API_PREFIXES = ["/api/workspaces/shared/"];
 
 self.addEventListener("install", (event) => {
   self.skipWaiting();
@@ -35,7 +36,7 @@ self.addEventListener("fetch", (event) => {
 
   if (event.request.url.includes("/api/")) {
     const url = new URL(event.request.url);
-    const offlineSafe = OFFLINE_SAFE_API_PATHS.some((path) => url.pathname === path);
+    const offlineSafe = OFFLINE_SAFE_API_PATHS.some((path) => url.pathname === path) || OFFLINE_SAFE_API_PREFIXES.some((prefix) => url.pathname.startsWith(prefix));
     event.respondWith(
       fetch(event.request)
         .then((res) => {

@@ -30,6 +30,9 @@ test('PWA caches only public decision snapshots and exposes an honest offline st
   const manifest = JSON.parse(fs.readFileSync('src/web/public/manifest.json', 'utf8'));
   assert.equal(worker.includes('Response.new'), false);
   assert.match(worker, /\/api\/evidence/);
+  assert.match(worker, /\/api\/evidence\/changes/);
+  assert.match(worker, /\/api\/evidence\/source-health\/history/);
+  assert.match(worker, /\/api\/workspaces\/shared/);
   assert.match(worker, /\/api\/signals\/quality/);
   assert.doesNotMatch(worker, /\/api\/decisions/);
   assert.match(worker, /dataStatus[^\n]+cached|cached[^\n]+dataStatus/);

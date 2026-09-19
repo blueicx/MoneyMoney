@@ -2973,6 +2973,7 @@
             <article class="glass-card" style="padding:15px;border-radius:16px;">
               <div style="display:flex;justify-content:space-between;gap:8px;align-items:center;"><strong>🔎 证据与可信度</strong><button class="tab" type="button" onclick="loadDecisionIntelligence()">刷新</button></div>
               <div id="decision-evidence-list" style="margin-top:10px;"><div class="empty-tip">正在读取...</div></div>
+              <div id="decision-evidence-changes" style="margin-top:10px;"><div class="empty-tip">正在检查上次查看以来的变化...</div></div>
             </article>
             <article class="glass-card" style="padding:15px;border-radius:16px;">
               <div style="display:flex;justify-content:space-between;gap:8px;align-items:center;"><strong>🩺 来源故障时间线</strong><button class="tab guest-admin-only" type="button" onclick="retryDecisionSources()">一键重试</button></div>
@@ -2981,6 +2982,13 @@
             <article class="glass-card" style="padding:15px;border-radius:16px;">
               <strong>🧪 情景实验室</strong>
               <div id="decision-scenario-list" style="margin-top:10px;"><div class="empty-tip">正在读取...</div></div>
+              <div class="guest-admin-only" style="display:grid;grid-template-columns:1.2fr 1fr 1fr 90px;gap:6px;margin-top:9px;">
+                <input id="decision-scenario-name" placeholder="自定义情景" aria-label="情景名称" style="min-width:0;padding:7px;border:1px solid var(--border);border-radius:8px;background:var(--bg-card);color:var(--text);">
+                <input id="decision-scenario-target" placeholder="冲击目标" aria-label="冲击目标" value="market" style="min-width:0;padding:7px;border:1px solid var(--border);border-radius:8px;background:var(--bg-card);color:var(--text);">
+                <select id="decision-scenario-kind" aria-label="冲击类型" style="min-width:0;padding:7px;border:1px solid var(--border);border-radius:8px;background:var(--bg-card);color:var(--text);"><option value="pricePct">价格%</option><option value="rateBps">利率基点</option><option value="fundingPct">资金费率%</option><option value="probabilityPp">概率百分点</option><option value="absolute">绝对波动</option></select>
+                <input id="decision-scenario-value" type="number" placeholder="数值" aria-label="冲击数值" style="min-width:0;padding:7px;border:1px solid var(--border);border-radius:8px;background:var(--bg-card);color:var(--text);">
+              </div>
+              <button class="tab guest-admin-only" type="button" onclick="saveDecisionScenarioUi()" style="margin-top:7px;">保存自定义情景</button>
               <div id="decision-scenario-result" style="margin-top:8px;"></div>
             </article>
             <article class="glass-card" style="padding:15px;border-radius:16px;">
@@ -3000,7 +3008,7 @@
             <article class="glass-card" style="padding:15px;border-radius:16px;">
               <strong>💼 组合驾驶舱</strong>
               <div id="decision-portfolio" style="margin-top:10px;"><div class="empty-tip">登录后查看模拟盘和导入仓位分析。</div></div>
-              <details class="guest-admin-only" style="margin-top:9px;"><summary style="cursor:pointer;color:var(--purple);">导入 CSV 仓位</summary><textarea id="portfolio-csv-input" rows="4" placeholder="instrument,market,quantity,price,currency&#10;AAPL,stocks,10,200,USD" style="width:100%;box-sizing:border-box;margin-top:7px;padding:8px;border:1px solid var(--border);border-radius:8px;background:var(--bg-card);color:var(--text);"></textarea><button class="tab" type="button" onclick="previewPortfolioCsv()">校验并导入</button><div id="portfolio-import-result" style="margin-top:6px;"></div></details>
+              <details class="guest-admin-only" style="margin-top:9px;"><summary style="cursor:pointer;color:var(--purple);">导入 CSV 仓位</summary><textarea id="portfolio-csv-input" rows="4" placeholder="instrument,market,quantity,price,currency&#10;AAPL,stocks,10,200,USD" style="width:100%;box-sizing:border-box;margin-top:7px;padding:8px;border:1px solid var(--border);border-radius:8px;background:var(--bg-card);color:var(--text);"></textarea><button class="tab" type="button" onclick="previewPortfolioCsv()">先校验预览</button><div id="portfolio-import-result" style="margin-top:6px;"></div></details>
             </article>
             <article class="glass-card" style="padding:15px;border-radius:16px;">
               <strong>🎯 信号质量</strong>
@@ -9561,6 +9569,30 @@ function renderDecisionEvidence(items) {
   host.innerHTML = (items || []).length ? items.slice(0, 8).map(item => `<details style="padding:8px 0;border-bottom:1px dashed var(--border);"><summary style="cursor:pointer;display:flex;justify-content:space-between;gap:8px;"><span><b>${safeNewsText(item.source?.name || item.source?.id)}</b><small style="display:block;color:var(--text-secondary);">${safeNewsText(item.source?.id)} · ${safeNewsText(item.dataStatus)}</small></span><span style="font-size:10px;color:${item.dataStatus === 'live' ? 'var(--green)' : item.dataStatus === 'unavailable' ? 'var(--red)' : '#b7791f'};">${safeNewsText(item.dataStatus)}</span></summary><div style="margin-top:8px;">${decisionQualityBar('时效', item.quality?.freshness)}${decisionQualityBar('完整度', item.quality?.completeness)}${decisionQualityBar('来源可靠', item.quality?.sourceReliability)}${decisionQualityBar('多源一致', item.quality?.corroboration)}<div style="margin-top:7px;font-size:10px;color:var(--text-secondary);">数据 ${safeNewsText(item.observedAt)} · 抓取 ${safeNewsText(item.fetchedAt)} · Hash ${safeNewsText(String(item.hash || '').slice(0, 12))}${item.source?.url ? `<br><a href="${safeNewsUrl(item.source.url)}" target="_blank" rel="noopener noreferrer">打开来源原文 ↗</a>` : ''}${item.reason ? `<br><span style="color:var(--red);">${safeNewsText(item.reason)}</span>` : ''}</div></div></details>`).join('') : '<div class="empty-tip">当前市场暂无证据，数据不会由其他市场补位。</div>';
 }
 
+function renderDecisionEvidenceChanges(data, reason) {
+  const host = document.getElementById('decision-evidence-changes');
+  if (!host) return;
+  const change = data || {};
+  const formatEvidenceValue = value => value === undefined ? '—' : safeNewsText(typeof value === 'object' ? JSON.stringify(value) : String(value));
+  const rows = [];
+  const changes = (change.fieldChanges || []).slice(0, 12).map(item => {
+    const color = item.status === 'changed' ? 'var(--yellow)' : item.status === 'added' ? 'var(--green)' : 'var(--red)';
+    const verb = item.status === 'changed' ? '变化' : item.status === 'added' ? '新增' : '失效';
+    return `<span style="color:${color};">${verb} ${safeNewsText(item.field)}：${formatEvidenceValue(item.before)} → ${formatEvidenceValue(item.after)}</span>`;
+  });
+  if (changes.length) rows.push(...changes);
+  else {
+    if ((change.changed || []).length) rows.push(`<span style="color:var(--yellow);">变化：${change.changed.map(item => safeNewsText(item)).join('、')}</span>`);
+    if ((change.added || []).length) rows.push(`<span style="color:var(--green);">新增：${change.added.map(item => safeNewsText(item)).join('、')}</span>`);
+    if ((change.removed || []).length) rows.push(`<span style="color:var(--red);">失效：${change.removed.map(item => safeNewsText(item)).join('、')}</span>`);
+  }
+  if (!rows.length) {
+    host.innerHTML = `<div class="empty-tip">自上次查看以来暂无字段变化。${safeNewsText(reason || change.reason || '')}</div>`;
+    return;
+  }
+  host.innerHTML = `<div style="padding:8px;border:1px solid var(--border);border-radius:9px;background:var(--bg-secondary);font-size:10px;"><b>自上次查看以来</b><div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:5px;">${rows.join('')}</div><div style="color:var(--text-secondary);margin-top:5px;">快照：${safeNewsText((change.evidenceRefs || []).join(' → ') || '无')} · ${safeNewsText(change.dataStatus || 'unknown')}</div></div>`;
+}
+
 function renderDecisionSourceHistory(items) {
   const host = document.getElementById('decision-source-history');
   if (!host) return;
@@ -9576,7 +9608,8 @@ function renderDecisionNegativeKnowledge(items) {
 function renderDecisionScenarios(items) {
   const host = document.getElementById('decision-scenario-list');
   if (!host) return;
-  host.innerHTML = (items || []).length ? items.map(item => `<button class="market-research-row guest-admin-only" type="button" onclick="runDecisionScenario('${safeNewsText(item.id)}')"><strong>${safeNewsText(item.name)}</strong><span>${(item.shocks || []).map(shock => `${safeNewsText(shock.target)} ${Number(shock.value) >= 0 ? '+' : ''}${safeNewsText(shock.value)}${shock.kind === 'pricePct' ? '%' : ''}`).join(' · ')}</span></button>`).join('') : '<div class="empty-tip">当前市场暂无情景模板。</div>';
+  const unit = { pricePct: '%', rateBps: 'bp', fundingPct: '%', probabilityPp: 'pp', absolute: '' };
+  host.innerHTML = (items || []).length ? items.map(item => `<button class="market-research-row guest-admin-only" type="button" onclick="runDecisionScenario('${safeNewsText(item.id)}')"><strong>${safeNewsText(item.name)}</strong><span>${(item.shocks || []).map(shock => `${safeNewsText(shock.target)} ${Number(shock.value) >= 0 ? '+' : ''}${safeNewsText(shock.value)}${unit[shock.kind] || ''}`).join(' · ')}</span></button>`).join('') : '<div class="empty-tip">当前市场暂无情景模板。</div>';
 }
 
 function renderDecisionJournal(items) {
@@ -9619,20 +9652,31 @@ async function loadDecisionIntelligence() {
   const market = activeMarketScope;
   const instrument = decisionScopeInstrument();
   const query = `market=${encodeURIComponent(market)}${instrument ? `&instrument=${encodeURIComponent(instrument)}` : ''}`;
+  const seenKey = `mm-evidence-seen:${market}:${instrument || 'all'}`;
+  let since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  try {
+    const saved = localStorage.getItem(seenKey);
+    if (saved && Number.isFinite(new Date(saved).getTime())) since = new Date(saved).toISOString();
+  } catch (_) { /* 私密浏览或禁用存储时仍允许读取实时证据 */ }
   const context = document.getElementById('decision-context');
   if (context) context.textContent = `${marketResearchLabel(market)} / ${instrument || '未选择标的'} / 正在检查来源与研究状态...`;
-  const publicCalls = [decisionFetchJson(`/api/evidence?${query}`), decisionFetchJson(`/api/evidence/source-health/history?market=${encodeURIComponent(market)}`), decisionFetchJson(`/api/scenarios?market=${encodeURIComponent(market)}`), decisionFetchJson(`/api/signals/quality?${query}`)];
+  const publicCalls = [decisionFetchJson(`/api/evidence?${query}`), decisionFetchJson(`/api/evidence/source-health/history?market=${encodeURIComponent(market)}`), decisionFetchJson(`/api/scenarios?market=${encodeURIComponent(market)}`), decisionFetchJson(`/api/signals/quality?${query}`), decisionFetchJson(`/api/evidence/changes?${query}&since=${encodeURIComponent(since)}`)];
   const privateCalls = window.mm_isGuest ? [] : [decisionFetchJson(`/api/decisions?${query}`), decisionFetchJson(`/api/decisions/negative-knowledge?market=${encodeURIComponent(market)}`), decisionFetchJson(`/api/portfolio/analytics?market=${encodeURIComponent(market)}`), decisionFetchJson(`/api/workspaces?market=${encodeURIComponent(market)}`)];
   const settled = await Promise.allSettled([...publicCalls, ...privateCalls]);
   if (settled[0].status === 'fulfilled') renderDecisionEvidence(settled[0].value.data); else renderDecisionEvidence([]);
   if (settled[1].status === 'fulfilled') renderDecisionSourceHistory(settled[1].value.data); else renderDecisionSourceHistory([]);
   if (settled[2].status === 'fulfilled') renderDecisionScenarios(settled[2].value.data); else renderDecisionScenarios([]);
   if (settled[3].status === 'fulfilled') renderDecisionSignalQuality(settled[3].value.data, settled[3].value.reason); else renderDecisionSignalQuality(null, settled[3].reason?.message);
+  if (settled[4].status === 'fulfilled') {
+    renderDecisionEvidenceChanges(settled[4].value.data, settled[4].value.reason);
+    try { localStorage.setItem(seenKey, new Date().toISOString()); } catch (_) { /* 存储不可用时不阻断页面 */ }
+  } else renderDecisionEvidenceChanges(null, settled[4].reason?.message || '变化接口暂不可用');
+  const privateOffset = publicCalls.length;
   if (!window.mm_isGuest) {
-    if (settled[4]?.status === 'fulfilled') renderDecisionJournal(settled[4].value.data); else renderDecisionJournal([]);
-    if (settled[5]?.status === 'fulfilled') renderDecisionNegativeKnowledge(settled[5].value.data); else renderDecisionNegativeKnowledge([]);
-    if (settled[6]?.status === 'fulfilled') renderDecisionPortfolio(settled[6].value.data, settled[6].value.reason); else renderDecisionPortfolio(null, settled[6]?.reason?.message);
-    if (settled[7]?.status === 'fulfilled') renderDecisionWorkspaces(settled[7].value.data); else renderDecisionWorkspaces([]);
+    if (settled[privateOffset]?.status === 'fulfilled') renderDecisionJournal(settled[privateOffset].value.data); else renderDecisionJournal([]);
+    if (settled[privateOffset + 1]?.status === 'fulfilled') renderDecisionNegativeKnowledge(settled[privateOffset + 1].value.data); else renderDecisionNegativeKnowledge([]);
+    if (settled[privateOffset + 2]?.status === 'fulfilled') renderDecisionPortfolio(settled[privateOffset + 2].value.data, settled[privateOffset + 2].value.reason); else renderDecisionPortfolio(null, settled[privateOffset + 2]?.reason?.message);
+    if (settled[privateOffset + 3]?.status === 'fulfilled') renderDecisionWorkspaces(settled[privateOffset + 3].value.data); else renderDecisionWorkspaces([]);
   }
   const usable = settled.filter(item => item.status === 'fulfilled').length;
   if (context) context.innerHTML = `<b>${safeNewsText(marketResearchLabel(market))}</b> / ${safeNewsText(instrument || '未选择标的')} · ${usable}/${settled.length} 个研究域可用 · 更新时间 ${safeNewsText(new Date().toLocaleTimeString())}`;
@@ -9664,6 +9708,19 @@ async function runDecisionScenario(id) {
   } catch (error) { if (result) result.innerHTML = `<div class="empty-tip" style="color:var(--red);">${safeNewsText(error.message)}</div>`; }
 }
 
+async function saveDecisionScenarioUi() {
+  const name = document.getElementById('decision-scenario-name')?.value.trim();
+  const target = document.getElementById('decision-scenario-target')?.value.trim();
+  const kind = document.getElementById('decision-scenario-kind')?.value;
+  const value = Number(document.getElementById('decision-scenario-value')?.value);
+  if (!name || !target || !kind || !Number.isFinite(value)) return showToast('请填写情景名称、目标和数值', 'error');
+  try {
+    await decisionFetchJson('/api/scenarios', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: `custom-${Date.now()}`, name, market: activeMarketScope, shocks: [{ target, kind, value }] }) });
+    showToast('自定义情景已保存', 'success');
+    loadDecisionIntelligence();
+  } catch (error) { showToast(error.message, 'error'); }
+}
+
 async function saveDecisionRecordUi() {
   const instrument = decisionScopeInstrument();
   if (!instrument) return showToast('请先从右侧选择标的', 'error');
@@ -9678,6 +9735,15 @@ async function saveDecisionRecordUi() {
   } catch (error) { showToast(error.message, 'error'); }
 }
 
+const portfolioHeaderAlias = {
+  instrument: 'instrument', symbol: 'instrument', code: 'instrument', ticker: 'instrument', 标的: 'instrument', 代码: 'instrument',
+  market: 'market', 市场: 'market', scope: 'market',
+  quantity: 'quantity', qty: 'quantity', shares: 'quantity', 数量: 'quantity', 仓位: 'quantity',
+  price: 'price', cost: 'price', 价格: 'price', 成本价: 'price',
+  currency: 'currency', ccy: 'currency', 币种: 'currency',
+  sector: 'sector', 行业: 'sector', factor: 'factor', 因子: 'factor',
+};
+
 function parsePortfolioCsv(text) {
   const rows = String(text || '').split(/\r?\n/).filter(line => line.trim()).map(line => {
     const cells = []; let value = ''; let quoted = false;
@@ -9685,18 +9751,39 @@ function parsePortfolioCsv(text) {
     cells.push(value.trim()); return cells;
   });
   if (rows.length < 2) return [];
-  const headers = rows[0].map(item => item.toLowerCase());
-  return rows.slice(1).map(cells => Object.fromEntries(headers.map((header, index) => [header, ['quantity', 'price'].includes(header) ? Number(cells[index]) : cells[index]])));
+  const headers = rows[0].map(item => portfolioHeaderAlias[String(item || '').trim().toLowerCase()] || '');
+  return rows.slice(1).map(cells => Object.fromEntries(headers.map((header, index) => [header, ['quantity', 'price'].includes(header) ? Number(cells[index]) : cells[index]]).filter(([header]) => header)));
+}
+
+function renderPortfolioImportPreview(body, pendingRows = []) {
+  const result = document.getElementById('portfolio-import-result');
+  if (!result) return;
+  const accepted = body.data?.accepted || [];
+  const rejected = body.data?.rejected || [];
+  window.mm_pendingPortfolioRows = pendingRows.length ? accepted : [];
+  result.innerHTML = `<div style="font-size:10px;color:${accepted.length ? 'var(--green)' : 'var(--red)'};">字段映射已完成 · 通过 ${accepted.length} 条 · 拒绝 ${rejected.length} 条${rejected.slice(0, 3).map(item => `<br>${safeNewsText(item.reason)}`).join('')}</div>${accepted.length ? `<button class="tab active" type="button" style="margin-top:7px;" onclick="commitPortfolioCsv()">确认写入 ${accepted.length} 条</button>` : ''}`;
 }
 
 async function previewPortfolioCsv() {
   const result = document.getElementById('portfolio-import-result');
   try {
     const rows = parsePortfolioCsv(document.getElementById('portfolio-csv-input')?.value);
+    if (!rows.length) throw new Error('CSV 没有可校验的数据行');
+    const body = await fetch('/api/portfolio/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ rows, commit: false }) }).then(response => response.json());
+    renderPortfolioImportPreview(body, rows);
+  } catch (error) { if (result) result.innerHTML = `<div style="font-size:10px;color:var(--red);">${safeNewsText(error.message)}</div>`; }
+}
+
+async function commitPortfolioCsv() {
+  const rows = Array.isArray(window.mm_pendingPortfolioRows) ? window.mm_pendingPortfolioRows : [];
+  if (!rows.length) return showToast('没有待确认的仓位记录', 'error');
+  try {
     const body = await fetch('/api/portfolio/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ rows, commit: true }) }).then(response => response.json());
-    if (result) result.innerHTML = `<div style="font-size:10px;color:${body.data?.accepted?.length ? 'var(--green)' : 'var(--red)'};">通过 ${body.data?.accepted?.length || 0} 条 · 拒绝 ${body.data?.rejected?.length || 0} 条${(body.data?.rejected || []).slice(0, 3).map(item => `<br>${safeNewsText(item.reason)}`).join('')}</div>`;
-    if (body.data?.accepted?.length) loadDecisionIntelligence();
-  } catch (error) { if (result) result.textContent = error.message; }
+    window.mm_pendingPortfolioRows = [];
+    const result = document.getElementById('portfolio-import-result');
+    if (result) result.innerHTML = `<div style="font-size:10px;color:${body.data?.accepted?.length ? 'var(--green)' : 'var(--red)'};">已写入 ${body.data?.accepted?.length || 0} 条 · 拒绝 ${body.data?.rejected?.length || 0} 条</div>`;
+    if (body.data?.accepted?.length) { showToast(`已写入 ${body.data.accepted.length} 条仓位`, 'success'); loadDecisionIntelligence(); }
+  } catch (error) { showToast(error.message, 'error'); }
 }
 
 async function saveCurrentDecisionWorkspace() {
@@ -13081,7 +13168,7 @@ function mobileTab(tab) {
     }
     // Register service worker for PWA
     if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('/sw.js?v=58').catch(() => {});
+    navigator.serviceWorker.register('/sw.js?v=59').catch(() => {});
       let refreshing = false;
       navigator.serviceWorker.addEventListener('controllerchange', () => {
         if (!refreshing) {

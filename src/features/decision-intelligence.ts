@@ -101,14 +101,100 @@ export function compareEvidenceSnapshots(left: EvidenceSnapshot, right: Evidence
   return keys.filter(key => stable(left.fields[key]) !== stable(right.fields[key])).map(field => ({ field, before: left.fields[field], after: right.fields[field] }));
 }
 
-export type ScenarioShockKind = 'pricePct' | 'absolute';
+export interface EvidenceChanges {
+  market: MarketId;
+  instrument?: string;
+  since: string;
+  latestSnapshotId?: string;
+  changed: string[];
+  added: string[];
+  removed: string[];
+  fieldChanges: Array<{ field: string; before?: unknown; after?: unknown; status: 'changed' | 'added' | 'removed' }>;
+  evidenceRefs: string[];
+  dataStatus: DataStatus;
+  reason: string | null;
+}
+
+export function getEvidenceChanges(snapshots: EvidenceSnapshot[], market: MarketId, instrument: string | undefined, since: string): EvidenceChanges {
+  assertMarketContext({ market, workspace: 'evidence', instrument });
+  const base: Pick<EvidenceChanges, 'market' | 'instrument' | 'since' | 'changed' | 'added' | 'removed' | 'fieldChanges' | 'evidenceRefs'> = {
+    market, instrument, since, changed: [], added: [], removed: [], fieldChanges: [], evidenceRefs: [],
+  };
+  const sinceTime = new Date(since).getTime();
+  if (!Number.isFinite(sinceTime)) {
+    return { ...base, dataStatus: 'unavailable', reason: 'since 必须是有效日期时间' };
+  }
+  const scoped = snapshots
+    .filter(item => item.market === market && (!instrument || item.instrument === instrument))
+    .sort((left, right) => left.fetchedAt.localeCompare(right.fetchedAt) || left.id.localeCompare(right.id));
+  const groups = new Map<string, EvidenceSnapshot[]>();
+  scoped.forEach(item => {
+    const key = instrument ? 'selected-instrument' : `${item.source.id}:${item.instrument || 'market'}`;
+    const group = groups.get(key) || [];
+    group.push(item);
+    groups.set(key, group);
+  });
+  const latestByGroup = [...groups.values()].map(group => ({
+    group,
+    latest: group.filter(item => new Date(item.fetchedAt).getTime() > sinceTime).at(-1),
+  })).filter(item => item.latest);
+  if (!latestByGroup.length) {
+    return { ...base, dataStatus: 'empty', reason: 'since 之后暂无可比较的证据快照' };
+  }
+  const changed = new Set<string>();
+  const added = new Set<string>();
+  const removed = new Set<string>();
+  const fieldChanges: EvidenceChanges['fieldChanges'] = [];
+  const evidenceRefs: string[] = [];
+  latestByGroup.forEach(({ group, latest }) => {
+    if (!latest) return;
+    const latestTime = new Date(latest.fetchedAt).getTime();
+    const previous = group.filter(item => new Date(item.fetchedAt).getTime() < latestTime).at(-1);
+    const latestFields = new Set(Object.keys(latest.fields));
+    const previousFields = new Set(previous ? Object.keys(previous.fields) : []);
+    if (previous) {
+      [...latestFields].filter(field => previousFields.has(field)).filter(field => stable(previous.fields[field]) !== stable(latest.fields[field])).forEach(field => {
+        changed.add(field);
+        fieldChanges.push({ field, before: previous.fields[field], after: latest.fields[field], status: 'changed' });
+      });
+      [...previousFields].filter(field => !latestFields.has(field)).forEach(field => {
+        removed.add(field);
+        fieldChanges.push({ field, before: previous.fields[field], status: 'removed' });
+      });
+    }
+    [...latestFields].filter(field => !previousFields.has(field)).forEach(field => {
+      added.add(field);
+      fieldChanges.push({ field, after: latest.fields[field], status: 'added' });
+    });
+    if (previous) evidenceRefs.push(previous.id);
+    evidenceRefs.push(latest.id);
+  });
+  const latest = latestByGroup.map(item => item.latest).filter((item): item is EvidenceSnapshot => Boolean(item)).sort((left, right) => left.fetchedAt.localeCompare(right.fetchedAt)).at(-1);
+  return {
+    market, instrument, since, latestSnapshotId: latest?.id,
+    changed: [...changed].sort(), added: [...added].sort(), removed: [...removed].sort(), fieldChanges,
+    evidenceRefs: [...new Set(evidenceRefs)],
+    dataStatus: 'cached', reason: null,
+  };
+}
+
+export type ScenarioShockKind = 'pricePct' | 'absolute' | 'rateBps' | 'fundingPct' | 'probabilityPp';
 export interface ScenarioDefinition {
   id: string;
   name: string;
   market: MarketId;
   shocks: Array<{ target: string; kind: ScenarioShockKind; value: number }>;
 }
-export interface ScenarioPosition { instrument: string; market: MarketId; quantity: number; price: number; beta?: number; }
+export interface ScenarioPosition {
+  instrument: string;
+  market: MarketId;
+  quantity: number;
+  price: number;
+  beta?: number;
+  rateDuration?: number;
+  fundingBeta?: number;
+  probabilitySensitivity?: number;
+}
 
 export function runScenario(definition: ScenarioDefinition, positions: ScenarioPosition[]) {
   assertMarketContext({ market: definition.market, workspace: 'scenario' });
@@ -118,15 +204,24 @@ export function runScenario(definition: ScenarioDefinition, positions: ScenarioP
     if (position.market !== definition.market) throw new Error('Scenario and portfolio market must match');
     if (![position.quantity, position.price].every(value => Number.isFinite(value) && value >= 0)) throw new Error('Scenario position values must be finite and non-negative');
   });
+  const supportedKinds = new Set<ScenarioShockKind>(['pricePct', 'absolute', 'rateBps', 'fundingPct', 'probabilityPp']);
+  definition.shocks.forEach(shock => {
+    if (!supportedKinds.has(shock.kind)) throw new Error(`不支持的情景冲击类型：${String(shock.kind)}`);
+    if (!Number.isFinite(Number(shock.value))) throw new Error('Scenario shock must be finite');
+  });
   const totalValueBefore = positions.reduce((sum, item) => sum + item.quantity * item.price, 0);
   const impacts = positions.map(position => {
     const base = position.quantity * position.price;
     const change = definition.shocks.reduce((sum, shock) => {
       if (shock.kind === 'pricePct' && (shock.target === 'market' || shock.target === position.instrument)) return sum + base * (shock.value / 100) * (position.beta ?? 1);
       if (shock.kind === 'absolute' && shock.target === 'volatility') return sum - base * Math.abs(shock.value) * 0.0025;
+      if (shock.kind === 'rateBps' && ['rate', 'interest', 'yield'].includes(shock.target)) return sum - base * (shock.value / 10_000) * (position.rateDuration ?? 0);
+      if (shock.kind === 'fundingPct' && ['funding', 'fundingRate'].includes(shock.target) && position.market === 'crypto') return sum - base * (shock.value / 100) * (position.fundingBeta ?? 1);
+      if (shock.kind === 'probabilityPp' && (position.market === 'prediction' || shock.target === position.instrument)) return sum + base * (shock.value / 100) * (position.probabilitySensitivity ?? 1);
       return sum;
     }, 0);
-    return { instrument: position.instrument, valueBefore: base, valueAfter: Number((base + change).toFixed(8)), change: Number(change.toFixed(8)) };
+    const valueAfter = Math.max(0, base + change);
+    return { instrument: position.instrument, valueBefore: base, valueAfter: Number(valueAfter.toFixed(8)), change: Number((valueAfter - base).toFixed(8)) };
   });
   const totalValueAfter = impacts.reduce((sum, item) => sum + item.valueAfter, 0);
   return {
