@@ -22,6 +22,8 @@ export interface ResearchSnapshot {
   price?: number;
   note?: string;
   sources: ResearchSource[];
+  strategyVersion?: string;
+  experimentParams?: Record<string, unknown>;
 }
 
 export interface ResearchNote {

@@ -48,7 +48,7 @@ export interface ShortInterestRadar {
   source: string;
 }
 
-const ADVISOR_SYMBOLS = ['AAPL', 'MSFT', 'NVDA', 'TSLA', 'QQQ'];
+const ADVISOR_SYMBOLS = ['AAPL', 'MSFT', 'NVDA', 'AMZN', 'GOOGL', 'META', 'TSLA', 'QQQ'];
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 MoneyMoney/1.0';
 const CACHE_TTL_MS = 15 * 60_000;
 

@@ -28,3 +28,23 @@ test('migrates a legacy JSON document and keeps a timestamped backup', () => {
   assert.equal(store.health.migratedDocuments, 1);
   store.close();
 });
+
+test('lease acquisition is atomic, expires, releases, and survives restart', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'moneymoney-lease-'));
+  const dbPath = path.join(dir, 'state.sqlite');
+  const first = new SQLiteStateStore(dbPath, dir);
+
+  assert.equal(first.acquireLease('job-1', 'owner-a', 1_000, 30_000), true);
+  assert.equal(first.acquireLease('job-1', 'owner-b', 1_001, 30_000), false);
+  assert.equal(first.refreshLease('job-1', 'owner-a', 10_000, 30_000), true);
+  first.close();
+
+  const restarted = new SQLiteStateStore(dbPath, dir);
+  assert.equal(restarted.acquireLease('job-1', 'owner-b', 39_999, 30_000), false);
+  assert.equal(restarted.acquireLease('job-1', 'owner-b', 40_001, 30_000), true);
+  assert.equal(restarted.releaseLease('job-1', 'owner-a'), false);
+  assert.equal(restarted.releaseLease('job-1', 'owner-b'), true);
+  assert.equal(restarted.acquireLease('job-1', 'owner-c', 40_002, 30_000), true);
+  restarted.close();
+  fs.rmSync(dir, { recursive: true, force: true });
+});

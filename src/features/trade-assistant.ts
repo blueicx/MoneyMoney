@@ -161,13 +161,16 @@ interface KlineLike {
 
 const CRYPTO_SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT', 'XRPUSDT', 'DOGEUSDT'];
 const STOCK_SYMBOLS = [
-  'usAAPL', 'usMSFT', 'usNVDA', 'usTSLA',
+  'usAAPL', 'usMSFT', 'usNVDA', 'usAMZN', 'usGOOGL', 'usMETA', 'usTSLA',
   'usSPY', 'usQQQ', 'hk00700', 'sh600519',
 ];
 const STOCK_API_SYMBOLS: Record<string, string> = {
   usAAPL: 'usAAPL.OQ',
   usMSFT: 'usMSFT.OQ',
   usNVDA: 'usNVDA.OQ',
+  usAMZN: 'usAMZN.OQ',
+  usGOOGL: 'usGOOGL.OQ',
+  usMETA: 'usMETA.OQ',
   usTSLA: 'usTSLA.OQ',
   usSPY: 'usSPY.AM',
   usQQQ: 'usQQQ.OQ',

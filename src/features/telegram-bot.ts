@@ -49,6 +49,7 @@ export interface TelegramCommandContext {
 export interface TelegramInlineKeyboardButton {
   text: string;
   callback_data?: string;
+  url?: string;
 }
 
 export interface TelegramInlineKeyboardMarkup {
@@ -100,10 +101,12 @@ export interface TelegramInteractionBotOptions {
   allowedChatIds: Iterable<string> | string;
   handlers: Record<string, TelegramCommandHandler>;
   textHandlers?: Record<string, TelegramCommandHandler>;
+  textFallback?: TelegramCommandHandler;
   callbackHandlers?: Record<string, TelegramCallbackHandler>;
   unknownCallbackHandler?: TelegramCallbackHandler;
   transport?: TelegramTransport;
   stateFile?: string;
+  menuScope?: (chatId: string) => string;
   pollTimeoutSeconds?: number;
   logger?: Pick<Console, 'error'>;
 }
@@ -230,10 +233,12 @@ export class TelegramInteractionBot {
   private readonly allowedChatIds: Set<string>;
   private readonly handlers: Record<string, TelegramCommandHandler>;
   private readonly textHandlers: Record<string, TelegramCommandHandler>;
+  private readonly textFallback?: TelegramCommandHandler;
   private readonly callbackHandlers: Record<string, TelegramCallbackHandler>;
   private readonly unknownCallbackHandler?: TelegramCallbackHandler;
   private readonly transport: TelegramTransport;
   private readonly stateFile: string;
+  private readonly menuScope: (chatId: string) => string;
   private readonly pollTimeoutSeconds: number;
   private readonly logger: Pick<Console, 'error'>;
   private nextOffset = 0;
@@ -248,10 +253,12 @@ export class TelegramInteractionBot {
       : new Set([...options.allowedChatIds].map(String));
     this.handlers = options.handlers;
     this.textHandlers = options.textHandlers || {};
+    this.textFallback = options.textFallback;
     this.callbackHandlers = options.callbackHandlers || {};
     this.unknownCallbackHandler = options.unknownCallbackHandler;
     this.transport = options.transport || new TelegramApiTransport(options.token || '', options.proxyUrl || '');
     this.stateFile = options.stateFile || path.resolve('data/telegram-bot-state.json');
+    this.menuScope = options.menuScope || (() => 'overview');
     this.pollTimeoutSeconds = Math.max(1, Math.min(50, options.pollTimeoutSeconds || 25));
     this.logger = options.logger || console;
     this.nextOffset = this.readState().nextOffset;
@@ -334,7 +341,7 @@ export class TelegramInteractionBot {
     const textHandler = this.textHandlers[message.text.trim()];
     const command = parsed?.command || '';
     const args = parsed?.args || [];
-    const handler = parsed ? (this.handlers[command] || this.handlers.help) : textHandler;
+    const handler = parsed ? (this.handlers[command] || this.handlers.help) : (textHandler || this.textFallback);
     if (!handler) return { handled: false, reason: parsed ? 'unknown_command' : 'not_a_command' };
 
     const reply = await handler({
@@ -352,7 +359,7 @@ export class TelegramInteractionBot {
     if (reply === undefined || reply === '') return;
     const normalized = typeof reply === 'string' ? { text: reply } : reply;
     const replyMarkup = normalized.replyKeyboard === 'menu'
-      ? buildTelegramBottomMenu(chatId)
+      ? buildTelegramBottomMenu(chatId, this.menuScope(chatId))
       : normalized.replyMarkup;
     const parts = splitTelegramMessage(normalized.text);
     for (const part of parts) {

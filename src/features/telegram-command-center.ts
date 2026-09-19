@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { stateStore } from '../storage/sqlite-state';
+import { MARKET_SCOPES, type MarketScope } from './market-scope';
 
 export interface TelegramNotificationPreferences {
   signals: boolean;
@@ -68,13 +69,18 @@ export interface TelegramJournalEntry {
 export interface TelegramPendingAction {
   nonce: string;
   chatId: string;
-  type: 'paper_open' | 'paper_close' | 'paper_reset';
+  type: 'paper_open' | 'paper_close' | 'paper_reset' | 'unified_paper_order';
   marketId?: number;
   outcomeIndex?: 0 | 1;
   outcomeName?: string;
   price?: number;
   amountUsd?: number;
   positionId?: string;
+  instrumentId?: string;
+  instrumentType?: 'stock' | 'crypto';
+  instrumentTitle?: string;
+  side?: 'BUY' | 'SELL';
+  quantity?: number;
   createdAt: string;
   expiresAt: string;
 }
@@ -89,6 +95,7 @@ export interface TelegramAuditRecord {
 
 interface TelegramCommandCenterState {
   version: 2;
+  activeMarketScopes: Record<string, MarketScope>;
   preferences: Record<string, TelegramChatPreferences>;
   priceAlerts: TelegramPriceAlert[];
   smartAlerts: TelegramSmartAlert[];
@@ -187,6 +194,29 @@ export function routeNaturalLanguage(input: string): string | null {
   return null;
 }
 
+const TELEGRAM_NON_SYMBOL_WORDS = new Set([
+  'HELP', 'START', 'STATUS', 'RISK', 'SIGNAL', 'SIGNALS', 'SEARCH', 'DETAIL', 'TIMELINE', 'EVENTS', 'SOURCES',
+  'HISTORY', 'WATCHLIST', 'PORTFOLIO', 'POSITIONS', 'CLOSE', 'RESET', 'REVIEW', 'RESEARCH', 'NOTE', 'JOURNAL',
+  'ALERTS', 'ALERT', 'DIGEST', 'OPS', 'STRATEGIES', 'BACKTEST', 'EXPORT', 'HEALTH', 'ASK', 'CHART', 'AUDIT',
+  'WHOAMI', 'WEB', 'TEST', 'TODAY', 'PAPER', 'BINANCE', 'RADAR', 'MACRO', 'HELLO', 'HI', 'OK',
+]);
+
+/**
+ * Conservative classifier for the mobile quick-lookup path. Slash commands,
+ * canonical InstrumentRefs, prose and menu labels must remain on their own
+ * handlers instead of being sent to the market searcher.
+ */
+export function isTelegramBareSymbol(value: string): boolean {
+  const raw = String(value || '').trim();
+  if (!raw || raw.length > 20 || /\s|[\u4e00-\u9fff]/.test(raw)) return false;
+  if (/^(stock|option|crypto|prediction):/i.test(raw)) return false;
+  if (!/^[a-z0-9]+(?:[._/-]?[a-z0-9]+)?$/i.test(raw)) return false;
+  const compact = raw.replace(/[._/-]/g, '').toUpperCase();
+  if (TELEGRAM_NON_SYMBOL_WORDS.has(compact)) return false;
+  return /^[A-Z]{1,6}$/.test(compact)
+    || /^[A-Z0-9]{2,12}(?:USDT|USDC)$/.test(compact);
+}
+
 export function sparkline(values: number[]): string {
   if (!values.length) return '暂无';
   const glyphs = '▁▂▃▄▅▆▇█';
@@ -200,7 +230,7 @@ export function sparkline(values: number[]): string {
 }
 
 function emptyState(): TelegramCommandCenterState {
-  return { version: 2, preferences: {}, priceAlerts: [], smartAlerts: [], watchlists: {}, policies: {}, journal: [], pending: [], audits: [] };
+  return { version: 2, activeMarketScopes: {}, preferences: {}, priceAlerts: [], smartAlerts: [], watchlists: {}, policies: {}, journal: [], pending: [], audits: [] };
 }
 
 function defaultAlertPolicy(): TelegramAlertPolicy {
@@ -225,6 +255,19 @@ export class TelegramCommandCenterStore {
     this.useSqlite = !stateFile;
     this.stateFile = stateFile || path.resolve('data/telegram-command-center.json');
     this.state = this.load();
+  }
+
+  getActiveMarketScope(chatId: string): MarketScope {
+    const scope = this.state.activeMarketScopes[String(chatId)];
+    return scope && MARKET_SCOPES.includes(scope) ? scope : 'overview';
+  }
+
+  setActiveMarketScope(chatId: string, scope: string): MarketScope {
+    const normalized = String(scope || '').trim().toLowerCase() as MarketScope;
+    const selected = MARKET_SCOPES.includes(normalized) ? normalized : 'overview';
+    this.state.activeMarketScopes[String(chatId)] = selected;
+    this.save();
+    return selected;
   }
 
   getPreferences(chatId: string): TelegramChatPreferences {
@@ -505,6 +548,7 @@ export class TelegramCommandCenterStore {
           ...emptyState(),
           ...stored,
           version: 2,
+          activeMarketScopes: stored.activeMarketScopes || {},
           preferences: stored.preferences || {},
           priceAlerts: Array.isArray(stored.priceAlerts) ? stored.priceAlerts : [],
           smartAlerts: Array.isArray(stored.smartAlerts) ? stored.smartAlerts : [],
@@ -522,6 +566,7 @@ export class TelegramCommandCenterStore {
       if (version === 1 || version === 2) {
         return {
           version: 2,
+          activeMarketScopes: (parsed as any).activeMarketScopes || {},
           preferences: parsed.preferences || {},
           priceAlerts: Array.isArray(parsed.priceAlerts) ? parsed.priceAlerts : [],
           smartAlerts: Array.isArray((parsed as any).smartAlerts) ? (parsed as any).smartAlerts : [],

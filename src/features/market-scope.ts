@@ -7,7 +7,7 @@ export const MARKET_SCOPES: readonly MarketScope[] = [
 ];
 
 export function marketScopeForInstrumentType(type: InstrumentType): MarketScope {
-  return type === 'stock' ? 'stocks' : type === 'crypto' ? 'crypto' : 'prediction';
+  return type === 'stock' ? 'stocks' : type === 'option' ? 'options' : type === 'crypto' ? 'crypto' : 'prediction';
 }
 
 export function marketScopeForTab(tab: string): MarketScope {
@@ -29,6 +29,6 @@ export function defaultTabForMarketScope(scope: MarketScope): string {
 
 export function filterInstrumentResults<T extends Pick<InstrumentSearchResult, 'type'>>(items: T[], scope: MarketScope): T[] {
   if (scope === 'overview' || scope === 'watchlist') return items;
-  const type = scope === 'stocks' ? 'stock' : scope === 'crypto' ? 'crypto' : scope === 'prediction' ? 'prediction' : null;
+  const type = scope === 'stocks' ? 'stock' : scope === 'options' ? 'option' : scope === 'crypto' ? 'crypto' : scope === 'prediction' ? 'prediction' : null;
   return type ? items.filter(item => item.type === type) : [];
 }

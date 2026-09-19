@@ -1,6 +1,6 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const { ResilientDataSourceAdapter } = require('../dist/data/source-adapter');
+const { ResilientDataSourceAdapter, TradingViewAdapter } = require('../dist/data/source-adapter');
 
 test('retries a transient source failure and returns a fresh snapshot', async () => {
   let attempts = 0;
@@ -10,7 +10,7 @@ test('retries a transient source failure and returns a fresh snapshot', async ()
     return { value: 42 };
   }});
   const snapshot = await adapter.fetch();
-  assert.equal(snapshot.status, 'fresh');
+  assert.equal(snapshot.status, 'live');
   assert.deepEqual(snapshot.data, { value: 42 });
   assert.equal(attempts, 2);
 });
@@ -21,10 +21,21 @@ test('serves stale cached data after later failures', async () => {
     if (fail) throw new Error('offline');
     return 'cached';
   }});
-  assert.equal((await adapter.fetch()).status, 'fresh');
+  assert.equal((await adapter.fetch()).status, 'live');
   await new Promise(resolve => setTimeout(resolve, 5));
   fail = true;
   const stale = await adapter.fetch();
   assert.equal(stale.status, 'stale');
   assert.equal(stale.data, 'cached');
+});
+
+test('TradingView adapter is disabled by default', async () => {
+  const adapter = new TradingViewAdapter();
+  const res = await adapter.fetch();
+  assert.equal(res.status, 'unconfigured');
+  assert.match(res.error, /disabled by default/);
+
+  adapter.enable();
+  const res2 = await adapter.fetch();
+  assert.equal(res2.status, 'unavailable'); // Not implemented yet
 });

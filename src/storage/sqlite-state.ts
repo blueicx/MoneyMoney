@@ -45,6 +45,7 @@ export class SQLiteStateStore {
       CREATE TABLE IF NOT EXISTS state_documents (key TEXT PRIMARY KEY, version INTEGER NOT NULL DEFAULT 1, updated_at TEXT NOT NULL, payload TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS audit_log (id TEXT PRIMARY KEY, chat_id TEXT, action TEXT NOT NULL, detail TEXT NOT NULL, at TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS idempotency_keys (key TEXT PRIMARY KEY, result TEXT NOT NULL, created_at TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS state_leases (key TEXT PRIMARY KEY, owner TEXT NOT NULL, expires_at INTEGER NOT NULL, updated_at TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS migration_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
     `);
     this.migrateJsonFiles();
@@ -81,6 +82,36 @@ export class SQLiteStateStore {
 
   setIdempotent<T>(key: string, result: T): void {
     this.db.prepare('INSERT OR IGNORE INTO idempotency_keys (key, result, created_at) VALUES (?, ?, ?)').run(key, JSON.stringify(result), new Date().toISOString());
+  }
+
+  acquireLease(key: string, owner: string, now = Date.now(), leaseMs = 30_000): boolean {
+    if (!key || !owner || !Number.isFinite(now) || !Number.isFinite(leaseMs) || leaseMs <= 0) return false;
+    const result = this.db.prepare(`
+      INSERT INTO state_leases (key, owner, expires_at, updated_at)
+      VALUES (@key, @owner, @expiresAt, @updatedAt)
+      ON CONFLICT(key) DO UPDATE SET
+        owner = excluded.owner,
+        expires_at = excluded.expires_at,
+        updated_at = excluded.updated_at
+      WHERE state_leases.expires_at <= @now OR state_leases.owner = @owner
+    `).run({ key, owner, expiresAt: now + leaseMs, updatedAt: new Date(now).toISOString(), now });
+    return result.changes === 1;
+  }
+
+  refreshLease(key: string, owner: string, now = Date.now(), leaseMs = 30_000): boolean {
+    if (!key || !owner || !Number.isFinite(now) || !Number.isFinite(leaseMs) || leaseMs <= 0) return false;
+    const result = this.db.prepare(`
+      UPDATE state_leases
+      SET expires_at = @expiresAt, updated_at = @updatedAt
+      WHERE key = @key AND owner = @owner
+    `).run({ key, owner, expiresAt: now + leaseMs, updatedAt: new Date(now).toISOString() });
+    return result.changes === 1;
+  }
+
+  releaseLease(key: string, owner: string): boolean {
+    if (!key || !owner) return false;
+    const result = this.db.prepare('DELETE FROM state_leases WHERE key = ? AND owner = ?').run(key, owner);
+    return result.changes === 1;
   }
 
   private migrateJsonFiles(): void {

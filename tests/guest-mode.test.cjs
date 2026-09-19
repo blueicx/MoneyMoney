@@ -29,6 +29,8 @@ test('guest access only permits explicit read-only GET paths', () => {
   assert.equal(auth.isGuestRequestAllowed('GET', '/stock/quotes'), true);
   assert.equal(auth.isGuestRequestAllowed('GET', '/news'), true);
   assert.equal(auth.isGuestRequestAllowed('GET', '/events/calendar'), true);
+  assert.equal(auth.isGuestRequestAllowed('GET', '/market-ticker'), true);
+  assert.equal(auth.isGuestRequestAllowed('GET', '/screener'), true);
   assert.equal(auth.isGuestRequestAllowed('GET', '/settings'), false);
   assert.equal(auth.isGuestRequestAllowed('GET', '/telegram/status'), false);
   assert.equal(auth.isGuestRequestAllowed('GET', '/paper/portfolio'), false);
@@ -36,11 +38,22 @@ test('guest access only permits explicit read-only GET paths', () => {
   assert.equal(auth.isGuestRequestAllowed('DELETE', '/watchlist/item'), false);
 });
 
+test('guest can read the stock library and search without gaining write access', () => {
+  assert.equal(auth.isGuestRequestAllowed('GET', '/watchlist'), true);
+  assert.equal(auth.isGuestRequestAllowed('GET', '/paper/positions'), true);
+  assert.equal(auth.isGuestRequestAllowed('GET', '/stock/search'), true);
+  assert.equal(auth.isGuestRequestAllowed('POST', '/watchlist'), false);
+});
+
 test('server exposes guest login and enforces guest read-only middleware', () => {
   assert.match(serverSrc, /app\.post\(['"]\/api\/auth\/guest['"]/, 'guest login endpoint exists');
   assert.match(serverSrc, /role:\s*['"]guest['"]/, 'guest response identifies role');
   assert.match(serverSrc, /isGuestRequestAllowed/, 'API middleware checks the guest allowlist');
   assert.match(serverSrc, /GUEST_TOKEN_EXPIRY_MS/, 'guest expiry is explicit');
+});
+
+test('guest cannot request private watchlist risk data', () => {
+  assert.match(serverSrc, /app\.get\(['"]\/api\/risk\/overview['"][\s\S]*role === ['"]guest['"][\s\S]*scope === ['"]watchlist['"]/);
 });
 
 test('login and dashboard expose the guest read-only state', () => {

@@ -1,5 +1,7 @@
-const CACHE_NAME = "moneymoney-v53";
+const CACHE_NAME = "moneymoney-v59-trusted-research";
 const STATIC_ASSETS = ["/", "/manifest.json"];
+const OFFLINE_SAFE_API_PATHS = ["/api/evidence", "/api/evidence/changes", "/api/evidence/source-health/history", "/api/scenarios", "/api/signals/quality"];
+const OFFLINE_SAFE_API_PREFIXES = ["/api/workspaces/shared/"];
 
 self.addEventListener("install", (event) => {
   self.skipWaiting();
@@ -23,7 +25,7 @@ self.addEventListener("fetch", (event) => {
           caches.open(CACHE_NAME).then((cache) => cache.put("/", clone));
           return res;
         })
-        .catch(() => Response.new(
+        .catch(async () => (await caches.match("/")) || new Response(
           '<!doctype html><meta charset="utf-8"><title>MoneyMoney 正在连接</title><meta http-equiv="refresh" content="2">' +
           '<div style="font:16px system-ui,sans-serif;padding:28px;text-align:center;color:#333">MoneyMoney 正在连接本地服务，请稍候……</div>',
           { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" } }
@@ -33,13 +35,25 @@ self.addEventListener("fetch", (event) => {
   }
 
   if (event.request.url.includes("/api/")) {
+    const url = new URL(event.request.url);
+    const offlineSafe = OFFLINE_SAFE_API_PATHS.some((path) => url.pathname === path) || OFFLINE_SAFE_API_PREFIXES.some((prefix) => url.pathname.startsWith(prefix));
     event.respondWith(
       fetch(event.request)
-        .then((res) => res.ok ? res : Promise.reject(new Error("API unavailable")))
-        .catch(() => Response.new(
-          JSON.stringify({ success: false, error: "本地服务暂时不可用" }),
-          { status: 503, headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" } }
-        ))
+        .then((res) => {
+          if (!res.ok) throw new Error("API unavailable");
+          if (offlineSafe) caches.open(CACHE_NAME).then((cache) => cache.put(event.request, res.clone()));
+          return res;
+        })
+        .catch(async () => {
+          if (offlineSafe) {
+            const cached = await caches.match(event.request);
+            if (cached) return cached;
+          }
+          return new Response(
+            JSON.stringify({ success: false, dataStatus: "cached", error: "网络不可用且没有最近的公开快照", reason: "离线状态，仅可查看已缓存的公开证据快照" }),
+            { status: 503, headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" } }
+          );
+        })
     );
     return;
   }

@@ -6,6 +6,7 @@
  */
 
 import { loadTickerRecords } from './insider-transactions';
+import { buildSecHeaders } from './sec-edgar-client';
 
 export interface FundamentalHistoryPoint {
   endDate: string;
@@ -28,6 +29,17 @@ export interface FundamentalMetrics {
   returnOnEquityPct: number | null;
 }
 
+export interface FundamentalFactor {
+  label: string;
+  value: string;
+  reason: string;
+}
+
+export interface FundamentalFactors {
+  supportingFactors: FundamentalFactor[];
+  riskFactors: FundamentalFactor[];
+}
+
 export interface FundamentalRadarResult {
   symbol: string;
   cik: string;
@@ -43,6 +55,8 @@ export interface FundamentalRadarResult {
   metrics: FundamentalMetrics;
   history: FundamentalHistoryPoint[];
   missingFields: string[];
+  supportingFactors: FundamentalFactor[];
+  riskFactors: FundamentalFactor[];
   sources: string[];
 }
 
@@ -63,7 +77,6 @@ interface CompanyFacts {
   }>>;
 }
 
-const USER_AGENT = 'MoneyMoney/1.0 (keyless research; contact@moneymoney.app)';
 const CACHE_TTL = 12 * 60 * 60_000;
 const resultCache = new Map<string, { ts: number; value: FundamentalRadarResult }>();
 const inflight = new Map<string, Promise<FundamentalRadarResult>>();
@@ -82,7 +95,7 @@ function safeRatio(numerator: number | null, denominator: number | null): number
 async function fetchCompanyFacts(cik: string): Promise<CompanyFacts> {
   const response = await fetch(`https://data.sec.gov/api/xbrl/companyfacts/CIK${cik.padStart(10, '0')}.json`, {
     headers: {
-      'User-Agent': USER_AGENT,
+      ...buildSecHeaders(),
       Accept: 'application/json',
     },
     signal: AbortSignal.timeout(25_000),
@@ -179,6 +192,42 @@ function bandScore(value: number | null, bands: Array<[number, number]>, reverse
 
 function clamp(value: number, minimum: number, maximum: number): number {
   return Math.max(minimum, Math.min(maximum, value));
+}
+
+export function buildFundamentalFactors(metrics: FundamentalMetrics, score: number, ageDays: number): FundamentalFactors {
+  const supportingFactors: FundamentalFactor[] = [];
+  const riskFactors: FundamentalFactor[] = [];
+  if ((metrics.revenueGrowthPct ?? -Infinity) >= 10) {
+    supportingFactors.push({ label: '增长', value: `${metrics.revenueGrowthPct}%`, reason: '营收同比增长达到双位数。' });
+  }
+  if ((metrics.grossMarginPct ?? -Infinity) >= 40) {
+    supportingFactors.push({ label: '毛利率', value: `${metrics.grossMarginPct}%`, reason: '毛利率显示产品或服务仍有较好的定价缓冲。' });
+  }
+  if ((metrics.cashConversionRatio ?? -Infinity) >= 0.95 && (metrics.operatingCashFlowMarginPct ?? -Infinity) > 0) {
+    supportingFactors.push({ label: '现金流', value: `${metrics.cashConversionRatio}`, reason: '经营现金流与净利润匹配度较好。' });
+  }
+  if ((metrics.returnOnEquityPct ?? -Infinity) >= 15) {
+    supportingFactors.push({ label: 'ROE', value: `${metrics.returnOnEquityPct}%`, reason: '股东资本回报率达到可观察水平。' });
+  }
+  if ((score >= 66) && supportingFactors.length === 0) {
+    supportingFactors.push({ label: '综合评分', value: `${score}/100`, reason: '综合评分偏强，但仍需结合具体指标核对。' });
+  }
+  if ((metrics.cashConversionRatio ?? Infinity) < 0.65 && (metrics.netMarginPct ?? 0) > 0) {
+    riskFactors.push({ label: '现金流', value: `${metrics.cashConversionRatio}`, reason: '净利润明显高于经营现金流，需核对应收、库存或会计确认节奏。' });
+  }
+  if ((metrics.currentRatio ?? Infinity) < 1.05) {
+    riskFactors.push({ label: '偿债', value: `${metrics.currentRatio}`, reason: '流动比率偏低，短期营运资金缓冲较紧。' });
+  }
+  if ((metrics.liabilitiesToAssetsPct ?? -Infinity) > 78) {
+    riskFactors.push({ label: '负债', value: `${metrics.liabilitiesToAssetsPct}%`, reason: '负债占总资产比例偏高，利率或收入变化会放大压力。' });
+  }
+  if ((metrics.revenueGrowthPct ?? 0) < 0) {
+    riskFactors.push({ label: '增长', value: `${metrics.revenueGrowthPct}%`, reason: '营收同比收缩，需确认是周期性还是结构性问题。' });
+  }
+  if (ageDays > 420) {
+    riskFactors.push({ label: '数据新鲜度', value: `${ageDays} 天`, reason: '最新年度报告较旧，季度变化可能尚未体现。' });
+  }
+  return { supportingFactors, riskFactors };
 }
 
 function buildSignal(score: number, metrics: FundamentalMetrics, ageDays: number) {
@@ -351,6 +400,7 @@ function buildResult(symbol: string, facts: CompanyFacts): FundamentalRadarResul
   const coverage = (missingFields.length ? 10 - missingFields.length : 10) / 10;
   const confidence = Math.round(clamp(38 + coverage * 42 - Math.min(16, dataAgeDays / 40), 30, 88));
   const signal = buildSignal(score, metrics, dataAgeDays);
+  const factors = buildFundamentalFactors(metrics, score, dataAgeDays);
   const cik = String(facts.cik || '');
 
   return {
@@ -368,6 +418,7 @@ function buildResult(symbol: string, facts: CompanyFacts): FundamentalRadarResul
     metrics,
     history,
     missingFields,
+    ...factors,
     sources: [
       'SEC EDGAR XBRL companyfacts',
       `https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=${cik.padStart(10, '0')}&type=10-K`,

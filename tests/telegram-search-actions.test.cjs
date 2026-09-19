@@ -14,7 +14,7 @@ test('quick command table groups the existing Telegram commands', () => {
 
 test('combined market search exposes a watchlist action for stock results', () => {
   assert.match(server, /buildTelegramStockSearchRows/);
-  assert.match(search, /callback_data: `watch:add:\$\{item\.code\}`/);
+  assert.match(search, /callback_data: `watch:add:\$\{scope\}:\$\{encodeURIComponent\(item\.code\)\}`/);
   assert.match(search, /callback_data: `stock:view:\$\{item\.code\}`/);
   assert.match(server, /isTelegramWatchableStockId/);
 });
@@ -24,13 +24,13 @@ test('stock search rows contain both watchlist and quote actions', () => {
   assert.equal(isTelegramWatchableStockId('usAAPL'), true);
   assert.equal(isTelegramWatchableStockId('not-a-stock'), false);
   assert.deepEqual(buildTelegramStockSearchRows([{ code: 'usAAPL', name: 'Apple Inc.' }]), [[
-    { text: '加入自选 Apple In', callback_data: 'watch:add:usAAPL' },
+    { text: '加入自选 Apple In', callback_data: 'watch:add:stocks:usAAPL' },
     { text: 'Apple In 行情', callback_data: 'stock:view:usAAPL' },
   ]]);
 });
 
 test('unified search fallbacks contain detail buttons', () => {
-  assert.match(server, /unified:show:prediction:predictfun:\$\{item\.id\}/);
-  assert.match(server, /unified:show:stock:us:' \+ ticker/);
+  assert.match(server, /telegramScopedCallback\('unified:show', scope, `prediction:predictfun:\$\{item\.id\}`\)/);
+  assert.match(server, /telegramScopedCallback\('unified:show', scope === 'watchlist' \? 'watchlist' : 'stocks', 'stock:us:' \+ ticker\)/);
   assert.match(server, /const ticker = String\(tList\[i\]\.exchangeSymbol \|\| tList\[i\]\.code\)/);
 });

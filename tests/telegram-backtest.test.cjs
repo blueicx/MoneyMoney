@@ -5,7 +5,11 @@ const test = require('node:test');
 test('Telegram backtest command covers default, aliases, market ID, and read-only output', () => {
   const server = fs.readFileSync('src/web/server.ts', 'utf8');
 
-  assert.match(server, /backtest:\s*\(\{\s*args\s*\}\)/);
+  assert.match(server, /backtest:\s*async\s*\(\{\s*args,\s*chatId\s*\}\)/);
+  assert.match(server, /const chatScope = telegramScopeForChat\(chatId\)/);
+  assert.match(server, /backtester\.runStockBacktest\(assetStrategy, assetSymbol\)/);
+  assert.match(server, /backtester\.runCryptoBacktest\(assetStrategy, assetSymbol\)/);
+  assert.match(server, /chatScope === 'options'/);
   assert.match(server, /const first = String\(args\[0\] \|\| ''\)/);
   assert.match(server, /const aliases: Record<string, 'momentum' \| 'meanReversion'>/);
   assert.match(server, /const firstIsMarketId = \/\^\\d\+\$\/\.test\(first\)/);
@@ -21,5 +25,5 @@ test('Telegram backtest command covers default, aliases, market ID, and read-onl
   assert.match(server, /不会创建交易/);
   assert.match(server, /firstKey === 'compare'/);
   assert.match(server, /策略对比回测/);
-  assert.match(server, /\/backtest compare 1234/);
+  assert.match(server, /\/backtest start <策略> <标的>/);
 });
