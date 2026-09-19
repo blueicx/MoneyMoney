@@ -73,7 +73,10 @@ export function buildEventEvidence(input: {
 
 export function matchesEventScope(item: { scope: string; instrumentId?: string | null }, scope: string, instrumentId?: string): boolean {
   if (item.scope !== scope) return false;
-  if (instrumentId && item.instrumentId !== instrumentId) return false;
+  // Market-wide events (for example FOMC or CPI) are relevant to every
+  // instrument in that market. Keep the market scope check above so this
+  // never widens a stock timeline to crypto/options/prediction data.
+  if (instrumentId && item.instrumentId != null && item.instrumentId !== instrumentId) return false;
   return true;
 }
 

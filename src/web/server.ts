@@ -46,6 +46,7 @@ import { priceTracker } from '../features/price-tracker';
 import { kellySizer, backtester } from '../features/kelly-backtest';
 import { pushNotification } from '../features/notifications';
 import { newsFeed, settingsManager } from '../features/news-settings';
+import { getStockNews } from '../features/stock-news';
 import { reportScheduler } from '../features/report-scheduler';
 import { binanceFeed, alertManager, anomalyDetector } from '../features/binance';
 import { llmAnalyzer, redditSentiment, whaleMonitor, strategyComparison, tradeJournal } from '../features/ai-social';
@@ -2064,7 +2065,7 @@ app.get('/api/events/timeline', async (req, res) => {
         previous: ev.previous,
         source: ev.source,
         url: null,
-        scope: ev.category === 'earnings' ? 'stocks' : 'overview',
+        scope: scope === 'stocks' ? 'stocks' : (ev.category === 'earnings' ? 'stocks' : 'overview'),
         instrumentId: earningsSymbol ? `stock:us:${earningsSymbol}` : null,
       }));
       const evidence = evidences[evidences.length - 1];
@@ -2090,6 +2091,31 @@ app.get('/api/events/timeline', async (req, res) => {
       evidences.push({ ...evidence, kind: 'news', date: n.publishedAt, id: `news:${n.publishedAt}:${n.title}` });
     }
     sourceStatus.news = 'ok';
+  } catch {
+    sourceStatus.news = 'unavailable';
+  }
+
+  if (scope === 'stocks' && instrumentId) try {
+    const symbol = instrumentId.match(/^stock:[^:]+:([A-Z0-9.-]+)$/i)?.[1] || '';
+    if (symbol) {
+      const news = await getStockNews(symbol);
+      for (const item of news) {
+        evidences.push(buildEventEvidence({
+          title: item.title,
+          actual: null,
+          forecast: null,
+          previous: null,
+          source: item.source,
+          url: item.url,
+          scope: 'stocks',
+          instrumentId,
+          kind: 'news',
+          date: item.publishedAt,
+          id: `stock-news:${symbol}:${item.publishedAt}:${item.title}`,
+        }));
+      }
+      sourceStatus.news = 'ok';
+    }
   } catch {
     sourceStatus.news = 'unavailable';
   }
@@ -6070,6 +6096,12 @@ app.get('/api/correlations', (req, res) => {
 app.get('/api/news', async (req, res) => {
   try {
     const scope = requestedMarketScope(req.query.scope);
+    if (scope === 'stocks') {
+      const instrumentId = String(req.query.instrumentId || '');
+      const symbol = instrumentId.match(/^stock:[^:]+:([A-Z0-9.-]+)$/i)?.[1] || String(req.query.symbol || '');
+      if (!symbol) return res.json({ success: true, data: [], reason: '需要先选择股票标的' });
+      return res.json({ success: true, data: await getStockNews(symbol) });
+    }
     if (scope && !['overview', 'crypto'].includes(scope)) return res.json({ success: true, data: [] });
     const items = await newsFeed.getNews();
     res.json({ success: true, data: items });

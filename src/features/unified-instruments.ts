@@ -1,5 +1,6 @@
 import { binanceFeed, type BinanceTicker } from './binance';
 import { newsFeed, type NewsItem } from './news-settings';
+import { getStockNews } from './stock-news';
 import { getUpcomingEventCalendar, type UpcomingEvent } from './event-calendar';
 import { getCachedPredictionRadarSlice, getPredictionRadar, type PredictionMarket } from './prediction-radar';
 import { getAiRuntimeConfig } from './ai-runtime-config';
@@ -299,7 +300,12 @@ export class UnifiedInstrumentService {
         sourceStatus.klines = stockStatus(stockData.sourceStatus['nasdaq-public-history']);
       }
     } catch { /* each source is independently optional */ }
-    const [eventsResult, newsResult] = await Promise.allSettled([getUpcomingEventCalendar(7), newsFeed.getNews()]);
+    const newsPromise = normalized.type === 'stock'
+      ? getStockNews(normalized.symbol)
+      : normalized.type === 'crypto'
+        ? newsFeed.getNews()
+        : Promise.resolve([] as NewsItem[]);
+    const [eventsResult, newsResult] = await Promise.allSettled([getUpcomingEventCalendar(7), newsPromise]);
     const events = eventsResult.status === 'fulfilled' ? eventsResult.value.events : [];
     const news = newsResult.status === 'fulfilled' ? newsResult.value : [];
     if (eventsResult.status === 'fulfilled') sourceStatus.events = 'ok';

@@ -25,11 +25,12 @@ test('timeline matching never widens to another market', () => {
   assert.equal(matchesEventScope({ scope: 'stocks', instrumentId: 'stock:us:AAPL' }, 'stocks', 'stock:us:AAPL'), true);
   assert.equal(matchesEventScope({ scope: 'crypto', instrumentId: 'crypto:binance:BTCUSDT' }, 'stocks', 'stock:us:AAPL'), false);
   const items = filterTimelineItems([
+    { scope: 'stocks', instrumentId: null, title: 'market event' },
     { scope: 'stocks', instrumentId: 'stock:us:AAPL', title: 'stock' },
     { scope: 'crypto', instrumentId: 'crypto:binance:BTCUSDT', title: 'crypto' },
     { scope: 'stocks', instrumentId: 'stock:us:MSFT', title: 'other stock' },
   ], 'stocks', 'stock:us:AAPL');
-  assert.deepEqual(items.map(item => item.title), ['stock']);
+  assert.deepEqual(items.map(item => item.title), ['market event', 'stock']);
 });
 
 test('missing comparison values become unavailable instead of guessed', () => {

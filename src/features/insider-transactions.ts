@@ -75,6 +75,19 @@ function number(value: string): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+export function buildSecArchiveCandidates(accessionNumber: string, primaryDocument?: string): string[] {
+  const documentPath = text(primaryDocument);
+  const basename = documentPath.split(/[\\/]/).pop() || '';
+  const hasParentSegment = /(^|[\\/])\.\.([\\/]|$)/.test(documentPath);
+  const safePrimary = !hasParentSegment && /^[A-Za-z0-9][A-Za-z0-9._-]*\.xml$/i.test(basename) ? basename : '';
+  const safeAccession = text(accessionNumber).match(/^\d{10}-\d{2}-\d{6}$/)?.[0] || '';
+  return Array.from(new Set([
+    safePrimary,
+    'form4.xml',
+    safeAccession ? `${safeAccession}.txt` : '',
+  ].filter(Boolean)));
+}
+
 async function fetchJson<T>(url: string): Promise<T> {
   const response = await fetch(url, {
     headers: buildSecHeaders(),
@@ -101,6 +114,7 @@ interface SubmissionEntry {
   form: string;
   accessionNumber: string;
   filingDate: string;
+  primaryDocument?: string;
 }
 
 interface SubmissionsPayload {
@@ -241,6 +255,7 @@ export async function getInsiderRadar(symbolInput: string): Promise<InsiderRadar
   const forms = recent?.form || [];
   const accessions = recent?.accessionNumber || [];
   const filingDates = recent?.filingDate || [];
+  const primaryDocuments = recent?.primaryDocument || [];
   const cutoff = Date.now() - WINDOW_DAYS * 24 * 60 * 60_000;
 
   const entries: SubmissionEntry[] = [];
@@ -248,7 +263,7 @@ export async function getInsiderRadar(symbolInput: string): Promise<InsiderRadar
     const filedAt = filingDates[i] || '';
     const filedTime = new Date(filedAt).getTime();
     if (forms[i] !== '4' || !Number.isFinite(filedTime) || filedTime < cutoff) continue;
-    entries.push({ form: forms[i], accessionNumber: accessions[i], filingDate: filedAt });
+    entries.push({ form: forms[i], accessionNumber: accessions[i], filingDate: filedAt, primaryDocument: primaryDocuments[i] || undefined });
   }
 
   // Stay well below public-rate limits while keeping the radar responsive.
@@ -259,9 +274,17 @@ export async function getInsiderRadar(symbolInput: string): Promise<InsiderRadar
   for (const chunk of chunks) {
     const results = await Promise.allSettled(chunk.map(async entry => {
       const noDash = entry.accessionNumber.replace(/-/g, '');
-      const xml = await fetchText(`https://www.sec.gov/Archives/edgar/data/${paddedCik}/${noDash}/form4.xml`);
-      if (!/<ownershipDocument/i.test(xml)) throw new Error('Unexpected Form 4 payload');
-      return parseTransactions(xml, entry.filingDate);
+      let lastError: unknown = new Error('Unexpected Form 4 payload');
+      for (const candidate of buildSecArchiveCandidates(entry.accessionNumber, entry.primaryDocument)) {
+        try {
+          const xml = await fetchText(`https://www.sec.gov/Archives/edgar/data/${paddedCik}/${noDash}/${candidate}`);
+          if (/<ownershipDocument/i.test(xml)) return parseTransactions(xml, entry.filingDate);
+          lastError = new Error(`Unexpected Form 4 payload: ${candidate}`);
+        } catch (error) {
+          lastError = error;
+        }
+      }
+      throw lastError;
     }));
     for (const result of results) {
       if (result.status === 'fulfilled') transactions.push(...result.value);
