@@ -2029,7 +2029,7 @@
     });
   };
   const onLoginPage = location.pathname === '/login';
-  fetch('/api/auth/status', {credentials:'include'}).then(function(r){return r.json();}).then(function(d){
+  window.mm_authReady = fetch('/api/auth/status', {credentials:'include'}).then(function(r){return r.json();}).then(function(d){
     const logged = !!(d && d.data && d.data.loggedIn);
     window.mm_isLoggedIn = logged;
     window.mm_isGuest = logged && d.data.role === 'guest';
@@ -2048,6 +2048,7 @@
 </script>
 </head>
 <body>
+  <div id="network-status-banner" role="status" hidden style="position:fixed;z-index:100000;left:50%;top:8px;transform:translateX(-50%);padding:7px 14px;border-radius:999px;background:#7f1d1d;color:white;font-size:12px;box-shadow:0 8px 24px rgba(0,0,0,.3);">当前离线：仅显示已缓存的公开快照</div>
   <header class="header" id="top-market-bar">
     <div class="logo">
       <div class="logo-icon">P</div>
@@ -2974,6 +2975,10 @@
               <div id="decision-evidence-list" style="margin-top:10px;"><div class="empty-tip">正在读取...</div></div>
             </article>
             <article class="glass-card" style="padding:15px;border-radius:16px;">
+              <div style="display:flex;justify-content:space-between;gap:8px;align-items:center;"><strong>🩺 来源故障时间线</strong><button class="tab guest-admin-only" type="button" onclick="retryDecisionSources()">一键重试</button></div>
+              <div id="decision-source-history" style="margin-top:10px;"><div class="empty-tip">正在读取来源历史...</div></div>
+            </article>
+            <article class="glass-card" style="padding:15px;border-radius:16px;">
               <strong>🧪 情景实验室</strong>
               <div id="decision-scenario-list" style="margin-top:10px;"><div class="empty-tip">正在读取...</div></div>
               <div id="decision-scenario-result" style="margin-top:8px;"></div>
@@ -2987,6 +2992,10 @@
                 <button class="tab active" type="button" onclick="saveDecisionRecordUi()">保存决策与当前证据</button>
               </div>
               <div id="decision-journal-list" style="margin-top:10px;"><div class="empty-tip">登录后查看私人决策记录。</div></div>
+            </article>
+            <article class="glass-card guest-admin-only" style="padding:15px;border-radius:16px;">
+              <div style="display:flex;justify-content:space-between;gap:8px;align-items:center;"><strong>🧠 负知识库</strong><button class="tab" type="button" onclick="generateDueDecisionReviews()">生成到期复盘</button></div>
+              <div id="decision-negative-knowledge" style="margin-top:10px;"><div class="empty-tip">完成复盘后自动汇总重复失败模式。</div></div>
             </article>
             <article class="glass-card" style="padding:15px;border-radius:16px;">
               <strong>💼 组合驾驶舱</strong>
@@ -3023,6 +3032,7 @@
       <!-- Automation Operations Tab -->
       <div id="ops-tab" class="tab-content">
         <div class="section-title">⚙️ 自动化运营台</div>
+        <div id="runtime-diagnostics" class="glass-card" style="padding:14px;border-radius:16px;margin-bottom:14px;"><div class="empty-tip">正在读取运行诊断...</div></div>
         <div id="ops-overview" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:16px;"></div>
         <div id="ops-jobs" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;"></div>
       </div>
@@ -9548,7 +9558,19 @@ function renderDecisionEvidence(items) {
   const host = document.getElementById('decision-evidence-list');
   if (!host) return;
   window.mm_decisionEvidenceIds = (items || []).map(item => item.id);
-  host.innerHTML = (items || []).length ? items.slice(0, 8).map(item => `<details style="padding:8px 0;border-bottom:1px dashed var(--border);"><summary style="cursor:pointer;display:flex;justify-content:space-between;gap:8px;"><span><b>${safeNewsText(item.source?.name || item.source?.id)}</b><small style="display:block;color:var(--text-secondary);">${safeNewsText(item.source?.id)} · ${safeNewsText(item.dataStatus)}</small></span><span style="font-size:10px;color:${item.dataStatus === 'live' ? 'var(--green)' : item.dataStatus === 'unavailable' ? 'var(--red)' : '#b7791f'};">${safeNewsText(item.dataStatus)}</span></summary><div style="margin-top:8px;">${decisionQualityBar('时效', item.quality?.freshness)}${decisionQualityBar('完整度', item.quality?.completeness)}${decisionQualityBar('来源可靠', item.quality?.sourceReliability)}${decisionQualityBar('多源一致', item.quality?.corroboration)}<div style="margin-top:7px;font-size:10px;color:var(--text-secondary);">数据 ${safeNewsText(item.observedAt)} · 抓取 ${safeNewsText(item.fetchedAt)}${item.reason ? `<br><span style="color:var(--red);">${safeNewsText(item.reason)}</span>` : ''}</div></div></details>`).join('') : '<div class="empty-tip">当前市场暂无证据，数据不会由其他市场补位。</div>';
+  host.innerHTML = (items || []).length ? items.slice(0, 8).map(item => `<details style="padding:8px 0;border-bottom:1px dashed var(--border);"><summary style="cursor:pointer;display:flex;justify-content:space-between;gap:8px;"><span><b>${safeNewsText(item.source?.name || item.source?.id)}</b><small style="display:block;color:var(--text-secondary);">${safeNewsText(item.source?.id)} · ${safeNewsText(item.dataStatus)}</small></span><span style="font-size:10px;color:${item.dataStatus === 'live' ? 'var(--green)' : item.dataStatus === 'unavailable' ? 'var(--red)' : '#b7791f'};">${safeNewsText(item.dataStatus)}</span></summary><div style="margin-top:8px;">${decisionQualityBar('时效', item.quality?.freshness)}${decisionQualityBar('完整度', item.quality?.completeness)}${decisionQualityBar('来源可靠', item.quality?.sourceReliability)}${decisionQualityBar('多源一致', item.quality?.corroboration)}<div style="margin-top:7px;font-size:10px;color:var(--text-secondary);">数据 ${safeNewsText(item.observedAt)} · 抓取 ${safeNewsText(item.fetchedAt)} · Hash ${safeNewsText(String(item.hash || '').slice(0, 12))}${item.source?.url ? `<br><a href="${safeNewsUrl(item.source.url)}" target="_blank" rel="noopener noreferrer">打开来源原文 ↗</a>` : ''}${item.reason ? `<br><span style="color:var(--red);">${safeNewsText(item.reason)}</span>` : ''}</div></div></details>`).join('') : '<div class="empty-tip">当前市场暂无证据，数据不会由其他市场补位。</div>';
+}
+
+function renderDecisionSourceHistory(items) {
+  const host = document.getElementById('decision-source-history');
+  if (!host) return;
+  host.innerHTML = (items || []).length ? items.slice(0, 10).map(item => `<div style="padding:7px 0;border-bottom:1px dashed var(--border);font-size:10px;"><b style="color:${item.kind === 'recovery' ? 'var(--green)' : 'var(--red)'};">${item.kind === 'recovery' ? '已恢复' : item.kind === 'outage' ? '故障' : '降级'} · ${safeNewsText(item.sourceName)}</b><div style="color:var(--text-secondary);margin-top:3px;">${safeNewsText(item.detail)} · ${safeNewsText(item.at)}</div><div style="color:var(--text-secondary);">影响：${safeNewsText((item.affectedCapabilities || []).join('、') || '未声明')}</div></div>`).join('') : '<div class="empty-tip">暂无故障或恢复记录。</div>';
+}
+
+function renderDecisionNegativeKnowledge(items) {
+  const host = document.getElementById('decision-negative-knowledge');
+  if (!host) return;
+  host.innerHTML = (items || []).length ? items.map(item => `<div style="padding:7px 0;border-bottom:1px dashed var(--border);"><b>${safeNewsText(item.pattern)}</b><span style="float:right;color:var(--red);">${Number(item.count || 0)} 次</span><div style="font-size:10px;color:var(--text-secondary);margin-top:3px;">${safeNewsText((item.instruments || []).join('、'))}</div></div>`).join('') : '<div class="empty-tip">暂无重复失败模式；复盘内容不会被伪造。</div>';
 }
 
 function renderDecisionScenarios(items) {
@@ -9567,20 +9589,20 @@ function renderDecisionPortfolio(data, reason) {
   const host = document.getElementById('decision-portfolio');
   if (!host) return;
   if (!data?.positions?.length) { host.innerHTML = `<div class="empty-tip">${safeNewsText(reason || '当前市场暂无模拟或导入仓位')}</div>`; return; }
-  host.innerHTML = `<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:7px;">${commandMetric('组合市值', '$' + Number(data.totalValue || 0).toFixed(2), `${data.positions.length} 个仓位`)}${commandMetric('最大集中度', Number(data.concentrationPct || 0).toFixed(1) + '%', '单一仓位占比')}${commandMetric('超额收益', Number(data.excessReturnPct || 0).toFixed(2) + '%', '相对输入基准')}</div><div style="margin-top:8px;font-size:10px;color:var(--text-secondary);">压力测试：${(data.stressTests || []).map(item => `${item.shockPct}% → $${Number(item.value).toFixed(0)}`).join(' · ')}</div>`;
+  host.innerHTML = `<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:7px;">${commandMetric('组合市值', '$' + Number(data.totalValue || 0).toFixed(2), `${data.positions.length} 个仓位`)}${commandMetric('最大集中度', Number(data.concentrationPct || 0).toFixed(1) + '%', '单一仓位占比')}${commandMetric('超额收益', Number(data.excessReturnPct || 0).toFixed(2) + '%', '相对输入基准')}</div><div style="margin-top:8px;font-size:10px;color:var(--text-secondary);">压力测试：${(data.stressTests || []).map(item => `${item.shockPct}% → $${Number(item.value).toFixed(0)}`).join(' · ')}</div><div style="margin-top:6px;font-size:10px;color:var(--text-secondary);">因子暴露：${Object.entries(data.byFactor || {}).map(([key,value]) => `${safeNewsText(key)} $${Number(value).toFixed(0)}`).join(' · ') || '缺少因子标签'}<br>风险贡献：${(data.riskContributions || []).map(item => `${safeNewsText(item.instrument)} ${Number(item.contributionPct).toFixed(1)}%`).join(' · ') || safeNewsText(data.riskContributionReason || '暂无')}<br>相关性：${(data.correlations || []).map(item => `${safeNewsText(item.left)}/${safeNewsText(item.right)} ${Number(item.correlation).toFixed(2)}`).join(' · ') || safeNewsText(data.correlationReason || '暂无')}</div>`;
 }
 
 function renderDecisionSignalQuality(data, reason) {
   const host = document.getElementById('decision-signal-quality');
   if (!host) return;
   if (!data?.total) { host.innerHTML = `<div class="empty-tip">${safeNewsText(reason || '暂无已完成的信号样本')}</div>`; return; }
-  host.innerHTML = `<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:7px;">${commandMetric('样本', data.total, `已闭合 ${data.resolved}`)}${commandMetric('命中率', (Number(data.hitRate || 0) * 100).toFixed(1) + '%', '不等同未来收益')}${commandMetric('平均收益', Number(data.averageReturnPct || 0).toFixed(2) + '%', `基准 ${Number(data.benchmarkReturnPct || 0).toFixed(2)}%`)}</div>${(data.warnings || []).map(item => `<div style="margin-top:6px;color:#b7791f;font-size:10px;">⚠ ${safeNewsText(item)}</div>`).join('')}`;
+  host.innerHTML = `<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:7px;">${commandMetric('样本', data.total, `已闭合 ${data.resolved}`)}${commandMetric('命中率', (Number(data.hitRate || 0) * 100).toFixed(1) + '%', '不等同未来收益')}${commandMetric('平均收益', Number(data.averageReturnPct || 0).toFixed(2) + '%', `基准 ${data.baselines?.buyAndHold == null ? '未提供' : Number(data.baselines.buyAndHold).toFixed(2) + '%'}`)}</div><details style="margin-top:8px;"><summary style="cursor:pointer;font-size:10px;color:var(--purple);">查看策略/形态分组</summary><div style="margin-top:6px;font-size:10px;color:var(--text-secondary);">${Object.entries(data.byStrategy || {}).map(([name,item]) => `${safeNewsText(name)}：${item.count} 个 / ${(Number(item.hitRate || 0)*100).toFixed(1)}%`).join('<br>') || '暂无分组样本'}</div></details>${(data.warnings || []).map(item => `<div style="margin-top:6px;color:#b7791f;font-size:10px;">⚠ ${safeNewsText(item)}</div>`).join('')}`;
 }
 
 function renderDecisionWorkspaces(items) {
   const host = document.getElementById('decision-workspace-list');
   if (!host) return;
-  host.innerHTML = (items || []).length ? items.map(item => `<button class="market-research-row" type="button" onclick="restoreDecisionWorkspace('${safeNewsText(item.id)}')"><strong>${safeNewsText(item.name)}</strong><span>${safeNewsText(item.market)} / ${safeNewsText(item.instrument || '未固定标的')} / ${safeNewsText(item.timeframe || '默认周期')}</span></button>`).join('') : '<div class="empty-tip">暂无保存的工作区。</div>';
+  host.innerHTML = (items || []).length ? items.map(item => `<div class="market-research-row"><button type="button" onclick="restoreDecisionWorkspace('${safeNewsText(item.id)}')" style="all:unset;cursor:pointer;flex:1;"><strong>${safeNewsText(item.name)}</strong><span style="display:block;">${safeNewsText(item.market)} / ${safeNewsText(item.instrument || '未固定标的')} / ${safeNewsText(item.timeframe || '默认周期')}</span></button><button class="tab guest-admin-only" type="button" onclick="shareDecisionWorkspace('${safeNewsText(item.id)}')">只读分享</button></div>`).join('') : '<div class="empty-tip">暂无保存的工作区。</div>';
   window.mm_savedDecisionWorkspaces = items || [];
 }
 
@@ -9593,24 +9615,43 @@ async function decisionFetchJson(url, options) {
 
 async function loadDecisionIntelligence() {
   if (!['stocks', 'options', 'crypto', 'prediction'].includes(activeMarketScope)) return;
+  if (window.mm_authReady) await window.mm_authReady.catch(() => null);
   const market = activeMarketScope;
   const instrument = decisionScopeInstrument();
   const query = `market=${encodeURIComponent(market)}${instrument ? `&instrument=${encodeURIComponent(instrument)}` : ''}`;
   const context = document.getElementById('decision-context');
   if (context) context.textContent = `${marketResearchLabel(market)} / ${instrument || '未选择标的'} / 正在检查来源与研究状态...`;
-  const publicCalls = [decisionFetchJson(`/api/evidence?${query}`), decisionFetchJson(`/api/scenarios?market=${encodeURIComponent(market)}`), decisionFetchJson(`/api/signals/quality?${query}`)];
-  const privateCalls = window.mm_isGuest ? [] : [decisionFetchJson(`/api/decisions?${query}`), decisionFetchJson(`/api/portfolio/analytics?market=${encodeURIComponent(market)}`), decisionFetchJson(`/api/workspaces?market=${encodeURIComponent(market)}`)];
+  const publicCalls = [decisionFetchJson(`/api/evidence?${query}`), decisionFetchJson(`/api/evidence/source-health/history?market=${encodeURIComponent(market)}`), decisionFetchJson(`/api/scenarios?market=${encodeURIComponent(market)}`), decisionFetchJson(`/api/signals/quality?${query}`)];
+  const privateCalls = window.mm_isGuest ? [] : [decisionFetchJson(`/api/decisions?${query}`), decisionFetchJson(`/api/decisions/negative-knowledge?market=${encodeURIComponent(market)}`), decisionFetchJson(`/api/portfolio/analytics?market=${encodeURIComponent(market)}`), decisionFetchJson(`/api/workspaces?market=${encodeURIComponent(market)}`)];
   const settled = await Promise.allSettled([...publicCalls, ...privateCalls]);
   if (settled[0].status === 'fulfilled') renderDecisionEvidence(settled[0].value.data); else renderDecisionEvidence([]);
-  if (settled[1].status === 'fulfilled') renderDecisionScenarios(settled[1].value.data); else renderDecisionScenarios([]);
-  if (settled[2].status === 'fulfilled') renderDecisionSignalQuality(settled[2].value.data, settled[2].value.reason); else renderDecisionSignalQuality(null, settled[2].reason?.message);
+  if (settled[1].status === 'fulfilled') renderDecisionSourceHistory(settled[1].value.data); else renderDecisionSourceHistory([]);
+  if (settled[2].status === 'fulfilled') renderDecisionScenarios(settled[2].value.data); else renderDecisionScenarios([]);
+  if (settled[3].status === 'fulfilled') renderDecisionSignalQuality(settled[3].value.data, settled[3].value.reason); else renderDecisionSignalQuality(null, settled[3].reason?.message);
   if (!window.mm_isGuest) {
-    if (settled[3]?.status === 'fulfilled') renderDecisionJournal(settled[3].value.data); else renderDecisionJournal([]);
-    if (settled[4]?.status === 'fulfilled') renderDecisionPortfolio(settled[4].value.data, settled[4].value.reason); else renderDecisionPortfolio(null, settled[4]?.reason?.message);
-    if (settled[5]?.status === 'fulfilled') renderDecisionWorkspaces(settled[5].value.data); else renderDecisionWorkspaces([]);
+    if (settled[4]?.status === 'fulfilled') renderDecisionJournal(settled[4].value.data); else renderDecisionJournal([]);
+    if (settled[5]?.status === 'fulfilled') renderDecisionNegativeKnowledge(settled[5].value.data); else renderDecisionNegativeKnowledge([]);
+    if (settled[6]?.status === 'fulfilled') renderDecisionPortfolio(settled[6].value.data, settled[6].value.reason); else renderDecisionPortfolio(null, settled[6]?.reason?.message);
+    if (settled[7]?.status === 'fulfilled') renderDecisionWorkspaces(settled[7].value.data); else renderDecisionWorkspaces([]);
   }
   const usable = settled.filter(item => item.status === 'fulfilled').length;
   if (context) context.innerHTML = `<b>${safeNewsText(marketResearchLabel(market))}</b> / ${safeNewsText(instrument || '未选择标的')} · ${usable}/${settled.length} 个研究域可用 · 更新时间 ${safeNewsText(new Date().toLocaleTimeString())}`;
+}
+
+async function retryDecisionSources() {
+  try {
+    await decisionFetchJson('/api/evidence/source-health/retry', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ market: activeMarketScope }) });
+    showToast('数据源已重新检查', 'success');
+    loadDecisionIntelligence();
+  } catch (error) { showToast(error.message, 'error'); }
+}
+
+async function generateDueDecisionReviews() {
+  try {
+    const body = await decisionFetchJson('/api/decisions/review-due', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ market: activeMarketScope }) });
+    showToast(body.data?.drafts?.length ? `已生成 ${body.data.drafts.length} 份人工确认草稿` : (body.reason || '暂无到期决策'), body.data?.drafts?.length ? 'success' : 'info');
+    loadDecisionIntelligence();
+  } catch (error) { showToast(error.message, 'error'); }
 }
 
 async function runDecisionScenario(id) {
@@ -9668,6 +9709,15 @@ async function saveCurrentDecisionWorkspace() {
   } catch (error) { showToast(error.message, 'error'); }
 }
 
+async function shareDecisionWorkspace(id) {
+  try {
+    const body = await decisionFetchJson(`/api/workspaces/${encodeURIComponent(id)}/share`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    const url = `${location.origin}/?sharedWorkspace=${encodeURIComponent(body.data.id)}`;
+    await navigator.clipboard?.writeText(url).catch(() => null);
+    showToast('只读分享链接已生成并复制', 'success');
+  } catch (error) { showToast(error.message, 'error'); }
+}
+
 function restoreDecisionWorkspace(id) {
   const saved = (window.mm_savedDecisionWorkspaces || []).find(item => item.id === id);
   if (!saved) return;
@@ -9681,11 +9731,34 @@ function restoreDecisionWorkspace(id) {
   if (saved.layout?.rightLibraryCollapsed !== document.body.classList.contains('sidebar-collapsed')) toggleSidebar();
   loadDecisionIntelligence();
 }
+async function restoreSharedWorkspaceFromUrl() {
+  const id = new URLSearchParams(location.search).get('sharedWorkspace');
+  if (!id) return;
+  try {
+    const body = await decisionFetchJson(`/api/workspaces/shared/${encodeURIComponent(id)}`);
+    const saved = body.data;
+    activeMarketScope = saved.market;
+    activeWorkspaceId = saved.workspace;
+    currentInstrumentId = saved.instrument || null;
+    renderNavigationState();
+    syncWorkspaceContextUrl();
+    const tab = workspaceTabFor(activeWorkspaceId);
+    if (tab) showTab(tab, null, { scopeAlreadySynced: true });
+    if (activeWorkspaceId === 'decision-intelligence') loadDecisionIntelligence();
+    showToast('已打开只读工作区快照', 'success');
+  } catch (error) { showToast(error.message, 'error'); }
+}
 async function loadOpsConsole() {
   const jobsEl = document.getElementById('ops-jobs');
   const overviewEl = document.getElementById('ops-overview');
   if (!jobsEl || !overviewEl) return;
   jobsEl.innerHTML = '<div class="empty-tip">正在读取自动化状态...</div>';
+  const diagnosticsEl = document.getElementById('runtime-diagnostics');
+  if (diagnosticsEl) fetch(`/api/diagnostics?market=${encodeURIComponent(['stocks','options','crypto','prediction'].includes(activeMarketScope) ? activeMarketScope : '')}`, { cache: 'no-store' }).then(response => response.json()).then(body => {
+    if (!body.success) throw new Error(body.error || '诊断不可用');
+    const d = body.data;
+    diagnosticsEl.innerHTML = `<div style="display:flex;justify-content:space-between;gap:8px;"><strong>🩺 运行诊断</strong><span style="font-size:10px;color:var(--text-secondary);">${safeNewsText(d.generatedAt)}</span></div><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:7px;margin-top:9px;">${commandMetric('数据库', d.storage?.ok ? '正常' : '异常', d.storage?.detail || '')}${commandMetric('数据源', `${d.sources?.online || 0}/${d.sources?.total || 0}`, '在线')}${commandMetric('Telegram', d.telegram?.pollingRunning ? '轮询中' : d.telegram?.configured ? '已配置' : '未配置', '不显示密钥')}${commandMetric('真实交易', '永久关闭', safeNewsText(d.realTrading))}</div>`;
+  }).catch(error => { diagnosticsEl.innerHTML = `<div class="empty-tip" style="color:var(--red);">${safeNewsText(error.message)}</div>`; });
   try {
     const res = await fetch('/api/ops', { cache: 'no-store' });
     const body = await res.json();
@@ -12921,6 +12994,13 @@ loadMarketTimeline();
 renderChartPatternControls();
 // Restore last visited tab from localStorage.
 (function restoreLastTab() {
+  const requestedWorkspaceFromUrl = new URLSearchParams(location.search).get('workspace');
+  const requestedWorkspaceTab = requestedWorkspaceFromUrl === activeWorkspaceId ? workspaceTabFor(activeWorkspaceId) : null;
+  if (requestedWorkspaceTab && document.getElementById(requestedWorkspaceTab + '-tab')) {
+    showTab(requestedWorkspaceTab, null, { scopeAlreadySynced: true });
+    if (activeWorkspaceId === 'decision-intelligence') loadDecisionIntelligence();
+    return;
+  }
   const saved = localStorage.getItem('mm-last-tab');
   if (activeMarketScope === 'watchlist') {
     showTab('positions', null, { scopeAlreadySynced: true });
@@ -12935,6 +13015,7 @@ renderChartPatternControls();
   showTab(defaultTabForMarketScope(activeMarketScope), null, { scopeAlreadySynced: true });
 })();
 if (currentInstrumentId) loadActiveWorkspaceInstrument();
+restoreSharedWorkspaceFromUrl();
 loadMarketOverview();
 loadResearchBriefing();
 initializeDashboardCollapses();
@@ -12969,6 +13050,14 @@ initializeDashboardCollapses();
 <!-- Mobile Bottom Navigation -->
     <nav class="mobile-nav" id="mobile-nav" aria-current="page" aria-label="核心工作区"></nav>
 <script>
+function syncNetworkStatusBanner() {
+  const banner = document.getElementById('network-status-banner');
+  if (banner) banner.hidden = navigator.onLine;
+  document.body.classList.toggle('is-offline', !navigator.onLine);
+}
+window.addEventListener('online', syncNetworkStatusBanner);
+window.addEventListener('offline', syncNetworkStatusBanner);
+syncNetworkStatusBanner();
 // LAN mode API authentication: open the dashboard once with ?access_token=...
 // and keep the token only in localStorage. The server never receives it in logs.
 (function installApiAccessToken() {
@@ -12992,7 +13081,7 @@ function mobileTab(tab) {
     }
     // Register service worker for PWA
     if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('/sw.js?v=41').catch(() => {});
+    navigator.serviceWorker.register('/sw.js?v=58').catch(() => {});
       let refreshing = false;
       navigator.serviceWorker.addEventListener('controllerchange', () => {
         if (!refreshing) {

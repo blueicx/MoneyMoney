@@ -14,6 +14,7 @@ import zlib from 'zlib';
 import iconv from 'iconv-lite';
 import fs from 'fs';
 import path from 'path';
+import crypto from 'node:crypto';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { config } from '../config';
@@ -102,23 +103,27 @@ import { buildDailyResearchBriefing } from '../features/research-briefing';
 import { getAssistantCalibration, getAssistantJournalTrades, saveTradeNote } from '../features/assistant-journal';
 import { exportJournalCsv, exportPaperCsv, exportCalibrationCsv, exportForecastLabCsv } from '../features/data-export';
 import { generateAssistantReport } from '../features/trade-assistant';
-import { getSourceHealth } from '../features/source-health';
+import { getSourceHealth, refreshSourceHealth } from '../features/source-health';
 import { testNotificationChannels } from '../features/notification-channels';
 import { runResearchExperiment } from '../features/experiment-runner';
 import { assertMarketContext, createResearchJob, MARKET_IDS, type MarketId } from '../features/research-contracts';
 import {
   analyzePortfolio,
   analyzeSignalQuality,
+  buildDecisionReviewDraft,
+  buildDueDecisionReviewDrafts,
   createDecisionRecord,
   createEvidenceSnapshot,
   createSavedWorkspace,
   importPortfolioRows,
   reviewDecision,
   runScenario,
+  summarizeNegativeKnowledge,
   type PortfolioRow,
   type ScenarioDefinition,
 } from '../features/decision-intelligence';
 import { decisionIntelligenceStore } from '../features/decision-intelligence-store';
+import { buildDecisionMobileSummary } from '../features/decision-mobile-summary';
 import { researchRepository } from '../features/research-repository';
 import { analyzeFactor, getFactorCatalog } from '../features/factor-lab';
 import { StrategyCandidateRegistry } from '../features/strategy-candidates';
@@ -564,6 +569,27 @@ app.post('/api/evidence', express.json(), (req, res) => {
   }
 });
 
+app.get('/api/evidence/source-health/history', (req, res) => {
+  try {
+    const market = decisionMarket(req.query.market);
+    const data = researchRepository.listSourceHealthEvents(market, Number(req.query.limit || 100));
+    res.json(decisionEnvelope({ market, data, dataStatus: data.length ? 'cached' : 'empty', source: 'persisted source health timeline', reason: data.length ? null : '暂无来源故障或恢复记录' }));
+  } catch (error: any) {
+    res.status(400).json({ success: false, error: error.message, dataStatus: 'unavailable', reason: error.message });
+  }
+});
+
+app.post('/api/evidence/source-health/retry', express.json(), async (req, res) => {
+  if (!adminOnly(req, res)) return;
+  try {
+    const market = decisionMarket(req.body?.market);
+    const data = await refreshSourceHealth(market);
+    res.json(decisionEnvelope({ market, data, dataStatus: data.online ? (data.online === data.total ? 'live' : 'partial') : 'unavailable', source: 'forced source health refresh', reason: data.online ? null : '重试后仍无可用来源' }));
+  } catch (error: any) {
+    res.status(400).json({ success: false, error: error.message, dataStatus: 'unavailable', reason: error.message });
+  }
+});
+
 app.get('/api/scenarios', (req, res) => {
   try {
     const market = decisionMarket(req.query.market);
@@ -638,8 +664,36 @@ app.post('/api/decisions/:id/review', express.json(), (req, res) => {
   if (!current) return res.status(404).json({ success: false, error: 'Decision not found', dataStatus: 'empty', reason: 'Decision not found' });
   try {
     const reviewed = reviewDecision(current, req.body?.observed || {}, req.body?.at);
+    const reviewDraft = buildDecisionReviewDraft(current, req.body?.observed || {}, req.body?.at);
     decisionIntelligenceStore.saveDecision(reviewed);
-    res.json(decisionEnvelope({ market: current.market, instrument: current.instrument, data: reviewed, source: 'private decision journal' }));
+    res.json(decisionEnvelope({ market: current.market, instrument: current.instrument, data: { ...reviewed, reviewDraft }, source: 'private decision journal' }));
+  } catch (error: any) {
+    res.status(400).json({ success: false, error: error.message, dataStatus: 'unavailable', reason: error.message });
+  }
+});
+
+app.post('/api/decisions/review-due', express.json(), (req, res) => {
+  if (!adminOnly(req, res)) return;
+  try {
+    const market = decisionMarket(req.body?.market);
+    const result = buildDueDecisionReviewDrafts(decisionIntelligenceStore.listDecisions(market), decisionIntelligenceStore.listEvidence(market), req.body?.at);
+    result.drafts.forEach(item => decisionIntelligenceStore.saveReviewDraft(item));
+    res.json(decisionEnvelope({ market, data: result, dataStatus: result.drafts.length ? 'cached' : 'empty', source: 'evidence-linked review draft generator', reason: result.drafts.length ? null : result.skipped[0]?.reason || '暂无到期决策' }));
+  } catch (error: any) {
+    res.status(400).json({ success: false, error: error.message, dataStatus: 'unavailable', reason: error.message });
+  }
+});
+
+app.get('/api/decisions/negative-knowledge', (req, res) => {
+  if (!adminOnly(req, res)) return;
+  try {
+    const market = decisionMarket(req.query.market);
+    const drafts = [
+      ...decisionIntelligenceStore.listReviewDrafts(market),
+      ...decisionIntelligenceStore.listDecisions(market).filter(item => item.review).map(item => buildDecisionReviewDraft(item, item.review!.observed, item.review!.at)),
+    ];
+    const data = summarizeNegativeKnowledge(drafts);
+    res.json(decisionEnvelope({ market, data, dataStatus: data.length ? 'cached' : 'empty', source: 'reviewed private decision journal', reason: data.length ? null : '暂无重复失败模式' }));
   } catch (error: any) {
     res.status(400).json({ success: false, error: error.message, dataStatus: 'unavailable', reason: error.message });
   }
@@ -675,7 +729,12 @@ app.get('/api/signals/quality', (req, res) => {
     const instrument = String(req.query.instrument || '').trim() || undefined;
     assertMarketContext({ market, workspace: 'signal-quality', instrument });
     const signals = decisionIntelligenceStore.listSignalOutcomes(market, instrument);
-    const data = analyzeSignalQuality(signals, { minimumSamples: Number(req.query.minimumSamples || 30), benchmarkReturnPct: Number(req.query.benchmarkReturnPct || 0) });
+    const data = analyzeSignalQuality(signals, {
+      minimumSamples: Number(req.query.minimumSamples || 30),
+      benchmarkReturnPct: Number(req.query.benchmarkReturnPct || 0),
+      ...(req.query.buyHoldReturnPct == null ? {} : { buyHoldReturnPct: Number(req.query.buyHoldReturnPct) }),
+      ...(req.query.randomBaselineReturnPct == null ? {} : { randomBaselineReturnPct: Number(req.query.randomBaselineReturnPct) }),
+    });
     res.json(decisionEnvelope({ market, instrument, data, dataStatus: signals.length ? 'cached' : 'empty', source: 'persisted signal outcomes', reason: signals.length ? null : '暂无已完成的信号样本' }));
   } catch (error: any) {
     res.status(400).json({ success: false, error: error.message, dataStatus: 'unavailable', reason: error.message });
@@ -715,6 +774,20 @@ app.post('/api/workspaces', express.json(), (req, res) => {
   } catch (error: any) {
     res.status(400).json({ success: false, error: error.message, dataStatus: 'unavailable', reason: error.message });
   }
+});
+
+app.post('/api/workspaces/:id/share', express.json(), (req, res) => {
+  if (!adminOnly(req, res)) return;
+  const workspace = decisionIntelligenceStore.getWorkspace(String(req.params.id));
+  if (!workspace) return res.status(404).json({ success: false, error: 'Workspace not found', dataStatus: 'empty', reason: 'Workspace not found' });
+  const shared = decisionIntelligenceStore.saveSharedWorkspace({ ...workspace, id: `shared_${crypto.randomUUID()}`, visibility: 'public', updatedAt: new Date().toISOString() });
+  res.status(201).json(decisionEnvelope({ market: shared.market, instrument: shared.instrument, data: shared, dataStatus: 'cached', source: 'read-only shared workspace snapshot' }));
+});
+
+app.get('/api/workspaces/shared/:id', (req, res) => {
+  const workspace = decisionIntelligenceStore.getSharedWorkspace(String(req.params.id));
+  if (!workspace) return res.status(404).json({ success: false, error: 'Shared workspace not found', dataStatus: 'empty', reason: 'Shared workspace not found' });
+  res.json(decisionEnvelope({ market: workspace.market, instrument: workspace.instrument, data: workspace, dataStatus: 'cached', source: 'read-only shared workspace snapshot' }));
 });
 
 app.get('/api/screener', async (req, res) => {
@@ -1719,6 +1792,30 @@ app.get('/api/stock/kline', async (req, res) => {
       reason: `股票K线来源不可用：${e.message || '请求失败'}`,
       error: e.message,
     });
+  }
+});
+
+app.get('/api/diagnostics', async (req, res) => {
+  if (!adminOnly(req, res)) return;
+  try {
+    const market = req.query.market && MARKET_IDS.includes(String(req.query.market) as MarketId) ? String(req.query.market) as MarketId : undefined;
+    const sources = await getSourceHealth(market || 'all');
+    const jobs = researchRepository.listJobs(market).slice(0, 50);
+    const telegramConfig = getRuntimeTelegramConfig();
+    res.json({
+      success: true,
+      data: {
+        generatedAt: new Date().toISOString(),
+        version: process.env.APP_VERSION || process.env.npm_package_version || 'unknown',
+        storage: getStorageHealth(),
+        sources: { total: sources.total, online: sources.online, updatedAt: sources.updatedAt, unavailable: sources.items.filter(item => !item.ok).map(item => ({ id: item.id, detail: item.detail })) },
+        researchJobs: jobs.reduce<Record<string, number>>((acc, job) => { acc[job.status] = (acc[job.status] || 0) + 1; return acc; }, {}),
+        telegram: { configured: telegram.isConfigured, pollingEnabled: telegramConfig.pollingEnabled, pollingRunning: telegramInteractionBot?.isRunning || false },
+        realTrading: 'disabled',
+      },
+    });
+  } catch (error: any) {
+    res.status(503).json({ success: false, error: error.message, reason: error.message, dataStatus: 'unavailable' });
   }
 });
 
@@ -3095,6 +3192,16 @@ async function buildTelegramDigest(chatId: string): Promise<string> {
   const smartAlerts = telegramCommandCenterStore.listSmartAlerts(chatId).filter(item => item.enabled);
   const sources = await getSourceHealth().catch(() => null);
   const ai = radar ? await getAiMarketCommentary(radar).catch(() => null) : null;
+  const digestScope = telegramScopeForChat(chatId);
+  const decisionMarketScope = MARKET_IDS.includes(digestScope as MarketId) ? digestScope as MarketId : null;
+  const decisionSummary = decisionMarketScope ? buildDecisionMobileSummary({
+    market: decisionMarketScope,
+    evidence: decisionIntelligenceStore.listEvidence(decisionMarketScope),
+    openDecisions: decisionIntelligenceStore.listDecisions(decisionMarketScope).filter(item => item.status === 'open').length,
+    signalQuality: analyzeSignalQuality(decisionIntelligenceStore.listSignalOutcomes(decisionMarketScope), { minimumSamples: 30 }),
+    outages: researchRepository.listSourceHealthEvents(decisionMarketScope, 50).filter((item: any) => item.kind === 'outage').length,
+    deepLink: buildTelegramDeepLink(telegramPublicBaseUrl(), { market: decisionMarketScope, instrument: '', workspace: 'decision-intelligence' })?.replace(/&/g, '&amp;'),
+  }) : null;
   const lines = [
     '<b>🗓 MoneyMoney 定时摘要</b>',
     '生成时间：' + new Date().toLocaleString(),
@@ -3116,6 +3223,7 @@ async function buildTelegramDigest(chatId: string): Promise<string> {
     '',
     '<b>🤖 AI 简要总结</b>',
     ai?.analysis ? escapeTelegramHtml(ai.analysis.slice(0, 700)) : 'AI 点评暂不可用或未配置。',
+    ...(decisionSummary ? ['', decisionSummary] : []),
   ];
   return lines.join('\n');
 }

@@ -84,6 +84,13 @@ function initDb(db: Database.Database) {
       id TEXT PRIMARY KEY,
       data TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS source_health_events (
+      id TEXT PRIMARY KEY,
+      market TEXT NOT NULL,
+      at TEXT NOT NULL,
+      data TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_source_health_events_market_at ON source_health_events(market, at DESC);
   `);
 }
 
@@ -280,5 +287,13 @@ export const researchRepository = {
   getSourceHealth(id: string) {
     const row = db.prepare('SELECT data FROM data_source_health WHERE id = ?').get(id) as any;
     return row ? JSON.parse(row.data) : null;
+  },
+  appendSourceHealthEvents(events: any[]) {
+    const insert = db.prepare('INSERT OR IGNORE INTO source_health_events (id, market, at, data) VALUES (?, ?, ?, ?)');
+    db.transaction((items: any[]) => items.forEach(item => insert.run(item.id, item.market, item.at, JSON.stringify(item))))(events);
+    return events;
+  },
+  listSourceHealthEvents(market: string, limit = 100) {
+    return (db.prepare('SELECT data FROM source_health_events WHERE market = ? ORDER BY at DESC LIMIT ?').all(market, Math.max(1, Math.min(500, limit))) as any[]).map(row => JSON.parse(row.data));
   }
 };

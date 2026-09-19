@@ -184,6 +184,69 @@ export function reviewDecision(decision: DecisionRecord, observed: Record<string
   return { ...decision, status: breached ? 'invalidated' : expired ? 'expired' : 'reviewed', review: { at: reviewAt, observed: { ...observed }, invalidationBreached: breached }, invalidationBreached: breached };
 }
 
+export interface DecisionReviewDraft {
+  decisionId: string;
+  market: MarketId;
+  instrument: string;
+  strategyId?: string;
+  generatedAt: string;
+  draft: true;
+  invalidationBreached: boolean;
+  observed: Record<string, unknown>;
+  mistakes: string[];
+  summary: string;
+}
+
+export function buildDecisionReviewDraft(decision: DecisionRecord, observed: Record<string, unknown>, at = new Date().toISOString()): DecisionReviewDraft {
+  const generatedAt = validIso(at, 'reviewAt');
+  const breached = invalidationBreached(decision.invalidation, observed);
+  const mistakes: string[] = [];
+  if (breached) mistakes.push('违反失效条件');
+  if (['cached', 'stale', 'unavailable'].includes(String(observed.dataStatus || ''))) mistakes.push('忽略数据过期');
+  if (Number(observed.concentrationPct) > 35) mistakes.push('过度集中');
+  if (decision.direction === 'long' && Number(observed.entryDistanceFromReferencePct) > 5) mistakes.push('追涨');
+  const returnText = Number.isFinite(Number(observed.returnPct)) ? `，区间结果 ${Number(observed.returnPct).toFixed(2)}%` : '';
+  return {
+    decisionId: decision.id,
+    market: decision.market,
+    instrument: decision.instrument,
+    ...(decision.strategyId ? { strategyId: decision.strategyId } : {}),
+    generatedAt,
+    draft: true,
+    invalidationBreached: breached,
+    observed: { ...observed },
+    mistakes,
+    summary: `${decision.instrument} 的复盘草稿${returnText}；${mistakes.length ? `发现：${mistakes.join('、')}` : '暂未识别到规则性错误'}。需人工确认后归档。`,
+  };
+}
+
+export function summarizeNegativeKnowledge(drafts: DecisionReviewDraft[]): Array<{ pattern: string; count: number; decisionIds: string[]; markets: MarketId[]; instruments: string[] }> {
+  const groups = new Map<string, { pattern: string; count: number; decisionIds: Set<string>; markets: Set<MarketId>; instruments: Set<string> }>();
+  for (const draft of drafts) {
+    for (const pattern of draft.mistakes) {
+      const current = groups.get(pattern) || { pattern, count: 0, decisionIds: new Set<string>(), markets: new Set<MarketId>(), instruments: new Set<string>() };
+      current.count += 1;
+      current.decisionIds.add(draft.decisionId);
+      current.markets.add(draft.market);
+      current.instruments.add(draft.instrument);
+      groups.set(pattern, current);
+    }
+  }
+  return [...groups.values()].map(item => ({ pattern: item.pattern, count: item.count, decisionIds: [...item.decisionIds], markets: [...item.markets], instruments: [...item.instruments] })).sort((a, b) => b.count - a.count || a.pattern.localeCompare(b.pattern));
+}
+
+export function buildDueDecisionReviewDrafts(decisions: DecisionRecord[], evidence: EvidenceSnapshot[], at = new Date().toISOString()): { drafts: DecisionReviewDraft[]; skipped: Array<{ decisionId: string; reason: string }> } {
+  const reviewAt = validIso(at, 'reviewAt');
+  const drafts: DecisionReviewDraft[] = [];
+  const skipped: Array<{ decisionId: string; reason: string }> = [];
+  for (const decision of decisions.filter(item => item.status === 'open' && new Date(item.horizonAt).getTime() <= new Date(reviewAt).getTime())) {
+    const snapshot = evidence.filter(item => item.market === decision.market && item.instrument === decision.instrument && item.fields[decision.invalidation.field] != null).sort((left, right) => right.fetchedAt.localeCompare(left.fetchedAt))[0];
+    if (!snapshot) { skipped.push({ decisionId: decision.id, reason: `缺少字段 ${decision.invalidation.field} 的同市场证据` }); continue; }
+    drafts.push(buildDecisionReviewDraft(decision, { ...snapshot.fields, dataStatus: snapshot.dataStatus, evidenceSnapshotId: snapshot.id }, reviewAt));
+  }
+  return { drafts, skipped };
+}
+
 export interface PortfolioRow {
   instrument: string;
   market: MarketId;
@@ -192,6 +255,8 @@ export interface PortfolioRow {
   currency: string;
   sector?: string;
   factor?: string;
+  volatilityPct?: number;
+  returns?: number[];
 }
 
 export function importPortfolioRows(rows: Array<Partial<PortfolioRow>>): { accepted: PortfolioRow[]; rejected: Array<{ row: Partial<PortfolioRow>; reason: string }> } {
@@ -209,7 +274,11 @@ export function importPortfolioRows(rows: Array<Partial<PortfolioRow>>): { accep
       const key = `${market}:${instrument.toUpperCase()}:${String(row.currency).toUpperCase()}`;
       if (seen.has(key)) throw new Error('重复仓位');
       seen.add(key);
-      accepted.push({ instrument, market, quantity: Number(row.quantity), price: Number(row.price), currency: String(row.currency).toUpperCase(), ...(row.sector ? { sector: String(row.sector) } : {}), ...(row.factor ? { factor: String(row.factor) } : {}) });
+      const volatilityPct = row.volatilityPct == null ? undefined : Number(row.volatilityPct);
+      if (volatilityPct != null && (!Number.isFinite(volatilityPct) || volatilityPct < 0)) throw new Error('波动率无效');
+      const returns = row.returns == null ? undefined : row.returns.map(Number);
+      if (returns?.some(value => !Number.isFinite(value))) throw new Error('收益序列无效');
+      accepted.push({ instrument, market, quantity: Number(row.quantity), price: Number(row.price), currency: String(row.currency).toUpperCase(), ...(row.sector ? { sector: String(row.sector) } : {}), ...(row.factor ? { factor: String(row.factor) } : {}), ...(volatilityPct != null ? { volatilityPct } : {}), ...(returns ? { returns } : {}) });
     } catch (error: any) {
       rejected.push({ row, reason: error.message || '仓位记录无效' });
     }
@@ -222,9 +291,28 @@ export function analyzePortfolio(rows: PortfolioRow[], input: { benchmarkReturnP
   const totalValue = values.reduce((sum, value) => sum + value, 0);
   const byMarket = rows.reduce<Record<string, number>>((acc, row, index) => { acc[row.market] = (acc[row.market] || 0) + values[index]; return acc; }, {});
   const bySector = rows.reduce<Record<string, number>>((acc, row, index) => { const key = row.sector || '未分类'; acc[key] = (acc[key] || 0) + values[index]; return acc; }, {});
+  const byFactor = rows.reduce<Record<string, number>>((acc, row, index) => { const key = row.factor || '未分类'; acc[key] = (acc[key] || 0) + values[index]; return acc; }, {});
   const largest = values.length ? Math.max(...values) : 0;
   const benchmarkReturnPct = Number(input.benchmarkReturnPct || 0);
   const portfolioReturnPct = Number(input.portfolioReturnPct || 0);
+  const rawRisks = rows.map((row, index) => row.volatilityPct == null ? null : values[index] * row.volatilityPct);
+  const totalRisk = rawRisks.reduce<number>((sum, value) => sum + (value || 0), 0);
+  const riskContributions = rows.flatMap((row, index) => rawRisks[index] == null ? [] : [{ instrument: row.instrument, contributionPct: totalRisk ? Number(((rawRisks[index] || 0) / totalRisk * 100).toFixed(4)) : 0 }]);
+  const correlation = (left: number[], right: number[]) => {
+    const count = Math.min(left.length, right.length);
+    if (count < 2) return null;
+    const l = left.slice(0, count); const r = right.slice(0, count);
+    const lm = l.reduce((a, b) => a + b, 0) / count; const rm = r.reduce((a, b) => a + b, 0) / count;
+    const numerator = l.reduce((sum, value, index) => sum + (value - lm) * (r[index] - rm), 0);
+    const denominator = Math.sqrt(l.reduce((sum, value) => sum + (value - lm) ** 2, 0) * r.reduce((sum, value) => sum + (value - rm) ** 2, 0));
+    return denominator ? Number((numerator / denominator).toFixed(4)) : null;
+  };
+  const correlations: Array<{ left: string; right: string; correlation: number }> = [];
+  for (let left = 0; left < rows.length; left += 1) for (let right = left + 1; right < rows.length; right += 1) {
+    if (!rows[left].returns || !rows[right].returns) continue;
+    const value = correlation(rows[left].returns!, rows[right].returns!);
+    if (value != null) correlations.push({ left: rows[left].instrument, right: rows[right].instrument, correlation: value });
+  }
   return {
     totalValue: Number(totalValue.toFixed(2)),
     concentrationPct: totalValue ? Number((largest / totalValue * 100).toFixed(2)) : 0,
@@ -233,6 +321,11 @@ export function analyzePortfolio(rows: PortfolioRow[], input: { benchmarkReturnP
     excessReturnPct: Number((portfolioReturnPct - benchmarkReturnPct).toFixed(2)),
     byMarket,
     bySector,
+    byFactor,
+    riskContributions,
+    riskContributionReason: riskContributions.length ? null : '缺少波动率，无法计算风险贡献',
+    correlations,
+    correlationReason: correlations.length ? null : '缺少可比收益序列，未生成相关性',
     stressTests: [-20, -10, -5, 5].map(shockPct => ({ shockPct, value: Number((totalValue * (1 + shockPct / 100)).toFixed(2)), impact: Number((totalValue * shockPct / 100).toFixed(2)) })),
     rebalanceDraft: Object.entries(byMarket).map(([market, value]) => ({ market, currentPct: totalValue ? Number((value / totalValue * 100).toFixed(2)) : 0 })),
     disclaimer: '组合分析和再平衡仅为研究草稿，不会创建订单。',
@@ -259,7 +352,7 @@ export interface SignalOutcome {
   invalidationReason?: string;
 }
 
-export function analyzeSignalQuality(signals: SignalOutcome[], options: { minimumSamples?: number; benchmarkReturnPct?: number } = {}) {
+export function analyzeSignalQuality(signals: SignalOutcome[], options: { minimumSamples?: number; benchmarkReturnPct?: number; buyHoldReturnPct?: number; randomBaselineReturnPct?: number } = {}) {
   signals.forEach(signal => assertMarketContext({ market: signal.market, workspace: 'signal-quality', instrument: signal.instrument }));
   const returns = signals.map(signal => signal.exitPrice == null || !signal.entryPrice ? null : ((signal.exitPrice - signal.entryPrice) / signal.entryPrice) * 100);
   const resolved = returns.filter((value): value is number => value !== null && Number.isFinite(value));
@@ -270,6 +363,21 @@ export function analyzeSignalQuality(signals: SignalOutcome[], options: { minimu
   if (signals.some(signal => signal.dataGap)) warnings.push('部分信号存在数据缺口');
   if (signals.some(signal => signal.futureDataRisk)) warnings.push('检测到未来数据风险');
   const average = (values: number[]) => values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : 0;
+  type CohortAccumulator = { count: number; resolved: number; hitRate: number; averageReturnPct: number; _wins: number; _sum: number };
+  const cohort = (key: keyof Pick<SignalOutcome, 'strategyId' | 'pattern' | 'timeframe' | 'source'>) => signals.reduce<Record<string, CohortAccumulator>>((acc, signal, index) => {
+    const name = String(signal[key] || '未分类');
+    const item = acc[name] || { count: 0, resolved: 0, hitRate: 0, averageReturnPct: 0, _wins: 0, _sum: 0 };
+    item.count += 1;
+    const value = returns[index];
+    if (value != null && Number.isFinite(value)) { item.resolved += 1; item._wins += value > 0 ? 1 : 0; item._sum += value; }
+    item.hitRate = item.resolved ? Number((item._wins / item.resolved).toFixed(4)) : 0;
+    item.averageReturnPct = item.resolved ? Number((item._sum / item.resolved).toFixed(4)) : 0;
+    acc[name] = item;
+    return acc;
+  }, {});
+  const cleanCohort = (items: ReturnType<typeof cohort>) => Object.fromEntries(Object.entries(items).map(([key, { count, resolved, hitRate, averageReturnPct }]) => [key, { count, resolved, hitRate, averageReturnPct }]));
+  if (new Set(signals.map(item => `${item.strategyId}:${item.pattern || ''}`)).size > 5) warnings.push('多重检验风险：策略或形态分组较多，请校正显著性');
+  if (options.buyHoldReturnPct == null || options.randomBaselineReturnPct == null) warnings.push('基准数据未提供，未生成持有或随机入场对照');
   return {
     total: signals.length,
     resolved: resolved.length,
@@ -281,6 +389,11 @@ export function analyzeSignalQuality(signals: SignalOutcome[], options: { minimu
     averageConfirmationDelayMs: Number(average(signals.map(item => Number(item.confirmationDelayMs)).filter(Number.isFinite)).toFixed(2)),
     sampleBreakdown,
     invalidationReasons: signals.reduce<Record<string, number>>((acc, signal) => { if (signal.invalidationReason) acc[signal.invalidationReason] = (acc[signal.invalidationReason] || 0) + 1; return acc; }, {}),
+    byStrategy: cleanCohort(cohort('strategyId')),
+    byPattern: cleanCohort(cohort('pattern')),
+    byTimeframe: cleanCohort(cohort('timeframe')),
+    bySource: cleanCohort(cohort('source')),
+    baselines: { buyAndHold: options.buyHoldReturnPct ?? null, randomEntry: options.randomBaselineReturnPct ?? null },
     warnings,
   };
 }
@@ -298,6 +411,7 @@ export interface SavedWorkspace {
   layout: { rightLibraryCollapsed: boolean };
   createdAt: string;
   updatedAt: string;
+  visibility?: 'private' | 'public';
 }
 
 export function createSavedWorkspace(input: Omit<Partial<SavedWorkspace>, 'createdAt' | 'updatedAt'> & { name: string; market: MarketId; workspace: string }): SavedWorkspace {
@@ -306,5 +420,5 @@ export function createSavedWorkspace(input: Omit<Partial<SavedWorkspace>, 'creat
   (input.compare || []).forEach(instrument => assertMarketContext({ market: input.market, workspace: input.workspace, instrument }));
   const now = new Date().toISOString();
   const payload = { name: input.name.trim(), market: input.market, workspace: context.workspace, instrument: context.instrument, timeframe: input.timeframe, filters: input.filters || {}, layers: [...new Set(input.layers || [])], compare: [...new Set(input.compare || [])], layout: { rightLibraryCollapsed: !!input.layout?.rightLibraryCollapsed } };
-  return { ...payload, id: input.id || `workspace_${contentHash(payload).slice(0, 16)}`, createdAt: now, updatedAt: now };
+  return { ...payload, id: input.id || `workspace_${contentHash(payload).slice(0, 16)}`, createdAt: now, updatedAt: now, visibility: input.visibility === 'public' ? 'public' : 'private' };
 }

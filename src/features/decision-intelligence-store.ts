@@ -1,6 +1,6 @@
 import { stateStore } from '../storage/sqlite-state';
 import type { MarketId } from './research-contracts';
-import type { DecisionRecord, EvidenceSnapshot, PortfolioRow, SavedWorkspace, ScenarioDefinition, SignalOutcome } from './decision-intelligence';
+import type { DecisionRecord, DecisionReviewDraft, EvidenceSnapshot, PortfolioRow, SavedWorkspace, ScenarioDefinition, SignalOutcome } from './decision-intelligence';
 
 const KEYS = {
   evidence: 'decision-intelligence:evidence',
@@ -9,6 +9,8 @@ const KEYS = {
   portfolio: 'decision-intelligence:portfolio',
   signals: 'decision-intelligence:signal-outcomes',
   workspaces: 'decision-intelligence:workspaces',
+  reviewDrafts: 'decision-intelligence:review-drafts',
+  sharedWorkspaces: 'decision-intelligence:shared-workspaces',
 } as const;
 
 function list<T>(key: string): T[] {
@@ -41,6 +43,8 @@ export const decisionIntelligenceStore = {
     return list<DecisionRecord>(KEYS.decisions).filter(item => (!market || item.market === market) && (!instrument || item.instrument === instrument)).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   },
   getDecision(id: string) { return list<DecisionRecord>(KEYS.decisions).find(item => item.id === id) || null; },
+  saveReviewDraft(item: DecisionReviewDraft) { return upsert(KEYS.reviewDrafts, { ...item, id: item.decisionId }, 1_000); },
+  listReviewDrafts(market?: MarketId) { return list<DecisionReviewDraft & { id: string }>(KEYS.reviewDrafts).filter(item => !market || item.market === market).sort((a, b) => b.generatedAt.localeCompare(a.generatedAt)); },
 
   replacePortfolio(rows: PortfolioRow[]) { stateStore.set(KEYS.portfolio, rows, 1); return rows; },
   listPortfolio(market?: MarketId) { return list<PortfolioRow>(KEYS.portfolio).filter(item => !market || item.market === market); },
@@ -53,4 +57,6 @@ export const decisionIntelligenceStore = {
   saveWorkspace(item: SavedWorkspace) { return upsert(KEYS.workspaces, item, 200); },
   listWorkspaces(market?: MarketId) { return list<SavedWorkspace>(KEYS.workspaces).filter(item => !market || item.market === market).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)); },
   getWorkspace(id: string) { return list<SavedWorkspace>(KEYS.workspaces).find(item => item.id === id) || null; },
+  saveSharedWorkspace(item: SavedWorkspace) { return upsert(KEYS.sharedWorkspaces, { ...item, visibility: 'public' as const }, 200); },
+  getSharedWorkspace(id: string) { return list<SavedWorkspace>(KEYS.sharedWorkspaces).find(item => item.id === id && item.visibility === 'public') || null; },
 };

@@ -5,7 +5,14 @@
   "display": "standalone",
   "background_color": "#f8f7ff",
   "theme_color": "#7c3aed",
-  "description": "AI-powered prediction market trading bot",
+  "description": "MoneyMoney 多市场证据研究、压力测试与模拟盘工作台",
+  "shortcuts": [
+    {
+      "name": "可信决策",
+      "short_name": "可信决策",
+      "url": "/?workspace=decision-intelligence"
+    }
+  ],
   "icons": [
     {
       "src": "/icon.svg",

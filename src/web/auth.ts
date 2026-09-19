@@ -59,6 +59,7 @@ const GUEST_GET_PREFIXES = [
   '/evidence',
   '/scenarios',
   '/signals/quality',
+  '/workspaces/shared',
 ];
 
 function matchesPathPrefix(pathname: string, prefix: string): boolean {

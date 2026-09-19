@@ -2,6 +2,7 @@ import { getPredictionRadar } from './prediction-radar';
 import { aiCommentaryConfigured } from './ai-commentary';
 import { ResilientDataSourceAdapter, type SourceStatus } from '../data/source-adapter';
 import { stockDataService } from './stock-data-service';
+import { buildSourceHealthTransitions } from './source-health-history';
 
 export interface SourceHealthItem {
   id: string;
@@ -307,7 +308,12 @@ export async function getSourceHealth(scope = 'all'): Promise<SourceHealthReport
   if (!refreshPromise.has(scope) && (!cache || cache.expiresAt <= now)) {
     const promise = buildSourceHealth(scope).then(value => {
       caches.set(scope, { value, expiresAt: Date.now() + 30_000 });
-      import('./research-repository').then(m => (m.researchRepository as any).saveSourceHealth(scope, value));
+      import('./research-repository').then(m => {
+        const repository = m.researchRepository as any;
+        const previous = repository.getSourceHealth(scope);
+        repository.appendSourceHealthEvents(buildSourceHealthTransitions(scope, previous, value));
+        repository.saveSourceHealth(scope, value);
+      });
       return value;
     }).catch(err => {
       console.error('Background refresh failed for health scope:', scope, err);
@@ -347,4 +353,10 @@ export async function getSourceHealth(scope = 'all'): Promise<SourceHealthReport
   } catch (error) {
     return buildDegradedReport(scope);
   }
+}
+
+export async function refreshSourceHealth(scope = 'all'): Promise<SourceHealthReport> {
+  caches.delete(scope);
+  refreshPromise.delete(scope);
+  return getSourceHealth(scope);
 }
