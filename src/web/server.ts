@@ -106,6 +106,19 @@ import { getSourceHealth } from '../features/source-health';
 import { testNotificationChannels } from '../features/notification-channels';
 import { runResearchExperiment } from '../features/experiment-runner';
 import { assertMarketContext, createResearchJob, MARKET_IDS, type MarketId } from '../features/research-contracts';
+import {
+  analyzePortfolio,
+  analyzeSignalQuality,
+  createDecisionRecord,
+  createEvidenceSnapshot,
+  createSavedWorkspace,
+  importPortfolioRows,
+  reviewDecision,
+  runScenario,
+  type PortfolioRow,
+  type ScenarioDefinition,
+} from '../features/decision-intelligence';
+import { decisionIntelligenceStore } from '../features/decision-intelligence-store';
 import { researchRepository } from '../features/research-repository';
 import { analyzeFactor, getFactorCatalog } from '../features/factor-lab';
 import { StrategyCandidateRegistry } from '../features/strategy-candidates';
@@ -486,6 +499,223 @@ function adminOnly(req: express.Request, res: express.Response): boolean {
   }
   return true;
 }
+
+function decisionMarket(value: unknown): MarketId {
+  const market = String(value || '').trim() as MarketId;
+  if (!MARKET_IDS.includes(market)) throw new Error('Invalid market context');
+  return market;
+}
+
+function decisionEnvelope(input: { market: MarketId; instrument?: string | null; data: unknown; dataStatus?: string; source?: string; reason?: string | null; updatedAt?: string }) {
+  return {
+    success: true,
+    market: input.market,
+    instrument: input.instrument || null,
+    dataStatus: input.dataStatus || 'live',
+    source: input.source || 'MoneyMoney research state',
+    updatedAt: input.updatedAt || new Date().toISOString(),
+    reason: input.reason || null,
+    data: input.data,
+  };
+}
+
+const SCENARIO_PRESETS: ScenarioDefinition[] = [
+  { id: 'equity-risk-off', name: '股票风险收缩', market: 'stocks', shocks: [{ target: 'market', kind: 'pricePct', value: -10 }, { target: 'volatility', kind: 'absolute', value: 8 }] },
+  { id: 'options-vol-spike', name: '隐含波动率跳升', market: 'options', shocks: [{ target: 'volatility', kind: 'absolute', value: 15 }] },
+  { id: 'crypto-liquidation', name: '加密连锁爆仓', market: 'crypto', shocks: [{ target: 'market', kind: 'pricePct', value: -18 }, { target: 'volatility', kind: 'absolute', value: 20 }] },
+  { id: 'prediction-reprice', name: '预测概率重估', market: 'prediction', shocks: [{ target: 'market', kind: 'pricePct', value: -12 }] },
+];
+
+app.get('/api/evidence', async (req, res) => {
+  try {
+    const market = decisionMarket(req.query.market);
+    const instrument = String(req.query.instrument || '').trim() || undefined;
+    assertMarketContext({ market, workspace: 'evidence', instrument });
+    const stored = decisionIntelligenceStore.listEvidence(market, instrument);
+    const health = await getSourceHealth(market);
+    const live = health.items.map(item => createEvidenceSnapshot({
+      market,
+      instrument,
+      workspace: 'evidence',
+      dataStatus: item.ok ? (item.status === 'stale' ? 'cached' : 'live') : item.status === 'unconfigured' ? 'empty' : 'unavailable',
+      source: { id: item.id, name: item.name },
+      observedAt: item.checkedAt,
+      fetchedAt: health.updatedAt,
+      fields: { status: item.status || (item.ok ? 'live' : 'unavailable'), latencyMs: item.latencyMs, detail: item.detail, capabilities: item.capabilities || [] },
+      expectedFields: ['status', 'latencyMs', 'detail', 'capabilities'],
+      reason: item.ok ? undefined : item.detail,
+    }));
+    const byId = new Map([...stored, ...live].map(item => [item.id, item]));
+    const data = [...byId.values()].sort((a, b) => b.fetchedAt.localeCompare(a.fetchedAt));
+    res.json(decisionEnvelope({ market, instrument, data, dataStatus: data.some(item => item.dataStatus === 'live') ? 'live' : data.length ? 'partial' : 'empty', source: 'scoped source health + saved evidence', reason: data.length ? null : '暂无证据' }));
+  } catch (error: any) {
+    res.status(/market|Instrument/.test(error.message) ? 400 : 500).json({ success: false, error: error.message, dataStatus: 'unavailable', reason: error.message });
+  }
+});
+
+app.post('/api/evidence', express.json(), (req, res) => {
+  if (!adminOnly(req, res)) return;
+  try {
+    const item = createEvidenceSnapshot(req.body || {});
+    decisionIntelligenceStore.saveEvidence(item);
+    res.status(201).json(decisionEnvelope({ market: item.market, instrument: item.instrument, data: item, dataStatus: item.dataStatus, source: item.source.name, updatedAt: item.fetchedAt }));
+  } catch (error: any) {
+    res.status(400).json({ success: false, error: error.message, dataStatus: 'unavailable', reason: error.message });
+  }
+});
+
+app.get('/api/scenarios', (req, res) => {
+  try {
+    const market = decisionMarket(req.query.market);
+    const stored = decisionIntelligenceStore.listScenarios(market);
+    const byId = new Map([...SCENARIO_PRESETS.filter(item => item.market === market), ...stored].map(item => [item.id, item]));
+    res.json(decisionEnvelope({ market, data: [...byId.values()], source: 'MoneyMoney deterministic scenario catalog' }));
+  } catch (error: any) {
+    res.status(400).json({ success: false, error: error.message, dataStatus: 'unavailable', reason: error.message });
+  }
+});
+
+app.post('/api/scenarios', express.json(), (req, res) => {
+  if (!adminOnly(req, res)) return;
+  try {
+    const scenario = req.body as ScenarioDefinition;
+    const market = decisionMarket(scenario?.market);
+    if (!scenario.id?.trim() || !scenario.name?.trim() || !Array.isArray(scenario.shocks) || !scenario.shocks.length) throw new Error('Scenario definition is incomplete');
+    scenario.shocks.forEach(shock => { if (!Number.isFinite(Number(shock.value))) throw new Error('Scenario shock must be finite'); });
+    const saved = decisionIntelligenceStore.saveScenario({ ...scenario, market, shocks: scenario.shocks.map(shock => ({ ...shock, value: Number(shock.value) })) });
+    res.status(201).json(decisionEnvelope({ market, data: saved, source: 'MoneyMoney scenario catalog' }));
+  } catch (error: any) {
+    res.status(400).json({ success: false, error: error.message, dataStatus: 'unavailable', reason: error.message });
+  }
+});
+
+app.post('/api/scenarios/run', express.json(), (req, res) => {
+  if (!adminOnly(req, res)) return;
+  try {
+    const market = decisionMarket(req.body?.market || req.body?.scenario?.market);
+    const scenarioId = String(req.body?.scenarioId || '');
+    const scenario = req.body?.scenario || [...SCENARIO_PRESETS, ...decisionIntelligenceStore.listScenarios(market)].find(item => item.id === scenarioId);
+    if (!scenario) throw new Error('Scenario not found');
+    let positions = Array.isArray(req.body?.positions) ? req.body.positions : decisionIntelligenceStore.listPortfolio(market);
+    if (!positions.length) {
+      const typeByMarket: Record<string, string> = { stocks: 'stock', crypto: 'crypto', prediction: 'prediction' };
+      positions = unifiedPaperLedgerStore.get().positions.filter(item => item.instrumentType === typeByMarket[market]).map(item => ({ instrument: item.instrumentId, market, quantity: item.quantity, price: item.currentPrice }));
+    }
+    if (!positions.length) throw new Error('当前市场暂无可用于压力测试的模拟或导入仓位');
+    const result = runScenario({ ...scenario, market }, positions);
+    res.json(decisionEnvelope({ market, data: result, source: 'MoneyMoney deterministic stress engine' }));
+  } catch (error: any) {
+    res.status(400).json({ success: false, error: error.message, dataStatus: 'empty', reason: error.message });
+  }
+});
+
+app.get('/api/decisions', (req, res) => {
+  try {
+    const market = decisionMarket(req.query.market);
+    const instrument = String(req.query.instrument || '').trim() || undefined;
+    assertMarketContext({ market, workspace: 'decision-journal', instrument });
+    const data = decisionIntelligenceStore.listDecisions(market, instrument);
+    res.json(decisionEnvelope({ market, instrument, data, dataStatus: data.length ? 'cached' : 'empty', source: 'private decision journal', reason: data.length ? null : '暂无决策记录' }));
+  } catch (error: any) {
+    res.status(400).json({ success: false, error: error.message, dataStatus: 'unavailable', reason: error.message });
+  }
+});
+
+app.post('/api/decisions', express.json(), (req, res) => {
+  if (!adminOnly(req, res)) return;
+  try {
+    const record = createDecisionRecord(req.body || {});
+    decisionIntelligenceStore.saveDecision(record);
+    res.status(201).json(decisionEnvelope({ market: record.market, instrument: record.instrument, data: record, source: 'private decision journal' }));
+  } catch (error: any) {
+    res.status(400).json({ success: false, error: error.message, dataStatus: 'unavailable', reason: error.message });
+  }
+});
+
+app.post('/api/decisions/:id/review', express.json(), (req, res) => {
+  if (!adminOnly(req, res)) return;
+  const current = decisionIntelligenceStore.getDecision(String(req.params.id));
+  if (!current) return res.status(404).json({ success: false, error: 'Decision not found', dataStatus: 'empty', reason: 'Decision not found' });
+  try {
+    const reviewed = reviewDecision(current, req.body?.observed || {}, req.body?.at);
+    decisionIntelligenceStore.saveDecision(reviewed);
+    res.json(decisionEnvelope({ market: current.market, instrument: current.instrument, data: reviewed, source: 'private decision journal' }));
+  } catch (error: any) {
+    res.status(400).json({ success: false, error: error.message, dataStatus: 'unavailable', reason: error.message });
+  }
+});
+
+app.post('/api/portfolio/import', express.json(), (req, res) => {
+  if (!adminOnly(req, res)) return;
+  const result = importPortfolioRows(Array.isArray(req.body?.rows) ? req.body.rows : []);
+  if (req.body?.commit === true && result.accepted.length) {
+    const existing = decisionIntelligenceStore.listPortfolio();
+    decisionIntelligenceStore.replacePortfolio([...existing, ...result.accepted]);
+  }
+  res.status(result.rejected.length && !result.accepted.length ? 400 : 200).json({ success: result.accepted.length > 0 || result.rejected.length === 0, data: result, dataStatus: result.accepted.length ? (result.rejected.length ? 'partial' : 'cached') : 'empty', source: 'manual/CSV portfolio import', updatedAt: new Date().toISOString(), reason: result.rejected.length ? `${result.rejected.length} 条记录未通过校验` : null });
+});
+
+app.get('/api/portfolio/analytics', (req, res) => {
+  try {
+    const market = decisionMarket(req.query.market);
+    const imported = decisionIntelligenceStore.listPortfolio(market);
+    const typeByMarket: Record<string, string> = { stocks: 'stock', crypto: 'crypto', prediction: 'prediction' };
+    const paper: PortfolioRow[] = unifiedPaperLedgerStore.get().positions.filter(item => item.instrumentType === typeByMarket[market]).map(item => ({ instrument: item.instrumentId, market, quantity: item.quantity, price: item.currentPrice, currency: 'USD' }));
+    const rows = [...imported, ...paper];
+    const data = analyzePortfolio(rows, { benchmarkReturnPct: Number(req.query.benchmarkReturnPct || 0), portfolioReturnPct: Number(req.query.portfolioReturnPct || 0) });
+    res.json(decisionEnvelope({ market, data: { ...data, positions: rows }, dataStatus: rows.length ? 'cached' : 'empty', source: 'paper ledger + validated manual imports', reason: rows.length ? null : '当前市场暂无模拟或导入仓位' }));
+  } catch (error: any) {
+    res.status(400).json({ success: false, error: error.message, dataStatus: 'unavailable', reason: error.message });
+  }
+});
+
+app.get('/api/signals/quality', (req, res) => {
+  try {
+    const market = decisionMarket(req.query.market);
+    const instrument = String(req.query.instrument || '').trim() || undefined;
+    assertMarketContext({ market, workspace: 'signal-quality', instrument });
+    const signals = decisionIntelligenceStore.listSignalOutcomes(market, instrument);
+    const data = analyzeSignalQuality(signals, { minimumSamples: Number(req.query.minimumSamples || 30), benchmarkReturnPct: Number(req.query.benchmarkReturnPct || 0) });
+    res.json(decisionEnvelope({ market, instrument, data, dataStatus: signals.length ? 'cached' : 'empty', source: 'persisted signal outcomes', reason: signals.length ? null : '暂无已完成的信号样本' }));
+  } catch (error: any) {
+    res.status(400).json({ success: false, error: error.message, dataStatus: 'unavailable', reason: error.message });
+  }
+});
+
+app.post('/api/signals/outcomes', express.json(), (req, res) => {
+  if (!adminOnly(req, res)) return;
+  try {
+    const signal = req.body || {};
+    const market = decisionMarket(signal.market);
+    assertMarketContext({ market, workspace: 'signal-quality', instrument: signal.instrument });
+    if (!signal.id || !signal.strategyId || !signal.timeframe || !signal.source || !Number.isFinite(Number(signal.triggeredAt)) || !Number.isFinite(Number(signal.entryPrice))) throw new Error('Signal outcome is incomplete');
+    const saved = decisionIntelligenceStore.saveSignalOutcome({ ...signal, market, triggeredAt: Number(signal.triggeredAt), entryPrice: Number(signal.entryPrice) });
+    res.status(201).json(decisionEnvelope({ market, instrument: signal.instrument, data: saved, source: signal.source }));
+  } catch (error: any) {
+    res.status(400).json({ success: false, error: error.message, dataStatus: 'unavailable', reason: error.message });
+  }
+});
+
+app.get('/api/workspaces', (req, res) => {
+  try {
+    const market = decisionMarket(req.query.market);
+    const data = decisionIntelligenceStore.listWorkspaces(market);
+    res.json(decisionEnvelope({ market, data, dataStatus: data.length ? 'cached' : 'empty', source: 'private saved workspaces', reason: data.length ? null : '暂无保存的工作区' }));
+  } catch (error: any) {
+    res.status(400).json({ success: false, error: error.message, dataStatus: 'unavailable', reason: error.message });
+  }
+});
+
+app.post('/api/workspaces', express.json(), (req, res) => {
+  if (!adminOnly(req, res)) return;
+  try {
+    const workspace = createSavedWorkspace(req.body || {});
+    decisionIntelligenceStore.saveWorkspace(workspace);
+    res.status(201).json(decisionEnvelope({ market: workspace.market, instrument: workspace.instrument, data: workspace, source: 'private saved workspaces' }));
+  } catch (error: any) {
+    res.status(400).json({ success: false, error: error.message, dataStatus: 'unavailable', reason: error.message });
+  }
+});
 
 app.get('/api/screener', async (req, res) => {
   const scope = String(req.query.scope || '') as ScreenerScope;

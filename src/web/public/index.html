@@ -2965,6 +2965,46 @@
       </div>
       <!-- Research Workspace Tab -->
       <div id="research-tab" class="tab-content">
+        <section id="decision-intelligence-tab" data-market-scopes="stocks options crypto prediction" data-workspace-ids="decision-intelligence" style="margin-bottom:18px;">
+          <div class="section-title">◇ 可信决策与研究闭环</div>
+          <div id="decision-context" class="glass-card" style="padding:12px 14px;border-radius:14px;margin-bottom:12px;font-size:12px;color:var(--text-secondary);">正在读取当前市场证据...</div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px;align-items:start;">
+            <article class="glass-card" style="padding:15px;border-radius:16px;">
+              <div style="display:flex;justify-content:space-between;gap:8px;align-items:center;"><strong>🔎 证据与可信度</strong><button class="tab" type="button" onclick="loadDecisionIntelligence()">刷新</button></div>
+              <div id="decision-evidence-list" style="margin-top:10px;"><div class="empty-tip">正在读取...</div></div>
+            </article>
+            <article class="glass-card" style="padding:15px;border-radius:16px;">
+              <strong>🧪 情景实验室</strong>
+              <div id="decision-scenario-list" style="margin-top:10px;"><div class="empty-tip">正在读取...</div></div>
+              <div id="decision-scenario-result" style="margin-top:8px;"></div>
+            </article>
+            <article class="glass-card" style="padding:15px;border-radius:16px;">
+              <strong>📝 决策日记</strong>
+              <div class="guest-admin-only" style="display:grid;gap:7px;margin-top:10px;">
+                <input id="decision-thesis" placeholder="当前假设，例如：盈利修正改善" style="padding:8px;border:1px solid var(--border);border-radius:8px;background:var(--bg-card);color:var(--text);">
+                <input id="decision-counter" placeholder="反证，逗号分隔" style="padding:8px;border:1px solid var(--border);border-radius:8px;background:var(--bg-card);color:var(--text);">
+                <div style="display:grid;grid-template-columns:1fr 90px 1fr;gap:6px;"><input id="decision-invalid-field" value="price" aria-label="失效字段" style="padding:8px;border:1px solid var(--border);border-radius:8px;background:var(--bg-card);color:var(--text);"><select id="decision-invalid-op" aria-label="失效条件" style="padding:8px;border:1px solid var(--border);border-radius:8px;background:var(--bg-card);color:var(--text);"><option value="lt">低于</option><option value="gt">高于</option><option value="lte">不高于</option><option value="gte">不低于</option></select><input id="decision-invalid-value" type="number" placeholder="失效值" aria-label="失效值" style="padding:8px;border:1px solid var(--border);border-radius:8px;background:var(--bg-card);color:var(--text);"></div>
+                <button class="tab active" type="button" onclick="saveDecisionRecordUi()">保存决策与当前证据</button>
+              </div>
+              <div id="decision-journal-list" style="margin-top:10px;"><div class="empty-tip">登录后查看私人决策记录。</div></div>
+            </article>
+            <article class="glass-card" style="padding:15px;border-radius:16px;">
+              <strong>💼 组合驾驶舱</strong>
+              <div id="decision-portfolio" style="margin-top:10px;"><div class="empty-tip">登录后查看模拟盘和导入仓位分析。</div></div>
+              <details class="guest-admin-only" style="margin-top:9px;"><summary style="cursor:pointer;color:var(--purple);">导入 CSV 仓位</summary><textarea id="portfolio-csv-input" rows="4" placeholder="instrument,market,quantity,price,currency&#10;AAPL,stocks,10,200,USD" style="width:100%;box-sizing:border-box;margin-top:7px;padding:8px;border:1px solid var(--border);border-radius:8px;background:var(--bg-card);color:var(--text);"></textarea><button class="tab" type="button" onclick="previewPortfolioCsv()">校验并导入</button><div id="portfolio-import-result" style="margin-top:6px;"></div></details>
+            </article>
+            <article class="glass-card" style="padding:15px;border-radius:16px;">
+              <strong>🎯 信号质量</strong>
+              <div id="decision-signal-quality" style="margin-top:10px;"><div class="empty-tip">正在统计已完成信号...</div></div>
+            </article>
+            <article class="glass-card" style="padding:15px;border-radius:16px;">
+              <strong>🗂 保存的工作区</strong>
+              <div class="guest-admin-only" style="display:flex;gap:7px;margin-top:10px;"><input id="saved-workspace-name" placeholder="工作区名称" style="min-width:0;flex:1;padding:8px;border:1px solid var(--border);border-radius:8px;background:var(--bg-card);color:var(--text);"><button class="tab active" type="button" onclick="saveCurrentDecisionWorkspace()">保存当前</button></div>
+              <div id="decision-workspace-list" style="margin-top:10px;"><div class="empty-tip">登录后保存和恢复工作区。</div></div>
+            </article>
+          </div>
+          <p style="margin:12px 2px 0;color:var(--text-secondary);font-size:11px;">所有情景结果均为研究压力测试，不构成交易指令；真实交易执行器保持关闭。</p>
+        </section>
         <div class="section-title">📚 研究证据工作台</div>
         <div class="glass-card" style="padding:16px;border-radius:18px;margin-bottom:16px;">
           <div style="font-weight:800;margin-bottom:8px;">新建研究对象</div>
@@ -9486,6 +9526,161 @@ async function addResearchSnapshotUi(id) {
   showToast(body.success ? '快照已记录' : (body.error || '记录失败'), body.success ? 'success' : 'error');
   if (body.success) loadResearchWorkspace();
 }
+
+function decisionScopeInstrument() {
+  const raw = String(currentInstrumentId || '').trim();
+  if (activeMarketScope === 'stocks') return raw.replace(/^us/i, '').toUpperCase() || String(window._stockSelectedSymbol || currentStockSymbol || 'AAPL').toUpperCase();
+  if (activeMarketScope === 'options') {
+    const symbol = raw.replace(/^(option:|usoption:)(cboe:)?/i, '').toUpperCase() || String(document.getElementById('option-symbol')?.value || 'SPY').toUpperCase();
+    return `option:cboe:${symbol}`;
+  }
+  if (activeMarketScope === 'crypto') return raw.replace(/^(crypto:|binance:)(binance:)?/i, '').toUpperCase() || String(window.bnCurrentSymbol || 'BTCUSDT').toUpperCase();
+  if (activeMarketScope === 'prediction') return raw ? (/^(prediction:|predict:|market:)/i.test(raw) ? raw : `prediction:predict:${raw}`) : '';
+  return '';
+}
+
+function decisionQualityBar(label, value) {
+  const pct = Math.max(0, Math.min(100, Number(value || 0) * 100));
+  return `<div style="display:grid;grid-template-columns:70px 1fr 34px;gap:6px;align-items:center;margin-top:4px;font-size:10px;color:var(--text-secondary);"><span>${safeNewsText(label)}</span><span style="height:5px;border-radius:99px;background:var(--bg-secondary);overflow:hidden;"><i style="display:block;height:100%;width:${pct.toFixed(0)}%;background:var(--purple);"></i></span><b>${pct.toFixed(0)}%</b></div>`;
+}
+
+function renderDecisionEvidence(items) {
+  const host = document.getElementById('decision-evidence-list');
+  if (!host) return;
+  window.mm_decisionEvidenceIds = (items || []).map(item => item.id);
+  host.innerHTML = (items || []).length ? items.slice(0, 8).map(item => `<details style="padding:8px 0;border-bottom:1px dashed var(--border);"><summary style="cursor:pointer;display:flex;justify-content:space-between;gap:8px;"><span><b>${safeNewsText(item.source?.name || item.source?.id)}</b><small style="display:block;color:var(--text-secondary);">${safeNewsText(item.source?.id)} · ${safeNewsText(item.dataStatus)}</small></span><span style="font-size:10px;color:${item.dataStatus === 'live' ? 'var(--green)' : item.dataStatus === 'unavailable' ? 'var(--red)' : '#b7791f'};">${safeNewsText(item.dataStatus)}</span></summary><div style="margin-top:8px;">${decisionQualityBar('时效', item.quality?.freshness)}${decisionQualityBar('完整度', item.quality?.completeness)}${decisionQualityBar('来源可靠', item.quality?.sourceReliability)}${decisionQualityBar('多源一致', item.quality?.corroboration)}<div style="margin-top:7px;font-size:10px;color:var(--text-secondary);">数据 ${safeNewsText(item.observedAt)} · 抓取 ${safeNewsText(item.fetchedAt)}${item.reason ? `<br><span style="color:var(--red);">${safeNewsText(item.reason)}</span>` : ''}</div></div></details>`).join('') : '<div class="empty-tip">当前市场暂无证据，数据不会由其他市场补位。</div>';
+}
+
+function renderDecisionScenarios(items) {
+  const host = document.getElementById('decision-scenario-list');
+  if (!host) return;
+  host.innerHTML = (items || []).length ? items.map(item => `<button class="market-research-row guest-admin-only" type="button" onclick="runDecisionScenario('${safeNewsText(item.id)}')"><strong>${safeNewsText(item.name)}</strong><span>${(item.shocks || []).map(shock => `${safeNewsText(shock.target)} ${Number(shock.value) >= 0 ? '+' : ''}${safeNewsText(shock.value)}${shock.kind === 'pricePct' ? '%' : ''}`).join(' · ')}</span></button>`).join('') : '<div class="empty-tip">当前市场暂无情景模板。</div>';
+}
+
+function renderDecisionJournal(items) {
+  const host = document.getElementById('decision-journal-list');
+  if (!host) return;
+  host.innerHTML = (items || []).length ? items.slice(0, 8).map(item => `<div style="padding:8px 0;border-bottom:1px dashed var(--border);"><div style="display:flex;justify-content:space-between;gap:8px;"><b>${safeNewsText(item.instrument)} · ${safeNewsText(item.direction)}</b><span style="font-size:10px;color:var(--purple);">${safeNewsText(item.status)}</span></div><div style="font-size:11px;margin-top:4px;">${safeNewsText(item.thesis)}</div><div style="font-size:10px;color:var(--text-secondary);margin-top:4px;">失效：${safeNewsText(item.invalidation?.field)} ${safeNewsText(item.invalidation?.operator)} ${safeNewsText(item.invalidation?.value)} · 证据 ${(item.evidenceIds || []).length}</div></div>`).join('') : '<div class="empty-tip">暂无决策记录。</div>';
+}
+
+function renderDecisionPortfolio(data, reason) {
+  const host = document.getElementById('decision-portfolio');
+  if (!host) return;
+  if (!data?.positions?.length) { host.innerHTML = `<div class="empty-tip">${safeNewsText(reason || '当前市场暂无模拟或导入仓位')}</div>`; return; }
+  host.innerHTML = `<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:7px;">${commandMetric('组合市值', '$' + Number(data.totalValue || 0).toFixed(2), `${data.positions.length} 个仓位`)}${commandMetric('最大集中度', Number(data.concentrationPct || 0).toFixed(1) + '%', '单一仓位占比')}${commandMetric('超额收益', Number(data.excessReturnPct || 0).toFixed(2) + '%', '相对输入基准')}</div><div style="margin-top:8px;font-size:10px;color:var(--text-secondary);">压力测试：${(data.stressTests || []).map(item => `${item.shockPct}% → $${Number(item.value).toFixed(0)}`).join(' · ')}</div>`;
+}
+
+function renderDecisionSignalQuality(data, reason) {
+  const host = document.getElementById('decision-signal-quality');
+  if (!host) return;
+  if (!data?.total) { host.innerHTML = `<div class="empty-tip">${safeNewsText(reason || '暂无已完成的信号样本')}</div>`; return; }
+  host.innerHTML = `<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:7px;">${commandMetric('样本', data.total, `已闭合 ${data.resolved}`)}${commandMetric('命中率', (Number(data.hitRate || 0) * 100).toFixed(1) + '%', '不等同未来收益')}${commandMetric('平均收益', Number(data.averageReturnPct || 0).toFixed(2) + '%', `基准 ${Number(data.benchmarkReturnPct || 0).toFixed(2)}%`)}</div>${(data.warnings || []).map(item => `<div style="margin-top:6px;color:#b7791f;font-size:10px;">⚠ ${safeNewsText(item)}</div>`).join('')}`;
+}
+
+function renderDecisionWorkspaces(items) {
+  const host = document.getElementById('decision-workspace-list');
+  if (!host) return;
+  host.innerHTML = (items || []).length ? items.map(item => `<button class="market-research-row" type="button" onclick="restoreDecisionWorkspace('${safeNewsText(item.id)}')"><strong>${safeNewsText(item.name)}</strong><span>${safeNewsText(item.market)} / ${safeNewsText(item.instrument || '未固定标的')} / ${safeNewsText(item.timeframe || '默认周期')}</span></button>`).join('') : '<div class="empty-tip">暂无保存的工作区。</div>';
+  window.mm_savedDecisionWorkspaces = items || [];
+}
+
+async function decisionFetchJson(url, options) {
+  const response = await fetch(url, options);
+  const body = await response.json().catch(() => ({ success: false, error: `HTTP ${response.status}` }));
+  if (!response.ok || !body.success) throw new Error(body.reason || body.error || `HTTP ${response.status}`);
+  return body;
+}
+
+async function loadDecisionIntelligence() {
+  if (!['stocks', 'options', 'crypto', 'prediction'].includes(activeMarketScope)) return;
+  const market = activeMarketScope;
+  const instrument = decisionScopeInstrument();
+  const query = `market=${encodeURIComponent(market)}${instrument ? `&instrument=${encodeURIComponent(instrument)}` : ''}`;
+  const context = document.getElementById('decision-context');
+  if (context) context.textContent = `${marketResearchLabel(market)} / ${instrument || '未选择标的'} / 正在检查来源与研究状态...`;
+  const publicCalls = [decisionFetchJson(`/api/evidence?${query}`), decisionFetchJson(`/api/scenarios?market=${encodeURIComponent(market)}`), decisionFetchJson(`/api/signals/quality?${query}`)];
+  const privateCalls = window.mm_isGuest ? [] : [decisionFetchJson(`/api/decisions?${query}`), decisionFetchJson(`/api/portfolio/analytics?market=${encodeURIComponent(market)}`), decisionFetchJson(`/api/workspaces?market=${encodeURIComponent(market)}`)];
+  const settled = await Promise.allSettled([...publicCalls, ...privateCalls]);
+  if (settled[0].status === 'fulfilled') renderDecisionEvidence(settled[0].value.data); else renderDecisionEvidence([]);
+  if (settled[1].status === 'fulfilled') renderDecisionScenarios(settled[1].value.data); else renderDecisionScenarios([]);
+  if (settled[2].status === 'fulfilled') renderDecisionSignalQuality(settled[2].value.data, settled[2].value.reason); else renderDecisionSignalQuality(null, settled[2].reason?.message);
+  if (!window.mm_isGuest) {
+    if (settled[3]?.status === 'fulfilled') renderDecisionJournal(settled[3].value.data); else renderDecisionJournal([]);
+    if (settled[4]?.status === 'fulfilled') renderDecisionPortfolio(settled[4].value.data, settled[4].value.reason); else renderDecisionPortfolio(null, settled[4]?.reason?.message);
+    if (settled[5]?.status === 'fulfilled') renderDecisionWorkspaces(settled[5].value.data); else renderDecisionWorkspaces([]);
+  }
+  const usable = settled.filter(item => item.status === 'fulfilled').length;
+  if (context) context.innerHTML = `<b>${safeNewsText(marketResearchLabel(market))}</b> / ${safeNewsText(instrument || '未选择标的')} · ${usable}/${settled.length} 个研究域可用 · 更新时间 ${safeNewsText(new Date().toLocaleTimeString())}`;
+}
+
+async function runDecisionScenario(id) {
+  const result = document.getElementById('decision-scenario-result');
+  if (result) result.innerHTML = '<div class="empty-tip">正在运行确定性压力测试...</div>';
+  try {
+    const body = await decisionFetchJson('/api/scenarios/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ market: activeMarketScope, scenarioId: id }) });
+    const impact = body.data.impact;
+    if (result) result.innerHTML = `<div style="padding:9px;border-radius:10px;background:var(--bg-secondary);font-size:11px;"><b>影响 ${Number(impact.change).toFixed(2)}</b><br>测试前 $${Number(impact.totalValueBefore).toFixed(2)} → 测试后 $${Number(impact.totalValueAfter).toFixed(2)}<br><small style="color:var(--text-secondary);">${safeNewsText(body.data.disclaimer)}</small></div>`;
+  } catch (error) { if (result) result.innerHTML = `<div class="empty-tip" style="color:var(--red);">${safeNewsText(error.message)}</div>`; }
+}
+
+async function saveDecisionRecordUi() {
+  const instrument = decisionScopeInstrument();
+  if (!instrument) return showToast('请先从右侧选择标的', 'error');
+  const thesis = document.getElementById('decision-thesis')?.value.trim();
+  const invalidValue = Number(document.getElementById('decision-invalid-value')?.value);
+  if (!thesis || !Number.isFinite(invalidValue)) return showToast('请填写假设和失效值', 'error');
+  const horizon = new Date(Date.now() + 30 * 86400000).toISOString();
+  try {
+    await decisionFetchJson('/api/decisions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ market: activeMarketScope, instrument, direction: 'long', thesis, counterEvidence: String(document.getElementById('decision-counter')?.value || '').split(',').map(item => item.trim()).filter(Boolean), invalidation: { field: document.getElementById('decision-invalid-field')?.value || 'price', operator: document.getElementById('decision-invalid-op')?.value || 'lt', value: invalidValue }, horizonAt: horizon, evidenceIds: window.mm_decisionEvidenceIds || [] }) });
+    showToast('决策和当前证据引用已保存', 'success');
+    loadDecisionIntelligence();
+  } catch (error) { showToast(error.message, 'error'); }
+}
+
+function parsePortfolioCsv(text) {
+  const rows = String(text || '').split(/\r?\n/).filter(line => line.trim()).map(line => {
+    const cells = []; let value = ''; let quoted = false;
+    for (let i = 0; i < line.length; i += 1) { const char = line[i]; if (char === '"' && line[i + 1] === '"' && quoted) { value += '"'; i += 1; } else if (char === '"') quoted = !quoted; else if (char === ',' && !quoted) { cells.push(value.trim()); value = ''; } else value += char; }
+    cells.push(value.trim()); return cells;
+  });
+  if (rows.length < 2) return [];
+  const headers = rows[0].map(item => item.toLowerCase());
+  return rows.slice(1).map(cells => Object.fromEntries(headers.map((header, index) => [header, ['quantity', 'price'].includes(header) ? Number(cells[index]) : cells[index]])));
+}
+
+async function previewPortfolioCsv() {
+  const result = document.getElementById('portfolio-import-result');
+  try {
+    const rows = parsePortfolioCsv(document.getElementById('portfolio-csv-input')?.value);
+    const body = await fetch('/api/portfolio/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ rows, commit: true }) }).then(response => response.json());
+    if (result) result.innerHTML = `<div style="font-size:10px;color:${body.data?.accepted?.length ? 'var(--green)' : 'var(--red)'};">通过 ${body.data?.accepted?.length || 0} 条 · 拒绝 ${body.data?.rejected?.length || 0} 条${(body.data?.rejected || []).slice(0, 3).map(item => `<br>${safeNewsText(item.reason)}`).join('')}</div>`;
+    if (body.data?.accepted?.length) loadDecisionIntelligence();
+  } catch (error) { if (result) result.textContent = error.message; }
+}
+
+async function saveCurrentDecisionWorkspace() {
+  const name = document.getElementById('saved-workspace-name')?.value.trim();
+  if (!name) return showToast('请填写工作区名称', 'error');
+  try {
+    await decisionFetchJson('/api/workspaces', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, market: activeMarketScope, workspace: 'decision-intelligence', instrument: decisionScopeInstrument() || undefined, timeframe: window.stockKlinePeriod || window.bnInterval || undefined, filters: window.mm_screenerState?.filters || {}, layers: Object.entries(window.stockKlineLayerState || {}).filter(([, enabled]) => enabled).map(([layer]) => layer), compare: String(document.getElementById('market-compare-ids')?.value || '').split(',').map(item => item.trim()).filter(Boolean), layout: { rightLibraryCollapsed: document.body.classList.contains('sidebar-collapsed') } }) });
+    showToast('工作区已保存', 'success');
+    loadDecisionIntelligence();
+  } catch (error) { showToast(error.message, 'error'); }
+}
+
+function restoreDecisionWorkspace(id) {
+  const saved = (window.mm_savedDecisionWorkspaces || []).find(item => item.id === id);
+  if (!saved) return;
+  setMarketScope(saved.market, { openTab: false });
+  activeWorkspaceId = 'decision-intelligence';
+  currentInstrumentId = saved.instrument || null;
+  syncWorkspaceContextUrl();
+  renderWorkspaceSidebar();
+  showTab('research', null, { scopeAlreadySynced: true });
+  applyWorkspaceView();
+  if (saved.layout?.rightLibraryCollapsed !== document.body.classList.contains('sidebar-collapsed')) toggleSidebar();
+  loadDecisionIntelligence();
+}
 async function loadOpsConsole() {
   const jobsEl = document.getElementById('ops-jobs');
   const overviewEl = document.getElementById('ops-overview');
@@ -10418,7 +10613,7 @@ const WORKSPACE_ITEM_CATALOG = {
   overview: ['⌂', '市场总览'], radar: ['◉', '市场雷达'], analysis: ['⌁', '标的分析'],
   'stock-quotes': ['▥', '行情与选股'], 'crypto-quotes': ['₿', '行情与K线'], events: ['▤', '市场事件与新闻'],
   backtest: ['⌘', '策略回测'], screener: ['⌕', '筛选与比较'], watchlist: ['★', '我的自选'], positions: ['▣', '我的持仓'],
-  risk: ['♡', '风险监控'], breadth: ['▥', '市场宽度'],
+  risk: ['♡', '风险监控'], 'decision-intelligence': ['◇', '可信决策'], breadth: ['▥', '市场宽度'],
   insider: ['♟', '内部人交易'], institutional: ['♜', '机构持仓'], analyst: ['◎', '分析师共识'],
   fundamentals: ['▥', '基本面质量'], 'short-interest': ['♟', '空头利息'],
   'option-chain': ['◌', '期权链'], volatility: ['∿', '隐含波动率'], greeks: ['Δ', 'Greeks'],
@@ -10428,6 +10623,7 @@ const WORKSPACE_ITEM_CATALOG = {
 const WORKSPACE_BASE_GROUPS = [
   ['market', '市场', ['overview', 'radar', 'analysis']],
   ['research', '研究', ['screener', 'backtest', 'risk']],
+  ['intelligence', '决策', ['decision-intelligence']],
 ];
 const WORKSPACE_SPECIFIC_IDS = {
   overview: [], watchlist: [],
@@ -10737,6 +10933,7 @@ function workspaceTabFor(id) {
   if (id === 'analysis') return 'analysis';
   if (id === 'watchlist' || id === 'positions') return 'positions';
   if (id === 'risk') return 'risk';
+  if (id === 'decision-intelligence') return 'research';
   if (id === 'search') return null;
   if (['breadth', 'insider', 'institutional', 'analyst', 'fundamentals', 'short-interest'].includes(id)) return 'stocks';
   if (['option-chain', 'volatility', 'greeks'].includes(id)) return 'options';
@@ -10812,6 +11009,7 @@ window.openWorkspace = function(id) {
   }
   const targetTab = workspaceTabFor(id);
   if (targetTab) showTab(targetTab, null, { scopeAlreadySynced: true });
+  if (id === 'decision-intelligence') loadDecisionIntelligence();
   if (currentInstrumentId) loadActiveWorkspaceInstrument();
   closeWorkspaceDrawer();
   const section = document.querySelector(`[data-workspace-id="${id}"].dash-collapse`);
@@ -10859,7 +11057,7 @@ function scopeAllowsView(declared) {
 const EXCLUSIVE_WORKSPACE_IDS = new Set([
   'stock-quotes', 'crypto-quotes', 'events', 'breadth', 'insider', 'institutional', 'analyst', 'fundamentals', 'short-interest', 'screener',
   'option-chain', 'volatility', 'greeks', 'funding-rate', 'open-interest', 'on-chain', 'order-flow',
-  'prediction-radar',
+  'prediction-radar', 'decision-intelligence',
 ]);
 function workspaceIdsForNode(node) {
   return String(node?.dataset?.workspaceIds || node?.dataset?.workspaceId || '')
