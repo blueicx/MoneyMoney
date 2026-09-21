@@ -141,6 +141,7 @@ import { buildSourceSlo, runtimeObservability } from '../features/runtime-observ
 import { dataLakeCatalog } from '../storage/data-lake';
 import { dataLakeWorker } from '../storage/data-lake-worker';
 import { EventStudyRepository, runEventStudy } from '../features/event-study';
+import { buildEventEntities, clusterEventEntities } from '../features/event-intelligence';
 import { curlCommand } from '../utils/platform-command';
 import { STOCK_KLINE_PERIODS, createYahooStockKlineAdapter } from '../data/yahoo-adapter';
 import { actionsForScreener, fieldsForScreener, filterRows, isScreenerScope, paginateRows, serializeTemplate, sortRows, type ScreenerFilter, type ScreenerScope, type ScreenerSort } from '../features/market-screener';
@@ -654,6 +655,16 @@ app.get('/api/ops/slo', async (_req, res) => {
     });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.get('/api/ops/data-lake', (req, res) => {
+  if (!adminOnly(req, res)) return;
+  try {
+    const data = dataLakeCatalog.getDiagnostics();
+    res.json({ success: true, data, dataStatus: data.quotaState === 'blocked' ? 'degraded' : 'cached', source: 'MoneyMoney local Parquet catalog', updatedAt: data.generatedAt, reason: data.quotaState === 'blocked' ? '数据湖已达到容量停止阈值，非必要采集应暂停' : data.quotaState === 'warning' ? '数据湖已达到容量告警阈值' : null });
+  } catch (error: any) {
+    res.status(503).json({ success: false, dataStatus: 'unavailable', source: 'MoneyMoney local Parquet catalog', updatedAt: new Date().toISOString(), reason: error?.message || '数据湖诊断不可用' });
   }
 });
 
@@ -1923,6 +1934,7 @@ app.get('/api/diagnostics', async (req, res) => {
         generatedAt: new Date().toISOString(),
         version: process.env.APP_VERSION || process.env.npm_package_version || 'unknown',
         storage: getStorageHealth(),
+        dataLake: dataLakeCatalog.getDiagnostics(),
         sources: { total: sources.total, online: sources.online, updatedAt: sources.updatedAt, unavailable: sources.items.filter(item => !item.ok).map(item => ({ id: item.id, detail: item.detail })) },
         researchJobs: jobs.reduce<Record<string, number>>((acc, job) => { acc[job.status] = (acc[job.status] || 0) + 1; return acc; }, {}),
         telegram: { configured: telegram.isConfigured, pollingEnabled: telegramConfig.pollingEnabled, pollingRunning: telegramInteractionBot?.isRunning || false },
@@ -2227,6 +2239,36 @@ app.get('/api/events/timeline', async (req, res) => {
     freshness: { fetchedAt: new Date().toISOString(), status: Object.values(sourceStatus).some(value => value === 'ok' || value === 'stale') ? 'live' : 'unavailable' },
   }, Object.values(sourceStatus).includes('unavailable') ? 'unavailable' : 'ok');
 });
+
+function eventInstrumentRef(market: MarketId, instrumentId: string) {
+  const match = instrumentId.match(/^([^:]+):([^:]+):(.+)$/);
+  if (!match) throw new Error('instrumentId 必须使用 market:venue:symbol 格式');
+  const [type, venue, symbol] = match.slice(1);
+  const expected: Record<MarketId, InstrumentType> = { stocks: 'stock', options: 'option', crypto: 'crypto', prediction: 'prediction' };
+  if (type !== expected[market]) throw new Error(`Instrument ${instrumentId} does not belong to market ${market}`);
+  return normalizeInstrumentRef({ type: type as InstrumentType, venue, symbol, title: symbol, aliases: [] });
+}
+
+async function readEventIntelligence(req: express.Request, res: express.Response, grouped: boolean): Promise<void> {
+  const market = String(req.query.market || req.query.scope || '') as MarketId;
+  const instrument = String(req.query.instrument || req.query.instrumentId || '').trim();
+  if (!MARKET_IDS.includes(market) || !instrument) {
+    res.status(400).json({ success: false, market: MARKET_IDS.includes(market) ? market : undefined, dataStatus: 'unavailable', reason: 'market 和 instrumentId 均为必填项' });
+    return;
+  }
+  try {
+    const ref = eventInstrumentRef(market, instrument);
+    const timeline = await unifiedInstrumentService.timeline(ref);
+    const entities = buildEventEntities(timeline.items, { market, instrument: ref.id });
+    const data = grouped ? clusterEventEntities(entities) : entities;
+    res.json(decisionEnvelope({ market, instrument: ref.id, data, dataStatus: data.length ? 'live' : 'empty', source: 'scoped instrument event timeline', updatedAt: timeline.generatedAt, reason: data.length ? null : '当前标的暂无可聚类事件或新闻' }));
+  } catch (error: any) {
+    res.status(400).json({ success: false, market, instrument, dataStatus: 'unavailable', source: 'scoped instrument event timeline', updatedAt: null, reason: error?.message || '事件数据不可用' });
+  }
+}
+
+app.get('/api/events/entities', async (req, res) => { await readEventIntelligence(req, res, false); });
+app.get('/api/events/clusters', async (req, res) => { await readEventIntelligence(req, res, true); });
 app.get('/api/events/calendar', async (req, res) => {
   try {
     const scope = requestedMarketScope(req.query.scope);

@@ -69,6 +69,63 @@ test('backfill worker rejects unsupported markets before calling the provider', 
   } finally { catalog.close(); fs.rmSync(root, { recursive: true, force: true }); }
 });
 
+test('backfill worker routes a crypto bars job through its market-scoped provider', async () => {
+  const { root, catalog } = tempCatalog();
+  try {
+    let calls = 0;
+    const worker = new DataLakeBackfillWorker(catalog, {
+      providers: [{
+        id: 'test-binance-bars',
+        market: 'crypto',
+        datasets: ['bars'],
+        timeframes: ['1d'],
+        createAdapter: () => ({
+          id: 'test-binance-bars',
+          group: 'test crypto',
+          fetch: async () => {
+            calls += 1;
+            return {
+              data: [{ time: Date.parse('2026-02-02T00:00:00.000Z'), open: 100, high: 105, low: 99, close: 103, volume: 20 }],
+              source: 'test-binance-bars', fetchedAt: '2026-02-03T00:00:00.000Z', expiresAt: '2026-02-04T00:00:00.000Z', latencyMs: 1, status: 'live',
+            };
+          },
+        }),
+      }],
+    });
+    const job = catalog.createBackfill({ market: 'crypto', dataset: 'bars', instrument: 'BTCUSDT', timeframe: '1d', from: '2026-02-01T00:00:00.000Z', to: '2026-02-03T00:00:00.000Z' });
+    const result = await worker.runOnce();
+    assert.equal(result.id, job.id);
+    assert.equal(result.status, 'succeeded');
+    assert.equal(calls, 1);
+    assert.equal(catalog.listPartitions()[0].market, 'crypto');
+    const snapshot = await catalog.queryBarsAsOf({ market: 'crypto', instrument: 'BTCUSDT', timeframe: '1d', asOf: '2026-02-04T00:00:00.000Z' });
+    assert.deepEqual(snapshot.rows.map(row => row.close), [103]);
+  } finally { catalog.close(); fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('backfill worker reports unavailable provider without publishing options data', async () => {
+  const { root, catalog } = tempCatalog();
+  try {
+    let calls = 0;
+    const worker = new DataLakeBackfillWorker(catalog, {
+      providers: [{
+        id: 'test-stock-only',
+        market: 'stocks',
+        datasets: ['bars'],
+        timeframes: ['1d'],
+        createAdapter: () => ({ fetch: async () => { calls += 1; return { data: [] }; } }),
+      }],
+    });
+    const job = catalog.createBackfill({ market: 'options', dataset: 'bars', instrument: 'option:AAPL:20270115:200:C', timeframe: '1d', from: '2026-02-01T00:00:00.000Z', to: '2026-02-03T00:00:00.000Z' });
+    const result = await worker.runOnce();
+    assert.equal(result.id, job.id);
+    assert.equal(result.status, 'failed');
+    assert.match(result.reason, /Provider|来源|unavailable/i);
+    assert.equal(calls, 0);
+    assert.deepEqual(catalog.listPartitions(), []);
+  } finally { catalog.close(); fs.rmSync(root, { recursive: true, force: true }); }
+});
+
 test('backfill worker never runs two jobs concurrently', async () => {
   const { root, catalog } = tempCatalog();
   try {

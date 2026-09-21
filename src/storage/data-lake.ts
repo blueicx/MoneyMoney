@@ -17,6 +17,19 @@ export interface ProviderContract { id: string; provider: string; market: Market
 export interface DataQualityReport { valid: boolean; rowCount: number; duplicateTimestamps: number; outOfOrderRows: number; missingFields: string[]; futureRows: number; errors: string[]; checkedAt: string; }
 export interface DataBackfillJob { id: string; market: MarketId; dataset: string; instrument: string; timeframe: string; from: string; to: string; status: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled'; reason?: string; createdAt: string; updatedAt: string; }
 export interface BarRow { timestamp: string; open: number; high: number; low: number; close: number; volume?: number; publishedAt?: string; }
+export interface DataLakeDiagnostics {
+  root: string;
+  generatedAt: string;
+  usageBytes: number;
+  quotaBytes: number;
+  usagePercent: number;
+  quotaState: 'ok' | 'warning' | 'blocked';
+  partitionCount: number;
+  stagingFileCount: number;
+  byMarket: Record<MarketId, number>;
+  byDataset: Record<string, number>;
+  backfills: Record<DataBackfillJob['status'], number>;
+}
 
 const BAR_FIELDS = ['timestamp', 'open', 'high', 'low', 'close'] as const;
 const IDENTIFIER = /^[A-Za-z0-9._:/-]+$/;
@@ -178,6 +191,28 @@ export class DataLakeCatalog {
       ? this.db.prepare('SELECT q.partition_id AS partitionId, q.report FROM data_quality_reports q JOIN dataset_partitions p ON p.id = q.partition_id WHERE p.market = ? ORDER BY q.checked_at DESC').all(market)
       : this.db.prepare('SELECT partition_id AS partitionId, report FROM data_quality_reports ORDER BY checked_at DESC').all()) as Array<{ partitionId: string; report: string }>;
     return rows.map(row => ({ partitionId: row.partitionId, report: JSON.parse(row.report) as DataQualityReport }));
+  }
+
+  getDiagnostics(options: { quotaBytes?: number; warningPercent?: number; stopPercent?: number } = {}): DataLakeDiagnostics {
+    const partitions = this.listPartitions();
+    const byMarket: Record<MarketId, number> = { stocks: 0, options: 0, crypto: 0, prediction: 0 };
+    const byDataset: Record<string, number> = {};
+    let usageBytes = 0;
+    for (const partition of partitions) {
+      if (MARKET_IDS.includes(partition.market)) byMarket[partition.market] += 1;
+      byDataset[partition.dataset] = (byDataset[partition.dataset] || 0) + 1;
+      try { usageBytes += fs.statSync(partition.path).size; } catch { /* catalog rows can outlive a removed local file */ }
+    }
+    let stagingFileCount = 0;
+    try { stagingFileCount = fs.readdirSync(path.join(this.lakeRoot, '.staging'), { withFileTypes: true }).filter(item => item.isFile()).length; } catch { /* the constructor normally creates it */ }
+    const backfills: Record<DataBackfillJob['status'], number> = { queued: 0, running: 0, succeeded: 0, failed: 0, cancelled: 0 };
+    for (const job of this.listBackfills()) backfills[job.status] += 1;
+    const quotaBytes = Math.max(1, Number(options.quotaBytes ?? process.env.MONEYMONEY_DATA_LAKE_MAX_BYTES ?? 8 * 1024 ** 3));
+    const usagePercent = usageBytes / quotaBytes * 100;
+    const warningPercent = Number(options.warningPercent ?? 70);
+    const stopPercent = Number(options.stopPercent ?? 90);
+    const quotaState = usagePercent >= stopPercent ? 'blocked' : usagePercent >= warningPercent ? 'warning' : 'ok';
+    return { root: this.lakeRoot, generatedAt: new Date().toISOString(), usageBytes, quotaBytes, usagePercent, quotaState, partitionCount: partitions.length, stagingFileCount, byMarket, byDataset, backfills };
   }
 
   claimNextBackfill(): DataBackfillJob | null {

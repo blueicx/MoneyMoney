@@ -69,3 +69,17 @@ test('data lake rejects cross-market instrument identity before any provider wri
     assert.deepEqual(catalog.listPartitions(), []);
   } finally { catalog.close(); fs.rmSync(root, { recursive: true, force: true }); }
 });
+
+test('data lake diagnostics reports partition coverage and quota state', async () => {
+  const { root, catalog } = tempCatalog();
+  try {
+    await catalog.stageBars({ market: 'stocks', dataset: 'bars', instrument: 'AAPL', timeframe: '1d', source: 'test-source', publishedAt: '2026-09-03T00:00:00.000Z', rows: stockRows });
+    fs.writeFileSync(path.join(root, 'lake', '.staging', 'unfinished.tmp'), 'unfinished');
+    const diagnostics = catalog.getDiagnostics({ quotaBytes: 1, warningPercent: 70, stopPercent: 90 });
+    assert.equal(diagnostics.partitionCount, 1);
+    assert.equal(diagnostics.byMarket.stocks, 1);
+    assert.equal(diagnostics.stagingFileCount, 1);
+    assert.equal(diagnostics.quotaState, 'blocked');
+    assert.ok(diagnostics.usagePercent >= 90);
+  } finally { catalog.close(); fs.rmSync(root, { recursive: true, force: true }); }
+});
