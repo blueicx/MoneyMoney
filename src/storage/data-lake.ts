@@ -141,14 +141,29 @@ export class DataLakeCatalog {
     validateInstrument(input.market, input.instrument);
     const asOf = Date.parse(input.asOf);
     if (!Number.isFinite(asOf)) throw new Error('invalid asOf');
-    const row = this.db.prepare('SELECT p.*, m.source AS source FROM dataset_partitions p JOIN dataset_manifests m ON m.id = p.manifest_id WHERE p.market = ? AND p.dataset = ? AND p.instrument = ? AND p.timeframe = ? AND p.published_at <= ? AND p.status = ? ORDER BY p.published_at DESC LIMIT 1').get(input.market, 'bars', input.instrument, input.timeframe, new Date(asOf).toISOString(), 'committed') as Record<string, any> | undefined;
-    if (!row) return { rows: [], dataStatus: 'unavailable', source: null, updatedAt: null, reason: '没有在 asOf 时点之前发布的数据分区' };
+    const candidates = this.db.prepare('SELECT p.*, m.source AS source FROM dataset_partitions p JOIN dataset_manifests m ON m.id = p.manifest_id WHERE p.market = ? AND p.dataset = ? AND p.instrument = ? AND p.timeframe = ? AND p.published_at <= ? AND p.status = ? ORDER BY p.period_start ASC, p.period_end ASC, p.published_at DESC, p.id DESC').all(input.market, 'bars', input.instrument, input.timeframe, new Date(asOf).toISOString(), 'committed') as Array<Record<string, any>>;
+    const selected: Array<Record<string, any>> = [];
+    const periods = new Set<string>();
+    for (const candidate of candidates) {
+      const periodKey = `${candidate.period_start}|${candidate.period_end}`;
+      if (periods.has(periodKey)) continue;
+      periods.add(periodKey);
+      selected.push(candidate);
+    }
+    if (!selected.length) return { rows: [], dataStatus: 'unavailable', source: null, updatedAt: null, reason: '没有在 asOf 时点之前发布的数据分区' };
     const instance = await DuckDBInstance.create(':memory:', { memory_limit: '512MB', threads: '1' });
     const connection = await instance.connect();
     try {
-      const reader = await connection.runAndReadAll(`SELECT observation_ts AS timestamp, open, high, low, close, volume, published_at, market, instrument, timeframe, source FROM read_parquet('${sqlPath(row.path)}') ORDER BY observation_ts`);
-      const rows = reader.getRowObjectsJS();
-      return { rows, dataStatus: 'historical', source: String(row.source || ''), updatedAt: String(row.published_at || ''), snapshot: { id: `snapshot_${row.content_hash.slice(0, 24)}_${asOf}`, market: input.market, instrument: input.instrument, dataset: 'bars', asOf: new Date(asOf).toISOString(), partitionId: row.id, contentHash: row.content_hash } };
+      const rows: Array<Record<string, unknown>> = [];
+      for (const partition of selected) {
+        const reader = await connection.runAndReadAll(`SELECT observation_ts AS timestamp, open, high, low, close, volume, published_at, market, instrument, timeframe, source FROM read_parquet('${sqlPath(String(partition.path))}') ORDER BY observation_ts`);
+        rows.push(...reader.getRowObjectsJS() as Array<Record<string, unknown>>);
+      }
+      rows.sort((left, right) => Date.parse(String(left.timestamp)) - Date.parse(String(right.timestamp)));
+      const latest = selected.reduce((current, candidate) => String(candidate.published_at) > String(current.published_at) ? candidate : current, selected[0]);
+      const source = [...new Set(selected.map(item => String(item.source || '')).filter(Boolean))].join(', ');
+      const contentHash = crypto.createHash('sha256').update(selected.map(item => String(item.content_hash)).join('|')).digest('hex');
+      return { rows, dataStatus: 'historical', source, updatedAt: String(latest.published_at || ''), snapshot: { id: `snapshot_${contentHash.slice(0, 24)}_${asOf}`, market: input.market, instrument: input.instrument, dataset: 'bars', asOf: new Date(asOf).toISOString(), partitionId: selected.map(item => String(item.id)).join(','), contentHash } };
     } finally { connection.closeSync(); instance.closeSync(); }
   }
 
@@ -163,6 +178,29 @@ export class DataLakeCatalog {
       ? this.db.prepare('SELECT q.partition_id AS partitionId, q.report FROM data_quality_reports q JOIN dataset_partitions p ON p.id = q.partition_id WHERE p.market = ? ORDER BY q.checked_at DESC').all(market)
       : this.db.prepare('SELECT partition_id AS partitionId, report FROM data_quality_reports ORDER BY checked_at DESC').all()) as Array<{ partitionId: string; report: string }>;
     return rows.map(row => ({ partitionId: row.partitionId, report: JSON.parse(row.report) as DataQualityReport }));
+  }
+
+  claimNextBackfill(): DataBackfillJob | null {
+    const transaction = this.db.transaction(() => {
+      const row = this.db.prepare('SELECT id,market,dataset,instrument,timeframe,from_at AS "from",to_at AS "to",status,reason,created_at AS createdAt,updated_at AS updatedAt FROM data_backfill_jobs WHERE status = ? ORDER BY created_at ASC LIMIT 1').get('queued') as Record<string, any> | undefined;
+      if (!row) return null;
+      const now = new Date().toISOString();
+      const updated = this.db.prepare('UPDATE data_backfill_jobs SET status = ?, reason = ?, updated_at = ? WHERE id = ? AND status = ?').run('running', 'Worker 已领取，正在读取免费数据源', now, row.id, 'queued');
+      if (updated.changes !== 1) return null;
+      return { ...row, status: 'running', reason: 'Worker 已领取，正在读取免费数据源', updatedAt: now, market: row.market as MarketId } as DataBackfillJob;
+    });
+    return transaction() as DataBackfillJob | null;
+  }
+
+  updateBackfill(id: string, status: DataBackfillJob['status'], reason?: string): DataBackfillJob | null {
+    const now = new Date().toISOString();
+    this.db.prepare('UPDATE data_backfill_jobs SET status = ?, reason = ?, updated_at = ? WHERE id = ?').run(status, reason || null, now, id);
+    return this.getBackfill(id);
+  }
+
+  listBackfills(): DataBackfillJob[] {
+    const rows = this.db.prepare('SELECT id,market,dataset,instrument,timeframe,from_at AS "from",to_at AS "to",status,reason,created_at AS createdAt,updated_at AS updatedAt FROM data_backfill_jobs ORDER BY created_at DESC').all() as Array<Record<string, any>>;
+    return rows.map(row => ({ ...row, market: row.market as MarketId } as DataBackfillJob));
   }
 
   createBackfill(input: { market: MarketId; dataset: string; instrument: string; timeframe: string; from: string; to: string }): DataBackfillJob {

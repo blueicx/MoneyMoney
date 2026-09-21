@@ -139,6 +139,7 @@ import { unifiedPaperLedgerStore, calculateUnifiedPerformance, replayUnifiedPape
 import { logger } from '../utils/logger';
 import { buildSourceSlo, runtimeObservability } from '../features/runtime-observability';
 import { dataLakeCatalog } from '../storage/data-lake';
+import { dataLakeWorker } from '../storage/data-lake-worker';
 import { curlCommand } from '../utils/platform-command';
 import { STOCK_KLINE_PERIODS, createYahooStockKlineAdapter } from '../data/yahoo-adapter';
 import { actionsForScreener, fieldsForScreener, filterRows, isScreenerScope, paginateRows, serializeTemplate, sortRows, type ScreenerFilter, type ScreenerScope, type ScreenerSort } from '../features/market-screener';
@@ -172,6 +173,7 @@ import os from 'os';
 import { parseRssItems } from '../utils/rss';
 
 export const app = express();
+dataLakeWorker.start();
 const strategyCandidateRegistry = new StrategyCandidateRegistry();
 // A rejected optional/background data refresh must not take down the dashboard.
 // Route handlers still report their own errors; this last-resort observer keeps

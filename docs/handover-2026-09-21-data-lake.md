@@ -31,7 +31,9 @@
 - `staging → Parquet → SQLite 清单` 的提交流程、内容 Hash、质量门禁和 `asOf` 时点查询。
 - 重复时间戳、乱序、缺字段、非法数值、未来时间和跨市场标的校验。
 - 数据接口：`/api/data/catalog`、`/api/data/history`、`/api/data/as-of`、`/api/data/quality`、`/api/data/revisions`、`/api/data/backfills`。
-- 回补任务当前登记为单并发 Worker 的 `queued` 状态；尚未接入各 Provider 的实际回补执行器。
+- 已接入单并发 Yahoo 免费历史 Worker：当前只允许 `stocks / bars`，支持现有股票周期，按 UTC 月写入分区，并在服务启动后自动领取 `queued` 任务。
+- Worker 会把来源空结果、来源不可用、周期不支持和跨市场请求保存为明确的 `failed` 原因；不跨市场回退、不生成伪数据。
+- 其他市场和宏观数据源仍需后续接入；生产数据湖为空时，接口会明确返回“暂无已发布分区”。
 
 ## 安全边界
 
