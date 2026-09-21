@@ -48,6 +48,7 @@ test('event study repository keeps records isolated by market and supports share
   assert.equal(stocks.id, 'study-stock');
   assert.deepEqual(repository.list('stocks').map(item => item.instrument), ['AAPL']);
   assert.equal(repository.get('study-crypto').market, 'crypto');
+  assert.throws(() => repository.save({ id: 'unsafe', market: 'stocks', instrument: 'AAPL', eventAt: '2026-01-03T00:00:00.000Z', sourceUrl: 'javascript:alert(1)' }), /http\(s\)/i);
 });
 
 test('event study API is wired to point-in-time bars and private evidence routes', () => {

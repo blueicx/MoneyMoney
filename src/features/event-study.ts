@@ -79,6 +79,14 @@ function matchingBar(bars: EventStudyBar[] | undefined, timestamp: string): Even
   return bars.find(bar => Date.parse(bar.timestamp) === target) || null;
 }
 
+function safeSourceUrl(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  let url: URL;
+  try { url = new URL(value); } catch { throw new Error('sourceUrl must be a valid http(s) URL'); }
+  if (!['http:', 'https:'].includes(url.protocol)) throw new Error('sourceUrl must be a valid http(s) URL');
+  return url.toString();
+}
+
 export function runEventStudy(input: EventStudyInput): EventStudyResult {
   assertMarketContext({ market: input.market, workspace: 'event-study', instrument: input.instrument });
   const eventAtMs = Date.parse(input.eventAt);
@@ -158,7 +166,7 @@ export class EventStudyRepository {
       asOf: input.asOf,
       title: input.title,
       source: input.source,
-      sourceUrl: input.sourceUrl,
+      sourceUrl: safeSourceUrl(input.sourceUrl),
       evidenceRefs: input.evidenceRefs || [],
     };
     const next = [...current.filter(item => item.id !== record.id), record].slice(-500);
