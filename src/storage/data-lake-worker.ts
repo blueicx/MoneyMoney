@@ -69,6 +69,7 @@ export class DataLakeBackfillWorker {
 
   start(intervalMs = 5000): void {
     if (this.timer) return;
+    this.catalog.recoverStaleBackfills();
     this.timer = setInterval(() => { void this.runOnce(); }, intervalMs);
     this.timer.unref();
     void this.runOnce();

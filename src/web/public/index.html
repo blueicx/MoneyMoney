@@ -2955,6 +2955,15 @@
               <strong>🎯 信号质量</strong>
               <div id="decision-signal-quality" style="margin-top:10px;"><div class="empty-tip">正在统计已完成信号...</div></div>
             </article>
+            <article class="glass-card guest-admin-only" style="padding:15px;border-radius:16px;">
+              <div style="display:flex;justify-content:space-between;gap:8px;align-items:center;"><strong>📐 事件研究</strong><span style="font-size:10px;color:var(--text-secondary);">历史统计，不是预测</span></div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-top:10px;">
+                <label style="font-size:10px;color:var(--text-secondary);">事件时间<input id="event-study-at" type="datetime-local" style="display:block;width:100%;box-sizing:border-box;margin-top:4px;padding:7px;border:1px solid var(--border);border-radius:8px;background:var(--bg-card);color:var(--text);"></label>
+                <label style="font-size:10px;color:var(--text-secondary);">后窗口K线<input id="event-study-after-bars" type="number" min="1" max="500" value="20" style="display:block;width:100%;box-sizing:border-box;margin-top:4px;padding:7px;border:1px solid var(--border);border-radius:8px;background:var(--bg-card);color:var(--text);"></label>
+              </div>
+              <button class="tab" type="button" onclick="runEventStudyUi()" style="margin-top:8px;">运行当前标的事件研究</button>
+              <div id="event-study-result" style="margin-top:9px;"><div class="empty-tip">请选择股票和事件时间；没有可靠历史数据时不会生成结果。</div></div>
+            </article>
             <article class="glass-card" style="padding:15px;border-radius:16px;">
               <strong>🗂 保存的工作区</strong>
               <div class="guest-admin-only" style="display:flex;gap:7px;margin-top:10px;"><input id="saved-workspace-name" placeholder="工作区名称" style="min-width:0;flex:1;padding:8px;border:1px solid var(--border);border-radius:8px;background:var(--bg-card);color:var(--text);"><button class="tab active" type="button" onclick="saveCurrentDecisionWorkspace()">保存当前</button></div>
@@ -9571,6 +9580,26 @@ function renderDecisionSignalQuality(data, reason) {
   if (!host) return;
   if (!data?.total) { host.innerHTML = `<div class="empty-tip">${safeNewsText(reason || '暂无已完成的信号样本')}</div>`; return; }
   host.innerHTML = `<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:7px;">${commandMetric('样本', data.total, `已闭合 ${data.resolved}`)}${commandMetric('命中率', (Number(data.hitRate || 0) * 100).toFixed(1) + '%', '不等同未来收益')}${commandMetric('平均收益', Number(data.averageReturnPct || 0).toFixed(2) + '%', `基准 ${data.baselines?.buyAndHold == null ? '未提供' : Number(data.baselines.buyAndHold).toFixed(2) + '%'}`)}</div><details style="margin-top:8px;"><summary style="cursor:pointer;font-size:10px;color:var(--purple);">查看策略/形态分组</summary><div style="margin-top:6px;font-size:10px;color:var(--text-secondary);">${Object.entries(data.byStrategy || {}).map(([name,item]) => `${safeNewsText(name)}：${item.count} 个 / ${(Number(item.hitRate || 0)*100).toFixed(1)}%`).join('<br>') || '暂无分组样本'}</div></details>${(data.warnings || []).map(item => `<div style="margin-top:6px;color:#b7791f;font-size:10px;">⚠ ${safeNewsText(item)}</div>`).join('')}`;
+}
+
+function renderEventStudyResult(data, reason) {
+  const host = document.getElementById('event-study-result');
+  if (!host) return;
+  if (!data) { host.innerHTML = `<div class="empty-tip" style="color:var(--red);">${safeNewsText(reason || '事件研究暂无结果')}</div>`; return; }
+  const metric = value => value == null ? '—' : `${Number(value).toFixed(2)}%`;
+  host.innerHTML = `<div style="padding:9px;border:1px solid var(--border);border-radius:10px;background:var(--bg-secondary);font-size:11px;line-height:1.55;"><div><b>${safeNewsText(data.instrument)}</b> · 事件K线 ${safeNewsText(data.eventAt)}</div><div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:7px;"><span>窗口收益<br><b>${metric(data.rawReturnPct)}</b></span><span>最大有利<br><b style="color:var(--green);">${metric(data.mfePct)}</b></span><span>最大不利<br><b style="color:var(--red);">${metric(data.maePct)}</b></span></div><div style="margin-top:7px;color:var(--text-secondary);">事件收盘 ${Number(data.eventBar?.close || 0).toFixed(2)} · 后窗口 ${Number(data.window?.length || 0)} 根 · 恢复 ${data.recoveryBars == null ? '未恢复' : data.recoveryBars + ' 根'}</div>${(data.warnings || []).map(item => `<div style="color:#b7791f;margin-top:4px;">⚠ ${safeNewsText(item)}</div>`).join('')}<div style="color:var(--text-secondary);margin-top:6px;">${safeNewsText(data.disclaimer)}</div></div>`;
+}
+
+async function runEventStudyUi() {
+  const host = document.getElementById('event-study-result');
+  if (host) host.innerHTML = '<div class="empty-tip">正在读取时点历史数据...</div>';
+  const instrument = activeMarketScope === 'stocks' ? decisionScopeInstrument().replace(/^:/, '') : decisionScopeInstrument();
+  const rawAt = document.getElementById('event-study-at')?.value;
+  if (!instrument || !rawAt) { renderEventStudyResult(null, activeMarketScope === 'stocks' ? '请先选择标的和事件时间' : '事件研究当前只对已接入历史K线的市场开放'); return; }
+  try {
+    const body = await decisionFetchJson('/api/event-studies', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ market: activeMarketScope, instrument, timeframe: window.stockKlinePeriod || '1d', eventAt: new Date(rawAt).toISOString(), asOf: new Date().toISOString(), beforeBars: 20, afterBars: Number(document.getElementById('event-study-after-bars')?.value || 20) }) });
+    renderEventStudyResult(body.data, body.reason);
+  } catch (error) { renderEventStudyResult(null, error.message); }
 }
 
 function renderDecisionWorkspaces(items) {

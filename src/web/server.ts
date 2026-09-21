@@ -140,6 +140,7 @@ import { logger } from '../utils/logger';
 import { buildSourceSlo, runtimeObservability } from '../features/runtime-observability';
 import { dataLakeCatalog } from '../storage/data-lake';
 import { dataLakeWorker } from '../storage/data-lake-worker';
+import { EventStudyRepository, runEventStudy } from '../features/event-study';
 import { curlCommand } from '../utils/platform-command';
 import { STOCK_KLINE_PERIODS, createYahooStockKlineAdapter } from '../data/yahoo-adapter';
 import { actionsForScreener, fieldsForScreener, filterRows, isScreenerScope, paginateRows, serializeTemplate, sortRows, type ScreenerFilter, type ScreenerScope, type ScreenerSort } from '../features/market-screener';
@@ -175,6 +176,7 @@ import { parseRssItems } from '../utils/rss';
 export const app = express();
 dataLakeWorker.start();
 const strategyCandidateRegistry = new StrategyCandidateRegistry();
+const eventStudyRepository = new EventStudyRepository(stateStore);
 // A rejected optional/background data refresh must not take down the dashboard.
 // Route handlers still report their own errors; this last-resort observer keeps
 // long-lived local sessions alive and records the source error without secrets.
@@ -559,6 +561,77 @@ app.get('/api/data/backfills/:id', (req, res) => {
   const job = dataLakeCatalog.getBackfill(String(req.params.id));
   if (!job) return res.status(404).json({ success: false, error: 'backfill job not found' });
   res.json({ success: true, data: job, market: job.market, instrument: job.instrument, dataStatus: job.status, source: 'MoneyMoney data worker queue', updatedAt: job.updatedAt, reason: job.reason || null });
+});
+
+function normalizeEventStudyBars(rows: Array<Record<string, unknown>>): Array<{ timestamp: string; open: number; high: number; low: number; close: number; volume?: number }> {
+  return rows.map(row => {
+    const timestamp = row.timestamp instanceof Date ? row.timestamp.toISOString() : new Date(String(row.timestamp)).toISOString();
+    return {
+      timestamp,
+      open: Number(row.open),
+      high: Number(row.high),
+      low: Number(row.low),
+      close: Number(row.close),
+      ...(row.volume == null ? {} : { volume: Number(row.volume) }),
+    };
+  });
+}
+
+app.get('/api/event-studies', (req, res) => {
+  if (!adminOnly(req, res)) return;
+  try {
+    const market = decisionMarket(req.query.market);
+    const instrument = String(req.query.instrument || '').trim() || undefined;
+    const data = eventStudyRepository.list(market, instrument);
+    res.json(decisionEnvelope({ market, instrument, data, dataStatus: data.length ? 'cached' : 'empty', source: 'private historical event studies', reason: data.length ? null : '暂无事件研究记录' }));
+  } catch (error: any) {
+    res.status(400).json({ success: false, error: error.message, dataStatus: 'unavailable', reason: error.message });
+  }
+});
+
+app.post('/api/event-studies', express.json(), async (req, res) => {
+  if (!adminOnly(req, res)) return;
+  try {
+    const body = req.body || {};
+    const market = decisionMarket(body.market);
+    const instrument = String(body.instrument || '').trim();
+    const eventAt = String(body.eventAt || '').trim();
+    const timeframe = String(body.timeframe || '1d').trim();
+    const asOf = String(body.asOf || new Date().toISOString()).trim();
+    assertMarketContext({ market, workspace: 'event-study', instrument });
+    if (!eventAt) throw new Error('eventAt is required');
+    const historical = await dataLakeCatalog.queryBarsAsOf({ market, instrument, timeframe, asOf });
+    if (!historical.rows.length) {
+      return res.status(422).json(decisionEnvelope({ market, instrument, data: [], dataStatus: historical.dataStatus, source: historical.source || 'MoneyMoney local Parquet catalog', updatedAt: historical.updatedAt || undefined, reason: historical.reason || '历史数据不可用' }));
+    }
+    const result = runEventStudy({ market, instrument, eventAt, bars: normalizeEventStudyBars(historical.rows), beforeBars: Number(body.beforeBars ?? 20), afterBars: Number(body.afterBars ?? 20) });
+    const record = eventStudyRepository.save({
+      ...result,
+      asOf,
+      title: typeof body.title === 'string' ? body.title.trim() || undefined : undefined,
+      source: typeof body.source === 'string' ? body.source.trim() || historical.source || undefined : historical.source || undefined,
+      sourceUrl: typeof body.sourceUrl === 'string' ? body.sourceUrl.trim() || undefined : undefined,
+      evidenceRefs: historical.snapshot ? [historical.snapshot.id] : [],
+    });
+    res.status(201).json(decisionEnvelope({ market, instrument, data: record, dataStatus: 'historical', source: historical.source || 'MoneyMoney local Parquet catalog', updatedAt: historical.updatedAt || undefined, reason: null }));
+  } catch (error: any) {
+    const status = /market|instrument|eventAt|historical bars|ordered|OHLC/i.test(error.message) ? 400 : 500;
+    res.status(status).json({ success: false, error: error.message, dataStatus: 'unavailable', reason: error.message });
+  }
+});
+
+app.get('/api/event-studies/:id', (req, res) => {
+  if (!adminOnly(req, res)) return;
+  const record = eventStudyRepository.get(String(req.params.id));
+  if (!record) return res.status(404).json({ success: false, error: 'event study not found', dataStatus: 'empty', reason: '事件研究不存在' });
+  res.json(decisionEnvelope({ market: record.market, instrument: record.instrument, data: record, dataStatus: 'cached', source: record.source || 'private historical event studies', updatedAt: record.createdAt, reason: null }));
+});
+
+app.get('/api/events/:id/evidence', (req, res) => {
+  if (!adminOnly(req, res)) return;
+  const record = eventStudyRepository.get(String(req.params.id));
+  if (!record) return res.status(404).json({ success: false, error: 'event study not found', dataStatus: 'empty', reason: '事件研究不存在' });
+  res.json(decisionEnvelope({ market: record.market, instrument: record.instrument, data: { eventStudyId: record.id, title: record.title || null, source: record.source || null, sourceUrl: record.sourceUrl || null, evidenceRefs: record.evidenceRefs || [], asOf: record.asOf || null }, dataStatus: record.evidenceRefs?.length ? 'historical' : 'empty', source: record.source || 'private historical event studies', updatedAt: record.createdAt, reason: record.evidenceRefs?.length ? null : '该事件研究没有关联证据快照' }));
 });
 
 app.get('/api/ops/slo', async (_req, res) => {

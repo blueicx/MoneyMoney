@@ -83,3 +83,17 @@ test('backfill worker never runs two jobs concurrently', async () => {
     await first;
   } finally { catalog.close(); fs.rmSync(root, { recursive: true, force: true }); }
 });
+
+test('backfill recovery requeues jobs left running after a worker interruption', async () => {
+  const { root, catalog } = tempCatalog();
+  try {
+    const job = catalog.createBackfill({ market: 'stocks', dataset: 'bars', instrument: 'AAPL', timeframe: '1d', from: '2026-01-01T00:00:00.000Z', to: '2026-03-01T00:00:00.000Z' });
+    assert.equal(catalog.claimNextBackfill().id, job.id);
+    await new Promise(resolve => setTimeout(resolve, 5));
+    assert.equal(catalog.recoverStaleBackfills(1), 1);
+    const recovered = catalog.getBackfill(job.id);
+    assert.equal(recovered.status, 'queued');
+    assert.match(recovered.reason, /重新排队/);
+    assert.equal(catalog.claimNextBackfill().id, job.id);
+  } finally { catalog.close(); fs.rmSync(root, { recursive: true, force: true }); }
+});

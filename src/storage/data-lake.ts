@@ -198,6 +198,13 @@ export class DataLakeCatalog {
     return this.getBackfill(id);
   }
 
+  recoverStaleBackfills(staleAfterMs = 10 * 60 * 1000): number {
+    const cutoff = new Date(Date.now() - Math.max(0, staleAfterMs)).toISOString();
+    const now = new Date().toISOString();
+    const result = this.db.prepare('UPDATE data_backfill_jobs SET status = ?, reason = ?, updated_at = ? WHERE status = ? AND updated_at < ?').run('queued', '检测到上次 Worker 中断，已重新排队', now, 'running', cutoff);
+    return Number(result.changes || 0);
+  }
+
   listBackfills(): DataBackfillJob[] {
     const rows = this.db.prepare('SELECT id,market,dataset,instrument,timeframe,from_at AS "from",to_at AS "to",status,reason,created_at AS createdAt,updated_at AS updatedAt FROM data_backfill_jobs ORDER BY created_at DESC').all() as Array<Record<string, any>>;
     return rows.map(row => ({ ...row, market: row.market as MarketId } as DataBackfillJob));

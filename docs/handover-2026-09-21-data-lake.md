@@ -33,7 +33,17 @@
 - 数据接口：`/api/data/catalog`、`/api/data/history`、`/api/data/as-of`、`/api/data/quality`、`/api/data/revisions`、`/api/data/backfills`。
 - 已接入单并发 Yahoo 免费历史 Worker：当前只允许 `stocks / bars`，支持现有股票周期，按 UTC 月写入分区，并在服务启动后自动领取 `queued` 任务。
 - Worker 会把来源空结果、来源不可用、周期不支持和跨市场请求保存为明确的 `failed` 原因；不跨市场回退、不生成伪数据。
+- Worker 启动时会把超过 10 分钟仍处于 `running` 的回补任务恢复为 `queued`，避免进程中断后任务永久卡死；恢复原因会写入任务记录。
 - 其他市场和宏观数据源仍需后续接入；生产数据湖为空时，接口会明确返回“暂无已发布分区”。
+
+## 本批次：事件研究闭环
+
+已加入：
+
+- `src/features/event-study.ts`：按事件时间选择时点 K 线，计算事件窗口收益、MFE、MAE、恢复时间、基准调整收益，并明确标注单事件样本和“不是价格预测”。
+- 私有接口：`GET/POST /api/event-studies`、`GET /api/event-studies/:id`、`GET /api/events/:id/evidence`；事件研究只读取 `asOf` 之前已发布的数据，并保存数据湖快照 ID。
+- 研究工作台提供事件研究操作卡：选择事件时间和后窗口后可运行，结果展示事件收盘价、窗口收益、最大有利/不利波动、恢复状态、警告和免责声明。
+- 事件研究记录通过 SQLite 状态存储保留，并按四市场上下文隔离；股票之外没有可靠时点 K 线时，接口返回明确不可用原因。
 
 ## 安全边界
 
