@@ -138,6 +138,7 @@ import { paperTradingExecutor } from '../features/trading-executor';
 import { unifiedPaperLedgerStore, calculateUnifiedPerformance, replayUnifiedPaperOrders, type UnifiedPaperOrder } from '../features/unified-paper-trading';
 import { logger } from '../utils/logger';
 import { buildSourceSlo, runtimeObservability } from '../features/runtime-observability';
+import { dataLakeCatalog } from '../storage/data-lake';
 import { curlCommand } from '../utils/platform-command';
 import { STOCK_KLINE_PERIODS, createYahooStockKlineAdapter } from '../data/yahoo-adapter';
 import { actionsForScreener, fieldsForScreener, filterRows, isScreenerScope, paginateRows, serializeTemplate, sortRows, type ScreenerFilter, type ScreenerScope, type ScreenerSort } from '../features/market-screener';
@@ -503,6 +504,59 @@ app.get('/api/evidence', async (req, res) => {
   } catch (error: any) {
     res.status(/market|Instrument/.test(error.message) ? 400 : 500).json({ success: false, error: error.message, dataStatus: 'unavailable', reason: error.message });
   }
+});
+
+app.get('/api/data/catalog', (req, res) => {
+  const rawMarket = typeof req.query.market === 'string' ? req.query.market : undefined;
+  if (rawMarket && !MARKET_IDS.includes(rawMarket as MarketId)) return res.status(400).json({ success: false, error: 'Invalid market context' });
+  const partitions = dataLakeCatalog.listPartitions().filter(item => !rawMarket || item.market === rawMarket);
+  res.json({ success: true, data: partitions, market: rawMarket || 'all', dataStatus: partitions.length ? 'cached' : 'empty', source: 'MoneyMoney local Parquet catalog', updatedAt: new Date().toISOString(), reason: partitions.length ? null : '本地数据湖暂无已发布分区' });
+});
+
+async function readHistoricalBars(req: express.Request, res: express.Response): Promise<void> {
+  const market = String(req.query.market || '') as MarketId;
+  const instrument = String(req.query.instrument || '').trim();
+  const timeframe = String(req.query.timeframe || '').trim();
+  const asOf = String(req.query.asOf || '').trim();
+  if (!MARKET_IDS.includes(market) || !instrument || !timeframe || !asOf) {
+    res.status(400).json({ success: false, error: 'market、instrument、timeframe、asOf 均为必填项' });
+    return;
+  }
+  try {
+    const result = await dataLakeCatalog.queryBarsAsOf({ market, instrument, timeframe, asOf });
+    res.json({ success: true, market, instrument, timeframe, asOf, ...result, reason: result.reason || null });
+  } catch (error: any) { res.status(400).json({ success: false, market, instrument, dataStatus: 'unavailable', source: 'MoneyMoney local Parquet catalog', updatedAt: null, reason: error.message }); }
+}
+
+app.get('/api/data/history', readHistoricalBars);
+app.get('/api/data/as-of', readHistoricalBars);
+
+app.get('/api/data/quality', (req, res) => {
+  const rawMarket = typeof req.query.market === 'string' ? req.query.market : undefined;
+  if (rawMarket && !MARKET_IDS.includes(rawMarket as MarketId)) return res.status(400).json({ success: false, error: 'Invalid market context' });
+  const reports = dataLakeCatalog.listQuality(rawMarket as MarketId | undefined);
+  res.json({ success: true, data: reports, market: rawMarket || 'all', dataStatus: reports.length ? 'cached' : 'empty', source: 'MoneyMoney local quality reports', updatedAt: new Date().toISOString(), reason: reports.length ? null : '本地数据湖暂无质量报告' });
+});
+
+app.get('/api/data/revisions', (req, res) => {
+  const rawMarket = typeof req.query.market === 'string' ? req.query.market : undefined;
+  if (rawMarket && !MARKET_IDS.includes(rawMarket as MarketId)) return res.status(400).json({ success: false, error: 'Invalid market context' });
+  const partitions = dataLakeCatalog.listPartitions().filter(item => !rawMarket || item.market === rawMarket);
+  const revisions = partitions.map(item => ({ id: `revision_${item.id}`, partitionId: item.id, market: item.market, instrument: item.instrument, dataset: item.dataset, timeframe: item.timeframe, publishedAt: item.publishedAt, contentHash: item.contentHash }));
+  res.json({ success: true, data: revisions, market: rawMarket || 'all', dataStatus: revisions.length ? 'cached' : 'empty', source: 'MoneyMoney local revision catalog', updatedAt: new Date().toISOString(), reason: revisions.length ? null : '本地数据湖暂无修订记录' });
+});
+
+app.post('/api/data/backfills', (req, res) => {
+  try {
+    const job = dataLakeCatalog.createBackfill(req.body || {});
+    res.status(202).json({ success: true, data: job, market: job.market, instrument: job.instrument, dataStatus: 'queued', source: 'MoneyMoney data worker queue', updatedAt: job.updatedAt, reason: job.reason });
+  } catch (error: any) { res.status(400).json({ success: false, error: error.message }); }
+});
+
+app.get('/api/data/backfills/:id', (req, res) => {
+  const job = dataLakeCatalog.getBackfill(String(req.params.id));
+  if (!job) return res.status(404).json({ success: false, error: 'backfill job not found' });
+  res.json({ success: true, data: job, market: job.market, instrument: job.instrument, dataStatus: job.status, source: 'MoneyMoney data worker queue', updatedAt: job.updatedAt, reason: job.reason || null });
 });
 
 app.get('/api/ops/slo', async (_req, res) => {

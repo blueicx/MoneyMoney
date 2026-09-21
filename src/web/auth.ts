@@ -62,6 +62,7 @@ const GUEST_GET_PREFIXES = [
   '/watchlist',
   '/paper/positions',
   '/evidence',
+  '/data',
   '/scenarios',
   '/signals/quality',
   '/workspaces/shared',
