@@ -17,7 +17,7 @@ import path from 'path';
 import crypto from 'node:crypto';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
-import { config } from '../config';
+import { config, isJwtSecretDefault, validateLoginConfiguration } from '../config';
 import { buildEventEvidence, filterTimelineItems, type EventEvidence } from '../features/event-evidence';
 
 import { getRuntimeTelegramConfig, parseChatIds, runtimeSecrets } from '../config/runtime-secrets';
@@ -131,12 +131,13 @@ import { analyzeFactor, getFactorCatalog } from '../features/factor-lab';
 import { StrategyCandidateRegistry } from '../features/strategy-candidates';
 import { riskPatrol } from '../features/risk-patrol';
 import { createAccessMiddleware, validateAccessConfiguration } from './access-control';
-import { createLoginToken, verifyLoginToken, createLoginRateLimiter, extractAuthToken, requireAuth, safeEqual, blacklistToken, buildAuthCookie, buildClearCookie, GUEST_TOKEN_EXPIRY_MS, isGuestRequestAllowed } from './auth';
-import { isDefaultLoginCredentials, isJwtSecretDefault } from '../config';
+import { verifyLoginToken, extractAuthToken } from './auth';
+import { registerApiAuthProtection, registerAuthRoutes } from './auth-routes';
 import { stateStore, getStorageHealth } from '../storage/sqlite-state';
 import { paperTradingExecutor } from '../features/trading-executor';
 import { unifiedPaperLedgerStore, calculateUnifiedPerformance, replayUnifiedPaperOrders, type UnifiedPaperOrder } from '../features/unified-paper-trading';
 import { logger } from '../utils/logger';
+import { buildSourceSlo, runtimeObservability } from '../features/runtime-observability';
 import { curlCommand } from '../utils/platform-command';
 import { STOCK_KLINE_PERIODS, createYahooStockKlineAdapter } from '../data/yahoo-adapter';
 import { actionsForScreener, fieldsForScreener, filterRows, isScreenerScope, paginateRows, serializeTemplate, sortRows, type ScreenerFilter, type ScreenerScope, type ScreenerSort } from '../features/market-screener';
@@ -204,13 +205,17 @@ app.use('/api', (req, res, next) => {
 });
 app.use((req, res, next) => {
   const startedAt = Date.now();
-  res.on('finish', () => logger.info('http_request', {
-    requestId: res.getHeader('X-Request-Id') || null,
-    method: req.method,
-    path: req.path,
-    status: res.statusCode,
-    latencyMs: Date.now() - startedAt,
-  }));
+  res.on('finish', () => {
+    const latencyMs = Date.now() - startedAt;
+    runtimeObservability.recordHttp({ method: req.method, path: req.path, status: res.statusCode, latencyMs });
+    logger.info('http_request', {
+      requestId: res.getHeader('X-Request-Id') || null,
+      method: req.method,
+      path: req.path,
+      status: res.statusCode,
+      latencyMs,
+    });
+  });
   next();
 });
 
@@ -259,7 +264,6 @@ app.get('/', (req, res) => {
     })
     .catch(() => res.status(500).send('Dashboard assets missing'));
 });
- const loginRateLimiter = createLoginRateLimiter({ windowMs: 60_000, max: 5 });
 // --- MoneyMoney 登录鉴权（与 LAN token 共存） ---
 app.get('/login', (req, res) => {
   res.setHeader('Cache-Control', 'no-cache');
@@ -274,67 +278,8 @@ app.get('/login', (req, res) => {
     .then(html => { res.type('html'); res.send(html); })
     .catch(() => res.status(500).send('Login page missing'));
 });
-
-app.post('/api/auth/login', loginRateLimiter, (req, res) => {
-  const { username, password } = (req.body || {}) as { username?: string; password?: string };
-  const u = String(username || '').trim();
-  const p = String(password || '');
-  if (!u || !p) return res.status(400).json({ success: false, error: '请输入用户名和密码' });
-  const okUser = safeEqual(u, config.loginUser);
-  const okPass = safeEqual(p, config.loginPass);
-  if (!okUser || !okPass) return res.status(401).json({ success: false, error: '用户名或密码错误' });
-  const token = createLoginToken(u);
-  // 同步写 cookie
-  res.setHeader('Set-Cookie', buildAuthCookie(token, req as any));
-  res.json({ success: true, token, user: u, role: 'admin', expiresInMs: config.loginTokenExpiryMs });
-});
-
-app.post('/api/auth/guest', loginRateLimiter, (req, res) => {
-  const token = createLoginToken('guest', 'guest', GUEST_TOKEN_EXPIRY_MS);
-  res.setHeader('Set-Cookie', buildAuthCookie(token, req as any, GUEST_TOKEN_EXPIRY_MS));
-  res.json({ success: true, token, user: 'guest', role: 'guest', expiresInMs: GUEST_TOKEN_EXPIRY_MS });
-});
-
-app.get('/api/auth/me', (req, res) => {
-  const token = extractAuthToken(req);
-  if (!token) return res.status(401).json({ success: false, error: '未登录' });
-  const payload = verifyLoginToken(token);
-  if (!payload) return res.status(401).json({ success: false, error: '登录已过期' });
-  // 滑动续期：剩余 <2h 则重签（P3）
-  const remain = payload.exp - Date.now();
-  if (payload.role !== 'guest' && remain < 2 * 60 * 60 * 1000) {
-    const newToken = createLoginToken(payload.user, payload.role);
-    res.setHeader('Set-Cookie', buildAuthCookie(newToken, req as any));
-    return res.json({ success: true, user: payload.user, role: payload.role, exp: Date.now() + config.loginTokenExpiryMs, token: newToken, renewed: true });
-  }
-  res.json({ success: true, user: payload.user, role: payload.role, exp: payload.exp });
-});
-
-app.post('/api/auth/logout', (req, res) => {
-  try { const tok = extractAuthToken(req as any); if (tok) blacklistToken(tok); } catch {}
-  res.setHeader('Set-Cookie', buildClearCookie(req as any));
-  res.json({ success: true });
-});
-
-app.get('/api/auth/status', (req, res) => {
-  const tok = extractAuthToken(req as any);
-  const payload = tok ? verifyLoginToken(tok) : null;
-  res.json({ success: true, data: { isDefault: isDefaultLoginCredentials(), isJwtDefault: isJwtSecretDefault(), loggedIn: !!payload, user: payload?.user || null, role: payload?.role || null, tokenExpiryMs: payload?.role === 'guest' ? GUEST_TOKEN_EXPIRY_MS : config.loginTokenExpiryMs } });
-});
-// 需要登录保护的 API（登录相关与健康检查除外）。
-app.use('/api', (req, res, next) => {
-  if (req.path.startsWith('/auth/') || req.path === '/health' || req.path === '/health/live' || req.path === '/health/readiness') {
-    next();
-    return;
-  }
-  const token = extractAuthToken(req as any);
-  const payload = token ? verifyLoginToken(token) : null;
-  if (payload?.role === 'guest' && !isGuestRequestAllowed(req.method, req.path)) {
-    res.status(403).json({ success: false, error: '访客模式仅支持只读浏览', code: 'GUEST_READ_ONLY' });
-    return;
-  }
-  requireAuth(req, res, next);
-});
+registerAuthRoutes(app);
+registerApiAuthProtection(app);
 
 app.use(express.static(path.join(__dirname, 'public'), {
   setHeaders: (res) => res.setHeader('Cache-Control', 'no-store'),
@@ -557,6 +502,29 @@ app.get('/api/evidence', async (req, res) => {
     res.json(decisionEnvelope({ market, instrument, data, dataStatus: data.some(item => item.dataStatus === 'live') ? 'live' : data.length ? 'partial' : 'empty', source: 'scoped source health + saved evidence', reason: data.length ? null : '暂无证据' }));
   } catch (error: any) {
     res.status(/market|Instrument/.test(error.message) ? 400 : 500).json({ success: false, error: error.message, dataStatus: 'unavailable', reason: error.message });
+  }
+});
+
+app.get('/api/ops/slo', async (_req, res) => {
+  try {
+    const sourceHealth = await getSourceHealth('all');
+    res.json({
+      success: true,
+      data: {
+        runtime: runtimeObservability.snapshot(),
+        sources: buildSourceSlo(sourceHealth.items.map(item => ({
+          id: item.id,
+          ok: item.ok,
+          latencyMs: item.latencyMs,
+          checkedAt: item.checkedAt,
+          status: item.status || (item.ok ? 'live' : 'unavailable'),
+        }))),
+        storage: getStorageHealth(),
+      },
+      updatedAt: new Date().toISOString(),
+    });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
@@ -6577,7 +6545,15 @@ async function main() {
   const accessErrors = validateAccessConfiguration(config.appHost, config.lanMode, config.accessToken);
   if (accessErrors.length) throw new Error(accessErrors.join('; '));
 
-  if (isDefaultLoginCredentials()) console.warn('\n  ⚠️ 当前使用默认账号 admin/admin123，请尽快在 .env 中修改 MONEYMONEY_LOGIN_USER / MONEYMONEY_LOGIN_PASS\n');
+  const publicMode = config.lanMode || !!process.env.MONEYMONEY_PUBLIC_BASE_URL || process.env.NODE_ENV === 'production';
+  const loginErrors = validateLoginConfiguration({
+    publicMode,
+    loginUser: config.loginUser,
+    loginPass: config.loginPass,
+    jwtSecretConfigured: !isJwtSecretDefault(),
+  });
+  if (loginErrors.length) throw new Error(loginErrors.join('; '));
+
   if (isJwtSecretDefault()) console.warn('  ⚠️ MONEYMONEY_JWT_SECRET 为默认值，重启后所有 token 失效，请设置随机字符串\n');
   console.log(hasWallet
     ? '\n  Wallet configured for read-only inspection; real trading executor is DISABLED.\n'

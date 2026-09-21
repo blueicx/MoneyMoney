@@ -1988,64 +1988,7 @@
     }
   };
 </script>
-<script>
-// MoneyMoney 登录守卫：以 Cookie(HttpOnly) 为主，localStorage 兼容；统一 credentials:include
-(function(){
-  window.mm_isLoggedIn = false;
-  window.mm_isGuest = false;
-  window.mmApplyGuestMode = function(){
-    const apply = function(){
-      document.body.classList.toggle('guest-mode', !!window.mm_isGuest);
-      if(typeof window.renderNavGroups === 'function') window.renderNavGroups();
-      if(typeof window.renderNavSubTabs === 'function') window.renderNavSubTabs();
-    };
-    if(document.body) apply(); else document.addEventListener('DOMContentLoaded', apply, {once:true});
-  };
-  const origFetch = window.fetch;
-  window.fetch = function(input, init){
-    init = init || {};
-    if(!init.credentials) init.credentials='include';
-    let url = typeof input === 'string' ? input : (input && input.url) || '';
-    if(url && url.includes('/api/') && !url.includes('/api/auth/login')){
-      const t = localStorage.getItem('mm_token');
-      if(t){
-        if(init.headers instanceof Headers){ if(!init.headers.has('Authorization')) init.headers.set('Authorization','Bearer '+t); }
-        else { init.headers = init.headers || {}; if(!init.headers['Authorization'] && !init.headers['authorization']) init.headers['Authorization']='Bearer '+t; }
-      }
-    }
-    return origFetch(input, init).then(function(res){
-      if(res.status===401 && url.includes('/api/')){
-        localStorage.removeItem('mm_token');
-        if(location.pathname !== '/login'){
-          location.href='/login?next='+encodeURIComponent(location.pathname+location.search);
-        }
-      }
-      if(res.status===403 && url.includes('/api/') && window.mm_isGuest){
-        res.clone().json().then(function(data){
-          if(data && data.code==='GUEST_READ_ONLY' && typeof window.showToast==='function') window.showToast(data.error || '访客模式仅支持只读浏览','error');
-        }).catch(function(){});
-      }
-      return res;
-    });
-  };
-  const onLoginPage = location.pathname === '/login';
-  window.mm_authReady = fetch('/api/auth/status', {credentials:'include'}).then(function(r){return r.json();}).then(function(d){
-    const logged = !!(d && d.data && d.data.loggedIn);
-    window.mm_isLoggedIn = logged;
-    window.mm_isGuest = logged && d.data.role === 'guest';
-    window.mmApplyGuestMode();
-    if(!logged && !onLoginPage && location.pathname === '/'){
-      location.href='/login?next='+encodeURIComponent(location.pathname+location.search);
-    }
-    if(logged && onLoginPage){
-      const qs=new URLSearchParams(location.search); const nxt=qs.get('next');
-      location.href=nxt ? decodeURIComponent(nxt) : '/';
-    }
-  }).catch(function(){});
-  window.mmLogout = function(){ if(!confirm('确定退出登录？')) return; fetch('/api/auth/logout',{method:'POST',credentials:'include'}).finally(function(){ localStorage.removeItem('mm_token'); localStorage.removeItem('mm_user'); localStorage.removeItem('mm_role'); window.mm_isLoggedIn=false; window.mm_isGuest=false; document.cookie='mm_token=; Path=/; Max-Age=0; SameSite=Lax'; location.href='/login'; }); };
-  window.mmIsLoggedIn = function(){ return !!window.mm_isLoggedIn; };
-})();
-</script>
+<script type="module" src="/modules/auth-client.js"></script>
 </head>
 <body>
   <div id="network-status-banner" role="status" hidden style="position:fixed;z-index:100000;left:50%;top:8px;transform:translateX(-50%);padding:7px 14px;border-radius:999px;background:#7f1d1d;color:white;font-size:12px;box-shadow:0 8px 24px rgba(0,0,0,.3);">当前离线：仅显示已缓存的公开快照</div>
@@ -2068,8 +2011,6 @@
     </div>
   </header>
   <div id="guest-banner" style="display:none;margin:12px 16px;padding:10px 14px;border-radius:12px;background:color-mix(in srgb, #2563eb 10%, transparent);border:1px solid color-mix(in srgb, #2563eb 18%, transparent);color:#1d4ed8;font-size:12px;line-height:1.6;">👀 访客模式 · 只读浏览：市场、行情、新闻和分析可查看，配置、通知与交易功能已隐藏</div>
-  <div id="sec-banner" style="display:none;margin:12px 16px;padding:10px 14px;border-radius:12px;background:color-mix(in srgb, #ef4444 10%, transparent);border:1px solid color-mix(in srgb, #ef4444 16%, transparent);color:#b91c1c;font-size:12px;line-height:1.6;">⚠️ 当前使用默认账号 <code>admin / admin123</code>，请尽快在 <code>.env</code> 中修改 <code>MONEYMONEY_LOGIN_USER</code>/<code>MONEYMONEY_LOGIN_PASS</code> 并重启服务</div>
-  <script>/* 登录已禁用：不再显示默认账号警告 */</script>
   <script>
 (function(){
   const KEY="mm_sidebar_collapsed";

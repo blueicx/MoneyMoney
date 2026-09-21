@@ -50,8 +50,8 @@ export const config = {
   lanMode: process.env.MONEYMONEY_LAN_MODE === 'true'
     || !['127.0.0.1', 'localhost', '::1', '[::1]'].includes((process.env.APP_HOST || '127.0.0.1').trim().toLowerCase()),
   accessToken: process.env.MONEYMONEY_ACCESS_TOKEN || '',
-  loginUser: process.env.MONEYMONEY_LOGIN_USER || 'admin',
-  loginPass: process.env.MONEYMONEY_LOGIN_PASS || 'admin123',
+  loginUser: process.env.MONEYMONEY_LOGIN_USER?.trim() || '',
+  loginPass: process.env.MONEYMONEY_LOGIN_PASS || '',
   jwtSecret: (()=>{ const s=process.env.MONEYMONEY_JWT_SECRET; if(s && s!== 'moneymoney-dev-secret-change-me') return s; try{ const g=crypto.randomBytes(32).toString('hex'); if(!process.env.MONEYMONEY_JWT_SECRET) console.warn('\n  ⚠️ MONEYMONEY_JWT_SECRET 未设置，已临时生成随机密钥（重启后失效，请写入 .env）'); return g; }catch{return 'moneymoney-dev-secret-change-me'; } })(),
   loginTokenExpiryMs: parseInt(process.env.MONEYMONEY_LOGIN_EXPIRY_MS || '43200000'),
   aiPaperTradingEnabled: process.env.AI_PAPER_TRADING_ENABLED === 'true',
@@ -85,6 +85,21 @@ export const config = {
 export function isDefaultLoginCredentials(): boolean { return config.loginUser==='admin' && config.loginPass==='admin123'; }
 export function isJwtSecretDefault(): boolean { return !process.env.MONEYMONEY_JWT_SECRET || process.env.MONEYMONEY_JWT_SECRET==='moneymoney-dev-secret-change-me'; }
 export function getLoginSecurityStatus(){ return { isDefault: isDefaultLoginCredentials(), isJwtDefault: isJwtSecretDefault(), user: config.loginUser }; }
+export function validateLoginConfiguration(input: {
+  publicMode: boolean;
+  loginUser: string;
+  loginPass: string;
+  jwtSecretConfigured: boolean;
+}): string[] {
+  if (!input.publicMode) return [];
+  const errors: string[] = [];
+  if (!input.loginUser.trim()) errors.push('公网模式必须设置 MONEYMONEY_LOGIN_USER');
+  if (!input.loginPass) errors.push('公网模式必须设置 MONEYMONEY_LOGIN_PASS');
+  if (input.loginUser === 'admin' && input.loginPass === 'admin123') errors.push('公网模式禁止使用默认管理员凭据 admin/admin123');
+  if (input.loginPass && input.loginPass.length < 12) errors.push('MONEYMONEY_LOGIN_PASS 至少需要 12 个字符');
+  if (!input.jwtSecretConfigured) errors.push('公网模式必须设置独立的 MONEYMONEY_JWT_SECRET');
+  return errors;
+}
 export function validateConfig(): void {
   const errors: string[] = [];
 

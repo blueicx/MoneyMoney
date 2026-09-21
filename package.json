@@ -22,6 +22,7 @@
     "analyze:watch": "ts-node src/analysis/analyze.ts --watch",
     "security:scan": "node scripts/secret-scan.cjs",
     "smoke:web": "node scripts/web-smoke.cjs",
+    "smoke:auth": "node scripts/browser-auth-smoke.cjs",
     "state:backup": "node scripts/state-backup.cjs",
     "state:restore": "node scripts/state-backup.cjs restore"
   },

@@ -47,19 +47,17 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;b
   <div class="logo"><span class="logo-icon">¥</span> MoneyMoney</div>
   <div class="subtitle">多市场交易助手 · 登录后即可进入仪表盘<br>本地优先，登录状态仅保存在本机浏览器</div>
   <div class="banner" id="expiredBanner">登录已过期，请重新登录</div>
-  <div class="banner warn" id="defaultBanner">⚠️ 当前使用默认账号 <code>admin / admin123</code>，建议尽快在 <code>.env</code> 中修改</div>
   <form id="loginForm" autocomplete="on">
     <label class="label" for="username">用户名</label>
-    <input class="input" id="username" name="username" type="text" placeholder="默认 admin" required autofocus>
+    <input class="input" id="username" name="username" type="text" placeholder="管理员用户名" required autofocus>
     <label class="label" for="password">密码</label>
-    <div class="pw-wrap"><input class="input" id="password" name="password" type="password" placeholder="默认 admin123" required><button type="button" class="pw-toggle" id="pwToggle" aria-label="显示密码" title="显示/隐藏密码">👁️</button></div>
+    <div class="pw-wrap"><input class="input" id="password" name="password" type="password" placeholder="管理员密码" required><button type="button" class="pw-toggle" id="pwToggle" aria-label="显示密码" title="显示/隐藏密码">👁️</button></div>
     <div class="error" id="errorBox" role="alert" aria-live="polite" tabindex="-1"></div>
     <button class="btn" id="submitBtn" type="submit">登录</button>
     <button class="btn btn-guest" id="guestBtn" type="button">👀 访客进入（只读）</button>
   </form>
   <div class="hint">
-    默认账号 <code>admin / admin123</code><br>
-    可在 <code>.env</code> 中设置 <code>MONEYMONEY_LOGIN_USER</code> / <code>MONEYMONEY_LOGIN_PASS</code>
+    管理员账号必须由部署环境显式设置；系统不再提供默认凭据。
   </div>
   <div class="footer"><a href="/">← 返回首页</a> · <span id="capsHint" style="display:none;color:var(--red);margin-left:8px">大写锁定已开启</span></div>
 </div>
@@ -67,15 +65,11 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;b
 (function(){
   const $ = (s)=>document.querySelector(s);
   const form=$('#loginForm'), user=$('#username'), pass=$('#password'), err=$('#errorBox'), btn=$('#submitBtn'), guestBtn=$('#guestBtn');
-  const pwToggle=$('#pwToggle'), expiredBanner=$('#expiredBanner'), defaultBanner=$('#defaultBanner');
-  // 显示过期提示 / 默认账号提示
+  const pwToggle=$('#pwToggle'), expiredBanner=$('#expiredBanner');
+  // 显示过期提示
   (function(){
     const qs=new URLSearchParams(location.search);
     if(qs.get('reason')==='expired') { expiredBanner.style.display='block'; expiredBanner.classList.add('show'); }
-    // 检查是否默认账号
-    fetch('/api/auth/status').then(r=>r.json()).then(d=>{
-      if(d && d.data && d.data.isDefault) defaultBanner.classList.add('show');
-    }).catch(()=>{});
   })();
   if(pwToggle){
     pwToggle.addEventListener('click', ()=>{
@@ -117,10 +111,9 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;b
       const data=await res.json().catch(()=>({}));
       if(res.status===429){ const ra=data.retryAfter||60; throw new Error('尝试过于频繁，请 '+ra+' 秒后再试'); }
       if(!res.ok || !data.success) throw new Error(data.error || '访客进入失败');
-      localStorage.setItem('mm_token', data.token);
       localStorage.setItem('mm_user', data.user);
       localStorage.setItem('mm_role', data.role || 'guest');
-      document.cookie = 'mm_token='+encodeURIComponent(data.token)+'; Path=/; SameSite=Lax';
+      localStorage.setItem('mm_csrf', data.csrfToken || '');
       goNext();
     }catch(ex){ showError(ex.message || '网络错误'); }
     finally{ guestBtn.disabled=false; guestBtn.textContent='👀 访客进入（只读）'; }
@@ -137,11 +130,9 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;b
       const data= await res.json().catch(()=>({}));
       if(res.status===429){ const ra=data.retryAfter||60; throw new Error('尝试过于频繁，请 '+ra+' 秒后再试'); }
       if(!res.ok || !data.success){ throw new Error(data.error || '登录失败'); }
-      localStorage.setItem('mm_token', data.token);
       localStorage.setItem('mm_user', data.user);
       localStorage.setItem('mm_role', data.role || 'admin');
-      // 同时写 cookie 便于直接访问受保护资源
-      document.cookie = 'mm_token='+encodeURIComponent(data.token)+'; Path=/; SameSite=Lax';
+      localStorage.setItem('mm_csrf', data.csrfToken || '');
       goNext();
     }catch(ex){ showError(ex.message || '网络错误'); } finally { btn.disabled=false; btn.textContent='登录'; }
   });

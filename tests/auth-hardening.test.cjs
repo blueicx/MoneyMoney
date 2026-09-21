@@ -84,7 +84,6 @@ test('login rate limiter blocks 6th request in 60s with 429 and Retry-After', ()
 });
 
 test('config default credential helpers', () => {
-  // helpers should reflect current env (defaults in test env are admin/admin123)
   const isDefault = configMod.isDefaultLoginCredentials();
   const status = configMod.getLoginSecurityStatus();
   assert.equal(typeof isDefault, 'boolean');
@@ -92,6 +91,45 @@ test('config default credential helpers', () => {
   assert.equal(typeof status.isJwtDefault, 'boolean');
   // BUILD checks: the file exists
   assert.ok(status);
+});
+
+test('public authentication configuration rejects missing or legacy credentials', () => {
+  const missing = configMod.validateLoginConfiguration({
+    publicMode: true,
+    loginUser: '',
+    loginPass: '',
+    jwtSecretConfigured: false,
+  });
+  assert.ok(missing.some((item) => item.includes('MONEYMONEY_LOGIN_USER')));
+  assert.ok(missing.some((item) => item.includes('MONEYMONEY_LOGIN_PASS')));
+  assert.ok(missing.some((item) => item.includes('MONEYMONEY_JWT_SECRET')));
+
+  const legacy = configMod.validateLoginConfiguration({
+    publicMode: true,
+    loginUser: 'admin',
+    loginPass: 'admin123',
+    jwtSecretConfigured: true,
+  });
+  assert.ok(legacy.some((item) => item.includes('默认管理员凭据')));
+
+  assert.deepEqual(configMod.validateLoginConfiguration({
+    publicMode: true,
+    loginUser: 'owner',
+    loginPass: 'a-long-unique-password',
+    jwtSecretConfigured: true,
+  }), []);
+});
+
+test('CSRF double-submit helpers protect cookie-authenticated writes', () => {
+  const token = auth.createCsrfToken();
+  assert.match(token, /^[A-Za-z0-9_-]{32,}$/);
+  const req = { headers: { cookie: `mm_token=session; mm_csrf=${token}`, 'x-csrf-token': token }, method: 'POST' };
+  assert.equal(auth.verifyCsrfRequest(req), true);
+  assert.equal(auth.verifyCsrfRequest({ ...req, headers: { ...req.headers, 'x-csrf-token': 'wrong' } }), false);
+  assert.equal(auth.verifyCsrfRequest({ headers: { authorization: 'Bearer api-token' }, method: 'POST' }), true);
+  assert.equal(auth.requiresCsrfProtection({ headers: {}, method: 'GET' }), false);
+  assert.match(auth.buildCsrfCookie(token, { headers: {}, protocol: 'http' }), /SameSite=Lax/);
+  assert.doesNotMatch(auth.buildCsrfCookie(token, { headers: {}, protocol: 'http' }), /HttpOnly/);
 });
 
 test('extractAuthToken prefers Bearer, then Cookie, then query', () => {
@@ -118,18 +156,21 @@ test('frontend assets contain new hardening markers', () => {
   const loginHtml = fs.readFileSync(path.join(__dirname, '..', 'dist', 'web', 'public', 'login.html'), 'utf8');
   assert.ok(loginHtml.includes('pw-toggle'), 'login should have show/hide toggle');
   assert.ok(loginHtml.includes('expiredBanner'), 'login should have expired banner');
-  assert.ok(loginHtml.includes('defaultBanner'), 'login should have default cred banner');
+  assert.ok(!loginHtml.includes('admin123'), 'login must not advertise legacy credentials');
   assert.match(loginHtml, /Retry-After|429/);
   const indexHtml = fs.readFileSync(path.join(__dirname, '..', 'dist', 'web', 'public', 'index.html'), 'utf8');
-  assert.ok(indexHtml.includes('sec-banner'), 'index should have security banner');
-  assert.ok(indexHtml.includes('mm_isLoggedIn'), 'index should have login state helper');
+  assert.ok(indexHtml.includes('/modules/auth-client.js'), 'auth client should be an external module');
+  assert.ok(!indexHtml.includes('admin123'), 'dashboard must not advertise legacy credentials');
   assert.ok(indexHtml.includes('quick') || indexHtml.includes('快捷'), 'index radar should have quick trade linkage');
 });
 
 test('server endpoints include /api/auth/status', () => {
   const serverSrc = fs.readFileSync(path.join(__dirname,'..','src','web','server.ts'),'utf8');
-  assert.ok(serverSrc.includes("/api/auth/status"), 'status endpoint exists');
-  assert.ok(serverSrc.includes('buildAuthCookie'), 'uses secure cookie helper');
-  assert.ok(serverSrc.includes('blacklistToken'), 'logout blacklists');
+  const authRoutesSrc = fs.readFileSync(path.join(__dirname,'..','src','web','auth-routes.ts'),'utf8');
+  assert.ok(serverSrc.includes('registerAuthRoutes'), 'server registers modular auth routes');
+  assert.ok(!serverSrc.includes("app.post('/api/auth/login'"), 'login route is not embedded in server monolith');
+  assert.ok(authRoutesSrc.includes("/api/auth/status"), 'status endpoint exists');
+  assert.ok(authRoutesSrc.includes('buildAuthCookie'), 'uses secure cookie helper');
+  assert.ok(authRoutesSrc.includes('blacklistToken'), 'logout blacklists');
   assert.ok(serverSrc.includes('/login') && serverSrc.includes('redirect'), 'login redirects when already authed');
 });

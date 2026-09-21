@@ -14,6 +14,11 @@ function b64urlDecode(input: string): Buffer {
 
 
 const tokenBlacklist = new Map();
+type RevocationStore = {
+  revoke(tokenHash: string, expiresAt: number): void;
+  isRevoked(tokenHash: string, now: number): boolean;
+};
+let revocationStore: RevocationStore | null = null;
 export const GUEST_TOKEN_EXPIRY_MS = 2 * 60 * 60 * 1000;
 export type AuthRole = 'admin' | 'guest';
 
@@ -78,15 +83,22 @@ export function blacklistToken(token: string): void {
     const payload = JSON.parse(b64urlDecode(parts[1]).toString('utf8')) as any;
     const exp = (payload as any).exp || (Date.now() + 12*60*60*1000);
     tokenBlacklist.set(token, exp);
-  } catch { tokenBlacklist.set(token, Date.now()+12*60*60*1000); }
+    revocationStore?.revoke(hashToken(token), exp);
+  } catch {
+    const exp = Date.now()+12*60*60*1000;
+    tokenBlacklist.set(token, exp);
+    revocationStore?.revoke(hashToken(token), exp);
+  }
   const now = Date.now(); for (const [k,exp] of tokenBlacklist) if (now>exp) tokenBlacklist.delete(k);
 }
 export function isTokenBlacklisted(token: string): boolean {
   const exp = tokenBlacklist.get(token);
-  if (!exp) return false;
+  if (!exp) return revocationStore?.isRevoked(hashToken(token), Date.now()) ?? false;
   if (Date.now()>exp){ tokenBlacklist.delete(token); return false; }
   return true;
 }
+function hashToken(token: string): string { return crypto.createHash('sha256').update(token).digest('hex'); }
+export function configureTokenRevocationStore(store: RevocationStore | null): void { revocationStore = store; }
 export interface AuthPayload { user: string; role: AuthRole; exp: number; iat: number; }
 
 export function createLoginToken(username: string, role: AuthRole = 'admin', expiryMs = config.loginTokenExpiryMs): string {
@@ -130,6 +142,29 @@ export function extractAuthToken(req: Request): string {
 export function isSecureRequest(req: any): boolean { const proto = String((req.headers['x-forwarded-proto'] as string) || '').toLowerCase(); if (proto==='https') return true; return (req as any).secure || req.protocol === 'https'; }
 export function buildAuthCookie(token: string, req: any, maxAgeMs = config.loginTokenExpiryMs): string { const secure = isSecureRequest(req) ? '; Secure' : ''; return 'mm_token='+encodeURIComponent(token)+'; Path=/; HttpOnly; SameSite=Lax'+secure+'; Max-Age='+Math.ceil(maxAgeMs/1000); }
 export function buildClearCookie(req: any): string { const secure = isSecureRequest(req) ? '; Secure' : ''; return 'mm_token=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax'+secure; }
+export function createCsrfToken(): string { return b64urlEncode(crypto.randomBytes(32)); }
+export function buildCsrfCookie(token: string, req: any, maxAgeMs = config.loginTokenExpiryMs): string { const secure = isSecureRequest(req) ? '; Secure' : ''; return 'mm_csrf='+encodeURIComponent(token)+'; Path=/; SameSite=Lax'+secure+'; Max-Age='+Math.ceil(maxAgeMs/1000); }
+export function buildClearCsrfCookie(req: any): string { const secure = isSecureRequest(req) ? '; Secure' : ''; return 'mm_csrf=; Path=/; Max-Age=0; SameSite=Lax'+secure; }
+function cookieValue(req: any, name: string): string {
+  const cookie = String(req?.headers?.cookie || '');
+  const match = cookie.match(new RegExp('(?:^|;\\s*)' + name + '=([^;]+)'));
+  return match ? decodeURIComponent(match[1].trim()) : '';
+}
+export function requiresCsrfProtection(req: any): boolean {
+  return ['POST', 'PUT', 'PATCH', 'DELETE'].includes(String(req?.method || '').toUpperCase());
+}
+export function verifyCsrfRequest(req: any): boolean {
+  if (!requiresCsrfProtection(req)) return true;
+  const authorization = String(req?.headers?.authorization || '');
+  if (authorization.startsWith('Bearer ')) return true;
+  const cookieToken = cookieValue(req, 'mm_csrf');
+  const headerToken = String(req?.headers?.['x-csrf-token'] || '');
+  return !!cookieToken && !!headerToken && safeEqual(cookieToken, headerToken);
+}
+export function requireCsrf(req: Request, res: Response, next: NextFunction): void {
+  if (verifyCsrfRequest(req)) { next(); return; }
+  res.status(403).json({ success: false, error: '请求验证失败，请刷新页面后重试', code: 'CSRF_INVALID' });
+}
 export function requireAuth(req: Request, res: Response, next: NextFunction): void {
   // allow auth endpoints without token
   if (req.path.startsWith('/auth/')) { next(); return; }

@@ -46,6 +46,7 @@ export class SQLiteStateStore {
       CREATE TABLE IF NOT EXISTS audit_log (id TEXT PRIMARY KEY, chat_id TEXT, action TEXT NOT NULL, detail TEXT NOT NULL, at TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS idempotency_keys (key TEXT PRIMARY KEY, result TEXT NOT NULL, created_at TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS state_leases (key TEXT PRIMARY KEY, owner TEXT NOT NULL, expires_at INTEGER NOT NULL, updated_at TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS revoked_sessions (token_hash TEXT PRIMARY KEY, expires_at INTEGER NOT NULL, revoked_at TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS migration_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
     `);
     this.migrateJsonFiles();
@@ -82,6 +83,22 @@ export class SQLiteStateStore {
 
   setIdempotent<T>(key: string, result: T): void {
     this.db.prepare('INSERT OR IGNORE INTO idempotency_keys (key, result, created_at) VALUES (?, ?, ?)').run(key, JSON.stringify(result), new Date().toISOString());
+  }
+
+  revokeSession(tokenHash: string, expiresAt: number): void {
+    this.db.prepare('DELETE FROM revoked_sessions WHERE expires_at <= ?').run(Date.now());
+    this.db.prepare('INSERT OR REPLACE INTO revoked_sessions (token_hash, expires_at, revoked_at) VALUES (?, ?, ?)')
+      .run(tokenHash, expiresAt, new Date().toISOString());
+  }
+
+  isSessionRevoked(tokenHash: string, now = Date.now()): boolean {
+    const row = this.db.prepare('SELECT expires_at AS expiresAt FROM revoked_sessions WHERE token_hash = ?').get(tokenHash) as { expiresAt?: number } | undefined;
+    if (!row?.expiresAt) return false;
+    if (row.expiresAt <= now) {
+      this.db.prepare('DELETE FROM revoked_sessions WHERE token_hash = ?').run(tokenHash);
+      return false;
+    }
+    return true;
   }
 
   acquireLease(key: string, owner: string, now = Date.now(), leaseMs = 30_000): boolean {

@@ -5,7 +5,18 @@ const path = require('node:path');
 const port = 3187;
 const child = spawn(process.execPath, [path.join(__dirname, '..', 'dist', 'web', 'server.js')], {
   cwd: path.join(__dirname, '..'),
-  env: { ...process.env, APP_HOST: '127.0.0.1', APP_PORT: String(port), TELEGRAM_POLLING_ENABLED: 'false', AI_PAPER_TRADING_ENABLED: 'false', PRIVATE_KEY: '', API_KEY: '' },
+  env: {
+    ...process.env,
+    APP_HOST: '127.0.0.1',
+    APP_PORT: String(port),
+    TELEGRAM_POLLING_ENABLED: 'false',
+    AI_PAPER_TRADING_ENABLED: 'false',
+    PRIVATE_KEY: '',
+    API_KEY: '',
+    MONEYMONEY_LOGIN_USER: 'smoke-owner',
+    MONEYMONEY_LOGIN_PASS: 'smoke-test-password-only',
+    MONEYMONEY_JWT_SECRET: 'smoke-test-jwt-secret-0123456789abcdef',
+  },
   stdio: ['ignore', 'pipe', 'pipe'],
 });
 let output = '';
@@ -41,7 +52,7 @@ const get = pathname => request('GET', pathname);
     if (unauthHome.status !== 302 || !String(unauthHome.body).includes('/login?next=')) throw new Error(`login gate redirect failed: ${unauthHome.status}`);
     const unauthSettings = await get('/api/settings');
     if (unauthSettings.status !== 401) throw new Error(`unauthenticated API was not rejected: ${unauthSettings.status}`);
-    const login = await request('POST', '/api/auth/login', { username: 'admin', password: 'admin123' });
+    const login = await request('POST', '/api/auth/login', { username: 'smoke-owner', password: 'smoke-test-password-only' });
     const loginBody = JSON.parse(login.body);
     if (login.status !== 200 || !loginBody.success || !loginBody.token) throw new Error(`login failed: ${login.status} ${login.body}`);
     const authHeaders = { Authorization: `Bearer ${loginBody.token}` };

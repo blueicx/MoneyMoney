@@ -5,6 +5,8 @@ const test = require('node:test');
 
 const auth = require('../dist/web/auth');
 const serverSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'web', 'server.ts'), 'utf8');
+const authRoutesSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'web', 'auth-routes.ts'), 'utf8');
+const authClientSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'web', 'public', 'modules', 'auth-client.js'), 'utf8');
 const loginHtml = fs.readFileSync(path.join(__dirname, '..', 'src', 'web', 'public', 'login.html'), 'utf8');
 const indexHtml = fs.readFileSync(path.join(__dirname, '..', 'src', 'web', 'public', 'index.html'), 'utf8');
 
@@ -46,10 +48,10 @@ test('guest can read the stock library and search without gaining write access',
 });
 
 test('server exposes guest login and enforces guest read-only middleware', () => {
-  assert.match(serverSrc, /app\.post\(['"]\/api\/auth\/guest['"]/, 'guest login endpoint exists');
-  assert.match(serverSrc, /role:\s*['"]guest['"]/, 'guest response identifies role');
-  assert.match(serverSrc, /isGuestRequestAllowed/, 'API middleware checks the guest allowlist');
-  assert.match(serverSrc, /GUEST_TOKEN_EXPIRY_MS/, 'guest expiry is explicit');
+  assert.match(authRoutesSrc, /app\.post\(['"]\/api\/auth\/guest['"]/, 'guest login endpoint exists');
+  assert.match(authRoutesSrc, /role:\s*['"]guest['"]/, 'guest response identifies role');
+  assert.match(authRoutesSrc, /isGuestRequestAllowed/, 'API middleware checks the guest allowlist');
+  assert.match(authRoutesSrc, /GUEST_TOKEN_EXPIRY_MS/, 'guest expiry is explicit');
 });
 
 test('guest cannot request private watchlist risk data', () => {
@@ -59,6 +61,6 @@ test('guest cannot request private watchlist risk data', () => {
 test('login and dashboard expose the guest read-only state', () => {
   assert.match(loginHtml, /访客进入/, 'login page has guest entry');
   assert.match(loginHtml, /\/api\/auth\/guest/, 'guest button calls guest endpoint');
-  assert.match(indexHtml, /mm_isGuest/, 'dashboard tracks guest state');
+  assert.match(authClientSrc, /mm_isGuest/, 'dashboard tracks guest state');
   assert.match(indexHtml, /访客模式/, 'dashboard labels guest mode');
 });
