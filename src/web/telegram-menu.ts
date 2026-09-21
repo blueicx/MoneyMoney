@@ -1,10 +1,10 @@
 import type { TelegramReplyKeyboardMarkup } from '../features/telegram-bot';
 import { MARKET_SCOPES, type MarketScope } from '../features/market-scope';
+import { telegramCommandCenterStore } from '../features/telegram-command-center';
 
 export const TELEGRAM_MENU_PAGE_COUNT = 3;
 
 const MENU_PAGE_SIZE = 4;
-const pageByChat = new Map<string, number>();
 
 export const TELEGRAM_MARKET_MENU: Array<Array<{ text: string; scope: MarketScope }>> = [
   [{ text: '🏠 总体', scope: 'overview' }, { text: '📈 股票', scope: 'stocks' }, { text: '🎯 期权', scope: 'options' }],
@@ -88,13 +88,13 @@ function clampPage(page: number): number {
 
 export function getTelegramMenuPage(chatId: string): number {
   const key = normalizeChatId(chatId);
-  return key ? pageByChat.get(key) || 1 : 1;
+  return key ? telegramCommandCenterStore.getSession(key).menuPage : 1;
 }
 
 export function setTelegramMenuPage(chatId: string, page: number): number {
   const normalizedPage = clampPage(page);
   const key = normalizeChatId(chatId);
-  if (key) pageByChat.set(key, normalizedPage);
+  if (key) telegramCommandCenterStore.updateSession(key, { menuPage: normalizedPage });
   return normalizedPage;
 }
 

@@ -183,3 +183,62 @@ test('routes a bottom keyboard label as a menu action and preserves the keyboard
   assert.equal(result.handled, true);
   assert.deepEqual(sent, [{ chatId: 'allowed', text: 'risk', replyMarkup: menu }]);
 });
+
+test('does not poll when another instance owns the SQLite lease', async () => {
+  let pollCalls = 0;
+  const leaseCalls = [];
+  const bot = new TelegramInteractionBot({
+    allowedChatIds: ['allowed'],
+    stateFile: path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'telegram-lease-')), 'state.json'),
+    pollLease: {
+      acquireLease(key, owner) { leaseCalls.push(['acquire', key, owner]); return false; },
+      refreshLease() { return false; },
+      releaseLease() { leaseCalls.push(['release']); return true; },
+    },
+    transport: {
+      async getUpdates() { pollCalls += 1; return []; },
+      async sendMessage() {},
+    },
+    handlers: { help: async () => 'help' },
+  });
+
+  assert.equal(await bot.pollOnce(), 0);
+  assert.equal(pollCalls, 0);
+  assert.equal(bot.pollingStatus.leaseHeld, false);
+  assert.match(bot.pollingStatus.lastError, /lease unavailable/i);
+  assert.equal(leaseCalls[0][0], 'acquire');
+});
+
+test('backs off after Telegram getUpdates conflict and records a recoverable status', async () => {
+  let pollCalls = 0;
+  const errors = [];
+  const bot = new TelegramInteractionBot({
+    allowedChatIds: ['allowed'],
+    stateFile: path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'telegram-conflict-')), 'state.json'),
+    pollLease: {
+      acquireLease() { return true; },
+      refreshLease() { return true; },
+      releaseLease() { return true; },
+    },
+    pollConflictBackoffMs: 1,
+    pollLeaseWaitMs: 1,
+    transport: {
+      async getUpdates() {
+        pollCalls += 1;
+        if (pollCalls === 1) throw new Error('Conflict: terminated by other getUpdates request');
+        return [];
+      },
+      async sendMessage() {},
+    },
+    handlers: { help: async () => 'help' },
+    logger: { error(message) { errors.push(message); } },
+  });
+
+  bot.start();
+  await new Promise(resolve => setTimeout(resolve, 12));
+  bot.stop();
+  assert.ok(pollCalls >= 2);
+  assert.ok(errors.some(message => /polling conflict/i.test(message)));
+  assert.equal(bot.pollingStatus.lastError, null);
+  assert.ok(bot.pollingStatus.conflictCount >= 1);
+});

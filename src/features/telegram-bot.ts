@@ -95,6 +95,12 @@ export interface TelegramTransport {
   answerCallbackQuery(callbackQueryId: string, text?: string): Promise<void>;
 }
 
+export interface TelegramPollLeaseStore {
+  acquireLease(key: string, owner: string, now?: number, leaseMs?: number): boolean;
+  refreshLease(key: string, owner: string, now?: number, leaseMs?: number): boolean;
+  releaseLease(key: string, owner: string): boolean;
+}
+
 export interface TelegramInteractionBotOptions {
   token?: string;
   proxyUrl?: string;
@@ -108,6 +114,12 @@ export interface TelegramInteractionBotOptions {
   stateFile?: string;
   menuScope?: (chatId: string) => string;
   pollTimeoutSeconds?: number;
+  pollLease?: TelegramPollLeaseStore;
+  pollLeaseKey?: string;
+  pollOwnerId?: string;
+  pollLeaseMs?: number;
+  pollLeaseWaitMs?: number;
+  pollConflictBackoffMs?: number;
   logger?: Pick<Console, 'error'>;
 }
 
@@ -119,6 +131,10 @@ interface TelegramApiResponse<T> {
   ok: boolean;
   result?: T;
   description?: string;
+}
+
+export function isTelegramPollingConflict(error: unknown): boolean {
+  return /(?:409|conflict).*getupdates|terminated by other getupdates request/i.test(error instanceof Error ? error.message : String(error));
 }
 
 export function parseAllowedChatIds(value?: string, fallback?: string): Set<string> {
@@ -240,12 +256,21 @@ export class TelegramInteractionBot {
   private readonly stateFile: string;
   private readonly menuScope: (chatId: string) => string;
   private readonly pollTimeoutSeconds: number;
+  private readonly pollLease?: TelegramPollLeaseStore;
+  private readonly pollLeaseKey: string;
+  private readonly pollOwnerId: string;
+  private readonly pollLeaseMs: number;
+  private readonly pollLeaseWaitMs: number;
+  private readonly pollConflictBackoffMs: number;
   private readonly logger: Pick<Console, 'error'>;
   private nextOffset = 0;
   private running = false;
   private loopPromise: Promise<void> | null = null;
   private lastPollError: string | null = null;
   private lastPollAt: string | null = null;
+  private leaseHeld = false;
+  private leaseExpiresAt: number | null = null;
+  private conflictCount = 0;
 
   constructor(options: TelegramInteractionBotOptions) {
     this.allowedChatIds = typeof options.allowedChatIds === 'string'
@@ -260,6 +285,12 @@ export class TelegramInteractionBot {
     this.stateFile = options.stateFile || path.resolve('data/telegram-bot-state.json');
     this.menuScope = options.menuScope || (() => 'overview');
     this.pollTimeoutSeconds = Math.max(1, Math.min(50, options.pollTimeoutSeconds || 25));
+    this.pollLease = options.pollLease;
+    this.pollLeaseKey = options.pollLeaseKey || 'telegram:getUpdates';
+    this.pollOwnerId = options.pollOwnerId || `telegram-${process.pid}-${Math.random().toString(36).slice(2, 10)}`;
+    this.pollLeaseMs = Math.max(5_000, options.pollLeaseMs || 30_000);
+    this.pollLeaseWaitMs = Math.max(1, options.pollLeaseWaitMs || 1_000);
+    this.pollConflictBackoffMs = Math.max(1, options.pollConflictBackoffMs || 30_000);
     this.logger = options.logger || console;
     this.nextOffset = this.readState().nextOffset;
   }
@@ -280,6 +311,26 @@ export class TelegramInteractionBot {
     return this.lastPollAt;
   }
 
+  get pollingStatus(): {
+    leaseKey: string;
+    ownerId: string;
+    leaseHeld: boolean;
+    leaseExpiresAt: string | null;
+    lastError: string | null;
+    lastPollAt: string | null;
+    conflictCount: number;
+  } {
+    return {
+      leaseKey: this.pollLeaseKey,
+      ownerId: this.pollOwnerId,
+      leaseHeld: this.leaseHeld,
+      leaseExpiresAt: this.leaseExpiresAt == null ? null : new Date(this.leaseExpiresAt).toISOString(),
+      lastError: this.lastPollError,
+      lastPollAt: this.lastPollAt,
+      conflictCount: this.conflictCount,
+    };
+  }
+
   start(): void {
     if (this.running) return;
     this.running = true;
@@ -288,10 +339,17 @@ export class TelegramInteractionBot {
 
   stop(): void {
     this.running = false;
+    this.releasePollLease();
   }
 
   async pollOnce(): Promise<number> {
+    if (!this.ensurePollLease()) return 0;
     const updates = await this.transport.getUpdates(this.nextOffset, this.pollTimeoutSeconds);
+    if (this.pollLease && !this.pollLease.refreshLease(this.pollLeaseKey, this.pollOwnerId, Date.now(), this.pollLeaseMs)) {
+      this.leaseHeld = false;
+      this.leaseExpiresAt = null;
+      throw new Error('Telegram polling lease lost');
+    }
     let handled = 0;
     for (const update of updates) {
       const result = await this.handleUpdate(update);
@@ -372,15 +430,46 @@ export class TelegramInteractionBot {
       try {
         await this.pollOnce();
         this.lastPollAt = new Date().toISOString();
-        this.lastPollError = null;
+        if (!this.pollLease || this.leaseHeld) this.lastPollError = null;
+        if (this.pollLease) await this.delay(this.pollLeaseWaitMs);
       } catch (error) {
         this.lastPollError = error instanceof Error ? error.message : 'unknown error';
         this.lastPollAt = new Date().toISOString();
-        this.logger.error(`[telegram] polling failed: ${this.lastPollError}`);
-        await new Promise((resolve) => setTimeout(resolve, 1_000));
+        if (isTelegramPollingConflict(error)) {
+          this.conflictCount += 1;
+          this.logger.error(`[telegram] polling conflict: ${this.lastPollError}`);
+          this.releasePollLease();
+          await this.delay(this.pollConflictBackoffMs);
+        } else {
+          this.logger.error(`[telegram] polling failed: ${this.lastPollError}`);
+          await this.delay(1_000);
+        }
       }
     }
     this.loopPromise = null;
+  }
+
+  private ensurePollLease(): boolean {
+    if (!this.pollLease) return true;
+    const now = Date.now();
+    if (this.leaseHeld && this.pollLease.refreshLease(this.pollLeaseKey, this.pollOwnerId, now, this.pollLeaseMs)) {
+      this.leaseExpiresAt = now + this.pollLeaseMs;
+      return true;
+    }
+    this.leaseHeld = this.pollLease.acquireLease(this.pollLeaseKey, this.pollOwnerId, now, this.pollLeaseMs);
+    this.leaseExpiresAt = this.leaseHeld ? now + this.pollLeaseMs : null;
+    if (!this.leaseHeld) this.lastPollError = 'Telegram polling lease unavailable';
+    return this.leaseHeld;
+  }
+
+  private releasePollLease(): void {
+    if (this.pollLease && this.leaseHeld) this.pollLease.releaseLease(this.pollLeaseKey, this.pollOwnerId);
+    this.leaseHeld = false;
+    this.leaseExpiresAt = null;
+  }
+
+  private async delay(milliseconds: number): Promise<void> {
+    await new Promise((resolve) => setTimeout(resolve, milliseconds));
   }
 
   private readState(): TelegramState {

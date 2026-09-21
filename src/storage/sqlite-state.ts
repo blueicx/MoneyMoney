@@ -131,6 +131,17 @@ export class SQLiteStateStore {
     return result.changes === 1;
   }
 
+  getLease(key: string, now = Date.now()): { key: string; owner: string; expiresAt: string; expired: boolean } | null {
+    const row = this.db.prepare('SELECT key, owner, expires_at AS expiresAt FROM state_leases WHERE key = ?').get(key) as { key?: string; owner?: string; expiresAt?: number } | undefined;
+    if (!row?.key || !row.owner || !Number.isFinite(row.expiresAt)) return null;
+    return {
+      key: row.key,
+      owner: row.owner,
+      expiresAt: new Date(Number(row.expiresAt)).toISOString(),
+      expired: Number(row.expiresAt) <= now,
+    };
+  }
+
   private migrateJsonFiles(): void {
     const migrationAt = new Date().toISOString();
     for (const item of MIGRATIONS) {

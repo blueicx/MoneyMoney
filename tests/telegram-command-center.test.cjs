@@ -13,6 +13,8 @@ const {
   parseDigestTime,
   routeNaturalLanguage,
   sparkline,
+  isTelegramBareQueryScope,
+  shouldSuppressTelegramAlert,
 } = require('../dist/features/telegram-command-center');
 
 test('stores per-chat notification preferences and keeps defaults safe', () => {
@@ -28,7 +30,7 @@ test('stores per-chat notification preferences and keeps defaults safe', () => {
   store.updatePreferences('100', { notifications: { riskAlerts: false } });
   assert.equal(store.getPreferences('100').notifications.riskAlerts, false);
   assert.equal(store.getPreferences('100').notifications.signals, true);
-  assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).version, 2);
+  assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).version, 3);
 });
 
 test('parses safe price alerts and normalizes crypto symbols', () => {
@@ -118,5 +120,56 @@ test('migrates version one state without losing existing preferences or price al
   assert.equal(store.listPriceAlerts('100')[0].id, 'ta_old');
   assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).version, 1);
   store.addWatchlistMarket('100', '42');
-  assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).version, 2);
+  assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).version, 3);
+});
+
+test('persists the complete private Telegram session and resets it safely', () => {
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'telegram-session-')), 'state.json');
+  const store = new TelegramCommandCenterStore(file);
+  store.updateSession('100', {
+    marketScope: 'stocks',
+    workspace: 'stock-quotes',
+    instrumentId: 'stock:us:AAPL',
+    timeframe: '1d',
+    menuPage: 2,
+  });
+
+  const restored = new TelegramCommandCenterStore(file);
+  assert.deepEqual(restored.getSession('100'), {
+    chatId: '100',
+    marketScope: 'stocks',
+    workspace: 'stock-quotes',
+    instrumentId: 'stock:us:AAPL',
+    timeframe: '1d',
+    menuPage: 2,
+    updatedAt: restored.getSession('100').updatedAt,
+  });
+  assert.equal(restored.getActiveMarketScope('100'), 'stocks');
+
+  const reset = restored.resetSession('100');
+  assert.equal(reset.marketScope, 'overview');
+  assert.equal(reset.instrumentId, undefined);
+  assert.equal(reset.menuPage, 1);
+  assert.equal(restored.getActiveMarketScope('100'), 'overview');
+});
+
+test('only a selected market scope permits bare symbol lookup', () => {
+  assert.equal(isTelegramBareQueryScope('stocks'), true);
+  assert.equal(isTelegramBareQueryScope('options'), true);
+  assert.equal(isTelegramBareQueryScope('crypto'), true);
+  assert.equal(isTelegramBareQueryScope('prediction'), true);
+  assert.equal(isTelegramBareQueryScope('overview'), false);
+  assert.equal(isTelegramBareQueryScope('watchlist'), false);
+});
+
+test('high priority Telegram alerts bypass quiet hours but not a manual pause', () => {
+  const policy = {
+    pausedUntil: undefined,
+    quietHours: { enabled: true, start: '22:00', end: '07:00' },
+    digest: { enabled: false, time: '08:30' },
+  };
+  const quietAt = new Date(2026, 8, 1, 23, 0);
+  assert.equal(shouldSuppressTelegramAlert(policy, 'normal', quietAt), true);
+  assert.equal(shouldSuppressTelegramAlert(policy, 'high', quietAt), false);
+  assert.equal(shouldSuppressTelegramAlert({ ...policy, pausedUntil: '2026-09-02T00:00:00.000Z' }, 'high', quietAt), true);
 });

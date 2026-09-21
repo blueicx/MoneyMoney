@@ -46,6 +46,18 @@ test('market button changes the chat scope and resets its menu page', async () =
   assert.match(response.text, /scope=stocks/);
 });
 
+test('/start shows the four-market selector and /session reset clears the private context', async () => {
+  const handlers = getTelegramCommandHandlers();
+  const chatId = `start-${Date.now()}`;
+  const start = await handlers.start({ chatId, command: 'start', args: [], message: { chat: { id: chatId } }, update: { update_id: 1 } });
+  assert.ok(start.replyMarkup.inline_keyboard.flat().some(button => button.callback_data === 'market:stocks'));
+  await handlers.market({ chatId, command: 'market', args: ['stocks'], message: { chat: { id: chatId } }, update: { update_id: 2 } });
+  const reset = await handlers.session({ chatId, command: 'session', args: ['reset'], message: { chat: { id: chatId } }, update: { update_id: 3 } });
+  assert.match(reset.text, /已清空/);
+  const { TelegramCommandCenterStore } = require('../dist/features/telegram-command-center');
+  assert.equal(new TelegramCommandCenterStore().getActiveMarketScope(chatId), 'overview');
+});
+
 test('server wires the chat scope into the menu and filters Telegram search results', () => {
   assert.match(serverSource, /menuScope:\s*chatId\s*=>\s*telegramCommandCenterStore\.getActiveMarketScope\(chatId\)/);
   assert.match(serverSource, /filterInstrumentResults\(await unifiedInstrumentService\.search\(query\)/);

@@ -93,9 +93,20 @@ export interface TelegramAuditRecord {
   at: string;
 }
 
+export interface TelegramSessionContext {
+  chatId: string;
+  marketScope: MarketScope;
+  workspace: string;
+  instrumentId?: string;
+  timeframe: string;
+  menuPage: number;
+  updatedAt: string;
+}
+
 interface TelegramCommandCenterState {
-  version: 2;
+  version: 3;
   activeMarketScopes: Record<string, MarketScope>;
+  sessions: Record<string, TelegramSessionContext>;
   preferences: Record<string, TelegramChatPreferences>;
   priceAlerts: TelegramPriceAlert[];
   smartAlerts: TelegramSmartAlert[];
@@ -217,6 +228,10 @@ export function isTelegramBareSymbol(value: string): boolean {
     || /^[A-Z0-9]{2,12}(?:USDT|USDC)$/.test(compact);
 }
 
+export function isTelegramBareQueryScope(scope: string): scope is Exclude<MarketScope, 'overview' | 'watchlist'> {
+  return scope === 'stocks' || scope === 'options' || scope === 'crypto' || scope === 'prediction';
+}
+
 export function sparkline(values: number[]): string {
   if (!values.length) return '暂无';
   const glyphs = '▁▂▃▄▅▆▇█';
@@ -230,7 +245,7 @@ export function sparkline(values: number[]): string {
 }
 
 function emptyState(): TelegramCommandCenterState {
-  return { version: 2, activeMarketScopes: {}, preferences: {}, priceAlerts: [], smartAlerts: [], watchlists: {}, policies: {}, journal: [], pending: [], audits: [] };
+  return { version: 3, activeMarketScopes: {}, sessions: {}, preferences: {}, priceAlerts: [], smartAlerts: [], watchlists: {}, policies: {}, journal: [], pending: [], audits: [] };
 }
 
 function defaultAlertPolicy(): TelegramAlertPolicy {
@@ -246,6 +261,15 @@ function minutesOfDay(value: string): number {
   return hours * 60 + minutes;
 }
 
+export function shouldSuppressTelegramAlert(policy: TelegramAlertPolicy, priority: 'high' | 'normal' = 'normal', now = new Date()): boolean {
+  if (policy.pausedUntil && new Date(policy.pausedUntil).getTime() > now.getTime()) return true;
+  if (priority === 'high' || !policy.quietHours.enabled) return false;
+  const current = now.getHours() * 60 + now.getMinutes();
+  const start = minutesOfDay(policy.quietHours.start);
+  const end = minutesOfDay(policy.quietHours.end);
+  return start === end ? true : start < end ? current >= start && current < end : current >= start || current < end;
+}
+
 export class TelegramCommandCenterStore {
   private state: TelegramCommandCenterState;
   private readonly useSqlite: boolean;
@@ -258,16 +282,66 @@ export class TelegramCommandCenterStore {
   }
 
   getActiveMarketScope(chatId: string): MarketScope {
-    const scope = this.state.activeMarketScopes[String(chatId)];
+    const scope = this.state.sessions[String(chatId)]?.marketScope || this.state.activeMarketScopes[String(chatId)];
     return scope && MARKET_SCOPES.includes(scope) ? scope : 'overview';
   }
 
   setActiveMarketScope(chatId: string, scope: string): MarketScope {
     const normalized = String(scope || '').trim().toLowerCase() as MarketScope;
     const selected = MARKET_SCOPES.includes(normalized) ? normalized : 'overview';
-    this.state.activeMarketScopes[String(chatId)] = selected;
+    this.updateSession(chatId, { marketScope: selected });
     this.save();
     return selected;
+  }
+
+  getSession(chatId: string): TelegramSessionContext {
+    const key = String(chatId);
+    const existing = this.state.sessions[key];
+    if (existing) return { ...existing };
+    const created: TelegramSessionContext = {
+      chatId: key,
+      marketScope: this.getActiveMarketScopeFromLegacy(key),
+      workspace: 'analysis',
+      timeframe: '1h',
+      menuPage: 1,
+      updatedAt: new Date().toISOString(),
+    };
+    this.state.sessions[key] = created;
+    this.state.activeMarketScopes[key] = created.marketScope;
+    this.save();
+    return { ...created };
+  }
+
+  updateSession(chatId: string, patch: Partial<Omit<TelegramSessionContext, 'chatId' | 'updatedAt'>>): TelegramSessionContext {
+    const key = String(chatId);
+    const current = this.getSessionWithoutCreate(key);
+    const selectedScope = patch.marketScope && MARKET_SCOPES.includes(patch.marketScope) ? patch.marketScope : current.marketScope;
+    const requestedTimeframe = String(patch.timeframe ?? current.timeframe);
+    const requestedPage = Number(patch.menuPage);
+    const next: TelegramSessionContext = {
+      ...current,
+      ...patch,
+      chatId: key,
+      marketScope: selectedScope,
+      workspace: String(patch.workspace ?? current.workspace).slice(0, 80) || 'analysis',
+      timeframe: /^\d+(?:m|h|d|w)$/i.test(requestedTimeframe) ? requestedTimeframe : current.timeframe,
+      menuPage: Number.isFinite(requestedPage) ? Math.max(1, Math.min(3, Math.trunc(requestedPage))) : current.menuPage,
+      instrumentId: Object.prototype.hasOwnProperty.call(patch, 'instrumentId')
+        ? (patch.instrumentId == null ? undefined : String(patch.instrumentId).slice(0, 160))
+        : current.instrumentId,
+      updatedAt: new Date().toISOString(),
+    };
+    this.state.sessions[key] = next;
+    this.state.activeMarketScopes[key] = next.marketScope;
+    this.save();
+    return { ...next };
+  }
+
+  resetSession(chatId: string): TelegramSessionContext {
+    const key = String(chatId);
+    delete this.state.sessions[key];
+    delete this.state.activeMarketScopes[key];
+    return this.getSession(key);
   }
 
   getPreferences(chatId: string): TelegramChatPreferences {
@@ -547,8 +621,9 @@ export class TelegramCommandCenterStore {
         return {
           ...emptyState(),
           ...stored,
-          version: 2,
+          version: 3,
           activeMarketScopes: stored.activeMarketScopes || {},
+          sessions: stored.sessions || {},
           preferences: stored.preferences || {},
           priceAlerts: Array.isArray(stored.priceAlerts) ? stored.priceAlerts : [],
           smartAlerts: Array.isArray(stored.smartAlerts) ? stored.smartAlerts : [],
@@ -563,10 +638,11 @@ export class TelegramCommandCenterStore {
     try {
       const parsed = JSON.parse(fs.readFileSync(this.stateFile, 'utf8')) as Partial<TelegramCommandCenterState>;
       const version = Number((parsed as { version?: number }).version);
-      if (version === 1 || version === 2) {
+      if (version === 1 || version === 2 || version === 3) {
         return {
-          version: 2,
+          version: 3,
           activeMarketScopes: (parsed as any).activeMarketScopes || {},
+          sessions: (parsed as any).sessions || {},
           preferences: parsed.preferences || {},
           priceAlerts: Array.isArray(parsed.priceAlerts) ? parsed.priceAlerts : [],
           smartAlerts: Array.isArray((parsed as any).smartAlerts) ? (parsed as any).smartAlerts : [],
@@ -583,13 +659,31 @@ export class TelegramCommandCenterStore {
 
   private save(): void {
     if (this.useSqlite) {
-      stateStore.set('telegram-command-center', this.state, 2);
+      stateStore.set('telegram-command-center', this.state, 3);
       return;
     }
     fs.mkdirSync(path.dirname(this.stateFile), { recursive: true });
     const temp = `${this.stateFile}.tmp`;
     fs.writeFileSync(temp, JSON.stringify(this.state, null, 2), 'utf8');
     fs.renameSync(temp, this.stateFile);
+  }
+
+  private getActiveMarketScopeFromLegacy(chatId: string): MarketScope {
+    const scope = this.state.activeMarketScopes[chatId];
+    return scope && MARKET_SCOPES.includes(scope) ? scope : 'overview';
+  }
+
+  private getSessionWithoutCreate(chatId: string): TelegramSessionContext {
+    const existing = this.state.sessions[chatId];
+    if (existing) return { ...existing };
+    return {
+      chatId,
+      marketScope: this.getActiveMarketScopeFromLegacy(chatId),
+      workspace: 'analysis',
+      timeframe: '1h',
+      menuPage: 1,
+      updatedAt: new Date().toISOString(),
+    };
   }
 }
 
