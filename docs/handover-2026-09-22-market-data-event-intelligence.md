@@ -33,13 +33,15 @@
 - 本批构建文件 Hash：
   - `dist/web/server.js`: `cab410e05d10404194e88fad8ce9ea1c98e859cf3f0c131255e03a85645a38d0`
   - `dist/web/public/index.html`: `7a7efab50fa8a2008cebf7ef572f2342a0ba1090d5328f1b273fd78234f6a201`
-- 当前远端仍为旧版本，现有 Hash：
-  - `dist/web/server.js`: `01cf7a8fc9c21043988ae723175aa484b0d66d0e882333d7ac09e13076108a54`
-  - `dist/web/public/index.html`: `b20fb3dd78da53e080346baaac76fedf8a65b395a20066d9e794f6db24a80eae`
-- 当前服务仍为 `active`，`http://127.0.0.1:3001/api/health/live` 返回 `ok=true`。
+- 发布后远端 Hash 已与本地构建一致：
+  - `dist/web/server.js`: `cab410e05d10404194e88fad8ce9ea1c98e859cf3f0c131255e03a85645a38d0`
+  - `dist/web/public/index.html`: `7a7efab50fa8a2008cebf7ef572f2342a0ba1090d5328f1b273fd78234f6a201`
+- 当前服务为 `active`，`http://127.0.0.1:3001/api/health/live` 返回 `ok=true`。
+- 备份目录：`/opt/moneymoney/backups/dist-pre-a74071f-20260922-0205`
+- 回滚目录：`/opt/moneymoney/dist.rollback-a74071f-20260922-0205`
 
-### 发布阻塞
+### 发布结果
 
-部署脚本已上传到 `/tmp` 并执行预检，但 `ubuntu` 无无交互 sudo 权限；直接重启 `moneymoney.service` 被 systemd 拒绝，root 登录也被 AWS 拒绝。因此本次没有停止服务、替换 `/opt/moneymoney/dist`、创建备份或回滚目录，生产版本保持不变。
+首次以普通 `ubuntu` 执行时因 sudo/systemd 权限不足被安全拦截；随后使用服务器授权的交互式 sudo 执行同一原子发布脚本，完成备份、切换、重启和健康检查。重启瞬间的短暂连接拒绝后，服务恢复为 `active`，健康接口返回 `ok=true`。
 
-补齐 `ubuntu` 对 `systemctl restart moneymoney.service` 及 `/opt/moneymoney/backups`、`/opt/moneymoney/.staging` 的受限授权后，可直接重新执行同一归档和现有原子发布脚本。不要修改 Nginx、TLS、VPN、Telegram 配置、环境密钥或运行数据库。
+本批只替换 `/opt/moneymoney/dist`，未修改 Nginx、TLS、VPN、Telegram 配置、环境密钥或运行数据库。
