@@ -11,7 +11,9 @@
 - 服务：`moneymoney.service`
 - 健康检查：`http://127.0.0.1:3001/api/health/live`
 
-部署使用 `scripts/deploy-vps-dist.sh`。它会校验归档、服务端和首页 Hash，创建远端备份，原子切换 `dist`，健康检查失败时回滚。远端发布目录、备份和回滚目录均按 release tag 隔离；不要覆盖已有 tag。
+部署使用 `scripts/deploy-vps-dist.sh`。它会校验归档、服务端和首页 Hash，按需在停止服务前安装经过校验的运行依赖，创建远端备份，原子切换 `dist`，健康检查失败时回滚。远端发布目录、备份和回滚目录均按 release tag 隔离；不要覆盖已有 tag。
+
+本批次首次部署时 VPS 曾因没有 DuckDB 运行包而自动回滚；随后已安装 `@duckdb/node-api@1.4.5-r.1` 并成功发布。以后新增运行依赖必须作为脚本的第 6 个参数传入，例如：`@duckdb/node-api@1.4.5-r.1`，不能只更新本地 `package.json` 后直接上传 `dist`。
 
 ## 认证交接
 

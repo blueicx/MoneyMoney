@@ -6,9 +6,13 @@ archive="${2:?remote archive path required}"
 expected_archive="${3:?archive SHA-256 required}"
 expected_server="${4:?server SHA-256 required}"
 expected_index="${5:?index SHA-256 required}"
+runtime_package="${6:-}"
 
 [[ "$tag" =~ ^[a-zA-Z0-9._-]+$ ]] || { echo 'invalid release tag' >&2; exit 2; }
 [[ "$archive" == /tmp/moneymoney-*.tar.gz ]] || { echo 'archive must be a bounded /tmp/moneymoney-*.tar.gz path' >&2; exit 2; }
+if [[ -n "$runtime_package" ]]; then
+  [[ "$runtime_package" =~ ^@[a-z0-9._-]+/[a-z0-9._-]+@[0-9A-Za-z._+-]+$ ]] || { echo 'invalid runtime package spec' >&2; exit 2; }
+fi
 
 app_root=/opt/moneymoney
 stage="$app_root/.staging/dist-$tag"
@@ -24,6 +28,10 @@ done
 
 actual_archive=$(sha256sum "$archive" | awk '{print $1}')
 test "$actual_archive" = "$expected_archive" || { echo 'archive hash mismatch' >&2; exit 4; }
+
+if [[ -n "$runtime_package" ]]; then
+  sudo -u moneymoney env NPM_CONFIG_CACHE=/tmp/moneymoney-npm-cache npm install --prefix "$app_root" --no-save --package-lock=false "$runtime_package"
+fi
 
 mkdir -p "$app_root/.staging" "$app_root/backups"
 mkdir "$stage"
