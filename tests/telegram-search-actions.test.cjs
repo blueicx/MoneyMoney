@@ -43,3 +43,13 @@ test('context callbacks are signed, chat-bound, and one-time', () => {
   assert.match(server, /parseScopedTelegramCallback\(data, 'watch:add', ctx\.chatId\)/);
   assert.match(server, /parseTelegramContextCallback\(data, 'quick:select', ctx\.chatId\)/);
 });
+
+test('paper and confirmation callbacks are signed, scoped, and reject plaintext payloads', () => {
+  assert.match(server, /function telegramPaperCallback\(action: string, payload: string, chatId: string/);
+  assert.match(server, /parseTelegramCallbackPayload\(data, 'paper:pick', ctx\.chatId\)/);
+  assert.match(server, /parseTelegramCallbackPayload\(data, 'pending:confirm', ctx\.chatId\)/);
+  assert.match(server, /Paper and confirmation callbacks never accept legacy plaintext payloads/);
+  assert.match(server, /telegramPaperCallback\('paper:close:pick', String\(p\.id\), chatId, 'prediction'\)/);
+  assert.doesNotMatch(server, /callback_data: `paper:pick:\$\{m\.id\}`/);
+  assert.doesNotMatch(server, /callback_data: `paper:close:pick:\$\{p\.id\}`/);
+});

@@ -579,9 +579,10 @@ export class TelegramCommandCenterStore {
     return filtered.map(item => ({ ...item }));
   }
 
-  cancelPendingAction(chatId: string): boolean {
+  cancelPendingAction(chatId: string, nonce?: string): boolean {
     const before = this.state.pending.length;
-    this.state.pending = this.state.pending.filter(item => item.chatId !== String(chatId));
+    const normalizedNonce = nonce ? String(nonce).toUpperCase() : '';
+    this.state.pending = this.state.pending.filter(item => item.chatId !== String(chatId) || (normalizedNonce && item.nonce !== normalizedNonce));
     if (before === this.state.pending.length) return false;
     this.save();
     return true;

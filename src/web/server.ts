@@ -3081,24 +3081,27 @@ function buildPaperPickRows(chatId: string): TelegramInlineKeyboardButton[][] {
     for (let j = i; j < Math.min(i + 2, picks.length); j++) {
       const m: any = picks[j];
       const label = String(m.titleZh || m.title).slice(0, 14) || String(m.id).slice(0, 12);
-      row.push({ text: label, callback_data: `paper:pick:${m.id}` });
+      row.push({ text: label, callback_data: telegramPaperCallback('paper:pick', String(m.id), chatId) });
     }
     rows.push(row);
   }
   if (!picks.length) rows.push([{ text: '点击刷新雷达快照', callback_data: 'view:signals' }]);
   return rows;
 }
-function buildPaperSideRows(marketId: string): TelegramInlineKeyboardButton[][] {
-  return [[{ text: 'YES 看涨', callback_data: `paper:side:${marketId}:YES` }, { text: 'NO 看跌', callback_data: `paper:side:${marketId}:NO` }]];
+function buildPaperSideRows(marketId: string, chatId: string): TelegramInlineKeyboardButton[][] {
+  return [[
+    { text: 'YES 看涨', callback_data: telegramPaperCallback('paper:side', `${marketId}:YES`, chatId) },
+    { text: 'NO 看跌', callback_data: telegramPaperCallback('paper:side', `${marketId}:NO`, chatId) },
+  ]];
 }
-function buildPaperAmountRows(marketId: string, side: string): TelegramInlineKeyboardButton[][] {
+function buildPaperAmountRows(marketId: string, side: string, chatId: string): TelegramInlineKeyboardButton[][] {
   const s = String(side).toUpperCase() === 'NO' ? 'NO' : 'YES';
   const combos: Array<[string,string,string]> = s === 'YES'
     ? [['0.55','10','YES 0.55 $10'], ['0.55','50','YES 0.55 $50'], ['0.65','10','YES 0.65 $10'], ['0.65','50','YES 0.65 $50']]
     : [['0.45','10','NO 0.45 $10'], ['0.45','50','NO 0.45 $50'], ['0.35','10','NO 0.35 $10'], ['0.35','50','NO 0.35 $50']];
   const rows: TelegramInlineKeyboardButton[][] = [];
   for (let i=0;i<combos.length;i+=2){
-    rows.push(combos.slice(i,i+2).map(([price,amt,label])=>({ text: label, callback_data: `paper:do:${marketId}:${s}:${price}:${amt}` })));
+    rows.push(combos.slice(i,i+2).map(([price,amt,label])=>({ text: label, callback_data: telegramPaperCallback('paper:do', `${marketId}:${s}:${price}:${amt}`, chatId) })));
   }
   rows.push([{ text: `自定义：/paper open ${marketId} ${s.toLowerCase()} <价格> <金额>`, callback_data: 'menu:home' }]);
   return rows;
@@ -3151,6 +3154,10 @@ function telegramScopeHeader(scope: MarketScope): string {
 
 function telegramScopedCallback(prefix: string, scope: MarketScope, instrumentId: string, chatId?: string): string {
   return issueTelegramCallback(prefix, { scope, id: instrumentId, workspace: 'analysis', chatId });
+}
+
+function telegramPaperCallback(action: string, payload: string, chatId: string, scope: MarketScope = 'prediction'): string {
+  return issueTelegramCallback(action, { scope, id: String(payload || ''), workspace: 'paper', chatId });
 }
 
 const TELEGRAM_CONTEXT_WORKSPACES: Record<string, string> = {
@@ -3307,6 +3314,18 @@ function parseScopedTelegramCallback(data: string, prefix: string, chatId?: stri
   return { scope: null, id: decodeURIComponent(raw) };
 }
 
+function parseTelegramCallbackPayload(data: string, action: string, chatId: string): string | null {
+  const signed = consumeTelegramCallback(data, action, chatId);
+  if (signed) {
+    if (signed.workspace !== 'paper') return null;
+    if (action.startsWith('paper:') && signed.scope !== 'prediction') return null;
+    return signed.id;
+  }
+  // Paper and confirmation callbacks never accept legacy plaintext payloads.
+  // Old inline keyboards must expire instead of allowing a forged market/order ID.
+  return null;
+}
+
 function telegramScopeForWatchId(id: string): MarketScope | null {
   const value = String(id || '').trim().toLowerCase();
   if (!value) return null;
@@ -3323,10 +3342,12 @@ function telegramScopedWatchIds(chatId: string, scope: MarketScope): string[] {
   return ids.filter(id => telegramScopeForWatchId(id) === scope);
 }
 
-function telegramPendingReply(text: string, nonce: string): TelegramReply {
+function telegramPendingReply(text: string, nonce: string, chatId: string, scope: MarketScope = 'overview'): TelegramReply {
+  const confirmCallback = telegramPaperCallback('pending:confirm', nonce, chatId, scope);
+  const cancelCallback = telegramPaperCallback('pending:cancel', nonce, chatId, scope);
   return {
     text,
-    replyMarkup: { inline_keyboard: [[{ text: '✅ 确认 ' + nonce, callback_data: 'pending:confirm:' + nonce }, { text: '❌ 取消', callback_data: 'pending:cancel' }]] } as any,
+    replyMarkup: { inline_keyboard: [[{ text: '✅ 确认 ' + nonce, callback_data: confirmCallback }, { text: '❌ 取消', callback_data: cancelCallback }]] } as any,
   };
 }
 function telegramReply(text: string): TelegramReply {
@@ -3841,7 +3862,7 @@ export function getTelegramCommandHandlers(): Record<string, TelegramCommandHand
         }
 
         row.push({ text: `解释`, callback_data: `explain:${id}` });
-        row.push({ text: `开仓`, callback_data: `paper:pick:${id}` });
+        if (telegramScopeForWatchId(id) === 'prediction') row.push({ text: `开仓`, callback_data: telegramPaperCallback('paper:pick', String(id), chatId, 'prediction') });
 
         return row;
       });
@@ -3975,7 +3996,7 @@ export function getTelegramCommandHandlers(): Record<string, TelegramCommandHand
       const ageMinutes = Math.max(0, Math.round((Date.now() - new Date(radar?.updatedAt || Date.now()).getTime()) / 60000));
       const ai = radar ? await getAiMarketCommentary(radar).catch(() => null) : null;
       const mText = ['<b>🧠 市场解释</b>', escapeTelegramHtml(market.titleZh || market.title), '平台：' + escapeTelegramHtml(market.platform), 'YES：' + formatTelegramNumber(market.yesPrice * 100, 1) + '% · 模型：' + formatTelegramNumber(market.modelProbability * 100, 1) + '%', '模型信心：' + formatTelegramNumber(market.probabilityConfidence, 1) + '%', '数据年龄：' + ageMinutes + ' 分钟' + (ageMinutes > 10 ? ' · ⚠️ 数据可能已过期' : ''), '', '<b>支持与风险</b>', '· ' + escapeTelegramHtml(market.probabilityZh || '模型概率与市场概率已进行对比'), '· 流动性：$' + formatTelegramNumber(market.liquidity, 0), '· 价差：' + formatTelegramNumber((market.spread || 0) * 100, 2) + 'pp', '', '失效条件：市场流动性骤降、来源过期或事件信息出现反转。', ...(ai?.analysis ? ['', '<b>AI 参考</b>', escapeTelegramHtml(ai.analysis.slice(0, 500))] : [])].join('\n');
-      return telegramInlineReply(mText, [[{ text: '加自选', callback_data: `watch:add:${market.id}` }, { text: '开仓', callback_data: `paper:pick:${market.id}` }]]);
+      return telegramInlineReply(mText, [[{ text: '加自选', callback_data: `watch:add:${market.id}` }, { text: '开仓', callback_data: telegramPaperCallback('paper:pick', String(market.id), chatId) }]]);
     },
     today: async () => {
       const [prices, calendar] = await Promise.allSettled([
@@ -4123,7 +4144,7 @@ export function getTelegramCommandHandlers(): Record<string, TelegramCommandHand
       const allLines = [...radarLines, ...(radarLines.length && stockHeader.length ? [''] : []), ...stockHeader, '', (matches.length? '\u9884\u6d4b\u7ed3\u679c\u6765\u81ea\u96f7\u8fbe\u5feb\u7167\uff1b' : '') + (stockLines.length? '\u80a1\u7968\u884c\u60c5\u6765\u81ea\u817e\u8baf\u884c\u60c5\uff1b':'') + '\u70b9\u51fb\u6309\u94ae\u53ef\u5feb\u901f\u52a0\u5165\u81ea\u9009/\u89e3\u91ca/\u5f00\u4ed3/\u67e5\u770b\u884c\u60c5\u3002'].join('\n');
       const kb = [];
       for(const item of matches){
-        kb.push([{ text: `\u52a0\u81ea\u9009 ${String(item.titleZh || item.title).slice(0,8)}`, callback_data: telegramScopedCallback('watch:add', scope, `prediction:predictfun:${item.id}`, chatId) }, { text: `\u89e3\u91ca`, callback_data: `explain:${item.id}` }, { text: `\u5f00\u4ed3`, callback_data: `paper:pick:${item.id}` }, { text: `查看详情`, callback_data: telegramScopedCallback('unified:show', scope, `prediction:predictfun:${item.id}`, chatId) }]);
+        kb.push([{ text: `\u52a0\u81ea\u9009 ${String(item.titleZh || item.title).slice(0,8)}`, callback_data: telegramScopedCallback('watch:add', scope, `prediction:predictfun:${item.id}`, chatId) }, { text: `\u89e3\u91ca`, callback_data: `explain:${item.id}` }, { text: `\u5f00\u4ed3`, callback_data: telegramPaperCallback('paper:pick', String(item.id), chatId) }, { text: `查看详情`, callback_data: telegramScopedCallback('unified:show', scope, `prediction:predictfun:${item.id}`, chatId) }]);
       }
       for(const row of stockKb) kb.push(row);
       if(!kb.length) return telegramReply(allLines || '\u6682\u65e0\u7ed3\u679c');
@@ -4220,7 +4241,7 @@ export function getTelegramCommandHandlers(): Record<string, TelegramCommandHand
         });
         telegramCommandCenterStore.setActiveMarketScope(chatId, itemScope);
         telegramCommandCenterStore.recordAudit(chatId, 'unified_paper_order_form', `${ref.id}:${side}:${price}:${quantity}`);
-        return telegramPendingReply(`⚠️ 请确认股票/虚拟币纸面订单\n标的：${escapeTelegramHtml(ref.title || ref.symbol)} · <code>${escapeTelegramHtml(ref.id)}</code>\n方向：${side} · 价格 ${formatTelegramNumber(price, ref.type === 'crypto' ? 4 : 2)} · 数量 ${formatTelegramNumber(quantity, 8)}\n\n确认码：${pending.nonce}（5分钟有效）`, pending.nonce);
+        return telegramPendingReply(`⚠️ 请确认股票/虚拟币纸面订单\n标的：${escapeTelegramHtml(ref.title || ref.symbol)} · <code>${escapeTelegramHtml(ref.id)}</code>\n方向：${side} · 价格 ${formatTelegramNumber(price, ref.type === 'crypto' ? 4 : 2)} · 数量 ${formatTelegramNumber(quantity, 8)}\n\n确认码：${pending.nonce}（5分钟有效）`, pending.nonce, chatId, itemScope);
       }
       if (args[0] === 'open') {
         if (!['overview', 'prediction'].includes(currentScope)) return `当前为${escapeTelegramHtml(TELEGRAM_SCOPE_LABELS[currentScope])}市场，预测市场纸面开仓不能跨市场执行。`;
@@ -4233,7 +4254,7 @@ export function getTelegramCommandHandlers(): Record<string, TelegramCommandHand
           if (args[1] && Number.isInteger(Number(args[1]))) {
             const mid = String(args[1]);
             const m = telegramFindMarket(mid);
-            return telegramInlineReply(`\u5df2\u9009\u5e02\u573a\uFF1A${escapeTelegramHtml(m?.titleZh || m?.title || mid)}\n\u8bf7\u9009\u62e9\u65b9\u5411`, buildPaperSideRows(mid));
+            return telegramInlineReply(`\u5df2\u9009\u5e02\u573a\uFF1A${escapeTelegramHtml(m?.titleZh || m?.title || mid)}\n\u8bf7\u9009\u62e9\u65b9\u5411`, buildPaperSideRows(mid, chatId));
           }
           const txt = ['<b>\u6a21\u62df\u5f00\u4ed3</b>','\u70b9\u51fb\u4e0b\u65b9\u6309\u94ae\u9009\u62e9\u5e02\u573a\uFF0C\u7136\u540e\u9009 YES/NO \u518d\u9009\u4ef7\u683c\u91d1\u989d','\u6216\u76f4\u63a5\u8f93\u5165\uFF1A/paper open <\u5e02\u573aID> <yes|no> <\u4ef7\u683c> <\u91d1\u989d>'].join('\n');
           return telegramInlineReply(txt, buildPaperPickRows(chatId));
@@ -4243,7 +4264,7 @@ export function getTelegramCommandHandlers(): Record<string, TelegramCommandHand
           type: 'paper_open', marketId, outcomeIndex: outcomeIndex as 0 | 1,
           outcomeName: outcomeIndex === 0 ? 'YES' : 'NO', price, amountUsd,
         });
-        return telegramPendingReply(`\u26a0\uFE0F \u8bf7\u786e\u8ba4\u6a21\u62df\u5f00\u4ed3\n\u5e02\u573a\uFF1A${escapeTelegramHtml(market?.titleZh || market?.title || `\u5e02\u573a ${marketId}`)}\n\u65b9\u5411\uFF1A${outcomeIndex === 0 ? 'YES' : 'NO'} \u00b7 \u4ef7\u683c ${price} \u00b7 \u91d1\u989d ${amountUsd}\n\n\u786e\u8ba4\u7801\uFF1A${pending.nonce}\uFF085\u5206\u949f\u6709\u6548\uFF09`, pending.nonce);
+        return telegramPendingReply(`\u26a0\uFE0F \u8bf7\u786e\u8ba4\u6a21\u62df\u5f00\u4ed3\n\u5e02\u573a\uFF1A${escapeTelegramHtml(market?.titleZh || market?.title || `\u5e02\u573a ${marketId}`)}\n\u65b9\u5411\uFF1A${outcomeIndex === 0 ? 'YES' : 'NO'} \u00b7 \u4ef7\u683c ${price} \u00b7 \u91d1\u989D ${amountUsd}\n\n\u786e\u8ba4\u7801\uFF1A${pending.nonce}\uFF085\u5206\u949F\u6709\u6548\uFF09`, pending.nonce, chatId, 'prediction');
       }
       if (args[0] === 'close') {
         if (!['overview', 'prediction'].includes(currentScope)) return `当前为${escapeTelegramHtml(TELEGRAM_SCOPE_LABELS[currentScope])}市场，预测市场纸面平仓不能跨市场执行。`;
@@ -4253,11 +4274,11 @@ export function getTelegramCommandHandlers(): Record<string, TelegramCommandHand
         if (!position || !Number.isFinite(exitPrice) || exitPrice <= 0 || exitPrice > 1) {
           const positions = paperEngine.getOpenPositions();
           if(!positions.length) return '<b>\u5f53\u524d\u6301\u4ed3</b>\n\u6682\u65e0\u5f00\u653e\u6301\u4ed3\u3002';
-          const rows: TelegramInlineKeyboardButton[][] = positions.slice(0,6).map(p=>[{ text: `\u5e73\u4ed3 ${String(p.marketTitle).slice(0,12)}`, callback_data: `paper:close:pick:${p.id}` }]);
+          const rows: TelegramInlineKeyboardButton[][] = positions.slice(0,6).map(p=>[{ text: `\u5e73\u4ed3 ${String(p.marketTitle).slice(0,12)}`, callback_data: telegramPaperCallback('paper:close:pick', String(p.id), chatId, 'prediction') }]);
           return telegramInlineReply('<b>\u9009\u62e9\u8981\u5e73\u4ed3\u7684\u6301\u4ed3</b>', rows);
         }
         const pending = telegramCommandCenterStore.createPendingAction(chatId, { type: 'paper_close', positionId, price: exitPrice });
-        return telegramPendingReply(`\u26a0\uFE0F \u8bf7\u786e\u8ba4\u6a21\u62df\u5e73\u4ed3\n${escapeTelegramHtml(position.marketTitle)} \u00b7 ${escapeTelegramHtml(position.outcomeName)}\n\u4ef7\u683c\uFF1A${exitPrice}\n\n\u786e\u8ba4\u7801\uFF1A${pending.nonce}`, pending.nonce);
+        return telegramPendingReply(`\u26a0\uFE0F \u8bf7\u786e\u8ba4\u6a21\u62df\u5e73\u4ed3\n${escapeTelegramHtml(position.marketTitle)} \u00b7 ${escapeTelegramHtml(position.outcomeName)}\n\u4ef7\u683c\uFF1A${exitPrice}\n\n\u786e\u8ba4\u7801\uFF1A${pending.nonce}`, pending.nonce, chatId, 'prediction');
       }
       const portfolio = paperEngine.getPortfolio();
       const positions = paperEngine.getOpenPositions();
@@ -4275,7 +4296,7 @@ export function getTelegramCommandHandlers(): Record<string, TelegramCommandHand
         '\u70b9\u51fb\u6309\u94ae\u5feb\u901f\u5f00\u4ed3\uFF0C\u6216\u8f93\u5165 /paper open \u547d\u4ee4\u3002',
       ].join('\n');
       const pickRows = buildPaperPickRows(chatId);
-      const closeRows: TelegramInlineKeyboardButton[][] = positions.slice(0,4).map(p=>[{ text: `\u5e73\u4ed3 ${String(p.id).slice(0,8)}`, callback_data: `paper:close:pick:${p.id}` }]);
+      const closeRows: TelegramInlineKeyboardButton[][] = positions.slice(0,4).map(p=>[{ text: `\u5e73\u4ed3 ${String(p.id).slice(0,8)}`, callback_data: telegramPaperCallback('paper:close:pick', String(p.id), chatId, 'prediction') }]);
       return telegramInlineReply(text, [...pickRows, ...closeRows]);
     },
     research: async ({ args }) => {
@@ -4648,27 +4669,36 @@ function startTelegramInteractionBot(): void {
       }
       if (data.startsWith('paper:pick:')) {
         if (!['overview', 'prediction'].includes(telegramScopeForChat(ctx.chatId))) return telegramReply('模拟开仓目前只允许在总体或预测市场作用域使用。');
-        const marketId = data.slice('paper:pick:'.length);
+        const marketId = parseTelegramCallbackPayload(data, 'paper:pick', ctx.chatId);
+        if (!marketId) return telegramReply('按钮已过期或签名无效，请重新发送 /paper。');
         const m = telegramFindMarket(marketId);
         if(!m) return telegramReply('未找到该市场，请先 /search 刷新。');
         return telegramInlineReply(`已选市场：${escapeTelegramHtml(m.titleZh || m.title)}
 平台：${escapeTelegramHtml(m.platform)} · YES ${formatTelegramNumber(m.yesPrice*100,1)}%
-请选择方向`, buildPaperSideRows(String(m.id)));
+请选择方向`, buildPaperSideRows(String(m.id), ctx.chatId));
       }
       if (data.startsWith('paper:side:')) {
-        const parts = data.split(':');
-        const marketId = parts[2];
-        const side = parts[3];
+        const payload = parseTelegramCallbackPayload(data, 'paper:side', ctx.chatId);
+        if (!payload) return telegramReply('按钮已过期或签名无效，请重新发送 /paper。');
+        const separator = payload.lastIndexOf(':');
+        if (separator <= 0) return telegramReply('纸面交易按钮数据无效，请重新发送 /paper。');
+        const marketId = payload.slice(0, separator);
+        const side = payload.slice(separator + 1);
+        if (!['YES', 'NO'].includes(side)) return telegramReply('纸面交易方向无效，请重新发送 /paper。');
         const m = telegramFindMarket(marketId);
         return telegramInlineReply(`市场：${escapeTelegramHtml(m?.titleZh || m?.title || marketId)} · 方向 ${side}
-请选择快捷价格/金额，或输入自定义命令`, buildPaperAmountRows(marketId, side));
+请选择快捷价格/金额，或输入自定义命令`, buildPaperAmountRows(marketId, side, ctx.chatId));
       }
       if (data.startsWith('paper:do:')) {
-        const parts = data.split(':');
-        const marketId = Number(parts[2]);
-        const side = parts[3];
-        const price = Number(parts[4]);
-        const amt = Number(parts[5]);
+        const payload = parseTelegramCallbackPayload(data, 'paper:do', ctx.chatId);
+        if (!payload) return telegramReply('按钮已过期或签名无效，请重新发送 /paper。');
+        const parts = payload.split(':');
+        if (parts.length !== 4) return telegramReply('纸面交易参数无效，请重新发送 /paper。');
+        const marketId = Number(parts[0]);
+        const side = parts[1];
+        const price = Number(parts[2]);
+        const amt = Number(parts[3]);
+        if (!Number.isInteger(marketId) || !['YES', 'NO'].includes(side) || !Number.isFinite(price) || !Number.isFinite(amt) || price <= 0 || price > 1 || amt <= 0) return telegramReply('纸面交易参数无效，请重新发送 /paper。');
         const outcomeIndex = side === 'NO' ? 1 : 0;
         const m = telegramFindMarket(String(marketId));
         const pending = telegramCommandCenterStore.createPendingAction(ctx.chatId, { type: 'paper_open', marketId, outcomeIndex: outcomeIndex as 0|1, outcomeName: side, price, amountUsd: amt });
@@ -4677,29 +4707,33 @@ function startTelegramInteractionBot(): void {
 市场：${escapeTelegramHtml(m?.titleZh || m?.title || `市场 ${marketId}`)}
 方向：${side} · 价格 ${price} · 金额 ${amt}
 
-确认码：${pending.nonce}`, pending.nonce);
+确认码：${pending.nonce}`, pending.nonce, ctx.chatId, 'prediction');
       }
       if (data.startsWith('paper:close:pick:')) {
-        const pid = data.slice('paper:close:pick:'.length);
+        const pid = parseTelegramCallbackPayload(data, 'paper:close:pick', ctx.chatId);
+        if (!pid) return telegramReply('按钮已过期或签名无效，请重新发送 /paper。');
         const position = paperEngine.getOpenPositions().find(p=>p.id===pid);
         if(!position) return telegramReply('持仓不存在或已平仓');
         const vals=['0.45','0.55','0.65','0.75'];
         const kb=[];
-        for(let i=0;i<vals.length;i+=2) kb.push(vals.slice(i,i+2).map(v=>({ text: `平仓 ${v}`, callback_data: `paper:close:do:${pid}:${v}` })));
+        for(let i=0;i<vals.length;i+=2) kb.push(vals.slice(i,i+2).map(v=>({ text: `平仓 ${v}`, callback_data: telegramPaperCallback('paper:close:do', `${pid}:${v}`, ctx.chatId, 'prediction') })));
         return telegramInlineReply(`选择平仓价格
 ${escapeTelegramHtml(position.marketTitle)} · ${escapeTelegramHtml(position.outcomeName)}`, kb);
       }
       if (data.startsWith('paper:close:do:')) {
-        const rem = data.slice('paper:close:do:'.length);
+        const rem = parseTelegramCallbackPayload(data, 'paper:close:do', ctx.chatId);
+        if (!rem) return telegramReply('按钮已过期或签名无效，请重新发送 /paper。');
         const idx = rem.lastIndexOf(':');
+        if (idx <= 0) return telegramReply('平仓参数无效，请重新发送 /paper。');
         const pid = rem.slice(0, idx);
         const price = Number(rem.slice(idx+1));
+        if (!Number.isFinite(price) || price <= 0 || price > 1) return telegramReply('平仓价格无效，请重新发送 /paper。');
         const position = paperEngine.getOpenPositions().find(p=>p.id===pid);
         if(!position) return telegramReply('持仓不存在');
         const pending = telegramCommandCenterStore.createPendingAction(ctx.chatId, { type: 'paper_close', positionId: pid, price });
         return telegramPendingReply(`⚠️ 请确认模拟平仓
 ${escapeTelegramHtml(position.marketTitle)} · ${escapeTelegramHtml(position.outcomeName)}
-价格：${price}`, pending.nonce);
+价格：${price}`, pending.nonce, ctx.chatId, 'prediction');
       }
       if (data.startsWith('unified:show:')) {
         const currentScope = telegramScopeForChat(ctx.chatId);
@@ -4747,7 +4781,7 @@ ${escapeTelegramHtml(position.marketTitle)} · ${escapeTelegramHtml(position.out
         const m = telegramFindMarket(mid) || telegramRadarMarkets().find(x=>String(x.id)===mid);
         if(!m) return telegramReply('未找到该市场');
         const txt = [`<b>🧠 市场解释</b>`, escapeTelegramHtml(m.titleZh || m.title), `平台：${escapeTelegramHtml(m.platform)}`, `YES：${formatTelegramNumber(m.yesPrice*100,1)}% · 模型：${formatTelegramNumber(m.modelProbability*100,1)}%`, `信号：${escapeTelegramHtml(m.signalZh || (m as any).signal || '-')}`].join('\n');
-        return telegramInlineReply(txt, [[{ text: '加自选', callback_data: `watch:add:${m.id}` }, { text: '开仓', callback_data: `paper:pick:${m.id}` }]]);
+        return telegramInlineReply(txt, [[{ text: '加自选', callback_data: `watch:add:${m.id}` }, { text: '开仓', callback_data: telegramPaperCallback('paper:pick', String(m.id), ctx.chatId) }]]);
       }
       if (data.startsWith('search:q:')) {
         const q = data.slice('search:q:'.length).toLowerCase();
@@ -4764,7 +4798,8 @@ ${escapeTelegramHtml(position.marketTitle)} · ${escapeTelegramHtml(position.out
         } catch(e){ return telegramReply(`\u884c\u60c5\u83b7\u53d6\u5931\u8d25: ${escapeTelegramHtml(String(e))}`); }
       }
       if (data.startsWith('pending:confirm:')) {
-        const nonce = data.slice('pending:confirm:'.length);
+        const nonce = parseTelegramCallbackPayload(data, 'pending:confirm', ctx.chatId);
+        if (!nonce) return telegramReply('确认按钮已过期或签名无效，请重新发送模拟盘操作。');
         const pending = telegramCommandCenterStore.consumePendingAction(ctx.chatId, nonce);
         if (!pending) return telegramReply('确认码不存在、已使用或已过期。请重新发送模拟盘操作。');
         if (pending.type === 'unified_paper_order') {
@@ -4800,8 +4835,10 @@ ${escapeTelegramHtml(position.marketTitle)} · ${escapeTelegramHtml(position.out
         telegramCommandCenterStore.recordAudit(ctx.chatId, 'paper_close_confirm', result.message);
         return telegramReply(result.success ? `✅ ${escapeTelegramHtml(result.message)}` : `❌ ${escapeTelegramHtml(result.message)}`);
       }
-      if (data === 'pending:cancel' || data.startsWith('pending:cancel')) {
-        const cancelled = telegramCommandCenterStore.cancelPendingAction(ctx.chatId);
+      if (data === 'pending:cancel' || data.startsWith('pending:cancel:')) {
+        const nonce = data === 'pending:cancel' ? undefined : parseTelegramCallbackPayload(data, 'pending:cancel', ctx.chatId);
+        if (data !== 'pending:cancel' && !nonce) return telegramReply('取消按钮已过期或签名无效，请重新发送模拟盘操作。');
+        const cancelled = telegramCommandCenterStore.cancelPendingAction(ctx.chatId, nonce || undefined);
         return telegramReply(cancelled ? '已取消待确认的模拟盘操作。' : '当前没有待确认操作。');
       }
       return telegramReply('按钮已过期，请发送 /start 重新打开功能菜单。');

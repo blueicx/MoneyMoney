@@ -49,6 +49,11 @@ test('supports pending confirmation lifecycle and audit records', () => {
   const pending = store.createPendingAction('100', { type: 'paper_open', marketId: 7, amountUsd: 10 });
   assert.equal(store.consumePendingAction('100', pending.nonce)?.marketId, 7);
   assert.equal(store.consumePendingAction('100', pending.nonce), null);
+  const cancellable = store.createPendingAction('100', { type: 'paper_close', positionId: 'pos-1', price: 0.5 });
+  assert.equal(store.cancelPendingAction('100', 'WRONG'), false);
+  assert.equal(store.countPendingActions('100'), 1);
+  assert.equal(store.cancelPendingAction('100', cancellable.nonce), true);
+  assert.equal(store.countPendingActions('100'), 0);
   store.recordAudit('100', 'paper_open', 'confirmed');
   assert.equal(store.listAudits('100', 1)[0].action, 'paper_open');
 });
