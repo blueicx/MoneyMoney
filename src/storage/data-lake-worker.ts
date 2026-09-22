@@ -123,10 +123,12 @@ export class DataLakeBackfillWorker {
     }
     const source = snapshot.status === 'live' ? snapshot.source : `${snapshot.source}:${snapshot.status}`;
     let rowCount = 0;
+    let partitionsCommitted = 0;
     for (const rows of groups.values()) {
       await this.catalog.stageBars({ market: job.market, dataset: job.dataset, instrument: job.instrument, timeframe: job.timeframe, source, publishedAt: snapshot.fetchedAt, rows });
       rowCount += rows.length;
-      const checkpoint = this.catalog.heartbeatBackfill(job.id, this.workerId, { cursor: rows[rows.length - 1]?.timestamp, rowsWritten: rowCount, partitionsCommitted: 1 });
+      partitionsCommitted += 1;
+      const checkpoint = this.catalog.heartbeatBackfill(job.id, this.workerId, { cursor: rows[rows.length - 1]?.timestamp, rowsWritten: rowCount, partitionsCommitted });
       if (!checkpoint) throw new Error('回补任务租约已失效，请重新排队后重试');
     }
     this.catalog.updateBackfill(job.id, 'succeeded', `已写入 ${groups.size} 个 Parquet 分区，共 ${rowCount} 根K线，来源 ${source}`, this.workerId);

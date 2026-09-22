@@ -33,6 +33,8 @@ test('backfill worker writes real adapter bars by time partition and query merge
     assert.equal(calls, 1);
     assert.equal(result.id, job.id);
     assert.equal(result.status, 'succeeded');
+    assert.equal(result.checkpoint.partitionsCommitted, 2);
+    assert.equal(result.checkpoint.rowsWritten, 2);
     assert.equal(catalog.listPartitions().length, 2);
     const snapshot = await catalog.queryBarsAsOf({ market: 'stocks', instrument: 'AAPL', timeframe: '1d', asOf: '2026-02-04T00:00:00.000Z' });
     assert.deepEqual(snapshot.rows.map(row => row.close), [104, 107]);
