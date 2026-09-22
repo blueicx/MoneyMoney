@@ -242,3 +242,58 @@ test('backs off after Telegram getUpdates conflict and records a recoverable sta
   assert.equal(bot.pollingStatus.lastError, null);
   assert.ok(bot.pollingStatus.conflictCount >= 1);
 });
+
+test('graceful stop aborts in-flight polling before releasing the lease', async () => {
+  let release;
+  let resolveUpdates;
+  let pollStarted = false;
+  const bot = new TelegramInteractionBot({
+    allowedChatIds: ['allowed'],
+    stateFile: path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'telegram-stop-')), 'state.json'),
+    pollLease: {
+      acquireLease() { return true; },
+      refreshLease() { return true; },
+      releaseLease() { release = true; return true; },
+    },
+    transport: {
+      getUpdates(_offset, _timeout, signal) {
+        pollStarted = true;
+        return new Promise((resolve, reject) => {
+          resolveUpdates = resolve;
+          signal?.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })), { once: true });
+        });
+      },
+      async sendMessage() {},
+    },
+    handlers: { help: async () => 'help' },
+  });
+
+  bot.start();
+  for (let i = 0; i < 20 && !pollStarted; i += 1) await new Promise(resolve => setTimeout(resolve, 1));
+  assert.equal(pollStarted, true);
+  const stopping = bot.stop();
+  assert.equal(release, undefined);
+  await stopping;
+  assert.equal(release, true);
+  resolveUpdates?.([]);
+});
+
+test('poll offset can be persisted through the shared state store', async () => {
+  const values = new Map();
+  const sharedState = {
+    get(key) { return values.get(key) || null; },
+    set(key, value) { values.set(key, value); },
+  };
+  const bot = new TelegramInteractionBot({
+    allowedChatIds: ['allowed'],
+    pollStateStore: sharedState,
+    stateFile: path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'telegram-shared-state-')), 'unused.json'),
+    transport: {
+      async getUpdates() { return []; },
+      async sendMessage() {},
+    },
+    handlers: { help: async () => 'help' },
+  });
+  await bot.handleUpdate({ update_id: 70, message: { chat: { id: 'allowed', type: 'private' }, text: '/help' } });
+  assert.deepEqual(values.get('telegram-poll-state'), { nextOffset: 71 });
+});

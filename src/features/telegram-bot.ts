@@ -90,9 +90,14 @@ export type TelegramCommandHandler = (context: TelegramCommandContext) => Telegr
 export type TelegramCallbackHandler = (context: TelegramCallbackContext) => TelegramCommandResult | Promise<TelegramCommandResult>;
 
 export interface TelegramTransport {
-  getUpdates(offset: number, timeoutSeconds: number): Promise<TelegramUpdate[]>;
+  getUpdates(offset: number, timeoutSeconds: number, signal?: AbortSignal): Promise<TelegramUpdate[]>;
   sendMessage(chatId: string, text: string, replyMarkup?: TelegramReplyMarkup): Promise<void>;
   answerCallbackQuery(callbackQueryId: string, text?: string): Promise<void>;
+}
+
+export interface TelegramPollStateStore {
+  get<T>(key: string): T | null;
+  set<T>(key: string, value: T, version?: number): void;
 }
 
 export interface TelegramPollLeaseStore {
@@ -112,6 +117,7 @@ export interface TelegramInteractionBotOptions {
   unknownCallbackHandler?: TelegramCallbackHandler;
   transport?: TelegramTransport;
   stateFile?: string;
+  pollStateStore?: TelegramPollStateStore;
   menuScope?: (chatId: string) => string;
   pollTimeoutSeconds?: number;
   pollLease?: TelegramPollLeaseStore;
@@ -177,12 +183,12 @@ class TelegramApiTransport implements TelegramTransport {
     private readonly proxyUrl = '',
   ) {}
 
-  async getUpdates(offset: number, timeoutSeconds: number): Promise<TelegramUpdate[]> {
+  async getUpdates(offset: number, timeoutSeconds: number, signal?: AbortSignal): Promise<TelegramUpdate[]> {
     const response = await this.callApi<TelegramUpdate[]>('getUpdates', {
       offset,
       timeout: timeoutSeconds,
       allowed_updates: ['message', 'channel_post', 'callback_query'],
-    }, Math.max(15_000, (timeoutSeconds + 10) * 1000));
+    }, Math.max(15_000, (timeoutSeconds + 10) * 1000), signal);
     return response.result || [];
   }
 
@@ -202,25 +208,32 @@ class TelegramApiTransport implements TelegramTransport {
     }, 15_000);
   }
 
-  private async callApi<T>(method: string, body: Record<string, unknown>, timeoutMs: number): Promise<TelegramApiResponse<T>> {
+  private async callApi<T>(method: string, body: Record<string, unknown>, timeoutMs: number, signal?: AbortSignal): Promise<TelegramApiResponse<T>> {
     const url = `${TELEGRAM_API}/bot${this.token}/${method}`;
+    const request = createTimeoutSignal(signal, timeoutMs);
     try {
       const response = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
-        signal: AbortSignal.timeout(timeoutMs),
+        signal: request.signal,
       });
       const parsed = await response.json() as TelegramApiResponse<T>;
       if (!response.ok || !parsed.ok) throw new Error(parsed.description || `Telegram HTTP ${response.status}`);
       return parsed;
     } catch (error) {
+      // An intentional shutdown must never fall through to a second transport
+      // request through curl. That would keep the long poll alive and could
+      // release the lease while Telegram still sees the previous request.
+      if (isAbortError(error)) throw error;
       if (!this.proxyUrl) throw error;
-      return await this.callApiWithCurl<T>(url, body, timeoutMs);
+      return await this.callApiWithCurl<T>(url, body, timeoutMs, request.signal);
+    } finally {
+      request.cleanup();
     }
   }
 
-  private async callApiWithCurl<T>(url: string, body: Record<string, unknown>, timeoutMs: number): Promise<TelegramApiResponse<T>> {
+  private async callApiWithCurl<T>(url: string, body: Record<string, unknown>, timeoutMs: number, signal?: AbortSignal): Promise<TelegramApiResponse<T>> {
     const command = curlCommand();
     const maxTimeSeconds = Math.max(5, Math.ceil(timeoutMs / 1000));
     const args = [
@@ -231,7 +244,7 @@ class TelegramApiTransport implements TelegramTransport {
       '--proxy', this.proxyUrl,
     ];
     const output = await new Promise<string>((resolve, reject) => {
-      execFile(command, args, { windowsHide: true, timeout: timeoutMs + 3_000 }, (error, stdout) => {
+      execFile(command, args, { windowsHide: true, timeout: timeoutMs + 3_000, signal }, (error, stdout) => {
         if (error) {
           reject(new Error(`Telegram proxy request failed (${error.code || 'unknown'})`));
           return;
@@ -245,6 +258,24 @@ class TelegramApiTransport implements TelegramTransport {
   }
 }
 
+function createTimeoutSignal(parent: AbortSignal | undefined, timeoutMs: number): { signal: AbortSignal; cleanup: () => void } {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const abort = () => controller.abort();
+  parent?.addEventListener('abort', abort, { once: true });
+  return {
+    signal: controller.signal,
+    cleanup: () => {
+      clearTimeout(timer);
+      parent?.removeEventListener('abort', abort);
+    },
+  };
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && (error.name === 'AbortError' || /aborted|abort/i.test(error.message));
+}
+
 export class TelegramInteractionBot {
   private readonly allowedChatIds: Set<string>;
   private readonly handlers: Record<string, TelegramCommandHandler>;
@@ -254,6 +285,7 @@ export class TelegramInteractionBot {
   private readonly unknownCallbackHandler?: TelegramCallbackHandler;
   private readonly transport: TelegramTransport;
   private readonly stateFile: string;
+  private readonly pollStateStore?: TelegramPollStateStore;
   private readonly menuScope: (chatId: string) => string;
   private readonly pollTimeoutSeconds: number;
   private readonly pollLease?: TelegramPollLeaseStore;
@@ -266,8 +298,10 @@ export class TelegramInteractionBot {
   private nextOffset = 0;
   private running = false;
   private loopPromise: Promise<void> | null = null;
+  private abortController: AbortController | null = null;
   private lastPollError: string | null = null;
   private lastPollAt: string | null = null;
+  private lastSuccessfulPollAt: string | null = null;
   private leaseHeld = false;
   private leaseExpiresAt: number | null = null;
   private conflictCount = 0;
@@ -283,6 +317,7 @@ export class TelegramInteractionBot {
     this.unknownCallbackHandler = options.unknownCallbackHandler;
     this.transport = options.transport || new TelegramApiTransport(options.token || '', options.proxyUrl || '');
     this.stateFile = options.stateFile || path.resolve('data/telegram-bot-state.json');
+    this.pollStateStore = options.pollStateStore;
     this.menuScope = options.menuScope || (() => 'overview');
     this.pollTimeoutSeconds = Math.max(1, Math.min(50, options.pollTimeoutSeconds || 25));
     this.pollLease = options.pollLease;
@@ -318,6 +353,7 @@ export class TelegramInteractionBot {
     leaseExpiresAt: string | null;
     lastError: string | null;
     lastPollAt: string | null;
+    lastSuccessfulPollAt: string | null;
     conflictCount: number;
   } {
     return {
@@ -327,24 +363,30 @@ export class TelegramInteractionBot {
       leaseExpiresAt: this.leaseExpiresAt == null ? null : new Date(this.leaseExpiresAt).toISOString(),
       lastError: this.lastPollError,
       lastPollAt: this.lastPollAt,
+      lastSuccessfulPollAt: this.lastSuccessfulPollAt,
       conflictCount: this.conflictCount,
     };
   }
 
   start(): void {
     if (this.running) return;
+    this.abortController = new AbortController();
     this.running = true;
     this.loopPromise = this.pollLoop();
   }
 
-  stop(): void {
+  async stop(): Promise<void> {
     this.running = false;
-    this.releasePollLease();
+    this.abortController?.abort();
+    const loop = this.loopPromise;
+    if (loop) await loop;
+    else this.releasePollLease();
+    this.abortController = null;
   }
 
   async pollOnce(): Promise<number> {
     if (!this.ensurePollLease()) return 0;
-    const updates = await this.transport.getUpdates(this.nextOffset, this.pollTimeoutSeconds);
+    const updates = await this.transport.getUpdates(this.nextOffset, this.pollTimeoutSeconds, this.abortController?.signal);
     if (this.pollLease && !this.pollLease.refreshLease(this.pollLeaseKey, this.pollOwnerId, Date.now(), this.pollLeaseMs)) {
       this.leaseHeld = false;
       this.leaseExpiresAt = null;
@@ -426,27 +468,33 @@ export class TelegramInteractionBot {
   }
 
   private async pollLoop(): Promise<void> {
-    while (this.running) {
-      try {
-        await this.pollOnce();
-        this.lastPollAt = new Date().toISOString();
-        if (!this.pollLease || this.leaseHeld) this.lastPollError = null;
-        if (this.pollLease) await this.delay(this.pollLeaseWaitMs);
-      } catch (error) {
-        this.lastPollError = error instanceof Error ? error.message : 'unknown error';
-        this.lastPollAt = new Date().toISOString();
-        if (isTelegramPollingConflict(error)) {
-          this.conflictCount += 1;
-          this.logger.error(`[telegram] polling conflict: ${this.lastPollError}`);
-          this.releasePollLease();
-          await this.delay(this.pollConflictBackoffMs);
-        } else {
-          this.logger.error(`[telegram] polling failed: ${this.lastPollError}`);
-          await this.delay(1_000);
+    try {
+      while (this.running) {
+        try {
+          await this.pollOnce();
+          this.lastPollAt = new Date().toISOString();
+          this.lastSuccessfulPollAt = this.lastPollAt;
+          if (!this.pollLease || this.leaseHeld) this.lastPollError = null;
+          if (this.pollLease) await this.delay(this.pollLeaseWaitMs);
+        } catch (error) {
+          if (!this.running && isAbortError(error)) break;
+          this.lastPollError = error instanceof Error ? error.message : 'unknown error';
+          this.lastPollAt = new Date().toISOString();
+          if (isTelegramPollingConflict(error)) {
+            this.conflictCount += 1;
+            this.logger.error(`[telegram] polling conflict: ${this.lastPollError}`);
+            this.releasePollLease();
+            await this.delay(this.pollConflictBackoffMs);
+          } else {
+            this.logger.error(`[telegram] polling failed: ${this.lastPollError}`);
+            await this.delay(1_000);
+          }
         }
       }
+    } finally {
+      this.loopPromise = null;
+      this.releasePollLease();
     }
-    this.loopPromise = null;
   }
 
   private ensurePollLease(): boolean {
@@ -469,10 +517,20 @@ export class TelegramInteractionBot {
   }
 
   private async delay(milliseconds: number): Promise<void> {
-    await new Promise((resolve) => setTimeout(resolve, milliseconds));
+    await new Promise((resolve) => {
+      const timer = setTimeout(resolve, milliseconds);
+      this.abortController?.signal.addEventListener('abort', () => {
+        clearTimeout(timer);
+        resolve(undefined);
+      }, { once: true });
+    });
   }
 
   private readState(): TelegramState {
+    if (this.pollStateStore) {
+      const stored = this.pollStateStore.get<Partial<TelegramState>>('telegram-poll-state');
+      return { nextOffset: Number.isInteger(stored?.nextOffset) && stored!.nextOffset! >= 0 ? stored!.nextOffset! : 0 };
+    }
     try {
       const parsed = JSON.parse(fs.readFileSync(this.stateFile, 'utf8')) as Partial<TelegramState>;
       return { nextOffset: Number.isInteger(parsed.nextOffset) && parsed.nextOffset! >= 0 ? parsed.nextOffset! : 0 };
@@ -482,6 +540,10 @@ export class TelegramInteractionBot {
   }
 
   private writeState(): void {
+    if (this.pollStateStore) {
+      this.pollStateStore.set('telegram-poll-state', { nextOffset: this.nextOffset }, 1);
+      return;
+    }
     fs.mkdirSync(path.dirname(this.stateFile), { recursive: true });
     const tempFile = `${this.stateFile}.tmp`;
     fs.writeFileSync(tempFile, JSON.stringify({ nextOffset: this.nextOffset }), 'utf8');

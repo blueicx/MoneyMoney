@@ -1,6 +1,6 @@
 import { stateStore } from '../storage/sqlite-state';
 
-export type UnifiedPaperInstrumentType = 'stock' | 'crypto' | 'prediction';
+export type UnifiedPaperInstrumentType = 'stock' | 'option' | 'crypto' | 'prediction';
 export type UnifiedPaperSide = 'BUY' | 'SELL' | 'YES' | 'NO';
 
 export interface UnifiedPaperOrder {
@@ -48,7 +48,7 @@ export function emptyUnifiedPaperLedger(startingCash = 1000): UnifiedPaperLedger
 
 export function validateUnifiedPaperOrder(input: Partial<UnifiedPaperOrder>): { ok: boolean; error?: string } {
   if (!String(input.instrumentId || '').trim()) return { ok: false, error: '必须提供标的 ID' };
-  if (!['stock', 'crypto', 'prediction'].includes(String(input.instrumentType))) return { ok: false, error: '标的类型无效' };
+  if (!['stock', 'option', 'crypto', 'prediction'].includes(String(input.instrumentType))) return { ok: false, error: '标的类型无效' };
   const allowed = input.instrumentType === 'prediction' ? ['YES', 'NO'] : ['BUY', 'SELL'];
   if (!allowed.includes(String(input.side))) return { ok: false, error: input.instrumentType === 'prediction' ? '预测市场订单只能选择 YES 或 NO' : '股票和加密资产订单只能选择 BUY 或 SELL' };
   if (!Number.isFinite(Number(input.price)) || Number(input.price) <= 0) return { ok: false, error: '价格必须大于 0' };
@@ -139,8 +139,8 @@ export function calculateUnifiedPerformance(ledger: UnifiedPaperLedger): {
   const closed = orders.filter(order => order.side === 'SELL' && Number.isFinite(order.pnlUsd));
   const wins = closed.filter(order => (order.pnlUsd || 0) > 0).length;
   const feeSlippageTotal = orders.reduce((sum, order) => sum + orderCosts(order), 0);
-  const attributionByAsset: Record<UnifiedPaperInstrumentType, number> = { stock: 0, crypto: 0, prediction: 0 };
-  const marketExposure: Record<UnifiedPaperInstrumentType, number> = { stock: 0, crypto: 0, prediction: 0 };
+  const attributionByAsset: Record<UnifiedPaperInstrumentType, number> = { stock: 0, option: 0, crypto: 0, prediction: 0 };
+  const marketExposure: Record<UnifiedPaperInstrumentType, number> = { stock: 0, option: 0, crypto: 0, prediction: 0 };
   const strategyAttribution: Record<string, number> = {};
   for (const order of closed) if (order.instrumentType) attributionByAsset[order.instrumentType] += Number(order.pnlUsd) || 0;
   for (const position of positions) {
@@ -173,11 +173,13 @@ export function calculateUnifiedPerformance(ledger: UnifiedPaperLedger): {
     concentrationPct: equity > 0 ? round((largestPositionValue / equity) * 100, 2) : 0,
     attributionByAsset: {
       stock: round(attributionByAsset.stock, 2),
+      option: round(attributionByAsset.option, 2),
       crypto: round(attributionByAsset.crypto, 2),
       prediction: round(attributionByAsset.prediction, 2),
     },
     marketExposure: {
       stock: round(marketExposure.stock, 2),
+      option: round(marketExposure.option, 2),
       crypto: round(marketExposure.crypto, 2),
       prediction: round(marketExposure.prediction, 2),
     },

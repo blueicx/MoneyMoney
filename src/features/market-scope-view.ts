@@ -17,10 +17,12 @@ export function scopeQuery(scope: string | undefined): string {
 export function scopeForInstrument(item: { type?: string; instrumentType?: string; id?: string }): MarketScope | null {
   const type = String(item.type || item.instrumentType || '').toLowerCase();
   if (type === 'stock') return 'stocks';
+  if (type === 'option') return 'options';
   if (type === 'crypto') return 'crypto';
   if (type === 'prediction') return 'prediction';
   const id = String(item.id || '').toLowerCase();
   if (id.startsWith('stock:')) return 'stocks';
+  if (id.startsWith('option:')) return 'options';
   if (id.startsWith('crypto:')) return 'crypto';
   if (id.startsWith('prediction:')) return 'prediction';
   return null;

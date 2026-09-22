@@ -10,29 +10,33 @@ const {
 } = require('../dist/features/unified-paper-trading');
 
 assert.equal(validateUnifiedPaperOrder({ instrumentId: 'stock:us:AAPL', instrumentType: 'stock', side: 'BUY', price: 100, quantity: 2 }).ok, true);
+assert.equal(validateUnifiedPaperOrder({ instrumentId: 'option:us:SPY:2027-01-15:500:C', instrumentType: 'option', side: 'BUY', price: 12, quantity: 10 }).ok, true);
 assert.equal(validateUnifiedPaperOrder({ instrumentId: 'crypto:binance:BTCUSDT', instrumentType: 'crypto', side: 'SELL', price: 100000, quantity: 0.01 }).ok, true);
 assert.equal(validateUnifiedPaperOrder({ instrumentId: 'prediction:predictfun:42', instrumentType: 'prediction', side: 'YES', price: 0.4, quantity: 10 }).ok, true);
 assert.equal(validateUnifiedPaperOrder({ instrumentId: 'prediction:predictfun:42', instrumentType: 'prediction', side: 'BUY', price: 0.4, quantity: 10 }).ok, false);
 
 let ledger = emptyUnifiedPaperLedger(1000);
+ledger = applyUnifiedPaperOrder(ledger, { instrumentId: 'option:us:SPY:2027-01-15:500:C', instrumentType: 'option', title: 'SPY Call', side: 'BUY', price: 12, quantity: 10, timestamp: '2026-09-08T00:30:00.000Z' });
+assert.equal(ledger.positions[0].instrumentType, 'option');
 ledger = applyUnifiedPaperOrder(ledger, { instrumentId: 'stock:us:AAPL', instrumentType: 'stock', title: 'Apple', side: 'BUY', price: 100, quantity: 2, timestamp: '2026-09-08T01:00:00.000Z' });
-assert.equal(ledger.cash, 800);
-assert.equal(ledger.positions[0].quantity, 2);
+assert.equal(ledger.cash, 680);
+assert.equal(ledger.positions.find(p => p.instrumentId === 'stock:us:AAPL').quantity, 2);
 ledger = applyUnifiedPaperOrder(ledger, { instrumentId: 'stock:us:AAPL', instrumentType: 'stock', title: 'Apple', side: 'SELL', price: 110, quantity: 1, timestamp: '2026-09-08T02:00:00.000Z' });
-assert.equal(ledger.cash, 910);
+assert.equal(ledger.cash, 790);
 assert.equal(ledger.realizedPnl, 10);
-assert.equal(ledger.positions[0].quantity, 1);
+assert.equal(ledger.positions.find(p => p.instrumentId === 'stock:us:AAPL').quantity, 1);
 
 ledger = applyUnifiedPaperOrder(ledger, { instrumentId: 'prediction:predictfun:42', instrumentType: 'prediction', title: 'Will it happen?', side: 'NO', price: 0.3, quantity: 100, timestamp: '2026-09-08T03:00:00.000Z' });
 assert.equal(ledger.positions.find(p => p.instrumentId.includes('prediction')).outcome, 'NO');
 ledger = markUnifiedPaperPrices(ledger, new Map([['stock:us:AAPL', 120], ['prediction:predictfun:42', 0.2]]));
 const performance = calculateUnifiedPerformance(ledger);
 assert.equal(performance.unrealizedPnl, 10);
-assert.equal(performance.totalTrades, 3);
+assert.equal(performance.totalTrades, 4);
 assert.equal(performance.feeSlippageTotal, 0);
 assert.equal(performance.isRecovered, true);
 assert.ok(performance.concentrationPct > 0);
 assert.ok(performance.attributionByAsset['stock'] !== undefined);
+assert.ok(performance.attributionByAsset['option'] !== undefined);
 assert.ok(performance.marketExposure.stock > 0);
 assert.ok(performance.strategyAttribution.unattributed !== undefined);
 assert.equal(performance.stressTests.length, 3);

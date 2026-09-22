@@ -2939,6 +2939,7 @@ app.get('/api/analysis', async (req, res) => {
 let lastAdvisorReport: Awaited<ReturnType<typeof generateAssistantReport>> | null = null;
 let advisorReportRefreshing = false;
 let telegramInteractionBot: TelegramInteractionBot | null = null;
+let telegramReloadPromise: Promise<void> = Promise.resolve();
 let telegramPriceMonitor: NodeJS.Timeout | null = null;
 let telegramSlowMonitor: NodeJS.Timeout | null = null;
 let telegramDigestMonitor: NodeJS.Timeout | null = null;
@@ -4484,6 +4485,7 @@ function startTelegramInteractionBot(): void {
     proxyUrl: telegramConfig.proxyUrl,
     allowedChatIds,
     pollLease: stateStore,
+    pollStateStore: stateStore,
     pollLeaseKey: 'telegram:getUpdates',
     handlers: commandHandlers,
     textHandlers,
@@ -4699,12 +4701,16 @@ ${escapeTelegramHtml(position.marketTitle)} · ${escapeTelegramHtml(position.out
   console.log(`  [telegram] interactive polling started (${allowedChatIds.size} allowed chat${allowedChatIds.size === 1 ? '' : 's'})`);
 }
 
-function reloadTelegramIntegration(): void {
-  stopTelegramCommandCenterMonitor();
-  telegramInteractionBot?.stop();
-  telegramInteractionBot = null;
-  startTelegramInteractionBot();
-  startTelegramCommandCenterMonitor();
+function reloadTelegramIntegration(): Promise<void> {
+  telegramReloadPromise = telegramReloadPromise.then(async () => {
+    stopTelegramCommandCenterMonitor();
+    const current = telegramInteractionBot;
+    telegramInteractionBot = null;
+    if (current) await current.stop();
+    startTelegramInteractionBot();
+    startTelegramCommandCenterMonitor();
+  });
+  return telegramReloadPromise;
 }
 
 const telegramSignalPushes = new Set<string>();
@@ -6703,7 +6709,7 @@ app.post('/api/settings/secrets', (req, res) => {
   if (typeof body.telegramPollingEnabled === 'boolean') patch.telegramPollingEnabled = body.telegramPollingEnabled;
   runtimeSecrets.update(patch);
   const updated = settingsManager.get();
-  reloadTelegramIntegration();
+  void reloadTelegramIntegration().catch(error => logger.error('telegram_reload_failed', { error: error instanceof Error ? error.message : String(error) }));
   res.json({
     success: true,
     ai: getAiConfigurationStatus(updated),
@@ -6841,15 +6847,21 @@ async function main() {
 
   // Keep process alive
 
-  process.on('SIGINT', () => {
+  let shuttingDown = false;
+  const shutdown = async () => {
+    if (shuttingDown) return;
+    shuttingDown = true;
     console.log('\n  Shutting down...');
     stopTelegramCommandCenterMonitor();
     reportScheduler.stop();
-    telegramInteractionBot?.stop();
-    server.close();
+    const current = telegramInteractionBot;
+    telegramInteractionBot = null;
+    await current?.stop();
+    await new Promise<void>(resolve => server.close(() => resolve()));
     process.exit(0);
-
-  });
+  };
+  process.on('SIGINT', () => { void shutdown(); });
+  process.on('SIGTERM', () => { void shutdown(); });
 
 }
 

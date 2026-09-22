@@ -28,6 +28,7 @@ test('scope query is stable and preserves legacy no-scope calls', () => {
 
 test('instrument references resolve to their market scope', () => {
   assert.equal(scopeForInstrument({ type: 'stock', id: 'stock:us:AAPL' }), 'stocks');
+  assert.equal(scopeForInstrument({ type: 'option', id: 'option:us:SPY:2027-01-15:500:C' }), 'options');
   assert.equal(scopeForInstrument({ type: 'crypto', id: 'crypto:binance:BTCUSDT' }), 'crypto');
   assert.equal(scopeForInstrument({ type: 'prediction', id: 'prediction:predictfun:42' }), 'prediction');
 });
@@ -96,6 +97,27 @@ test('unified paper ledger is isolated to the selected market', () => {
   assert.equal(stocks.cash, 910);
   assert.equal(stocks.realizedPnl, 10);
   assert.equal(filterUnifiedPaperLedger(ledger, 'overview'), ledger);
+});
+
+test('options positions and orders stay inside the options scope', () => {
+  const ledger = {
+    startingCash: 1000,
+    cash: 800,
+    positions: [
+      { instrumentId: 'option:us:SPY:2027-01-15:500:C', instrumentType: 'option' },
+      { instrumentId: 'stock:us:SPY', instrumentType: 'stock' },
+    ],
+    orders: [
+      { instrumentId: 'option:us:SPY:2027-01-15:500:C', instrumentType: 'option', side: 'BUY', price: 12, quantity: 10 },
+      { instrumentId: 'stock:us:SPY', instrumentType: 'stock', side: 'BUY', price: 500, quantity: 1 },
+    ],
+    realizedPnl: 0,
+    peakEquity: 1000,
+    maxDrawdownPct: 0,
+  };
+  const options = filterUnifiedPaperLedger(ledger, 'options');
+  assert.deepEqual(options.positions.map(item => item.instrumentId), ['option:us:SPY:2027-01-15:500:C']);
+  assert.deepEqual(options.orders.map(item => item.instrumentId), ['option:us:SPY:2027-01-15:500:C']);
 });
 
 test('risk overview keeps only the selected market and hides prediction radar outside prediction', () => {
