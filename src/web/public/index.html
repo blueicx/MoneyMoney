@@ -8282,7 +8282,10 @@ async function loadStockKline(symbol, name, apiSymbol) {
   if (name) currentStockName = name;
   if (apiSymbol !== undefined) currentStockApiSymbol = apiSymbol || '';
   if (asOfRevision === stockChartAsOfRevision) {
-    try { stockChartAsOf = localStorage.getItem(stockKlineAsOfStorageKey()) || ''; } catch (e) {}
+    try {
+      const storedAsOf = localStorage.getItem(stockKlineAsOfStorageKey()) || '';
+      if (storedAsOf || !stockChartAsOf) stockChartAsOf = storedAsOf;
+    } catch (e) {}
   }
   syncStockKlineAsOfControl();
   stockChartFocusIndex = null;
