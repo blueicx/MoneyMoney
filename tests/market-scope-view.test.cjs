@@ -120,6 +120,19 @@ test('options positions and orders stay inside the options scope', () => {
   assert.deepEqual(options.orders.map(item => item.instrumentId), ['option:us:SPY:2027-01-15:500:C']);
 });
 
+test('scoped ledger cash includes fees and slippage', () => {
+  const ledger = {
+    startingCash: 1000,
+    cash: 885,
+    positions: [{ instrumentId: 'stock:us:AAPL', instrumentType: 'stock' }],
+    orders: [{ instrumentId: 'stock:us:AAPL', instrumentType: 'stock', side: 'BUY', price: 100, quantity: 1, feeUsd: 10, slippageUsd: 5 }],
+    realizedPnl: 0,
+    peakEquity: 1000,
+    maxDrawdownPct: 0,
+  };
+  assert.equal(filterUnifiedPaperLedger(ledger, 'stocks').cash, 885);
+});
+
 test('risk overview keeps only the selected market and hides prediction radar outside prediction', () => {
   const overview = {
     groups: [{ name: '股票' }, { name: '币安' }, { name: '期权' }],

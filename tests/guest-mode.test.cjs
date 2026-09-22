@@ -40,9 +40,9 @@ test('guest access only permits explicit read-only GET paths', () => {
   assert.equal(auth.isGuestRequestAllowed('DELETE', '/watchlist/item'), false);
 });
 
-test('guest can read the stock library and search without gaining write access', () => {
+test('guest can read the stock library and search but cannot read private paper state', () => {
   assert.equal(auth.isGuestRequestAllowed('GET', '/watchlist'), true);
-  assert.equal(auth.isGuestRequestAllowed('GET', '/paper/positions'), true);
+  assert.equal(auth.isGuestRequestAllowed('GET', '/paper/positions'), false);
   assert.equal(auth.isGuestRequestAllowed('GET', '/stock/search'), true);
   assert.equal(auth.isGuestRequestAllowed('POST', '/watchlist'), false);
 });

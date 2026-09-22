@@ -37,7 +37,7 @@ export function filterUnifiedPaperLedger<T extends {
   startingCash: number;
   cash: number;
   positions: Array<{ instrumentId: string; instrumentType?: string }>;
-  orders: Array<{ instrumentId: string; instrumentType?: string; side?: string; price: number; quantity: number; pnlUsd?: number }>;
+  orders: Array<{ instrumentId: string; instrumentType?: string; side?: string; price: number; quantity: number; pnlUsd?: number; feeUsd?: number; slippageUsd?: number }>;
   realizedPnl: number;
   peakEquity: number;
   maxDrawdownPct: number;
@@ -47,7 +47,10 @@ export function filterUnifiedPaperLedger<T extends {
   const orders = filterByMarketScope(ledger.orders, scope);
   const cash = orders.reduce((balance, order) => {
     const notional = Number(order.price) * Number(order.quantity);
-    return order.side === 'SELL' ? balance + notional : balance - notional;
+    const fee = Number.isFinite(Number(order.feeUsd)) ? Math.abs(Number(order.feeUsd)) : 0;
+    const slippage = Number.isFinite(Number(order.slippageUsd)) ? Math.abs(Number(order.slippageUsd)) : 0;
+    const costs = fee + slippage;
+    return order.side === 'SELL' ? balance + notional - costs : balance - notional - costs;
   }, Number(ledger.startingCash) || 0);
   const realizedPnl = orders.reduce((sum, order) => sum + (Number(order.pnlUsd) || 0), 0);
   return { ...ledger, cash, positions, orders, realizedPnl, peakEquity: Math.max(Number(ledger.startingCash) || 0, cash), maxDrawdownPct: 0 };

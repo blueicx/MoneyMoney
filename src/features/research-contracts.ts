@@ -1,6 +1,9 @@
+import type { DataStatus } from './data-status';
+
+export type { DataStatus } from './data-status';
+
 export const MARKET_IDS = ['stocks', 'options', 'crypto', 'prediction'] as const;
 export type MarketId = typeof MARKET_IDS[number];
-export type DataStatus = 'live' | 'delayed' | 'cached' | 'partial' | 'empty' | 'unavailable';
 
 export interface MarketContext {
   market: MarketId;

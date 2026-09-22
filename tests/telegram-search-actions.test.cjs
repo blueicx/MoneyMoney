@@ -30,7 +30,16 @@ test('stock search rows contain both watchlist and quote actions', () => {
 });
 
 test('unified search fallbacks contain detail buttons', () => {
-  assert.match(server, /telegramScopedCallback\('unified:show', scope, `prediction:predictfun:\$\{item\.id\}`\)/);
-  assert.match(server, /telegramScopedCallback\('unified:show', scope === 'watchlist' \? 'watchlist' : 'stocks', 'stock:us:' \+ ticker\)/);
+  assert.match(server, /telegramScopedCallback\('unified:show', scope, `prediction:predictfun:\$\{item\.id\}`, chatId\)/);
+  assert.match(server, /telegramScopedCallback\('unified:show', scope === 'watchlist' \? 'watchlist' : 'stocks', 'stock:us:' \+ ticker, chatId\)/);
   assert.match(server, /const ticker = String\(tList\[i\]\.exchangeSymbol \|\| tList\[i\]\.code\)/);
+});
+
+test('context callbacks are signed, chat-bound, and one-time', () => {
+  assert.match(server, /crypto\.createHmac\('sha256', config\.jwtSecret\)/);
+  assert.match(server, /crypto\.timingSafeEqual/);
+  assert.match(server, /TELEGRAM_CALLBACK_STATE_KEY/);
+  assert.match(server, /activeRecords\.filter\(item => item\.token !== token\)/);
+  assert.match(server, /parseScopedTelegramCallback\(data, 'watch:add', ctx\.chatId\)/);
+  assert.match(server, /parseTelegramContextCallback\(data, 'quick:select', ctx\.chatId\)/);
 });

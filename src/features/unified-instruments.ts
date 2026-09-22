@@ -39,6 +39,7 @@ export interface InstrumentOverviewSection {
   id: 'quote' | 'history' | 'events' | 'news' | 'analysis' | 'timeline';
   label: string;
   status: InstrumentSectionStatus;
+  reason?: string;
 }
 
 export interface OverviewDataStatus {
@@ -62,6 +63,7 @@ export interface UnifiedInstrumentOverview {
   };
   freshness: Freshness;
   sourceStatus: Record<string, 'ok' | 'stale' | 'unavailable'>;
+  sectionReasons?: Partial<Record<InstrumentOverviewSection['id'], string>>;
   sections: InstrumentOverviewSection[];
   timeline: Array<Record<string, unknown>>;
   status: OverviewDataStatus;
@@ -157,11 +159,33 @@ export function buildInstrumentOverviewSections(input: Pick<UnifiedInstrumentOve
   return [
     { id: 'quote', label: '行情', status: quoteAvailable ? sectionStatus({ quote: input.sourceStatus.quote || 'unavailable' }) : 'unavailable' },
     { id: 'history', label: '历史', status: historyAvailable ? sectionStatus({ klines: input.sourceStatus.klines || 'unavailable' }) : 'unavailable' },
-    { id: 'events', label: '事件', status: eventsAvailable ? sectionStatus({ events: input.sourceStatus.events || 'unavailable' }) : 'unavailable' },
-    { id: 'news', label: '新闻', status: newsAvailable ? sectionStatus({ news: input.sourceStatus.news || 'unavailable' }) : 'unavailable' },
+    { id: 'events', label: '事件', status: eventsAvailable ? sectionStatus({ events: input.sourceStatus.events || 'unavailable' }) : 'unavailable', reason: (input as UnifiedInstrumentOverview).sectionReasons?.events },
+    { id: 'news', label: '新闻', status: newsAvailable ? sectionStatus({ news: input.sourceStatus.news || 'unavailable' }) : 'unavailable', reason: (input as UnifiedInstrumentOverview).sectionReasons?.news },
     { id: 'analysis', label: 'AI 分析', status: input.analysis.status === 'ready' ? 'live' : 'unavailable' },
     { id: 'timeline', label: '时间线', status: timelineAvailable ? 'live' : 'unavailable' },
   ];
+}
+
+/**
+ * The general event calendar contains macro and all-company rows. An
+ * instrument detail view must never copy that whole calendar into every
+ * stock. Only earnings whose canonical event identity belongs to the selected
+ * symbol are relevant here; other markets currently have no instrument event
+ * adapter and therefore return an explicit empty list.
+ */
+export function filterEventsForInstrument<T extends Pick<UpcomingEvent, 'id' | 'title' | 'category'>>(
+  events: T[],
+  ref: Pick<InstrumentRef, 'type' | 'symbol'>,
+): T[] {
+  if (ref.type !== 'stock') return [];
+  const symbol = clean(ref.symbol).toUpperCase();
+  if (!symbol) return [];
+  return events.filter(event => {
+    if (event.category !== 'earnings') return false;
+    const title = clean(event.title).toUpperCase();
+    const id = clean(event.id).toUpperCase();
+    return title.startsWith(`${symbol} `) || id.endsWith(`-${symbol}`);
+  });
 }
 
 function buildInstrumentTimeline(events: UpcomingEvent[], news: NewsItem[]): Array<Record<string, unknown>> {
@@ -227,6 +251,23 @@ async function searchCrypto(query: string): Promise<InstrumentSearchResult[]> {
   return [normalizeSearchResult({ type: 'crypto', venue: parsed.venue, symbol: parsed.symbol, title: parsed.symbol.replace(/USDT$/, '') + ' / USDT', aliases: [parsed.symbol], subtitle: 'Binance', price: ticker?.price, changePct: ticker?.change24hPct })];
 }
 
+async function searchOptions(query: string): Promise<InstrumentSearchResult[]> {
+  const parsed = parseInstrumentQuery(query);
+  const raw = parsed?.type === 'option' ? parsed.symbol.split(':')[0] : query;
+  const symbol = clean(raw).replace(/[^A-Za-z0-9.-]/g, '').toUpperCase();
+  if (!/^[A-Z][A-Z0-9.-]{0,9}$/.test(symbol)) return [];
+  try {
+    const snapshot = await getEquityOptionsSnapshot(symbol);
+    return [normalizeSearchResult({
+      type: 'option', venue: 'cboe', symbol: snapshot.asset || symbol,
+      title: `${snapshot.asset || symbol} 期权`, aliases: [symbol], subtitle: snapshot.source,
+      price: snapshot.spot, changePct: snapshot.quote?.changePercent,
+    })];
+  } catch {
+    return [];
+  }
+}
+
 function predictionResult(market: PredictionMarket): InstrumentSearchResult {
   return normalizeSearchResult({
     type: 'prediction', venue: 'predictfun', symbol: String(market.id), marketId: String(market.id), title: market.titleZh || market.title,
@@ -239,13 +280,14 @@ export class UnifiedInstrumentService {
     const q = clean(query);
     if (!q) return [];
     const parsed = parseInstrumentQuery(q);
-    const [stocks, crypto] = await Promise.all([
+    const [stocks, crypto, options] = await Promise.all([
       parsed?.type === 'crypto' || parsed?.type === 'option' ? Promise.resolve([]) : searchStocks(q),
       searchCrypto(q),
+      scope === 'options' || parsed?.type === 'option' ? searchOptions(q) : Promise.resolve([]),
     ]);
     const radar = getCachedPredictionRadarSlice(q, 12);
     const predictions = (radar?.markets || []).map(predictionResult);
-    const deduped = dedupeInstrumentRefs([...stocks, ...crypto, ...predictions]) as InstrumentSearchResult[];
+    const deduped = dedupeInstrumentRefs([...stocks, ...options, ...crypto, ...predictions]) as InstrumentSearchResult[];
     return filterInstrumentResults(deduped, scope).slice(0, 20);
   }
 
@@ -306,12 +348,25 @@ export class UnifiedInstrumentService {
         ? newsFeed.getNews()
         : Promise.resolve([] as NewsItem[]);
     const [eventsResult, newsResult] = await Promise.allSettled([getUpcomingEventCalendar(7), newsPromise]);
-    const events = eventsResult.status === 'fulfilled' ? eventsResult.value.events : [];
+    const allEvents = eventsResult.status === 'fulfilled' ? eventsResult.value.events : [];
+    const events = filterEventsForInstrument(allEvents, normalized);
     const news = newsResult.status === 'fulfilled' ? newsResult.value : [];
     if (eventsResult.status === 'fulfilled') sourceStatus.events = 'ok';
     if (newsResult.status === 'fulfilled' && news.length) sourceStatus.news = 'ok';
+    const sectionReasons: UnifiedInstrumentOverview['sectionReasons'] = {
+      events: eventsResult.status === 'rejected'
+        ? '事件来源不可用，请稍后重试'
+        : normalized.type === 'stock'
+          ? (events.length ? undefined : `暂无 ${normalized.symbol} 的财报事件`)
+          : '当前市场暂不支持标的事件日历',
+      news: newsResult.status === 'rejected'
+        ? '新闻来源不可用，请稍后重试'
+        : news.length
+          ? undefined
+          : normalized.type === 'stock' ? `暂无 ${normalized.symbol} 的相关新闻` : '当前市场暂不支持标的新闻',
+    };
     const base: UnifiedInstrumentOverview = {
-      instrument: normalized, quote, marketData, klines, events, news, analysis: emptyAnalysis,
+      instrument: normalized, quote, marketData, klines, events, news, analysis: emptyAnalysis, sectionReasons,
       freshness: freshnessStatus(fetchedAt, normalized.type === 'crypto' ? 30_000 : 5 * 60_000), sourceStatus,
       sections: [], timeline: [], status: overviewDataStatus(sourceStatus),
     };

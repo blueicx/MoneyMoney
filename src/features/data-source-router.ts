@@ -1,4 +1,6 @@
-export type DataStatus = 'live' | 'cached' | 'partial' | 'degraded' | 'unavailable' | 'empty';
+import type { DataStatus as CanonicalDataStatus } from './data-status';
+
+export type DataStatus = CanonicalDataStatus;
 export type DataQuality = 'high' | 'medium' | 'low';
 export type DataDataset = 'quote' | 'bars' | 'depth' | 'funding' | 'openInterest' | 'optionsChain' | 'fundamentals' | 'filings' | 'news' | 'events' | 'settlementEvidence';
 

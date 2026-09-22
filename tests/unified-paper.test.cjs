@@ -11,6 +11,7 @@ const {
 
 assert.equal(validateUnifiedPaperOrder({ instrumentId: 'stock:us:AAPL', instrumentType: 'stock', side: 'BUY', price: 100, quantity: 2 }).ok, true);
 assert.equal(validateUnifiedPaperOrder({ instrumentId: 'option:us:SPY:2027-01-15:500:C', instrumentType: 'option', side: 'BUY', price: 12, quantity: 10 }).ok, true);
+assert.equal(validateUnifiedPaperOrder({ instrumentId: 'option:us:SPY:2027-01-15:500:C', instrumentType: 'stock', side: 'BUY', price: 12, quantity: 10 }).ok, false);
 assert.equal(validateUnifiedPaperOrder({ instrumentId: 'crypto:binance:BTCUSDT', instrumentType: 'crypto', side: 'SELL', price: 100000, quantity: 0.01 }).ok, true);
 assert.equal(validateUnifiedPaperOrder({ instrumentId: 'prediction:predictfun:42', instrumentType: 'prediction', side: 'YES', price: 0.4, quantity: 10 }).ok, true);
 assert.equal(validateUnifiedPaperOrder({ instrumentId: 'prediction:predictfun:42', instrumentType: 'prediction', side: 'BUY', price: 0.4, quantity: 10 }).ok, false);

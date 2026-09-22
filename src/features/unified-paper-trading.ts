@@ -47,10 +47,13 @@ export function emptyUnifiedPaperLedger(startingCash = 1000): UnifiedPaperLedger
 }
 
 export function validateUnifiedPaperOrder(input: Partial<UnifiedPaperOrder>): { ok: boolean; error?: string } {
-  if (!String(input.instrumentId || '').trim()) return { ok: false, error: '必须提供标的 ID' };
+  const instrumentId = String(input.instrumentId || '').trim();
+  if (!instrumentId) return { ok: false, error: '必须提供标的 ID' };
   if (!['stock', 'option', 'crypto', 'prediction'].includes(String(input.instrumentType))) return { ok: false, error: '标的类型无效' };
+  const inferredType = instrumentTypeFromId(instrumentId);
+  if (inferredType && inferredType !== input.instrumentType) return { ok: false, error: '标的类型与规范化 ID 不一致' };
   const allowed = input.instrumentType === 'prediction' ? ['YES', 'NO'] : ['BUY', 'SELL'];
-  if (!allowed.includes(String(input.side))) return { ok: false, error: input.instrumentType === 'prediction' ? '预测市场订单只能选择 YES 或 NO' : '股票和加密资产订单只能选择 BUY 或 SELL' };
+  if (!allowed.includes(String(input.side))) return { ok: false, error: input.instrumentType === 'prediction' ? '预测市场订单只能选择 YES 或 NO' : '股票、期权和加密资产订单只能选择 BUY 或 SELL' };
   if (!Number.isFinite(Number(input.price)) || Number(input.price) <= 0) return { ok: false, error: '价格必须大于 0' };
   if (input.instrumentType === 'prediction' && Number(input.price) > 1) return { ok: false, error: '预测市场价格必须在 0 到 1 之间' };
   if (!Number.isFinite(Number(input.quantity)) || Number(input.quantity) <= 0) return { ok: false, error: '数量必须大于 0' };
@@ -59,6 +62,14 @@ export function validateUnifiedPaperOrder(input: Partial<UnifiedPaperOrder>): { 
 }
 
 function round(value: number, digits = 8): number { const factor = 10 ** digits; return Math.round(value * factor) / factor; }
+function instrumentTypeFromId(value: string): UnifiedPaperInstrumentType | null {
+  const id = String(value || '').trim().toLowerCase();
+  if (id.startsWith('stock:')) return 'stock';
+  if (id.startsWith('option:')) return 'option';
+  if (id.startsWith('crypto:')) return 'crypto';
+  if (id.startsWith('prediction:')) return 'prediction';
+  return null;
+}
 function positionKey(order: UnifiedPaperOrder): string { return `${order.instrumentId}:${order.instrumentType === 'prediction' ? order.side : 'direction'}`; }
 function orderCosts(order: UnifiedPaperOrder): number {
   const fee = Number(order.feeUsd);

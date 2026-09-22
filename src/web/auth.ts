@@ -60,7 +60,6 @@ const GUEST_GET_PREFIXES = [
   '/market-ticker',
   '/workspace',
   '/watchlist',
-  '/paper/positions',
   '/evidence',
   '/data',
   '/scenarios',

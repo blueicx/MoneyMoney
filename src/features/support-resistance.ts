@@ -38,6 +38,17 @@ interface CacheEntry {
 const cache = new Map<string, CacheEntry>();
 const CACHE_TTL_MS = 120_000; // 2 minutes
 
+/** Score how recently a level was touched within the supplied history window. */
+export function supportResistanceRecencyScore(lastTouchTime: number, historyStartTime: number, now = Date.now()): number {
+  const last = Number(lastTouchTime);
+  const start = Number(historyStartTime);
+  const current = Number(now);
+  if (![last, start, current].every(Number.isFinite)) return 0;
+  const observedSpan = Math.max(current - start, 1);
+  const age = Math.max(0, current - last);
+  return Math.round(Math.max(0, Math.min(30, 30 * (1 - age / observedSpan))) * 100) / 100;
+}
+
 interface SwingPoint {
   price: number;
   time: number;
@@ -133,8 +144,9 @@ export async function getSupportResistance(symbol = 'BTCUSDT', interval = '4h'):
       .filter(l => type === 'support' ? l.price <= currentPrice : l.price >= currentPrice)
       .map(l => {
         const touchScore = Math.min(40, l.touches * 10);
-        const recencyScore = Math.min(30, ((now - l.lastTouchTime) / ageSpan) > 0 ? 0 : 0); // placeholder
-        const recentBonus = (now - l.lastTouchTime) / ageSpan < 0.15 ? 15 : (now - l.lastTouchTime) / ageSpan < 0.4 ? 8 : 0;
+        const recencyScore = supportResistanceRecencyScore(l.lastTouchTime, times[0], now);
+        const ageRatio = Math.max(0, now - l.lastTouchTime) / ageSpan;
+        const recentBonus = ageRatio < 0.15 ? 15 : ageRatio < 0.4 ? 8 : 0;
         const volScore = Math.min(20, (l.totalVolume / maxVol) * 20);
         const proximityScore = Math.max(0, 10 - Math.abs(l.price - currentPrice) / currentPrice * 100 * 2);
         return {
@@ -142,7 +154,7 @@ export async function getSupportResistance(symbol = 'BTCUSDT', interval = '4h'):
           price: l.price,
           touches: l.touches,
           lastTouchTime: new Date(l.lastTouchTime).toISOString(),
-          strength: Math.min(100, Math.round(touchScore + recentBonus + volScore + proximityScore)),
+          strength: Math.min(100, Math.round(touchScore + recencyScore + recentBonus + volScore + proximityScore)),
           distancePct: Math.round(((l.price - currentPrice) / currentPrice * 100) * 100) / 100,
         };
       })

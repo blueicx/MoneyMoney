@@ -8,6 +8,7 @@ const {
   freshnessStatus,
   buildInstrumentOverviewSections,
   overviewDataStatus,
+  filterEventsForInstrument,
   UNIFIED_AI_CACHE_TTL_MS,
 } = require('../dist/features/unified-instruments');
 
@@ -51,5 +52,14 @@ assert.deepEqual(sections.map(section => section.id), ['quote', 'history', 'even
 assert.equal(sections.find(section => section.id === 'quote').status, 'live');
 assert.equal(overviewDataStatus({ quote: 'ok', market: 'unavailable', klines: 'ok' }).state, 'degraded');
 assert.equal(overviewDataStatus({ quote: 'stale', market: 'unavailable', klines: 'unavailable' }).state, 'cached');
+
+const eventRows = [
+  { id: 'earnings-2026-09-16-AAPL', title: 'AAPL 财报', category: 'earnings' },
+  { id: 'earnings-2026-09-16-SNDK', title: 'SNDK 财报', category: 'earnings' },
+  { id: 'macro-cpi', title: 'CPI y/y', category: 'macro' },
+];
+assert.deepEqual(filterEventsForInstrument(eventRows, { type: 'stock', symbol: 'AAPL' }).map(item => item.id), ['earnings-2026-09-16-AAPL']);
+assert.deepEqual(filterEventsForInstrument(eventRows, { type: 'stock', symbol: 'SNDK' }).map(item => item.id), ['earnings-2026-09-16-SNDK']);
+assert.deepEqual(filterEventsForInstrument(eventRows, { type: 'crypto', symbol: 'BTCUSDT' }), []);
 
 console.log('unified instrument helpers: all assertions passed');

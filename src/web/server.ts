@@ -138,6 +138,7 @@ import { paperTradingExecutor } from '../features/trading-executor';
 import { unifiedPaperLedgerStore, calculateUnifiedPerformance, replayUnifiedPaperOrders, type UnifiedPaperOrder } from '../features/unified-paper-trading';
 import { logger } from '../utils/logger';
 import { buildSourceSlo, runtimeObservability } from '../features/runtime-observability';
+import { createDataEnvelope } from '../features/data-status';
 import { dataLakeCatalog } from '../storage/data-lake';
 import { dataLakeWorker } from '../storage/data-lake-worker';
 import { EventStudyRepository, runEventStudy } from '../features/event-study';
@@ -197,6 +198,21 @@ app.use('/api', createAccessMiddleware({
   token: config.accessToken,
   maxRequests: 180,
 }));
+// Every JSON API response gets the same request correlation field. This keeps
+// source failures, retries, and browser/Telegram reports traceable without
+// requiring each legacy route to hand-copy the request id.
+app.use((req, res, next) => {
+  const requestId = String(res.getHeader('X-Request-Id') || req.headers['x-request-id'] || crypto.randomUUID());
+  res.setHeader('X-Request-Id', requestId);
+  const originalJson = res.json.bind(res);
+  res.json = ((body: any) => {
+    if (body && typeof body === 'object' && !Array.isArray(body) && body.requestId == null) {
+      return originalJson({ ...body, requestId });
+    }
+    return originalJson(body);
+  }) as typeof res.json;
+  next();
+});
 app.use('/api', (req, res, next) => {
   const isWrite = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method);
   const isHealthEndpoint = req.path === '/health' || req.path.startsWith('/health/');
@@ -466,17 +482,18 @@ function decisionMarket(value: unknown): MarketId {
   return market;
 }
 
-function decisionEnvelope(input: { market: MarketId; instrument?: string | null; data: unknown; dataStatus?: string; source?: string; reason?: string | null; updatedAt?: string }) {
-  return {
-    success: true,
+function decisionEnvelope(input: { market: MarketId; instrument?: string | null; data: unknown; dataStatus?: unknown; source?: string; reason?: string | null; updatedAt?: string; evidenceRefs?: string[]; requestId?: string | null }) {
+  return createDataEnvelope({
     market: input.market,
-    instrument: input.instrument || null,
+    instrument: input.instrument,
+    data: input.data,
     dataStatus: input.dataStatus || 'live',
     source: input.source || 'MoneyMoney research state',
     updatedAt: input.updatedAt || new Date().toISOString(),
-    reason: input.reason || null,
-    data: input.data,
-  };
+    reason: input.reason,
+    evidenceRefs: input.evidenceRefs,
+    requestId: input.requestId,
+  });
 }
 
 const SCENARIO_PRESETS: ScenarioDefinition[] = [
@@ -3132,8 +3149,8 @@ function telegramScopeHeader(scope: MarketScope): string {
   return `当前市场：${TELEGRAM_SCOPE_LABELS[scope]} · scope=${scope}`;
 }
 
-function telegramScopedCallback(prefix: string, scope: MarketScope, instrumentId: string): string {
-  return `${prefix}:${scope}:${encodeURIComponent(String(instrumentId || ''))}`;
+function telegramScopedCallback(prefix: string, scope: MarketScope, instrumentId: string, chatId?: string): string {
+  return issueTelegramCallback(prefix, { scope, id: instrumentId, workspace: 'analysis', chatId });
 }
 
 const TELEGRAM_CONTEXT_WORKSPACES: Record<string, string> = {
@@ -3154,19 +3171,108 @@ function telegramWorkspaceForType(type: string): string {
   return TELEGRAM_CONTEXT_WORKSPACES[type] || 'analysis';
 }
 
+interface TelegramCallbackRecord {
+  token: string;
+  action: string;
+  scope: MarketScope;
+  id: string;
+  timeframe: string;
+  workspace: string;
+  chatId?: string;
+  expiresAt: number;
+  signature: string;
+}
+
+const TELEGRAM_CALLBACK_STATE_KEY = 'telegram-callback-records';
+const TELEGRAM_CALLBACK_TTL_MS = 15 * 60_000;
+
+function telegramCallbackSignature(record: Omit<TelegramCallbackRecord, 'signature'>): string {
+  const canonical = [record.action, record.scope, record.id, record.timeframe, record.workspace, record.chatId || '', record.expiresAt, record.token].join('|');
+  return crypto.createHmac('sha256', config.jwtSecret).update(canonical).digest('base64url').slice(0, 12);
+}
+
+function safeTelegramCallbackSignature(left: string, right: string): boolean {
+  const a = Buffer.from(String(left));
+  const b = Buffer.from(String(right));
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
+function saveTelegramCallbackRecord(record: TelegramCallbackRecord): void {
+  const now = Date.now();
+  const records = (stateStore.get<TelegramCallbackRecord[]>(TELEGRAM_CALLBACK_STATE_KEY) || [])
+    .filter(item => item.expiresAt > now && item.token !== record.token)
+    .slice(-499);
+  stateStore.set(TELEGRAM_CALLBACK_STATE_KEY, [...records, record], 1);
+}
+
+function issueTelegramCallback(action: string, input: { scope: MarketScope; id: string; timeframe?: string; workspace?: string; chatId?: string }): string {
+  const token = crypto.randomBytes(6).toString('base64url');
+  const unsigned: Omit<TelegramCallbackRecord, 'signature'> = {
+    token,
+    action,
+    scope: input.scope,
+    id: String(input.id || ''),
+    timeframe: input.timeframe || '1h',
+    workspace: input.workspace || 'analysis',
+    ...(input.chatId ? { chatId: String(input.chatId) } : {}),
+    expiresAt: Date.now() + TELEGRAM_CALLBACK_TTL_MS,
+  };
+  const record = { ...unsigned, signature: telegramCallbackSignature(unsigned) };
+  saveTelegramCallbackRecord(record);
+  return `${action}:${token}:${record.signature}`;
+}
+
+function consumeTelegramCallback(data: string, action: string, chatId?: string): TelegramCallbackRecord | null {
+  const raw = String(data || '').slice(action.length + 1);
+  const parts = raw.split(':');
+  if (parts.length !== 2) return null;
+  const [token, signature] = parts;
+  const now = Date.now();
+  const records = stateStore.get<TelegramCallbackRecord[]>(TELEGRAM_CALLBACK_STATE_KEY) || [];
+  const activeRecords = records.filter(item => item.expiresAt > now);
+  const record = activeRecords.find(item => item.token === token) || null;
+  if (!record || record.action !== action) {
+    if (activeRecords.length !== records.length) stateStore.set(TELEGRAM_CALLBACK_STATE_KEY, activeRecords, 1);
+    return null;
+  }
+  if (record.chatId && String(record.chatId) !== String(chatId || '')) {
+    if (activeRecords.length !== records.length) stateStore.set(TELEGRAM_CALLBACK_STATE_KEY, activeRecords, 1);
+    return null;
+  }
+  if (!safeTelegramCallbackSignature(record.signature, signature) || record.signature !== telegramCallbackSignature({
+    token: record.token,
+    action: record.action,
+    scope: record.scope,
+    id: record.id,
+    timeframe: record.timeframe,
+    workspace: record.workspace,
+    ...(record.chatId ? { chatId: record.chatId } : {}),
+    expiresAt: record.expiresAt,
+  })) {
+    if (activeRecords.length !== records.length) stateStore.set(TELEGRAM_CALLBACK_STATE_KEY, activeRecords, 1);
+    return null;
+  }
+  stateStore.set(TELEGRAM_CALLBACK_STATE_KEY, activeRecords.filter(item => item.token !== token), 1);
+  return record;
+}
+
 /**
  * New quick-lookup callbacks carry the complete mobile context. Keep the
  * compact workspace code so callback_data remains below Telegram's limit.
  */
-function telegramContextCallback(action: string, ref: any, workspace: string, timeframe = '1h'): string {
+function telegramContextCallback(action: string, ref: any, workspace: string, timeframe = '1h', chatId?: string): string {
   const scope = telegramInstrumentScope(ref.type);
-  const code = TELEGRAM_CONTEXT_WORKSPACE_CODES[workspace] || 'an';
-  const expiresAt = (Date.now() + 15 * 60_000).toString(36);
-  const nonce = Math.random().toString(36).slice(2, 7);
-  return `${action}:${scope}:${encodeURIComponent(String(ref.id || ''))}:${encodeURIComponent(timeframe)}:${code}:${expiresAt}:${nonce}`;
+  return issueTelegramCallback(action, { scope, id: ref.id, timeframe, workspace, chatId });
 }
 
-function parseTelegramContextCallback(data: string, action: string): { scope: MarketScope; id: string; timeframe: string; workspace: string; ref: any } | null {
+function parseTelegramContextCallback(data: string, action: string, chatId?: string): { scope: MarketScope; id: string; timeframe: string; workspace: string; ref: any } | null {
+  const signed = consumeTelegramCallback(data, action, chatId);
+  if (signed) {
+    const ref = telegramRefFromId(signed.id);
+    if (!ref || telegramInstrumentScope(ref.type) !== signed.scope) return null;
+    if (signed.workspace !== 'analysis' && signed.workspace !== telegramWorkspaceForType(ref.type)) return null;
+    return { scope: signed.scope, id: signed.id, timeframe: signed.timeframe, workspace: signed.workspace, ref };
+  }
   const raw = String(data || '').slice(action.length + 1);
   const parts = raw.split(':');
   if (![4, 6].includes(parts.length) || !MARKET_SCOPES.includes(parts[0] as MarketScope)) return null;
@@ -3184,7 +3290,9 @@ function parseTelegramContextCallback(data: string, action: string): { scope: Ma
   return { scope, id, timeframe, workspace, ref };
 }
 
-function parseScopedTelegramCallback(data: string, prefix: string): { scope: MarketScope | null; id: string } {
+function parseScopedTelegramCallback(data: string, prefix: string, chatId?: string): { scope: MarketScope | null; id: string } {
+  const signed = consumeTelegramCallback(data, prefix, chatId);
+  if (signed) return { scope: signed.scope, id: signed.id };
   const raw = String(data || '').slice(prefix.length + 1);
   const separator = raw.indexOf(':');
   if (separator > 0) {
@@ -3192,6 +3300,9 @@ function parseScopedTelegramCallback(data: string, prefix: string): { scope: Mar
     if (MARKET_SCOPES.includes(maybeScope)) {
       return { scope: maybeScope, id: decodeURIComponent(raw.slice(separator + 1)) };
     }
+    // A short-token callback with a bad signature must not be reinterpreted
+    // as a legacy unscoped instrument ID.
+    if (raw.split(':').length === 2) return { scope: null, id: '' };
   }
   return { scope: null, id: decodeURIComponent(raw) };
 }
@@ -3957,7 +4068,7 @@ export function getTelegramCommandHandlers(): Record<string, TelegramCommandHand
       if (!isTelegramBareQueryScope(scope)) return '请先发送 /start 或 /market stocks|options|crypto|prediction 选择当前市场，再查询标的。';
       const candidates = await telegramQuickCandidates(query, scope);
       if (!candidates.length) return `未找到“${escapeTelegramHtml(query)}”。没有可用数据时不会生成伪行情。`;
-      if (candidates.length !== 1) return telegramQuickCandidateReply(query, candidates);
+      if (candidates.length !== 1) return telegramQuickCandidateReply(query, candidates, chatId);
       telegramCommandCenterStore.setActiveMarketScope(chatId, telegramInstrumentScope(candidates[0].type));
       const detail = await unifiedInstrumentService.overview(candidates[0]).catch(() => null);
       if (!detail) return `已找到${escapeTelegramHtml(candidates[0].id)}，但当前来源不可用：暂无详情数据。`;
@@ -3978,7 +4089,7 @@ export function getTelegramCommandHandlers(): Record<string, TelegramCommandHand
       const unified = filterInstrumentResults(await unifiedInstrumentService.search(query).catch(() => []), scope);
       if (unified.length) {
         const lines = [`<b>${TELEGRAM_SCOPE_LABELS[scope]}标的搜索</b> · ${escapeTelegramHtml(query)}`, telegramScopeHeader(scope), ...unified.slice(0, 8).map((item, index) => `${index + 1}. ${escapeTelegramHtml(item.title)}\n   ${escapeTelegramHtml(item.id)} · ${escapeTelegramHtml(item.subtitle || '')}${item.price == null ? '' : ` · ${formatTelegramNumber(item.price, item.type === 'prediction' ? 3 : 4)}`}`)];
-        const kb = unified.slice(0, 8).map(item => [{ text: `加自选 ${String(item.title).slice(0, 8)}`, callback_data: telegramScopedCallback('watch:add', scope, item.id) }, { text: '查看详情', callback_data: telegramScopedCallback('unified:show', scope, item.id) }]);
+        const kb = unified.slice(0, 8).map(item => [{ text: `加自选 ${String(item.title).slice(0, 8)}`, callback_data: telegramScopedCallback('watch:add', scope, item.id, chatId) }, { text: '查看详情', callback_data: telegramScopedCallback('unified:show', scope, item.id, chatId) }]);
         return telegramInlineReply(lines.join('\n'), kb);
       }
       if (scope === 'options' && /^[a-z][a-z0-9.-]{0,9}$/i.test(query)) {
@@ -3998,7 +4109,7 @@ export function getTelegramCommandHandlers(): Record<string, TelegramCommandHand
           for (let i = 0; i < tList.length; i++) {
             if (tList[i].market === '美股' || String(tList[i].code).startsWith('us')) {
               const ticker = String(tList[i].exchangeSymbol || tList[i].code).replace(/^us/i, '').replace(/\.[A-Z]+$/i, '').toUpperCase();
-              if (ticker && stockKb[i]) stockKb[i].push({ text: '查看详情', callback_data: telegramScopedCallback('unified:show', scope === 'watchlist' ? 'watchlist' : 'stocks', 'stock:us:' + ticker) });
+              if (ticker && stockKb[i]) stockKb[i].push({ text: '查看详情', callback_data: telegramScopedCallback('unified:show', scope === 'watchlist' ? 'watchlist' : 'stocks', 'stock:us:' + ticker, chatId) });
             }
           }
         }
@@ -4012,7 +4123,7 @@ export function getTelegramCommandHandlers(): Record<string, TelegramCommandHand
       const allLines = [...radarLines, ...(radarLines.length && stockHeader.length ? [''] : []), ...stockHeader, '', (matches.length? '\u9884\u6d4b\u7ed3\u679c\u6765\u81ea\u96f7\u8fbe\u5feb\u7167\uff1b' : '') + (stockLines.length? '\u80a1\u7968\u884c\u60c5\u6765\u81ea\u817e\u8baf\u884c\u60c5\uff1b':'') + '\u70b9\u51fb\u6309\u94ae\u53ef\u5feb\u901f\u52a0\u5165\u81ea\u9009/\u89e3\u91ca/\u5f00\u4ed3/\u67e5\u770b\u884c\u60c5\u3002'].join('\n');
       const kb = [];
       for(const item of matches){
-        kb.push([{ text: `\u52a0\u81ea\u9009 ${String(item.titleZh || item.title).slice(0,8)}`, callback_data: telegramScopedCallback('watch:add', scope, `prediction:predictfun:${item.id}`) }, { text: `\u89e3\u91ca`, callback_data: `explain:${item.id}` }, { text: `\u5f00\u4ed3`, callback_data: `paper:pick:${item.id}` }, { text: `查看详情`, callback_data: telegramScopedCallback('unified:show', scope, `prediction:predictfun:${item.id}`) }]);
+        kb.push([{ text: `\u52a0\u81ea\u9009 ${String(item.titleZh || item.title).slice(0,8)}`, callback_data: telegramScopedCallback('watch:add', scope, `prediction:predictfun:${item.id}`, chatId) }, { text: `\u89e3\u91ca`, callback_data: `explain:${item.id}` }, { text: `\u5f00\u4ed3`, callback_data: `paper:pick:${item.id}` }, { text: `查看详情`, callback_data: telegramScopedCallback('unified:show', scope, `prediction:predictfun:${item.id}`, chatId) }]);
       }
       for(const row of stockKb) kb.push(row);
       if(!kb.length) return telegramReply(allLines || '\u6682\u65e0\u7ed3\u679c');
@@ -4092,7 +4203,7 @@ export function getTelegramCommandHandlers(): Record<string, TelegramCommandHand
         // check so a cross-market paper order receives the explicit rejection
         // below. Bare-symbol lookup remains strictly limited to currentScope.
         const candidates = await telegramQuickCandidates(refText, currentScope, true);
-        if (candidates.length !== 1) return candidates.length ? telegramQuickCandidateReply(refText, candidates) : `未找到“${escapeTelegramHtml(refText)}”，请使用完整 InstrumentRef。`;
+        if (candidates.length !== 1) return candidates.length ? telegramQuickCandidateReply(refText, candidates, chatId) : `未找到“${escapeTelegramHtml(refText)}”，请使用完整 InstrumentRef。`;
         const ref = candidates[0];
         const itemScope = telegramInstrumentScope(ref.type);
         if (itemScope === 'options') return '期权纸面订单需要期权链、Greeks 和合约乘数，当前 Telegram 入口暂不可用，请从网页期权工作区操作。';
@@ -4372,7 +4483,7 @@ export function getTelegramCommandHandlers(): Record<string, TelegramCommandHand
       const query = args.join(' ').trim();
       if (query) {
         const candidates = await telegramQuickCandidates(query, telegramScopeForChat(chatId));
-        if (candidates.length !== 1) return candidates.length ? telegramQuickCandidateReply(query, candidates) : `未找到“${escapeTelegramHtml(query)}”，无法打开K线。`;
+        if (candidates.length !== 1) return candidates.length ? telegramQuickCandidateReply(query, candidates, chatId) : `未找到“${escapeTelegramHtml(query)}”，无法打开K线。`;
         const ref = candidates[0];
         const scope = telegramInstrumentScope(ref.type);
         telegramCommandCenterStore.setActiveMarketScope(chatId, scope);
@@ -4386,7 +4497,7 @@ export function getTelegramCommandHandlers(): Record<string, TelegramCommandHand
       const query = args.join(' ').trim();
       if (!query) return '用法：/replay <代码或InstrumentRef>，例如 /replay stock:us:AAPL 或 /replay BTCUSDT';
       const candidates = await telegramQuickCandidates(query, telegramScopeForChat(chatId));
-      if (candidates.length !== 1) return candidates.length ? telegramQuickCandidateReply(query, candidates) : `未找到“${escapeTelegramHtml(query)}”，无法打开回放。`;
+      if (candidates.length !== 1) return candidates.length ? telegramQuickCandidateReply(query, candidates, chatId) : `未找到“${escapeTelegramHtml(query)}”，无法打开回放。`;
       const ref = candidates[0];
       const scope = telegramInstrumentScope(ref.type);
       telegramCommandCenterStore.setActiveMarketScope(chatId, scope);
@@ -4499,13 +4610,13 @@ function startTelegramInteractionBot(): void {
     unknownCallbackHandler: async (ctx: any) => {
       const data = String(ctx?.data || '');
       if (data.startsWith('quick:select:')) {
-        const parsed = parseTelegramContextCallback(data, 'quick:select');
+        const parsed = parseTelegramContextCallback(data, 'quick:select', ctx.chatId);
         if (!parsed) return telegramReply('按钮上下文已失效，请重新发送代码查询。');
         telegramCommandCenterStore.setActiveMarketScope(ctx.chatId, parsed.scope);
         return commandHandlers.quick({ chatId: ctx.chatId, command: 'quick', args: [parsed.id], message: ctx.message, update: ctx.update });
       }
       if (data.startsWith('quick:watch:')) {
-        const parsed = parseTelegramContextCallback(data, 'quick:watch');
+        const parsed = parseTelegramContextCallback(data, 'quick:watch', ctx.chatId);
         if (!parsed) return telegramReply('自选按钮上下文已失效，请重新查询标的。');
         telegramCommandCenterStore.setActiveMarketScope(ctx.chatId, parsed.scope);
         telegramCommandCenterStore.updateSession(ctx.chatId, { marketScope: parsed.scope, workspace: parsed.workspace, instrumentId: parsed.ref.id, timeframe: parsed.timeframe });
@@ -4515,7 +4626,7 @@ function startTelegramInteractionBot(): void {
         return telegramReply(changed ? `✅ 已加入${escapeTelegramHtml(TELEGRAM_SCOPE_LABELS[parsed.scope])}自选：${escapeTelegramHtml(parsed.ref.title || parsed.ref.symbol)}` : '该标的已在自选中。');
       }
       if (data.startsWith('quick:backtest:')) {
-        const parsed = parseTelegramContextCallback(data, 'quick:backtest');
+        const parsed = parseTelegramContextCallback(data, 'quick:backtest', ctx.chatId);
         if (!parsed) return telegramReply('回测按钮上下文已失效，请重新查询标的。');
         telegramCommandCenterStore.setActiveMarketScope(ctx.chatId, parsed.scope);
         telegramCommandCenterStore.updateSession(ctx.chatId, { marketScope: parsed.scope, workspace: parsed.workspace, instrumentId: parsed.ref.id, timeframe: parsed.timeframe });
@@ -4523,14 +4634,14 @@ function startTelegramInteractionBot(): void {
         return commandHandlers.backtest({ chatId: ctx.chatId, command: 'backtest', args: [parsed.ref.symbol], message: ctx.message, update: ctx.update });
       }
       if (data.startsWith('quick:alert:')) {
-        const parsed = parseTelegramContextCallback(data, 'quick:alert');
+        const parsed = parseTelegramContextCallback(data, 'quick:alert', ctx.chatId);
         if (!parsed) return telegramReply('提醒按钮上下文已失效，请重新查询标的。');
         telegramCommandCenterStore.setActiveMarketScope(ctx.chatId, parsed.scope);
         telegramCommandCenterStore.updateSession(ctx.chatId, { marketScope: parsed.scope, workspace: parsed.workspace, instrumentId: parsed.ref.id, timeframe: parsed.timeframe });
         return telegramReply(`已识别${escapeTelegramHtml(parsed.ref.symbol)}。请发送 /alert ${escapeTelegramHtml(parsed.ref.symbol)} above <价格> 或 /alert ${escapeTelegramHtml(parsed.ref.symbol)} below <价格> 创建价格提醒。`);
       }
       if (data.startsWith('quick:timeline:')) {
-        const parsed = parseTelegramContextCallback(data, 'quick:timeline');
+        const parsed = parseTelegramContextCallback(data, 'quick:timeline', ctx.chatId);
         if (!parsed) return telegramReply('时间线按钮已过期，请重新查询标的。');
         telegramCommandCenterStore.updateSession(ctx.chatId, { marketScope: parsed.scope, workspace: parsed.workspace, instrumentId: parsed.ref.id, timeframe: parsed.timeframe });
         return commandHandlers.timeline({ chatId: ctx.chatId, command: 'timeline', args: [parsed.id], message: ctx.message, update: ctx.update });
@@ -4592,7 +4703,7 @@ ${escapeTelegramHtml(position.marketTitle)} · ${escapeTelegramHtml(position.out
       }
       if (data.startsWith('unified:show:')) {
         const currentScope = telegramScopeForChat(ctx.chatId);
-        const parsed = parseScopedTelegramCallback(data, 'unified:show');
+        const parsed = parseScopedTelegramCallback(data, 'unified:show', ctx.chatId);
         const id = parsed.id;
         if (parsed.scope && parsed.scope !== 'overview' && parsed.scope !== 'watchlist' && currentScope !== 'overview' && currentScope !== 'watchlist' && parsed.scope !== currentScope) {
           return telegramReply(`该按钮属于${TELEGRAM_SCOPE_LABELS[parsed.scope]}市场，请先切换当前市场。`);
@@ -4608,7 +4719,7 @@ ${escapeTelegramHtml(position.marketTitle)} · ${escapeTelegramHtml(position.out
       }
       if (data.startsWith('watch:add:')) {
         const currentScope = telegramScopeForChat(ctx.chatId);
-        const parsed = parseScopedTelegramCallback(data, 'watch:add');
+        const parsed = parseScopedTelegramCallback(data, 'watch:add', ctx.chatId);
         const mid = parsed.id;
         if (parsed.scope && parsed.scope !== 'overview' && parsed.scope !== 'watchlist' && currentScope !== 'overview' && currentScope !== 'watchlist' && parsed.scope !== currentScope) {
           return telegramReply(`该按钮属于${TELEGRAM_SCOPE_LABELS[parsed.scope]}市场，请先切换当前市场。`);
@@ -6395,16 +6506,16 @@ function telegramQuickReply(chatId: string, ref: any, detail: any, query: string
   const scope = telegramInstrumentScope(ref.type);
   const keyboard: TelegramInlineKeyboardButton[][] = [
     [
-      { text: '⭐ 加入自选', callback_data: telegramContextCallback('quick:watch', ref, workspace) },
-      link ? { text: '📈 K线/详情', url: link } : { text: '📈 K线/详情', callback_data: telegramScopedCallback('unified:show', scope, ref.id) },
+      { text: '⭐ 加入自选', callback_data: telegramContextCallback('quick:watch', ref, workspace, '1h', chatId) },
+      link ? { text: '📈 K线/详情', url: link } : { text: '📈 K线/详情', callback_data: telegramScopedCallback('unified:show', scope, ref.id, chatId) },
     ],
     [
-      analysisLink ? { text: '🧠 研究分析', url: analysisLink } : { text: '🧠 研究分析', callback_data: telegramScopedCallback('unified:show', scope, ref.id) },
-      { text: '🧪 回测入口', callback_data: telegramContextCallback('quick:backtest', ref, workspace) },
+      analysisLink ? { text: '🧠 研究分析', url: analysisLink } : { text: '🧠 研究分析', callback_data: telegramScopedCallback('unified:show', scope, ref.id, chatId) },
+      { text: '🧪 回测入口', callback_data: telegramContextCallback('quick:backtest', ref, workspace, '1h', chatId) },
     ],
     [
-      { text: '📰 新闻/事件', callback_data: telegramContextCallback('quick:timeline', ref, workspace) },
-      { text: '🔔 设置提醒', callback_data: telegramContextCallback('quick:alert', ref, workspace) },
+      { text: '📰 新闻/事件', callback_data: telegramContextCallback('quick:timeline', ref, workspace, '1h', chatId) },
+      { text: '🔔 设置提醒', callback_data: telegramContextCallback('quick:alert', ref, workspace, '1h', chatId) },
     ],
   ];
   return telegramInlineReply([
@@ -6438,7 +6549,7 @@ async function telegramQuickCandidates(query: string, scope: MarketScope = 'over
   return candidates.filter(item => !seen.has(item.id) && seen.add(item.id)).slice(0, 12);
 }
 
-function telegramQuickCandidateReply(query: string, candidates: any[]): TelegramReply {
+function telegramQuickCandidateReply(query: string, candidates: any[], chatId?: string): TelegramReply {
   const groups: Record<string, any[]> = {};
   for (const item of candidates) (groups[item.type] ||= []).push(item);
   const labels: Record<string, string> = { stock: '股票', option: '期权', crypto: '虚拟币', prediction: '预测市场' };
@@ -6448,8 +6559,8 @@ function telegramQuickCandidateReply(query: string, candidates: any[]): Telegram
     for (const item of groups[type] || []) {
       lines.push(`· ${labels[type]}：${escapeTelegramHtml(item.title)} · <code>${escapeTelegramHtml(item.id)}</code>${item.subtitle ? ` · ${escapeTelegramHtml(item.subtitle)}` : ''}`);
       keyboard.push([
-        { text: `${labels[type]} ${String(item.title).slice(0, 10)}`, callback_data: telegramContextCallback('quick:select', item, telegramWorkspaceForType(type)) },
-        { text: '⭐ 加自选', callback_data: telegramContextCallback('quick:watch', item, telegramWorkspaceForType(type)) },
+        { text: `${labels[type]} ${String(item.title).slice(0, 10)}`, callback_data: telegramContextCallback('quick:select', item, telegramWorkspaceForType(type), '1h', chatId) },
+        { text: '⭐ 加自选', callback_data: telegramContextCallback('quick:watch', item, telegramWorkspaceForType(type), '1h', chatId) },
       ]);
     }
   }
