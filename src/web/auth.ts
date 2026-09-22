@@ -25,6 +25,7 @@ export type AuthRole = 'admin' | 'guest';
 // Guest access is an explicit GET-only allowlist. Anything not listed here,
 // including all writes, remains admin-only by default.
 const GUEST_GET_PREFIXES = [
+  '/overview',
   '/categories',
   '/markets',
   '/stock',
@@ -46,6 +47,7 @@ const GUEST_GET_PREFIXES = [
   '/treasury-yields',
   '/earnings',
   '/cross-asset',
+  '/cross-asset-correlation',
   '/perpetual',
   '/funding',
   '/order-flow',

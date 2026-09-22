@@ -27,6 +27,8 @@ test('normal login tokens remain admin tokens', () => {
 });
 
 test('guest access only permits explicit read-only GET paths', () => {
+  assert.equal(auth.isGuestRequestAllowed('GET', '/overview'), true);
+  assert.equal(auth.isGuestRequestAllowed('GET', '/cross-asset-correlation'), true);
   assert.equal(auth.isGuestRequestAllowed('GET', '/markets'), true);
   assert.equal(auth.isGuestRequestAllowed('GET', '/stock/quotes'), true);
   assert.equal(auth.isGuestRequestAllowed('GET', '/news'), true);
@@ -63,4 +65,10 @@ test('login and dashboard expose the guest read-only state', () => {
   assert.match(loginHtml, /\/api\/auth\/guest/, 'guest button calls guest endpoint');
   assert.match(authClientSrc, /mm_isGuest/, 'dashboard tracks guest state');
   assert.match(indexHtml, /访客模式/, 'dashboard labels guest mode');
+});
+
+test('guest dashboard does not request private ops data', () => {
+  const commandCenter = indexHtml.slice(indexHtml.indexOf('async function loadCommandCenter'), indexHtml.indexOf('async function loadOpsConsole'));
+  assert.match(commandCenter, /mm_isGuest/);
+  assert.match(commandCenter, /\/api\/ops/);
 });

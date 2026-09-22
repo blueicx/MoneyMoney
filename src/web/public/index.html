@@ -9609,14 +9609,16 @@ async function loadCommandCenter() {
   const actions = document.getElementById('command-actions');
   const streams = document.getElementById('command-workstreams');
   if (!host || !actions || !streams) return;
+  if (window.mm_authReady) await window.mm_authReady;
+  const isGuest = Boolean(window.mm_isGuest);
   host.innerHTML = '<div style="color:var(--text-secondary);font-size:13px;">正在汇总风险、研究和自动化状态...</div>';
   try {
     const [riskRes, opsRes] = await Promise.all([
       fetch('/api/risk/overview', { cache: 'no-store' }),
-      fetch('/api/ops', { cache: 'no-store' }),
+      isGuest ? Promise.resolve(null) : fetch('/api/ops', { cache: 'no-store' }),
     ]);
     const riskBody = await riskRes.json();
-    const opsBody = await opsRes.json();
+    const opsBody = opsRes ? await opsRes.json() : { data: { overview: {}, jobs: [] } };
     if (!riskBody.success) throw new Error(riskBody.error || '风险总览暂不可用');
     const risk = riskBody.data;
     const ops = opsBody.data || { overview: {}, jobs: [] };
