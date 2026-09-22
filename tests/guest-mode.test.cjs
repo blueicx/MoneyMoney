@@ -99,3 +99,12 @@ test('dashboard bootstrap waits for auth before loading private widgets', () => 
   assert.match(bootstrap, /loadAll\(\)/);
   assert.match(bootstrap, /loadCommandCenter\(\)/);
 });
+
+test('guest dashboard does not request private briefing or wallet balance', () => {
+  const briefing = indexHtml.slice(indexHtml.indexOf('async function loadResearchBriefing'), indexHtml.indexOf('// --- Market Overview Bar ---'));
+  const balance = indexHtml.slice(indexHtml.indexOf('async function loadBalance'), indexHtml.indexOf('async function loadWallet'));
+  assert.match(briefing, /mm_isGuest/);
+  assert.match(briefing, /mm_isLoggedIn/);
+  assert.match(balance, /mm_isGuest/);
+  assert.match(balance, /mm_isLoggedIn/);
+});

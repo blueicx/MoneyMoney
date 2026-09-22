@@ -8890,6 +8890,12 @@ function drawMACD(canvas, klines) {
 async function loadResearchBriefing(force = false) {
   const el = document.getElementById('research-briefing');
   if (!el) return;
+  const auth = await waitForDashboardAuthState();
+  const canReadPrivate = window.mm_isLoggedIn === true && !window.mm_isGuest && privateDashboardSessionReady(auth);
+  if (!canReadPrivate) {
+    renderPrivateWidgetLocked(el, '访客模式不读取包含模拟盘风险的私有研究简报。');
+    return;
+  }
   if (currentResearchBriefingController) currentResearchBriefingController.abort();
   currentResearchBriefingController = new AbortController();
   const signal = currentResearchBriefingController.signal;
@@ -10212,6 +10218,9 @@ function observeCategoryCards() {
   });
 }
 async function loadBalance() {
+  const auth = await waitForDashboardAuthState();
+  const canReadPrivate = window.mm_isLoggedIn === true && !window.mm_isGuest && privateDashboardSessionReady(auth);
+  if (!canReadPrivate) return;
   try {
     const res = await fetch('/api/balance');
     const data = await res.json();
