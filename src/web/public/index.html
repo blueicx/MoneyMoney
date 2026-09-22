@@ -3992,7 +3992,23 @@ async function runMonteCarlo() {
     resultEl.innerHTML = `<div style="color:var(--red);font-size:12px;padding:8px 0;">${safeNewsText(e.message)}</div>`;
   }
 }
+async function waitForDashboardAuthState() {
+  const deadline = Date.now() + 2500;
+  while (!window.mm_authReady && Date.now() < deadline) {
+    await new Promise(resolve => setTimeout(resolve, 0));
+  }
+  if (window.mm_authReady) await window.mm_authReady.catch(() => null);
+  return { loggedIn: window.mm_isLoggedIn === true, guest: window.mm_isGuest === true };
+}
+function privateDashboardSessionReady(auth = {}) {
+  return auth.loggedIn === true && auth.guest !== true;
+}
+function renderPrivateWidgetLocked(element, message = '访客模式仅支持公开数据；登录后查看私有数据。') {
+  if (element) element.innerHTML = `<div class="empty-tip">${safeNewsText(message)}</div>`;
+}
 async function loadScopedPaperPortfolio() {
+  const auth = await waitForDashboardAuthState();
+  const canReadPrivate = window.mm_isLoggedIn === true && !window.mm_isGuest && privateDashboardSessionReady(auth);
   const token = marketScopeRequestToken();
   const statsEl = document.getElementById('paper-stats');
   const positionsEl = document.getElementById('paper-positions');
@@ -4003,6 +4019,10 @@ async function loadScopedPaperPortfolio() {
   const adminEl = document.querySelector('#paper-tab .guest-admin-only');
   if (monteCarloEl) monteCarloEl.hidden = true;
   if (adminEl) adminEl.hidden = true;
+  if (!canReadPrivate) {
+    [statsEl, positionsEl, tradesEl, riskEl, curveEl].forEach(element => renderPrivateWidgetLocked(element));
+    return;
+  }
   try {
     const [perfRes, posRes, ledgerRes] = await Promise.all([
       fetch(scopedUrl('/api/paper/performance')),
@@ -4029,6 +4049,16 @@ async function loadScopedPaperPortfolio() {
   }
 }
 async function loadPaperPortfolio() {
+  const auth = await waitForDashboardAuthState();
+  const canReadPrivate = window.mm_isLoggedIn === true && !window.mm_isGuest && privateDashboardSessionReady(auth);
+  if (!canReadPrivate) {
+    ['paper-stats', 'paper-positions', 'paper-trades', 'paper-risk-metrics', 'paper-equity-chart'].forEach(id => renderPrivateWidgetLocked(document.getElementById(id)));
+    const monteCarloEl = document.getElementById('paper-monte-carlo');
+    const adminEl = document.querySelector('#paper-tab .guest-admin-only');
+    if (monteCarloEl) monteCarloEl.hidden = true;
+    if (adminEl) adminEl.hidden = true;
+    return;
+  }
   if (!['overview', 'prediction'].includes(activeMarketScope)) return loadScopedPaperPortfolio();
   const monteCarloEl = document.getElementById('paper-monte-carlo');
   const adminEl = document.querySelector('#paper-tab .guest-admin-only');
@@ -4178,7 +4208,7 @@ async function loadPaperPortfolio() {
     // Recent trades
     // Unified Performance (Admin only)
     try {
-      if (!document.body.classList.contains('guest-mode')) {
+      if (privateDashboardSessionReady({ loggedIn: window.mm_isLoggedIn === true, guest: window.mm_isGuest === true })) {
         const [perfRes, posRes] = await Promise.all([
           fetch('/api/paper/performance'),
           fetch('/api/paper/positions')
@@ -5976,11 +6006,13 @@ function stockNameForSymbol(symbol) {
   return STOCK_QUICK_SYMBOLS.find(item => item[0] === normalized)?.[1] || normalized;
 }
 let stockLibraryPromise = null;
-function stockLibraryData(force = false) {
+async function stockLibraryData(force = false) {
   if (!force && stockLibraryPromise) return stockLibraryPromise;
+  const auth = await waitForDashboardAuthState();
+  const canReadPrivate = window.mm_isLoggedIn === true && !window.mm_isGuest && privateDashboardSessionReady(auth);
   stockLibraryPromise = Promise.allSettled([
     fetch('/api/watchlist', { cache: 'no-store' }).then(response => response.json()),
-    fetch('/api/paper/positions?scope=stocks', { cache: 'no-store' }).then(response => response.json()),
+    canReadPrivate ? fetch('/api/paper/positions?scope=stocks', { cache: 'no-store' }).then(response => response.json()) : Promise.resolve(null),
   ]).then(([watchResult, paperResult]) => {
     const watchPayload = watchResult.status === 'fulfilled' ? watchResult.value : null;
     const paperPayload = paperResult.status === 'fulfilled' ? paperResult.value : null;
@@ -5995,7 +6027,7 @@ function stockLibraryData(force = false) {
       const price = Number(position.currentPrice || position.averageEntryPrice || 0);
       return { symbol, name: position.title || stockNameForSymbol(symbol), meta: `模拟持仓 · ${quantity} × ${price.toFixed(4)}` };
     }).filter(Boolean);
-    return { watchlist, paper, watchOk: watchPayload?.success !== false, paperOk: paperPayload?.success !== false };
+    return { watchlist, paper, watchOk: watchPayload?.success !== false, paperOk: canReadPrivate && paperPayload?.success !== false, paperPrivate: !canReadPrivate };
   });
   return stockLibraryPromise;
 }
@@ -6086,7 +6118,7 @@ async function loadStockInstrumentLibrary(force = false) {
   try {
     const data = await stockLibraryData(force);
     renderStockLibraryList(watchlist, data.watchlist, data.watchOk ? '暂无股票自选。' : '股票自选暂时不可用。');
-    renderStockLibraryList(paper, data.paper, data.paperOk ? '暂无股票模拟持仓。' : '模拟持仓暂时不可用。');
+    renderStockLibraryList(paper, data.paper, data.paperPrivate ? '访客模式不读取私有模拟持仓。' : data.paperOk ? '暂无股票模拟持仓。' : '模拟持仓暂时不可用。');
   } catch (error) {
     const message = `<div class="empty-tip" style="color:var(--red);">${safeNewsText(error.message || '股票标的库加载失败')}</div>`;
     watchlist.innerHTML = message;
@@ -9609,13 +9641,14 @@ async function loadCommandCenter() {
   const actions = document.getElementById('command-actions');
   const streams = document.getElementById('command-workstreams');
   if (!host || !actions || !streams) return;
-  if (window.mm_authReady) await window.mm_authReady;
+  const auth = await waitForDashboardAuthState();
   const isGuest = Boolean(window.mm_isGuest);
+  const canReadPrivate = window.mm_isLoggedIn === true && !isGuest && privateDashboardSessionReady(auth);
   host.innerHTML = '<div style="color:var(--text-secondary);font-size:13px;">正在汇总风险、研究和自动化状态...</div>';
   try {
     const [riskRes, opsRes] = await Promise.all([
       fetch('/api/risk/overview', { cache: 'no-store' }),
-      isGuest ? Promise.resolve(null) : fetch('/api/ops', { cache: 'no-store' }),
+      canReadPrivate ? fetch('/api/ops', { cache: 'no-store' }) : Promise.resolve(null),
     ]);
     const riskBody = await riskRes.json();
     const opsBody = opsRes ? await opsRes.json() : { data: { overview: {}, jobs: [] } };
@@ -10015,6 +10048,15 @@ async function loadOpsConsole() {
   const jobsEl = document.getElementById('ops-jobs');
   const overviewEl = document.getElementById('ops-overview');
   if (!jobsEl || !overviewEl) return;
+  const auth = await waitForDashboardAuthState();
+  const canReadPrivate = window.mm_isLoggedIn === true && !window.mm_isGuest && privateDashboardSessionReady(auth);
+  if (!canReadPrivate) {
+    overviewEl.innerHTML = '<div class="empty-tip">访客模式不读取私有运维状态。</div>';
+    jobsEl.innerHTML = '<div class="empty-tip">登录后查看任务、诊断和数据源运行状态。</div>';
+    const diagnosticsEl = document.getElementById('runtime-diagnostics');
+    renderPrivateWidgetLocked(diagnosticsEl, '访客模式不读取私有运行诊断。');
+    return;
+  }
   jobsEl.innerHTML = '<div class="empty-tip">正在读取自动化状态...</div>';
   const diagnosticsEl = document.getElementById('runtime-diagnostics');
   if (diagnosticsEl) fetch(`/api/diagnostics?market=${encodeURIComponent(['stocks','options','crypto','prediction'].includes(activeMarketScope) ? activeMarketScope : '')}`, { cache: 'no-store' }).then(response => response.json()).then(body => {
@@ -10185,6 +10227,9 @@ async function loadBalance() {
   }
 }
 async function loadWallet() {
+  const auth = await waitForDashboardAuthState();
+  const canReadPrivate = window.mm_isLoggedIn === true && !window.mm_isGuest && privateDashboardSessionReady(auth);
+  if (!canReadPrivate) return;
   try {
     const res = await fetch('/api/wallet');
     const data = await res.json();
@@ -13246,15 +13291,19 @@ async function submitSellOrder() {
 document.getElementById('sell-modal').addEventListener('click', (e) => {
   if (e.target.id === 'sell-modal') closeSellModal();
 });
-initTheme();
-activeMarketScope = readInitialMarketScope();
-restoreWorkspaceContextFromUrl();
-renderNavigationState();
-loadAll();
-loadCommandCenter();
-loadNewsTicker();
-loadMarketTimeline();
-renderChartPatternControls();
+async function startDashboard() {
+  await waitForDashboardAuthState();
+  initTheme();
+  activeMarketScope = readInitialMarketScope();
+  restoreWorkspaceContextFromUrl();
+  renderNavigationState();
+  loadAll();
+  loadCommandCenter();
+  loadNewsTicker();
+  loadMarketTimeline();
+  renderChartPatternControls();
+}
+startDashboard();
 // Restore last visited tab from localStorage.
 (function restoreLastTab() {
   const requestedWorkspaceFromUrl = new URLSearchParams(location.search).get('workspace');

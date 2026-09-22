@@ -70,5 +70,32 @@ test('login and dashboard expose the guest read-only state', () => {
 test('guest dashboard does not request private ops data', () => {
   const commandCenter = indexHtml.slice(indexHtml.indexOf('async function loadCommandCenter'), indexHtml.indexOf('async function loadOpsConsole'));
   assert.match(commandCenter, /mm_isGuest/);
+  assert.match(commandCenter, /mm_isLoggedIn/);
   assert.match(commandCenter, /\/api\/ops/);
+});
+
+test('private dashboard loaders guard guest and unresolved auth state', () => {
+  const paperLoader = indexHtml.slice(indexHtml.indexOf('async function loadScopedPaperPortfolio'), indexHtml.indexOf('// --- Backtest ---'));
+  const opsLoader = indexHtml.slice(indexHtml.indexOf('async function loadOpsConsole'), indexHtml.indexOf('async function runOpsJob'));
+  const walletLoader = indexHtml.slice(indexHtml.indexOf('async function loadWallet'), indexHtml.indexOf('function categoryCardHtml'));
+  assert.match(paperLoader, /mm_isGuest/);
+  assert.match(paperLoader, /mm_isLoggedIn/);
+  assert.match(opsLoader, /mm_isGuest/);
+  assert.match(opsLoader, /mm_isLoggedIn/);
+  assert.match(walletLoader, /mm_isGuest/);
+  assert.match(walletLoader, /mm_isLoggedIn/);
+});
+
+test('stock library does not request private paper positions for guests', () => {
+  const stockLibrary = indexHtml.slice(indexHtml.indexOf('function stockLibraryData'), indexHtml.indexOf('async function loadStockInstrumentLibrary'));
+  assert.match(stockLibrary, /mm_isGuest/);
+  assert.match(stockLibrary, /\/api\/paper\/positions\?scope=stocks/);
+  assert.match(stockLibrary, /Promise\.resolve\(null\)/);
+});
+
+test('dashboard bootstrap waits for auth before loading private widgets', () => {
+  const bootstrap = indexHtml.slice(indexHtml.indexOf('async function startDashboard'), indexHtml.indexOf('// Restore last visited tab'));
+  assert.match(bootstrap, /authReady|waitForDashboardAuthState/);
+  assert.match(bootstrap, /loadAll\(\)/);
+  assert.match(bootstrap, /loadCommandCenter\(\)/);
 });
