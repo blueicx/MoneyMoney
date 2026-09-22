@@ -41,3 +41,24 @@ test('stable K-line route keeps explicit market scope and no cross-market fallba
   assert.match(block, /market.*stocks|market.*crypto|market.*options|market.*prediction/s);
   assert.match(block, /unavailable|暂无数据|当前市场不支持/);
 });
+
+test('K-line time machine reads persisted asOf snapshots without live fallback', () => {
+  const start = serverSource.indexOf('async function scopedKlinePayload');
+  assert.ok(start >= 0);
+  const block = serverSource.slice(start, start + 6000);
+  assert.match(block, /queryBarsAsOf\(/);
+  assert.match(block, /asOf/);
+  assert.match(block, /没有在 asOf 时点之前发布的数据分区|历史数据不可用|来源不可用/);
+  const stockRoute = serverSource.slice(serverSource.indexOf("app.get('/api/stock/kline'"), serverSource.indexOf("app.get('/api/diagnostics'"));
+  assert.match(stockRoute, /asOf/);
+  assert.match(stockRoute, /queryBarsAsOf\(/);
+  assert.match(stockRoute, /不回退|historical|历史/);
+});
+
+test('stock K-line UI exposes an explicit data time machine control', () => {
+  const html = fs.readFileSync('src/web/public/index.html', 'utf8');
+  assert.match(html, /data-chart-as-of/);
+  assert.match(html, /applyStockKlineAsOf/);
+  assert.match(html, /clearStockKlineAsOf/);
+  assert.match(html, /[?&]asOf=/);
+});

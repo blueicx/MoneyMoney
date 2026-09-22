@@ -103,6 +103,16 @@ test('data lake persists revisions and point-in-time snapshots for reproducible 
   } finally { catalog.close(); fs.rmSync(root, { recursive: true, force: true }); }
 });
 
+test('asOf reads clip observations after the requested historical moment', async () => {
+  const { root, catalog } = tempCatalog();
+  try {
+    await catalog.stageBars({ market: 'stocks', dataset: 'bars', instrument: 'AAPL', timeframe: '1d', source: 'test-source', publishedAt: '2026-08-31T00:00:00.000Z', rows: stockRows });
+    const result = await catalog.queryBarsAsOf({ market: 'stocks', instrument: 'AAPL', timeframe: '1d', asOf: '2026-09-01T12:00:00.000Z' });
+    assert.equal(result.rows.length, 1);
+    assert.equal(new Date(String(result.rows[0].timestamp)).toISOString(), '2026-09-01T00:00:00.000Z');
+  } finally { catalog.close(); fs.rmSync(root, { recursive: true, force: true }); }
+});
+
 test('data lake persists stock corporate actions and provider contracts with market scope', async () => {
   const { root, catalog } = tempCatalog();
   try {

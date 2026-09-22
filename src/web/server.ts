@@ -1933,6 +1933,7 @@ app.get('/api/stock/kline', async (req, res) => {
     const symbol = String(req.query.symbol || 'sh600519');
     const rawApiSymbol = String(req.query.api || '').trim().toUpperCase();
     const period = String(req.query.period || req.query.interval || '1d').trim().toLowerCase();
+    const asOf = String(req.query.asOf || '').trim();
     const periodConfig = STOCK_KLINE_PERIODS[period as keyof typeof STOCK_KLINE_PERIODS];
     if (!periodConfig) {
       return res.json({
@@ -1945,6 +1946,24 @@ app.get('/api/stock/kline', async (req, res) => {
       });
     }
     const requestedSymbol = rawApiSymbol || symbol;
+    if (asOf) {
+      const historical = await dataLakeCatalog.queryBarsAsOf({ market: 'stocks', instrument: requestedSymbol.trim().toUpperCase(), timeframe: period, asOf });
+      const data = historical.rows.map(row => {
+        const time = row.timestamp instanceof Date ? row.timestamp.getTime() : Date.parse(String(row.timestamp));
+        return { time, open: Number(row.open), high: Number(row.high), low: Number(row.low), close: Number(row.close), volume: Number(row.volume || 0) };
+      }).filter(row => [row.time, row.open, row.high, row.low, row.close].every(Number.isFinite));
+      const historicalReason = data.length ? undefined : (historical.reason || '历史股票K线数据不可用，未回退到实时数据');
+      return res.json({
+        success: data.length > 0,
+        data: data.length ? data : null,
+        dataStatus: data.length ? 'historical' : historical.dataStatus,
+        source: historical.source || 'MoneyMoney 本地时点数据湖',
+        updatedAt: historical.updatedAt || asOf,
+        asOf,
+        snapshotId: historical.snapshot?.id || null,
+        reason: historicalReason,
+      });
+    }
     const adapter = getStockKlineAdapter(period, requestedSymbol);
     const snapshot = await adapter.fetch({ symbol: requestedSymbol, period });
     const updatedAt = snapshot.fetchedAt || new Date().toISOString();
@@ -6666,6 +6685,12 @@ function overlayQueryConfig(query: Record<string, unknown>): Record<string, unkn
     indicators: { ma: String(query.ma || 'true') !== 'false', boll: String(query.boll || 'false') === 'true', macd: String(query.macd || 'false') === 'true' },
   };
 }
+function normalizeHistoricalKlineBars(rows: Array<Record<string, unknown>>): Array<{ time: number; open: number; high: number; low: number; close: number; volume: number }> {
+  return rows.map(row => {
+    const time = row.timestamp instanceof Date ? row.timestamp.getTime() : Date.parse(String(row.timestamp));
+    return { time, open: Number(row.open), high: Number(row.high), low: Number(row.low), close: Number(row.close), volume: Number(row.volume || 0) };
+  }).filter(row => [row.time, row.open, row.high, row.low, row.close].every(Number.isFinite));
+}
 async function scopedKlinePayload(marketInput: string, instrumentInput: string, query: Record<string, unknown>) {
   if (!MARKET_IDS.includes(marketInput as MarketId)) throw new Error('Invalid market context');
   const market = marketInput as MarketId;
@@ -6673,15 +6698,35 @@ async function scopedKlinePayload(marketInput: string, instrumentInput: string, 
   if (!rawInstrument) throw new Error('Instrument is required');
   const instrument = normalizeInstrumentRef({ type: scopedInstrumentType(market), venue: scopedVenue(market), symbol: rawInstrument, title: rawInstrument, aliases: [], marketId: market });
   assertMarketContext({ market, workspace: 'kline', instrument: instrument.id });
-  const overview = await unifiedInstrumentService.overview(instrument);
-  const bars = Array.isArray(overview.klines) ? overview.klines : [];
-  const klineSource = Object.entries(overview.sourceStatus).find(([key, status]) => key.toLowerCase().includes('kline') && status !== 'unavailable')?.[0] || null;
-  const dataStatus = bars.length ? (overview.sourceStatus.klines === 'stale' ? 'cached' : 'live') : (overview.status.state === 'unavailable' ? 'unavailable' : 'empty');
-  const reason = bars.length ? null : (overview.status.reason || (market === 'options' || market === 'prediction' ? '当前市场暂未提供 K 线数据' : '来源不可用'));
-  const normalizedBars = bars.map((bar: any) => ({ ...bar, time: Number(bar.time), open: Number(bar.open), high: Number(bar.high), low: Number(bar.low), close: Number(bar.close), volume: Number(bar.volume || 0) })).filter((bar: any) => [bar.time, bar.open, bar.high, bar.low, bar.close].every(Number.isFinite));
+  const timeframe = String(query.timeframe || '1h');
+  const asOf = String(query.asOf || '').trim();
+  let normalizedBars: Array<{ time: number; open: number; high: number; low: number; close: number; volume: number }> = [];
+  let dataStatus: string;
+  let klineSource: string | null = null;
+  let updatedAt: string;
+  let reason: string | null = null;
+  let snapshotId: string | null = null;
+  if (asOf) {
+    const lakeInstrument = market === 'stocks' || market === 'crypto' ? instrument.symbol.toUpperCase() : rawInstrument;
+    const historical = await dataLakeCatalog.queryBarsAsOf({ market, instrument: lakeInstrument, timeframe, asOf });
+    normalizedBars = normalizeHistoricalKlineBars(historical.rows);
+    dataStatus = normalizedBars.length ? 'historical' : historical.dataStatus;
+    klineSource = historical.source || 'MoneyMoney 本地时点数据湖';
+    updatedAt = historical.updatedAt || asOf;
+    snapshotId = historical.snapshot?.id || null;
+    reason = normalizedBars.length ? null : (historical.reason || '历史K线数据不可用，未回退到实时数据');
+  } else {
+    const overview = await unifiedInstrumentService.overview(instrument);
+    const bars = Array.isArray(overview.klines) ? overview.klines : [];
+    klineSource = Object.entries(overview.sourceStatus).find(([key, status]) => key.toLowerCase().includes('kline') && status !== 'unavailable')?.[0] || null;
+    dataStatus = bars.length ? (overview.sourceStatus.klines === 'stale' ? 'cached' : 'live') : (overview.status.state === 'unavailable' ? 'unavailable' : 'empty');
+    reason = bars.length ? null : (overview.status.reason || (market === 'options' || market === 'prediction' ? '当前市场暂未提供 K 线数据' : '来源不可用'));
+    normalizedBars = bars.map((bar: any) => ({ ...bar, time: Number(bar.time), open: Number(bar.open), high: Number(bar.high), low: Number(bar.low), close: Number(bar.close), volume: Number(bar.volume || 0) })).filter((bar: any) => [bar.time, bar.open, bar.high, bar.low, bar.close].every(Number.isFinite));
+    updatedAt = overview.freshness.fetchedAt || new Date().toISOString();
+  }
   const config = overlayQueryConfig(query);
   const overlays = normalizedBars.length >= 3 ? chartAnalysis.buildChartOverlays({ bars: normalizedBars, config, signals: [] }) : { emptyReason: reason || '暂无数据', config, signals: [], patterns: [], structures: [], annotations: [], explanations: [], lines: [], volume: [] };
-  return { market, instrument: instrument.id, timeframe: String(query.timeframe || '1h'), dataStatus, source: klineSource, updatedAt: overview.freshness.fetchedAt || new Date().toISOString(), reason, bars: normalizedBars, overlays };
+  return { market, instrument: instrument.id, timeframe, dataStatus, source: klineSource, updatedAt, reason, ...(asOf ? { asOf, snapshotId } : {}), bars: normalizedBars, overlays };
 }
 
 app.get('/api/kline/:market/:instrument', async (req, res) => {

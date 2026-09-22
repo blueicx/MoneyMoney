@@ -2532,6 +2532,11 @@
                 <div id="stock-chart-title" style="font-weight:700;font-size:15px;"></div>
                 <div class="kline-toolbar" data-kline-controls="stocks" aria-label="股票K线周期">
                   <button class="tab chart-fullscreen-button" type="button" data-chart-fullscreen="stocks" onclick="toggleChartFullscreen('stocks')" title="放大查看股票K线">⛶ 全屏</button>
+                  <span class="kline-data-status" aria-label="K线数据时间机器">
+                    <label>数据时点 <input type="date" data-chart-as-of onchange="applyStockKlineAsOf(this.value)" aria-label="选择股票历史数据时点"></label>
+                    <button class="tab" type="button" data-chart-as-of-apply onclick="applyStockKlineAsOf(document.querySelector('[data-chart-as-of]')?.value || '')">应用</button>
+                    <button class="tab" type="button" data-chart-as-of-clear onclick="clearStockKlineAsOf()">退出时点</button>
+                  </span>
                   <button class="tab" type="button" data-chart-candle-focus onclick="toggleStockKlineFocus()" disabled title="先点击图中的某一根日K">🔎 放大所选日</button>
                   <div class="kline-control-group" aria-label="K线周期"><span class="kline-control-label">周期</span>
                     <button class="tab stock-kline-period" data-kline-period="5m" onclick="setStockKlinePeriod('5m')">5分</button>
@@ -7845,6 +7850,7 @@ let stockChartKlines = [];
 let stockChartFocusIndex = null;
 let stockChartFocusEnabled = false;
 let stockChartRenderedStartIndex = 0;
+let stockChartAsOf = '';
 let stockChartOverlayConfig = window.MoneyChartAnalysis?.normalizeOverlayConfig({ strategies:{ maCross:true, rsiReversal:false, bollinger:false, volumeBreakout:false } }) || { signals:true, patterns:false, structures:false, volume:true, indicators:{ ma:true, boll:false, macd:false }, strategies:{ maCross:true, rsiReversal:false, bollinger:false, volumeBreakout:false }, patternTypes:{}, maxLabels:80 };
 let cryptoChartStrategyConfig = { maCross:true, rsiReversal:false, bollinger:false, volumeBreakout:false };
 var INLINE_CANDLE_PATTERN_CATALOG = [
@@ -8196,6 +8202,28 @@ function setStockKlinePeriod(period) {
   });
   loadStockKline();
 }
+function stockKlineAsOfStorageKey() {
+  return `moneymoney:kline-as-of:${currentStockSymbol || 'default'}`;
+}
+function syncStockKlineAsOfControl() {
+  const input = document.querySelector('[data-chart-as-of]');
+  if (input) input.value = stockChartAsOf ? stockChartAsOf.slice(0, 10) : '';
+  const clear = document.querySelector('[data-chart-as-of-clear]');
+  if (clear) clear.disabled = !stockChartAsOf;
+}
+function applyStockKlineAsOf(value) {
+  const next = String(value || '').trim();
+  stockChartAsOf = next ? (next.length === 10 ? `${next}T23:59:59.999Z` : next) : '';
+  try { localStorage.setItem(stockKlineAsOfStorageKey(), stockChartAsOf); } catch (e) {}
+  syncStockKlineAsOfControl();
+  loadStockKline();
+}
+function clearStockKlineAsOf() {
+  stockChartAsOf = '';
+  try { localStorage.removeItem(stockKlineAsOfStorageKey()); } catch (e) {}
+  syncStockKlineAsOfControl();
+  loadStockKline();
+}
 function setStockKlineStatus(message) {
   const status = document.querySelector('#stock-chart-data-status [data-kline-status]') || document.getElementById('stock-chart-data-status');
   if (status) status.textContent = String(message || '');
@@ -8215,6 +8243,8 @@ async function loadStockKline(symbol, name, apiSymbol) {
   if (symbol) currentStockSymbol = symbol;
   if (name) currentStockName = name;
   if (apiSymbol !== undefined) currentStockApiSymbol = apiSymbol || '';
+  try { stockChartAsOf = localStorage.getItem(stockKlineAsOfStorageKey()) || ''; } catch (e) {}
+  syncStockKlineAsOfControl();
   stockChartFocusIndex = null;
   stockChartFocusEnabled = false;
   stockChartRenderedStartIndex = 0;
@@ -8225,7 +8255,8 @@ async function loadStockKline(symbol, name, apiSymbol) {
   if (!canvas) return;
   try {
     setStockKlineStatus('正在加载真实数据…');
-    const res = await fetch('/api/stock/kline?symbol=' + encodeURIComponent(currentStockSymbol) + '&period=' + encodeURIComponent(currentStockKlinePeriod) + '&interval=' + encodeURIComponent(currentStockKlinePeriod) + (currentStockApiSymbol ? '&api=' + encodeURIComponent(currentStockApiSymbol) : ''));
+    const asOfQuery = stockChartAsOf ? '&asOf=' + encodeURIComponent(stockChartAsOf) : '';
+    const res = await fetch('/api/stock/kline?symbol=' + encodeURIComponent(currentStockSymbol) + '&period=' + encodeURIComponent(currentStockKlinePeriod) + '&interval=' + encodeURIComponent(currentStockKlinePeriod) + asOfQuery + (currentStockApiSymbol ? '&api=' + encodeURIComponent(currentStockApiSymbol) : ''));
     const d = await res.json();
     if (!d.success || !d.data || !d.data.length) {
       currentStockKlineReason = d.reason || d.error || '暂无数据';
@@ -8244,7 +8275,7 @@ async function loadStockKline(symbol, name, apiSymbol) {
       return;
     }
     currentStockKlineReason = '';
-    const freshness = d.dataStatus === 'cached' ? '缓存' : d.dataStatus === 'stale' ? '过期缓存' : d.dataStatus === 'degraded' ? '降级' : '实时';
+    const freshness = d.dataStatus === 'historical' ? `历史时点 ${d.asOf ? formatChartTime(d.asOf) : ''}` : d.dataStatus === 'cached' ? '缓存' : d.dataStatus === 'stale' ? '过期缓存' : d.dataStatus === 'degraded' ? '降级' : '实时';
     setStockKlineStatus(`${freshness} · ${d.source || '股票行情'} · ${d.updatedAt ? formatChartTime(d.updatedAt) : ''}${d.reason ? ` · ${d.reason}` : ''}`);
     stockChartKlines = d.data;
     stockChartReplayIndex = stockChartKlines.length - 1;

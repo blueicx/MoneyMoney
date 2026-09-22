@@ -196,11 +196,15 @@ export class DataLakeCatalog {
       const rows: Array<Record<string, unknown>> = [];
       for (const partition of selected) {
         const reader = await connection.runAndReadAll(`SELECT observation_ts AS timestamp, open, high, low, close, volume, published_at, market, instrument, timeframe, source FROM read_parquet('${sqlPath(String(partition.path))}') ORDER BY observation_ts`);
-        rows.push(...reader.getRowObjectsJS() as Array<Record<string, unknown>>);
+        rows.push(...(reader.getRowObjectsJS() as Array<Record<string, unknown>>).filter(row => {
+          const timestamp = row.timestamp instanceof Date ? row.timestamp.getTime() : Date.parse(String(row.timestamp));
+          return Number.isFinite(timestamp) && timestamp <= asOf;
+        }));
       }
       rows.sort((left, right) => Date.parse(String(left.timestamp)) - Date.parse(String(right.timestamp)));
       const latest = selected.reduce((current, candidate) => String(candidate.published_at) > String(current.published_at) ? candidate : current, selected[0]);
       const source = [...new Set(selected.map(item => String(item.source || '')).filter(Boolean))].join(', ');
+      if (!rows.length) return { rows: [], dataStatus: 'unavailable', source: source || null, updatedAt: String(latest.published_at || ''), reason: '已发布分区中没有早于该 asOf 时点的 K 线观测' };
       const contentHash = crypto.createHash('sha256').update(selected.map(item => String(item.content_hash)).join('|')).digest('hex');
       const snapshot: PointInTimeSnapshot = { id: `snapshot_${contentHash.slice(0, 24)}_${asOf}`, market: input.market, instrument: input.instrument, dataset: 'bars', timeframe: input.timeframe, asOf: new Date(asOf).toISOString(), partitionId: selected.map(item => String(item.id)).join(','), contentHash, source: source || null, createdAt: new Date().toISOString() };
       this.db.prepare('INSERT OR IGNORE INTO point_in_time_snapshots (id,market,instrument,dataset,timeframe,as_of,partition_id,content_hash,source,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)').run(snapshot.id, snapshot.market, snapshot.instrument, snapshot.dataset, snapshot.timeframe, snapshot.asOf, snapshot.partitionId, snapshot.contentHash, snapshot.source, snapshot.createdAt);
