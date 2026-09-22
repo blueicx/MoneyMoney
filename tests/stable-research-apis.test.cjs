@@ -62,3 +62,11 @@ test('stock K-line UI exposes an explicit data time machine control', () => {
   assert.match(html, /clearStockKlineAsOf/);
   assert.match(html, /[?&]asOf=/);
 });
+
+test('stock K-line time machine protects a newer date from stale loads', () => {
+  const html = fs.readFileSync('src/web/public/index.html', 'utf8');
+  assert.match(html, /stockChartAsOfRevision/);
+  assert.match(html, /stockKlineRequestRevision/);
+  assert.match(html, /requestRevision !== stockKlineRequestRevision/);
+  assert.match(html, /stockChartAsOfRevision\+\+/);
+});

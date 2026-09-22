@@ -7883,6 +7883,8 @@ let stockChartFocusIndex = null;
 let stockChartFocusEnabled = false;
 let stockChartRenderedStartIndex = 0;
 let stockChartAsOf = '';
+let stockChartAsOfRevision = 0;
+let stockKlineRequestRevision = 0;
 let stockChartOverlayConfig = window.MoneyChartAnalysis?.normalizeOverlayConfig({ strategies:{ maCross:true, rsiReversal:false, bollinger:false, volumeBreakout:false } }) || { signals:true, patterns:false, structures:false, volume:true, indicators:{ ma:true, boll:false, macd:false }, strategies:{ maCross:true, rsiReversal:false, bollinger:false, volumeBreakout:false }, patternTypes:{}, maxLabels:80 };
 let cryptoChartStrategyConfig = { maCross:true, rsiReversal:false, bollinger:false, volumeBreakout:false };
 var INLINE_CANDLE_PATTERN_CATALOG = [
@@ -8246,12 +8248,14 @@ function syncStockKlineAsOfControl() {
 function applyStockKlineAsOf(value) {
   const next = String(value || '').trim();
   stockChartAsOf = next ? (next.length === 10 ? `${next}T23:59:59.999Z` : next) : '';
+  stockChartAsOfRevision++;
   try { localStorage.setItem(stockKlineAsOfStorageKey(), stockChartAsOf); } catch (e) {}
   syncStockKlineAsOfControl();
   loadStockKline();
 }
 function clearStockKlineAsOf() {
   stockChartAsOf = '';
+  stockChartAsOfRevision++;
   try { localStorage.removeItem(stockKlineAsOfStorageKey()); } catch (e) {}
   syncStockKlineAsOfControl();
   loadStockKline();
@@ -8261,6 +8265,8 @@ function setStockKlineStatus(message) {
   if (status) status.textContent = String(message || '');
 }
 async function loadStockKline(symbol, name, apiSymbol) {
+  const requestRevision = ++stockKlineRequestRevision;
+  const asOfRevision = stockChartAsOfRevision;
   bindStockKlineSelection();
   if (!window.stockMoneyKLine) {
       const canvas = document.getElementById('stock-kline');
@@ -8275,7 +8281,9 @@ async function loadStockKline(symbol, name, apiSymbol) {
   if (symbol) currentStockSymbol = symbol;
   if (name) currentStockName = name;
   if (apiSymbol !== undefined) currentStockApiSymbol = apiSymbol || '';
-  try { stockChartAsOf = localStorage.getItem(stockKlineAsOfStorageKey()) || ''; } catch (e) {}
+  if (asOfRevision === stockChartAsOfRevision) {
+    try { stockChartAsOf = localStorage.getItem(stockKlineAsOfStorageKey()) || ''; } catch (e) {}
+  }
   syncStockKlineAsOfControl();
   stockChartFocusIndex = null;
   stockChartFocusEnabled = false;
@@ -8290,6 +8298,7 @@ async function loadStockKline(symbol, name, apiSymbol) {
     const asOfQuery = stockChartAsOf ? '&asOf=' + encodeURIComponent(stockChartAsOf) : '';
     const res = await fetch('/api/stock/kline?symbol=' + encodeURIComponent(currentStockSymbol) + '&period=' + encodeURIComponent(currentStockKlinePeriod) + '&interval=' + encodeURIComponent(currentStockKlinePeriod) + asOfQuery + (currentStockApiSymbol ? '&api=' + encodeURIComponent(currentStockApiSymbol) : ''));
     const d = await res.json();
+    if (requestRevision !== stockKlineRequestRevision) return;
     if (!d.success || !d.data || !d.data.length) {
       currentStockKlineReason = d.reason || d.error || '暂无数据';
       setStockKlineStatus(currentStockKlineReason);
