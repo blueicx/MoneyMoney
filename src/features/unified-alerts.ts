@@ -164,6 +164,28 @@ export function triggerUnifiedAlerts(store: UnifiedAlertStore, observations: Arr
   return created;
 }
 
+export interface UnifiedAlertPreview {
+  ruleId: string;
+  instrumentId: string;
+  wouldTrigger: boolean;
+  suppressed: boolean;
+  reason: string;
+  direction: UnifiedAlertHistory['direction'];
+  message: string;
+}
+
+/** Evaluate the same rules as production without changing history or cooldown state. */
+export function previewUnifiedAlerts(store: UnifiedAlertStore, observations: Array<{ instrumentId: string; observation: UnifiedAlertObservation }>, now = new Date()): UnifiedAlertPreview[] {
+  return store.listRules().map(rule => {
+    if (isAlertSuppressed(rule, now)) return { ruleId: rule.id, instrumentId: rule.instrumentId, wouldTrigger: false, suppressed: true, reason: '规则处于暂停、静默、冷却或已过期状态', direction: 'neutral', message: '' };
+    const candidate = observations.find(item => item.observation.kind === rule.kind && (!rule.instrumentId || item.instrumentId === rule.instrumentId) && (!rule.scope || item.observation.scope === rule.scope) && (!rule.watchlistId || item.observation.watchlistIds?.includes(rule.watchlistId)));
+    if (!candidate) return { ruleId: rule.id, instrumentId: rule.instrumentId, wouldTrigger: false, suppressed: false, reason: '本次试运行没有匹配到观察数据', direction: 'neutral', message: '' };
+    const result = evaluateUnifiedAlert(rule, candidate.observation);
+    const deduped = store.listHistory(500).some(item => item.dedupKey === alertDedupKey(rule, candidate.observation));
+    return { ruleId: rule.id, instrumentId: candidate.instrumentId, wouldTrigger: result.matched && !deduped, suppressed: false, reason: deduped ? '同一事件已发送过，生产逻辑会去重' : result.matched ? '满足触发条件' : '未满足触发条件', direction: result.direction, message: result.message };
+  });
+}
+
 interface UnifiedAlertState { rules: UnifiedAlertRule[]; history: UnifiedAlertHistory[]; watchlist: string[] }
 
 export class UnifiedAlertStore {

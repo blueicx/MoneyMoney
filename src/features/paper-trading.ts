@@ -4,8 +4,10 @@
 
 import fs from 'fs';
 import path from 'path';
+import { createHash } from 'node:crypto';
 import { config } from '../config';
 import { stateStore } from '../storage/sqlite-state';
+import { unifiedPaperLedgerStore, calculateUnifiedPerformance, type UnifiedPaperLedger, type UnifiedPaperOrder } from './unified-paper-trading';
 
 export interface PaperPosition {
   id: string;
@@ -222,7 +224,10 @@ export class PaperTradingEngine {
    * Bootstrap-resamples historical per-trade PnL to project future
    * max-drawdown distribution over the next `tradesPerSim` trades.
    */
-  runMonteCarlo(simulations = 2000, tradesPerSim = 20): {
+  runMonteCarlo(simulations = 2000, tradesPerSim = 20, seed = 42): {
+    seed: number;
+    snapshotHash: string;
+    algorithm: string;
     simulations: number;
     tradesPerSim: number;
     sampleTrades: number;
@@ -236,6 +241,11 @@ export class PaperTradingEngine {
     ruinProbabilityPct: number;
     noteZh: string;
   } | { error: string } {
+    if (!Number.isInteger(simulations) || simulations < 1 || simulations > 10_000 ||
+        !Number.isInteger(tradesPerSim) || tradesPerSim < 1 || tradesPerSim > 100 ||
+        !Number.isInteger(seed) || seed < 0 || seed > 0xffffffff) {
+      return { error: '模拟次数须为 1–10000、交易数须为 1–100 的整数，随机种子须为 uint32' };
+    }
     const closed = portfolio.positions
       .filter(p => p.status === 'CLOSED' && typeof p.pnlUsd === 'number');
     if (closed.length < 5) {
@@ -243,6 +253,13 @@ export class PaperTradingEngine {
     }
     const pnls = closed.map(p => p.pnlUsd!);
     const currentEquity = portfolio.startingBalance + pnls.reduce((s, v) => s + v, 0);
+    if (!Number.isFinite(currentEquity) || currentEquity <= 0 || pnls.some(value => !Number.isFinite(value))) return { error: '权益或历史盈亏无效，无法计算收益分布' };
+    const snapshotHash = createHash('sha256').update(JSON.stringify({ startingBalance: portfolio.startingBalance, trades: closed.map(p => ({ id: p.id, pnlUsd: p.pnlUsd, exitTime: p.exitTime })) })).digest('hex');
+    let randomState = seed >>> 0;
+    const random = () => {
+      randomState = (Math.imul(randomState, 1664525) + 1013904223) >>> 0;
+      return randomState / 4294967296;
+    };
     // Scale sampled PnL to current equity so projections stay proportional.
     const scaleFactor = Math.max(currentEquity, 1) / Math.max(portfolio.startingBalance, 1);
 
@@ -254,7 +271,7 @@ export class PaperTradingEngine {
       let peak = equity;
       let maxDd = 0;
       for (let t = 0; t < tradesPerSim; t++) {
-        const sampled = pnls[Math.floor(Math.random() * pnls.length)] * scaleFactor;
+        const sampled = pnls[Math.floor(random() * pnls.length)] * scaleFactor;
         equity += sampled;
         if (equity > peak) peak = equity;
         if (peak > 0) {
@@ -270,6 +287,9 @@ export class PaperTradingEngine {
     finalReturns.sort((a, b) => a - b);
     const pct = (arr: number[], p: number) => arr[Math.min(arr.length - 1, Math.floor(arr.length * p))] ?? 0;
     return {
+      seed,
+      snapshotHash,
+      algorithm: 'bootstrap-lcg32-v1',
       simulations,
       tradesPerSim,
       sampleTrades: pnls.length,
@@ -281,7 +301,7 @@ export class PaperTradingEngine {
       finalReturnP50Pct: Math.round(pct(finalReturns, 0.5) * 10) / 10,
       finalReturnP95Pct: Math.round(pct(finalReturns, 0.95) * 10) / 10,
       ruinProbabilityPct: Math.round((ruinCount / simulations) * 1000) / 10,
-      noteZh: '按历史每笔盈亏随机重排，模拟未来 20 笔交易的最大回撤分布。30% 回撤视为「重创线」。',
+      noteZh: `按历史每笔盈亏有放回抽样，模拟 ${tradesPerSim} 笔交易的最大回撤分布。30% 回撤视为「重创线」。历史压力测试，不是预测。`,
     };
   }
 
@@ -448,5 +468,82 @@ export class PaperTradingEngine {
   }
 }
 
-export const paperEngine = new PaperTradingEngine();
+class UnifiedPredictionPaperAdapter {
+  constructor() { unifiedPaperLedgerStore.migrateLegacyPredictionPortfolio(portfolio); }
+
+  private ledger(): UnifiedPaperLedger {
+    const value = unifiedPaperLedgerStore.get() as Partial<UnifiedPaperLedger>;
+    return { startingCash: Number(value.startingCash) || 0, cash: Number(value.cash) || 0, positions: Array.isArray(value.positions) ? value.positions : [], orders: Array.isArray(value.orders) ? value.orders : [], realizedPnl: Number(value.realizedPnl) || 0, peakEquity: Number(value.peakEquity) || Number(value.cash) || 0, maxDrawdownPct: Number(value.maxDrawdownPct) || 0 };
+  }
+  private predictionOrders(): UnifiedPaperOrder[] { return this.ledger().orders.filter(order => order.instrumentType === 'prediction'); }
+  private positionId(instrumentId: string, outcome: 'YES' | 'NO'): string { return `${instrumentId}:${outcome}`; }
+  private toPosition(position: UnifiedPaperLedger['positions'][number]): PaperPosition {
+    const instrumentId = String(position.instrumentId || 'prediction:predictfun:0');
+    const parts = instrumentId.split(':');
+    const marketId = Number(parts.at(-1));
+    const outcomeIndex = position.outcome === 'NO' ? 1 : 0;
+    return { id: this.positionId(instrumentId, position.outcome || 'YES'), marketId: Number.isFinite(marketId) ? marketId : 0, marketTitle: position.title || instrumentId, outcomeIndex, outcomeName: position.outcome || 'YES', side: 'BUY', entryPrice: position.averageEntryPrice || 0, currentPrice: position.currentPrice || position.averageEntryPrice || 0, quantity: position.quantity || 0, entryTime: position.openedAt || new Date(0).toISOString(), status: 'OPEN' };
+  }
+  private closedPositions(): PaperPosition[] {
+    return this.predictionOrders().filter(order => order.side === 'SELL' && Number.isFinite(order.pnlUsd)).map(order => {
+      const outcome = order.outcome || 'YES';
+      const qty = order.quantity;
+      const entryPrice = qty > 0 ? order.price - Number(order.pnlUsd) / qty : order.price;
+      return { id: this.positionId(order.instrumentId, outcome), marketId: Number(order.instrumentId.split(':').at(-1)) || 0, marketTitle: order.title || order.instrumentId, outcomeIndex: outcome === 'NO' ? 1 : 0, outcomeName: outcome, side: 'BUY', entryPrice, currentPrice: order.price, quantity: qty, entryTime: order.timestamp, exitPrice: order.price, exitTime: order.timestamp, status: 'CLOSED', pnlUsd: Number(order.pnlUsd), pnlPct: entryPrice ? Number(order.pnlUsd) / (entryPrice * qty) * 100 : 0 };
+    });
+  }
+  private allClosedOrders() { return this.ledger().orders.filter(order => order.side === 'SELL' && Number.isFinite(order.pnlUsd)); }
+
+  previewOpen(_marketId: number, price: number, amountUsd: number): { ok: boolean; message: string } {
+    const validation = validatePaperOrderInput({ price, amountUsd });
+    if (!validation.ok) return { ok: false, message: validation.error || '模拟订单参数无效' };
+    const qty = Math.floor(amountUsd / price);
+    if (qty <= 0) return { ok: false, message: '金额低于该价格可交易的最小数量' };
+    if (amountUsd > calculateUnifiedPerformance(this.ledger()).cash) return { ok: false, message: '模拟余额不足' };
+    return { ok: true, message: '模拟订单参数有效' };
+  }
+  getPortfolio(): PaperPortfolio & { openPositionsValue: number; equity: number; unrealizedPnl: number; winRate: number } {
+    const performance = calculateUnifiedPerformance(this.ledger());
+    const closed = this.closedPositions();
+    const positions = this.ledger().positions.filter(position => position.instrumentType === 'prediction').map(position => this.toPosition(position));
+    const tradeLog = this.predictionOrders().map(order => ({ id: order.id || '', marketId: Number(order.instrumentId.split(':').at(-1)) || 0, marketTitle: order.title || order.instrumentId, action: order.side === 'SELL' ? 'SELL' : 'BUY', outcomeName: order.outcome || order.side, price: order.price, quantity: order.quantity, timestamp: order.timestamp, reason: order.reason || '' }));
+    return { startingBalance: this.ledger().startingCash, cashBalance: performance.cash, positions: [...positions, ...closed], tradeLog, totalPnl: performance.totalPnl, winsCount: closed.filter(item => (item.pnlUsd || 0) > 0).length, lossesCount: closed.filter(item => (item.pnlUsd || 0) < 0).length, maxDrawdownPct: performance.maxDrawdownPct, peakEquity: this.ledger().peakEquity, openPositionsValue: performance.equity - performance.cash, equity: performance.equity, unrealizedPnl: performance.unrealizedPnl, winRate: closed.length ? closed.filter(item => (item.pnlUsd || 0) > 0).length / closed.length : 0 };
+  }
+  getRiskMetrics() {
+    const pnls = this.allClosedOrders().map(order => Number(order.pnlUsd));
+    const wins = pnls.filter(value => value > 0); const losses = pnls.filter(value => value < 0);
+    const mean = pnls.length ? pnls.reduce((sum, value) => sum + value, 0) / pnls.length : 0;
+    const variance = pnls.length > 1 ? pnls.reduce((sum, value) => sum + (value - mean) ** 2, 0) / (pnls.length - 1) : 0;
+    return { totalTrades: pnls.length, winRate: pnls.length ? wins.length / pnls.length : 0, profitFactor: losses.length ? Math.min(99, Math.abs(wins.reduce((s, v) => s + v, 0) / losses.reduce((s, v) => s + v, 0))) : wins.length ? 99 : 0, expectancyUsd: mean, sharpeRatio: variance > 0 ? mean / Math.sqrt(variance) : 0, var95Usd: pnls.length ? [...pnls].sort((a, b) => a - b)[Math.floor(pnls.length * 0.05)] : 0, avgWinUsd: wins.length ? wins.reduce((s, v) => s + v, 0) / wins.length : 0, avgLossUsd: losses.length ? Math.abs(losses.reduce((s, v) => s + v, 0) / losses.length) : 0, payoffRatio: wins.length && losses.length ? wins.reduce((s, v) => s + v, 0) / wins.length / Math.abs(losses.reduce((s, v) => s + v, 0) / losses.length) : 0, maxDrawdownPct: this.ledger().maxDrawdownPct, bestTradeUsd: pnls.length ? Math.max(...pnls) : 0, worstTradeUsd: pnls.length ? Math.min(...pnls) : 0, equityCurve: [] };
+  }
+  reset(startingBalance = 1000): PaperPortfolio { unifiedPaperLedgerStore.reset(startingBalance); return this.getPortfolio(); }
+  runMonteCarlo(simulations = 2000, tradesPerSim = 20, seed = 42) { return runUnifiedMonteCarlo(this.allClosedOrders().map(order => Number(order.pnlUsd)), this.ledger().startingCash, simulations, tradesPerSim, seed); }
+  openPosition(marketId: number, marketTitle: string, outcomeIndex: 0 | 1, outcomeName: string, price: number, amountUsd: number, reason = ''): { success: boolean; message: string; position?: PaperPosition } {
+    const preview = this.previewOpen(marketId, price, amountUsd); if (!preview.ok) return { success: false, message: preview.message };
+    const quantity = Math.floor(amountUsd / price); const outcome = outcomeIndex === 0 ? 'YES' : 'NO';
+    try { const ledger = unifiedPaperLedgerStore.apply({ id: `prediction:${marketId}:${outcome}:${Date.now()}`, instrumentId: `prediction:predictfun:${marketId}`, instrumentType: 'prediction', title: marketTitle, side: outcome, outcome, price, quantity, timestamp: new Date().toISOString(), reason }); const position = ledger.positions.find(item => item.instrumentId.endsWith(`:${marketId}`) && item.outcome === outcome); return { success: true, message: `已开仓 ${outcomeName} × ${quantity} @ $${price.toFixed(4)}`, position: position ? this.toPosition(position) : undefined }; } catch (error: any) { return { success: false, message: error?.message || '模拟撮合失败' }; }
+  }
+  closePosition(positionId: string, exitPrice: number): { success: boolean; message: string; pnl?: number } {
+    const match = String(positionId).match(/^(prediction:[^:]+:\d+):(YES|NO)$/); if (!match) return { success: false, message: '持仓标识无效' };
+    const position = this.ledger().positions.find(item => item.instrumentId === match[1] && item.outcome === match[2]); if (!position) return { success: false, message: '未找到持仓，或已平仓' };
+    try { const ledger = unifiedPaperLedgerStore.apply({ id: `prediction:close:${Date.now()}`, instrumentId: position.instrumentId, instrumentType: 'prediction', title: position.title, side: 'SELL', outcome: match[2] as 'YES' | 'NO', price: exitPrice, quantity: position.quantity, timestamp: new Date().toISOString(), reason: '平仓' }); const order = ledger.orders[0]; return { success: true, message: `已平仓 ${match[2]} | 盈亏: ${(order.pnlUsd || 0) >= 0 ? '+' : ''}$${(order.pnlUsd || 0).toFixed(2)}`, pnl: order.pnlUsd }; } catch (error: any) { return { success: false, message: error?.message || '平仓失败' }; }
+  }
+  markToMarket(currentPrices: Map<number, { yesPrice: number; noPrice: number }>): void { const prices = new Map<string, number>(); for (const position of this.ledger().positions.filter(item => item.instrumentType === 'prediction')) { const value = currentPrices.get(Number(position.instrumentId.split(':').at(-1))); const price = position.outcome === 'NO' ? value?.noPrice : value?.yesPrice; if (price != null) prices.set(position.instrumentId + ':' + position.outcome, price); } unifiedPaperLedgerStore.markPrices(prices); }
+  checkStopLossTakeProfit(currentPrices: Map<number, { yesPrice: number; noPrice: number }>): string[] { const messages: string[] = []; for (const position of this.getOpenPositions()) { const value = currentPrices.get(position.marketId); const price = position.outcomeIndex === 1 ? value?.noPrice : value?.yesPrice; if (!price) continue; const change = (price - position.entryPrice) / position.entryPrice * 100; if (change <= -15 || change >= 50) { const result = this.closePosition(position.id, price); messages.push(`${change <= -15 ? '🛑 止损' : '🎯 止盈'}：${position.outcomeName} | ${result.message}`); } } return messages; }
+  getOpenPositions(): PaperPosition[] { return this.ledger().positions.filter(item => item.instrumentType === 'prediction').map(item => this.toPosition(item)); }
+  getClosedPositions(): PaperPosition[] { return this.closedPositions().slice(-20).reverse(); }
+  getRecentTrades(count = 20): PaperTradeLog[] { return this.getPortfolio().tradeLog.slice(0, count); }
+}
+
+export function runUnifiedMonteCarlo(pnls: number[], startingBalance: number, simulations: number, tradesPerSim: number, seed: number): any {
+  if (pnls.length < 5) return { error: '至少需要 5 笔已平仓交易才能跑蒙特卡洛模拟' };
+  if (!Number.isInteger(simulations) || simulations < 1 || simulations > 10000 || !Number.isInteger(tradesPerSim) || tradesPerSim < 1 || tradesPerSim > 100 || !Number.isInteger(seed) || seed < 0 || seed > 0xffffffff) return { error: '模拟参数无效' };
+  let state = seed >>> 0; const random = () => { state = (Math.imul(state, 1664525) + 1013904223) >>> 0; return state / 4294967296; };
+  const equity = startingBalance + pnls.reduce((sum, value) => sum + value, 0); const dd: number[] = []; const returns: number[] = [];
+  for (let i = 0; i < simulations; i++) { let current = equity; let peak = equity; let max = 0; for (let j = 0; j < tradesPerSim; j++) { current += pnls[Math.floor(random() * pnls.length)]; peak = Math.max(peak, current); max = Math.max(max, peak ? (peak - current) / peak * 100 : 0); } dd.push(max); returns.push((current / equity - 1) * 100); }
+  const percentile = (values: number[], ratio: number) => values.sort((a, b) => a - b)[Math.min(values.length - 1, Math.floor(values.length * ratio))] || 0;
+  return { seed, snapshotHash: createHash('sha256').update(JSON.stringify({ startingBalance, pnls })).digest('hex'), algorithm: 'bootstrap-lcg32-v1', simulations, tradesPerSim, sampleTrades: pnls.length, currentEquityUsd: equity, maxDrawdownP5Pct: percentile(dd, .05), maxDrawdownP50Pct: percentile(dd, .5), maxDrawdownP95Pct: percentile(dd, .95), finalReturnP5Pct: percentile(returns, .05), finalReturnP50Pct: percentile(returns, .5), finalReturnP95Pct: percentile(returns, .95), ruinProbabilityPct: dd.filter(value => value >= 30).length / simulations * 100, noteZh: `按历史每笔盈亏有放回抽样，模拟 ${tradesPerSim} 笔交易的最大回撤分布。历史压力测试，不是预测。` };
+}
+
+export const paperEngine = new UnifiedPredictionPaperAdapter();
 

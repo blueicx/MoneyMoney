@@ -92,12 +92,13 @@ import { aiCommentaryConfigured, getAiMarketCommentary } from '../features/ai-co
 import { getAiConfigurationStatus, testAiConnection, type AiChain } from '../features/ai-runtime-config';
 import { unifiedInstrumentService, normalizeInstrumentRef, type InstrumentType } from '../features/unified-instruments';
 import { stockDataService } from '../features/stock-data-service';
+import { buildStockCoverageMap } from '../features/instrument-coverage';
 import { MARKET_SCOPES, filterInstrumentResults, type MarketScope } from '../features/market-scope';
 import { defaultWorkspace, isWorkspaceAllowed, resolveWorkspaceNavigation, type WorkspaceId } from '../features/market-workspace';
 import { resolveMarketDashboardCards } from '../features/market-workspace-dashboard';
 import { marketDepthCapabilities } from '../features/market-depth-capabilities';
 import { filterAssistantReport, filterRiskOverview, filterUnifiedPaperLedger, scopeForAction } from '../features/market-scope-view';
-import { unifiedAlertStore, triggerUnifiedAlerts } from '../features/unified-alerts';
+import { unifiedAlertStore, triggerUnifiedAlerts, previewUnifiedAlerts } from '../features/unified-alerts';
 import { buildPortfolioRiskOverview } from '../features/risk-overview';
 import { getRiskHistory, recordRiskHistory } from '../features/risk-history';
 import { buildDailyResearchBriefing } from '../features/research-briefing';
@@ -2259,6 +2260,28 @@ app.get('/api/events/timeline', async (req, res) => {
   }, Object.values(sourceStatus).includes('unavailable') ? 'unavailable' : 'ok');
 });
 
+app.get('/api/stocks/:symbol/coverage', async (req, res) => {
+  const symbol = String(req.params.symbol || '').trim().toUpperCase().replace(/^US(?=[A-Z])/, '');
+  try {
+    const [overview, news, insider] = await Promise.allSettled([
+      stockDataService.overview(symbol),
+      getStockNews(symbol),
+      getInsiderRadar(symbol),
+    ]);
+    const data = buildStockCoverageMap(symbol, { overview, news, insider });
+    const values = Object.values(data.capabilities);
+    const available = values.filter(item => item.status === 'live' || item.status === 'cached').length;
+    res.json(createDataEnvelope({
+      market: 'stocks', instrument: data.instrument, data,
+      dataStatus: available === values.length ? 'live' : available ? 'partial' : 'unavailable',
+      source: 'instrument coverage map', updatedAt: data.updatedAt,
+      reason: available ? null : '该标的当前没有可用数据能力',
+    }));
+  } catch (error: any) {
+    res.status(400).json({ success: false, market: 'stocks', instrument: `stock:us:${symbol}`, dataStatus: 'failed', source: 'instrument coverage map', updatedAt: null, reason: error?.message || '覆盖地图不可用' });
+  }
+});
+
 function eventInstrumentRef(market: MarketId, instrumentId: string) {
   const match = instrumentId.match(/^([^:]+):([^:]+):(.+)$/);
   if (!match) throw new Error('instrumentId 必须使用 market:venue:symbol 格式');
@@ -3205,11 +3228,13 @@ function safeTelegramCallbackSignature(left: string, right: string): boolean {
 }
 
 function saveTelegramCallbackRecord(record: TelegramCallbackRecord): void {
-  const now = Date.now();
-  const records = (stateStore.get<TelegramCallbackRecord[]>(TELEGRAM_CALLBACK_STATE_KEY) || [])
-    .filter(item => item.expiresAt > now && item.token !== record.token)
-    .slice(-499);
-  stateStore.set(TELEGRAM_CALLBACK_STATE_KEY, [...records, record], 1);
+  stateStore.transaction(() => {
+    const now = Date.now();
+    const records = (stateStore.get<TelegramCallbackRecord[]>(TELEGRAM_CALLBACK_STATE_KEY) || [])
+      .filter(item => item.expiresAt > now && item.token !== record.token)
+      .slice(-499);
+    stateStore.set(TELEGRAM_CALLBACK_STATE_KEY, [...records, record], 1);
+  });
 }
 
 function issueTelegramCallback(action: string, input: { scope: MarketScope; id: string; timeframe?: string; workspace?: string; chatId?: string }): string {
@@ -3234,33 +3259,35 @@ function consumeTelegramCallback(data: string, action: string, chatId?: string):
   const parts = raw.split(':');
   if (parts.length !== 2) return null;
   const [token, signature] = parts;
-  const now = Date.now();
-  const records = stateStore.get<TelegramCallbackRecord[]>(TELEGRAM_CALLBACK_STATE_KEY) || [];
-  const activeRecords = records.filter(item => item.expiresAt > now);
-  const record = activeRecords.find(item => item.token === token) || null;
-  if (!record || record.action !== action) {
-    if (activeRecords.length !== records.length) stateStore.set(TELEGRAM_CALLBACK_STATE_KEY, activeRecords, 1);
-    return null;
-  }
-  if (record.chatId && String(record.chatId) !== String(chatId || '')) {
-    if (activeRecords.length !== records.length) stateStore.set(TELEGRAM_CALLBACK_STATE_KEY, activeRecords, 1);
-    return null;
-  }
-  if (!safeTelegramCallbackSignature(record.signature, signature) || record.signature !== telegramCallbackSignature({
-    token: record.token,
-    action: record.action,
-    scope: record.scope,
-    id: record.id,
-    timeframe: record.timeframe,
-    workspace: record.workspace,
-    ...(record.chatId ? { chatId: record.chatId } : {}),
-    expiresAt: record.expiresAt,
-  })) {
-    if (activeRecords.length !== records.length) stateStore.set(TELEGRAM_CALLBACK_STATE_KEY, activeRecords, 1);
-    return null;
-  }
-  stateStore.set(TELEGRAM_CALLBACK_STATE_KEY, activeRecords.filter(item => item.token !== token), 1);
-  return record;
+  return stateStore.transaction(() => {
+    const now = Date.now();
+    const records = stateStore.get<TelegramCallbackRecord[]>(TELEGRAM_CALLBACK_STATE_KEY) || [];
+    const activeRecords = records.filter(item => item.expiresAt > now);
+    const record = activeRecords.find(item => item.token === token) || null;
+    if (!record || record.action !== action) {
+      if (activeRecords.length !== records.length) stateStore.set(TELEGRAM_CALLBACK_STATE_KEY, activeRecords, 1);
+      return null;
+    }
+    if (record.chatId && String(record.chatId) !== String(chatId || '')) {
+      if (activeRecords.length !== records.length) stateStore.set(TELEGRAM_CALLBACK_STATE_KEY, activeRecords, 1);
+      return null;
+    }
+    if (!safeTelegramCallbackSignature(record.signature, signature) || record.signature !== telegramCallbackSignature({
+      token: record.token,
+      action: record.action,
+      scope: record.scope,
+      id: record.id,
+      timeframe: record.timeframe,
+      workspace: record.workspace,
+      ...(record.chatId ? { chatId: record.chatId } : {}),
+      expiresAt: record.expiresAt,
+    })) {
+      if (activeRecords.length !== records.length) stateStore.set(TELEGRAM_CALLBACK_STATE_KEY, activeRecords, 1);
+      return null;
+    }
+    stateStore.set(TELEGRAM_CALLBACK_STATE_KEY, activeRecords.filter(item => item.token !== token), 1);
+    return record;
+  });
 }
 
 /**
@@ -4835,10 +4862,10 @@ ${escapeTelegramHtml(position.marketTitle)} · ${escapeTelegramHtml(position.out
         telegramCommandCenterStore.recordAudit(ctx.chatId, 'paper_close_confirm', result.message);
         return telegramReply(result.success ? `✅ ${escapeTelegramHtml(result.message)}` : `❌ ${escapeTelegramHtml(result.message)}`);
       }
-      if (data === 'pending:cancel' || data.startsWith('pending:cancel:')) {
-        const nonce = data === 'pending:cancel' ? undefined : parseTelegramCallbackPayload(data, 'pending:cancel', ctx.chatId);
-        if (data !== 'pending:cancel' && !nonce) return telegramReply('取消按钮已过期或签名无效，请重新发送模拟盘操作。');
-        const cancelled = telegramCommandCenterStore.cancelPendingAction(ctx.chatId, nonce || undefined);
+      if (data.startsWith('pending:cancel:')) {
+        const nonce = parseTelegramCallbackPayload(data, 'pending:cancel', ctx.chatId);
+        if (!nonce) return telegramReply('取消按钮已过期或签名无效，请重新发送模拟盘操作。');
+        const cancelled = telegramCommandCenterStore.cancelPendingAction(ctx.chatId, nonce);
         return telegramReply(cancelled ? '已取消待确认的模拟盘操作。' : '当前没有待确认操作。');
       }
       return telegramReply('按钮已过期，请发送 /start 重新打开功能菜单。');
@@ -4850,7 +4877,7 @@ ${escapeTelegramHtml(position.marketTitle)} · ${escapeTelegramHtml(position.out
 }
 
 function reloadTelegramIntegration(): Promise<void> {
-  telegramReloadPromise = telegramReloadPromise.then(async () => {
+  telegramReloadPromise = telegramReloadPromise.catch(() => undefined).then(async () => {
     stopTelegramCommandCenterMonitor();
     const current = telegramInteractionBot;
     telegramInteractionBot = null;
@@ -6006,7 +6033,7 @@ app.get('/api/paper/risk-metrics', (_req, res) => {
 app.post('/api/paper/monte-carlo', express.json(), (req, res) => {
   const simulations = Math.min(10_000, Math.max(100, Number(req.body?.simulations) || 2000));
   const tradesPerSim = Math.min(100, Math.max(5, Number(req.body?.tradesPerSim) || 20));
-  const result = paperEngine.runMonteCarlo(simulations, tradesPerSim);
+  const result = paperEngine.runMonteCarlo(simulations, tradesPerSim, req.body?.seed == null ? 42 : Number(req.body.seed));
   if ('error' in result) return res.status(400).json({ success: false, error: result.error });
   res.json({ success: true, data: result });
 });
@@ -6793,6 +6820,12 @@ app.patch('/api/alert-rules/:id', (req, res) => {
 });
 app.delete('/api/alert-rules/:id', (req, res) => res.json({ success: unifiedAlertStore.removeRule(String(req.params.id)) }));
 app.get('/api/alerts/history', (req, res) => res.json({ success: true, data: unifiedAlertStore.listHistory(Number(req.query.limit) || 100) }));
+app.post('/api/alerts/dry-run', express.json(), (req, res) => {
+  try {
+    const observations = Array.isArray(req.body?.observations) ? req.body.observations : [];
+    res.json({ success: true, data: previewUnifiedAlerts(unifiedAlertStore, observations.map((item: any) => ({ instrumentId: String(item.instrumentId || ''), observation: item.observation || item }))) });
+  } catch (error: any) { res.status(400).json({ success: false, error: error?.message || '提醒试运行失败' }); }
+});
 app.get('/api/alerts/deliveries', (req, res) => {
   res.json({ success: true, data: researchRepository.listAlertDeliveries(Number(req.query.limit) || 100) });
 });

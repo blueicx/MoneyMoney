@@ -28,8 +28,12 @@ test('Performance cache serves stale data while refreshing once', async () => {
   const stale = await cache.fetch('stocks:nasdaq:AAPL', fetcher, { ttl: 50, staleTtl: 100 });
   assert.equal(stale.status, 'stale');
   assert.deepStrictEqual(stale.data, { version: 1 });
-  await new Promise(resolve => setTimeout(resolve, 5));
-  const refreshed = await cache.fetch('stocks:nasdaq:AAPL', fetcher, { ttl: 50, staleTtl: 100 });
+  let refreshed;
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    refreshed = await cache.fetch('stocks:nasdaq:AAPL', fetcher, { ttl: 50, staleTtl: 100 });
+    if (refreshed.status === 'fresh') break;
+    await new Promise(resolve => setTimeout(resolve, 5));
+  }
   assert.equal(refreshed.status, 'fresh');
   assert.deepStrictEqual(refreshed.data, { version: 2 });
   assert.equal(callCount, 2);

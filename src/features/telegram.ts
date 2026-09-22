@@ -3,7 +3,7 @@
 // ============================================
 
 import { curlCommand } from '../utils/platform-command';
-import { getRuntimeTelegramConfig } from '../config/runtime-secrets';
+import { getRuntimeTelegramConfig, telegramNetworkAllowed } from '../config/runtime-secrets';
 
 const { execFile } = require('child_process');
 
@@ -18,6 +18,7 @@ export class TelegramNotifier {
   }
 
   async send(message: string): Promise<boolean> {
+    if (!telegramNetworkAllowed()) return false;
     const { botToken, chatId, proxyUrl } = getRuntimeTelegramConfig();
     if (!botToken || !chatId) return false;
 

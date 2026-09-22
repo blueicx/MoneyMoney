@@ -15,6 +15,11 @@ export type RuntimeSecretKey =
 type RuntimeSecretValues = Partial<Record<RuntimeSecretKey, string | boolean>>;
 type Environment = Record<string, string | undefined>;
 
+/** Runtime settings must never turn a local preview into a production poller. */
+export function telegramNetworkAllowed(env: Environment = process.env): boolean {
+  return env.TELEGRAM_NETWORK_ENABLED === 'true' && env.NODE_ENV !== 'test' && env.NODE_ENV !== 'development';
+}
+
 const ENV_KEYS: Record<RuntimeSecretKey, string> = {
   openrouterApiKey: 'OPENROUTER_API_KEY',
   groqApiKey: 'GROQ_API_KEY',
@@ -140,8 +145,8 @@ export function getRuntimeTelegramConfig(
     allowedChatIds: resolveString('telegramAllowedChatIds', store, env),
     adminChatIds: resolveString('telegramAdminChatIds', store, env),
     proxyUrl: resolveString('telegramProxyUrl', store, env),
-    pollingEnabled: store.get('telegramPollingEnabled') !== undefined
+    pollingEnabled: telegramNetworkAllowed(env) && (store.get('telegramPollingEnabled') !== undefined
       ? store.get('telegramPollingEnabled') === true
-      : env.TELEGRAM_POLLING_ENABLED === 'true',
+      : env.TELEGRAM_POLLING_ENABLED === 'true'),
   };
 }

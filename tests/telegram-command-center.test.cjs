@@ -17,6 +17,17 @@ const {
   shouldSuppressTelegramAlert,
 } = require('../dist/features/telegram-command-center');
 
+test('pending confirmation cannot execute after switching markets', () => {
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'telegram-scope-')), 'state.json');
+  const store = new TelegramCommandCenterStore(file);
+  store.setActiveMarketScope('100', 'stocks');
+  const pending = store.createPendingAction('100', { type: 'unified_paper_order', instrumentId: 'stock:us:AAPL', instrumentType: 'stock', side: 'BUY', price: 100, quantity: 1 });
+  store.setActiveMarketScope('100', 'crypto');
+  assert.equal(store.consumePendingAction('100', pending.nonce), null);
+  store.setActiveMarketScope('100', 'stocks');
+  assert.equal(store.consumePendingAction('100', pending.nonce), null);
+});
+
 test('stores per-chat notification preferences and keeps defaults safe', () => {
   const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'telegram-center-')), 'state.json');
   const store = new TelegramCommandCenterStore(file);

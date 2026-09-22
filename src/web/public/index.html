@@ -2544,7 +2544,10 @@
                     <button class="tab stock-kline-period" data-kline-period="1y" onclick="setStockKlinePeriod('1y')">1年</button>
                     <button class="tab stock-kline-period" data-kline-period="5y" onclick="setStockKlinePeriod('5y')">5年</button>
                   </div>
-                  <span id="stock-chart-data-status" class="kline-data-status" aria-live="polite"></span>
+                  <span id="stock-chart-data-status" class="kline-data-status" aria-live="polite">
+                    <span data-kline-status></span>
+                    <span data-stock-coverage title="当前股票各数据能力的覆盖状态"></span>
+                  </span>
                 </div>
               </div>
               <div id="stock-chart-overlays" class="stock-chart-overlays" aria-current="page" aria-label="K线显示选项">
@@ -6277,7 +6280,7 @@ async function loadStockQuotes() {
   }
 }
 async function loadUnifiedStockData(symbol) {
-  const el = document.getElementById('stock-data-freshness');
+  const el = document.querySelector('#stock-chart-data-status [data-stock-coverage]') || document.getElementById('stock-chart-data-status');
   if (!['stocks', 'overview', 'watchlist'].includes(activeMarketScope)) return null;
   const normalized = String(symbol || '').replace(/^us/i, '').toUpperCase();
   if (!/^[A-Z][A-Z0-9.-]{0,9}$/.test(normalized)) return null;
@@ -6285,8 +6288,12 @@ async function loadUnifiedStockData(symbol) {
   window._stockDataRequestToken = requestToken;
   if (el) el.textContent = '正在读取股票免费数据源…';
   try {
-    const res = await fetch('/api/stocks/' + encodeURIComponent(normalized) + '/overview', { cache: 'no-store' });
-    const payload = await res.json();
+    const [overviewResponse, coverageResponse] = await Promise.all([
+      fetch('/api/stocks/' + encodeURIComponent(normalized) + '/overview', { cache: 'no-store' }),
+      fetch('/api/stocks/' + encodeURIComponent(normalized) + '/coverage', { cache: 'no-store' }),
+    ]);
+    const payload = await overviewResponse.json();
+    const coveragePayload = await coverageResponse.json();
     if (requestToken !== window._stockDataRequestToken || !['stocks', 'overview', 'watchlist'].includes(activeMarketScope)) return null;
     if (!payload.success || !payload.data) throw new Error(payload.error || '股票数据暂不可用');
     const sources = (payload.data.sources || []).map(source => {
@@ -6295,6 +6302,17 @@ async function loadUnifiedStockData(symbol) {
       return label + '：' + status + '（' + new Date(source.fetchedAt).toLocaleString() + '）';
     });
     if (el) el.textContent = normalized + ' · 来源状态：' + (sources.join('　') || '暂无');
+    const coverage = coveragePayload?.data?.data || coveragePayload?.data;
+    if (coverage?.capabilities && el) {
+      const labels = { quote: '报价', bars: 'K线', filings: 'SEC申报', fundamentals: '基本面', news: '新闻', insider: '内部人' };
+      const statusLabel = { live: '有数据', cached: '缓存', partial: '部分', empty: '暂无', unavailable: '不可用' };
+      const cells = Object.entries(coverage.capabilities).map(([key, item]) => {
+        const date = item.coverage?.from && item.coverage?.to ? ` · ${item.coverage.from} 至 ${item.coverage.to}` : '';
+        const detail = item.reason || `${item.count ?? 0} 条${date}`;
+        return `<span title="${stockEscapeHtml(item.source || '')}: ${stockEscapeHtml(detail)}" style="display:inline-block;margin:3px 4px 0 0;padding:3px 7px;border:1px solid var(--border);border-radius:999px;color:var(--text-secondary);font-size:10px;">${labels[key] || key}：${statusLabel[item.status] || item.status}</span>`;
+      }).join('');
+      el.innerHTML += `<div style="margin-top:5px;line-height:1.5;">${cells}</div>`;
+    }
     return payload.data;
   } catch (error) {
     if (requestToken === window._stockDataRequestToken && el) el.textContent = normalized + ' · 股票免费数据源暂时不可用，其他卡片仍可查看。';
@@ -8046,6 +8064,10 @@ function setStockKlinePeriod(period) {
   });
   loadStockKline();
 }
+function setStockKlineStatus(message) {
+  const status = document.querySelector('#stock-chart-data-status [data-kline-status]') || document.getElementById('stock-chart-data-status');
+  if (status) status.textContent = String(message || '');
+}
 async function loadStockKline(symbol, name, apiSymbol) {
   if (!window.stockMoneyKLine) {
       const canvas = document.getElementById('stock-kline');
@@ -8062,16 +8084,15 @@ async function loadStockKline(symbol, name, apiSymbol) {
   if (apiSymbol !== undefined) currentStockApiSymbol = apiSymbol || '';
   const canvas = document.getElementById('stock-kline');
   const title = document.getElementById('stock-chart-title');
-  const status = document.getElementById('stock-chart-data-status');
   if (title) title.textContent = currentStockName + ' · ' + currentStockSymbol;
   if (!canvas) return;
   try {
-    if (status) status.textContent = '正在加载真实数据…';
+    setStockKlineStatus('正在加载真实数据…');
     const res = await fetch('/api/stock/kline?symbol=' + encodeURIComponent(currentStockSymbol) + '&period=' + encodeURIComponent(currentStockKlinePeriod) + '&interval=' + encodeURIComponent(currentStockKlinePeriod) + (currentStockApiSymbol ? '&api=' + encodeURIComponent(currentStockApiSymbol) : ''));
     const d = await res.json();
     if (!d.success || !d.data || !d.data.length) {
       currentStockKlineReason = d.reason || d.error || '暂无数据';
-      if (status) status.textContent = currentStockKlineReason;
+      setStockKlineStatus(currentStockKlineReason);
       const context = canvas.getContext('2d');
       context.setTransform(1, 0, 0, 1, 0, 0);
       context.clearRect(0, 0, canvas.width, canvas.height);
@@ -8084,7 +8105,7 @@ async function loadStockKline(symbol, name, apiSymbol) {
     }
     currentStockKlineReason = '';
     const freshness = d.dataStatus === 'cached' ? '缓存' : d.dataStatus === 'stale' ? '过期缓存' : d.dataStatus === 'degraded' ? '降级' : '实时';
-    if (status) status.textContent = `${freshness} · ${d.source || '股票行情'} · ${d.updatedAt ? formatChartTime(d.updatedAt) : ''}${d.reason ? ` · ${d.reason}` : ''}`;
+    setStockKlineStatus(`${freshness} · ${d.source || '股票行情'} · ${d.updatedAt ? formatChartTime(d.updatedAt) : ''}${d.reason ? ` · ${d.reason}` : ''}`);
     stockChartKlines = d.data;
     stockChartReplayIndex = stockChartKlines.length - 1;
     loadStockChartOverlayConfig();
@@ -8092,8 +8113,7 @@ async function loadStockKline(symbol, name, apiSymbol) {
     else drawStockKline(canvas, stockChartKlines);
   } catch(e) {
     currentStockKlineReason = '股票K线来源不可用，请稍后重试';
-    const status = document.getElementById('stock-chart-data-status');
-    if (status) status.textContent = currentStockKlineReason;
+    setStockKlineStatus(currentStockKlineReason);
   }
 }
 function drawStockKline(canvas, klines) {

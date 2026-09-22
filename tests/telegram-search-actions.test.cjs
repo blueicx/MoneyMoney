@@ -44,6 +44,10 @@ test('context callbacks are signed, chat-bound, and one-time', () => {
   assert.match(server, /parseTelegramContextCallback\(data, 'quick:select', ctx\.chatId\)/);
 });
 
+test('telegram reload recovers after an earlier reload rejection', () => {
+  assert.match(server, /telegramReloadPromise\s*=\s*telegramReloadPromise\.catch\(\(\)\s*=>\s*undefined\)\.then/);
+});
+
 test('paper and confirmation callbacks are signed, scoped, and reject plaintext payloads', () => {
   assert.match(server, /function telegramPaperCallback\(action: string, payload: string, chatId: string/);
   assert.match(server, /parseTelegramCallbackPayload\(data, 'paper:pick', ctx\.chatId\)/);
@@ -52,4 +56,5 @@ test('paper and confirmation callbacks are signed, scoped, and reject plaintext 
   assert.match(server, /telegramPaperCallback\('paper:close:pick', String\(p\.id\), chatId, 'prediction'\)/);
   assert.doesNotMatch(server, /callback_data: `paper:pick:\$\{m\.id\}`/);
   assert.doesNotMatch(server, /callback_data: `paper:close:pick:\$\{p\.id\}`/);
+  assert.doesNotMatch(server, /data === 'pending:cancel'/);
 });

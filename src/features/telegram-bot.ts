@@ -3,6 +3,7 @@ import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { curlCommand } from '../utils/platform-command';
 import { buildTelegramBottomMenu } from '../web/telegram-menu';
+import { telegramNetworkAllowed } from '../config/runtime-secrets';
 
 const TELEGRAM_API = 'https://api.telegram.org';
 const MAX_MESSAGE_LENGTH = 4096;
@@ -177,7 +178,7 @@ export function escapeTelegramHtml(value: unknown): string {
     .replaceAll('>', '&gt;');
 }
 
-class TelegramApiTransport implements TelegramTransport {
+export class TelegramApiTransport implements TelegramTransport {
   constructor(
     private readonly token: string,
     private readonly proxyUrl = '',
@@ -209,6 +210,7 @@ class TelegramApiTransport implements TelegramTransport {
   }
 
   private async callApi<T>(method: string, body: Record<string, unknown>, timeoutMs: number, signal?: AbortSignal): Promise<TelegramApiResponse<T>> {
+    if (!telegramNetworkAllowed()) throw new Error('Telegram network disabled in this environment');
     const url = `${TELEGRAM_API}/bot${this.token}/${method}`;
     const request = createTimeoutSignal(signal, timeoutMs);
     try {

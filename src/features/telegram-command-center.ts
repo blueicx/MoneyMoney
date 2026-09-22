@@ -67,6 +67,7 @@ export interface TelegramJournalEntry {
 }
 
 export interface TelegramPendingAction {
+  marketScope?: MarketScope;
   nonce: string;
   chatId: string;
   type: 'paper_open' | 'paper_close' | 'paper_reset' | 'unified_paper_order';
@@ -546,6 +547,7 @@ export class TelegramCommandCenterStore {
     const now = Date.now();
     const pending: TelegramPendingAction = {
       ...input,
+      marketScope: this.getActiveMarketScope(chatId),
       nonce: Math.random().toString(36).slice(2, 8).toUpperCase(),
       chatId: String(chatId),
       createdAt: new Date(now).toISOString(),
@@ -564,6 +566,7 @@ export class TelegramCommandCenterStore {
     this.state.pending = this.state.pending.filter(item => new Date(item.expiresAt).getTime() > now);
     this.save();
     if (new Date(pending.expiresAt).getTime() <= now) return null;
+    if (pending.marketScope && pending.marketScope !== this.getActiveMarketScope(chatId)) return null;
     return { ...pending };
   }
 

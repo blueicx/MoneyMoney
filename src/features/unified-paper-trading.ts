@@ -1,4 +1,5 @@
-import { stateStore } from '../storage/sqlite-state';
+import { stateStore, SQLiteStateStore } from '../storage/sqlite-state';
+import { randomUUID } from 'node:crypto';
 
 export type UnifiedPaperInstrumentType = 'stock' | 'option' | 'crypto' | 'prediction';
 export type UnifiedPaperSide = 'BUY' | 'SELL' | 'YES' | 'NO';
@@ -9,6 +10,7 @@ export interface UnifiedPaperOrder {
   instrumentType: UnifiedPaperInstrumentType;
   title?: string;
   side: UnifiedPaperSide;
+  outcome?: 'YES' | 'NO';
   price: number;
   quantity: number;
   timestamp: string;
@@ -52,13 +54,24 @@ export function validateUnifiedPaperOrder(input: Partial<UnifiedPaperOrder>): { 
   if (!['stock', 'option', 'crypto', 'prediction'].includes(String(input.instrumentType))) return { ok: false, error: '标的类型无效' };
   const inferredType = instrumentTypeFromId(instrumentId);
   if (inferredType && inferredType !== input.instrumentType) return { ok: false, error: '标的类型与规范化 ID 不一致' };
-  const allowed = input.instrumentType === 'prediction' ? ['YES', 'NO'] : ['BUY', 'SELL'];
+  const allowed = input.instrumentType === 'prediction' ? ['YES', 'NO', 'SELL'] : ['BUY', 'SELL'];
   if (!allowed.includes(String(input.side))) return { ok: false, error: input.instrumentType === 'prediction' ? '预测市场订单只能选择 YES 或 NO' : '股票、期权和加密资产订单只能选择 BUY 或 SELL' };
+  if (input.instrumentType === 'prediction' && input.side === 'SELL' && !['YES', 'NO'].includes(String(input.outcome))) return { ok: false, error: '平仓必须指定 YES 或 NO outcome' };
   if (!Number.isFinite(Number(input.price)) || Number(input.price) <= 0) return { ok: false, error: '价格必须大于 0' };
   if (input.instrumentType === 'prediction' && Number(input.price) > 1) return { ok: false, error: '预测市场价格必须在 0 到 1 之间' };
   if (!Number.isFinite(Number(input.quantity)) || Number(input.quantity) <= 0) return { ok: false, error: '数量必须大于 0' };
   if (input.timestamp != null && (!String(input.timestamp || '').trim() || !Number.isFinite(new Date(String(input.timestamp)).getTime()))) return { ok: false, error: '时间戳无效' };
   return { ok: true };
+}
+
+interface LegacyPredictionPosition {
+  id: string; marketId: number; marketTitle: string; outcomeIndex: 0 | 1; outcomeName: string;
+  entryPrice: number; currentPrice?: number; quantity: number; entryTime: string;
+  exitPrice?: number; exitTime?: string; status: 'OPEN' | 'CLOSED'; pnlUsd?: number;
+}
+
+interface LegacyPredictionPortfolio {
+  startingBalance: number; cashBalance: number; positions: LegacyPredictionPosition[];
 }
 
 function round(value: number, digits = 8): number { const factor = 10 ** digits; return Math.round(value * factor) / factor; }
@@ -70,7 +83,7 @@ function instrumentTypeFromId(value: string): UnifiedPaperInstrumentType | null 
   if (id.startsWith('prediction:')) return 'prediction';
   return null;
 }
-function positionKey(order: UnifiedPaperOrder): string { return `${order.instrumentId}:${order.instrumentType === 'prediction' ? order.side : 'direction'}`; }
+function positionKey(order: UnifiedPaperOrder): string { return `${order.instrumentId}:${order.instrumentType === 'prediction' ? (order.side === 'SELL' ? order.outcome : order.side) : 'direction'}`; }
 function orderCosts(order: UnifiedPaperOrder): number {
   const fee = Number(order.feeUsd);
   const slippage = Number(order.slippageUsd);
@@ -117,7 +130,7 @@ export function applyUnifiedPaperOrder(source: UnifiedPaperLedger, order: Unifie
 export function markUnifiedPaperPrices(source: UnifiedPaperLedger, prices: Map<string, number>): UnifiedPaperLedger {
   const ledger = { ...source, positions: source.positions.map(item => ({ ...item })), orders: [...source.orders] };
   for (const position of ledger.positions) {
-    const price = prices.get(position.instrumentId);
+    const price = prices.get(`${position.instrumentId}:${position.outcome || ''}`) ?? prices.get(position.instrumentId);
     if (price != null && Number.isFinite(price) && price > 0) position.currentPrice = price;
   }
   return ledger;
@@ -208,14 +221,65 @@ export function replayUnifiedPaperOrders(input: { startingCash?: number; orders:
 }
 
 export class UnifiedPaperLedgerStore {
-  private ledger: UnifiedPaperLedger;
-  constructor() { this.ledger = stateStore.get<UnifiedPaperLedger>('paper-ledger') || emptyUnifiedPaperLedger(); }
-  get(): UnifiedPaperLedger { return { ...this.ledger, positions: this.ledger.positions.map(item => ({ ...item })), orders: [...this.ledger.orders] }; }
-  apply(order: UnifiedPaperOrder): UnifiedPaperLedger { this.ledger = applyUnifiedPaperOrder(this.ledger, order); this.save(); return this.get(); }
-  markPrices(prices: Map<string, number>): UnifiedPaperLedger { this.ledger = markUnifiedPaperPrices(this.ledger, prices); this.save(); return this.get(); }
-  reset(startingCash?: number): UnifiedPaperLedger { this.ledger = emptyUnifiedPaperLedger(startingCash); this.save(); return this.get(); }
-  performance() { return calculateUnifiedPerformance(this.ledger); }
-  private save(): void { stateStore.set('paper-ledger', this.ledger, 1); }
+  constructor(private readonly store: SQLiteStateStore = stateStore) {}
+  get(): UnifiedPaperLedger { return this.store.get<UnifiedPaperLedger>('paper-ledger') || emptyUnifiedPaperLedger(); }
+  apply(order: UnifiedPaperOrder): UnifiedPaperLedger {
+    return this.store.transaction(() => {
+      const ledger = this.get();
+      const existing = order.id && ledger.orders.find(item => item.id === order.id);
+      if (existing) {
+        const fields = ['instrumentId', 'instrumentType', 'side', 'outcome', 'price', 'quantity', 'timestamp', 'feeUsd', 'slippageUsd', 'strategy', 'reason'] as const;
+        if (fields.some(key => existing[key] !== order[key])) throw new Error('重复订单 ID 的内容不一致');
+        return ledger;
+      }
+      const next = applyUnifiedPaperOrder(ledger, { ...order, id: order.id || randomUUID() });
+      this.store.set('paper-ledger', next, 2);
+      return next;
+    });
+  }
+  markPrices(prices: Map<string, number>): UnifiedPaperLedger {
+    return this.store.transaction(() => {
+      const next = markUnifiedPaperPrices(this.get(), prices);
+      this.store.set('paper-ledger', next, 2);
+      return next;
+    });
+  }
+  reset(startingCash?: number): UnifiedPaperLedger { const ledger = emptyUnifiedPaperLedger(startingCash); this.store.set('paper-ledger', ledger, 2); return ledger; }
+  performance() { return calculateUnifiedPerformance(this.get()); }
+  migrateLegacyPredictionPortfolio(legacy: LegacyPredictionPortfolio): UnifiedPaperLedger {
+    return this.store.transaction(() => {
+      const current = this.get();
+      const marker = this.store.get<{ startingBalance?: number }>('paper-ledger-legacy-migration-v1');
+      if (marker) return current;
+      const legacyStarting = Math.max(0, Number(legacy?.startingBalance) || 0);
+      let ledger: UnifiedPaperLedger = {
+        ...current,
+        startingCash: round(current.startingCash + legacyStarting),
+        cash: round(current.cash + legacyStarting),
+        positions: current.positions.map(item => ({ ...item })),
+        orders: [...current.orders],
+      };
+      for (const position of Array.isArray(legacy?.positions) ? legacy.positions : []) {
+        if (!position || !Number.isFinite(position.quantity) || position.quantity <= 0) continue;
+        const instrumentId = `prediction:predictfun:${position.marketId}`;
+        const outcome = position.outcomeIndex === 0 ? 'YES' : 'NO';
+        ledger = applyUnifiedPaperOrder(ledger, {
+          id: `legacy:${position.id}:entry`, instrumentId, instrumentType: 'prediction', title: position.marketTitle,
+          side: outcome, price: position.entryPrice, quantity: position.quantity, timestamp: position.entryTime,
+        });
+        if (position.status === 'CLOSED' && Number.isFinite(position.exitPrice)) {
+          ledger = applyUnifiedPaperOrder(ledger, {
+            id: `legacy:${position.id}:exit`, instrumentId, instrumentType: 'prediction', title: position.marketTitle,
+            side: 'SELL', outcome, price: position.exitPrice!, quantity: position.quantity,
+            timestamp: position.exitTime || position.entryTime,
+          });
+        }
+      }
+      this.store.set('paper-ledger', ledger, 2);
+      this.store.set('paper-ledger-legacy-migration-v1', { startingBalance: legacyStarting }, 1);
+      return ledger;
+    });
+  }
 }
 
 export const unifiedPaperLedgerStore = new UnifiedPaperLedgerStore();

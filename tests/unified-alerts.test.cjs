@@ -7,8 +7,18 @@ const {
   isAlertSuppressed,
   evaluateUnifiedAlert,
   triggerUnifiedAlerts,
+  previewUnifiedAlerts,
   UnifiedAlertStore,
 } = require('../dist/features/unified-alerts');
+
+{
+  const previewStore = new UnifiedAlertStore({ keyPrefix: 'test-unified-alert-preview-' + Date.now() });
+  previewStore.createRule({ id: 'preview-price', instrumentId: 'stock:us:AAPL', kind: 'price', condition: { direction: 'above', value: 200 }, cooldownMinutes: 0 });
+  const preview = previewUnifiedAlerts(previewStore, [{ instrumentId: 'stock:us:AAPL', observation: { kind: 'price', value: 201 } }]);
+  assert.equal(preview.length, 1);
+  assert.equal(preview[0].wouldTrigger, true);
+  assert.equal(previewStore.listHistory().length, 0);
+}
 
 assert.deepEqual(EVENT_ALERT_STAGES, [1440, 720, 360, 180, 60, 30, 10, 5]);
 assert.equal(validateUnifiedAlertRule({ instrumentId: 'stock:us:AAPL', kind: 'event', condition: { stage: 60 }, channels: { web: true, telegram: false } }).ok, true);
