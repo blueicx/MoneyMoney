@@ -21,7 +21,7 @@ test('event evidence preserves source values and classifies direction conservati
   assert.equal(evidence.url, 'https://example.invalid/aapl');
 });
 
-test('timeline matching never widens to another market', () => {
+test('instrument timeline excludes market-wide rows from a specific stock', () => {
   assert.equal(matchesEventScope({ scope: 'stocks', instrumentId: 'stock:us:AAPL' }, 'stocks', 'stock:us:AAPL'), true);
   assert.equal(matchesEventScope({ scope: 'crypto', instrumentId: 'crypto:binance:BTCUSDT' }, 'stocks', 'stock:us:AAPL'), false);
   const items = filterTimelineItems([
@@ -30,7 +30,11 @@ test('timeline matching never widens to another market', () => {
     { scope: 'crypto', instrumentId: 'crypto:binance:BTCUSDT', title: 'crypto' },
     { scope: 'stocks', instrumentId: 'stock:us:MSFT', title: 'other stock' },
   ], 'stocks', 'stock:us:AAPL');
-  assert.deepEqual(items.map(item => item.title), ['market event', 'stock']);
+  assert.deepEqual(items.map(item => item.title), ['stock']);
+  assert.deepEqual(filterTimelineItems([
+    { scope: 'stocks', instrumentId: null, title: 'market event' },
+    { scope: 'stocks', instrumentId: 'stock:us:AAPL', title: 'stock' },
+  ], 'stocks'), ['market event', 'stock'].map(title => ({ scope: 'stocks', instrumentId: title === 'stock' ? 'stock:us:AAPL' : null, title })));
 });
 
 test('missing comparison values become unavailable instead of guessed', () => {

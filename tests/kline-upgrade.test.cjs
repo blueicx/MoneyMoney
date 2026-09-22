@@ -135,4 +135,12 @@ describe('K-Line Upgrade & Advanced Capabilities', () => {
     assert.equal(window.getStockKlineIndexFromPointer(99, rect, 10), null);
     assert.equal(window.getStockKlineIndexFromPointer(741, rect, 10), null);
   });
+
+  it('supports locating a stock candle by date and moving the selection', () => {
+    assert.ok(document.querySelector('[data-chart-candle-date]'));
+    assert.equal(typeof window.focusStockKlineDate, 'function');
+    assert.equal(typeof window.moveStockKlineSelection, 'function');
+    assert.ok(document.querySelector('[data-chart-candle-prev]'));
+    assert.ok(document.querySelector('[data-chart-candle-next]'));
+  });
 });

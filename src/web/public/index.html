@@ -2550,6 +2550,11 @@
                     <span data-stock-coverage title="当前股票各数据能力的覆盖状态"></span>
                   </span>
                   <span id="stock-chart-candle-selection" class="kline-data-status" aria-live="polite">点击图中某一根日K，可聚焦查看该日附近走势</span>
+                  <span class="kline-data-status" aria-label="日K定位控制">
+                    <button class="tab" type="button" data-chart-candle-prev onclick="moveStockKlineSelection(-1)" title="上一根K线">‹</button>
+                    <label>定位日期 <input type="date" data-chart-candle-date onchange="focusStockKlineDate(this.value)" aria-label="定位股票K线日期"></label>
+                    <button class="tab" type="button" data-chart-candle-next onclick="moveStockKlineSelection(1)" title="下一根K线">›</button>
+                  </span>
                 </div>
               </div>
               <div id="stock-chart-overlays" class="stock-chart-overlays" aria-current="page" aria-label="K线显示选项">
@@ -8095,6 +8100,8 @@ function updateStockKlineFocusControl() {
     button.setAttribute('aria-pressed', String(Boolean(stockChartFocusEnabled)));
   }
   if (info) info.textContent = formatStockCandleSelection(bar);
+  const dateInput = document.querySelector('[data-chart-candle-date]');
+  if (dateInput) dateInput.value = bar?.time ? new Date(bar.time).toISOString().slice(0, 10) : '';
 }
 function redrawStockKlineSelection() {
   const canvas = document.getElementById('stock-kline');
@@ -8114,6 +8121,48 @@ function selectStockKlineCandle(event) {
   updateStockKlineFocusControl();
   redrawStockKlineSelection();
   return sourceIndex;
+}
+function stockKlineVisibleCount() {
+  return stockChartReplayIndex >= 0 ? Math.min(stockChartKlines.length, stockChartReplayIndex + 1) : stockChartKlines.length;
+}
+function moveStockKlineSelection(offset) {
+  const visibleCount = stockKlineVisibleCount();
+  if (!visibleCount) return null;
+  const delta = Math.trunc(Number(offset) || 0);
+  const current = Number.isInteger(stockChartFocusIndex) && stockChartFocusIndex < visibleCount
+    ? stockChartFocusIndex
+    : delta < 0 ? visibleCount - 1 : 0;
+  stockChartFocusIndex = Math.max(0, Math.min(visibleCount - 1, current + delta));
+  updateStockKlineFocusControl();
+  redrawStockKlineSelection();
+  return stockChartFocusIndex;
+}
+function focusStockKlineDate(value) {
+  const dateText = String(value || '').trim();
+  const visibleCount = stockKlineVisibleCount();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateText) || !visibleCount) return null;
+  const index = stockChartKlines.slice(0, visibleCount).findIndex(bar => {
+    const timestamp = new Date(bar?.time).getTime();
+    return Number.isFinite(timestamp) && new Date(timestamp).toISOString().slice(0, 10) === dateText;
+  });
+  if (index < 0) {
+    const info = document.getElementById('stock-chart-candle-selection');
+    if (info) info.textContent = `未找到 ${dateText} 的K线，请检查当前周期或数据范围`;
+    return null;
+  }
+  stockChartFocusIndex = index;
+  updateStockKlineFocusControl();
+  redrawStockKlineSelection();
+  return index;
+}
+function handleStockKlineKeydown(event) {
+  if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+    event.preventDefault();
+    moveStockKlineSelection(event.key === 'ArrowLeft' ? -1 : 1);
+  } else if (event.key === 'Enter' && Number.isInteger(stockChartFocusIndex)) {
+    event.preventDefault();
+    toggleStockKlineFocus();
+  }
 }
 function toggleStockKlineFocus() {
   if (!Number.isInteger(stockChartFocusIndex) || !stockChartKlines[stockChartFocusIndex]) return false;
@@ -8135,7 +8184,9 @@ function bindStockKlineSelection() {
   canvas.dataset.candleSelectionBound = 'true';
   canvas.setAttribute('role', 'img');
   canvas.setAttribute('aria-label', '股票日K线图，点击某根K线可选择并放大');
+  canvas.tabIndex = 0;
   canvas.addEventListener('click', selectStockKlineCandle);
+  canvas.addEventListener('keydown', handleStockKlineKeydown);
 }
 function setStockKlinePeriod(period) {
   currentStockKlinePeriod = String(period || '1d').toLowerCase();
