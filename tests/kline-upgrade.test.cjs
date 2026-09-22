@@ -121,4 +121,18 @@ describe('K-Line Upgrade & Advanced Capabilities', () => {
     assert.match(html, /item\.status/);
     assert.match(html, /确认状态/);
   });
+
+  it('supports selecting and focusing one daily candle', () => {
+    const focusButton = document.querySelector('[data-chart-candle-focus]');
+    assert.ok(focusButton, 'A candle focus action should be visible in the stock chart toolbar');
+    assert.equal(typeof window.selectStockKlineCandle, 'function');
+    assert.equal(typeof window.clearStockKlineFocus, 'function');
+    assert.equal(typeof window.getStockKlineIndexFromPointer, 'function');
+
+    const rect = { left: 100, width: 640 };
+    assert.equal(window.getStockKlineIndexFromPointer(158, rect, 10), 0);
+    assert.equal(window.getStockKlineIndexFromPointer(726, rect, 10), 9);
+    assert.equal(window.getStockKlineIndexFromPointer(99, rect, 10), null);
+    assert.equal(window.getStockKlineIndexFromPointer(741, rect, 10), null);
+  });
 });

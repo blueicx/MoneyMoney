@@ -2532,6 +2532,7 @@
                 <div id="stock-chart-title" style="font-weight:700;font-size:15px;"></div>
                 <div class="kline-toolbar" data-kline-controls="stocks" aria-label="股票K线周期">
                   <button class="tab chart-fullscreen-button" type="button" data-chart-fullscreen="stocks" onclick="toggleChartFullscreen('stocks')" title="放大查看股票K线">⛶ 全屏</button>
+                  <button class="tab" type="button" data-chart-candle-focus onclick="toggleStockKlineFocus()" disabled title="先点击图中的某一根日K">🔎 放大所选日</button>
                   <div class="kline-control-group" aria-label="K线周期"><span class="kline-control-label">周期</span>
                     <button class="tab stock-kline-period" data-kline-period="5m" onclick="setStockKlinePeriod('5m')">5分</button>
                     <button class="tab stock-kline-period" data-kline-period="15m" onclick="setStockKlinePeriod('15m')">15分</button>
@@ -2548,6 +2549,7 @@
                     <span data-kline-status></span>
                     <span data-stock-coverage title="当前股票各数据能力的覆盖状态"></span>
                   </span>
+                  <span id="stock-chart-candle-selection" class="kline-data-status" aria-live="polite">点击图中某一根日K，可聚焦查看该日附近走势</span>
                 </div>
               </div>
               <div id="stock-chart-overlays" class="stock-chart-overlays" aria-current="page" aria-label="K线显示选项">
@@ -7835,6 +7837,9 @@ let currentStockKlinePeriod = '1d';
 let currentStockKlineReason = '';
 let stockChartReplayIndex = -1;
 let stockChartKlines = [];
+let stockChartFocusIndex = null;
+let stockChartFocusEnabled = false;
+let stockChartRenderedStartIndex = 0;
 let stockChartOverlayConfig = window.MoneyChartAnalysis?.normalizeOverlayConfig({ strategies:{ maCross:true, rsiReversal:false, bollinger:false, volumeBreakout:false } }) || { signals:true, patterns:false, structures:false, volume:true, indicators:{ ma:true, boll:false, macd:false }, strategies:{ maCross:true, rsiReversal:false, bollinger:false, volumeBreakout:false }, patternTypes:{}, maxLabels:80 };
 let cryptoChartStrategyConfig = { maCross:true, rsiReversal:false, bollinger:false, volumeBreakout:false };
 var INLINE_CANDLE_PATTERN_CATALOG = [
@@ -8057,8 +8062,84 @@ function stepStockChartReplay(action) {
   else if (window.stockMoneyKLine) window.stockMoneyKLine.create(stockChartKlines);
   else drawStockKline(document.getElementById('stock-kline'), stockChartKlines);
 }
+function getStockKlineIndexFromPointer(clientX, rect, count, padLeft = 58, padRight = 14) {
+  const total = Math.floor(Number(count));
+  const left = Number(rect?.left);
+  const width = Number(rect?.width);
+  const pointer = Number(clientX);
+  if (!Number.isFinite(left) || !Number.isFinite(width) || width <= 0 || !Number.isFinite(pointer) || total <= 0) return null;
+  const localX = pointer - left;
+  const plotWidth = width - Number(padLeft) - Number(padRight);
+  if (plotWidth <= 0 || localX < Number(padLeft) || localX > width - Number(padRight)) return null;
+  return Math.max(0, Math.min(total - 1, Math.floor((localX - Number(padLeft)) / (plotWidth / total))));
+}
+function getStockKlineFocusStart(total, index) {
+  const count = Math.max(0, Math.floor(Number(total)));
+  const selected = Math.max(0, Math.min(count - 1, Math.floor(Number(index))));
+  const windowSize = Math.min(11, count);
+  return Math.max(0, Math.min(selected - Math.floor(windowSize / 2), count - windowSize));
+}
+function formatStockCandleSelection(bar) {
+  if (!bar) return '点击图中某一根日K，可聚焦查看该日附近走势';
+  const price = value => Number.isFinite(Number(value)) ? formatChartPrice(Number(value)) : '--';
+  return `已选 ${formatChartTime(bar.time)} · O ${price(bar.open)} · H ${price(bar.high)} · L ${price(bar.low)} · C ${price(bar.close)} · V ${price(bar.volume)}`;
+}
+function updateStockKlineFocusControl() {
+  const button = document.querySelector('[data-chart-candle-focus]');
+  const info = document.getElementById('stock-chart-candle-selection');
+  const bar = Number.isInteger(stockChartFocusIndex) ? stockChartKlines[stockChartFocusIndex] : null;
+  if (button) {
+    button.disabled = !bar;
+    button.textContent = stockChartFocusEnabled ? '↩ 退出日K放大' : '🔎 放大所选日';
+    button.title = bar ? (stockChartFocusEnabled ? '恢复当前周期全部日K' : '放大查看所选日附近的K线') : '先点击图中的某一根日K';
+    button.setAttribute('aria-pressed', String(Boolean(stockChartFocusEnabled)));
+  }
+  if (info) info.textContent = formatStockCandleSelection(bar);
+}
+function redrawStockKlineSelection() {
+  const canvas = document.getElementById('stock-kline');
+  if (!canvas || !stockChartKlines.length) return;
+  if (window.stockMoneyKLine?.render) window.stockMoneyKLine.render();
+  else drawStockKline(canvas, stockChartKlines);
+}
+function selectStockKlineCandle(event) {
+  const canvas = event?.currentTarget || document.getElementById('stock-kline');
+  if (!canvas || !stockChartKlines.length) return null;
+  const visibleCount = stockChartReplayIndex >= 0 ? Math.min(stockChartKlines.length, stockChartReplayIndex + 1) : stockChartKlines.length;
+  const rect = canvas.getBoundingClientRect();
+  const localIndex = getStockKlineIndexFromPointer(event?.clientX, rect, Math.min(visibleCount, Math.max(1, stockChartFocusEnabled && Number.isInteger(stockChartFocusIndex) ? Math.min(11, visibleCount) : visibleCount)));
+  if (localIndex == null) return null;
+  const sourceIndex = Math.max(0, Math.min(visibleCount - 1, stockChartRenderedStartIndex + localIndex));
+  stockChartFocusIndex = sourceIndex;
+  updateStockKlineFocusControl();
+  redrawStockKlineSelection();
+  return sourceIndex;
+}
+function toggleStockKlineFocus() {
+  if (!Number.isInteger(stockChartFocusIndex) || !stockChartKlines[stockChartFocusIndex]) return false;
+  stockChartFocusEnabled = !stockChartFocusEnabled;
+  updateStockKlineFocusControl();
+  redrawStockKlineSelection();
+  return stockChartFocusEnabled;
+}
+function clearStockKlineFocus() {
+  stockChartFocusIndex = null;
+  stockChartFocusEnabled = false;
+  stockChartRenderedStartIndex = 0;
+  updateStockKlineFocusControl();
+  redrawStockKlineSelection();
+}
+function bindStockKlineSelection() {
+  const canvas = document.getElementById('stock-kline');
+  if (!canvas || canvas.dataset.candleSelectionBound === 'true') return;
+  canvas.dataset.candleSelectionBound = 'true';
+  canvas.setAttribute('role', 'img');
+  canvas.setAttribute('aria-label', '股票日K线图，点击某根K线可选择并放大');
+  canvas.addEventListener('click', selectStockKlineCandle);
+}
 function setStockKlinePeriod(period) {
   currentStockKlinePeriod = String(period || '1d').toLowerCase();
+  clearStockKlineFocus();
   document.querySelectorAll('.stock-kline-period').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.klinePeriod === currentStockKlinePeriod);
   });
@@ -8069,6 +8150,7 @@ function setStockKlineStatus(message) {
   if (status) status.textContent = String(message || '');
 }
 async function loadStockKline(symbol, name, apiSymbol) {
+  bindStockKlineSelection();
   if (!window.stockMoneyKLine) {
       const canvas = document.getElementById('stock-kline');
       // The initial dashboard bootstrap runs before the late chart runtime
@@ -8082,6 +8164,10 @@ async function loadStockKline(symbol, name, apiSymbol) {
   if (symbol) currentStockSymbol = symbol;
   if (name) currentStockName = name;
   if (apiSymbol !== undefined) currentStockApiSymbol = apiSymbol || '';
+  stockChartFocusIndex = null;
+  stockChartFocusEnabled = false;
+  stockChartRenderedStartIndex = 0;
+  updateStockKlineFocusControl();
   const canvas = document.getElementById('stock-kline');
   const title = document.getElementById('stock-chart-title');
   if (title) title.textContent = currentStockName + ' · ' + currentStockSymbol;
@@ -8098,6 +8184,9 @@ async function loadStockKline(symbol, name, apiSymbol) {
       context.clearRect(0, 0, canvas.width, canvas.height);
       stockChartKlines = [];
       stockChartReplayIndex = -1;
+      stockChartFocusIndex = null;
+      stockChartFocusEnabled = false;
+      updateStockKlineFocusControl();
       renderChartPatternMarkers('stock-chart-patterns', [], () => null);
       renderChartPatternList('stock-chart-pattern-list', [], currentStockKlineReason);
       renderChartSignalList('stock-chart-signals', [], '当前周期未触发所选策略信号');
@@ -8120,7 +8209,12 @@ function drawStockKline(canvas, klines) {
   if (!canvas || !window.MoneyChartAnalysis) return;
   const fullKlines = Array.isArray(klines) ? klines : [];
   const visibleCount = stockChartReplayIndex >= 0 ? Math.min(fullKlines.length, stockChartReplayIndex + 1) : fullKlines.length;
-  klines = fullKlines.slice(0, visibleCount);
+  const replayKlines = fullKlines.slice(0, visibleCount);
+  const selectedIndex = Number.isInteger(stockChartFocusIndex) && stockChartFocusIndex < replayKlines.length ? stockChartFocusIndex : null;
+  const focusStart = stockChartFocusEnabled && selectedIndex != null ? getStockKlineFocusStart(replayKlines.length, selectedIndex) : 0;
+  stockChartRenderedStartIndex = focusStart;
+  klines = replayKlines.slice(focusStart, focusStart + (stockChartFocusEnabled && selectedIndex != null ? Math.min(11, replayKlines.length) : replayKlines.length));
+  const selectedVisibleIndex = selectedIndex == null ? -1 : selectedIndex - focusStart;
   if (!klines.length) {
     const replayStatus = document.getElementById('stock-chart-replay-status');
     if (replayStatus) replayStatus.textContent = '暂无K线数据';
@@ -8191,6 +8285,14 @@ function drawStockKline(canvas, klines) {
   });
   klines.forEach((k, idx) => {
     const x = xCenter(idx), isUp = k.close >= k.open, color = isUp ? green : red;
+    if (idx === selectedVisibleIndex) {
+      ctx.fillStyle = 'rgba(245, 158, 11, .12)';
+      ctx.fillRect(Math.max(padL, x - cw / 2), padT, Math.min(cw, W - padR - Math.max(padL, x - cw / 2)), H - padT - padB);
+      ctx.strokeStyle = '#f59e0b';
+      ctx.setLineDash([3, 3]);
+      ctx.beginPath(); ctx.moveTo(x, padT); ctx.lineTo(x, H - padB); ctx.stroke();
+      ctx.setLineDash([]);
+    }
     ctx.strokeStyle = color; ctx.lineWidth = 1;
     ctx.beginPath(); ctx.moveTo(x, yPrice(k.high)); ctx.lineTo(x, yPrice(k.low)); ctx.stroke();
     const yo = yPrice(k.open), yc = yPrice(k.close);
