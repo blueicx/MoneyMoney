@@ -384,9 +384,10 @@ app.get('/api/data/capabilities', async (req, res) => {
 
 app.get('/api/data/snapshots/:id', (req, res) => {
   try {
-    const snapshot = require('../features/research-repository').researchRepository.getDataSnapshot(String(req.params.id));
+    const snapshot = require('../features/research-repository').researchRepository.getDataSnapshot(String(req.params.id)) || dataLakeCatalog.getSnapshot(String(req.params.id));
     if (!snapshot) return res.status(404).json({ success: false, error: 'Data snapshot not found' });
-    res.json({ success: true, data: snapshot, market: snapshot.context.market, instrument: snapshot.context.instrument || null, dataStatus: snapshot.context.dataStatus || 'cached', updatedAt: snapshot.context.updatedAt || null });
+    const context = snapshot.context || snapshot;
+    res.json({ success: true, data: snapshot, market: context.market, instrument: context.instrument || null, dataStatus: context.dataStatus || 'historical', source: snapshot.source || 'MoneyMoney point-in-time snapshot', updatedAt: context.updatedAt || snapshot.createdAt || null, reason: null });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -566,9 +567,32 @@ app.get('/api/data/quality', (req, res) => {
 app.get('/api/data/revisions', (req, res) => {
   const rawMarket = typeof req.query.market === 'string' ? req.query.market : undefined;
   if (rawMarket && !MARKET_IDS.includes(rawMarket as MarketId)) return res.status(400).json({ success: false, error: 'Invalid market context' });
-  const partitions = dataLakeCatalog.listPartitions().filter(item => !rawMarket || item.market === rawMarket);
-  const revisions = partitions.map(item => ({ id: `revision_${item.id}`, partitionId: item.id, market: item.market, instrument: item.instrument, dataset: item.dataset, timeframe: item.timeframe, publishedAt: item.publishedAt, contentHash: item.contentHash }));
+  const revisions = dataLakeCatalog.listRevisions(rawMarket as MarketId | undefined);
   res.json({ success: true, data: revisions, market: rawMarket || 'all', dataStatus: revisions.length ? 'cached' : 'empty', source: 'MoneyMoney local revision catalog', updatedAt: new Date().toISOString(), reason: revisions.length ? null : '本地数据湖暂无修订记录' });
+});
+
+app.get('/api/data/corporate-actions', (req, res) => {
+  const rawMarket = typeof req.query.market === 'string' ? req.query.market : undefined;
+  const instrument = typeof req.query.instrument === 'string' ? req.query.instrument.trim() : undefined;
+  if (rawMarket && rawMarket !== 'stocks') return res.status(400).json({ success: false, market: rawMarket, dataStatus: 'unsupported', reason: '公司行动仅支持股票市场' });
+  const data = dataLakeCatalog.listCorporateActions('stocks', instrument);
+  res.json({ success: true, data, market: 'stocks', instrument: instrument || null, dataStatus: data.length ? 'historical' : 'empty', source: 'MoneyMoney corporate action catalog', updatedAt: new Date().toISOString(), reason: data.length ? null : '当前股票暂无公司行动记录' });
+});
+
+app.get('/api/data/providers', (req, res) => {
+  const rawMarket = typeof req.query.market === 'string' ? req.query.market : undefined;
+  if (rawMarket && !MARKET_IDS.includes(rawMarket as MarketId)) return res.status(400).json({ success: false, error: 'Invalid market context' });
+  const data = dataLakeCatalog.listProviderContracts(rawMarket as MarketId | undefined);
+  res.json({ success: true, data, market: rawMarket || 'all', dataStatus: data.length ? 'cached' : 'empty', source: 'MoneyMoney provider contract catalog', updatedAt: new Date().toISOString(), reason: data.length ? null : '当前作用域暂无 Provider 契约' });
+});
+
+app.get('/api/data/coverage', (req, res) => {
+  const rawMarket = typeof req.query.market === 'string' ? req.query.market : undefined;
+  const instrument = typeof req.query.instrument === 'string' ? req.query.instrument.trim() : undefined;
+  const timeframe = typeof req.query.timeframe === 'string' ? req.query.timeframe.trim() : undefined;
+  if (rawMarket && !MARKET_IDS.includes(rawMarket as MarketId)) return res.status(400).json({ success: false, error: 'Invalid market context' });
+  const data = dataLakeCatalog.listCoverage(rawMarket as MarketId | undefined, instrument, timeframe);
+  res.json({ success: true, data, market: rawMarket || 'all', instrument: instrument || null, timeframe: timeframe || null, dataStatus: data.length ? 'historical' : 'empty', source: 'MoneyMoney local data coverage catalog', updatedAt: new Date().toISOString(), reason: data.length ? null : '当前筛选范围暂无已发布数据分区' });
 });
 
 app.post('/api/data/backfills', (req, res) => {
@@ -2301,7 +2325,7 @@ async function readEventIntelligence(req: express.Request, res: express.Response
   try {
     const ref = eventInstrumentRef(market, instrument);
     const timeline = await unifiedInstrumentService.timeline(ref);
-    const entities = buildEventEntities(timeline.items, { market, instrument: ref.id });
+    const entities = buildEventEntities(timeline.items, { market, instrument: ref.id, retrievedAt: timeline.generatedAt, asOf: timeline.generatedAt });
     const data = grouped ? clusterEventEntities(entities) : entities;
     res.json(decisionEnvelope({ market, instrument: ref.id, data, dataStatus: data.length ? 'live' : 'empty', source: 'scoped instrument event timeline', updatedAt: timeline.generatedAt, reason: data.length ? null : '当前标的暂无可聚类事件或新闻' }));
   } catch (error: any) {

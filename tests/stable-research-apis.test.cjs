@@ -15,6 +15,10 @@ test('stable research and paper API routes are registered', () => {
     "app.get('/api/kline/:market/:instrument'",
     "app.get('/api/kline/:market/:instrument/replay'",
     "app.post('/api/kline/:market/:instrument/drawings'",
+    "app.get('/api/data/corporate-actions'",
+    "app.get('/api/data/providers'",
+    "app.get('/api/data/coverage'",
+    "dataLakeCatalog.listRevisions",
   ]) assert.ok(serverSource.includes(route), `missing ${route}`);
 });
 

@@ -31,3 +31,15 @@ test('event clusters deduplicate same-market evidence without mixing instruments
 test('event intelligence rejects missing or cross-market identity', () => {
   assert.throws(() => buildEventEntities([{ title: 'bad' }], { market: 'stocks', instrument: 'crypto:binance:BTCUSDT' }), /market|instrument/i);
 });
+
+test('event entities preserve occurred, published, retrieved and as-of timestamps without inventing publication time', () => {
+  const entities = buildEventEntities([
+    { kind: 'news', at: '2026-09-20T10:00:00.000Z', publishedAt: '2026-09-20T09:00:00.000Z', retrievedAt: '2026-09-20T10:05:00.000Z', asOf: '2026-09-20T10:05:00.000Z', title: 'Apple update', source: 'BBC', url: 'https://bbc.example/apple' },
+    { kind: 'event', at: '2026-09-21T10:00:00.000Z', title: 'Apple event', source: 'SEC', url: 'https://sec.example/apple' },
+  ], { market: 'stocks', instrument: 'stock:us:AAPL' });
+  assert.equal(entities[0].occurredAt, '2026-09-20T10:00:00.000Z');
+  assert.equal(entities[0].publishedAt, '2026-09-20T09:00:00.000Z');
+  assert.equal(entities[0].retrievedAt, '2026-09-20T10:05:00.000Z');
+  assert.equal(entities[0].asOf, '2026-09-20T10:05:00.000Z');
+  assert.equal(entities[1].publishedAt, null);
+});

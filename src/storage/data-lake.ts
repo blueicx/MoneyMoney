@@ -10,12 +10,13 @@ import { MARKET_IDS, type MarketId } from '../features/research-contracts';
 export type DatasetStatus = 'staged' | 'committed' | 'rejected';
 export interface DatasetManifest { id: string; dataset: string; market: MarketId; source: string; fieldVersion: string; timezone: string; adjustment: string; createdAt: string; contentHash: string; }
 export interface DatasetPartition { id: string; manifestId: string; path: string; dataset: string; market: MarketId; instrument: string; timeframe: string; periodStart: string; periodEnd: string; publishedAt: string; fetchedAt: string; rowCount: number; status: DatasetStatus; contentHash: string; }
-export interface PointInTimeSnapshot { id: string; market: MarketId; instrument: string; dataset: string; asOf: string; partitionId: string; contentHash: string; }
-export interface DataRevision { id: string; dataset: string; partitionId: string; publishedAt: string; supersedes?: string; reason?: string; }
+export interface PointInTimeSnapshot { id: string; market: MarketId; instrument: string; dataset: string; timeframe: string; asOf: string; partitionId: string; contentHash: string; source: string | null; createdAt: string; }
+export interface DataRevision { id: string; dataset: string; market: MarketId; instrument: string; timeframe: string; partitionId: string; publishedAt: string; contentHash: string; supersedes?: string; reason?: string; }
 export interface CorporateAction { id: string; market: 'stocks'; instrument: string; kind: 'split' | 'dividend' | 'symbol-change' | 'delisting'; effectiveAt: string; factor?: number; oldSymbol?: string; newSymbol?: string; source: string; }
 export interface ProviderContract { id: string; provider: string; market: MarketId; datasets: string[]; timezone: string; units: Record<string, string>; revisionPolicy: 'point-in-time' | 'latest'; }
 export interface DataQualityReport { valid: boolean; rowCount: number; duplicateTimestamps: number; outOfOrderRows: number; missingFields: string[]; futureRows: number; errors: string[]; checkedAt: string; }
-export interface DataBackfillJob { id: string; market: MarketId; dataset: string; instrument: string; timeframe: string; from: string; to: string; status: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled'; reason?: string; createdAt: string; updatedAt: string; }
+export interface BackfillCheckpoint { cursor?: string; rowsWritten: number; partitionsCommitted: number; }
+export interface DataBackfillJob { id: string; market: MarketId; dataset: string; instrument: string; timeframe: string; from: string; to: string; status: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled'; reason?: string; createdAt: string; updatedAt: string; leaseOwner?: string; leaseExpiresAt?: string; checkpoint: BackfillCheckpoint; }
 export interface BarRow { timestamp: string; open: number; high: number; low: number; close: number; volume?: number; publishedAt?: string; }
 export interface DataLakeDiagnostics {
   root: string;
@@ -30,6 +31,7 @@ export interface DataLakeDiagnostics {
   byDataset: Record<string, number>;
   backfills: Record<DataBackfillJob['status'], number>;
 }
+export interface DataCoverage { market: MarketId; instrument: string; dataset: string; timeframe: string; partitionCount: number; rowCount: number; periodStart: string; periodEnd: string; latestPublishedAt: string; status: DatasetStatus; }
 
 const BAR_FIELDS = ['timestamp', 'open', 'high', 'low', 'close'] as const;
 const IDENTIFIER = /^[A-Za-z0-9._:/-]+$/;
@@ -43,6 +45,12 @@ function stableJson(value: unknown): string {
 }
 function hash(value: unknown): string { return crypto.createHash('sha256').update(stableJson(value)).digest('hex'); }
 function sqlPath(value: string): string { return value.replace(/'/g, "''"); }
+function parseCheckpoint(value: unknown): BackfillCheckpoint {
+  try {
+    const parsed = typeof value === 'string' ? JSON.parse(value) : value;
+    return { cursor: parsed?.cursor ? String(parsed.cursor) : undefined, rowsWritten: Number(parsed?.rowsWritten || 0), partitionsCommitted: Number(parsed?.partitionsCommitted || 0) };
+  } catch { return { rowsWritten: 0, partitionsCommitted: 0 }; }
+}
 
 function validateInstrument(market: MarketId, instrument: string): void {
   if (!instrument || !IDENTIFIER.test(instrument)) throw new Error('invalid instrument identity');
@@ -99,9 +107,24 @@ export class DataLakeCatalog {
       CREATE TABLE IF NOT EXISTS dataset_manifests (id TEXT PRIMARY KEY, dataset TEXT NOT NULL, market TEXT NOT NULL, source TEXT NOT NULL, field_version TEXT NOT NULL, timezone TEXT NOT NULL, adjustment TEXT NOT NULL, created_at TEXT NOT NULL, content_hash TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS dataset_partitions (id TEXT PRIMARY KEY, manifest_id TEXT NOT NULL, path TEXT NOT NULL UNIQUE, dataset TEXT NOT NULL, market TEXT NOT NULL, instrument TEXT NOT NULL, timeframe TEXT NOT NULL, period_start TEXT NOT NULL, period_end TEXT NOT NULL, published_at TEXT NOT NULL, fetched_at TEXT NOT NULL, row_count INTEGER NOT NULL, status TEXT NOT NULL, content_hash TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS data_quality_reports (partition_id TEXT PRIMARY KEY, report TEXT NOT NULL, checked_at TEXT NOT NULL);
-      CREATE TABLE IF NOT EXISTS data_backfill_jobs (id TEXT PRIMARY KEY, market TEXT NOT NULL, dataset TEXT NOT NULL, instrument TEXT NOT NULL, timeframe TEXT NOT NULL, from_at TEXT NOT NULL, to_at TEXT NOT NULL, status TEXT NOT NULL, reason TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS data_revisions (id TEXT PRIMARY KEY, dataset TEXT NOT NULL, market TEXT NOT NULL, instrument TEXT NOT NULL, timeframe TEXT NOT NULL, partition_id TEXT NOT NULL, published_at TEXT NOT NULL, content_hash TEXT NOT NULL, supersedes TEXT, reason TEXT);
+      CREATE TABLE IF NOT EXISTS point_in_time_snapshots (id TEXT PRIMARY KEY, market TEXT NOT NULL, instrument TEXT NOT NULL, dataset TEXT NOT NULL, timeframe TEXT NOT NULL, as_of TEXT NOT NULL, partition_id TEXT NOT NULL, content_hash TEXT NOT NULL, source TEXT, created_at TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS corporate_actions (id TEXT PRIMARY KEY, market TEXT NOT NULL, instrument TEXT NOT NULL, kind TEXT NOT NULL, effective_at TEXT NOT NULL, factor REAL, old_symbol TEXT, new_symbol TEXT, source TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS provider_contracts (id TEXT PRIMARY KEY, provider TEXT NOT NULL, market TEXT NOT NULL, datasets TEXT NOT NULL, timezone TEXT NOT NULL, units TEXT NOT NULL, revision_policy TEXT NOT NULL, updated_at TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS data_backfill_jobs (id TEXT PRIMARY KEY, market TEXT NOT NULL, dataset TEXT NOT NULL, instrument TEXT NOT NULL, timeframe TEXT NOT NULL, from_at TEXT NOT NULL, to_at TEXT NOT NULL, status TEXT NOT NULL, reason TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, lease_owner TEXT, lease_expires_at TEXT, checkpoint TEXT NOT NULL DEFAULT '{"rowsWritten":0,"partitionsCommitted":0}');
       CREATE INDEX IF NOT EXISTS idx_dataset_partitions_lookup ON dataset_partitions (market, dataset, instrument, timeframe, published_at);
+      CREATE INDEX IF NOT EXISTS idx_data_revisions_lookup ON data_revisions (market, dataset, instrument, timeframe, published_at);
+      CREATE INDEX IF NOT EXISTS idx_snapshots_lookup ON point_in_time_snapshots (market, instrument, dataset, timeframe, as_of);
     `);
+    this.ensureBackfillColumns();
+  }
+
+  private ensureBackfillColumns(): void {
+    const columns = this.db.prepare('PRAGMA table_info(data_backfill_jobs)').all() as Array<{ name: string }>;
+    const names = new Set(columns.map(column => column.name));
+    if (!names.has('lease_owner')) this.db.exec('ALTER TABLE data_backfill_jobs ADD COLUMN lease_owner TEXT');
+    if (!names.has('lease_expires_at')) this.db.exec('ALTER TABLE data_backfill_jobs ADD COLUMN lease_expires_at TEXT');
+    if (!names.has('checkpoint')) this.db.exec(`ALTER TABLE data_backfill_jobs ADD COLUMN checkpoint TEXT NOT NULL DEFAULT '{"rowsWritten":0,"partitionsCommitted":0}'`);
   }
 
   async stageBars(input: { market: MarketId; dataset: string; instrument: string; timeframe: string; source: string; publishedAt: string; rows: BarRow[]; fieldVersion?: string; timezone?: string; adjustment?: string }): Promise<DatasetPartition & { quality: DataQualityReport }> {
@@ -142,10 +165,13 @@ export class DataLakeCatalog {
     fs.renameSync(stagePath, finalPath);
     const manifest: DatasetManifest = { id: manifestId, dataset: input.dataset, market: input.market, source: input.source, fieldVersion: input.fieldVersion || 'bars-v1', timezone: input.timezone || 'UTC', adjustment: input.adjustment || 'unadjusted', createdAt: new Date().toISOString(), contentHash };
     const partition: DatasetPartition = { id: partitionId, manifestId, path: finalPath, dataset: input.dataset, market: input.market, instrument: input.instrument, timeframe: input.timeframe, periodStart: new Date(first).toISOString(), periodEnd: new Date(last).toISOString(), publishedAt: new Date(publishedAt).toISOString(), fetchedAt: manifest.createdAt, rowCount: input.rows.length, status: 'committed', contentHash };
+    const previous = this.db.prepare('SELECT id FROM data_revisions WHERE market = ? AND dataset = ? AND instrument = ? AND timeframe = ? ORDER BY published_at DESC, id DESC LIMIT 1').get(input.market, input.dataset, input.instrument, input.timeframe) as { id?: string } | undefined;
+    const revision: DataRevision = { id: `revision_${partitionId}`, dataset: input.dataset, market: input.market, instrument: input.instrument, timeframe: input.timeframe, partitionId, publishedAt: partition.publishedAt, contentHash, ...(previous?.id ? { supersedes: String(previous.id) } : {}) };
     this.db.transaction(() => {
       this.db.prepare('INSERT OR REPLACE INTO dataset_manifests (id,dataset,market,source,field_version,timezone,adjustment,created_at,content_hash) VALUES (?,?,?,?,?,?,?,?,?)').run(manifest.id, manifest.dataset, manifest.market, manifest.source, manifest.fieldVersion, manifest.timezone, manifest.adjustment, manifest.createdAt, manifest.contentHash);
       this.db.prepare('INSERT OR REPLACE INTO dataset_partitions (id,manifest_id,path,dataset,market,instrument,timeframe,period_start,period_end,published_at,fetched_at,row_count,status,content_hash) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run(partition.id, partition.manifestId, partition.path, partition.dataset, partition.market, partition.instrument, partition.timeframe, partition.periodStart, partition.periodEnd, partition.publishedAt, partition.fetchedAt, partition.rowCount, partition.status, partition.contentHash);
       this.db.prepare('INSERT OR REPLACE INTO data_quality_reports (partition_id, report, checked_at) VALUES (?, ?, ?)').run(partition.id, JSON.stringify(quality), quality.checkedAt);
+      this.db.prepare('INSERT OR REPLACE INTO data_revisions (id,dataset,market,instrument,timeframe,partition_id,published_at,content_hash,supersedes,reason) VALUES (?,?,?,?,?,?,?,?,?,?)').run(revision.id, revision.dataset, revision.market, revision.instrument, revision.timeframe, revision.partitionId, revision.publishedAt, revision.contentHash, revision.supersedes || null, revision.reason || null);
     })();
     return { ...partition, quality };
   }
@@ -176,8 +202,64 @@ export class DataLakeCatalog {
       const latest = selected.reduce((current, candidate) => String(candidate.published_at) > String(current.published_at) ? candidate : current, selected[0]);
       const source = [...new Set(selected.map(item => String(item.source || '')).filter(Boolean))].join(', ');
       const contentHash = crypto.createHash('sha256').update(selected.map(item => String(item.content_hash)).join('|')).digest('hex');
-      return { rows, dataStatus: 'historical', source, updatedAt: String(latest.published_at || ''), snapshot: { id: `snapshot_${contentHash.slice(0, 24)}_${asOf}`, market: input.market, instrument: input.instrument, dataset: 'bars', asOf: new Date(asOf).toISOString(), partitionId: selected.map(item => String(item.id)).join(','), contentHash } };
+      const snapshot: PointInTimeSnapshot = { id: `snapshot_${contentHash.slice(0, 24)}_${asOf}`, market: input.market, instrument: input.instrument, dataset: 'bars', timeframe: input.timeframe, asOf: new Date(asOf).toISOString(), partitionId: selected.map(item => String(item.id)).join(','), contentHash, source: source || null, createdAt: new Date().toISOString() };
+      this.db.prepare('INSERT OR IGNORE INTO point_in_time_snapshots (id,market,instrument,dataset,timeframe,as_of,partition_id,content_hash,source,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)').run(snapshot.id, snapshot.market, snapshot.instrument, snapshot.dataset, snapshot.timeframe, snapshot.asOf, snapshot.partitionId, snapshot.contentHash, snapshot.source, snapshot.createdAt);
+      return { rows, dataStatus: 'historical', source, updatedAt: String(latest.published_at || ''), snapshot: this.getSnapshot(snapshot.id) || snapshot };
     } finally { connection.closeSync(); instance.closeSync(); }
+  }
+
+  getSnapshot(id: string): PointInTimeSnapshot | null {
+    const row = this.db.prepare('SELECT id,market,instrument,dataset,timeframe,as_of AS asOf,partition_id AS partitionId,content_hash AS contentHash,source,created_at AS createdAt FROM point_in_time_snapshots WHERE id = ?').get(id) as Record<string, unknown> | undefined;
+    if (!row) return null;
+    return { id: String(row.id), market: row.market as MarketId, instrument: String(row.instrument), dataset: String(row.dataset), timeframe: String(row.timeframe), asOf: String(row.asOf), partitionId: String(row.partitionId), contentHash: String(row.contentHash), source: row.source == null ? null : String(row.source), createdAt: String(row.createdAt) };
+  }
+
+  listRevisions(market?: MarketId): DataRevision[] {
+    const rows = (market
+      ? this.db.prepare('SELECT id,dataset,market,instrument,timeframe,partition_id AS partitionId,published_at AS publishedAt,content_hash AS contentHash,supersedes,reason FROM data_revisions WHERE market = ? ORDER BY published_at, id').all(market)
+      : this.db.prepare('SELECT id,dataset,market,instrument,timeframe,partition_id AS partitionId,published_at AS publishedAt,content_hash AS contentHash,supersedes,reason FROM data_revisions ORDER BY published_at, id').all()) as Array<Record<string, unknown>>;
+    return rows.map(row => ({ id: String(row.id), dataset: String(row.dataset), market: row.market as MarketId, instrument: String(row.instrument), timeframe: String(row.timeframe), partitionId: String(row.partitionId), publishedAt: String(row.publishedAt), contentHash: String(row.contentHash), ...(row.supersedes ? { supersedes: String(row.supersedes) } : {}), ...(row.reason ? { reason: String(row.reason) } : {}) }));
+  }
+
+  saveCorporateAction(input: CorporateAction): CorporateAction {
+    if (input.market !== 'stocks') throw new Error('Corporate actions are only supported for stocks');
+    validateInstrument(input.market, input.instrument);
+    if (!['split', 'dividend', 'symbol-change', 'delisting'].includes(input.kind)) throw new Error('Invalid corporate action kind');
+    if (!Number.isFinite(Date.parse(input.effectiveAt)) || !input.source?.trim()) throw new Error('Corporate action requires effectiveAt and source');
+    this.db.prepare('INSERT OR REPLACE INTO corporate_actions (id,market,instrument,kind,effective_at,factor,old_symbol,new_symbol,source) VALUES (?,?,?,?,?,?,?,?,?)').run(input.id, input.market, input.instrument, input.kind, new Date(input.effectiveAt).toISOString(), input.factor ?? null, input.oldSymbol || null, input.newSymbol || null, input.source.trim());
+    return { ...input, effectiveAt: new Date(input.effectiveAt).toISOString(), source: input.source.trim() };
+  }
+
+  listCorporateActions(market?: MarketId, instrument?: string): CorporateAction[] {
+    const rows = (market && instrument
+      ? this.db.prepare('SELECT id,market,instrument,kind,effective_at AS effectiveAt,factor,old_symbol AS oldSymbol,new_symbol AS newSymbol,source FROM corporate_actions WHERE market = ? AND instrument = ? ORDER BY effective_at').all(market, instrument)
+      : market
+        ? this.db.prepare('SELECT id,market,instrument,kind,effective_at AS effectiveAt,factor,old_symbol AS oldSymbol,new_symbol AS newSymbol,source FROM corporate_actions WHERE market = ? ORDER BY effective_at').all(market)
+        : this.db.prepare('SELECT id,market,instrument,kind,effective_at AS effectiveAt,factor,old_symbol AS oldSymbol,new_symbol AS newSymbol,source FROM corporate_actions ORDER BY effective_at').all()) as Array<Record<string, unknown>>;
+    return rows.map(row => ({ id: String(row.id), market: row.market as 'stocks', instrument: String(row.instrument), kind: row.kind as CorporateAction['kind'], effectiveAt: String(row.effectiveAt), ...(row.factor == null ? {} : { factor: Number(row.factor) }), ...(row.oldSymbol ? { oldSymbol: String(row.oldSymbol) } : {}), ...(row.newSymbol ? { newSymbol: String(row.newSymbol) } : {}), source: String(row.source) }));
+  }
+
+  registerProviderContract(input: ProviderContract): ProviderContract {
+    if (!MARKET_IDS.includes(input.market) || !input.provider?.trim() || !input.id?.trim() || !input.datasets.length) throw new Error('Provider contract is incomplete');
+    if (!['point-in-time', 'latest'].includes(input.revisionPolicy)) throw new Error('Invalid provider revision policy');
+    this.db.prepare('INSERT OR REPLACE INTO provider_contracts (id,provider,market,datasets,timezone,units,revision_policy,updated_at) VALUES (?,?,?,?,?,?,?,?)').run(input.id, input.provider.trim(), input.market, JSON.stringify([...input.datasets]), input.timezone || 'UTC', JSON.stringify(input.units || {}), input.revisionPolicy, new Date().toISOString());
+    return { ...input, provider: input.provider.trim(), datasets: [...input.datasets], timezone: input.timezone || 'UTC', units: { ...input.units } };
+  }
+
+  listProviderContracts(market?: MarketId): ProviderContract[] {
+    const rows = (market ? this.db.prepare('SELECT id,provider,market,datasets,timezone,units,revision_policy AS revisionPolicy FROM provider_contracts WHERE market = ? ORDER BY id').all(market) : this.db.prepare('SELECT id,provider,market,datasets,timezone,units,revision_policy AS revisionPolicy FROM provider_contracts ORDER BY id').all()) as Array<Record<string, unknown>>;
+    return rows.map(row => ({ id: String(row.id), provider: String(row.provider), market: row.market as MarketId, datasets: JSON.parse(String(row.datasets)) as string[], timezone: String(row.timezone), units: JSON.parse(String(row.units)) as Record<string, string>, revisionPolicy: row.revisionPolicy as ProviderContract['revisionPolicy'] }));
+  }
+
+  listCoverage(market?: MarketId, instrument?: string, timeframe?: string): DataCoverage[] {
+    const clauses: string[] = [];
+    const values: string[] = [];
+    if (market) { clauses.push('market = ?'); values.push(market); }
+    if (instrument) { clauses.push('instrument = ?'); values.push(instrument); }
+    if (timeframe) { clauses.push('timeframe = ?'); values.push(timeframe); }
+    const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
+    const rows = this.db.prepare(`SELECT market,instrument,dataset,timeframe,COUNT(*) AS partitionCount,SUM(row_count) AS rowCount,MIN(period_start) AS periodStart,MAX(period_end) AS periodEnd,MAX(published_at) AS latestPublishedAt,MAX(status) AS status FROM dataset_partitions ${where} GROUP BY market,instrument,dataset,timeframe ORDER BY market,instrument,timeframe`).all(...values) as Array<Record<string, unknown>>;
+    return rows.map(row => ({ market: row.market as MarketId, instrument: String(row.instrument), dataset: String(row.dataset), timeframe: String(row.timeframe), partitionCount: Number(row.partitionCount), rowCount: Number(row.rowCount), periodStart: String(row.periodStart), periodEnd: String(row.periodEnd), latestPublishedAt: String(row.latestPublishedAt), status: row.status as DatasetStatus }));
   }
 
   listPartitions(): DatasetPartition[] {
@@ -215,34 +297,53 @@ export class DataLakeCatalog {
     return { root: this.lakeRoot, generatedAt: new Date().toISOString(), usageBytes, quotaBytes, usagePercent, quotaState, partitionCount: partitions.length, stagingFileCount, byMarket, byDataset, backfills };
   }
 
-  claimNextBackfill(): DataBackfillJob | null {
+  claimNextBackfill(owner = '', leaseMs = 5 * 60 * 1000): DataBackfillJob | null {
     const transaction = this.db.transaction(() => {
-      const row = this.db.prepare('SELECT id,market,dataset,instrument,timeframe,from_at AS "from",to_at AS "to",status,reason,created_at AS createdAt,updated_at AS updatedAt FROM data_backfill_jobs WHERE status = ? ORDER BY created_at ASC LIMIT 1').get('queued') as Record<string, any> | undefined;
+      const row = this.db.prepare('SELECT id,market,dataset,instrument,timeframe,from_at AS "from",to_at AS "to",status,reason,created_at AS createdAt,updated_at AS updatedAt,lease_owner AS leaseOwner,lease_expires_at AS leaseExpiresAt,checkpoint FROM data_backfill_jobs WHERE status = ? ORDER BY created_at ASC LIMIT 1').get('queued') as Record<string, any> | undefined;
       if (!row) return null;
       const now = new Date().toISOString();
-      const updated = this.db.prepare('UPDATE data_backfill_jobs SET status = ?, reason = ?, updated_at = ? WHERE id = ? AND status = ?').run('running', 'Worker 已领取，正在读取免费数据源', now, row.id, 'queued');
+      const leaseOwner = String(owner || '').trim() || null;
+      const leaseExpiresAt = leaseOwner ? new Date(Date.now() + Math.max(1_000, leaseMs)).toISOString() : null;
+      const updated = this.db.prepare('UPDATE data_backfill_jobs SET status = ?, reason = ?, updated_at = ?, lease_owner = ?, lease_expires_at = ? WHERE id = ? AND status = ?').run('running', 'Worker 已领取，正在读取免费数据源', now, leaseOwner, leaseExpiresAt, row.id, 'queued');
       if (updated.changes !== 1) return null;
-      return { ...row, status: 'running', reason: 'Worker 已领取，正在读取免费数据源', updatedAt: now, market: row.market as MarketId } as DataBackfillJob;
+      return { ...row, status: 'running', reason: 'Worker 已领取，正在读取免费数据源', updatedAt: now, leaseOwner: leaseOwner || undefined, leaseExpiresAt: leaseExpiresAt || undefined, checkpoint: parseCheckpoint(row.checkpoint), market: row.market as MarketId } as DataBackfillJob;
     });
     return transaction() as DataBackfillJob | null;
   }
 
-  updateBackfill(id: string, status: DataBackfillJob['status'], reason?: string): DataBackfillJob | null {
+  heartbeatBackfill(id: string, owner: string, checkpoint?: Partial<BackfillCheckpoint>, leaseMs = 5 * 60 * 1000): DataBackfillJob | null {
+    const current = this.getBackfill(id);
+    if (!current || current.status !== 'running' || current.leaseOwner !== owner) return null;
+    const nextCheckpoint: BackfillCheckpoint = { ...current.checkpoint, ...checkpoint, rowsWritten: Number(checkpoint?.rowsWritten ?? current.checkpoint.rowsWritten), partitionsCommitted: Number(checkpoint?.partitionsCommitted ?? current.checkpoint.partitionsCommitted) };
     const now = new Date().toISOString();
-    this.db.prepare('UPDATE data_backfill_jobs SET status = ?, reason = ?, updated_at = ? WHERE id = ?').run(status, reason || null, now, id);
+    const leaseExpiresAt = new Date(Date.now() + Math.max(1_000, leaseMs)).toISOString();
+    const result = this.db.prepare('UPDATE data_backfill_jobs SET updated_at = ?, lease_expires_at = ?, checkpoint = ? WHERE id = ? AND status = ? AND lease_owner = ?').run(now, leaseExpiresAt, JSON.stringify(nextCheckpoint), id, 'running', owner);
+    return result.changes === 1 ? this.getBackfill(id) : null;
+  }
+
+  updateBackfill(id: string, status: DataBackfillJob['status'], reason?: string, owner?: string): DataBackfillJob | null {
+    const now = new Date().toISOString();
+    const terminal = ['succeeded', 'failed', 'cancelled'].includes(status);
+    const query = owner
+      ? 'UPDATE data_backfill_jobs SET status = ?, reason = ?, updated_at = ?, lease_owner = ?, lease_expires_at = ? WHERE id = ? AND (? IS NULL OR lease_owner = ?)'
+      : 'UPDATE data_backfill_jobs SET status = ?, reason = ?, updated_at = ?, lease_owner = ?, lease_expires_at = ? WHERE id = ?';
+    const args = owner
+      ? [status, reason || null, now, terminal ? null : owner, terminal ? null : new Date(Date.now() + 5 * 60 * 1000).toISOString(), id, owner, owner]
+      : [status, reason || null, now, terminal ? null : null, terminal ? null : null, id];
+    this.db.prepare(query).run(...args);
     return this.getBackfill(id);
   }
 
   recoverStaleBackfills(staleAfterMs = 10 * 60 * 1000): number {
     const cutoff = new Date(Date.now() - Math.max(0, staleAfterMs)).toISOString();
     const now = new Date().toISOString();
-    const result = this.db.prepare('UPDATE data_backfill_jobs SET status = ?, reason = ?, updated_at = ? WHERE status = ? AND updated_at < ?').run('queued', '检测到上次 Worker 中断，已重新排队', now, 'running', cutoff);
+    const result = this.db.prepare('UPDATE data_backfill_jobs SET status = ?, reason = ?, updated_at = ?, lease_owner = NULL, lease_expires_at = NULL WHERE status = ? AND ((lease_expires_at IS NOT NULL AND lease_expires_at < ?) OR (lease_expires_at IS NULL AND updated_at < ?))').run('queued', '检测到上次 Worker 中断，已重新排队', now, 'running', now, cutoff);
     return Number(result.changes || 0);
   }
 
   listBackfills(): DataBackfillJob[] {
-    const rows = this.db.prepare('SELECT id,market,dataset,instrument,timeframe,from_at AS "from",to_at AS "to",status,reason,created_at AS createdAt,updated_at AS updatedAt FROM data_backfill_jobs ORDER BY created_at DESC').all() as Array<Record<string, any>>;
-    return rows.map(row => ({ ...row, market: row.market as MarketId } as DataBackfillJob));
+    const rows = this.db.prepare('SELECT id,market,dataset,instrument,timeframe,from_at AS "from",to_at AS "to",status,reason,created_at AS createdAt,updated_at AS updatedAt,lease_owner AS leaseOwner,lease_expires_at AS leaseExpiresAt,checkpoint FROM data_backfill_jobs ORDER BY created_at DESC').all() as Array<Record<string, any>>;
+    return rows.map(row => ({ ...row, leaseOwner: row.leaseOwner || undefined, leaseExpiresAt: row.leaseExpiresAt || undefined, checkpoint: parseCheckpoint(row.checkpoint), market: row.market as MarketId } as DataBackfillJob));
   }
 
   createBackfill(input: { market: MarketId; dataset: string; instrument: string; timeframe: string; from: string; to: string }): DataBackfillJob {
@@ -250,14 +351,14 @@ export class DataLakeCatalog {
     validateInstrument(input.market, input.instrument);
     if (!input.dataset || !input.timeframe || !Number.isFinite(Date.parse(input.from)) || !Number.isFinite(Date.parse(input.to)) || Date.parse(input.from) >= Date.parse(input.to)) throw new Error('invalid backfill range');
     const now = new Date().toISOString();
-    const job: DataBackfillJob = { id: `backfill_${crypto.randomUUID()}`, ...input, status: 'queued', reason: '已登记，等待单并发数据 Worker 按 Provider 契约执行', createdAt: now, updatedAt: now };
-    this.db.prepare('INSERT INTO data_backfill_jobs (id,market,dataset,instrument,timeframe,from_at,to_at,status,reason,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)').run(job.id, job.market, job.dataset, job.instrument, job.timeframe, job.from, job.to, job.status, job.reason, job.createdAt, job.updatedAt);
+    const job: DataBackfillJob = { id: `backfill_${crypto.randomUUID()}`, ...input, status: 'queued', reason: '已登记，等待单并发数据 Worker 按 Provider 契约执行', createdAt: now, updatedAt: now, checkpoint: { rowsWritten: 0, partitionsCommitted: 0 } };
+    this.db.prepare('INSERT INTO data_backfill_jobs (id,market,dataset,instrument,timeframe,from_at,to_at,status,reason,created_at,updated_at,lease_owner,lease_expires_at,checkpoint) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run(job.id, job.market, job.dataset, job.instrument, job.timeframe, job.from, job.to, job.status, job.reason, job.createdAt, job.updatedAt, null, null, JSON.stringify(job.checkpoint));
     return job;
   }
 
   getBackfill(id: string): DataBackfillJob | null {
-    const row = this.db.prepare('SELECT id,market,dataset,instrument,timeframe,from_at AS "from",to_at AS "to",status,reason,created_at AS createdAt,updated_at AS updatedAt FROM data_backfill_jobs WHERE id = ?').get(id) as Record<string, any> | undefined;
-    return row ? { ...row, market: row.market as MarketId } as DataBackfillJob : null;
+    const row = this.db.prepare('SELECT id,market,dataset,instrument,timeframe,from_at AS "from",to_at AS "to",status,reason,created_at AS createdAt,updated_at AS updatedAt,lease_owner AS leaseOwner,lease_expires_at AS leaseExpiresAt,checkpoint FROM data_backfill_jobs WHERE id = ?').get(id) as Record<string, any> | undefined;
+    return row ? { ...row, leaseOwner: row.leaseOwner || undefined, leaseExpiresAt: row.leaseExpiresAt || undefined, checkpoint: parseCheckpoint(row.checkpoint), market: row.market as MarketId } as DataBackfillJob : null;
   }
 
   close(): void { this.db.close(); }

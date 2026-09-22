@@ -16,6 +16,8 @@ export interface DataLakeBackfillProvider {
 
 export interface DataLakeBackfillWorkerOptions {
   providers?: readonly DataLakeBackfillProvider[];
+  workerId?: string;
+  leaseMs?: number;
 }
 
 const DEFAULT_PROVIDERS: readonly DataLakeBackfillProvider[] = [
@@ -39,13 +41,30 @@ export class DataLakeBackfillWorker {
 
   private readonly legacyAdapterFactory?: KlineAdapterFactory;
   private readonly providers: readonly DataLakeBackfillProvider[];
+  private readonly workerId: string;
+  private readonly leaseMs: number;
 
   constructor(private readonly catalog: DataLakeCatalog, adapterOrOptions?: KlineAdapterFactory | DataLakeBackfillWorkerOptions) {
     if (typeof adapterOrOptions === 'function') {
       this.legacyAdapterFactory = adapterOrOptions;
       this.providers = [];
+      this.workerId = `data-lake-worker-${process.pid}`;
+      this.leaseMs = 5 * 60 * 1000;
     } else {
       this.providers = adapterOrOptions?.providers || DEFAULT_PROVIDERS;
+      this.workerId = adapterOrOptions?.workerId || `data-lake-worker-${process.pid}`;
+      this.leaseMs = adapterOrOptions?.leaseMs || 5 * 60 * 1000;
+    }
+    for (const provider of this.providers) {
+      this.catalog.registerProviderContract({
+        id: provider.id,
+        provider: provider.id,
+        market: provider.market,
+        datasets: [...provider.datasets],
+        timezone: 'UTC',
+        units: { timestamp: 'UTC', price: 'native', volume: 'native' },
+        revisionPolicy: 'point-in-time',
+      });
     }
   }
 
@@ -54,7 +73,7 @@ export class DataLakeBackfillWorker {
     this.active = true;
     let job: DataBackfillJob | null;
     try {
-      job = this.catalog.claimNextBackfill();
+      job = this.catalog.claimNextBackfill(this.workerId, this.leaseMs);
     } catch (error) {
       this.active = false;
       throw error;
@@ -67,7 +86,7 @@ export class DataLakeBackfillWorker {
       await this.execute(job);
       return this.catalog.getBackfill(job.id);
     } catch (error: any) {
-      return this.catalog.updateBackfill(job.id, 'failed', error?.message || '数据回补失败');
+      return this.catalog.updateBackfill(job.id, 'failed', error?.message || '数据回补失败', this.workerId);
     } finally {
       this.active = false;
     }
@@ -107,8 +126,10 @@ export class DataLakeBackfillWorker {
     for (const rows of groups.values()) {
       await this.catalog.stageBars({ market: job.market, dataset: job.dataset, instrument: job.instrument, timeframe: job.timeframe, source, publishedAt: snapshot.fetchedAt, rows });
       rowCount += rows.length;
+      const checkpoint = this.catalog.heartbeatBackfill(job.id, this.workerId, { cursor: rows[rows.length - 1]?.timestamp, rowsWritten: rowCount, partitionsCommitted: 1 });
+      if (!checkpoint) throw new Error('回补任务租约已失效，请重新排队后重试');
     }
-    this.catalog.updateBackfill(job.id, 'succeeded', `已写入 ${groups.size} 个 Parquet 分区，共 ${rowCount} 根K线，来源 ${source}`);
+    this.catalog.updateBackfill(job.id, 'succeeded', `已写入 ${groups.size} 个 Parquet 分区，共 ${rowCount} 根K线，来源 ${source}`, this.workerId);
   }
 
   start(intervalMs = 5000): void {

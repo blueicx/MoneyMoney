@@ -83,3 +83,48 @@ test('data lake diagnostics reports partition coverage and quota state', async (
     assert.ok(diagnostics.usagePercent >= 90);
   } finally { catalog.close(); fs.rmSync(root, { recursive: true, force: true }); }
 });
+
+test('data lake persists revisions and point-in-time snapshots for reproducible reads', async () => {
+  const { root, catalog } = tempCatalog();
+  try {
+    const first = await catalog.stageBars({ market: 'stocks', dataset: 'bars', instrument: 'AAPL', timeframe: '1d', source: 'test-source', publishedAt: '2026-09-03T00:00:00.000Z', rows: stockRows });
+    const second = await catalog.stageBars({ market: 'stocks', dataset: 'bars', instrument: 'AAPL', timeframe: '1d', source: 'test-source', publishedAt: '2026-09-04T00:00:00.000Z', rows: stockRows.map(row => ({ ...row, close: row.close + 1 })) });
+    const revisions = catalog.listRevisions('stocks');
+    assert.equal(revisions.length, 2);
+    assert.equal(revisions[0].market, 'stocks');
+    assert.equal(revisions[1].supersedes, revisions[0].id);
+    assert.equal(revisions[1].contentHash, second.contentHash);
+    const result = await catalog.queryBarsAsOf({ market: 'stocks', instrument: 'AAPL', timeframe: '1d', asOf: '2026-09-05T00:00:00.000Z' });
+    assert.ok(result.snapshot?.id);
+    const saved = catalog.getSnapshot(result.snapshot.id);
+    assert.deepEqual(saved, result.snapshot);
+    assert.equal(saved.contentHash, result.snapshot.contentHash);
+    assert.equal(catalog.listPartitions()[0].id, first.id);
+  } finally { catalog.close(); fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('data lake persists stock corporate actions and provider contracts with market scope', async () => {
+  const { root, catalog } = tempCatalog();
+  try {
+    catalog.saveCorporateAction({ id: 'ca-aapl-split', market: 'stocks', instrument: 'AAPL', kind: 'split', effectiveAt: '2026-08-01T00:00:00.000Z', factor: 4, source: 'official-test' });
+    catalog.registerProviderContract({ id: 'provider-yahoo-bars', provider: 'Yahoo', market: 'stocks', datasets: ['bars', 'quote'], timezone: 'UTC', units: { price: 'USD', volume: 'shares' }, revisionPolicy: 'point-in-time' });
+    assert.deepEqual(catalog.listCorporateActions('stocks', 'AAPL').map(item => item.id), ['ca-aapl-split']);
+    assert.deepEqual(catalog.listCorporateActions('crypto'), []);
+    assert.deepEqual(catalog.listProviderContracts('stocks').map(item => item.id), ['provider-yahoo-bars']);
+    assert.deepEqual(catalog.listProviderContracts('crypto'), []);
+  } finally { catalog.close(); fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('data lake reports coverage by market, instrument and timeframe', async () => {
+  const { root, catalog } = tempCatalog();
+  try {
+    await catalog.stageBars({ market: 'stocks', dataset: 'bars', instrument: 'AAPL', timeframe: '1d', source: 'test-source', publishedAt: '2026-09-03T00:00:00.000Z', rows: stockRows });
+    const coverage = catalog.listCoverage('stocks', 'AAPL', '1d');
+    assert.equal(coverage.length, 1);
+    assert.deepEqual(coverage[0], {
+      market: 'stocks', instrument: 'AAPL', dataset: 'bars', timeframe: '1d', partitionCount: 1, rowCount: 2,
+      periodStart: '2026-09-01T00:00:00.000Z', periodEnd: '2026-09-02T00:00:00.000Z', latestPublishedAt: '2026-09-03T00:00:00.000Z', status: 'committed',
+    });
+    assert.deepEqual(catalog.listCoverage('crypto'), []);
+  } finally { catalog.close(); fs.rmSync(root, { recursive: true, force: true }); }
+});

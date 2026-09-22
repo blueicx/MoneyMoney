@@ -9,6 +9,9 @@ export interface EventEntity {
   title: string;
   normalizedTitle: string;
   occurredAt: string;
+  publishedAt: string | null;
+  retrievedAt: string;
+  asOf: string;
   source: { name: string | null; url: string | null };
 }
 
@@ -29,6 +32,10 @@ export interface EventCluster {
 interface TimelineRow {
   kind?: unknown;
   at?: unknown;
+  occurredAt?: unknown;
+  publishedAt?: unknown;
+  retrievedAt?: unknown;
+  asOf?: unknown;
   title?: unknown;
   source?: unknown;
   url?: unknown;
@@ -58,21 +65,31 @@ function entityHash(value: unknown): string {
   return crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex').slice(0, 24);
 }
 
-export function buildEventEntities(rows: TimelineRow[], context: { market: MarketId; instrument: string }): EventEntity[] {
+function isoOrNull(value: unknown): string | null {
+  const parsed = new Date(text(value));
+  return text(value) && Number.isFinite(parsed.getTime()) ? parsed.toISOString() : null;
+}
+
+export function buildEventEntities(rows: TimelineRow[], context: { market: MarketId; instrument: string; retrievedAt?: string; asOf?: string }): EventEntity[] {
   assertMarketContext({ market: context.market, workspace: 'event-intelligence', instrument: context.instrument });
   if (!Array.isArray(rows)) return [];
+  const defaultRetrievedAt = isoOrNull(context.retrievedAt) || new Date().toISOString();
+  const defaultAsOf = isoOrNull(context.asOf) || defaultRetrievedAt;
   return rows.map((row): EventEntity | null => {
     const title = text(row.title);
-    const parsedAt = new Date(text(row.at));
+    const parsedAt = new Date(text(row.occurredAt || row.at));
     if (!title || !Number.isFinite(parsedAt.getTime())) return null;
     const occurredAt = parsedAt.toISOString();
+    const publishedAt = isoOrNull(row.publishedAt);
+    const retrievedAt = isoOrNull(row.retrievedAt) || defaultRetrievedAt;
+    const asOf = isoOrNull(row.asOf) || defaultAsOf;
     const kind = row.kind === 'event' ? 'event' : 'news';
     const normalizedTitle = normalizeEventTitle(title);
     if (!normalizedTitle) return null;
     const sourceName = text(row.source) || null;
     const url = safeUrl(row.url);
-    const id = `event_${entityHash({ market: context.market, instrument: context.instrument, kind, title, occurredAt, sourceName, url })}`;
-    return { id, market: context.market, instrument: context.instrument, kind, title, normalizedTitle, occurredAt, source: { name: sourceName, url } };
+    const id = `event_${entityHash({ market: context.market, instrument: context.instrument, kind, title, occurredAt, publishedAt, sourceName, url })}`;
+    return { id, market: context.market, instrument: context.instrument, kind, title, normalizedTitle, occurredAt, publishedAt, retrievedAt, asOf, source: { name: sourceName, url } };
   }).filter((row): row is EventEntity => row !== null);
 }
 

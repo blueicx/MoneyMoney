@@ -92,6 +92,7 @@ test('backfill worker routes a crypto bars job through its market-scoped provide
         }),
       }],
     });
+    assert.equal(catalog.listProviderContracts('crypto').map(item => item.id).includes('test-binance-bars'), true);
     const job = catalog.createBackfill({ market: 'crypto', dataset: 'bars', instrument: 'BTCUSDT', timeframe: '1d', from: '2026-02-01T00:00:00.000Z', to: '2026-02-03T00:00:00.000Z' });
     const result = await worker.runOnce();
     assert.equal(result.id, job.id);
@@ -152,5 +153,21 @@ test('backfill recovery requeues jobs left running after a worker interruption',
     assert.equal(recovered.status, 'queued');
     assert.match(recovered.reason, /重新排队/);
     assert.equal(catalog.claimNextBackfill().id, job.id);
+  } finally { catalog.close(); fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('backfill lease records owner, heartbeat and checkpoint before recovery', async () => {
+  const { root, catalog } = tempCatalog();
+  try {
+    const job = catalog.createBackfill({ market: 'stocks', dataset: 'bars', instrument: 'AAPL', timeframe: '1d', from: '2026-01-01T00:00:00.000Z', to: '2026-03-01T00:00:00.000Z' });
+    const claimed = catalog.claimNextBackfill('worker-a', 60_000);
+    assert.equal(claimed.id, job.id);
+    assert.equal(claimed.leaseOwner, 'worker-a');
+    assert.ok(claimed.leaseExpiresAt);
+    const checkpointed = catalog.heartbeatBackfill(job.id, 'worker-a', { cursor: '2026-02-01T00:00:00.000Z', rowsWritten: 10 });
+    assert.equal(checkpointed.checkpoint.cursor, '2026-02-01T00:00:00.000Z');
+    assert.equal(checkpointed.checkpoint.rowsWritten, 10);
+    assert.equal(catalog.heartbeatBackfill(job.id, 'worker-b'), null);
+    assert.equal(catalog.recoverStaleBackfills(60_000), 0);
   } finally { catalog.close(); fs.rmSync(root, { recursive: true, force: true }); }
 });

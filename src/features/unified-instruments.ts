@@ -190,8 +190,8 @@ export function filterEventsForInstrument<T extends Pick<UpcomingEvent, 'id' | '
 
 function buildInstrumentTimeline(events: UpcomingEvent[], news: NewsItem[]): Array<Record<string, unknown>> {
   return [
-    ...events.map(event => ({ kind: 'event', at: event.date, title: event.titleZh || event.title, impact: event.impact, result: event.actual ? { actual: event.actual, forecast: event.forecast } : null })),
-    ...news.map(item => ({ kind: 'news', at: item.publishedAt, title: item.title, source: item.source, url: item.url, sentimentScore: item.sentimentScore ?? null })),
+    ...events.map(event => ({ kind: 'event', at: event.date, occurredAt: event.date, publishedAt: null, title: event.titleZh || event.title, impact: event.impact, result: event.actual ? { actual: event.actual, forecast: event.forecast } : null })),
+    ...news.map(item => ({ kind: 'news', at: item.publishedAt, occurredAt: item.publishedAt, publishedAt: item.publishedAt, title: item.title, source: item.source, url: item.url, sentimentScore: item.sentimentScore ?? null })),
   ].sort((a, b) => new Date(String(b.at)).getTime() - new Date(String(a.at)).getTime());
 }
 
