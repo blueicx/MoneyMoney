@@ -44,6 +44,7 @@ export interface StockFiling {
   form: string;
   accessionNumber: string;
   filingDate: string;
+  acceptedAt?: string;
   primaryDocument?: string;
   reportUrl?: string;
 }

@@ -12,6 +12,7 @@ interface SecSubmissionRecent {
   form?: string[];
   accessionNumber?: string[];
   filingDate?: string[];
+  acceptanceDateTime?: string[];
   primaryDocument?: string[];
 }
 
@@ -72,6 +73,7 @@ export function parseSecSubmissions(payload: SecSubmissionsPayload): { companyNa
   const forms = Array.isArray(recent.form) ? recent.form : [];
   const accessions = Array.isArray(recent.accessionNumber) ? recent.accessionNumber : [];
   const dates = Array.isArray(recent.filingDate) ? recent.filingDate : [];
+  const accepted = Array.isArray(recent.acceptanceDateTime) ? recent.acceptanceDateTime : [];
   const documents = Array.isArray(recent.primaryDocument) ? recent.primaryDocument : [];
   const filings: StockFiling[] = [];
   for (let index = 0; index < forms.length; index += 1) {
@@ -79,7 +81,10 @@ export function parseSecSubmissions(payload: SecSubmissionsPayload): { companyNa
     const accessionNumber = text(accessions[index]);
     const filingDate = text(dates[index]);
     if (!form || !accessionNumber || !/^\d{4}-\d{2}-\d{2}$/.test(filingDate)) continue;
-    filings.push({ form, accessionNumber, filingDate, ...(text(documents[index]) ? { primaryDocument: text(documents[index]) } : {}) });
+    const acceptedAt = text(accepted[index]);
+    filings.push({ form, accessionNumber, filingDate,
+      ...( /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/.test(acceptedAt) && Number.isFinite(Date.parse(acceptedAt)) ? { acceptedAt: new Date(acceptedAt).toISOString() } : {}),
+      ...(text(documents[index]) ? { primaryDocument: text(documents[index]) } : {}) });
   }
   return { companyName: text(payload?.name), filings };
 }
@@ -160,7 +165,13 @@ export async function loadSecSubmissions(symbol: string): Promise<{ companyName:
   if (hit) return hit;
   const payload = await fetchSecJson<SecSubmissionsPayload>(`https://data.sec.gov/submissions/CIK${record.cik}.json`);
   const parsed = parseSecSubmissions(payload);
-  const value = { companyName: parsed.companyName || record.title, cik: record.cik, filings: parsed.filings };
+  const accessionBase = `https://www.sec.gov/Archives/edgar/data/${Number(record.cik)}/`;
+  const value = { companyName: parsed.companyName || record.title, cik: record.cik, filings: parsed.filings.map(filing => ({
+    ...filing,
+    reportUrl: filing.primaryDocument
+      ? `${accessionBase}${filing.accessionNumber.replace(/-/g, '')}/${encodeURI(filing.primaryDocument)}`
+      : `${accessionBase}${filing.accessionNumber.replace(/-/g, '')}/`,
+  })) };
   jsonCache.set(key, { ts: Date.now(), value });
   return value;
 }

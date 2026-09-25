@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const { buildEventEntities, clusterEventEntities } = require('../dist/features/event-intelligence');
+const { buildEventEntities, clusterEventEntities, selectResearchEvent } = require('../dist/features/event-intelligence');
 
 test('event intelligence normalizes timeline rows and keeps provenance', () => {
   const entities = buildEventEntities([
@@ -42,4 +42,18 @@ test('event entities preserve occurred, published, retrieved and as-of timestamp
   assert.equal(entities[0].retrievedAt, '2026-09-20T10:05:00.000Z');
   assert.equal(entities[0].asOf, '2026-09-20T10:05:00.000Z');
   assert.equal(entities[1].publishedAt, null);
+});
+
+test('research selection requires a known publication time no later than asOf', () => {
+  const entities = buildEventEntities([
+    { kind: 'news', at: '2026-09-20T18:00:00.000Z', publishedAt: '2026-09-20T18:00:00.000Z', title: 'AAPL earnings', source: 'Official', url: 'https://example.com/aapl' },
+    { kind: 'event', at: '2026-09-20T18:00:00.000Z', title: 'AAPL future calendar' },
+  ], { market: 'stocks', instrument: 'stock:us:AAPL' });
+  assert.throws(() => selectResearchEvent(entities, entities[0].id, '2026-09-20T17:00:00.000Z'), /published|asOf/i);
+  assert.throws(() => selectResearchEvent(entities, entities[1].id, '2026-09-21T00:00:00.000Z'), /publication/i);
+  const selected = selectResearchEvent(entities, entities[0].id, '2026-09-21T00:00:00.000Z');
+  assert.equal(selected.source.url, 'https://example.com/aapl');
+  assert.equal(selected.publishedAt, '2026-09-20T18:00:00.000Z');
+  const upcoming = buildEventEntities([{ kind: 'event', at: '2026-09-26T18:00:00.000Z', publishedAt: '2026-09-20T18:00:00.000Z', title: 'AAPL scheduled earnings' }], { market: 'stocks', instrument: 'stock:us:AAPL' });
+  assert.throws(() => selectResearchEvent(upcoming, upcoming[0].id, '2026-09-25T00:00:00.000Z'), /future|occurred|asOf/i);
 });

@@ -60,4 +60,7 @@ test('event study API is wired to point-in-time bars and private evidence routes
   assert.match(server, /eventStudyRepository\.save/);
   assert.match(html, /id="event-study-at"/);
   assert.match(html, /runEventStudyUi\(\)/);
+  assert.match(server, /selectResearchEvent\(entities, eventId, asOf\)/);
+  assert.match(server, /evidenceRefs: selectedEvent/);
+  assert.match(html, /openEventResearchFromTimeline\(this\)/);
 });

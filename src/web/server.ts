@@ -143,7 +143,8 @@ import { createDataEnvelope } from '../features/data-status';
 import { dataLakeCatalog } from '../storage/data-lake';
 import { dataLakeWorker } from '../storage/data-lake-worker';
 import { EventStudyRepository, runEventStudy } from '../features/event-study';
-import { buildEventEntities, clusterEventEntities } from '../features/event-intelligence';
+import { analyzePaperDrift, analyzePaperDriftByStrategy, collectPaperDriftSamples, samePaperInstrument, StrategyDriftGate } from '../features/paper-drift';
+import { buildEventEntities, clusterEventEntities, selectResearchEvent } from '../features/event-intelligence';
 import { curlCommand } from '../utils/platform-command';
 import { STOCK_KLINE_PERIODS, createYahooStockKlineAdapter } from '../data/yahoo-adapter';
 import { actionsForScreener, fieldsForScreener, filterRows, isScreenerScope, paginateRows, serializeTemplate, sortRows, type ScreenerFilter, type ScreenerScope, type ScreenerSort } from '../features/market-screener';
@@ -182,6 +183,7 @@ export const app = express();
 dataLakeWorker.start();
 const strategyCandidateRegistry = new StrategyCandidateRegistry();
 const eventStudyRepository = new EventStudyRepository(stateStore);
+const driftGate = new StrategyDriftGate(stateStore);
 // A rejected optional/background data refresh must not take down the dashboard.
 // Route handlers still report their own errors; this last-resort observer keeps
 // long-lived local sessions alive and records the source error without secrets.
@@ -559,9 +561,12 @@ app.get('/api/data/as-of', readHistoricalBars);
 
 app.get('/api/data/quality', (req, res) => {
   const rawMarket = typeof req.query.market === 'string' ? req.query.market : undefined;
+  const instrument = typeof req.query.instrument === 'string' ? req.query.instrument.trim() : undefined;
   if (rawMarket && !MARKET_IDS.includes(rawMarket as MarketId)) return res.status(400).json({ success: false, error: 'Invalid market context' });
-  const reports = dataLakeCatalog.listQuality(rawMarket as MarketId | undefined);
-  res.json({ success: true, data: reports, market: rawMarket || 'all', dataStatus: reports.length ? 'cached' : 'empty', source: 'MoneyMoney local quality reports', updatedAt: new Date().toISOString(), reason: reports.length ? null : '本地数据湖暂无质量报告' });
+  if (instrument && !rawMarket) return res.status(400).json({ success: false, error: 'Instrument quality requires market context' });
+  const reports = dataLakeCatalog.listQuality(rawMarket as MarketId | undefined, instrument);
+  const conflicts = rawMarket ? dataLakeCatalog.listDiscrepancies(rawMarket as MarketId, instrument) : [];
+  res.json({ success: true, data: reports, market: rawMarket || 'all', instrument: instrument || null, dataStatus: conflicts.length ? 'partial' : reports.length ? 'cached' : 'empty', source: 'MoneyMoney local quality reports', updatedAt: new Date().toISOString(), reason: conflicts.length ? `${conflicts.length} 条来源差异待核对` : reports.length ? null : '本地数据湖暂无质量报告', discrepancyCount: conflicts.length });
 });
 
 app.get('/api/data/revisions', (req, res) => {
@@ -592,7 +597,46 @@ app.get('/api/data/coverage', (req, res) => {
   const timeframe = typeof req.query.timeframe === 'string' ? req.query.timeframe.trim() : undefined;
   if (rawMarket && !MARKET_IDS.includes(rawMarket as MarketId)) return res.status(400).json({ success: false, error: 'Invalid market context' });
   const data = dataLakeCatalog.listCoverage(rawMarket as MarketId | undefined, instrument, timeframe);
-  res.json({ success: true, data, market: rawMarket || 'all', instrument: instrument || null, timeframe: timeframe || null, dataStatus: data.length ? 'historical' : 'empty', source: 'MoneyMoney local data coverage catalog', updatedAt: new Date().toISOString(), reason: data.length ? null : '当前筛选范围暂无已发布数据分区' });
+  const conflicts = rawMarket ? dataLakeCatalog.listDiscrepancies(rawMarket as MarketId, instrument).filter(item => !timeframe || item.timeframe === timeframe) : [];
+  res.json({ success: true, data, market: rawMarket || 'all', instrument: instrument || null, timeframe: timeframe || null, dataStatus: conflicts.length ? 'partial' : data.length ? 'historical' : 'empty', source: 'MoneyMoney local data coverage catalog', updatedAt: new Date().toISOString(), reason: conflicts.length ? `${conflicts.length} 条数据源差异待核对` : data.length ? null : '当前筛选范围暂无已发布数据分区', discrepancyCount: conflicts.length });
+});
+
+app.get('/api/data/discrepancies', (req, res) => {
+  const market = String(req.query.market || '') as MarketId;
+  const instrument = typeof req.query.instrument === 'string' ? req.query.instrument.trim() : undefined;
+  if (!MARKET_IDS.includes(market)) return res.status(400).json({ success: false, dataStatus: 'failed', reason: '必须指定有效市场' });
+  const data = dataLakeCatalog.listDiscrepancies(market, instrument);
+  res.json({ success: true, data, market, instrument: instrument || null, dataStatus: data.length ? 'partial' : 'empty', source: 'MoneyMoney provider discrepancy catalog', updatedAt: new Date().toISOString(), reason: data.length ? '来源收盘价存在差异，争议分区未发布' : '当前标的没有已记录的来源差异' });
+});
+
+app.get('/api/data/instruments/resolve', (req, res) => {
+  if (!adminOnly(req, res)) return;
+  const market = String(req.query.market || '') as MarketId;
+  const query = String(req.query.query || '').trim();
+  if (!MARKET_IDS.includes(market)) return res.status(400).json({ success: false, dataStatus: 'failed', reason: '必须指定有效市场' });
+  try {
+    const instrument = query ? dataLakeCatalog.resolveInstrument(market, query) : null;
+    const quarantine = dataLakeCatalog.listInstrumentQuarantine(market).filter(item => !query || item.instrument.toUpperCase() === query.toUpperCase());
+    res.json({ success: true, market, instrument: instrument?.id || query || null, data: { resolved: instrument, quarantine }, dataStatus: quarantine.length ? 'partial' : instrument ? 'cached' : 'empty', source: 'MoneyMoney instrument registry', updatedAt: new Date().toISOString(), reason: quarantine.length ? '旧数据交易场所待管理员确认' : instrument ? null : '当前市场暂无已确认的标的身份' });
+  } catch (error: any) {
+    res.status(409).json({ success: false, market, instrument: query || null, dataStatus: 'partial', reason: error.message || '标的身份有歧义，请指定交易场所' });
+  }
+});
+
+app.post('/api/data/instruments/confirm', express.json(), (req, res) => {
+  if (!adminOnly(req, res)) return;
+  const market = String(req.body?.market || '') as MarketId;
+  const type = String(req.body?.type || '') as InstrumentType;
+  const venue = String(req.body?.venue || '').trim();
+  const symbol = String(req.body?.symbol || '').trim();
+  const expected = ({ stocks: 'stock', options: 'option', crypto: 'crypto', prediction: 'prediction' } as const)[market];
+  if (!expected || type !== expected || !venue || !symbol) return res.status(400).json({ success: false, dataStatus: 'failed', reason: '市场、类型、交易场所和标的必须一致且完整' });
+  try {
+    const ref = dataLakeCatalog.registerInstrument({ type, venue, symbol, title: String(req.body?.title || symbol), aliases: [] });
+    res.json({ success: true, market, instrument: ref.id, data: ref, dataStatus: 'cached', source: 'administrator-confirmed instrument registry', updatedAt: new Date().toISOString(), reason: null });
+  } catch (error: any) {
+    res.status(400).json({ success: false, market, instrument: symbol, dataStatus: 'failed', reason: error.message || '标的身份确认失败' });
+  }
 });
 
 app.post('/api/data/backfills', (req, res) => {
@@ -640,10 +684,20 @@ app.post('/api/event-studies', express.json(), async (req, res) => {
     const body = req.body || {};
     const market = decisionMarket(body.market);
     const instrument = String(body.instrument || '').trim();
-    const eventAt = String(body.eventAt || '').trim();
+    let eventAt = String(body.eventAt || '').trim();
+    const eventId = String(body.eventId || '').trim();
     const timeframe = String(body.timeframe || '1d').trim();
     const asOf = String(body.asOf || new Date().toISOString()).trim();
     assertMarketContext({ market, workspace: 'event-study', instrument });
+    let selectedEvent: ReturnType<typeof selectResearchEvent> | null = null;
+    if (eventId) {
+      if (market !== 'stocks') throw new Error('当前市场事件研究尚无可靠的标的事件来源');
+      const ref = eventInstrumentRef(market, instrument.includes(':') ? instrument : `stock:us:${instrument.toUpperCase()}`);
+      const timeline = await unifiedInstrumentService.timeline(ref);
+      const entities = buildEventEntities(timeline.items, { market, instrument: ref.id, retrievedAt: timeline.generatedAt, asOf: timeline.generatedAt });
+      selectedEvent = selectResearchEvent(entities, eventId, asOf);
+      eventAt = new Date(Math.max(Date.parse(selectedEvent.occurredAt), Date.parse(selectedEvent.publishedAt!))).toISOString();
+    }
     if (!eventAt) throw new Error('eventAt is required');
     const historical = await dataLakeCatalog.queryBarsAsOf({ market, instrument, timeframe, asOf });
     if (!historical.rows.length) {
@@ -653,14 +707,14 @@ app.post('/api/event-studies', express.json(), async (req, res) => {
     const record = eventStudyRepository.save({
       ...result,
       asOf,
-      title: typeof body.title === 'string' ? body.title.trim() || undefined : undefined,
-      source: typeof body.source === 'string' ? body.source.trim() || historical.source || undefined : historical.source || undefined,
-      sourceUrl: typeof body.sourceUrl === 'string' ? body.sourceUrl.trim() || undefined : undefined,
-      evidenceRefs: historical.snapshot ? [historical.snapshot.id] : [],
+      title: selectedEvent?.title || (typeof body.title === 'string' ? body.title.trim() || undefined : undefined),
+      source: selectedEvent?.source.name || (typeof body.source === 'string' ? body.source.trim() || historical.source || undefined : historical.source || undefined),
+      sourceUrl: selectedEvent?.source.url || (typeof body.sourceUrl === 'string' ? body.sourceUrl.trim() || undefined : undefined),
+      evidenceRefs: selectedEvent ? [selectedEvent.id, ...(historical.snapshot ? [historical.snapshot.id] : [])] : historical.snapshot ? [historical.snapshot.id] : [],
     });
     res.status(201).json(decisionEnvelope({ market, instrument, data: record, dataStatus: 'historical', source: historical.source || 'MoneyMoney local Parquet catalog', updatedAt: historical.updatedAt || undefined, reason: null }));
   } catch (error: any) {
-    const status = /market|instrument|eventAt|historical bars|ordered|OHLC/i.test(error.message) ? 400 : 500;
+    const status = /market|instrument|eventAt|historical bars|ordered|OHLC|published|asOf|evidence|来源/i.test(error.message) ? 400 : 500;
     res.status(status).json({ success: false, error: error.message, dataStatus: 'unavailable', reason: error.message });
   }
 });
@@ -2346,7 +2400,7 @@ async function readEventIntelligence(req: express.Request, res: express.Response
     const timeline = await unifiedInstrumentService.timeline(ref);
     const entities = buildEventEntities(timeline.items, { market, instrument: ref.id, retrievedAt: timeline.generatedAt, asOf: timeline.generatedAt });
     const data = grouped ? clusterEventEntities(entities) : entities;
-    res.json(decisionEnvelope({ market, instrument: ref.id, data, dataStatus: data.length ? 'live' : 'empty', source: 'scoped instrument event timeline', updatedAt: timeline.generatedAt, reason: data.length ? null : '当前标的暂无可聚类事件或新闻' }));
+    res.json(decisionEnvelope({ market, instrument: ref.id, data, dataStatus: data.length ? 'live' : market === 'stocks' ? 'empty' : 'unsupported', source: 'scoped instrument event timeline', updatedAt: timeline.generatedAt, reason: data.length ? null : market === 'stocks' ? '当前标的暂无可聚类事件或新闻' : '当前市场暂无可靠标的事件来源' }));
   } catch (error: any) {
     res.status(400).json({ success: false, market, instrument, dataStatus: 'unavailable', source: 'scoped instrument event timeline', updatedAt: null, reason: error?.message || '事件数据不可用' });
   }
@@ -6021,6 +6075,58 @@ app.post('/api/notifications/mark-read', (req, res) => {
 
 // --- Paper Trading APIs ---
 
+function paperDriftSamples() {
+  return collectPaperDriftSamples(unifiedPaperLedgerStore.get().orders, {
+    experiment: id => researchRepository.getExperiment(id),
+    snapshot: id => dataLakeCatalog.getSnapshot(id),
+  });
+}
+
+function validatePaperOrderReferences(order: UnifiedPaperOrder): void {
+  const fields = [order.experimentId, order.signalId, order.dataSnapshotId, order.strategyVersion];
+  if (!fields.some(Boolean) && order.backtestTradeIndex === undefined) return;
+  const market = ({ stock: 'stocks', option: 'options', crypto: 'crypto', prediction: 'prediction' } as const)[order.instrumentType];
+  if (order.strategyVersion && !order.strategy) throw new Error('策略版本必须关联策略');
+  if (order.backtestTradeIndex !== undefined && (!order.experimentId || !Number.isInteger(order.backtestTradeIndex) || order.backtestTradeIndex < 0)) throw new Error('回测成交索引必须关联有效实验');
+  if (order.experimentId) {
+    const experiment = researchRepository.getExperiment(order.experimentId);
+    if (!experiment || experiment.experiment?.market !== market ||
+        !samePaperInstrument(market, order.instrumentId, experiment.experiment?.instrument || '') ||
+        (order.strategy && experiment.experiment?.strategyId !== order.strategy) ||
+        (order.strategyVersion && experiment.experiment?.strategyVersion !== order.strategyVersion) ||
+        (order.backtestTradeIndex !== undefined && !experiment.backtest?.trades?.[order.backtestTradeIndex])) throw new Error('模拟订单实验与市场、标的或策略不匹配');
+  }
+  if (order.dataSnapshotId) {
+    const snapshot = dataLakeCatalog.getSnapshot(order.dataSnapshotId);
+    if (!snapshot || snapshot.market !== market || !samePaperInstrument(market, order.instrumentId, snapshot.instrument)) throw new Error('证据快照与市场或标的不匹配');
+    const snapshotTime = Date.parse(snapshot.asOf);
+    const orderTime = Date.parse(order.timestamp);
+    if (!Number.isFinite(snapshotTime) || snapshotTime > orderTime || orderTime - snapshotTime > 72 * 60 * 60 * 1000) throw new Error('证据快照过期或晚于模拟订单');
+  }
+}
+
+app.get('/api/research/drift', (req, res) => {
+  if (!adminOnly(req, res)) return;
+  const market = String(req.query.market || '') as MarketId;
+  if (!MARKET_IDS.includes(market)) return res.status(400).json({ success: false, dataStatus: 'failed', reason: '必须指定有效市场' });
+  const strategyId = String(req.query.strategyId || '');
+  const strategyVersion = String(req.query.strategyVersion || '');
+  const samples = paperDriftSamples().filter(item => item.market === market && (!strategyId || item.strategyId === strategyId) && (!strategyVersion || item.strategyVersion === strategyVersion));
+  const result = analyzePaperDrift(samples);
+  const results = analyzePaperDriftByStrategy(samples);
+  res.json({ success: true, market, instrument: null, dataStatus: samples.length ? 'historical' : 'empty', source: 'paired research experiment + unified paper ledger', updatedAt: result.evaluatedAt, reason: results.length ? null : '没有明确配对的实验与模拟成交', data: { result: strategyId && strategyVersion ? result : null, results, gates: driftGate.list(market) } });
+});
+
+app.post('/api/research/drift/resume', express.json(), (req, res) => {
+  if (!adminOnly(req, res)) return;
+  const market = String(req.body?.market || '') as MarketId;
+  const strategyId = String(req.body?.strategyId || '').trim();
+  const strategyVersion = String(req.body?.strategyVersion || '').trim();
+  if (!MARKET_IDS.includes(market) || !strategyId || !strategyVersion) return res.status(400).json({ success: false, reason: '需指定市场、策略和版本' });
+  const resumed = driftGate.resume(market, strategyId, strategyVersion);
+  res.status(resumed ? 200 : 404).json({ success: resumed, market, instrument: null, dataStatus: resumed ? 'live' : 'empty', source: 'strategy drift gate', updatedAt: new Date().toISOString(), reason: resumed ? '管理员已恢复此策略提醒' : '没有待恢复的策略提醒暂停记录' });
+});
+
 // Canonical cross-asset paper ledger. Legacy prediction-market endpoints below
 // remain untouched for existing clients and stored portfolios.
 app.get('/api/paper/ledger', (req, res) => {
@@ -6045,10 +6151,26 @@ app.post('/api/paper/orders', (req, res) => {
       id: String(body.id || `paper_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`),
       instrumentId: String(body.instrumentId || ''), instrumentType: body.instrumentType, title: String(body.title || ''), side: body.side,
       price: Number(body.price), quantity: Number(body.quantity), timestamp: String(body.timestamp || new Date().toISOString()), strategy: body.strategy ? String(body.strategy) : undefined, reason: body.reason ? String(body.reason) : undefined,
+      strategyVersion: body.strategyVersion ? String(body.strategyVersion) : undefined,
+      experimentId: body.experimentId ? String(body.experimentId) : undefined,
+      signalId: body.signalId ? String(body.signalId) : undefined,
+      dataSnapshotId: body.dataSnapshotId ? String(body.dataSnapshotId) : undefined,
+      backtestTradeIndex: body.backtestTradeIndex === undefined ? undefined : Number(body.backtestTradeIndex),
       feeUsd: Number.isFinite(Number(body.feeUsd)) ? Number(body.feeUsd) : undefined,
       slippageUsd: Number.isFinite(Number(body.slippageUsd)) ? Number(body.slippageUsd) : undefined,
     };
+    validatePaperOrderReferences(order);
     const ledger = unifiedPaperLedgerStore.apply(order);
+    if (order.strategy && order.strategyVersion && order.experimentId) {
+      const samples = paperDriftSamples().filter(item => item.market === ({ stock: 'stocks', option: 'options', crypto: 'crypto', prediction: 'prediction' } as const)[order.instrumentType] && item.strategyId === order.strategy && item.strategyVersion === order.strategyVersion);
+      const result = analyzePaperDrift(samples);
+      const market = ({ stock: 'stocks', option: 'options', crypto: 'crypto', prediction: 'prediction' } as const)[order.instrumentType];
+      if (driftGate.update(market, order.strategy, order.strategyVersion, result)) {
+        const message = `${market}/${order.strategy}@${order.strategyVersion} 模拟盘与回测偏差超出门槛；仅策略信号提醒已暂停，需管理员复核恢复。`;
+        pushNotification('risk', message);
+        void telegram.send(`⚠️ ${message}`).catch(() => {});
+      }
+    }
     res.status(201).json({ success: true, data: { order, ledger, performance: calculateUnifiedPerformance(ledger) } });
   } catch (error: any) { res.status(400).json({ success: false, error: error?.message || '统一模拟订单无效' }); }
 });

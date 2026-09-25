@@ -2210,6 +2210,7 @@
           <div id="admin-paper-unified-categories" style="display:flex;gap:8px;margin-bottom:20px;flex-wrap:wrap;"></div>
         </div>
         <div id="paper-stats" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:20px;"></div>
+        <div class="guest-admin-only" style="margin-bottom:18px;"><div class="section-title">策略偏差与提醒状态</div><div id="paper-drift-status" class="empty-tip">选择一个市场后查看；旧订单未关联实验时不会参与偏差判断。</div></div>
         <div class="section-title" style="margin-top:16px;">📊 风险分析</div>
         <div id="paper-risk-metrics" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:20px;"></div>
         <div class="section-title" style="margin-top:8px;">📈 权益曲线</div>
@@ -2782,6 +2783,7 @@
       </div>
       <!-- Cross-platform Prediction Radar Tab -->
       <div id="radar-tab" class="tab-content" data-market-scopes="overview prediction" data-workspace-ids="prediction-radar radar">
+        <div id="prediction-selected-event" class="glass-card" style="padding:14px;margin-bottom:12px;" hidden></div>
         <div class="section-title">🌐 跨平台预测雷达</div>
         <div class="radar-controls">
           <div class="radar-field">
@@ -2973,7 +2975,7 @@
             <article class="glass-card guest-admin-only" style="padding:15px;border-radius:16px;">
               <div style="display:flex;justify-content:space-between;gap:8px;align-items:center;"><strong>📐 事件研究</strong><span style="font-size:10px;color:var(--text-secondary);">历史统计，不是预测</span></div>
               <div style="display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-top:10px;">
-                <label style="font-size:10px;color:var(--text-secondary);">事件时间<input id="event-study-at" type="datetime-local" style="display:block;width:100%;box-sizing:border-box;margin-top:4px;padding:7px;border:1px solid var(--border);border-radius:8px;background:var(--bg-card);color:var(--text);"></label>
+                <label style="font-size:10px;color:var(--text-secondary);">事件时间<input id="event-study-at" type="datetime-local" oninput="window.mm_selectedStudyEventId = null" style="display:block;width:100%;box-sizing:border-box;margin-top:4px;padding:7px;border:1px solid var(--border);border-radius:8px;background:var(--bg-card);color:var(--text);"></label>
                 <label style="font-size:10px;color:var(--text-secondary);">后窗口K线<input id="event-study-after-bars" type="number" min="1" max="500" value="20" style="display:block;width:100%;box-sizing:border-box;margin-top:4px;padding:7px;border:1px solid var(--border);border-radius:8px;background:var(--bg-card);color:var(--text);"></label>
               </div>
               <button class="tab" type="button" onclick="runEventStudyUi()" style="margin-top:8px;">运行当前标的事件研究</button>
@@ -4006,6 +4008,38 @@ function privateDashboardSessionReady(auth = {}) {
 function renderPrivateWidgetLocked(element, message = '访客模式仅支持公开数据；登录后查看私有数据。') {
   if (element) element.innerHTML = `<div class="empty-tip">${safeNewsText(message)}</div>`;
 }
+async function loadPaperDriftStatus() {
+  const host = document.getElementById('paper-drift-status');
+  if (!host || window.mm_isGuest || !window.mm_isLoggedIn) return;
+  const market = activeMarketScope;
+  if (!['stocks', 'options', 'crypto', 'prediction'].includes(market)) {
+    host.textContent = '请选择股票、期权、虚拟币或预测市场查看对应策略偏差。';
+    return;
+  }
+  host.textContent = '正在核对明确关联的模拟成交与回测记录…';
+  try {
+    const response = await fetch('/api/research/drift?market=' + encodeURIComponent(market));
+    const body = await response.json();
+    if (!response.ok || !body.success) throw new Error(body.reason || '策略偏差数据不可用');
+    if (market !== activeMarketScope) return;
+    const gates = Array.isArray(body.data?.gates) ? body.data.gates : [];
+    window.mm_driftGates = gates;
+    const results = Array.isArray(body.data?.results) ? body.data.results : [];
+    host.innerHTML = `<div>${results.length ? results.map(item => `${safeNewsText(item.strategyId)}@${safeNewsText(item.strategyVersion)}：最近30天配对 ${Number(item.result?.pairedCount || 0)} 笔，${safeNewsText(item.result?.reason || '暂无有效判断')}`).join('<br>') : safeNewsText(body.reason || '暂无有效配对')}。旧订单未关联实验时不参与判断。</div>` +
+      gates.filter(item => item.paused).map((item, index) => `<div style="margin-top:8px;">${safeNewsText(item.strategyId)}@${safeNewsText(item.strategyVersion)}：仅策略信号提醒已暂停；价格、风险和来源故障提醒继续运行。<button class="tab" type="button" data-drift-index="${gates.indexOf(item)}" onclick="resumePaperDriftGate(this)">人工确认恢复</button></div>`).join('');
+  } catch (error) {
+    if (market === activeMarketScope) host.textContent = error.message || '策略偏差读取失败';
+  }
+}
+async function resumePaperDriftGate(button) {
+  const gate = (window.mm_driftGates || [])[Number(button?.dataset?.driftIndex)];
+  if (!gate || gate.market !== activeMarketScope || !gate.paused) return;
+  if (!window.confirm(`恢复 ${gate.strategyId}@${gate.strategyVersion} 的策略信号提醒？模拟持仓不会改变。`)) return;
+  const response = await fetch('/api/research/drift/resume', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ market: gate.market, strategyId: gate.strategyId, strategyVersion: gate.strategyVersion }) });
+  const body = await response.json();
+  showToast(body.reason || (response.ok ? '已恢复' : '恢复失败'), response.ok ? 'success' : 'error');
+  await loadPaperDriftStatus();
+}
 async function loadScopedPaperPortfolio() {
   const auth = await waitForDashboardAuthState();
   const canReadPrivate = window.mm_isLoggedIn === true && !window.mm_isGuest && privateDashboardSessionReady(auth);
@@ -4023,6 +4057,7 @@ async function loadScopedPaperPortfolio() {
     [statsEl, positionsEl, tradesEl, riskEl, curveEl].forEach(element => renderPrivateWidgetLocked(element));
     return;
   }
+  void loadPaperDriftStatus();
   try {
     const [perfRes, posRes, ledgerRes] = await Promise.all([
       fetch(scopedUrl('/api/paper/performance')),
@@ -4043,7 +4078,11 @@ async function loadScopedPaperPortfolio() {
     riskEl.innerHTML = `<div class="empty-tip">当前仅展示${scopeLabel}的统一纸面账本：持仓 ${rows.length} 个 · 已实现盈亏 $${Number(p.realizedPnl || 0).toFixed(2)} · 最大回撤 ${Number(p.maxDrawdownPct || 0).toFixed(2)}%</div>`;
     curveEl.innerHTML = '<div class="empty-tip">当前市场范围已隔离；该范围的权益曲线将在形成更多统一账本快照后展示。</div>';
     positionsEl.innerHTML = rows.length ? rows.map(pos => `<div style="background:var(--bg-card);border-radius:12px;padding:14px;margin-bottom:8px;box-shadow:var(--shadow);display:flex;justify-content:space-between;align-items:center;"><div><div style="font-weight:600;font-size:13px;">${safeNewsText(pos.title || pos.instrumentId)}</div><div style="font-size:12px;color:var(--text-secondary);">${safeNewsText(pos.instrumentId)} · ${Number(pos.quantity || 0)} × ${Number(pos.currentPrice || pos.averageEntryPrice || 0).toFixed(4)}</div></div></div>`).join('') : '<div class="empty-tip">当前市场暂无统一纸面持仓</div>';
-    tradesEl.innerHTML = orders.length ? orders.slice(0, 30).map(order => `<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border);font-size:12px;"><span>${safeNewsText(order.side)} · ${safeNewsText(order.title || order.instrumentId)}</span><span style="color:var(--text-secondary);">${Number(order.price || 0).toFixed(4)} × ${Number(order.quantity || 0)}</span></div>`).join('') : '<div class="empty-tip">当前市场暂无统一纸面交易</div>';
+    tradesEl.innerHTML = orders.length ? orders.slice(0, 30).map(order => {
+      const linked = order.strategyVersion && order.experimentId && order.signalId && order.dataSnapshotId;
+      const identity = /^(stock|option|crypto|prediction):[^:]+:.+$/i.test(String(order.instrumentId || '')) ? '' : ' · 标的身份待确认';
+      return `<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border);font-size:12px;"><span>${safeNewsText(order.side)} · ${safeNewsText(order.title || order.instrumentId)}<small style="display:block;color:var(--text-secondary);">${linked ? '已关联实验与信号' : '未关联实验/信号'}${identity}</small></span><span style="color:var(--text-secondary);">${Number(order.price || 0).toFixed(4)} × ${Number(order.quantity || 0)}</span></div>`;
+    }).join('') : '<div class="empty-tip">当前市场暂无统一纸面交易</div>';
   } catch (error) {
     if (isCurrentMarketScopeToken(token)) statsEl.innerHTML = `<div class="empty-tip" style="color:var(--red);">${safeNewsText(error.message || '统一纸面账本加载失败')}</div>`;
   }
@@ -4059,6 +4098,7 @@ async function loadPaperPortfolio() {
     if (adminEl) adminEl.hidden = true;
     return;
   }
+  void loadPaperDriftStatus();
   if (!['overview', 'prediction'].includes(activeMarketScope)) return loadScopedPaperPortfolio();
   const monteCarloEl = document.getElementById('paper-monte-carlo');
   const adminEl = document.querySelector('#paper-tab .guest-admin-only');
@@ -5979,12 +6019,107 @@ function selectCryptoFromInstrumentLibrary(symbol, name) {
 
 function renderOptionsLibraryQuick() {
   const element = document.getElementById('options-library-quick');
-  if (element) element.innerHTML = '<div class="empty-tip">期权市场实盘级标的库开发中，暂不可用</div>';
+  if (!element) return;
+  element.replaceChildren();
+  for (const symbol of ['SPY', 'QQQ', 'AAPL', 'NVDA']) {
+    const button = document.createElement('button');
+    button.className = 'stock-library-item';
+    button.type = 'button';
+    const title = document.createElement('strong');
+    title.textContent = symbol;
+    const hint = document.createElement('small');
+    hint.textContent = '查看真实期权链；非合约报价';
+    button.append(title, hint);
+    button.addEventListener('click', () => selectOptionLibraryAsset(symbol));
+    element.append(button);
+  }
 }
 
-function renderPredictionLibraryQuick() {
+async function renderPredictionLibraryQuick() {
   const element = document.getElementById('prediction-library-quick');
-  if (element) element.innerHTML = '<div class="empty-tip">预测市场标的需通过中心区发现进入，快捷库未挂载</div>';
+  if (!element) return;
+  element.textContent = '正在读取真实预测事件…';
+  try {
+    const response = await fetch('/api/prediction-radar?limit=12');
+    const payload = await response.json();
+    if (!response.ok || !payload.success) throw new Error(payload.error || '预测事件来源不可用');
+    const markets = Array.isArray(payload.data?.markets) ? payload.data.markets.slice(0, 12) : [];
+    if (activeMarketScope !== 'prediction') return;
+    element.replaceChildren();
+    if (!markets.length) { element.textContent = '当前来源暂无可用预测事件；请刷新重试。'; return; }
+    for (const market of markets) {
+      const button = document.createElement('button');
+      button.className = 'stock-library-item';
+      button.type = 'button';
+      const title = document.createElement('strong');
+      title.textContent = market.titleZh || market.title || String(market.id);
+      const hint = document.createElement('small');
+      hint.textContent = `${market.platform || '未知来源'} · ${payload.data.updatedAt || '更新时间未知'}`;
+      button.append(title, hint);
+      button.addEventListener('click', () => selectPredictionLibraryEvent(market, payload.data.updatedAt));
+      element.append(button);
+    }
+  } catch (error) {
+    if (activeMarketScope === 'prediction') element.textContent = `预测事件来源不可用：${error.message || '请求失败'}`;
+  }
+}
+function selectPredictionLibraryEvent(market, updatedAt) {
+  if (activeMarketScope !== 'prediction' || !market?.id) return;
+  const title = market.titleZh || market.title || String(market.id);
+  setWorkspaceInstrument(`prediction:${market.platform || 'unknown'}:${market.id}`);
+  window.openWorkspace('radar');
+  const current = document.getElementById('prediction-library-current-symbol');
+  if (current) current.textContent = title;
+  const host = document.getElementById('prediction-selected-event');
+  if (!host) return;
+  host.hidden = false;
+  host.replaceChildren();
+  const heading = document.createElement('strong');
+  heading.textContent = title;
+  const details = document.createElement('p');
+  details.textContent = `YES ${Number.isFinite(Number(market.yesPrice)) ? (Number(market.yesPrice) * 100).toFixed(1) + '%' : '暂无概率'} · 来源 ${market.platform || '未知'} · 更新 ${updatedAt || '未知'}`;
+  host.append(heading, details);
+  if (/^https?:\/\//i.test(String(market.url || ''))) {
+    const link = document.createElement('a');
+    link.href = market.url;
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    link.textContent = '查看原始事件与结算规则';
+    host.append(link);
+  }
+  host.scrollIntoView({ block: 'center' });
+}
+async function loadLibrarySearch(scope) {
+  const input = document.getElementById(`${scope}-library-search-input`);
+  const host = document.getElementById(`${scope}-library-search-results`);
+  if (!input || !host || scope !== activeMarketScope) return;
+  const query = input.value.trim();
+  if (!query) { host.textContent = '请输入当前市场的代码或名称。'; return; }
+  if (scope === 'overview') { host.textContent = '请先选择一个具体市场，再搜索标的。'; return; }
+  host.textContent = '正在搜索当前市场…';
+  try {
+    const response = await fetch(`/api/instruments/search?scope=${encodeURIComponent(scope)}&q=${encodeURIComponent(query)}`);
+    const payload = await response.json();
+    if (!response.ok || !payload.success) throw new Error(payload.error || '搜索来源不可用');
+    if (scope !== activeMarketScope) return;
+    const rows = Array.isArray(payload.data) ? payload.data.filter(item => ({ options: 'option', crypto: 'crypto', prediction: 'prediction' })[scope] === item.type) : [];
+    host.replaceChildren();
+    if (!rows.length) { host.textContent = '当前市场没有匹配标的，或搜索来源暂无数据。'; return; }
+    for (const row of rows.slice(0, 20)) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'stock-library-item';
+      button.textContent = `${row.title || row.symbol} · ${row.venue || scope}`;
+      button.addEventListener('click', () => {
+        if (scope === 'options') selectOptionLibraryAsset(row.symbol);
+        else if (scope === 'crypto') selectCryptoFromInstrumentLibrary(row.symbol, row.title);
+        else selectPredictionLibraryEvent({ id: row.symbol, platform: row.venue, title: row.title, yesPrice: row.price }, payload.fetchedAt);
+      });
+      host.append(button);
+    }
+  } catch (error) {
+    if (scope === activeMarketScope) host.textContent = `搜索来源不可用：${error.message || '请求失败'}`;
+  }
 }
 
 const STOCK_QUICK_SYMBOLS = Object.freeze([
@@ -9252,11 +9387,27 @@ async function loadMarketTimeline() {
   currentTimelineController = new AbortController();
   const signal = currentTimelineController.signal;
   const scopeToken = marketScopeRequestToken();
+  window.mm_eventEntities = [];
+  window.mm_selectedStudyEventId = null;
   host.innerHTML = '<div class="event-loading">正在加载市场事件与新闻...</div>';
   try {
     const query = new URLSearchParams({ scope: activeMarketScope });
     const instrumentId = currentInstrumentFilterId();
     if (instrumentId) query.set('instrumentId', instrumentId);
+    if (activeMarketScope === 'stocks' && instrumentId.startsWith('stock:')) {
+      const entityResponse = await fetch('/api/events/entities?market=stocks&instrumentId=' + encodeURIComponent(instrumentId), { signal });
+      const entityPayload = await entityResponse.json();
+      if (!entityResponse.ok || !entityPayload.success) throw new Error(entityPayload.reason || '标的事件来源不可用');
+      if (!isCurrentMarketScopeToken(scopeToken) || signal.aborted) return;
+      window.mm_eventEntities = entityPayload.data || [];
+      host.innerHTML = window.mm_eventEntities.length ? window.mm_eventEntities.map(item => {
+        const evidence = formatSourceEvidence({ title: item.title, sourceName: item.source?.name, sourceUrl: item.source?.url, publishedAt: item.publishedAt, fetchedAt: item.retrievedAt, sourceStatus: item.publishedAt ? 'live' : 'partial' });
+        const id = safeAttr(item.id);
+        const canStudy = item.publishedAt && Date.parse(item.occurredAt) <= Date.now();
+        return `${evidence}<div class="event-research-actions"><button class="tab" type="button" data-event-id="${id}" onclick="openEventKlineFromTimeline(this)">定位 K 线</button><button class="tab guest-admin-only" type="button" data-event-id="${id}" onclick="openEventResearchFromTimeline(this)" ${canStudy ? '' : 'disabled title="尚未发生或缺少可核实的发布时间"'}>事件研究</button><button class="tab guest-admin-only" type="button" data-event-id="${id}" onclick="openEventDecisionFromTimeline(this)">写决策日记</button></div>`;
+      }).join('') : `<div class="empty-tip">${safeNewsText(entityPayload.reason || '该股票暂无可核实的事件与新闻')}</div>`;
+      return;
+    }
     const res = await fetch('/api/events/timeline?' + query.toString(), { signal });
     const payload = await res.json();
     if (!payload.success) throw new Error(payload.error || '无法获取时间线');
@@ -9752,6 +9903,37 @@ async function addResearchSnapshotUi(id) {
   if (body.success) loadResearchWorkspace();
 }
 
+function timelineSelectedEntity(button) {
+  const entity = (window.mm_eventEntities || []).find(item => item.id === button?.dataset?.eventId);
+  return entity && activeMarketScope === 'stocks' && entity.instrument === currentInstrumentFilterId() ? entity : null;
+}
+function openEventKlineFromTimeline(button) {
+  const entity = timelineSelectedEntity(button);
+  if (!entity) return showToast('事件与当前标的不匹配，请刷新', 'error');
+  window.openWorkspace('stock-quotes');
+  applyStockKlineAsOf(entity.occurredAt.slice(0, 10));
+}
+function openEventResearchFromTimeline(button) {
+  const entity = timelineSelectedEntity(button);
+  if (!entity || !entity.publishedAt) return showToast('缺少可核实的发布时间，不能建立时点研究', 'error');
+  const start = new Date(Math.max(Date.parse(entity.occurredAt), Date.parse(entity.publishedAt)));
+  const local = new Date(start.getTime() - start.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+  window.mm_selectedStudyEventId = entity.id;
+  window.openWorkspace('decision-intelligence');
+  const field = document.getElementById('event-study-at');
+  if (field) field.value = local;
+  document.getElementById('event-study-result')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+function openEventDecisionFromTimeline(button) {
+  const entity = timelineSelectedEntity(button);
+  if (!entity) return showToast('事件与当前标的不匹配，请刷新', 'error');
+  window.openWorkspace('decision-intelligence');
+  window.mm_decisionEvidenceIds = [...new Set([...(window.mm_decisionEvidenceIds || []), entity.id])];
+  const field = document.getElementById('decision-thesis');
+  if (field && !field.value) field.value = `围绕「${entity.title}」的研究假设：`;
+  field?.focus();
+}
+
 function decisionScopeInstrument() {
   const raw = String(currentInstrumentId || '').trim();
   if (activeMarketScope === 'stocks') return raw.replace(/^us/i, '').toUpperCase() || String(window._stockSelectedSymbol || currentStockSymbol || 'AAPL').toUpperCase();
@@ -9854,7 +10036,7 @@ async function runEventStudyUi() {
   const rawAt = document.getElementById('event-study-at')?.value;
   if (!instrument || !rawAt) { renderEventStudyResult(null, activeMarketScope === 'stocks' ? '请先选择标的和事件时间' : '事件研究当前只对已接入历史K线的市场开放'); return; }
   try {
-    const body = await decisionFetchJson('/api/event-studies', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ market: activeMarketScope, instrument, timeframe: window.stockKlinePeriod || '1d', eventAt: new Date(rawAt).toISOString(), asOf: new Date().toISOString(), beforeBars: 20, afterBars: Number(document.getElementById('event-study-after-bars')?.value || 20) }) });
+    const body = await decisionFetchJson('/api/event-studies', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ market: activeMarketScope, instrument, timeframe: window.stockKlinePeriod || '1d', eventId: window.mm_selectedStudyEventId || undefined, eventAt: new Date(rawAt).toISOString(), asOf: new Date().toISOString(), beforeBars: 20, afterBars: Number(document.getElementById('event-study-after-bars')?.value || 20) }) });
     renderEventStudyResult(body.data, body.reason);
   } catch (error) { renderEventStudyResult(null, error.message); }
 }
@@ -11515,12 +11697,15 @@ function applyMarketScopeView() {
   }
 }
 function selectOptionLibraryAsset(symbol) {
+  if (activeMarketScope !== 'options') return;
   activeWorkspaceId = 'option-chain';
   const market = document.getElementById('option-market');
   if (market) market.value = 'us';
   setOptionMarket('us');
   setEquitySymbol(symbol);
   showTab('options', null, { scopeAlreadySynced: true });
+  const current = document.getElementById('options-library-current-symbol');
+  if (current) current.textContent = symbol;
 }
 function selectCryptoLibraryAsset(symbol) {
   if (typeof bnSetSymbol !== 'function') return;

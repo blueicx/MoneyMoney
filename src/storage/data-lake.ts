@@ -6,6 +6,7 @@ import { DuckDBInstance } from '@duckdb/node-api';
 import { timestampMillisValue } from '@duckdb/node-api';
 import { DATA_ROOT, ensureDir } from '../utils/paths';
 import { MARKET_IDS, type MarketId } from '../features/research-contracts';
+import { normalizeInstrumentRef, type InstrumentRef } from '../features/unified-instruments';
 
 export type DatasetStatus = 'staged' | 'committed' | 'rejected';
 export interface DatasetManifest { id: string; dataset: string; market: MarketId; source: string; fieldVersion: string; timezone: string; adjustment: string; createdAt: string; contentHash: string; }
@@ -32,6 +33,8 @@ export interface DataLakeDiagnostics {
   backfills: Record<DataBackfillJob['status'], number>;
 }
 export interface DataCoverage { market: MarketId; instrument: string; dataset: string; timeframe: string; partitionCount: number; rowCount: number; periodStart: string; periodEnd: string; latestPublishedAt: string; status: DatasetStatus; }
+export interface DataDiscrepancy { id: string; market: MarketId; instrument: string; timeframe: string; sourceA: string; sourceB: string; status: 'partial'; reason: string; evidence: Array<{ timestamp: string; closeA: number; closeB: number; differencePct: number }>; createdAt: string; }
+export interface InstrumentQuarantine { market: MarketId; instrument: string; reason: string; createdAt: string; }
 
 const BAR_FIELDS = ['timestamp', 'open', 'high', 'low', 'close'] as const;
 const IDENTIFIER = /^[A-Za-z0-9._:/-]+$/;
@@ -55,7 +58,7 @@ function parseCheckpoint(value: unknown): BackfillCheckpoint {
 function validateInstrument(market: MarketId, instrument: string): void {
   if (!instrument || !IDENTIFIER.test(instrument)) throw new Error('invalid instrument identity');
   const stock = /^[A-Z][A-Z0-9.]{0,9}$/.test(instrument);
-  const crypto = /^(BTC|ETH|BNB|SOL|XRP|DOGE|ADA|AVAX|DOT|LINK)(USDT|USD)?$/.test(instrument.toUpperCase());
+  const crypto = /^[A-Z0-9]{2,20}(USDT|USDC|USD)$/.test(instrument.toUpperCase());
   if (market === 'stocks' && (!stock || crypto)) throw new Error('instrument does not belong to stocks market');
   if (market === 'crypto' && !crypto) throw new Error('instrument does not belong to crypto market');
   if (market === 'options' && !instrument.includes(':')) throw new Error('option instrument must include an option identity');
@@ -67,12 +70,16 @@ function qualityReport(rows: BarRow[], now = Date.now()): DataQualityReport {
   let duplicateTimestamps = 0;
   let outOfOrderRows = 0;
   let futureRows = 0;
+  let invalidPrices = 0;
+  let invalidVolumes = 0;
+  let timezoneMissing = 0;
   let previous = -Infinity;
   const seen = new Set<number>();
   for (const row of rows) {
     for (const field of BAR_FIELDS) if (row[field] === undefined || row[field] === null || row[field] === '') missingFields.add(field);
     const timestamp = Date.parse(row.timestamp);
     if (!Number.isFinite(timestamp)) { missingFields.add('timestamp'); continue; }
+    if (!/(?:Z|[+-]\d{2}:\d{2})$/i.test(row.timestamp)) timezoneMissing += 1;
     if (seen.has(timestamp)) duplicateTimestamps += 1;
     seen.add(timestamp);
     if (timestamp < previous) outOfOrderRows += 1;
@@ -81,12 +88,19 @@ function qualityReport(rows: BarRow[], now = Date.now()): DataQualityReport {
     for (const field of ['open', 'high', 'low', 'close', 'volume'] as const) {
       if (row[field] !== undefined && !Number.isFinite(Number(row[field]))) missingFields.add(field);
     }
+    if ([row.open, row.high, row.low, row.close].every(Number.isFinite) &&
+        (row.open <= 0 || row.high <= 0 || row.low <= 0 || row.close <= 0 ||
+         row.low > Math.min(row.open, row.close) || row.high < Math.max(row.open, row.close) || row.low > row.high)) invalidPrices += 1;
+    if (row.volume !== undefined && Number.isFinite(row.volume) && row.volume < 0) invalidVolumes += 1;
   }
   const errors = [
     ...(missingFields.size ? [`missing or invalid fields: ${[...missingFields].join(', ')}`] : []),
     ...(duplicateTimestamps ? [`duplicate timestamps: ${duplicateTimestamps}`] : []),
     ...(outOfOrderRows ? [`out-of-order rows: ${outOfOrderRows}`] : []),
     ...(futureRows ? [`future rows: ${futureRows}`] : []),
+    ...(invalidPrices ? [`invalid OHLC rows: ${invalidPrices}`] : []),
+    ...(invalidVolumes ? [`negative volume rows: ${invalidVolumes}`] : []),
+    ...(timezoneMissing ? [`timestamps missing timezone: ${timezoneMissing}`] : []),
   ];
   return { valid: rows.length > 0 && errors.length === 0, rowCount: rows.length, duplicateTimestamps, outOfOrderRows, missingFields: [...missingFields], futureRows, errors, checkedAt: new Date(now).toISOString() };
 }
@@ -111,12 +125,35 @@ export class DataLakeCatalog {
       CREATE TABLE IF NOT EXISTS point_in_time_snapshots (id TEXT PRIMARY KEY, market TEXT NOT NULL, instrument TEXT NOT NULL, dataset TEXT NOT NULL, timeframe TEXT NOT NULL, as_of TEXT NOT NULL, partition_id TEXT NOT NULL, content_hash TEXT NOT NULL, source TEXT, created_at TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS corporate_actions (id TEXT PRIMARY KEY, market TEXT NOT NULL, instrument TEXT NOT NULL, kind TEXT NOT NULL, effective_at TEXT NOT NULL, factor REAL, old_symbol TEXT, new_symbol TEXT, source TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS provider_contracts (id TEXT PRIMARY KEY, provider TEXT NOT NULL, market TEXT NOT NULL, datasets TEXT NOT NULL, timezone TEXT NOT NULL, units TEXT NOT NULL, revision_policy TEXT NOT NULL, updated_at TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS instrument_registry (id TEXT PRIMARY KEY, market TEXT NOT NULL, venue TEXT NOT NULL, symbol TEXT NOT NULL, title TEXT NOT NULL, aliases TEXT NOT NULL, registered_at TEXT NOT NULL);
+      CREATE INDEX IF NOT EXISTS idx_instrument_registry_symbol ON instrument_registry (market, symbol);
+      CREATE TABLE IF NOT EXISTS data_discrepancies (id TEXT PRIMARY KEY, market TEXT NOT NULL, instrument TEXT NOT NULL, timeframe TEXT NOT NULL, source_a TEXT NOT NULL, source_b TEXT NOT NULL, status TEXT NOT NULL, reason TEXT NOT NULL, evidence TEXT NOT NULL, created_at TEXT NOT NULL);
+      CREATE INDEX IF NOT EXISTS idx_data_discrepancies_scope ON data_discrepancies (market, instrument, created_at);
+      CREATE TABLE IF NOT EXISTS instrument_identity_quarantine (market TEXT NOT NULL, instrument TEXT NOT NULL, reason TEXT NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY (market, instrument));
       CREATE TABLE IF NOT EXISTS data_backfill_jobs (id TEXT PRIMARY KEY, market TEXT NOT NULL, dataset TEXT NOT NULL, instrument TEXT NOT NULL, timeframe TEXT NOT NULL, from_at TEXT NOT NULL, to_at TEXT NOT NULL, status TEXT NOT NULL, reason TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, lease_owner TEXT, lease_expires_at TEXT, checkpoint TEXT NOT NULL DEFAULT '{"rowsWritten":0,"partitionsCommitted":0}');
       CREATE INDEX IF NOT EXISTS idx_dataset_partitions_lookup ON dataset_partitions (market, dataset, instrument, timeframe, published_at);
       CREATE INDEX IF NOT EXISTS idx_data_revisions_lookup ON data_revisions (market, dataset, instrument, timeframe, published_at);
       CREATE INDEX IF NOT EXISTS idx_snapshots_lookup ON point_in_time_snapshots (market, instrument, dataset, timeframe, as_of);
     `);
     this.ensureBackfillColumns();
+    this.migrateLegacyInstrumentIdentities();
+  }
+
+  private migrateLegacyInstrumentIdentities(): void {
+    const rows = this.db.prepare('SELECT DISTINCT p.market, p.instrument, m.source FROM dataset_partitions p JOIN dataset_manifests m ON m.id = p.manifest_id ORDER BY p.market,p.instrument,m.source').all() as Array<{ market: MarketId; instrument: string; source: string }>;
+    for (const row of rows) {
+      if (!MARKET_IDS.includes(row.market) || this.resolveInstrument(row.market, row.instrument)) continue;
+      const type = ({ stocks: 'stock', options: 'option', crypto: 'crypto', prediction: 'prediction' } as const)[row.market];
+      const venue = row.market === 'stocks' ? 'us' : row.market === 'crypto' && /binance/i.test(row.source) ? 'binance' : '';
+      if (venue) {
+        try { this.registerInstrument({ type, venue, symbol: row.instrument, title: row.instrument, aliases: [] }); continue; } catch { /* keep ambiguous historical records quarantined */ }
+      }
+      this.db.prepare('INSERT OR IGNORE INTO instrument_identity_quarantine (market,instrument,reason,created_at) VALUES (?,?,?,?)').run(row.market, row.instrument, `旧数据缺少可确认的交易场所：${row.source}`, new Date().toISOString());
+    }
+  }
+
+  listInstrumentQuarantine(market: MarketId): InstrumentQuarantine[] {
+    return (this.db.prepare('SELECT market,instrument,reason,created_at AS createdAt FROM instrument_identity_quarantine WHERE market = ? ORDER BY instrument').all(market) as InstrumentQuarantine[]);
   }
 
   private ensureBackfillColumns(): void {
@@ -127,14 +164,81 @@ export class DataLakeCatalog {
     if (!names.has('checkpoint')) this.db.exec(`ALTER TABLE data_backfill_jobs ADD COLUMN checkpoint TEXT NOT NULL DEFAULT '{"rowsWritten":0,"partitionsCommitted":0}'`);
   }
 
-  async stageBars(input: { market: MarketId; dataset: string; instrument: string; timeframe: string; source: string; publishedAt: string; rows: BarRow[]; fieldVersion?: string; timezone?: string; adjustment?: string }): Promise<DatasetPartition & { quality: DataQualityReport }> {
+  registerInstrument(input: Pick<InstrumentRef, 'type' | 'venue' | 'symbol'> & Partial<Pick<InstrumentRef, 'title' | 'aliases'>>): InstrumentRef {
+    const ref = normalizeInstrumentRef({ ...input, title: input.title || input.symbol, aliases: input.aliases || [] });
+    const market = ({ stock: 'stocks', option: 'options', crypto: 'crypto', prediction: 'prediction' } as const)[ref.type];
+    validateInstrument(market, ref.symbol);
+    this.db.prepare('INSERT INTO instrument_registry (id,market,venue,symbol,title,aliases,registered_at) VALUES (?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET title=excluded.title, aliases=excluded.aliases')
+      .run(ref.id, market, ref.venue, ref.symbol, ref.title, JSON.stringify(ref.aliases), new Date().toISOString());
+    this.db.prepare('DELETE FROM instrument_identity_quarantine WHERE market = ? AND instrument = ?').run(market, ref.symbol);
+    return ref;
+  }
+
+  resolveInstrument(market: MarketId | undefined, query: string): InstrumentRef | null {
+    if (!market) throw new Error('market is required to resolve an instrument');
+    const value = String(query || '').trim().toUpperCase();
+    const rows = this.db.prepare('SELECT id,market,venue,symbol,title,aliases FROM instrument_registry WHERE market = ? AND (UPPER(id) = ? OR UPPER(symbol) = ?) ORDER BY id').all(market, value, value) as Array<Record<string, string>>;
+    if (rows.length > 1) throw new Error('ambiguous instrument: specify market and venue');
+    const row = rows[0];
+    if (!row) return null;
+    const type = ({ stocks: 'stock', options: 'option', crypto: 'crypto', prediction: 'prediction' } as const)[market];
+    return { id: row.id, type, venue: row.venue, symbol: row.symbol, title: row.title, aliases: JSON.parse(row.aliases) as string[] };
+  }
+
+  listDiscrepancies(market: MarketId, instrument?: string): DataDiscrepancy[] {
+    const rows = (instrument
+      ? this.db.prepare('SELECT * FROM data_discrepancies WHERE market = ? AND instrument = ? ORDER BY created_at DESC').all(market, instrument)
+      : this.db.prepare('SELECT * FROM data_discrepancies WHERE market = ? ORDER BY created_at DESC').all(market)) as Array<Record<string, any>>;
+    return rows.map(row => ({ id: String(row.id), market: row.market as MarketId, instrument: String(row.instrument), timeframe: String(row.timeframe), sourceA: String(row.source_a), sourceB: String(row.source_b), status: 'partial', reason: String(row.reason), evidence: JSON.parse(String(row.evidence)), createdAt: String(row.created_at) }));
+  }
+
+  private async rejectConflictingBars(input: { market: MarketId; instrument: string; timeframe: string; source: string; rows: BarRow[]; adjustment?: string; timezone?: string }): Promise<void> {
+    const candidates = this.db.prepare('SELECT p.path, m.source, m.adjustment, m.timezone FROM dataset_partitions p JOIN dataset_manifests m ON m.id = p.manifest_id WHERE p.market = ? AND p.dataset = ? AND p.instrument = ? AND p.timeframe = ? AND m.source != ? AND p.status = ? ORDER BY p.published_at DESC LIMIT 12')
+      .all(input.market, 'bars', input.instrument, input.timeframe, input.source, 'committed') as Array<{ path: string; source: string; adjustment: string; timezone: string }>;
+    if (!candidates.length) return;
+    const incoming = new Map(input.rows.map(row => [Date.parse(row.timestamp), row]));
+    const instance = await DuckDBInstance.create(':memory:', { memory_limit: '512MB', threads: '1' });
+    const connection = await instance.connect();
+    try {
+      for (const candidate of candidates) {
+        if (!fs.existsSync(candidate.path) || candidate.adjustment !== (input.adjustment || 'unadjusted') || candidate.timezone !== (input.timezone || 'UTC')) continue;
+        const result = await connection.runAndReadAll(`SELECT observation_ts AS timestamp, close FROM read_parquet('${sqlPath(candidate.path)}') ORDER BY observation_ts`);
+        const evidence: DataDiscrepancy['evidence'] = [];
+        for (const row of result.getRowObjectsJS() as Array<Record<string, unknown>>) {
+          const time = row.timestamp instanceof Date ? row.timestamp.getTime() : Date.parse(String(row.timestamp));
+          const next = incoming.get(time);
+          const closeA = Number(row.close);
+          if (!next || !Number.isFinite(closeA) || closeA <= 0) continue;
+          const differencePct = Math.abs(next.close - closeA) / closeA * 100;
+          if (differencePct > (input.market === 'stocks' || input.market === 'options' ? 0.5 : 1)) evidence.push({ timestamp: new Date(time).toISOString(), closeA, closeB: next.close, differencePct });
+        }
+        if (!evidence.length) continue;
+        const id = `discrepancy_${hash({ market: input.market, instrument: input.instrument, timeframe: input.timeframe, sourceA: candidate.source, sourceB: input.source, evidence }).slice(0, 24)}`;
+        const reason = `${candidate.source} 与 ${input.source} 的 ${evidence.length} 个重叠收盘价超出同市场容差`;
+        this.db.prepare('INSERT OR IGNORE INTO data_discrepancies (id,market,instrument,timeframe,source_a,source_b,status,reason,evidence,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)')
+          .run(id, input.market, input.instrument, input.timeframe, candidate.source, input.source, 'partial', reason, JSON.stringify(evidence), new Date().toISOString());
+        throw new Error(`provider conflict: ${reason}`);
+      }
+    } finally { connection.closeSync(); instance.closeSync(); }
+  }
+
+  async stageBars(input: { market: MarketId; dataset: string; instrument: string; timeframe: string; source: string; publishedAt: string; rows: BarRow[]; fieldVersion?: string; timezone?: string; adjustment?: string; units?: Record<string, string> }): Promise<DatasetPartition & { quality: DataQualityReport }> {
     if (!MARKET_IDS.includes(input.market)) throw new Error('invalid market');
     validateInstrument(input.market, input.instrument);
+    this.resolveInstrument(input.market, input.instrument);
     if (!input.dataset || !input.timeframe || !input.source) throw new Error('dataset, timeframe and source are required');
+    const contract = this.listProviderContracts(input.market).find(item => item.provider === input.source && item.datasets.includes(input.dataset));
+    if (contract) {
+      if ((input.timezone || 'UTC') !== contract.timezone) throw new Error('provider timezone mismatch');
+      for (const [field, expectedUnit] of Object.entries(contract.units)) {
+        if (input.units?.[field] !== expectedUnit) throw new Error(`provider unit mismatch for ${field}`);
+      }
+    }
     const publishedAt = Date.parse(input.publishedAt);
     if (!Number.isFinite(publishedAt)) throw new Error('invalid publishedAt');
     const quality = qualityReport(input.rows);
     if (!quality.valid) throw new Error(`quality gate rejected partition: ${quality.errors.join('; ')}`);
+    await this.rejectConflictingBars(input);
     const first = Date.parse(input.rows[0].timestamp);
     const last = Date.parse(input.rows[input.rows.length - 1].timestamp);
     const year = new Date(first).getUTCFullYear();
@@ -173,11 +277,18 @@ export class DataLakeCatalog {
       this.db.prepare('INSERT OR REPLACE INTO data_quality_reports (partition_id, report, checked_at) VALUES (?, ?, ?)').run(partition.id, JSON.stringify(quality), quality.checkedAt);
       this.db.prepare('INSERT OR REPLACE INTO data_revisions (id,dataset,market,instrument,timeframe,partition_id,published_at,content_hash,supersedes,reason) VALUES (?,?,?,?,?,?,?,?,?,?)').run(revision.id, revision.dataset, revision.market, revision.instrument, revision.timeframe, revision.partitionId, revision.publishedAt, revision.contentHash, revision.supersedes || null, revision.reason || null);
     })();
+    if ((input.market === 'stocks' && /^[A-Z][A-Z0-9.]{0,9}$/.test(input.instrument)) ||
+        (input.market === 'crypto' && /binance/i.test(input.source))) {
+      const type = input.market === 'stocks' ? 'stock' : 'crypto';
+      const venue = input.market === 'stocks' ? 'us' : 'binance';
+      this.registerInstrument({ type, venue, symbol: input.instrument, title: input.instrument, aliases: [] });
+    }
     return { ...partition, quality };
   }
 
   async queryBarsAsOf(input: { market: MarketId; instrument: string; timeframe: string; asOf: string }): Promise<{ rows: Array<Record<string, unknown>>; dataStatus: 'historical' | 'unavailable'; source: string | null; updatedAt: string | null; reason?: string; snapshot?: PointInTimeSnapshot }> {
     validateInstrument(input.market, input.instrument);
+    if (this.listInstrumentQuarantine(input.market).some(item => item.instrument === input.instrument)) return { rows: [], dataStatus: 'unavailable', source: null, updatedAt: null, reason: '标的身份未确认，旧分区已隔离' };
     const asOf = Date.parse(input.asOf);
     if (!Number.isFinite(asOf)) throw new Error('invalid asOf');
     const candidates = this.db.prepare('SELECT p.*, m.source AS source FROM dataset_partitions p JOIN dataset_manifests m ON m.id = p.manifest_id WHERE p.market = ? AND p.dataset = ? AND p.instrument = ? AND p.timeframe = ? AND p.published_at <= ? AND p.status = ? ORDER BY p.period_start ASC, p.period_end ASC, p.published_at DESC, p.id DESC').all(input.market, 'bars', input.instrument, input.timeframe, new Date(asOf).toISOString(), 'committed') as Array<Record<string, any>>;
@@ -230,6 +341,9 @@ export class DataLakeCatalog {
     validateInstrument(input.market, input.instrument);
     if (!['split', 'dividend', 'symbol-change', 'delisting'].includes(input.kind)) throw new Error('Invalid corporate action kind');
     if (!Number.isFinite(Date.parse(input.effectiveAt)) || !input.source?.trim()) throw new Error('Corporate action requires effectiveAt and source');
+    if (input.kind === 'split' && (!Number.isFinite(input.factor) || Number(input.factor) <= 0)) throw new Error('Split factor must be positive');
+    if (input.kind === 'dividend' && (!Number.isFinite(input.factor) || Number(input.factor) < 0)) throw new Error('Dividend amount must be nonnegative');
+    if (input.kind === 'symbol-change' && (!input.oldSymbol || !input.newSymbol || input.oldSymbol === input.newSymbol)) throw new Error('Symbol change requires distinct old and new symbols');
     this.db.prepare('INSERT OR REPLACE INTO corporate_actions (id,market,instrument,kind,effective_at,factor,old_symbol,new_symbol,source) VALUES (?,?,?,?,?,?,?,?,?)').run(input.id, input.market, input.instrument, input.kind, new Date(input.effectiveAt).toISOString(), input.factor ?? null, input.oldSymbol || null, input.newSymbol || null, input.source.trim());
     return { ...input, effectiveAt: new Date(input.effectiveAt).toISOString(), source: input.source.trim() };
   }
@@ -272,10 +386,12 @@ export class DataLakeCatalog {
     }));
   }
 
-  listQuality(market?: MarketId): Array<{ partitionId: string; report: DataQualityReport }> {
-    const rows = (market
-      ? this.db.prepare('SELECT q.partition_id AS partitionId, q.report FROM data_quality_reports q JOIN dataset_partitions p ON p.id = q.partition_id WHERE p.market = ? ORDER BY q.checked_at DESC').all(market)
-      : this.db.prepare('SELECT partition_id AS partitionId, report FROM data_quality_reports ORDER BY checked_at DESC').all()) as Array<{ partitionId: string; report: string }>;
+  listQuality(market?: MarketId, instrument?: string): Array<{ partitionId: string; report: DataQualityReport }> {
+    const rows = (market && instrument
+      ? this.db.prepare('SELECT q.partition_id AS partitionId, q.report FROM data_quality_reports q JOIN dataset_partitions p ON p.id = q.partition_id WHERE p.market = ? AND p.instrument = ? ORDER BY q.checked_at DESC').all(market, instrument)
+      : market
+        ? this.db.prepare('SELECT q.partition_id AS partitionId, q.report FROM data_quality_reports q JOIN dataset_partitions p ON p.id = q.partition_id WHERE p.market = ? ORDER BY q.checked_at DESC').all(market)
+        : this.db.prepare('SELECT partition_id AS partitionId, report FROM data_quality_reports ORDER BY checked_at DESC').all()) as Array<{ partitionId: string; report: string }>;
     return rows.map(row => ({ partitionId: row.partitionId, report: JSON.parse(row.report) as DataQualityReport }));
   }
 

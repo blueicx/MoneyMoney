@@ -15,6 +15,11 @@ export interface UnifiedPaperOrder {
   quantity: number;
   timestamp: string;
   strategy?: string;
+  strategyVersion?: string;
+  experimentId?: string;
+  signalId?: string;
+  dataSnapshotId?: string;
+  backtestTradeIndex?: number;
   reason?: string;
   pnlUsd?: number;
   feeUsd?: number;
@@ -228,7 +233,7 @@ export class UnifiedPaperLedgerStore {
       const ledger = this.get();
       const existing = order.id && ledger.orders.find(item => item.id === order.id);
       if (existing) {
-        const fields = ['instrumentId', 'instrumentType', 'side', 'outcome', 'price', 'quantity', 'timestamp', 'feeUsd', 'slippageUsd', 'strategy', 'reason'] as const;
+        const fields = ['instrumentId', 'instrumentType', 'side', 'outcome', 'price', 'quantity', 'timestamp', 'feeUsd', 'slippageUsd', 'strategy', 'strategyVersion', 'experimentId', 'signalId', 'dataSnapshotId', 'backtestTradeIndex', 'reason'] as const;
         if (fields.some(key => existing[key] !== order[key])) throw new Error('重复订单 ID 的内容不一致');
         return ledger;
       }

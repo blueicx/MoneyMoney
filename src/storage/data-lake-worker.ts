@@ -125,7 +125,7 @@ export class DataLakeBackfillWorker {
     let rowCount = 0;
     let partitionsCommitted = 0;
     for (const rows of groups.values()) {
-      await this.catalog.stageBars({ market: job.market, dataset: job.dataset, instrument: job.instrument, timeframe: job.timeframe, source, publishedAt: snapshot.fetchedAt, rows });
+      await this.catalog.stageBars({ market: job.market, dataset: job.dataset, instrument: job.instrument, timeframe: job.timeframe, source, publishedAt: snapshot.fetchedAt, timezone: 'UTC', units: { timestamp: 'UTC', price: 'native', volume: 'native' }, rows });
       rowCount += rows.length;
       partitionsCommitted += 1;
       const checkpoint = this.catalog.heartbeatBackfill(job.id, this.workerId, { cursor: rows[rows.length - 1]?.timestamp, rowsWritten: rowCount, partitionsCommitted });

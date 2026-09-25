@@ -69,14 +69,15 @@ test('scoped library quick data and rendering exists for each market and ensures
   assert.match(cryptoContainer.innerHTML, /BTCUSDT/, 'Crypto includes BTC');
   assert.match(cryptoContainer.innerHTML, /ETHUSDT/, 'Crypto includes ETH');
 
-  // Verify separation / unavailability text
+  // Verify market-specific entries and truthful loading state
   window.eval("activeMarketScope = 'options'; applySidebarScope();");
   const optionsContainer = document.getElementById('options-library-quick');
-  assert.match(optionsContainer.innerHTML, /empty-tip/);
+  assert.match(optionsContainer.textContent, /SPY/);
+  assert.match(optionsContainer.textContent, /非合约报价/);
 
   window.eval("activeMarketScope = 'prediction'; applySidebarScope();");
   const predictionContainer = document.getElementById('prediction-library-quick');
-  assert.match(predictionContainer.innerHTML, /empty-tip/);
+  assert.match(predictionContainer.textContent, /正在读取真实预测事件|来源不可用|暂无可用预测事件/);
 
   // Validate no cross-market overlap
   assert.doesNotMatch(cryptoContainer.innerHTML, /AAPL/);

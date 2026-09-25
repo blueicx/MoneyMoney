@@ -7,6 +7,8 @@ import { SentimentAnalyzer } from './sentiment';
 import { DataCollector } from './collector';
 import { globalStrategyRegistry } from '../features/strategy-registry';
 import { SignalMonitor } from '../features/signal-monitor';
+import { StrategyDriftGate } from '../features/paper-drift';
+import { stateStore } from '../storage/sqlite-state';
 import { DataSourceRouter } from '../features/data-source-router';
 import { BacktestEngine } from '../features/backtest-engine';
 
@@ -14,7 +16,7 @@ export class AnalysisEngine {
   private collector: DataCollector;
   private sentimentAnalyzer: SentimentAnalyzer;
   private cachedSentimentSignals: Signal[] = [];
-  private signalMonitor = new SignalMonitor(60000); // 1-minute cooldown
+  private signalMonitor = new SignalMonitor(60000, new StrategyDriftGate(stateStore)); // 1-minute cooldown
 
   constructor(collector: DataCollector) {
     this.collector = collector;
@@ -69,10 +71,11 @@ export class AnalysisEngine {
             const status = this.signalMonitor.processSignal({
                 id: `${rec.marketId}-${Date.now()}`,
                 strategyId: 'engine-default',
-                marketId: String(rec.marketId),
+                strategyVersion: 'v1',
+                marketId: 'prediction',
                 timestamp: Date.now(),
                 direction: rec.action.includes('YES') ? 'buy' : 'sell'
-            });
+            }, String(rec.marketId));
             if (status === 'confirmed') recommendations.push(rec);
         } else if (rec) {
             recommendations.push(rec);

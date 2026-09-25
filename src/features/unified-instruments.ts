@@ -1,5 +1,5 @@
 import { binanceFeed, type BinanceTicker } from './binance';
-import { newsFeed, type NewsItem } from './news-settings';
+import type { NewsItem } from './news-settings';
 import { getStockNews } from './stock-news';
 import { getUpcomingEventCalendar, type UpcomingEvent } from './event-calendar';
 import { getCachedPredictionRadarSlice, getPredictionRadar, type PredictionMarket } from './prediction-radar';
@@ -7,6 +7,7 @@ import { getAiRuntimeConfig } from './ai-runtime-config';
 import { filterInstrumentResults, type MarketScope } from './market-scope';
 import { stockDataService } from './stock-data-service';
 import { getEquityOptionsSnapshot } from './options-market';
+import type { StockFiling } from './stock-data-contracts';
 
 export type InstrumentType = 'stock' | 'option' | 'crypto' | 'prediction';
 
@@ -188,10 +189,11 @@ export function filterEventsForInstrument<T extends Pick<UpcomingEvent, 'id' | '
   });
 }
 
-function buildInstrumentTimeline(events: UpcomingEvent[], news: NewsItem[]): Array<Record<string, unknown>> {
+export function buildInstrumentTimeline(events: UpcomingEvent[], news: NewsItem[], filings: StockFiling[] = []): Array<Record<string, unknown>> {
   return [
     ...events.map(event => ({ kind: 'event', at: event.date, occurredAt: event.date, publishedAt: null, title: event.titleZh || event.title, impact: event.impact, result: event.actual ? { actual: event.actual, forecast: event.forecast } : null })),
     ...news.map(item => ({ kind: 'news', at: item.publishedAt, occurredAt: item.publishedAt, publishedAt: item.publishedAt, title: item.title, source: item.source, url: item.url, sentimentScore: item.sentimentScore ?? null })),
+    ...filings.slice(0, 30).map(filing => ({ kind: 'event', at: filing.acceptedAt || filing.filingDate, occurredAt: filing.acceptedAt || filing.filingDate, publishedAt: filing.acceptedAt || null, title: `SEC ${filing.form} · ${filing.accessionNumber}`, source: 'SEC EDGAR', url: filing.reportUrl || null })),
   ].sort((a, b) => new Date(String(b.at)).getTime() - new Date(String(a.at)).getTime());
 }
 
@@ -301,6 +303,7 @@ export class UnifiedInstrumentService {
     let klines: unknown[] = [];
     let fetchedAt: string | null = null;
     const sourceStatus: Record<string, 'ok' | 'stale' | 'unavailable'> = { quote: 'unavailable', market: 'unavailable', klines: 'unavailable', events: 'unavailable', news: 'unavailable' };
+    let filings: StockFiling[] = [];
     try {
       if (normalized.type === 'crypto') {
         const ticker = await binanceFeed.getPrice(normalized.symbol);
@@ -338,20 +341,18 @@ export class UnifiedInstrumentService {
           fetchedAt = stockData.quote.asOf || stockData.snapshots.map(item => item.fetchedAt).filter(Boolean).sort().pop() || new Date().toISOString();
         }
         klines = stockData.bars;
+        filings = stockData.filings;
         sourceStatus.quote = stockStatus(stockData.sourceStatus['nasdaq-public-quote']);
         sourceStatus.klines = stockStatus(stockData.sourceStatus['nasdaq-public-history']);
       }
     } catch { /* each source is independently optional */ }
-    const newsPromise = normalized.type === 'stock'
-      ? getStockNews(normalized.symbol)
-      : normalized.type === 'crypto'
-        ? newsFeed.getNews()
-        : Promise.resolve([] as NewsItem[]);
-    const [eventsResult, newsResult] = await Promise.allSettled([getUpcomingEventCalendar(7), newsPromise]);
+    const newsPromise = normalized.type === 'stock' ? getStockNews(normalized.symbol) : Promise.resolve([] as NewsItem[]);
+    const eventsPromise = normalized.type === 'stock' ? getUpcomingEventCalendar(7) : Promise.resolve({ events: [] as UpcomingEvent[] });
+    const [eventsResult, newsResult] = await Promise.allSettled([eventsPromise, newsPromise]);
     const allEvents = eventsResult.status === 'fulfilled' ? eventsResult.value.events : [];
     const events = filterEventsForInstrument(allEvents, normalized);
     const news = newsResult.status === 'fulfilled' ? newsResult.value : [];
-    if (eventsResult.status === 'fulfilled') sourceStatus.events = 'ok';
+    if (normalized.type === 'stock' && eventsResult.status === 'fulfilled') sourceStatus.events = 'ok';
     if (newsResult.status === 'fulfilled' && news.length) sourceStatus.news = 'ok';
     const sectionReasons: UnifiedInstrumentOverview['sectionReasons'] = {
       events: eventsResult.status === 'rejected'
@@ -371,7 +372,7 @@ export class UnifiedInstrumentService {
       sections: [], timeline: [], status: overviewDataStatus(sourceStatus),
     };
     base.analysis = await getInstrumentAnalysis(normalized, base);
-    base.timeline = buildInstrumentTimeline(events, news);
+    base.timeline = buildInstrumentTimeline(events, news, filings);
     base.sections = buildInstrumentOverviewSections(base);
     overviewCache.set(normalized.id, { at: Date.now(), value: base });
     return base;

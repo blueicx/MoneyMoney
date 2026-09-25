@@ -18,12 +18,14 @@ test('SEC submissions keeps recent filing rows aligned and filters malformed row
   const result = parseSecSubmissions({
     name: 'Apple Inc.',
     filings: { recent: {
-      form: ['10-K', '8-K', '4', ''], accessionNumber: ['0001-23-000001', '0001-23-000002', '0001-23-000003', ''], filingDate: ['2026-01-30', '2026-02-01', '2026-02-02', ''], primaryDocument: ['annual.htm', 'current.htm', 'xslF345X06/primarydocument.xml', '']
+      form: ['10-K', '8-K', '4', ''], accessionNumber: ['0001-23-000001', '0001-23-000002', '0001-23-000003', ''], filingDate: ['2026-01-30', '2026-02-01', '2026-02-02', ''], acceptanceDateTime: ['2026-01-30T16:00:00.000Z', 'bad', '', ''], primaryDocument: ['annual.htm', 'current.htm', 'xslF345X06/primarydocument.xml', '']
     } },
   });
   assert.equal(result.companyName, 'Apple Inc.');
   assert.deepEqual(result.filings.map(item => item.form), ['10-K', '8-K', '4']);
   assert.equal(result.filings[2].primaryDocument, 'xslF345X06/primarydocument.xml');
+  assert.equal(result.filings[0].acceptedAt, '2026-01-30T16:00:00.000Z');
+  assert.equal(result.filings[1].acceptedAt, undefined);
 });
 
 test('company facts selects latest annual USD values by tag', () => {

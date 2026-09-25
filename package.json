@@ -6,7 +6,7 @@
   "scripts": {
     "build": "tsc && node scripts/copy-web-assets.js",
     "start": "node dist/index.js",
-    "test": "node --test tests/*.test.cjs",
+    "test": "node --test --test-concurrency=1 tests/*.test.cjs",
     "dev": "ts-node src/index.ts",
     "trade": "ts-node src/index.ts",
     "live": "ts-node src/commands/dashboard.ts",
@@ -22,6 +22,7 @@
     "analyze:watch": "ts-node src/analysis/analyze.ts --watch",
     "security:scan": "node scripts/secret-scan.cjs",
     "smoke:web": "node scripts/web-smoke.cjs",
+    "smoke:browser": "node scripts/browser-market-matrix.cjs",
     "smoke:auth": "node scripts/browser-auth-smoke.cjs",
     "state:backup": "node scripts/state-backup.cjs",
     "state:restore": "node scripts/state-backup.cjs restore"

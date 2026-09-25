@@ -1,4 +1,6 @@
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 
 const {
   instrumentId,
@@ -9,6 +11,7 @@ const {
   buildInstrumentOverviewSections,
   overviewDataStatus,
   filterEventsForInstrument,
+  buildInstrumentTimeline,
   UNIFIED_AI_CACHE_TTL_MS,
 } = require('../dist/features/unified-instruments');
 
@@ -61,5 +64,16 @@ const eventRows = [
 assert.deepEqual(filterEventsForInstrument(eventRows, { type: 'stock', symbol: 'AAPL' }).map(item => item.id), ['earnings-2026-09-16-AAPL']);
 assert.deepEqual(filterEventsForInstrument(eventRows, { type: 'stock', symbol: 'SNDK' }).map(item => item.id), ['earnings-2026-09-16-SNDK']);
 assert.deepEqual(filterEventsForInstrument(eventRows, { type: 'crypto', symbol: 'BTCUSDT' }), []);
+
+const secTimeline = buildInstrumentTimeline([], [], [
+  { form: '8-K', accessionNumber: '0001-26-000001', filingDate: '2026-09-20', acceptedAt: '2026-09-20T17:00:00.000Z', reportUrl: 'https://www.sec.gov/example' },
+  { form: '10-K', accessionNumber: '0001-26-000002', filingDate: '2026-09-19' },
+]);
+assert.equal(secTimeline[0].publishedAt, '2026-09-20T17:00:00.000Z');
+assert.equal(secTimeline[0].source, 'SEC EDGAR');
+assert.equal(secTimeline[0].url, 'https://www.sec.gov/example');
+assert.equal(secTimeline[1].publishedAt, null);
+const unifiedSource = fs.readFileSync(path.join(__dirname, '../src/features/unified-instruments.ts'), 'utf8');
+assert.doesNotMatch(unifiedSource, /normalized\.type === 'crypto'\s*\? newsFeed\.getNews\(\)/);
 
 console.log('unified instrument helpers: all assertions passed');

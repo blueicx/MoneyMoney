@@ -93,6 +93,17 @@ export function buildEventEntities(rows: TimelineRow[], context: { market: Marke
   }).filter((row): row is EventEntity => row !== null);
 }
 
+export function selectResearchEvent(entities: readonly EventEntity[], id: string, asOf: string): EventEntity {
+  const cutoff = Date.parse(asOf);
+  if (!Number.isFinite(cutoff)) throw new Error('Invalid asOf time');
+  const entity = entities.find(item => item.id === id);
+  if (!entity) throw new Error('Event evidence not found for this instrument');
+  if (!entity.publishedAt) throw new Error('Event publication time is unknown; historical study entry is unavailable');
+  if (Date.parse(entity.publishedAt) > cutoff) throw new Error('Event was published after asOf; future evidence is unavailable');
+  if (Date.parse(entity.occurredAt) > cutoff) throw new Error('Event occurred after asOf; future outcome is unavailable');
+  return entity;
+}
+
 export function clusterEventEntities(entities: EventEntity[]): EventCluster[] {
   const groups = new Map<string, EventEntity[]>();
   for (const entity of entities) {
