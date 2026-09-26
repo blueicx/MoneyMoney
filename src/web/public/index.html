@@ -8405,10 +8405,11 @@ function enterStockIntraday(date) {
   loadStockKline();
   return true;
 }
-function exitStockIntraday() {
+async function exitStockIntraday() {
   if (!stockChartIntradayDate) return false;
   const selectedDate = stockChartIntradayDate;
   const restore = stockChartDailyContext || { period: '1d', asOf: '' };
+  const selectedSymbol = currentStockSymbol;
   stockChartIntradayDate = '';
   stockChartIntradaySession = null;
   stockChartDailyContext = null;
@@ -8416,9 +8417,9 @@ function exitStockIntraday() {
   stockChartAsOf = restore.asOf || '';
   document.querySelectorAll('.stock-kline-period').forEach(btn => btn.classList.toggle('active', btn.dataset.klinePeriod === currentStockKlinePeriod));
   updateStockKlineFocusControl();
-  loadStockKline();
-  setTimeout(() => focusStockKlineDate(selectedDate), 0);
-  return true;
+  await loadStockKline();
+  if (currentStockSymbol !== selectedSymbol || currentStockKlinePeriod !== (restore.period || '1d') || stockChartIntradayDate) return false;
+  return focusStockKlineDate(selectedDate) != null;
 }
 function setStockIntradayPeriod(period) {
   const value = String(period || '').toLowerCase();

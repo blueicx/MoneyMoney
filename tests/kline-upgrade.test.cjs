@@ -156,4 +156,15 @@ describe('K-Line Upgrade & Advanced Capabilities', () => {
     assert.match(html, /exchangeTimezone|stockChartExchangeTimezone/);
     assert.match(html, /避免混入事后数据/);
   });
+
+  it('waits for restored daily bars before relocating the intraday date selection', () => {
+    const html = fs.readFileSync(path.join(__dirname, '../src/web/public/index.html'), 'utf8');
+    const start = html.indexOf('async function exitStockIntraday()');
+    const end = html.indexOf('\nfunction setStockIntradayPeriod', start);
+    assert.notEqual(start, -1, 'return-to-daily must be awaitable');
+    assert.notEqual(end, -1);
+    const implementation = html.slice(start, end);
+    assert.match(implementation, /await loadStockKline\(\)[\s\S]*focusStockKlineDate\(selectedDate\)/);
+    assert.doesNotMatch(implementation, /setTimeout\(\(\) => focusStockKlineDate/);
+  });
 });
