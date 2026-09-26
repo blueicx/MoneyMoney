@@ -1,0 +1,35 @@
+name: MoneyMoney Production Read-only Canary
+
+on:
+  schedule:
+    - cron: '20 14 * * 1-5'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  browser-canary:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      PUBLIC_WEB_BASE_URL: ${{ vars.PUBLIC_WEB_BASE_URL || 'https://54.211.146.2' }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      CANARY_ARTIFACT_DIR: artifacts/production-canary
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run smoke:production
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-canary-failure-${{ github.run_id }}
+          path: artifacts/production-canary/
+          if-no-files-found: warn
+          retention-days: 14

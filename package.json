@@ -23,6 +23,7 @@
     "security:scan": "node scripts/secret-scan.cjs",
     "smoke:web": "node scripts/web-smoke.cjs",
     "smoke:browser": "node scripts/browser-market-matrix.cjs",
+    "smoke:production": "node scripts/production-readonly-canary.cjs",
     "smoke:auth": "node scripts/browser-auth-smoke.cjs",
     "state:backup": "node scripts/state-backup.cjs",
     "state:restore": "node scripts/state-backup.cjs restore"

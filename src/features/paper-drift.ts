@@ -32,7 +32,26 @@ interface DriftExperiment {
   experiment: { id: string; market: MarketId; instrument?: string; strategyId?: string; strategyVersion?: string };
   backtest: { trades: Array<{ direction: string; price: number; volume: number; fee: number; slippage: number; pnl: number }> };
 }
-interface DriftSnapshot { id: string; market: MarketId; instrument: string; asOf: string }
+interface DriftSnapshot { id: string; market: MarketId; instrument: string; asOf: string; createdAt?: string; source?: string | null; dataStatus?: PaperDriftSample['dataStatus'] }
+
+interface DriftResolvers {
+  experiment: (id: string) => DriftExperiment | null;
+  snapshot: (id: string) => DriftSnapshot | null;
+}
+
+function hasDriftReferences(order: UnifiedPaperOrder): order is UnifiedPaperOrder & {
+  strategy: string; strategyVersion: string; experimentId: string; signalId: string; dataSnapshotId: string; backtestTradeIndex: number;
+} {
+  return !!(order.strategy && order.strategyVersion && order.experimentId && order.signalId && order.dataSnapshotId &&
+    Number.isInteger(order.backtestTradeIndex) && (order.backtestTradeIndex ?? -1) >= 0);
+}
+
+function snapshotStatus(snapshot: DriftSnapshot, ageMs: number): PaperDriftSample['dataStatus'] {
+  if (!snapshot.source) return 'unavailable';
+  if (snapshot.dataStatus && !['live', 'delayed'].includes(snapshot.dataStatus)) return snapshot.dataStatus;
+  if (ageMs > 15 * 60 * 1000) return 'cached';
+  return snapshot.dataStatus || 'delayed';
+}
 
 export function samePaperInstrument(market: MarketId, orderId: string, linkedInstrument: string): boolean {
   const actual = String(orderId || '').trim().toUpperCase();
@@ -43,14 +62,11 @@ export function samePaperInstrument(market: MarketId, orderId: string, linkedIns
   return false;
 }
 
-export function collectPaperDriftSamples(orders: readonly UnifiedPaperOrder[], resolve: {
-  experiment: (id: string) => DriftExperiment | null;
-  snapshot: (id: string) => DriftSnapshot | null;
-}): PaperDriftSample[] {
+export function collectPaperDriftSamples(orders: readonly UnifiedPaperOrder[], resolve: DriftResolvers): PaperDriftSample[] {
   const marketForType: Record<UnifiedPaperOrder['instrumentType'], MarketId> = { stock: 'stocks', option: 'options', crypto: 'crypto', prediction: 'prediction' };
   const samples: PaperDriftSample[] = [];
   for (const order of orders) {
-    if (order.side !== 'SELL' || !order.strategy || !order.strategyVersion || !order.experimentId || !order.signalId || !order.dataSnapshotId || !Number.isInteger(order.backtestTradeIndex) || (order.backtestTradeIndex ?? -1) < 0) continue;
+    if (order.side !== 'SELL' || !hasDriftReferences(order)) continue;
     const market = marketForType[order.instrumentType];
     const experiment = resolve.experiment(order.experimentId);
     const snapshot = resolve.snapshot(order.dataSnapshotId);
@@ -62,20 +78,38 @@ export function collectPaperDriftSamples(orders: readonly UnifiedPaperOrder[], r
     const trade = experiment.backtest.trades[order.backtestTradeIndex!];
     const paperTime = Date.parse(order.timestamp);
     const snapshotTime = Date.parse(snapshot.asOf);
+    const createdAt = snapshot.createdAt ? Date.parse(snapshot.createdAt) : null;
     if (!trade || trade.direction !== 'sell' || !Number.isFinite(trade.volume) || trade.volume <= 0 ||
         !Number.isFinite(paperTime) || !Number.isFinite(snapshotTime) || snapshotTime > paperTime || paperTime - snapshotTime > 72 * 60 * 60 * 1000 ||
+        (createdAt !== null && (!Number.isFinite(createdAt) || createdAt > paperTime)) ||
         !Number.isFinite(Number(order.pnlUsd))) continue;
     const factor = order.quantity / trade.volume;
     samples.push({
       market, instrumentId: order.instrumentId, strategyId: order.strategy, strategyVersion: order.strategyVersion,
       experimentId: order.experimentId, signalId: order.signalId, dataSnapshotId: order.dataSnapshotId,
-      timestamp: order.timestamp, dataStatus: 'delayed', paperPrice: order.price, paperQuantity: order.quantity,
+      timestamp: order.timestamp, dataStatus: snapshotStatus(snapshot, paperTime - snapshotTime), paperPrice: order.price, paperQuantity: order.quantity,
       paperSlippageUsd: Number(order.slippageUsd || 0), expectedSlippageUsd: trade.slippage * factor,
       paperNetPnlUsd: Number(order.pnlUsd) - Number(order.feeUsd || 0) - Number(order.slippageUsd || 0),
       expectedNetPnlUsd: trade.pnl * factor,
     });
   }
   return samples;
+}
+
+export function summarizePaperDriftCoverage(orders: readonly UnifiedPaperOrder[], resolve: DriftResolvers): {
+  closedOrders: number; explicitlyLinked: number; freshPairs: number; stalePairs: number; rejectedPairs: number;
+} {
+  const closed = orders.filter(order => order.side === 'SELL');
+  const paired = collectPaperDriftSamples(closed, resolve);
+  const freshPairs = paired.filter(sample => sample.dataStatus === 'live' || sample.dataStatus === 'delayed').length;
+  const stalePairs = paired.length - freshPairs;
+  return {
+    closedOrders: closed.length,
+    explicitlyLinked: closed.filter(hasDriftReferences).length,
+    freshPairs,
+    stalePairs,
+    rejectedPairs: closed.length - paired.length,
+  };
 }
 
 export function analyzePaperDrift(samples: readonly PaperDriftSample[], now = new Date()): PaperDriftResult {

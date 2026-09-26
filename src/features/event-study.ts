@@ -41,9 +41,112 @@ export interface EventStudyResult {
 export interface EventStudyRecord extends EventStudyResult {
   asOf?: string;
   title?: string;
+  eventCategory?: EventCategory;
+  cohort?: EventStudyCohortResult;
   source?: string;
   sourceUrl?: string;
   evidenceRefs?: string[];
+}
+
+export type EventCategory = 'earnings' | 'filing' | 'insider' | 'macro' | 'news';
+
+export interface EventStudyCohortResult {
+  category: EventCategory;
+  sampleSize: number;
+  eventIds: string[];
+  meanReturnPct: number | null;
+  medianReturnPct: number | null;
+  confidence95Pct: [number, number] | null;
+  benchmarkAdjustedMeanPct: number | null;
+  placebo: { sampleSize: number; meanReturnPct: number } | null;
+  warnings: string[];
+}
+
+interface CohortEvent {
+  id: string; market: MarketId; instrument: string; title: string; occurredAt: string; publishedAt: string | null;
+}
+
+export function classifyEventCategory(title: string): EventCategory {
+  if (/insider|form\s*4\b|内部人|高管增减持/i.test(title)) return 'insider';
+  if (/earnings|guidance|财报|业绩|业绩指引/i.test(title)) return 'earnings';
+  if (/10[- ]?[kq]\b|8[- ]?k\b|sec filing|年报|季报|披露文件/i.test(title)) return 'filing';
+  if (/\bfed\b|\bcpi\b|\bpce\b|interest rate|通胀|美联储|利率决议/i.test(title)) return 'macro';
+  return 'news';
+}
+
+function mean(values: number[]): number { return values.reduce((sum, value) => sum + value, 0) / values.length; }
+
+function confidenceInterval(values: number[], seedText: string): [number, number] | null {
+  if (values.length < 5) return null;
+  let seed = [...seedText].reduce((value, char) => Math.imul(value ^ char.charCodeAt(0), 16777619) >>> 0, 2166136261);
+  const next = () => { seed ^= seed << 13; seed ^= seed >>> 17; seed ^= seed << 5; return (seed >>> 0) / 0x100000000; };
+  const means: number[] = [];
+  for (let iteration = 0; iteration < 500; iteration++) {
+    const sample = Array.from({ length: values.length }, () => values[Math.floor(next() * values.length)]);
+    means.push(mean(sample));
+  }
+  means.sort((left, right) => left - right);
+  return [round(means[Math.floor(means.length * 0.025)])!, round(means[Math.floor(means.length * 0.975)])!];
+}
+
+export function buildEventStudyCohort(input: {
+  market: MarketId; instrument: string; eventAt: string; title: string; bars: EventStudyBar[];
+  events: readonly CohortEvent[]; afterBars?: number; benchmarkBars?: EventStudyBar[];
+}): EventStudyCohortResult {
+  assertMarketContext({ market: input.market, workspace: 'event-study', instrument: input.instrument });
+  assertBars(input.bars, 'cohort bars');
+  if (input.benchmarkBars) assertBars(input.benchmarkBars, 'benchmark bars');
+  const targetTime = Date.parse(input.eventAt);
+  if (!Number.isFinite(targetTime)) throw new Error('eventAt must be a valid timestamp');
+  const category = classifyEventCategory(input.title);
+  const afterBars = Math.max(1, Math.min(500, Math.floor(input.afterBars ?? 20)));
+  const eventIds: string[] = [];
+  const returns: number[] = [];
+  const benchmarkReturns: number[] = [];
+  const occupiedIndices: number[] = [];
+  const eligibleEvents = input.events.flatMap(event => {
+    if (event.market !== input.market || event.instrument !== input.instrument || classifyEventCategory(event.title) !== category || !event.publishedAt) return [];
+    const occurred = Date.parse(event.occurredAt);
+    const published = Date.parse(event.publishedAt);
+    if (!Number.isFinite(occurred) || !Number.isFinite(published)) return [];
+    const entryTime = Math.max(occurred, published);
+    if (entryTime >= targetTime) return [];
+    const index = input.bars.findIndex(bar => Date.parse(bar.timestamp) >= entryTime);
+    if (index < 0 || index + afterBars >= input.bars.length || Date.parse(input.bars[index + afterBars].timestamp) >= targetTime) return [];
+    return [{ event, entryTime, index }];
+  }).slice(0, 200);
+  for (const { event, entryTime, index } of eligibleEvents) {
+    const study = runEventStudy({ market: input.market, instrument: input.instrument, eventAt: new Date(entryTime).toISOString(), bars: input.bars, benchmarkBars: input.benchmarkBars, beforeBars: 0, afterBars });
+    if (study.rawReturnPct === null || eventIds.includes(event.id)) continue;
+    eventIds.push(event.id);
+    returns.push(study.rawReturnPct);
+    if (study.benchmarkAdjustedReturnPct !== null) benchmarkReturns.push(study.benchmarkAdjustedReturnPct);
+    occupiedIndices.push(index);
+  }
+  const targetIndex = input.bars.findIndex(bar => Date.parse(bar.timestamp) >= targetTime);
+  const placeboReturns: number[] = [];
+  let lastPlacebo = Infinity;
+  for (let index = targetIndex - afterBars - 1; index >= 0 && placeboReturns.length < returns.length; index--) {
+    if (lastPlacebo - index <= afterBars * 2 + 1 || occupiedIndices.some(eventIndex => Math.abs(eventIndex - index) <= afterBars * 2 + 1)) continue;
+    const value = returnPct(input.bars[index].close, input.bars[index + afterBars].close);
+    if (value === null) continue;
+    placeboReturns.push(value);
+    lastPlacebo = index;
+  }
+  const warnings = [
+    ...(returns.length < 5 ? [`同类历史事件仅 ${returns.length} 件，样本不足，不作稳定结论。`] : []),
+    ...(benchmarkReturns.length !== returns.length && returns.length ? ['部分历史事件缺少同时间基准数据，基准调整结果不可用。'] : []),
+    ...(placeboReturns.length < returns.length && returns.length ? ['非事件日期对照不足，安慰剂结果仅作参考。'] : []),
+  ];
+  return {
+    category, sampleSize: returns.length, eventIds,
+    meanReturnPct: returns.length ? round(mean(returns)) : null,
+    medianReturnPct: returns.length ? round([...returns].sort((a, b) => a - b)[Math.floor((returns.length - 1) / 2)]) : null,
+    confidence95Pct: confidenceInterval(returns, `${input.market}:${input.instrument}:${input.eventAt}:${category}`),
+    benchmarkAdjustedMeanPct: benchmarkReturns.length === returns.length && returns.length ? round(mean(benchmarkReturns)) : null,
+    placebo: placeboReturns.length ? { sampleSize: placeboReturns.length, meanReturnPct: round(mean(placeboReturns))! } : null,
+    warnings,
+  };
 }
 
 interface StateDocumentStore {
@@ -165,6 +268,8 @@ export class EventStudyRepository {
       createdAt: input.createdAt || new Date().toISOString(),
       asOf: input.asOf,
       title: input.title,
+      eventCategory: input.eventCategory,
+      cohort: input.cohort,
       source: input.source,
       sourceUrl: safeSourceUrl(input.sourceUrl),
       evidenceRefs: input.evidenceRefs || [],

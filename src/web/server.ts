@@ -142,8 +142,9 @@ import { buildSourceSlo, runtimeObservability } from '../features/runtime-observ
 import { createDataEnvelope } from '../features/data-status';
 import { dataLakeCatalog } from '../storage/data-lake';
 import { dataLakeWorker } from '../storage/data-lake-worker';
-import { EventStudyRepository, runEventStudy } from '../features/event-study';
-import { analyzePaperDrift, analyzePaperDriftByStrategy, collectPaperDriftSamples, samePaperInstrument, StrategyDriftGate } from '../features/paper-drift';
+import { EventStudyRepository, buildEventStudyCohort, classifyEventCategory, runEventStudy } from '../features/event-study';
+import { PredictionSettlementRepository, buildPolymarketResolutionEndpoint, buildSettlementEndpoint, normalizeSettlementEvidence, settlementPayloadMatches } from '../features/prediction-settlement';
+import { analyzePaperDrift, analyzePaperDriftByStrategy, collectPaperDriftSamples, summarizePaperDriftCoverage, samePaperInstrument, StrategyDriftGate } from '../features/paper-drift';
 import { buildEventEntities, clusterEventEntities, selectResearchEvent } from '../features/event-intelligence';
 import { curlCommand } from '../utils/platform-command';
 import { STOCK_KLINE_PERIODS, createYahooStockKlineAdapter } from '../data/yahoo-adapter';
@@ -183,6 +184,8 @@ export const app = express();
 dataLakeWorker.start();
 const strategyCandidateRegistry = new StrategyCandidateRegistry();
 const eventStudyRepository = new EventStudyRepository(stateStore);
+const predictionSettlementRepository = new PredictionSettlementRepository(stateStore);
+const predictionSettlementRefreshes = new Map<string, Promise<ReturnType<typeof normalizeSettlementEvidence>>>();
 const driftGate = new StrategyDriftGate(stateStore);
 // A rejected optional/background data refresh must not take down the dashboard.
 // Route handlers still report their own errors; this last-resort observer keeps
@@ -687,27 +690,55 @@ app.post('/api/event-studies', express.json(), async (req, res) => {
     let eventAt = String(body.eventAt || '').trim();
     const eventId = String(body.eventId || '').trim();
     const timeframe = String(body.timeframe || '1d').trim();
-    const asOf = String(body.asOf || new Date().toISOString()).trim();
+    const requestedAsOf = Date.parse(String(body.asOf || new Date().toISOString()).trim());
+    if (!Number.isFinite(requestedAsOf)) throw new Error('asOf must be a valid timestamp');
+    const asOf = new Date(Math.min(requestedAsOf, Date.now())).toISOString();
     assertMarketContext({ market, workspace: 'event-study', instrument });
     let selectedEvent: ReturnType<typeof selectResearchEvent> | null = null;
-    if (eventId) {
-      if (market !== 'stocks') throw new Error('当前市场事件研究尚无可靠的标的事件来源');
+    let eventEntities: ReturnType<typeof buildEventEntities> = [];
+    let cohortInstrument = instrument;
+    if (market === 'stocks') {
       const ref = eventInstrumentRef(market, instrument.includes(':') ? instrument : `stock:us:${instrument.toUpperCase()}`);
       const timeline = await unifiedInstrumentService.timeline(ref);
-      const entities = buildEventEntities(timeline.items, { market, instrument: ref.id, retrievedAt: timeline.generatedAt, asOf: timeline.generatedAt });
-      selectedEvent = selectResearchEvent(entities, eventId, asOf);
-      eventAt = new Date(Math.max(Date.parse(selectedEvent.occurredAt), Date.parse(selectedEvent.publishedAt!))).toISOString();
+      eventEntities = buildEventEntities(timeline.items, { market, instrument: ref.id, retrievedAt: timeline.generatedAt, asOf });
+      cohortInstrument = ref.id;
+      if (eventId) {
+        selectedEvent = selectResearchEvent(eventEntities, eventId, asOf);
+        eventAt = new Date(Math.max(Date.parse(selectedEvent.occurredAt), Date.parse(selectedEvent.publishedAt!))).toISOString();
+      }
+    } else if (eventId) {
+      throw new Error('当前市场事件研究尚无可靠的标的事件来源');
     }
     if (!eventAt) throw new Error('eventAt is required');
     const historical = await dataLakeCatalog.queryBarsAsOf({ market, instrument, timeframe, asOf });
     if (!historical.rows.length) {
       return res.status(422).json(decisionEnvelope({ market, instrument, data: [], dataStatus: historical.dataStatus, source: historical.source || 'MoneyMoney local Parquet catalog', updatedAt: historical.updatedAt || undefined, reason: historical.reason || '历史数据不可用' }));
     }
-    const result = runEventStudy({ market, instrument, eventAt, bars: normalizeEventStudyBars(historical.rows), beforeBars: Number(body.beforeBars ?? 20), afterBars: Number(body.afterBars ?? 20) });
+    const bars = normalizeEventStudyBars(historical.rows);
+    const afterBars = Number(body.afterBars ?? 20);
+    const benchmarkInstrument = market === 'stocks' ? String(body.benchmarkInstrument || 'SPY').trim().toUpperCase() : '';
+    let benchmarkBars: ReturnType<typeof normalizeEventStudyBars> | undefined;
+    let benchmarkReason: string | null = null;
+    if (benchmarkInstrument && benchmarkInstrument !== instrument.toUpperCase()) {
+      try {
+        const benchmark = await dataLakeCatalog.queryBarsAsOf({ market, instrument: benchmarkInstrument, timeframe, asOf });
+        if (benchmark.rows.length) benchmarkBars = normalizeEventStudyBars(benchmark.rows);
+        else benchmarkReason = benchmark.reason || `${benchmarkInstrument} 基准历史数据不可用`;
+      } catch (error: any) { benchmarkReason = error?.message || `${benchmarkInstrument} 基准历史数据不可用`; }
+    }
+    const result = runEventStudy({ market, instrument, eventAt, bars, benchmarkBars, beforeBars: Number(body.beforeBars ?? 20), afterBars });
+    const targetTitle = selectedEvent?.title || (typeof body.title === 'string' ? body.title.trim() : '');
+    const eventCategory = targetTitle ? classifyEventCategory(targetTitle) : undefined;
+    const cohort = market === 'stocks' && targetTitle
+      ? buildEventStudyCohort({ market, instrument: cohortInstrument, eventAt, title: targetTitle, bars, events: eventEntities, afterBars, benchmarkBars })
+      : undefined;
     const record = eventStudyRepository.save({
       ...result,
       asOf,
-      title: selectedEvent?.title || (typeof body.title === 'string' ? body.title.trim() || undefined : undefined),
+      title: targetTitle || undefined,
+      eventCategory,
+      cohort,
+      warnings: [...result.warnings, ...(cohort?.warnings || []), ...(!targetTitle && market === 'stocks' ? ['未提供事件标题或关联来源事件，未计算同类历史事件分布。'] : []), ...(benchmarkReason ? [`基准数据不可用：${benchmarkReason}`] : [])],
       source: selectedEvent?.source.name || (typeof body.source === 'string' ? body.source.trim() || historical.source || undefined : historical.source || undefined),
       sourceUrl: selectedEvent?.source.url || (typeof body.sourceUrl === 'string' ? body.sourceUrl.trim() || undefined : undefined),
       evidenceRefs: selectedEvent ? [selectedEvent.id, ...(historical.snapshot ? [historical.snapshot.id] : [])] : historical.snapshot ? [historical.snapshot.id] : [],
@@ -2164,6 +2195,62 @@ app.get('/api/prediction-history', (req, res) => {
   const data = getPredictionHistory(platform, id);
   if (!data) return res.json({ success: false, error: '还没有这个市场的走势快照；刷新雷达后会自动开始记录。' });
   res.json({ success: true, data });
+});
+
+app.get('/api/prediction/settlement/:platform/:marketId', async (req, res) => {
+  const platform = String(req.params.platform || '');
+  const marketId = String(req.params.marketId || '');
+  if (platform !== 'Kalshi' && platform !== 'Polymarket') {
+    return res.status(422).json({ success: false, market: 'prediction', instrument: `prediction:${platform.toLowerCase()}:${marketId}`, dataStatus: 'unsupported', source: platform || 'unknown', updatedAt: new Date().toISOString(), reason: '当前平台没有已接入且可核验的官方结算证据。' });
+  }
+  let sourceUrl: string;
+  try { sourceUrl = buildSettlementEndpoint(platform, marketId); }
+  catch (error: any) { return res.status(400).json({ success: false, market: 'prediction', dataStatus: 'failed', reason: error.message }); }
+  const cached = predictionSettlementRepository.latest(platform, platform === 'Kalshi' ? marketId.toUpperCase() : marketId);
+  if (cached && Date.now() - Date.parse(cached.capturedAt) < 5 * 60_000) {
+    return res.json({ success: true, data: cached, history: predictionSettlementRepository.history(platform, cached.marketId), market: 'prediction', instrument: cached.instrument, dataStatus: 'cached', source: cached.sourceUrl, updatedAt: cached.capturedAt, reason: cached.reason });
+  }
+  const cacheKey = `${platform}:${platform === 'Kalshi' ? marketId.toUpperCase() : marketId}`;
+  let refresh = predictionSettlementRefreshes.get(cacheKey);
+  if (!refresh) {
+    refresh = (async () => {
+      const response = await fetch(sourceUrl, { headers: { accept: 'application/json', 'user-agent': 'MoneyMoney/1.0 (+https://github.com/blueicx/MoneyMoney)' }, signal: AbortSignal.timeout(8_000) });
+      if (!response.ok) throw new Error(`官方结算来源 HTTP ${response.status}`);
+      const raw = await response.json() as Record<string, unknown>;
+      const payload = raw && typeof raw.market === 'object' && raw.market !== null ? raw.market as Record<string, unknown> : raw;
+      if (!settlementPayloadMatches(platform, marketId, payload)) throw new Error('官方来源返回的市场身份与请求标的不一致。');
+      let resolutionPayload: Record<string, unknown> | undefined;
+      let determinationSourceUrl: string | null = null;
+      let resolutionReason: string | null = null;
+      if (platform === 'Polymarket') {
+        const conditionId = typeof payload.conditionId === 'string' ? payload.conditionId : typeof payload.condition_id === 'string' ? payload.condition_id : '';
+        if (conditionId) {
+          try {
+            determinationSourceUrl = buildPolymarketResolutionEndpoint(conditionId);
+            const resolutionResponse = await fetch(determinationSourceUrl, { headers: { accept: 'application/json', 'user-agent': 'MoneyMoney/1.0 (+https://github.com/blueicx/MoneyMoney)' }, signal: AbortSignal.timeout(8_000) });
+            if (!resolutionResponse.ok) throw new Error(`官方 resolution 来源 HTTP ${resolutionResponse.status}`);
+            resolutionPayload = await resolutionResponse.json() as Record<string, unknown>;
+            const rows = Array.isArray(resolutionPayload.data) ? resolutionPayload.data : [];
+            const matchingRows = rows.filter((row: any) => row && String(row.condition_id || '').toLowerCase() === conditionId.toLowerCase());
+            if (matchingRows.length !== 1) resolutionReason = '官方 resolution 接口未返回唯一匹配的 condition 裁定记录。';
+          } catch (error: any) {
+            resolutionReason = error?.message || '官方 resolution 来源请求失败。';
+          }
+        } else resolutionReason = '市场详情未提供有效 condition ID，无法查询官方裁定记录。';
+      }
+      return predictionSettlementRepository.save(normalizeSettlementEvidence({ platform, marketId: cacheKey.slice(platform.length + 1), payload, resolutionPayload, determinationSourceUrl, resolutionReason, capturedAt: new Date().toISOString() }));
+    })();
+    predictionSettlementRefreshes.set(cacheKey, refresh);
+  }
+  try {
+    const evidence = await refresh;
+    return res.json({ success: true, data: evidence, history: predictionSettlementRepository.history(platform, evidence.marketId), market: 'prediction', instrument: evidence.instrument, dataStatus: 'historical', source: evidence.sourceUrl, updatedAt: evidence.capturedAt, reason: evidence.reason });
+  } catch (error: any) {
+    if (cached) return res.json({ success: true, data: cached, history: predictionSettlementRepository.history(platform, cached.marketId), market: 'prediction', instrument: cached.instrument, dataStatus: 'cached', source: cached.sourceUrl, updatedAt: cached.capturedAt, reason: `官方来源刷新失败，显示最近快照：${error?.message || '请求失败'}` });
+    return res.status(503).json({ success: false, market: 'prediction', instrument: `prediction:${platform.toLowerCase()}:${marketId}`, dataStatus: 'unavailable', source: sourceUrl, updatedAt: new Date().toISOString(), reason: error?.message || '官方结算来源不可用' });
+  } finally {
+    if (predictionSettlementRefreshes.get(cacheKey) === refresh) predictionSettlementRefreshes.delete(cacheKey);
+  }
 });
 
 app.get('/api/forecast-lab', (_req, res) => {
@@ -6112,9 +6199,15 @@ app.get('/api/research/drift', (req, res) => {
   const strategyId = String(req.query.strategyId || '');
   const strategyVersion = String(req.query.strategyVersion || '');
   const samples = paperDriftSamples().filter(item => item.market === market && (!strategyId || item.strategyId === strategyId) && (!strategyVersion || item.strategyVersion === strategyVersion));
+  const marketForType = { stock: 'stocks', option: 'options', crypto: 'crypto', prediction: 'prediction' } as const;
+  const orders = unifiedPaperLedgerStore.get().orders.filter(order => marketForType[order.instrumentType] === market && (!strategyId || order.strategy === strategyId) && (!strategyVersion || order.strategyVersion === strategyVersion));
+  const coverage = summarizePaperDriftCoverage(orders, {
+    experiment: id => researchRepository.getExperiment(id),
+    snapshot: id => dataLakeCatalog.getSnapshot(id),
+  });
   const result = analyzePaperDrift(samples);
   const results = analyzePaperDriftByStrategy(samples);
-  res.json({ success: true, market, instrument: null, dataStatus: samples.length ? 'historical' : 'empty', source: 'paired research experiment + unified paper ledger', updatedAt: result.evaluatedAt, reason: results.length ? null : '没有明确配对的实验与模拟成交', data: { result: strategyId && strategyVersion ? result : null, results, gates: driftGate.list(market) } });
+  res.json({ success: true, market, instrument: null, dataStatus: coverage.freshPairs ? 'historical' : coverage.stalePairs ? 'partial' : 'empty', source: 'paired research experiment + unified paper ledger', updatedAt: result.evaluatedAt, reason: coverage.freshPairs ? null : coverage.stalePairs ? '已有配对但数据快照过期，暂不判断策略偏差' : '没有可评估的明确配对成交', data: { result: strategyId && strategyVersion ? result : null, results, coverage, gates: driftGate.list(market) } });
 });
 
 app.post('/api/research/drift/resume', express.json(), (req, res) => {

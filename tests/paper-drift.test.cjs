@@ -3,7 +3,7 @@ const test = require('node:test');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const { analyzePaperDrift, analyzePaperDriftByStrategy, collectPaperDriftSamples, samePaperInstrument, StrategyDriftGate } = require('../dist/features/paper-drift');
+const { analyzePaperDrift, analyzePaperDriftByStrategy, collectPaperDriftSamples, summarizePaperDriftCoverage, samePaperInstrument, StrategyDriftGate } = require('../dist/features/paper-drift');
 const { SignalMonitor } = require('../dist/features/signal-monitor');
 
 function sample(index, overrides = {}) {
@@ -67,15 +67,22 @@ test('only explicit same-market experiment and snapshot links become drift sampl
     feeUsd: 0.2, slippageUsd: 0.25, pnlUsd: 2,
   };
   const experiment = { experiment: { id: 'exp-test', market: 'stocks', instrument: 'AAPL', strategyId: 'test-ma', strategyVersion: 'v1' }, backtest: { trades: [{ direction: 'sell', price: 100, volume: 1, fee: 0.1, slippage: 0.1, pnl: 7 }] } };
-  const snapshot = { id: 'snapshot-1', market: 'stocks', instrument: 'AAPL', asOf: '2026-09-23T00:00:00.000Z' };
+  const snapshot = { id: 'snapshot-1', market: 'stocks', instrument: 'AAPL', asOf: '2026-09-23T12:00:00.000Z', source: 'market-feed', createdAt: '2026-09-23T12:00:00.000Z' };
   const resolve = { experiment: () => experiment, snapshot: () => snapshot };
   const paired = collectPaperDriftSamples([paper], resolve);
   assert.equal(paired.length, 1);
   assert.equal(paired[0].paperNetPnlUsd, 1.55);
   assert.equal(paired[0].expectedNetPnlUsd, 7);
+  assert.equal(paired[0].dataStatus, 'delayed');
+  assert.equal(collectPaperDriftSamples([paper], { ...resolve, snapshot: () => ({ ...snapshot, asOf: '2026-09-23T00:00:00.000Z' }) })[0].dataStatus, 'cached');
   assert.deepEqual(collectPaperDriftSamples([{ ...paper, experimentId: undefined }], resolve), []);
   assert.deepEqual(collectPaperDriftSamples([paper], { ...resolve, snapshot: () => ({ ...snapshot, market: 'crypto' }) }), []);
   assert.deepEqual(collectPaperDriftSamples([paper], { ...resolve, snapshot: () => ({ ...snapshot, asOf: '2026-08-01T00:00:00.000Z' }) }), []);
+  assert.deepEqual(collectPaperDriftSamples([paper], { ...resolve, snapshot: () => ({ ...snapshot, createdAt: '2026-09-24T00:00:00.000Z' }) }), []);
+  const coverage = summarizePaperDriftCoverage([paper, { ...paper, id: 'legacy', signalId: undefined }], resolve);
+  assert.deepEqual(coverage, { closedOrders: 2, explicitlyLinked: 1, freshPairs: 1, stalePairs: 0, rejectedPairs: 1 });
+  const staleCoverage = summarizePaperDriftCoverage([paper], { ...resolve, snapshot: () => ({ ...snapshot, asOf: '2026-09-23T00:00:00.000Z' }) });
+  assert.equal(staleCoverage.stalePairs, 1);
 });
 
 test('paper order and drift API wire lineage, scoped pause and manual resume', () => {
@@ -85,6 +92,7 @@ test('paper order and drift API wire lineage, scoped pause and manual resume', (
   assert.match(server, /collectPaperDriftSamples\(/);
   assert.match(server, /dataSnapshotId: body\.dataSnapshotId/);
   assert.match(server, /driftGate\.update\(/);
+  assert.match(server, /summarizePaperDriftCoverage\(/);
 });
 
 test('analysis engine consults the persisted drift gate for strategy signals', () => {
@@ -101,4 +109,5 @@ test('paper workspace exposes drift status and manual resume controls', () => {
   assert.match(html, /async function resumePaperDriftGate\(/);
   assert.match(html, /未关联实验\/信号/);
   assert.match(html, /标的身份待确认/);
+  assert.match(html, /配对覆盖/);
 });
