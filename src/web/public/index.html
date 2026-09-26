@@ -13635,21 +13635,9 @@ async function submitSellOrder() {
 document.getElementById('sell-modal').addEventListener('click', (e) => {
   if (e.target.id === 'sell-modal') closeSellModal();
 });
-async function startDashboard() {
-  await waitForDashboardAuthState();
-  initTheme();
-  activeMarketScope = readInitialMarketScope();
-  restoreWorkspaceContextFromUrl();
-  renderNavigationState();
-  loadAll();
-  loadCommandCenter();
-  loadNewsTicker();
-  loadMarketTimeline();
-  renderChartPatternControls();
-}
-startDashboard();
-// Restore last visited tab from localStorage.
-(function restoreLastTab() {
+// Restore the requested workspace only after auth and URL context have settled.
+function restoreLastDashboardTab() {
+  if (new URLSearchParams(location.search).has('sharedWorkspace')) return;
   const requestedWorkspaceFromUrl = new URLSearchParams(location.search).get('workspace');
   const requestedWorkspaceTab = requestedWorkspaceFromUrl === activeWorkspaceId ? workspaceTabFor(activeWorkspaceId) : null;
   if (requestedWorkspaceTab && document.getElementById(requestedWorkspaceTab + '-tab')) {
@@ -13669,12 +13657,26 @@ startDashboard();
     }
   }
   showTab(defaultTabForMarketScope(activeMarketScope), null, { scopeAlreadySynced: true });
-})();
-if (currentInstrumentId) loadActiveWorkspaceInstrument();
-restoreSharedWorkspaceFromUrl();
-loadMarketOverview();
-loadResearchBriefing();
-initializeDashboardCollapses();
+}
+async function startDashboard() {
+  await waitForDashboardAuthState();
+  initTheme();
+  activeMarketScope = readInitialMarketScope();
+  restoreWorkspaceContextFromUrl();
+  renderNavigationState();
+  initializeDashboardCollapses();
+  await restoreSharedWorkspaceFromUrl();
+  restoreLastDashboardTab();
+  if (currentInstrumentId) loadActiveWorkspaceInstrument();
+  loadAll();
+  loadCommandCenter();
+  loadNewsTicker();
+  loadMarketTimeline();
+  renderChartPatternControls();
+  loadMarketOverview();
+  loadResearchBriefing();
+}
+startDashboard();
 </script>
 <!-- Quick Trade Modal -->
 <div id="qt-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:2000;display:none;align-items:center;justify-content:center;" onclick="if(event.target===this)closeQuickTrade()">

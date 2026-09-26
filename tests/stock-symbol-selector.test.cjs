@@ -140,6 +140,18 @@ test('restored stock context is not overwritten by the default AAPL loader', () 
   assert.match(html, /restoreWorkspaceContextFromUrl\(\)[\s\S]*const restoredSymbol = currentInstrumentId\.replace\(\/\^us\/i, ''\)\.toUpperCase\(\)[\s\S]*window\._stockSelectedSymbol = restoredSymbol/);
 });
 
+test('dashboard restores deep-linked market and instrument after auth is ready', () => {
+  const startupAt = html.indexOf('async function startDashboard()');
+  const startupEnd = html.indexOf('startDashboard();', startupAt);
+  assert.notEqual(startupAt, -1);
+  assert.notEqual(startupEnd, -1);
+  const startup = html.slice(startupAt, startupEnd);
+  assert.match(startup, /await waitForDashboardAuthState\(\)[\s\S]*restoreWorkspaceContextFromUrl\(\)[\s\S]*restoreLastDashboardTab\(\)[\s\S]*loadActiveWorkspaceInstrument\(\)/);
+
+  const afterStartup = html.slice(startupEnd, html.indexOf('</script>', startupEnd));
+  assert.doesNotMatch(afterStartup, /restoreLastDashboardTab\(\)|if\s*\(currentInstrumentId\)\s*loadActiveWorkspaceInstrument\(\)/);
+});
+
 test('stock quote loading keeps the right library current card in sync', () => {
   assert.match(html, /function selectStockSymbol\([\s\S]*setStockSelectorActive\(normalized\)[\s\S]*updateStockLibraryCurrent\(normalized, displayName\)/);
 });
