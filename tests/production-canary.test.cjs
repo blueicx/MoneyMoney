@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const test = require('node:test');
-const { validatePublicBaseUrl } = require('../scripts/production-readonly-canary.cjs');
+const { validatePublicBaseUrl, containsInstrumentIdentity } = require('../scripts/production-readonly-canary.cjs');
 
 test('production canary accepts only public HTTPS targets', () => {
   assert.equal(validatePublicBaseUrl('https://54.211.146.2/'), 'https://54.211.146.2');
@@ -19,8 +19,15 @@ test('production canary is read-only and exercises four markets, selected instru
   assert.match(script, /toggleRightLibrary/);
   assert.match(script, /production-canary-failure\.png/);
   assert.match(script, /production-canary-trace\.zip/);
+  assert.match(script, /await loadPredictionRadar\(true\)/);
   assert.match(workflow, /schedule:/);
   assert.match(workflow, /workflow_dispatch:/);
   assert.match(workflow, /PUBLIC_WEB_BASE_URL/);
   assert.doesNotMatch(script, /POST \/api\/paper\/orders|\/api\/paper\/orders/);
+});
+
+test('selected crypto identity matches chart labels with market separators but not ordinary words', () => {
+  assert.equal(containsInstrumentIdentity('BTC/USDT · 15M', 'BTCUSDT'), true);
+  assert.equal(containsInstrumentIdentity('SPY · 1D', 'SPY'), true);
+  assert.equal(containsInstrumentIdentity('whether the source is unavailable', 'ETH'), false);
 });

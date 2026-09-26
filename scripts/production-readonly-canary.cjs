@@ -31,6 +31,21 @@ function isPrivateIpv4(a, b, c, d) {
   return a === 10 || a === 127 || a === 0 || a === 169 && b === 254 || a === 192 && b === 168 || a === 172 && b >= 16 && b <= 31 || a === 100 && b >= 64 && b <= 127 || a >= 224;
 }
 
+function containsInstrumentIdentity(centerText, symbol) {
+  const target = String(symbol || '').toUpperCase().match(/[A-Z0-9]+/g)?.join('') || '';
+  const tokens = String(centerText || '').toUpperCase().match(/[A-Z0-9]+/g) || [];
+  if (!target) return false;
+  return tokens.some(token => token === target) || tokens.some((_, start) => {
+    let combined = '';
+    for (let end = start; end < Math.min(tokens.length, start + 4); end += 1) {
+      combined += tokens[end];
+      if (combined === target) return true;
+      if (!target.startsWith(combined)) break;
+    }
+    return false;
+  });
+}
+
 async function enterGuest(page, baseUrl) {
   await page.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: 30_000 });
   if (new URL(page.url()).pathname.startsWith('/login')) {
@@ -68,6 +83,7 @@ async function selectAndCheckNonPopularStock(page) {
 
 async function checkSettlementEvidence(page) {
   await page.evaluate(() => window.openWorkspace('prediction-radar'));
+  await page.evaluate(async () => { await loadPredictionRadar(true); });
   const cards = page.locator('#radar-markets .radar-card');
   try { await cards.first().waitFor({ state: 'visible', timeout: 20_000 }); }
   catch {
@@ -93,7 +109,7 @@ async function selectRightLibraryItem(page, market) {
   const symbol = (await page.locator(symbolSelector).innerText()).trim();
   assert.ok(symbol && symbol !== '--', `${market} selection should update the right-side context`);
   const center = await page.locator('#center-workspace').innerText();
-  assert.ok(center.includes(symbol) || /暂无数据|来源不可用|请求失败|当前市场不支持|缓存数据/.test(center), `${market} center must show selected instrument or explicit data reason`);
+  assert.ok(containsInstrumentIdentity(center, symbol) || /暂无数据|来源不可用|请求失败|当前市场不支持|缓存数据/.test(center), `${market} center must show selected instrument or explicit data reason`);
   return symbol;
 }
 
@@ -174,4 +190,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { validatePublicBaseUrl, runProductionCanary };
+module.exports = { validatePublicBaseUrl, containsInstrumentIdentity, runProductionCanary };
