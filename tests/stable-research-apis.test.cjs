@@ -22,6 +22,21 @@ test('stable research and paper API routes are registered', () => {
   ]) assert.ok(serverSource.includes(route), `missing ${route}`);
 });
 
+test('options history route is registered before the dynamic asset route', () => {
+  const history = serverSource.indexOf("app.get('/api/options/history'");
+  const dynamic = serverSource.indexOf("app.get('/api/options/:asset'");
+  assert.ok(history >= 0 && dynamic >= 0, 'both options routes must exist');
+  assert.ok(history < dynamic, 'the static history route must not be shadowed by /api/options/:asset');
+});
+
+test('signal lifecycle history route is private and backed by persistent repository methods', () => {
+  assert.ok(serverSource.includes("app.get('/api/signals/:id/history'"));
+  assert.match(serverSource, /app\.get\('\/api\/signals\/:id\/history',[\s\S]{0,500}adminOnly/);
+  assert.match(serverSource, /listSignalHistory\(/);
+  assert.match(repositorySource, /recordSignalHistory\(/);
+  assert.match(repositorySource, /listSignalHistory\(/);
+});
+
 test('repository exposes persistent lookup helpers for stable APIs', () => {
   for (const method of ['listExperiments', 'listAlertDeliveries', 'updateAlertDeliveryStatus']) {
     assert.match(repositorySource, new RegExp(`\\b${method}\\s*\\(`), `missing ${method}`);

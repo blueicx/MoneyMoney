@@ -2538,7 +2538,15 @@
                     <button class="tab" type="button" data-chart-as-of-apply onclick="applyStockKlineAsOf(document.querySelector('[data-chart-as-of]')?.value || '')">应用</button>
                     <button class="tab" type="button" data-chart-as-of-clear onclick="clearStockKlineAsOf()">退出时点</button>
                   </span>
-                  <button class="tab" type="button" data-chart-candle-focus onclick="toggleStockKlineFocus()" disabled title="先点击图中的某一根日K">🔎 放大所选日</button>
+                  <button class="tab" type="button" data-chart-candle-focus onclick="toggleStockKlineDrilldown()" disabled title="先点击图中的某一根日K">🔎 查看当日日内</button>
+                  <span class="kline-control-group" data-intraday-controls hidden aria-label="日内周期与日期导航">
+                    <span class="kline-control-label">日内</span>
+                    <button class="tab intraday-period" data-intraday-period="1m" onclick="setStockIntradayPeriod('1m')">1分</button>
+                    <button class="tab intraday-period active" data-intraday-period="5m" onclick="setStockIntradayPeriod('5m')">5分</button>
+                    <button class="tab intraday-period" data-intraday-period="15m" onclick="setStockIntradayPeriod('15m')">15分</button>
+                    <button class="tab" type="button" data-intraday-prev onclick="moveStockIntradayDate(-1)" title="上一可用交易日">前一日</button>
+                    <button class="tab" type="button" data-intraday-next onclick="moveStockIntradayDate(1)" title="下一可用交易日">后一日</button>
+                  </span>
                   <div class="kline-control-group" aria-label="K线周期"><span class="kline-control-label">周期</span>
                     <button class="tab stock-kline-period" data-kline-period="5m" onclick="setStockKlinePeriod('5m')">5分</button>
                     <button class="tab stock-kline-period" data-kline-period="15m" onclick="setStockKlinePeriod('15m')">15分</button>
@@ -8023,6 +8031,11 @@ let stockChartFocusEnabled = false;
 let stockChartRenderedStartIndex = 0;
 let stockChartAsOf = '';
 let stockChartAsOfRevision = 0;
+let stockChartIntradayDate = '';
+let stockChartIntradayPeriod = '5m';
+let stockChartDailyContext = null;
+let stockChartIntradaySession = null;
+let stockChartExchangeTimezone = 'America/New_York';
 let stockKlineRequestRevision = 0;
 let stockChartOverlayConfig = window.MoneyChartAnalysis?.normalizeOverlayConfig({ strategies:{ maCross:true, rsiReversal:false, bollinger:false, volumeBreakout:false } }) || { signals:true, patterns:false, structures:false, volume:true, indicators:{ ma:true, boll:false, macd:false }, strategies:{ maCross:true, rsiReversal:false, bollinger:false, volumeBreakout:false }, patternTypes:{}, maxLabels:80 };
 let cryptoChartStrategyConfig = { maCross:true, rsiReversal:false, bollinger:false, volumeBreakout:false };
@@ -8273,14 +8286,23 @@ function updateStockKlineFocusControl() {
   const info = document.getElementById('stock-chart-candle-selection');
   const bar = Number.isInteger(stockChartFocusIndex) ? stockChartKlines[stockChartFocusIndex] : null;
   if (button) {
-    button.disabled = !bar;
-    button.textContent = stockChartFocusEnabled ? '↩ 退出日K放大' : '🔎 放大所选日';
-    button.title = bar ? (stockChartFocusEnabled ? '恢复当前周期全部日K' : '放大查看所选日附近的K线') : '先点击图中的某一根日K';
-    button.setAttribute('aria-pressed', String(Boolean(stockChartFocusEnabled)));
+    button.disabled = !bar && !stockChartIntradayDate;
+    button.textContent = stockChartIntradayDate ? '↩ 返回日K' : currentStockKlinePeriod === '1d' ? '🔎 查看当日日内' : stockChartFocusEnabled ? '↩ 退出K线放大' : '🔎 放大所选K线';
+    button.title = stockChartIntradayDate ? `返回 ${stockChartDailyContext?.date || '日K'}` : bar ? (currentStockKlinePeriod === '1d' ? '加载所选交易日的 1/5/15 分钟K线' : '放大查看所选K线附近走势') : '先点击图中的某一根K线';
+    button.setAttribute('aria-pressed', String(Boolean(stockChartIntradayDate || stockChartFocusEnabled)));
   }
-  if (info) info.textContent = formatStockCandleSelection(bar);
+  if (info) info.textContent = stockChartIntradaySession?.ohlc
+    ? `${stockChartIntradaySession.date} ${stockChartExchangeTimezone} · O ${formatChartPrice(stockChartIntradaySession.ohlc.open)} · H ${formatChartPrice(stockChartIntradaySession.ohlc.high)} · L ${formatChartPrice(stockChartIntradaySession.ohlc.low)} · C ${formatChartPrice(stockChartIntradaySession.ohlc.close)} · V ${formatChartPrice(stockChartIntradaySession.ohlc.volume)}`
+    : formatStockCandleSelection(bar);
   const dateInput = document.querySelector('[data-chart-candle-date]');
-  if (dateInput) dateInput.value = bar?.time ? new Date(bar.time).toISOString().slice(0, 10) : '';
+  if (dateInput) dateInput.value = stockChartIntradayDate || (bar?.time ? new Intl.DateTimeFormat('en-CA', { timeZone: stockChartExchangeTimezone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(bar.time)) : '');
+  const intradayControls = document.querySelector('[data-intraday-controls]');
+  if (intradayControls) intradayControls.hidden = !stockChartIntradayDate;
+  document.querySelectorAll('.intraday-period').forEach(item => item.classList.toggle('active', item.dataset.intradayPeriod === stockChartIntradayPeriod));
+  const previous = document.querySelector('[data-intraday-prev]');
+  const next = document.querySelector('[data-intraday-next]');
+  if (previous) previous.disabled = !stockChartIntradaySession?.previousDate;
+  if (next) next.disabled = !stockChartIntradaySession?.nextDate;
 }
 function redrawStockKlineSelection() {
   const canvas = document.getElementById('stock-kline');
@@ -8318,6 +8340,14 @@ function moveStockKlineSelection(offset) {
 }
 function focusStockKlineDate(value) {
   const dateText = String(value || '').trim();
+  if (stockChartIntradayDate) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateText)) return null;
+    stockChartIntradayDate = dateText;
+    stockChartIntradaySession = null;
+    updateStockKlineFocusControl();
+    loadStockKline();
+    return dateText;
+  }
   const visibleCount = stockKlineVisibleCount();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dateText) || !visibleCount) return null;
   const index = stockChartKlines.slice(0, visibleCount).findIndex(bar => {
@@ -8350,6 +8380,65 @@ function toggleStockKlineFocus() {
   redrawStockKlineSelection();
   return stockChartFocusEnabled;
 }
+function toggleStockKlineDrilldown() {
+  if (stockChartIntradayDate) return exitStockIntraday();
+  if (currentStockKlinePeriod === '1d' && Number.isInteger(stockChartFocusIndex)) return enterStockIntraday();
+  return toggleStockKlineFocus();
+}
+function enterStockIntraday(date) {
+  const bar = Number.isInteger(stockChartFocusIndex) ? stockChartKlines[stockChartFocusIndex] : null;
+  if (!date && (!bar || currentStockKlinePeriod !== '1d')) return false;
+  if (stockChartAsOf) {
+    setStockKlineStatus('历史时点数据未提供该日期的日内分区；为避免混入事后数据，已阻止回退到实时日内行情');
+    return false;
+  }
+  const selectedDate = String(date || new Intl.DateTimeFormat('en-CA', { timeZone: stockChartExchangeTimezone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(bar.time)));
+  if (!stockChartDailyContext) stockChartDailyContext = { period: currentStockKlinePeriod, asOf: stockChartAsOf, date: selectedDate };
+  stockChartIntradayDate = selectedDate;
+  stockChartIntradayPeriod = '5m';
+  currentStockKlinePeriod = stockChartIntradayPeriod;
+  stockChartIntradaySession = null;
+  stockChartFocusIndex = null;
+  stockChartFocusEnabled = false;
+  document.querySelectorAll('.stock-kline-period').forEach(btn => btn.classList.toggle('active', btn.dataset.klinePeriod === currentStockKlinePeriod));
+  updateStockKlineFocusControl();
+  loadStockKline();
+  return true;
+}
+function exitStockIntraday() {
+  if (!stockChartIntradayDate) return false;
+  const selectedDate = stockChartIntradayDate;
+  const restore = stockChartDailyContext || { period: '1d', asOf: '' };
+  stockChartIntradayDate = '';
+  stockChartIntradaySession = null;
+  stockChartDailyContext = null;
+  currentStockKlinePeriod = restore.period || '1d';
+  stockChartAsOf = restore.asOf || '';
+  document.querySelectorAll('.stock-kline-period').forEach(btn => btn.classList.toggle('active', btn.dataset.klinePeriod === currentStockKlinePeriod));
+  updateStockKlineFocusControl();
+  loadStockKline();
+  setTimeout(() => focusStockKlineDate(selectedDate), 0);
+  return true;
+}
+function setStockIntradayPeriod(period) {
+  const value = String(period || '').toLowerCase();
+  if (!stockChartIntradayDate || !['1m', '5m', '15m'].includes(value)) return false;
+  stockChartIntradayPeriod = value;
+  currentStockKlinePeriod = value;
+  document.querySelectorAll('.stock-kline-period').forEach(btn => btn.classList.toggle('active', btn.dataset.klinePeriod === value));
+  updateStockKlineFocusControl();
+  loadStockKline();
+  return true;
+}
+function moveStockIntradayDate(direction) {
+  const date = Number(direction) < 0 ? stockChartIntradaySession?.previousDate : stockChartIntradaySession?.nextDate;
+  if (!date) return false;
+  stockChartIntradayDate = date;
+  stockChartIntradaySession = null;
+  updateStockKlineFocusControl();
+  loadStockKline();
+  return true;
+}
 function clearStockKlineFocus() {
   stockChartFocusIndex = null;
   stockChartFocusEnabled = false;
@@ -8368,7 +8457,10 @@ function bindStockKlineSelection() {
   canvas.addEventListener('keydown', handleStockKlineKeydown);
 }
 function setStockKlinePeriod(period) {
-  currentStockKlinePeriod = String(period || '1d').toLowerCase();
+  const nextPeriod = String(period || '1d').toLowerCase();
+  if (stockChartIntradayDate && ['1m', '5m', '15m'].includes(nextPeriod)) return setStockIntradayPeriod(nextPeriod);
+  if (stockChartIntradayDate) { stockChartIntradayDate = ''; stockChartIntradaySession = null; stockChartDailyContext = null; }
+  currentStockKlinePeriod = nextPeriod;
   clearStockKlineFocus();
   document.querySelectorAll('.stock-kline-period').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.klinePeriod === currentStockKlinePeriod);
@@ -8417,6 +8509,11 @@ async function loadStockKline(symbol, name, apiSymbol) {
       if (canvas && typeof KlineRuntime === 'function') window.stockMoneyKLine = new KlineRuntime(canvas);
   }
 
+  if (symbol && symbol !== currentStockSymbol) {
+    stockChartIntradayDate = '';
+    stockChartIntradaySession = null;
+    stockChartDailyContext = null;
+  }
   if (symbol) currentStockSymbol = symbol;
   if (name) currentStockName = name;
   if (apiSymbol !== undefined) currentStockApiSymbol = apiSymbol || '';
@@ -8438,7 +8535,8 @@ async function loadStockKline(symbol, name, apiSymbol) {
   try {
     setStockKlineStatus('正在加载真实数据…');
     const asOfQuery = stockChartAsOf ? '&asOf=' + encodeURIComponent(stockChartAsOf) : '';
-    const res = await fetch('/api/stock/kline?symbol=' + encodeURIComponent(currentStockSymbol) + '&period=' + encodeURIComponent(currentStockKlinePeriod) + '&interval=' + encodeURIComponent(currentStockKlinePeriod) + asOfQuery + (currentStockApiSymbol ? '&api=' + encodeURIComponent(currentStockApiSymbol) : ''));
+    const dateQuery = stockChartIntradayDate ? '&date=' + encodeURIComponent(stockChartIntradayDate) + '&intradayPeriod=' + encodeURIComponent(stockChartIntradayPeriod) : '';
+    const res = await fetch('/api/stock/kline?symbol=' + encodeURIComponent(currentStockSymbol) + '&period=' + encodeURIComponent(currentStockKlinePeriod) + '&interval=' + encodeURIComponent(currentStockKlinePeriod) + asOfQuery + dateQuery + (currentStockApiSymbol ? '&api=' + encodeURIComponent(currentStockApiSymbol) : ''));
     const d = await res.json();
     if (requestRevision !== stockKlineRequestRevision) return;
     if (!d.success || !d.data || !d.data.length) {
@@ -8448,6 +8546,7 @@ async function loadStockKline(symbol, name, apiSymbol) {
       context.setTransform(1, 0, 0, 1, 0, 0);
       context.clearRect(0, 0, canvas.width, canvas.height);
       stockChartKlines = [];
+      stockChartIntradaySession = null;
       stockChartReplayIndex = -1;
       stockChartFocusIndex = null;
       stockChartFocusEnabled = false;
@@ -8459,7 +8558,9 @@ async function loadStockKline(symbol, name, apiSymbol) {
     }
     currentStockKlineReason = '';
     const freshness = d.dataStatus === 'historical' ? `历史时点 ${d.asOf ? formatChartTime(d.asOf) : ''}` : d.dataStatus === 'cached' ? '缓存' : d.dataStatus === 'stale' ? '过期缓存' : d.dataStatus === 'degraded' ? '降级' : '实时';
-    setStockKlineStatus(`${freshness} · ${d.source || '股票行情'} · ${d.updatedAt ? formatChartTime(d.updatedAt) : ''}${d.reason ? ` · ${d.reason}` : ''}`);
+    stockChartExchangeTimezone = d.timezone || stockChartExchangeTimezone;
+    stockChartIntradaySession = d.session || null;
+    setStockKlineStatus(`${freshness}${stockChartIntradayDate ? ` · ${stockChartIntradayDate} · ${currentStockKlinePeriod} · ${stockChartExchangeTimezone}` : ''} · ${d.source || '股票行情'} · ${d.updatedAt ? formatChartTime(d.updatedAt) : ''}${d.reason ? ` · ${d.reason}` : ''}`);
     stockChartKlines = d.data;
     stockChartReplayIndex = stockChartKlines.length - 1;
     loadStockChartOverlayConfig();
@@ -10273,7 +10374,7 @@ async function loadOpsConsole() {
   if (diagnosticsEl) fetch(`/api/diagnostics?market=${encodeURIComponent(['stocks','options','crypto','prediction'].includes(activeMarketScope) ? activeMarketScope : '')}`, { cache: 'no-store' }).then(response => response.json()).then(body => {
     if (!body.success) throw new Error(body.error || '诊断不可用');
     const d = body.data;
-    diagnosticsEl.innerHTML = `<div style="display:flex;justify-content:space-between;gap:8px;"><strong>🩺 运行诊断</strong><span style="font-size:10px;color:var(--text-secondary);">${safeNewsText(d.generatedAt)}</span></div><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:7px;margin-top:9px;">${commandMetric('数据库', d.storage?.ok ? '正常' : '异常', d.storage?.detail || '')}${commandMetric('数据源', `${d.sources?.online || 0}/${d.sources?.total || 0}`, '在线')}${commandMetric('数据湖', `${d.dataLake?.partitionCount || 0} 分区`, `${Number(d.dataLake?.usagePercent || 0).toFixed(1)}% · ${d.dataLake?.quotaState || 'unknown'}`)}${commandMetric('Telegram', d.telegram?.pollingRunning ? '轮询中' : d.telegram?.configured ? '已配置' : '未配置', '不显示密钥')}${commandMetric('真实交易', '永久关闭', safeNewsText(d.realTrading))}</div>`;
+    diagnosticsEl.innerHTML = `<div style="display:flex;justify-content:space-between;gap:8px;"><strong>🩺 运行诊断</strong><span style="font-size:10px;color:var(--text-secondary);">${safeNewsText(d.generatedAt)}</span></div><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:7px;margin-top:9px;">${commandMetric('数据库', d.storage?.ok ? '正常' : '异常', d.storage?.detail || '')}${commandMetric('数据源', `${d.sources?.online || 0}/${d.sources?.total || 0}`, '在线')}${commandMetric('数据湖', `${d.dataLake?.partitionCount || 0} 分区`, `${Number(d.dataLake?.usagePercent || 0).toFixed(1)}% · ${d.dataLake?.quotaState || 'unknown'}`)}${commandMetric('恢复演练', d.recoveryDrill?.status === 'passed' ? '通过' : d.recoveryDrill?.status || '未执行', d.recoveryDrill?.completedAt || d.recoveryDrill?.reason || '仅隔离副本演练')}${commandMetric('Telegram', d.telegram?.pollingRunning ? '轮询中' : d.telegram?.configured ? '已配置' : '未配置', '不显示密钥')}${commandMetric('真实交易', '永久关闭', safeNewsText(d.realTrading))}</div>`;
   }).catch(error => { diagnosticsEl.innerHTML = `<div class="empty-tip" style="color:var(--red);">${safeNewsText(error.message)}</div>`; });
   try {
     const res = await fetch('/api/ops', { cache: 'no-store' });

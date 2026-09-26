@@ -427,6 +427,22 @@ export function analyzePortfolio(rows: PortfolioRow[], input: { benchmarkReturnP
   };
 }
 
+export type SignalLifecycleStatus = 'generated' | 'confirmed' | 'paper-filled' | 'tracking' | 'invalidated' | 'closed' | 'expired' | 'reviewed';
+
+export function canTransitionSignalStatus(current: SignalLifecycleStatus, next: SignalLifecycleStatus): boolean {
+  const transitions: Record<SignalLifecycleStatus, SignalLifecycleStatus[]> = {
+    generated: ['confirmed', 'invalidated', 'expired'],
+    confirmed: ['paper-filled', 'tracking', 'invalidated', 'expired'],
+    'paper-filled': ['tracking', 'invalidated', 'closed'],
+    tracking: ['invalidated', 'closed', 'expired'],
+    invalidated: ['reviewed'],
+    closed: ['reviewed'],
+    expired: ['reviewed'],
+    reviewed: [],
+  };
+  return current === next || transitions[current].includes(next);
+}
+
 export interface SignalOutcome {
   id: string;
   market: MarketId;
@@ -442,6 +458,9 @@ export interface SignalOutcome {
   maePct?: number;
   confirmationDelayMs?: number;
   sample: 'in-sample' | 'oos' | 'paper' | 'live';
+  status?: SignalLifecycleStatus;
+  statusReason?: string;
+  evidenceRefs?: string[];
   dataGap?: boolean;
   futureDataRisk?: boolean;
   invalidationReason?: string;

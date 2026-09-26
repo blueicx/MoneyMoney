@@ -3,6 +3,8 @@ import { aiCommentaryConfigured } from './ai-commentary';
 import { ResilientDataSourceAdapter, type SourceStatus } from '../data/source-adapter';
 import { stockDataService } from './stock-data-service';
 import { buildSourceHealthTransitions } from './source-health-history';
+import { type SourceHealthSample } from './source-health-slo';
+import { getEquityOptionsSnapshot, getOptionsSnapshot } from './options-market';
 
 export interface SourceHealthItem {
   id: string;
@@ -173,6 +175,30 @@ async function buildSourceHealth(scope = 'all'): Promise<SourceHealthReport> {
     return { updatedAt: checkedAt, total: items.length, online: items.filter(item => item.ok).length, configuredOptional: 0, items };
   }
 
+  if (scope === 'options') {
+    const probe = async (input: { id: string; name: string; fetch: () => Promise<any> }): Promise<SourceHealthItem> => {
+      const started = Date.now();
+      try {
+        const snapshot = await input.fetch();
+        const contracts = (snapshot.expiries || []).reduce((sum: number, expiry: any) => sum + (expiry.rows?.length || 0), 0);
+        return {
+          id: input.id, name: input.name, group: '期权数据', ok: contracts > 0, configured: true,
+          latencyMs: Date.now() - started,
+          detail: contracts ? `${contracts} 个真实合约 · ${snapshot.fetchedAt}` : '连接成功，但当前标的暂无可用合约',
+          checkedAt: snapshot.fetchedAt || new Date().toISOString(), status: 'live',
+          expiresAt: new Date(Date.now() + 30_000).toISOString(), capabilities: ['optionsChain'],
+        };
+      } catch (error: any) {
+        return { id: input.id, name: input.name, group: '期权数据', ok: false, configured: true, latencyMs: Date.now() - started, detail: friendlyError(error), checkedAt: new Date().toISOString(), status: 'unavailable', capabilities: ['optionsChain'] };
+      }
+    };
+    const items = await Promise.all([
+      probe({ id: 'cboe-equity-options', name: 'CBOE 延迟股票期权', fetch: () => getEquityOptionsSnapshot('SPY') }),
+      probe({ id: 'deribit-crypto-options', name: 'Deribit 加密期权', fetch: () => getOptionsSnapshot('BTC') }),
+    ]);
+    return { updatedAt: checkedAt, total: items.length, online: items.filter(item => item.ok).length, configuredOptional: 0, items };
+  }
+
   const optionalConfigured: boolean[] = [];
   const aiConfigured = aiCommentaryConfigured();
   optionalConfigured.push(aiConfigured);
@@ -313,7 +339,26 @@ export async function getSourceHealth(scope = 'all'): Promise<SourceHealthReport
         const previous = repository.getSourceHealth(scope);
         repository.appendSourceHealthEvents(buildSourceHealthTransitions(scope, previous, value));
         repository.saveSourceHealth(scope, value);
-      });
+        const samples: SourceHealthSample[] = value.items.flatMap(item => {
+          const id = item.id.toLowerCase();
+          const sampleMarket = id.startsWith('cboe-') || id.startsWith('deribit-') ? 'options'
+            : ['nasdaq-public-', 'sec-edgar-'].some(prefix => id.startsWith(prefix)) ? 'stocks'
+            : id.includes('binance') ? 'crypto'
+              : ['polymarket', 'kalshi', 'manifold', 'good-judgment-open', 'metaculus', 'predict-graphql'].some(provider => id.includes(provider)) ? 'prediction'
+                : null;
+          if (!sampleMarket) return [];
+          const status = String(item.status || '');
+          const outcome = item.configured === false || status === 'unconfigured'
+            ? 'unconfigured'
+            : item.ok
+              ? 'success'
+              : ['live', 'fallback', 'stale'].includes(status)
+                ? 'empty'
+                : 'failed';
+          return [{ market: sampleMarket, sourceId: item.id, sourceName: item.name, checkedAt: item.checkedAt || value.updatedAt, outcome, latencyMs: item.latencyMs, capabilities: item.capabilities || [], detail: item.detail }];
+        });
+        repository.appendSourceHealthSamples(samples);
+      }).catch(error => console.error('Unable to persist source health sample:', error));
       return value;
     }).catch(err => {
       console.error('Background refresh failed for health scope:', scope, err);

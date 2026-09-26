@@ -14,7 +14,9 @@ declare global {
 
 // src/utils -> project root in development; package output stays beside the exe.
 export const PROJECT_ROOT = process.pkg ? path.dirname(process.execPath) : path.resolve(__dirname, '..', '..');
-export const DATA_ROOT = process.pkg ? path.dirname(process.execPath) : path.resolve(__dirname, '..', '..', 'data');
+export const DATA_ROOT = process.env.MONEYMONEY_DATA_DIR?.trim()
+  ? path.resolve(process.env.MONEYMONEY_DATA_DIR)
+  : process.pkg ? path.dirname(process.execPath) : path.resolve(__dirname, '..', '..', 'data');
 
 export function ensureDir(dir: string): void {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });

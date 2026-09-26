@@ -106,12 +106,16 @@ import { getAssistantCalibration, getAssistantJournalTrades, saveTradeNote } fro
 import { exportJournalCsv, exportPaperCsv, exportCalibrationCsv, exportForecastLabCsv } from '../features/data-export';
 import { generateAssistantReport } from '../features/trade-assistant';
 import { getSourceHealth, refreshSourceHealth } from '../features/source-health';
+import { summarizeSourceSlo } from '../features/source-health-slo';
+import { zonedDigestClock } from '../features/digest-clock';
+import { filterStockBarsForTradingDate, resolveStockExchangeTimeZone } from '../features/stock-intraday-kline';
 import { testNotificationChannels } from '../features/notification-channels';
 import { runResearchExperiment } from '../features/experiment-runner';
 import { assertMarketContext, createResearchJob, MARKET_IDS, type MarketId } from '../features/research-contracts';
 import {
   analyzePortfolio,
   analyzeSignalQuality,
+  canTransitionSignalStatus,
   buildDecisionReviewDraft,
   buildDueDecisionReviewDrafts,
   createDecisionRecord,
@@ -135,6 +139,7 @@ import { createAccessMiddleware, validateAccessConfiguration } from './access-co
 import { verifyLoginToken, extractAuthToken } from './auth';
 import { registerApiAuthProtection, registerAuthRoutes } from './auth-routes';
 import { stateStore, getStorageHealth } from '../storage/sqlite-state';
+import { DATA_ROOT } from '../utils/paths';
 import { paperTradingExecutor } from '../features/trading-executor';
 import { unifiedPaperLedgerStore, calculateUnifiedPerformance, replayUnifiedPaperOrders, type UnifiedPaperOrder } from '../features/unified-paper-trading';
 import { logger } from '../utils/logger';
@@ -414,6 +419,16 @@ app.get('/api/health/live', (_req, res) => {
   res.json({ ok: true, app: 'MoneyMoney', status: 'alive' });
 });
 
+app.get('/api/health/version', (_req, res) => {
+  try {
+    const infoPath = path.resolve(__dirname, '..', 'build-info.json');
+    const info = fs.existsSync(infoPath) ? JSON.parse(fs.readFileSync(infoPath, 'utf8')) : {};
+    res.json({ ok: true, app: 'MoneyMoney', version: String(info.version || 'unknown'), commit: String(info.commit || 'unknown'), builtAt: String(info.builtAt || ''), source: 'build artifact', dataStatus: info.commit ? 'live' : 'unavailable', reason: info.commit ? null : '构建产物未包含提交版本信息' });
+  } catch (error: any) {
+    res.status(500).json({ ok: false, app: 'MoneyMoney', dataStatus: 'failed', reason: error.message });
+  }
+});
+
 const SCREENER_STOCK_SYMBOLS = ['AAPL', 'MSFT', 'NVDA', 'AMZN', 'GOOGL', 'META', 'TSLA'];
 const SCREENER_OPTION_SYMBOLS = ['SPY', 'QQQ', 'IWM'];
 const SCREENER_CRYPTO_SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT', 'XRPUSDT', 'DOGEUSDT'];
@@ -570,6 +585,20 @@ app.get('/api/data/quality', (req, res) => {
   const reports = dataLakeCatalog.listQuality(rawMarket as MarketId | undefined, instrument);
   const conflicts = rawMarket ? dataLakeCatalog.listDiscrepancies(rawMarket as MarketId, instrument) : [];
   res.json({ success: true, data: reports, market: rawMarket || 'all', instrument: instrument || null, dataStatus: conflicts.length ? 'partial' : reports.length ? 'cached' : 'empty', source: 'MoneyMoney local quality reports', updatedAt: new Date().toISOString(), reason: conflicts.length ? `${conflicts.length} 条来源差异待核对` : reports.length ? null : '本地数据湖暂无质量报告', discrepancyCount: conflicts.length });
+});
+
+app.get('/api/data/slo', (req, res) => {
+  const rawMarket = typeof req.query.market === 'string' ? req.query.market : 'stocks';
+  if (!MARKET_IDS.includes(rawMarket as MarketId)) return res.status(400).json({ success: false, error: 'Invalid market context', dataStatus: 'failed', reason: '必须指定有效市场' });
+  const window = String(req.query.window || '7d');
+  const match = /^(1|7|14|30)d$/.exec(window);
+  if (!match) return res.status(400).json({ success: false, error: 'window must be 1d, 7d, 14d, or 30d', dataStatus: 'failed', reason: '时间窗仅支持 1d、7d、14d、30d' });
+  const days = Number(match[1]);
+  const now = new Date();
+  const samples = researchRepository.listSourceHealthSamples(rawMarket, new Date(now.getTime() - days * 86_400_000).toISOString(), now.toISOString());
+  const summary = summarizeSourceSlo(samples, { market: rawMarket, now, windowMs: days * 86_400_000 });
+  const coverage = dataLakeCatalog.listCoverage(rawMarket as MarketId);
+  res.json({ success: true, ...summary, window, coverage: coverage.map(item => ({ instrument: item.instrument, dataset: item.dataset, timeframe: item.timeframe, status: item.status, latestPublishedAt: item.latestPublishedAt, partitionCount: item.partitionCount, rowCount: item.rowCount })), dataStatus: summary.sources.length ? (summary.sources.some(item => item.failed) ? 'partial' : 'historical') : 'empty', source: 'SQLite source health samples + local data lake coverage', updatedAt: now.toISOString(), reason: summary.reason });
 });
 
 app.get('/api/data/revisions', (req, res) => {
@@ -937,6 +966,27 @@ app.post('/api/decisions/review-due', express.json(), (req, res) => {
   }
 });
 
+async function monitorDueDecisionReviewDrafts(): Promise<void> {
+  const now = new Date().toISOString();
+  for (const market of MARKET_IDS) {
+    const existing = new Set(decisionIntelligenceStore.listReviewDrafts(market).map(item => item.decisionId));
+    const due = decisionIntelligenceStore.listDecisions(market).filter(item => item.status === 'open' && Date.parse(item.horizonAt) <= Date.parse(now) && !existing.has(item.id));
+    if (!due.length) continue;
+    const result = buildDueDecisionReviewDrafts(due, decisionIntelligenceStore.listEvidence(market), now);
+    result.drafts.forEach(item => decisionIntelligenceStore.saveReviewDraft(item));
+  }
+}
+
+async function sampleSourceHealth(): Promise<void> {
+  if (sourceHealthSampling) return;
+  sourceHealthSampling = true;
+  try {
+    sourceHealthSampleRuns += 1;
+    await Promise.allSettled([getSourceHealth('stocks'), getSourceHealth('all')]);
+    if (sourceHealthSampleRuns % 5 === 1) await getSourceHealth('options').catch(() => null);
+  } finally { sourceHealthSampling = false; }
+}
+
 app.get('/api/decisions/negative-knowledge', (req, res) => {
   if (!adminOnly(req, res)) return;
   try {
@@ -1002,11 +1052,45 @@ app.post('/api/signals/outcomes', express.json(), (req, res) => {
     const market = decisionMarket(signal.market);
     assertMarketContext({ market, workspace: 'signal-quality', instrument: signal.instrument });
     if (!signal.id || !signal.strategyId || !signal.timeframe || !signal.source || !Number.isFinite(Number(signal.triggeredAt)) || !Number.isFinite(Number(signal.entryPrice))) throw new Error('Signal outcome is incomplete');
+    const previous = decisionIntelligenceStore.getSignalOutcome(String(signal.id));
+    if (previous && (previous.market !== market || previous.instrument !== signal.instrument)) throw new Error('Signal identity and market cannot change');
+    if (signal.status && !['generated', 'confirmed', 'paper-filled', 'tracking', 'invalidated', 'closed', 'expired', 'reviewed'].includes(String(signal.status))) throw new Error('Signal status is invalid');
+    if (previous && signal.status && signal.status !== previous.status) {
+      if (!String(signal.statusReason || signal.invalidationReason || '').trim()) throw new Error('Signal status changes require a reason');
+      if (previous.status && !canTransitionSignalStatus(previous.status, signal.status)) throw new Error(`Invalid signal status transition: ${previous.status} -> ${signal.status}`);
+    }
     const saved = decisionIntelligenceStore.saveSignalOutcome({ ...signal, market, triggeredAt: Number(signal.triggeredAt), entryPrice: Number(signal.entryPrice) });
     res.status(201).json(decisionEnvelope({ market, instrument: signal.instrument, data: saved, source: signal.source }));
   } catch (error: any) {
     res.status(400).json({ success: false, error: error.message, dataStatus: 'unavailable', reason: error.message });
   }
+});
+
+app.get('/api/signals/:id/history', (req, res) => {
+  if (!adminOnly(req, res)) return;
+  const signal = decisionIntelligenceStore.getSignalOutcome(String(req.params.id));
+  if (!signal) return res.status(404).json({ success: false, dataStatus: 'empty', reason: '信号不存在' });
+  const data = researchRepository.listSignalHistory(signal.market, signal.id);
+  res.json(decisionEnvelope({ market: signal.market, instrument: signal.instrument, data, dataStatus: data.length ? 'cached' : 'empty', source: 'persistent signal lifecycle history', reason: data.length ? null : '这是迁移前的旧信号记录，未保存历史状态变化' }));
+});
+
+app.post('/api/signals/:id/status', express.json(), (req, res) => {
+  if (!adminOnly(req, res)) return;
+  try {
+    const signal = decisionIntelligenceStore.getSignalOutcome(String(req.params.id));
+    if (!signal) return res.status(404).json({ success: false, dataStatus: 'empty', reason: '信号不存在' });
+    const market = decisionMarket(req.body?.market || signal.market);
+    if (market !== signal.market || String(req.body?.instrument || signal.instrument) !== signal.instrument) throw new Error('Signal market and instrument cannot change');
+    const status = String(req.body?.status || '') as NonNullable<typeof signal.status>;
+    const reason = String(req.body?.reason || '').trim();
+    if (!['generated', 'confirmed', 'paper-filled', 'tracking', 'invalidated', 'closed', 'expired', 'reviewed'].includes(status)) throw new Error('Signal status is invalid');
+    if (!reason) throw new Error('状态变更必须填写原因');
+    const current = signal.status || (signal.exitPrice != null ? 'closed' : signal.invalidationReason ? 'invalidated' : 'generated');
+    if (!canTransitionSignalStatus(current, status)) throw new Error(`不允许的信号状态转换：${current} → ${status}`);
+    const evidenceRefs = Array.isArray(req.body?.evidenceRefs) ? req.body.evidenceRefs.map(String).filter(Boolean).slice(0, 30) : [];
+    const saved = decisionIntelligenceStore.saveSignalOutcome({ ...signal, status, statusReason: reason, evidenceRefs: [...new Set([...(signal.evidenceRefs || []), ...evidenceRefs])] });
+    res.json(decisionEnvelope({ market, instrument: signal.instrument, data: saved, source: 'persistent signal lifecycle history' }));
+  } catch (error: any) { res.status(400).json({ success: false, dataStatus: 'failed', reason: error.message || '信号状态更新失败' }); }
 });
 
 app.get('/api/workspaces', (req, res) => {
@@ -2018,8 +2102,14 @@ app.get('/api/stock/kline', async (req, res) => {
     const symbol = String(req.query.symbol || 'sh600519');
     const rawApiSymbol = String(req.query.api || '').trim().toUpperCase();
     const period = String(req.query.period || req.query.interval || '1d').trim().toLowerCase();
+    const tradingDate = String(req.query.date || '').trim();
+    const intradayPeriod = String(req.query.intradayPeriod || period).trim().toLowerCase();
+    const effectivePeriod = tradingDate ? intradayPeriod : period;
     const asOf = String(req.query.asOf || '').trim();
-    const periodConfig = STOCK_KLINE_PERIODS[period as keyof typeof STOCK_KLINE_PERIODS];
+    const periodConfig = STOCK_KLINE_PERIODS[effectivePeriod as keyof typeof STOCK_KLINE_PERIODS];
+    if (tradingDate && asOf) return res.status(400).json({ success: false, data: null, dataStatus: 'unsupported', source: 'Yahoo Finance 历史K线', updatedAt: new Date().toISOString(), reason: '本地历史时点与外部日内区间不能混用；请退出数据时点后再查看日内K线' });
+    if (tradingDate && !/^\d{4}-\d{2}-\d{2}$/.test(tradingDate)) return res.status(400).json({ success: false, data: null, dataStatus: 'failed', source: 'Yahoo Finance 历史K线', updatedAt: new Date().toISOString(), reason: 'date 必须为 YYYY-MM-DD' });
+    if (tradingDate && !['1m', '5m', '15m'].includes(intradayPeriod)) return res.status(400).json({ success: false, data: null, dataStatus: 'unsupported', source: 'Yahoo Finance 历史K线', updatedAt: new Date().toISOString(), reason: '日内周期仅支持 1m、5m、15m' });
     if (!periodConfig) {
       return res.json({
         success: false,
@@ -2027,7 +2117,7 @@ app.get('/api/stock/kline', async (req, res) => {
         dataStatus: 'unavailable',
         source: 'Yahoo Finance 历史K线',
         updatedAt: new Date().toISOString(),
-        reason: `当前股票周期不支持：${period}`,
+        reason: `当前股票周期不支持：${effectivePeriod}`,
       });
     }
     const requestedSymbol = rawApiSymbol || symbol;
@@ -2049,13 +2139,18 @@ app.get('/api/stock/kline', async (req, res) => {
         reason: historicalReason,
       });
     }
-    const adapter = getStockKlineAdapter(period, requestedSymbol);
-    const snapshot = await adapter.fetch({ symbol: requestedSymbol, period });
+    const adapter = getStockKlineAdapter(effectivePeriod, requestedSymbol);
+    const snapshot = await adapter.fetch({ symbol: requestedSymbol, period: effectivePeriod });
     const updatedAt = snapshot.fetchedAt || new Date().toISOString();
     if (!snapshot.data?.length) {
       return res.json({ success: false, data: null, dataStatus: snapshot.status, source: snapshot.source, updatedAt, reason: snapshot.error || `暂无${periodConfig.label}股票K线数据` });
     }
-    res.json({ success: true, data: snapshot.data, dataStatus: snapshot.status, source: snapshot.source, updatedAt, reason: snapshot.error || undefined });
+    if (tradingDate) {
+      const timezone = resolveStockExchangeTimeZone(requestedSymbol);
+      const session = filterStockBarsForTradingDate(snapshot.data, tradingDate, timezone);
+      return res.json({ success: session.bars.length > 0, data: session.bars, dataStatus: session.bars.length ? snapshot.status : 'empty', market: 'stocks', instrument: requestedSymbol, timeframe: effectivePeriod, date: tradingDate, timezone, session, source: snapshot.source, updatedAt, reason: session.bars.length ? undefined : `来源 ${snapshot.source} 当前覆盖 ${session.availableDateRange ? `${session.availableDateRange.from} 至 ${session.availableDateRange.to}` : '暂无可用交易日'}；未提供 ${tradingDate} 的 ${effectivePeriod} 日内数据` });
+    }
+    res.json({ success: true, data: snapshot.data, dataStatus: snapshot.status, source: snapshot.source, updatedAt, timezone: resolveStockExchangeTimeZone(requestedSymbol), reason: snapshot.error || undefined });
   } catch (e: any) {
     res.json({
       success: false,
@@ -2076,6 +2171,11 @@ app.get('/api/diagnostics', async (req, res) => {
     const sources = await getSourceHealth(market || 'all');
     const jobs = researchRepository.listJobs(market).slice(0, 50);
     const telegramConfig = getRuntimeTelegramConfig();
+    let recoveryDrill: unknown = null;
+    try {
+      const drillPath = path.join(DATA_ROOT, 'recovery-drill-last.json');
+      if (fs.existsSync(drillPath)) recoveryDrill = JSON.parse(fs.readFileSync(drillPath, 'utf8'));
+    } catch { recoveryDrill = { status: 'unavailable', reason: '恢复演练记录无法读取' }; }
     res.json({
       success: true,
       data: {
@@ -2083,6 +2183,7 @@ app.get('/api/diagnostics', async (req, res) => {
         version: process.env.APP_VERSION || process.env.npm_package_version || 'unknown',
         storage: getStorageHealth(),
         dataLake: dataLakeCatalog.getDiagnostics(),
+        recoveryDrill,
         sources: { total: sources.total, online: sources.online, updatedAt: sources.updatedAt, unavailable: sources.items.filter(item => !item.ok).map(item => ({ id: item.id, detail: item.detail })) },
         researchJobs: jobs.reduce<Record<string, number>>((acc, job) => { acc[job.status] = (acc[job.status] || 0) + 1; return acc; }, {}),
         telegram: { configured: telegram.isConfigured, pollingEnabled: telegramConfig.pollingEnabled, pollingRunning: telegramInteractionBot?.isRunning || false, polling: telegramInteractionBot?.pollingStatus || null, lease: stateStore.getLease('telegram:getUpdates') },
@@ -2151,22 +2252,84 @@ app.get('/api/defi/protocols', async (req, res) => {
 
 // --- Macro Indicators ---
 
+function handleOptionsHistory(req: express.Request, res: express.Response) {
+  try {
+    const market = String(req.query.market || '') as MarketId;
+    const instrument = String(req.query.instrument || '').trim();
+    const from = String(req.query.from || '').trim();
+    const to = String(req.query.to || '').trim();
+    if (market !== 'options') return res.status(400).json({ success: false, market, dataStatus: 'unsupported', reason: '期权历史快照必须指定 market=options；加密期权也归入期权链，不会混入虚拟币现货' });
+    if (!instrument) return res.status(400).json({ success: false, market, dataStatus: 'failed', reason: '必须指定规范期权标的 ID，例如 option:cboe:AAPL 或 option:deribit:BTC' });
+    for (const date of [from, to].filter(Boolean)) if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || new Date(`${date}T00:00:00.000Z`).toISOString().slice(0, 10) !== date) return res.status(400).json({ success: false, market, instrument, dataStatus: 'failed', reason: 'from/to 必须为有效 YYYY-MM-DD 日期' });
+    if (from && to && from > to) return res.status(400).json({ success: false, market, instrument, dataStatus: 'failed', reason: 'from 不能晚于 to' });
+    const data = dataLakeCatalog.listOptionSnapshots({ market: 'options', instrument, from: from || undefined, to: to || undefined });
+    const dates = [...new Set(data.map(item => item.tradeDate))].sort();
+    const start = from || dates[0] || null;
+    const end = to || dates.at(-1) || null;
+    const calendarGaps: string[] = [];
+    if (start && end) {
+      const cursor = new Date(`${start}T00:00:00.000Z`);
+      const last = Date.parse(`${end}T00:00:00.000Z`);
+      const observed = new Set(dates);
+      while (cursor.getTime() <= last && calendarGaps.length < 366) {
+        const day = cursor.toISOString().slice(0, 10);
+        if (!observed.has(day)) calendarGaps.push(day);
+        cursor.setUTCDate(cursor.getUTCDate() + 1);
+      }
+    }
+    res.json({ success: true, market, instrument, data, coverage: { observedDates: dates, calendarGaps, gapNote: '日历缺口未区分周末、交易所假日与采集缺失，不能据此认定来源故障。', from: start, to: end }, dataStatus: data.length ? 'historical' : 'empty', source: [...new Set(data.map(item => item.source))].join(', ') || 'CBOE Delayed Quotes / Deribit Public API', updatedAt: data.at(-1)?.fetchedAt || new Date().toISOString(), reason: data.length ? null : '本地尚无该期权标的的真实历史快照；从当前来源成功读取后才会开始积累，不回填推测历史' });
+  } catch (error: any) { res.status(400).json({ success: false, market: String(req.query.market || 'options'), dataStatus: 'failed', reason: error.message }); }
+}
+
+app.get('/api/options/history', handleOptionsHistory);
+
 app.get('/api/options/:asset', async (req, res) => {
   try {
-    const data = await getOptionsSnapshot(String(req.params.asset || 'BTC'));
-    res.json({ success: true, data });
+    const asset = String(req.params.asset || 'BTC').trim().toUpperCase();
+    if (!['BTC', 'ETH'].includes(asset)) return res.status(400).json({ success: false, dataStatus: 'unsupported', market: 'options', instrument: `option:deribit:${asset}`, reason: 'Deribit 当前只支持 BTC、ETH 期权链' });
+    const data = await getOptionsSnapshot(asset);
+    let persistence: any = { status: 'unavailable', reason: '该来源尚未提供可保存的合约' };
+    try {
+      const saved = dataLakeCatalog.saveOptionsChainSnapshot({ market: 'options', instrument: `option:deribit:${asset}`, underlyingMarket: 'crypto', source: data.source as any, fetchedAt: data.fetchedAt, timezone: 'UTC', mode: 'daily', snapshot: data as any });
+      persistence = { status: 'saved', id: saved.id, tradeDate: saved.tradeDate, contentHash: saved.contentHash };
+    } catch (error: any) { persistence = { status: 'unavailable', reason: error.message || '期权快照写入失败' }; }
+    res.json({ success: true, market: 'options', instrument: `option:deribit:${asset}`, dataStatus: data.expiries.some(expiry => expiry.rows.length) ? 'live' : 'empty', source: data.source, updatedAt: data.fetchedAt, data, snapshotPersistence: persistence, reason: persistence.status === 'saved' ? null : persistence.reason });
   } catch (e: any) {
-    res.json({ success: false, error: e.message });
+    res.status(503).json({ success: false, market: 'options', dataStatus: 'unavailable', source: 'Deribit Public API', updatedAt: new Date().toISOString(), error: e.message, reason: e.message || 'Deribit 期权来源不可用' });
   }
 });
 
 app.get('/api/equity-options/:symbol', async (req, res) => {
   try {
-    const data = await getEquityOptionsSnapshot(String(req.params.symbol || 'AAPL'));
-    res.json({ success: true, data });
+    const symbol = String(req.params.symbol || 'AAPL').trim().toUpperCase();
+    if (!/^[A-Z][A-Z0-9.]{0,9}$/.test(symbol)) return res.status(400).json({ success: false, market: 'options', dataStatus: 'failed', reason: '股票期权标的代码无效' });
+    const data = await getEquityOptionsSnapshot(symbol);
+    let persistence: any = { status: 'unavailable', reason: '该来源尚未提供可保存的合约' };
+    try {
+      const saved = dataLakeCatalog.saveOptionsChainSnapshot({ market: 'options', instrument: `option:cboe:${symbol}`, underlyingMarket: 'stocks', source: data.source as any, fetchedAt: data.fetchedAt, timezone: 'America/New_York', mode: 'daily', snapshot: data as any });
+      persistence = { status: 'saved', id: saved.id, tradeDate: saved.tradeDate, contentHash: saved.contentHash };
+    } catch (error: any) { persistence = { status: 'unavailable', reason: error.message || '期权快照写入失败' }; }
+    res.json({ success: true, market: 'options', instrument: `option:cboe:${symbol}`, dataStatus: data.expiries.some(expiry => expiry.rows.length) ? 'delayed' : 'empty', source: data.source, updatedAt: data.fetchedAt, data, snapshotPersistence: persistence, reason: persistence.status === 'saved' ? null : persistence.reason });
   } catch (e: any) {
-    res.json({ success: false, error: e.message });
+    res.status(503).json({ success: false, market: 'options', dataStatus: 'unavailable', source: 'CBOE Delayed Quotes', updatedAt: new Date().toISOString(), error: e.message, reason: e.message || 'CBOE 期权来源不可用' });
   }
+});
+
+app.post('/api/options/history/save', express.json(), (req, res) => {
+  if (!adminOnly(req, res)) return;
+  try {
+    const instrument = String(req.body?.instrument || '').trim();
+    const match = instrument.match(/^option:(cboe|deribit):([A-Z0-9.]+)$/i);
+    if (!match) throw new Error('instrument 必须是 option:cboe:SYMBOL 或 option:deribit:BTC/ETH');
+    const venue = match[1].toLowerCase();
+    const asset = match[2].toUpperCase();
+    const isEquity = venue === 'cboe';
+    const dataPromise = isEquity ? getEquityOptionsSnapshot(asset) : getOptionsSnapshot(asset);
+    void dataPromise.then(snapshot => {
+      const saved = dataLakeCatalog.saveOptionsChainSnapshot({ market: 'options', instrument: `option:${venue}:${asset}`, underlyingMarket: isEquity ? 'stocks' : 'crypto', source: snapshot.source as any, fetchedAt: snapshot.fetchedAt, timezone: isEquity ? 'America/New_York' : 'UTC', mode: 'manual', snapshot: snapshot as any });
+      res.status(201).json({ success: true, market: 'options', instrument: saved.instrument, data: saved, dataStatus: 'historical', source: saved.source, updatedAt: saved.fetchedAt, reason: null });
+    }).catch(error => res.status(503).json({ success: false, market: 'options', instrument, dataStatus: 'unavailable', source: isEquity ? 'CBOE Delayed Quotes' : 'Deribit Public API', updatedAt: new Date().toISOString(), reason: error?.message || '真实期权快照不可用' }));
+  } catch (error: any) { res.status(400).json({ success: false, market: 'options', dataStatus: 'failed', reason: error.message }); }
 });
 
 // --- Cross-platform Prediction Radar ---
@@ -3168,6 +3331,10 @@ let telegramPriceMonitor: NodeJS.Timeout | null = null;
 let telegramSlowMonitor: NodeJS.Timeout | null = null;
 let telegramDigestMonitor: NodeJS.Timeout | null = null;
 let telegramEventMonitor: NodeJS.Timeout | null = null;
+let sourceHealthMonitor: NodeJS.Timeout | null = null;
+let dueDecisionReviewMonitor: NodeJS.Timeout | null = null;
+let sourceHealthSampling = false;
+let sourceHealthSampleRuns = 0;
 const telegramRateLimit = new Map<string, number[]>();
 function isTelegramRateLimited(chatId: string): boolean {const now=Date.now();const list=telegramRateLimit.get(String(chatId))||[];const recent=list.filter((t: number)=>now-t<60000);if(recent.length>=10){telegramRateLimit.set(String(chatId),recent);return true;}recent.push(now);telegramRateLimit.set(String(chatId),recent);return false;}
 
@@ -3736,13 +3903,81 @@ function telegramAlertDescription(alert: any): string {
 async function buildTelegramDigest(chatId: string): Promise<string> {
   const ids = telegramCommandCenterStore.listWatchlist(chatId);
   const radar = getCachedPredictionRadarSlice('', 240);
-  const markets = ids.map(id => telegramFindMarket(id)).filter(Boolean);
   const calendar = await getUpcomingEventCalendar(2).catch(() => null);
   const portfolio = paperEngine.getPortfolio();
   const alerts = telegramCommandCenterStore.listPriceAlerts(chatId).filter(item => !item.triggered);
   const smartAlerts = telegramCommandCenterStore.listSmartAlerts(chatId).filter(item => item.enabled);
   const sources = await getSourceHealth().catch(() => null);
   const ai = radar ? await getAiMarketCommentary(radar).catch(() => null) : null;
+  const previousDigest = telegramCommandCenterStore.listAudits(chatId, 100).find(item => item.action === 'digest_sent');
+  const since = previousDigest?.at || new Date(Date.now() - 24 * 60 * 60_000).toISOString();
+  const marketIds: MarketId[] = ['stocks', 'options', 'crypto', 'prediction'];
+  const marketNames: Record<MarketId, string> = { stocks: '股票', options: '期权', crypto: '虚拟币', prediction: '预测市场' };
+  const evidenceSummary = marketIds.map(market => {
+    const recentEvidence = decisionIntelligenceStore.listEvidence(market).filter(item => item.fetchedAt >= since);
+    const recentSignals = decisionIntelligenceStore.listSignalOutcomes(market).filter(item => new Date(item.triggeredAt).toISOString() >= since);
+    const outages = researchRepository.listSourceHealthEvents(market, 200).filter((item: any) => item.kind === 'outage' && item.at >= since);
+    const base = telegramPublicBaseUrl();
+    const href = buildTelegramDeepLink(base, { market, instrument: recentEvidence[0]?.instrument || '', workspace: market === 'stocks' ? 'stock-quotes' : 'decision-intelligence' });
+    const label = `${marketNames[market]}：${recentEvidence.length} 条新证据 · ${recentSignals.length} 个信号 · ${outages.length} 次来源故障`;
+    const evidence = recentEvidence[0];
+    const sourceUrl = telegramSafeExternalUrl((evidence?.source as any)?.url);
+    const detail = evidence ? ` · 最新来源 ${escapeTelegramHtml(evidence.source.name)}${sourceUrl ? ` <a href="${escapeTelegramHtml(sourceUrl)}">原文</a>` : ''}` : '';
+    return `· ${href ? `<a href="${escapeTelegramHtml(href)}">${escapeTelegramHtml(label)}</a>` : escapeTelegramHtml(label)}${detail}`;
+  });
+  const watchGroups: Record<MarketId, string[]> = { stocks: [], options: [], crypto: [], prediction: [] };
+  const watchItems = ids.slice(0, 12).map(id => {
+    let ref = telegramRefFromId(id);
+    if (!ref && isTelegramWatchableStockId(id)) {
+      const match = id.match(/^(us|hk|sh|sz|bj)(.+)$/i)!;
+      const venue = ({ us: 'us', hk: 'hk', sh: 'sh', sz: 'sz', bj: 'bj' } as Record<string, string>)[match[1].toLowerCase()];
+      ref = normalizeInstrumentRef({ type: 'stock', venue, symbol: /^(sh|sz|bj)$/i.test(match[1]) ? `${match[1]}${match[2]}` : match[2], title: id, aliases: [] });
+    }
+    const scope: MarketId = ref ? (ref.type === 'stock' ? 'stocks' : ref.type === 'option' ? 'options' : ref.type === 'crypto' ? 'crypto' : 'prediction') : telegramFindMarket(id) ? 'prediction' : 'stocks';
+    watchGroups[scope].push(id);
+    return { id, ref, scope };
+  });
+  const watchLines: string[] = [];
+  for (const market of marketIds) {
+    const items = watchItems.filter(item => item.scope === market).slice(0, 4);
+    if (!items.length) { watchLines.push(`<b>${marketNames[market]}</b> · 暂无自选`); continue; }
+    watchLines.push(`<b>${marketNames[market]}</b>`);
+    const checked = await Promise.all(items.map(async item => {
+      const prediction = telegramFindMarket(item.id) || (item.ref?.type === 'prediction' ? telegramFindMarket(item.ref.symbol) : undefined);
+      let price: number | null = null;
+      let change: number | null = null;
+      let source = '';
+      let capturedAt = '';
+      let reason = '';
+      let label = telegramWatchLabel(item.id, prediction);
+      if (prediction) {
+        price = Number(prediction.yesPrice) * 100;
+        change = null;
+        source = String(prediction.platform || '预测市场来源');
+        capturedAt = String(radar?.updatedAt || '');
+        label = String(prediction.titleZh || prediction.title || item.id);
+      } else if (item.ref) {
+        try {
+          const overview = await unifiedInstrumentService.overview(item.ref);
+          const quote: any = overview.quote || overview.marketData || {};
+          const priceValue = quote.price ?? quote.yesPrice;
+          price = Number.isFinite(Number(priceValue)) ? Number(priceValue) : null;
+          change = Number.isFinite(Number(quote.changePct)) ? Number(quote.changePct) : null;
+          source = item.scope === 'stocks' ? '股票行情聚合源' : item.scope === 'crypto' ? 'Binance 公共行情' : item.scope === 'options' ? String((overview.marketData as any)?.source || 'CBOE 延迟期权') : '预测市场来源';
+          capturedAt = overview.freshness.fetchedAt || '';
+          reason = overview.status.reason || '';
+          label = item.ref.title || item.ref.symbol;
+        } catch (error: any) { reason = error?.message || '来源不可用'; }
+      } else {
+        reason = '标的 ID 无法识别，未跨市场猜测';
+      }
+      const deepMarket = item.scope;
+      const href = buildTelegramDeepLink(telegramPublicBaseUrl(), { market: deepMarket, instrument: item.ref?.id || item.id, timeframe: '1d', workspace: deepMarket === 'stocks' ? 'stock-quotes' : `${deepMarket}-market` });
+      const dataText = price == null ? escapeTelegramHtml(reason || '暂无数据') : `${market === 'prediction' ? 'YES ' : ''}${formatTelegramNumber(price, market === 'prediction' ? 1 : 2)}${market === 'prediction' ? '%' : ''}${change == null ? '' : ` · ${change >= 0 ? '+' : ''}${formatTelegramNumber(change, 2)}%`}`;
+      return `· ${href ? `<a href="${escapeTelegramHtml(href)}">${escapeTelegramHtml(label)}</a>` : escapeTelegramHtml(label)} · ${dataText}${source ? ` · ${escapeTelegramHtml(source)}` : ''}${capturedAt ? ` · ${escapeTelegramHtml(capturedAt.slice(0, 16))}` : ''}`;
+    }));
+    watchLines.push(...checked);
+  }
   const digestScope = telegramScopeForChat(chatId);
   const decisionMarketScope = MARKET_IDS.includes(digestScope as MarketId) ? digestScope as MarketId : null;
   const decisionSummary = decisionMarketScope ? buildDecisionMobileSummary({
@@ -3755,10 +3990,13 @@ async function buildTelegramDigest(chatId: string): Promise<string> {
   }) : null;
   const lines = [
     '<b>🗓 MoneyMoney 定时摘要</b>',
-    '生成时间：' + new Date().toLocaleString(),
+    '生成时间：' + new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false }) + '（上海时间）',
     '',
-    '<b>⭐ 自选市场</b>',
-    ...(markets.length ? markets.slice(0, 8).map(market => escapeTelegramHtml(market!.titleZh || market!.title) + ' · YES ' + formatTelegramNumber(market!.yesPrice * 100, 1) + '% · 模型 ' + formatTelegramNumber(market!.modelProbability * 100, 1) + '%') : ['· 暂无自选市场']),
+    '<b>⭐ 自选简报（按市场分组）</b>',
+    ...(ids.length ? watchLines : ['· 暂无自选标的']),
+    '',
+    '<b>🧾 自上次摘要以来</b>',
+    ...evidenceSummary,
     '',
     '<b>💼 模拟盘</b>',
     '权益 $' + formatTelegramNumber(portfolio.equity) + ' · 总盈亏 ' + (portfolio.totalPnl >= 0 ? '+' : '') + '$' + formatTelegramNumber(portfolio.totalPnl) + ' · 持仓 ' + paperEngine.getOpenPositions().length,
@@ -5068,6 +5306,16 @@ function reloadTelegramIntegration(): Promise<void> {
     if (current) await current.stop();
     startTelegramInteractionBot();
     startTelegramCommandCenterMonitor();
+    void sampleSourceHealth().catch(() => {});
+    if (!sourceHealthMonitor) {
+      sourceHealthMonitor = setInterval(() => { void sampleSourceHealth().catch(() => {}); }, 60_000);
+      sourceHealthMonitor.unref?.();
+    }
+    void monitorDueDecisionReviewDrafts().catch(() => {});
+    if (!dueDecisionReviewMonitor) {
+      dueDecisionReviewMonitor = setInterval(() => { void monitorDueDecisionReviewDrafts().catch(() => {}); }, 5 * 60_000);
+      dueDecisionReviewMonitor.unref?.();
+    }
   });
   return telegramReloadPromise;
 }
@@ -5132,15 +5380,17 @@ async function monitorTelegramDigests(): Promise<void> {
   const telegramConfig = getRuntimeTelegramConfig();
   const chats = new Set(parseChatIds(telegramConfig.allowedChatIds, telegramConfig.chatId));
   const now = new Date();
-  const minute = String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0');
-  const day = now.toISOString().slice(0, 10);
+  const clock = zonedDigestClock(now, 'Asia/Shanghai');
+  const minute = clock.minute;
+  const day = clock.date;
   for (const chatId of chats) {
     const policy = telegramCommandCenterStore.getAlertPolicy(chatId);
     const key = chatId + ':' + day + ':' + policy.digest.time;
-    if (!policy.digest.enabled || policy.digest.time !== minute || telegramDigestPushes.has(key) || telegramAlertSuppressed(chatId)) continue;
+    const alreadySent = telegramDigestPushes.has(key) || telegramCommandCenterStore.listAudits(chatId, 100).some(item => item.action === 'digest_sent' && item.detail === key);
+    if (!policy.digest.enabled || policy.digest.time !== minute || alreadySent || telegramAlertSuppressed(chatId)) continue;
     if (!telegramCommandCenterStore.getPreferences(chatId).notifications.dailyReport) continue;
-    telegramDigestPushes.add(key);
     await telegramInteractionBot.sendToChat(chatId, telegramReply(await buildTelegramDigest(chatId)));
+    telegramDigestPushes.add(key);
     telegramCommandCenterStore.recordAudit(chatId, 'digest_sent', key);
   }
 }
@@ -7283,12 +7533,6 @@ async function main() {
     // Pre-fetch radar data so the first click on the tab is already warm.
     void warmPredictionRadarCache();
     startTelegramInteractionBot();
-    reportScheduler.setDailyReportEnabledChecker(() => {
-      const telegramConfig = getRuntimeTelegramConfig();
-      const chats = new Set(parseChatIds(telegramConfig.allowedChatIds, telegramConfig.chatId));
-      return chats.size === 0 || [...chats].some(chatId => telegramCommandCenterStore.getPreferences(chatId).notifications.dailyReport);
-    });
-    reportScheduler.start();
     startTelegramCommandCenterMonitor();
   });
 

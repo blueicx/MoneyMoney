@@ -19,6 +19,9 @@ test('auth middleware allows health, rejects bad token, and accepts bearer token
   const healthRes = response(); let called = false;
   middleware(request('/health'), healthRes, () => { called = true; });
   assert.equal(called, true);
+  const versionRes = response(); called = false;
+  middleware(request('/health/version'), versionRes, () => { called = true; });
+  assert.equal(called, true, 'public build identity is a read-only health endpoint');
 
   const denied = response(); middleware(request('/portfolio'), denied, () => {});
   assert.equal(denied.statusCode, 401);

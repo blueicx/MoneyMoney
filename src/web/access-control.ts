@@ -47,7 +47,7 @@ export function createAccessMiddleware(options: AccessControlOptions) {
         return res.status(429).json({ success: false, error: '请求过于频繁', requestId });
       }
     }
-    if (req.path === '/health' || req.path === '/health/live') return next();
+    if (req.path === '/health' || req.path === '/health/live' || req.path === '/health/version') return next();
     const token = extractToken(req);
     if (!options.token || !safeEqual(token, options.token)) return res.status(401).json({ success: false, error: '需要有效的访问令牌', requestId });
     next();

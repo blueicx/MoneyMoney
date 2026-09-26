@@ -11,6 +11,7 @@ export interface StockKlineBar {
 }
 
 export const STOCK_KLINE_PERIODS: Record<string, { label: string; interval: string; range: string; aggregateDays?: number }> = {
+  '1m': { label: '1分', interval: '1m', range: '7d' },
   '5m': { label: '5分', interval: '5m', range: '60d' },
   '15m': { label: '15分', interval: '15m', range: '60d' },
   '1h': { label: '1小时', interval: '1h', range: '2y' },

@@ -14,6 +14,7 @@ const {
   importPortfolioRows,
   analyzePortfolio,
   analyzeSignalQuality,
+  canTransitionSignalStatus,
   createSavedWorkspace,
 } = require('../dist/features/decision-intelligence.js');
 
@@ -176,6 +177,15 @@ test('signal quality only compares explicit baselines and warns about multiple t
   assert.ok(report.warnings.some(item => /多重检验/.test(item)));
 });
 
+test('signal lifecycle permits auditable forward transitions but blocks reopening terminal states', () => {
+  assert.equal(canTransitionSignalStatus('generated', 'confirmed'), true);
+  assert.equal(canTransitionSignalStatus('confirmed', 'paper-filled'), true);
+  assert.equal(canTransitionSignalStatus('tracking', 'closed'), true);
+  assert.equal(canTransitionSignalStatus('invalidated', 'reviewed'), true);
+  assert.equal(canTransitionSignalStatus('closed', 'generated'), false);
+  assert.equal(canTransitionSignalStatus('reviewed', 'tracking'), false);
+});
+
 test('saved workspaces restore only market-scoped instruments and safe layout state', () => {
   const workspace = createSavedWorkspace({
     name: 'AAPL 日线研究', market: 'stocks', workspace: 'analysis', instrument: 'AAPL', timeframe: '1d',
@@ -193,6 +203,7 @@ test('stable APIs and one connected decision workspace are present', () => {
     "app.get('/api/evidence'", "app.post('/api/evidence'", "app.get('/api/scenarios'", "app.post('/api/scenarios/run'",
     "app.get('/api/decisions'", "app.post('/api/decisions'", "app.get('/api/portfolio/analytics'",
     "app.post('/api/portfolio/import'", "app.get('/api/signals/quality'", "app.get('/api/workspaces'", "app.post('/api/workspaces'",
+    "app.get('/api/signals/:id/history'", "app.post('/api/signals/:id/status'",
     "app.post('/api/decisions/review-due'", "app.post('/api/workspaces/:id/share'", "app.get('/api/workspaces/shared/:id'",
   ]) assert.ok(server.includes(route), `missing ${route}`);
   assert.match(page, /decision-intelligence-tab/);

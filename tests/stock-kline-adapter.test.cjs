@@ -8,7 +8,7 @@ const {
 } = require('../dist/data/yahoo-adapter');
 
 test('stock period catalog is a single selectable set', () => {
-  assert.deepEqual(Object.keys(STOCK_KLINE_PERIODS), ['5m', '15m', '1h', '1d', '3d', '5d', '60d', '120d', '1y', '5y']);
+  assert.deepEqual(Object.keys(STOCK_KLINE_PERIODS), ['1m', '5m', '15m', '1h', '1d', '3d', '5d', '60d', '120d', '1y', '5y']);
   assert.equal(STOCK_KLINE_PERIODS['5m'].interval, '5m');
   assert.equal(STOCK_KLINE_PERIODS['1d'].interval, '1d');
   assert.equal(STOCK_KLINE_PERIODS['3d'].aggregateDays, 3);

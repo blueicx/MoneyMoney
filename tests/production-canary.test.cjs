@@ -19,6 +19,10 @@ test('production canary is read-only and exercises four markets, selected instru
   assert.match(script, /toggleRightLibrary/);
   assert.match(script, /production-canary-failure\.png/);
   assert.match(script, /production-canary-trace\.zip/);
+  assert.match(script, /api\/health\/version/);
+  assert.match(script, /EXPECTED_BUILD_ID/);
+  assert.doesNotMatch(script, /ignoreHTTPSErrors:\s*true/);
+  assert.match(workflow, /https:\/\/bluetrade\.bbroot\.com/);
   assert.match(script, /await loadPredictionRadar\(true\)/);
   assert.match(workflow, /schedule:/);
   assert.match(workflow, /workflow_dispatch:/);

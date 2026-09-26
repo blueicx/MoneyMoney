@@ -34,6 +34,26 @@ test('data lake writes atomic Parquet partitions and restores the latest revisio
   } finally { catalog.close(); fs.rmSync(root, { recursive: true, force: true }); }
 });
 
+test('real options-chain snapshots are daily partitioned, quota-counted, source-checked and queryable without synthetic history', () => {
+  const { root, catalog } = tempCatalog();
+  try {
+    const input = {
+      market: 'options', instrument: 'option:cboe:AAPL', underlyingMarket: 'stocks', source: 'CBOE Delayed Quotes',
+      fetchedAt: '2026-09-27T14:00:00.000Z', mode: 'daily', timezone: 'America/New_York',
+      snapshot: { source: 'CBOE Delayed Quotes', market: 'us_equity', asset: 'AAPL', fetchedAt: '2026-09-27T14:00:00.000Z', expiries: [{ rows: [{ instrumentName: 'AAPL260930C00100000', strike: 100, optionType: 'call', impliedVolPct: 23, volume: 4, openInterest: 30 }] }] },
+    };
+    const first = catalog.saveOptionsChainSnapshot(input);
+    const sameDay = catalog.saveOptionsChainSnapshot(input);
+    assert.equal(first.id, sameDay.id, 'daily capture is idempotent per source/instrument/trading date');
+    const manual = catalog.saveOptionsChainSnapshot({ ...input, mode: 'manual', fetchedAt: '2026-09-27T14:05:00.000Z', snapshot: { ...input.snapshot, fetchedAt: '2026-09-27T14:05:00.000Z' } });
+    assert.notEqual(first.id, manual.id);
+    assert.equal(catalog.listOptionSnapshots({ market: 'options', instrument: 'option:cboe:AAPL', from: '2026-09-27', to: '2026-09-27' }).length, 2);
+    assert.equal(catalog.listCoverage('options', 'option:cboe:AAPL', 'snapshot')[0].rowCount, 2);
+    assert.equal(catalog.getDiagnostics().byDataset['options-chain-snapshots'], 2);
+    assert.throws(() => catalog.saveOptionsChainSnapshot({ ...input, source: 'Fabricated History', snapshot: { ...input.snapshot, source: 'Fabricated History' } }), /unsupported options provider/i);
+  } finally { catalog.close(); fs.rmSync(root, { recursive: true, force: true }); }
+});
+
 test('data lake content hashes include nested bar values', async () => {
   const { root, catalog } = tempCatalog();
   try {

@@ -53,6 +53,19 @@ test('mobile summary stays market scoped and links to the trusted decision works
   assert.doesNotMatch(text, /BTC|虚拟币/);
 });
 
+test('Telegram daily digest is per-chat, market-grouped, evidence-linked and scheduled in Shanghai time', () => {
+  const server = fs.readFileSync('src/web/server.ts', 'utf8');
+  const digest = server.slice(server.indexOf('async function buildTelegramDigest'), server.indexOf('async function monitorTelegramSourceRecovery'));
+  assert.match(digest, /按市场分组/);
+  assert.match(digest, /sourceUrl/);
+  assert.match(digest, /listSignalOutcomes\(market\)/);
+  assert.match(digest, /listSourceHealthEvents\(market/);
+  assert.match(server, /zonedDigestClock\(now, 'Asia\/Shanghai'\)/);
+  assert.match(server, /notifications\.dailyReport/);
+  assert.match(server, /action === 'digest_sent'/);
+  assert.doesNotMatch(server, /reportScheduler\.start\(\)/);
+});
+
 test('private runtime diagnostics API and connected UI panels are present', () => {
   const server = fs.readFileSync('src/web/server.ts', 'utf8');
   const page = fs.readFileSync('src/web/public/index.html', 'utf8');

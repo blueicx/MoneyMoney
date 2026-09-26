@@ -130,7 +130,7 @@ async function runProductionCanary({ baseUrl, artifactDir } = {}) {
   const outputDir = artifactDir || process.env.CANARY_ARTIFACT_DIR || path.join(os.tmpdir(), `moneymoney-canary-${Date.now()}`);
   await fs.mkdir(outputDir, { recursive: true });
   const browser = await chromium.launch({ headless: true });
-  const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, ignoreHTTPSErrors: true });
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   const page = await context.newPage();
   const pageErrors = [];
   page.on('pageerror', error => pageErrors.push(error.message));
@@ -142,7 +142,17 @@ async function runProductionCanary({ baseUrl, artifactDir } = {}) {
     assert.equal(health.status(), 200, 'production health endpoint must return 200');
     const healthBody = await health.json();
     assert.equal(healthBody.status, 'alive');
+    const versionResponse = await page.request.get(`${target}/api/health/version`, { timeout: 15_000 });
+    assert.equal(versionResponse.status(), 200, 'production version endpoint must return 200 over valid TLS');
+    const version = await versionResponse.json();
+    assert.ok(version.commit && version.commit !== 'unknown', 'production build must publish a verifiable commit id');
+    const expectedCommit = String(process.env.EXPECTED_BUILD_ID || process.env.GITHUB_SHA || '').trim().toLowerCase();
+    if (expectedCommit) assert.equal(version.commit, expectedCommit, 'production domain commit must match the release being verified');
+    report.version = version;
     await enterGuest(page, target);
+    const privateRead = await page.request.get(`${target}/api/decisions?market=stocks`, { timeout: 15_000 });
+    assert.ok([401, 403].includes(privateRead.status()), `guest must not read private decision records (HTTP ${privateRead.status()})`);
+    report.guestPrivateReadStatus = privateRead.status();
     for (const market of ['stocks', 'options', 'crypto', 'prediction']) {
       await selectMarket(page, market);
       report.markets.push(market);

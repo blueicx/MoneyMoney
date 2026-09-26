@@ -143,4 +143,17 @@ describe('K-Line Upgrade & Advanced Capabilities', () => {
     assert.ok(document.querySelector('[data-chart-candle-prev]'));
     assert.ok(document.querySelector('[data-chart-candle-next]'));
   });
+
+  it('drills a selected daily candle into exchange-local intraday data and preserves a return-to-daily action', () => {
+    const html = fs.readFileSync(path.join(__dirname, '../src/web/public/index.html'), 'utf8');
+    assert.equal(typeof window.enterStockIntraday, 'function');
+    assert.equal(typeof window.exitStockIntraday, 'function');
+    assert.equal(typeof window.setStockIntradayPeriod, 'function');
+    assert.equal(typeof window.moveStockIntradayDate, 'function');
+    assert.ok(document.querySelector('[data-intraday-controls]'));
+    for (const period of ['1m', '5m', '15m']) assert.ok(document.querySelector(`[data-intraday-period="${period}"]`));
+    assert.match(html, /intradayPeriod/);
+    assert.match(html, /exchangeTimezone|stockChartExchangeTimezone/);
+    assert.match(html, /避免混入事后数据/);
+  });
 });

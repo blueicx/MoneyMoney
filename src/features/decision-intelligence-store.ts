@@ -1,6 +1,8 @@
+import crypto from 'node:crypto';
 import { stateStore } from '../storage/sqlite-state';
 import type { MarketId } from './research-contracts';
-import type { DecisionRecord, DecisionReviewDraft, EvidenceSnapshot, PortfolioRow, SavedWorkspace, ScenarioDefinition, SignalOutcome } from './decision-intelligence';
+import { researchRepository } from './research-repository';
+import type { DecisionRecord, DecisionReviewDraft, EvidenceSnapshot, PortfolioRow, SavedWorkspace, ScenarioDefinition, SignalLifecycleStatus, SignalOutcome } from './decision-intelligence';
 
 const KEYS = {
   evidence: 'decision-intelligence:evidence',
@@ -49,10 +51,34 @@ export const decisionIntelligenceStore = {
   replacePortfolio(rows: PortfolioRow[]) { stateStore.set(KEYS.portfolio, rows, 1); return rows; },
   listPortfolio(market?: MarketId) { return list<PortfolioRow>(KEYS.portfolio).filter(item => !market || item.market === market); },
 
-  saveSignalOutcome(item: SignalOutcome) { return upsert(KEYS.signals, item, 5_000); },
+  saveSignalOutcome(item: SignalOutcome) {
+    const existing = this.getSignalOutcome(item.id);
+    if (existing && (existing.market !== item.market || existing.instrument !== item.instrument)) throw new Error('信号身份和市场不可在更新时变更');
+    const status: SignalLifecycleStatus = item.status || existing?.status || (item.exitPrice != null ? 'closed' : item.invalidationReason ? 'invalidated' : 'generated');
+    const saved: SignalOutcome = { ...item, status, evidenceRefs: [...new Set(item.evidenceRefs || existing?.evidenceRefs || [])] };
+    const statusChanged = !existing || existing.status !== status;
+    const reasonChanged = Boolean(existing && existing.invalidationReason !== saved.invalidationReason && saved.invalidationReason);
+    if (statusChanged || reasonChanged) {
+      const reason = saved.statusReason?.trim() || saved.invalidationReason?.trim() || (existing ? `信号状态更新为 ${status}` : '信号首次记录');
+      const at = new Date().toISOString();
+      researchRepository.recordSignalHistory({
+        id: `${item.id}:${at}:${crypto.randomUUID()}`,
+        signalId: item.id,
+        market: item.market,
+        instrument: item.instrument,
+        ...(existing?.status ? { previousStatus: existing.status } : {}),
+        status,
+        at,
+        reason,
+        evidenceRefs: saved.evidenceRefs || [],
+      });
+    }
+    return upsert(KEYS.signals, saved, 5_000);
+  },
   listSignalOutcomes(market?: MarketId, instrument?: string) {
     return list<SignalOutcome>(KEYS.signals).filter(item => (!market || item.market === market) && (!instrument || item.instrument === instrument));
   },
+  getSignalOutcome(id: string) { return list<SignalOutcome>(KEYS.signals).find(item => item.id === id) || null; },
 
   saveWorkspace(item: SavedWorkspace) { return upsert(KEYS.workspaces, item, 200); },
   listWorkspaces(market?: MarketId) { return list<SavedWorkspace>(KEYS.workspaces).filter(item => !market || item.market === market).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)); },

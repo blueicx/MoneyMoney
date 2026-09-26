@@ -35,6 +35,7 @@ export interface DataLakeDiagnostics {
 export interface DataCoverage { market: MarketId; instrument: string; dataset: string; timeframe: string; partitionCount: number; rowCount: number; periodStart: string; periodEnd: string; latestPublishedAt: string; status: DatasetStatus; }
 export interface DataDiscrepancy { id: string; market: MarketId; instrument: string; timeframe: string; sourceA: string; sourceB: string; status: 'partial'; reason: string; evidence: Array<{ timestamp: string; closeA: number; closeB: number; differencePct: number }>; createdAt: string; }
 export interface InstrumentQuarantine { market: MarketId; instrument: string; reason: string; createdAt: string; }
+export interface OptionsChainSnapshotInput { market: 'options'; instrument: string; underlyingMarket: 'stocks' | 'crypto'; source: 'CBOE Delayed Quotes' | 'Deribit Public API'; fetchedAt: string; timezone?: string; mode: 'daily' | 'manual'; snapshot: Record<string, any>; }
 
 const BAR_FIELDS = ['timestamp', 'open', 'high', 'low', 'close'] as const;
 const IDENTIFIER = /^[A-Za-z0-9._:/-]+$/;
@@ -131,6 +132,8 @@ export class DataLakeCatalog {
       CREATE INDEX IF NOT EXISTS idx_data_discrepancies_scope ON data_discrepancies (market, instrument, created_at);
       CREATE TABLE IF NOT EXISTS instrument_identity_quarantine (market TEXT NOT NULL, instrument TEXT NOT NULL, reason TEXT NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY (market, instrument));
       CREATE TABLE IF NOT EXISTS data_backfill_jobs (id TEXT PRIMARY KEY, market TEXT NOT NULL, dataset TEXT NOT NULL, instrument TEXT NOT NULL, timeframe TEXT NOT NULL, from_at TEXT NOT NULL, to_at TEXT NOT NULL, status TEXT NOT NULL, reason TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, lease_owner TEXT, lease_expires_at TEXT, checkpoint TEXT NOT NULL DEFAULT '{"rowsWritten":0,"partitionsCommitted":0}');
+      CREATE TABLE IF NOT EXISTS options_chain_partitions (id TEXT PRIMARY KEY, market TEXT NOT NULL, instrument TEXT NOT NULL, underlying_market TEXT NOT NULL, source TEXT NOT NULL, trade_date TEXT NOT NULL, fetched_at TEXT NOT NULL, mode TEXT NOT NULL, path TEXT NOT NULL UNIQUE, content_hash TEXT NOT NULL, row_count INTEGER NOT NULL, size_bytes INTEGER NOT NULL);
+      CREATE INDEX IF NOT EXISTS idx_options_chain_lookup ON options_chain_partitions (market,instrument,trade_date,fetched_at);
       CREATE INDEX IF NOT EXISTS idx_dataset_partitions_lookup ON dataset_partitions (market, dataset, instrument, timeframe, published_at);
       CREATE INDEX IF NOT EXISTS idx_data_revisions_lookup ON data_revisions (market, dataset, instrument, timeframe, published_at);
       CREATE INDEX IF NOT EXISTS idx_snapshots_lookup ON point_in_time_snapshots (market, instrument, dataset, timeframe, as_of);
@@ -377,7 +380,71 @@ export class DataLakeCatalog {
     if (timeframe) { clauses.push('timeframe = ?'); values.push(timeframe); }
     const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
     const rows = this.db.prepare(`SELECT market,instrument,dataset,timeframe,COUNT(*) AS partitionCount,SUM(row_count) AS rowCount,MIN(period_start) AS periodStart,MAX(period_end) AS periodEnd,MAX(published_at) AS latestPublishedAt,MAX(status) AS status FROM dataset_partitions ${where} GROUP BY market,instrument,dataset,timeframe ORDER BY market,instrument,timeframe`).all(...values) as Array<Record<string, unknown>>;
-    return rows.map(row => ({ market: row.market as MarketId, instrument: String(row.instrument), dataset: String(row.dataset), timeframe: String(row.timeframe), partitionCount: Number(row.partitionCount), rowCount: Number(row.rowCount), periodStart: String(row.periodStart), periodEnd: String(row.periodEnd), latestPublishedAt: String(row.latestPublishedAt), status: row.status as DatasetStatus }));
+    const barCoverage = rows.map(row => ({ market: row.market as MarketId, instrument: String(row.instrument), dataset: String(row.dataset), timeframe: String(row.timeframe), partitionCount: Number(row.partitionCount), rowCount: Number(row.rowCount), periodStart: String(row.periodStart), periodEnd: String(row.periodEnd), latestPublishedAt: String(row.latestPublishedAt), status: row.status as DatasetStatus }));
+    if ((market && market !== 'options') || (timeframe && timeframe !== 'snapshot')) return barCoverage;
+    const optionRows = this.db.prepare(`SELECT market,instrument,COUNT(*) AS partitionCount,SUM(row_count) AS rowCount,MIN(trade_date) AS periodStart,MAX(trade_date) AS periodEnd,MAX(fetched_at) AS latestPublishedAt FROM options_chain_partitions WHERE market = ? ${instrument ? 'AND instrument = ?' : ''} GROUP BY market,instrument ORDER BY instrument`).all(...(instrument ? ['options', instrument] : ['options'])) as Array<Record<string, unknown>>;
+    const optionCoverage: DataCoverage[] = optionRows.map(row => ({ market: 'options', instrument: String(row.instrument), dataset: 'options-chain-snapshots', timeframe: 'snapshot', partitionCount: Number(row.partitionCount), rowCount: Number(row.rowCount), periodStart: String(row.periodStart), periodEnd: String(row.periodEnd), latestPublishedAt: String(row.latestPublishedAt), status: 'committed' }));
+    return timeframe === 'snapshot' ? optionCoverage : [...barCoverage, ...optionCoverage];
+  }
+
+  saveOptionsChainSnapshot(input: OptionsChainSnapshotInput) {
+    if (input.market !== 'options') throw new Error('options snapshot market must be options');
+    if (!/^(option:cboe:[A-Z0-9.]+|option:deribit:(BTC|ETH))$/i.test(input.instrument)) throw new Error('invalid options instrument identity');
+    if (!['CBOE Delayed Quotes', 'Deribit Public API'].includes(input.source)) throw new Error('unsupported options provider');
+    const isEquity = input.source === 'CBOE Delayed Quotes';
+    if (isEquity !== (input.underlyingMarket === 'stocks') || (input.source === 'Deribit Public API' && input.underlyingMarket !== 'crypto')) throw new Error('options source and underlying market mismatch');
+    if (input.snapshot?.source !== input.source || !input.snapshot?.asset || !Array.isArray(input.snapshot?.expiries)) throw new Error('options snapshot does not match an actual provider response');
+    const fetchedAt = new Date(input.fetchedAt);
+    if (!Number.isFinite(fetchedAt.getTime()) || new Date(input.snapshot.fetchedAt).getTime() !== fetchedAt.getTime()) throw new Error('options snapshot fetch time is invalid');
+    const expectedAsset = input.instrument.split(':').at(-1)!.toUpperCase();
+    if (String(input.snapshot.asset).toUpperCase() !== expectedAsset) throw new Error('options snapshot asset does not match instrument');
+    const timeZone = input.timezone || (isEquity ? 'America/New_York' : 'UTC');
+    try { new Intl.DateTimeFormat('en', { timeZone }).format(fetchedAt); } catch { throw new Error('invalid options snapshot timezone'); }
+    const tradeDate = new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(fetchedAt);
+    const rowCount = input.snapshot.expiries.reduce((sum: number, expiry: any) => sum + (Array.isArray(expiry?.rows) ? expiry.rows.length : 0), 0);
+    if (!rowCount) throw new Error('empty provider options chain is not saved as a market snapshot');
+    const snapshotHash = hash(input.snapshot);
+    const dailyKey = `${input.market}:${input.instrument}:${input.source}:${tradeDate}:daily`;
+    const id = input.mode === 'daily' ? `option_snapshot_${hash(dailyKey).slice(0, 24)}` : `option_snapshot_${hash(`${dailyKey}:${fetchedAt.toISOString()}:${snapshotHash}`).slice(0, 24)}`;
+    const payload = { id, market: input.market, instrument: input.instrument, underlyingMarket: input.underlyingMarket, source: input.source, fetchedAt: fetchedAt.toISOString(), tradeDate, timezone: timeZone, mode: input.mode, rowCount, contentHash: snapshotHash, snapshot: input.snapshot };
+    const serialized = `${stableJson(payload)}\n`;
+    const bytes = Buffer.byteLength(serialized);
+    const diagnostics = this.getDiagnostics();
+    if (diagnostics.usageBytes + bytes >= diagnostics.quotaBytes * 0.9) throw new Error('data lake reached the 90% storage stop threshold; options snapshot was not saved');
+    const safeInstrument = input.instrument.replace(/[^A-Za-z0-9._-]/g, '_');
+    const finalPath = path.join(this.lakeRoot, 'options-chain', tradeDate.slice(0, 4), tradeDate.slice(5, 7), safeInstrument, `${id}-${snapshotHash.slice(0, 12)}.json`);
+    const stagingPath = path.join(this.lakeRoot, '.staging', `${id}-${crypto.randomUUID()}.tmp`);
+    ensureDir(path.dirname(finalPath));
+    fs.writeFileSync(stagingPath, serialized, { flag: 'wx' });
+    const old = this.db.prepare('SELECT path FROM options_chain_partitions WHERE id = ?').get(id) as { path: string } | undefined;
+    try {
+      fs.renameSync(stagingPath, finalPath);
+      this.db.prepare('INSERT OR REPLACE INTO options_chain_partitions (id,market,instrument,underlying_market,source,trade_date,fetched_at,mode,path,content_hash,row_count,size_bytes) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)')
+        .run(id, input.market, input.instrument, input.underlyingMarket, input.source, tradeDate, fetchedAt.toISOString(), input.mode, finalPath, snapshotHash, rowCount, bytes);
+      if (old?.path && old.path !== finalPath) fs.rmSync(old.path, { force: true });
+    } catch (error) {
+      fs.rmSync(stagingPath, { force: true });
+      const referenced = this.db.prepare('SELECT 1 AS ok FROM options_chain_partitions WHERE path = ?').get(finalPath);
+      if (!referenced) fs.rmSync(finalPath, { force: true });
+      throw error;
+    }
+    return payload;
+  }
+
+  listOptionSnapshots(input: { market: 'options'; instrument: string; from?: string; to?: string }) {
+    if (input.market !== 'options' || !/^(option:cboe:[A-Z0-9.]+|option:deribit:(BTC|ETH))$/i.test(input.instrument)) throw new Error('invalid options market/instrument context');
+    const clauses = ['market = ?', 'instrument = ?'];
+    const values: unknown[] = ['options', input.instrument];
+    if (input.from) { clauses.push('trade_date >= ?'); values.push(input.from); }
+    if (input.to) { clauses.push('trade_date <= ?'); values.push(input.to); }
+    const rows = this.db.prepare(`SELECT id,path,source,trade_date AS tradeDate,fetched_at AS fetchedAt,underlying_market AS underlyingMarket,mode,content_hash AS contentHash,row_count AS rowCount,size_bytes AS sizeBytes FROM options_chain_partitions WHERE ${clauses.join(' AND ')} ORDER BY fetched_at`).all(...values) as Array<Record<string, any>>;
+    return rows.flatMap(row => {
+      try {
+        const content = JSON.parse(fs.readFileSync(String(row.path), 'utf8'));
+        if (content.id !== row.id || content.contentHash !== row.contentHash || hash(content.snapshot) !== row.contentHash) return [];
+        return [{ id: String(row.id), market: 'options' as const, instrument: input.instrument, underlyingMarket: String(row.underlyingMarket), source: String(row.source), tradeDate: String(row.tradeDate), fetchedAt: String(row.fetchedAt), mode: String(row.mode), contentHash: String(row.contentHash), rowCount: Number(row.rowCount), snapshot: content.snapshot }];
+      } catch { return []; }
+    });
   }
 
   listPartitions(): DatasetPartition[] {
@@ -397,6 +464,7 @@ export class DataLakeCatalog {
 
   getDiagnostics(options: { quotaBytes?: number; warningPercent?: number; stopPercent?: number } = {}): DataLakeDiagnostics {
     const partitions = this.listPartitions();
+    const optionPartitions = this.db.prepare('SELECT market,source,size_bytes AS sizeBytes,path FROM options_chain_partitions').all() as Array<{ market: MarketId; source: string; sizeBytes: number; path: string }>;
     const byMarket: Record<MarketId, number> = { stocks: 0, options: 0, crypto: 0, prediction: 0 };
     const byDataset: Record<string, number> = {};
     let usageBytes = 0;
@@ -404,6 +472,11 @@ export class DataLakeCatalog {
       if (MARKET_IDS.includes(partition.market)) byMarket[partition.market] += 1;
       byDataset[partition.dataset] = (byDataset[partition.dataset] || 0) + 1;
       try { usageBytes += fs.statSync(partition.path).size; } catch { /* catalog rows can outlive a removed local file */ }
+    }
+    for (const partition of optionPartitions) {
+      if (fs.existsSync(partition.path)) usageBytes += Number(partition.sizeBytes || 0);
+      byMarket.options += 1;
+      byDataset['options-chain-snapshots'] = (byDataset['options-chain-snapshots'] || 0) + 1;
     }
     let stagingFileCount = 0;
     try { stagingFileCount = fs.readdirSync(path.join(this.lakeRoot, '.staging'), { withFileTypes: true }).filter(item => item.isFile()).length; } catch { /* the constructor normally creates it */ }
@@ -414,7 +487,7 @@ export class DataLakeCatalog {
     const warningPercent = Number(options.warningPercent ?? 70);
     const stopPercent = Number(options.stopPercent ?? 90);
     const quotaState = usagePercent >= stopPercent ? 'blocked' : usagePercent >= warningPercent ? 'warning' : 'ok';
-    return { root: this.lakeRoot, generatedAt: new Date().toISOString(), usageBytes, quotaBytes, usagePercent, quotaState, partitionCount: partitions.length, stagingFileCount, byMarket, byDataset, backfills };
+    return { root: this.lakeRoot, generatedAt: new Date().toISOString(), usageBytes, quotaBytes, usagePercent, quotaState, partitionCount: partitions.length + optionPartitions.length, stagingFileCount, byMarket, byDataset, backfills };
   }
 
   claimNextBackfill(owner = '', leaseMs = 5 * 60 * 1000): DataBackfillJob | null {

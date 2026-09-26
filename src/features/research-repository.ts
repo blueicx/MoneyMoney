@@ -91,6 +91,23 @@ function initDb(db: Database.Database) {
       data TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_source_health_events_market_at ON source_health_events(market, at DESC);
+    CREATE TABLE IF NOT EXISTS source_health_samples (
+      id TEXT PRIMARY KEY,
+      market TEXT NOT NULL,
+      source_id TEXT NOT NULL,
+      checked_at TEXT NOT NULL,
+      data TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_source_health_samples_market_at ON source_health_samples(market, checked_at DESC);
+    CREATE TABLE IF NOT EXISTS signal_status_history (
+      id TEXT PRIMARY KEY,
+      signal_id TEXT NOT NULL,
+      market TEXT NOT NULL,
+      instrument TEXT NOT NULL,
+      at TEXT NOT NULL,
+      data TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_signal_status_history_signal_at ON signal_status_history(market, signal_id, at ASC);
   `);
 }
 
@@ -295,5 +312,33 @@ export const researchRepository = {
   },
   listSourceHealthEvents(market: string, limit = 100) {
     return (db.prepare('SELECT data FROM source_health_events WHERE market = ? ORDER BY at DESC LIMIT ?').all(market, Math.max(1, Math.min(500, limit))) as any[]).map(row => JSON.parse(row.data));
+  },
+  appendSourceHealthSamples(samples: any[], retentionDays = 30) {
+    const insert = db.prepare('INSERT OR IGNORE INTO source_health_samples (id, market, source_id, checked_at, data) VALUES (?, ?, ?, ?, ?)');
+    const cutoff = new Date(Date.now() - Math.max(7, Math.min(90, retentionDays)) * 86_400_000).toISOString();
+    db.transaction((items: any[]) => {
+      for (const sample of items) {
+        const minute = String(sample.checkedAt || '').slice(0, 16);
+        const id = `${sample.market}:${sample.sourceId}:${minute}`;
+        insert.run(id, sample.market, sample.sourceId, sample.checkedAt, JSON.stringify(sample));
+      }
+      db.prepare('DELETE FROM source_health_samples WHERE checked_at < ?').run(cutoff);
+    })(samples);
+    return samples.length;
+  },
+  listSourceHealthSamples(market: string, from: string, to: string, limit = 100_000) {
+    const boundedLimit = Math.max(1, Math.min(100_000, limit));
+    return (db.prepare('SELECT data FROM source_health_samples WHERE market = ? AND checked_at >= ? AND checked_at <= ? ORDER BY checked_at DESC LIMIT ?').all(market, from, to, boundedLimit) as any[]).map(row => JSON.parse(row.data));
+  },
+  recordSignalHistory(event: { id: string; signalId: string; market: string; instrument: string; at: string; status: string; previousStatus?: string; reason: string; evidenceRefs: string[] }) {
+    assertMarketContext({ market: event.market as MarketId, workspace: 'signal-history', instrument: event.instrument });
+    if (!event.id?.trim() || !event.signalId?.trim() || !event.reason?.trim() || !Number.isFinite(Date.parse(event.at))) throw new Error('Signal history event is incomplete');
+    db.prepare('INSERT OR IGNORE INTO signal_status_history (id, signal_id, market, instrument, at, data) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(event.id, event.signalId, event.market, event.instrument, event.at, JSON.stringify({ ...event, evidenceRefs: [...new Set(event.evidenceRefs || [])] }));
+    return event;
+  },
+  listSignalHistory(market: string, signalId: string, limit = 500) {
+    const boundedLimit = Math.max(1, Math.min(2_000, limit));
+    return (db.prepare('SELECT data FROM signal_status_history WHERE market = ? AND signal_id = ? ORDER BY at ASC, rowid ASC LIMIT ?').all(market, signalId, boundedLimit) as any[]).map(row => JSON.parse(row.data));
   }
 };

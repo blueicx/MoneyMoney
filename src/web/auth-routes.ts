@@ -104,7 +104,7 @@ export function registerAuthRoutes(app: Express): void {
 
 export function registerApiAuthProtection(app: Express): void {
   app.use('/api', (req: Request, res: Response, next: NextFunction) => {
-    if (req.path.startsWith('/auth/') || req.path === '/health' || req.path === '/health/live' || req.path === '/health/readiness') {
+    if (req.path.startsWith('/auth/') || req.path === '/health' || req.path === '/health/live' || req.path === '/health/readiness' || req.path === '/health/version') {
       next();
       return;
     }
