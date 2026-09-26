@@ -21,6 +21,8 @@ test('production canary is read-only and exercises four markets, selected instru
   assert.match(script, /production-canary-trace\.zip/);
   assert.match(script, /api\/health\/version/);
   assert.match(script, /EXPECTED_BUILD_ID/);
+  assert.match(script, /#market-workspace-shell.*dataset\?\.marketScope|querySelector\('\#market-workspace-shell'\)\?\.dataset\?\.marketScope/, 'market wait must observe the rendered workspace scope across URL restoration');
+  assert.match(script, /waitForFunction\(\(\) => \{[\s\S]*stock-library-search-result/, 'stock search must wait for a completed result, not the initial empty state');
   assert.doesNotMatch(script, /ignoreHTTPSErrors:\s*true/);
   assert.match(workflow, /https:\/\/bluetrade\.bbroot\.com/);
   assert.match(script, /await loadPredictionRadar\(true\)/);

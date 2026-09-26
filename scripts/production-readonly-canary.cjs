@@ -57,7 +57,7 @@ async function enterGuest(page, baseUrl) {
 
 async function selectMarket(page, market) {
   await page.evaluate(scope => window.setMarketScope(scope), market);
-  await page.waitForFunction(scope => document.body.dataset.marketScope === scope, market, { timeout: 15_000 });
+  await page.waitForFunction(scope => document.querySelector('#market-workspace-shell')?.dataset?.marketScope === scope, market, { timeout: 15_000 });
   const library = market === 'stocks' ? '#stock-instrument-library' : `[data-market-library="${market}"]`;
   await page.locator(library).waitFor({ state: 'visible', timeout: 15_000 });
 }
@@ -67,7 +67,11 @@ async function selectAndCheckNonPopularStock(page) {
   const search = page.locator('#stock-library-search-input');
   await search.fill('SNDK');
   await search.press('Enter');
-  await page.waitForFunction(() => !document.querySelector('#stock-library-search-results')?.textContent?.includes('搜索中'), null, { timeout: 25_000 });
+  await page.waitForFunction(() => {
+    const results = document.querySelector('#stock-library-search-results');
+    if (!results) return false;
+    return Boolean(results.querySelector('.stock-library-search-result')) || /没有找到股票结果|搜索暂时失败/.test(results.textContent || '');
+  }, null, { timeout: 25_000 });
   const rows = page.locator('#stock-library-search-results .stock-library-search-result');
   assert.ok(await rows.count(), 'non-popular stock SNDK should resolve to a selectable result or explicit empty-state row');
   await rows.first().click();
@@ -165,7 +169,7 @@ async function runProductionCanary({ baseUrl, artifactDir } = {}) {
       if (market === 'prediction') report.settlementEvidence = await checkSettlementEvidence(page);
     }
     await page.evaluate(() => window.setMarketScope('stocks'));
-    await page.waitForFunction(() => document.body.dataset.marketScope === 'stocks');
+    await page.waitForFunction(() => document.querySelector('#market-workspace-shell')?.dataset?.marketScope === 'stocks');
     await page.evaluate(() => window.toggleRightLibrary());
     await page.waitForFunction(() => document.querySelector('#market-workspace-shell')?.getAttribute('data-right-library') === 'collapsed');
     await page.evaluate(() => window.toggleRightLibrary());
