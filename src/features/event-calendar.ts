@@ -42,6 +42,24 @@ export interface UpcomingEventCalendar {
   events: UpcomingEvent[];
   warnings: string[];
   stale?: boolean;
+  sourceStatus?: { macro: CalendarSourceStatus; earnings: CalendarSourceStatus };
+  sourceReasons?: Partial<Record<'macro' | 'earnings', string>>;
+}
+
+export type CalendarSourceStatus = 'live' | 'cached' | 'partial' | 'unavailable';
+
+export function classifyCalendarSourceStatus(input: {
+  macroAvailable: boolean;
+  macroStale: boolean;
+  earningsSucceeded: number;
+  earningsRequested: number;
+}): { macro: CalendarSourceStatus; earnings: CalendarSourceStatus } {
+  const requested = Math.max(0, Math.trunc(input.earningsRequested));
+  const succeeded = Math.max(0, Math.min(requested, Math.trunc(input.earningsSucceeded)));
+  return {
+    macro: !input.macroAvailable ? 'unavailable' : input.macroStale ? 'cached' : 'live',
+    earnings: requested === 0 || succeeded === 0 ? 'unavailable' : succeeded < requested ? 'partial' : 'live',
+  };
 }
 
 interface MergeInput {
@@ -532,9 +550,28 @@ async function fetchUpcomingEventCalendar(days: number): Promise<UpcomingEventCa
     earnings,
     referenceDate: dates[0] ? new Date(`${dates[0]}T00:00:00Z`) : reference,
   });
-  if (!macro) result.warnings.unshift('宏观日历暂时不可用');
-  if (!earnings.length) result.warnings.push('财报日历暂时不可用');
-  return result;
+  const sourceStatus = classifyCalendarSourceStatus({
+    macroAvailable: Boolean(macro),
+    macroStale: Boolean(macro?.stale),
+    earningsSucceeded: earnings.length,
+    earningsRequested: dates.length,
+  });
+  const sourceReasons: UpcomingEventCalendar['sourceReasons'] = {};
+  if (!macro) {
+    result.warnings.unshift('宏观日历暂时不可用');
+    sourceReasons.macro = String(macroResult.status === 'rejected' ? macroResult.reason?.message || macroResult.reason : '宏观日历来源不可用');
+  } else if (macro.stale) sourceReasons.macro = 'ForexFactory 当前请求失败，使用本地近期缓存';
+  if (!earnings.length) {
+    result.warnings.push('财报日历暂时不可用');
+    sourceReasons.earnings = earningsResults.status === 'fulfilled'
+      ? String(earningsDays.find(item => item.status === 'rejected')?.reason?.message || 'Nasdaq 财报日历来源不可用')
+      : String(earningsResults.reason?.message || 'Nasdaq 财报日历来源不可用');
+  } else if (earnings.length < dates.length) {
+    const failures = earningsDays.filter(item => item.status === 'rejected').length;
+    result.warnings.push(`财报日历部分日期暂不可用（成功 ${earnings.length}/${dates.length} 天）`);
+    sourceReasons.earnings = `Nasdaq 财报日历 ${failures} 个日期请求失败；其余日期仍有数据`;
+  }
+  return { ...result, sourceStatus, sourceReasons };
 }
 
 export async function getUpcomingEventCalendar(requestedDays?: number, force = false): Promise<UpcomingEventCalendar> {
@@ -557,7 +594,18 @@ export async function getUpcomingEventCalendar(requestedDays?: number, force = f
       const parsed = JSON.parse(await fs.promises.readFile(DISK_CACHE, 'utf8')) as UpcomingEventCalendar;
       const age = Date.now() - new Date(parsed.fetchedAt).getTime();
       if (Array.isArray(parsed.events) && age >= 0 && age <= MAX_STALE_MS) {
-        const value = { ...parsed, stale: true };
+        const value: UpcomingEventCalendar = {
+          ...parsed,
+          stale: true,
+          sourceStatus: {
+            macro: 'cached',
+            earnings: 'cached',
+          },
+          sourceReasons: {
+            macro: '宏观日历请求失败，使用本地近期缓存',
+            earnings: '财报日历请求失败，使用本地近期缓存',
+          },
+        };
         memoryCache = { ts: Date.now(), value };
         return value;
       }

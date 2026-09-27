@@ -4056,12 +4056,27 @@ async function loadPaperDriftStatus() {
     window.mm_driftGates = gates;
     const results = Array.isArray(body.data?.results) ? body.data.results : [];
     const coverage = body.data?.coverage || {};
+    const history = Array.isArray(body.data?.history) ? body.data.history : [];
+    const historyHtml = history.length ? `<details style="margin-top:7px;"><summary>按策略版本查看最近复核记录（${history.length} 条）</summary>${history.slice(0, 10).map(item => `<div style="padding:5px 0;border-top:1px solid var(--border);">${safeNewsText(item.strategyId)}@${safeNewsText(item.strategyVersion)} · ${safeNewsText(item.result?.status)} · ${safeNewsText(item.result?.evaluatedAt)} · ${Number(item.result?.pairedCount || 0)} 笔 · ${safeNewsText(item.result?.reason || '')}</div>`).join('')}</details>` : '<div style="margin-top:5px;color:var(--text-secondary);">尚无策略版本复核历史。</div>';
     host.innerHTML = `<div>配对覆盖：已平仓 ${Number(coverage.closedOrders || 0)} 笔，明确关联 ${Number(coverage.explicitlyLinked || 0)} 笔，有效新鲜样本 ${Number(coverage.freshPairs || 0)} 笔，过期/不可用 ${Number(coverage.stalePairs || 0)} 笔，未匹配 ${Number(coverage.rejectedPairs || 0)} 笔。</div>` +
       `<div style="margin-top:5px;">${results.length ? results.map(item => `${safeNewsText(item.strategyId)}@${safeNewsText(item.strategyVersion)}：最近30天有效配对 ${Number(item.result?.pairedCount || 0)} 笔，${safeNewsText(item.result?.reason || '暂无有效判断')}`).join('<br>') : safeNewsText(body.reason || '暂无有效配对')}。旧订单未关联实验时不参与判断。</div>` +
-      gates.filter(item => item.paused).map((item, index) => `<div style="margin-top:8px;">${safeNewsText(item.strategyId)}@${safeNewsText(item.strategyVersion)}：仅策略信号提醒已暂停；价格、风险和来源故障提醒继续运行。<button class="tab" type="button" data-drift-index="${gates.indexOf(item)}" onclick="resumePaperDriftGate(this)">人工确认恢复</button></div>`).join('');
+      `<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:7px;"><button class="tab" type="button" onclick="evaluatePaperDriftNow(this)">立即复核策略版本</button><span style="font-size:10px;color:var(--text-secondary);">每日定时复核 · 不足20笔或快照过期不会暂停</span></div>` +
+      historyHtml + gates.filter(item => item.paused).map(item => `<div style="margin-top:8px;">${safeNewsText(item.strategyId)}@${safeNewsText(item.strategyVersion)}：仅策略信号提醒已暂停；价格、风险和来源故障提醒继续运行。<button class="tab" type="button" data-drift-index="${gates.indexOf(item)}" onclick="resumePaperDriftGate(this)">人工确认恢复</button></div>`).join('');
   } catch (error) {
     if (market === activeMarketScope) host.textContent = error.message || '策略偏差读取失败';
   }
+}
+async function evaluatePaperDriftNow(button) {
+  if (window.mm_isLoggedIn !== true || window.mm_isGuest) return showToast('管理员登录后可复核策略偏差', 'error');
+  if (button) button.disabled = true;
+  try {
+    const response = await fetch('/api/research/drift/evaluate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    const body = await response.json();
+    if (!response.ok || !body.success) throw new Error(body.reason || '策略偏差复核失败');
+    showToast(body.reason || `已复核 ${body.data.strategies} 个策略版本`, 'success');
+    await loadPaperDriftStatus();
+  } catch (error) { showToast(error.message || '策略偏差复核失败', 'error'); }
+  finally { if (button) button.disabled = false; }
 }
 async function resumePaperDriftGate(button) {
   const gate = (window.mm_driftGates || [])[Number(button?.dataset?.driftIndex)];
@@ -9783,12 +9798,15 @@ async function loadMarketTimeline() {
       if (!entityResponse.ok || !entityPayload.success) throw new Error(entityPayload.reason || '标的事件来源不可用');
       if (!isCurrentMarketScopeToken(scopeToken) || signal.aborted) return;
       window.mm_eventEntities = entityPayload.data || [];
-      host.innerHTML = window.mm_eventEntities.length ? window.mm_eventEntities.map(item => {
+      const sourceLabels = { ok: '可用', stale: '缓存', unavailable: '不可用' };
+      const sourceStatusLine = Object.entries(entityPayload.sourceStatus || {}).map(([source, status]) => `${safeNewsText(source)}：${sourceLabels[status] || safeNewsText(status)}`).join(' · ');
+      const statusLine = `<div style="font-size:10px;color:var(--text-secondary);margin-bottom:8px;">时间线状态：${safeNewsText(entityPayload.dataStatus || 'unknown')}${sourceStatusLine ? ` · 来源 ${sourceStatusLine}` : ''}</div>`;
+      host.innerHTML = statusLine + (window.mm_eventEntities.length ? window.mm_eventEntities.map(item => {
         const evidence = formatSourceEvidence({ title: item.title, sourceName: item.source?.name, sourceUrl: item.source?.url, publishedAt: item.publishedAt, fetchedAt: item.retrievedAt, sourceStatus: item.publishedAt ? 'live' : 'partial' });
         const id = safeAttr(item.id);
         const canStudy = item.publishedAt && Date.parse(item.occurredAt) <= Date.now();
         return `${evidence}<div class="event-research-actions"><button class="tab" type="button" data-event-id="${id}" onclick="openEventKlineFromTimeline(this)">定位 K 线</button><button class="tab guest-admin-only" type="button" data-event-id="${id}" onclick="openEventResearchFromTimeline(this)" ${canStudy ? '' : 'disabled title="尚未发生或缺少可核实的发布时间"'}>事件研究</button><button class="tab guest-admin-only" type="button" data-event-id="${id}" onclick="openEventDecisionFromTimeline(this)">写决策日记</button></div>`;
-      }).join('') : `<div class="empty-tip">${safeNewsText(entityPayload.reason || '该股票暂无可核实的事件与新闻')}</div>`;
+      }).join('') : `<div class="empty-tip">${safeNewsText(entityPayload.reason || '该股票暂无可核实的事件与新闻')}</div>`);
       return;
     }
     const res = await fetch('/api/events/timeline?' + query.toString(), { signal });
@@ -10362,15 +10380,32 @@ function timelineSelectedEntity(button) {
   const entity = (window.mm_eventEntities || []).find(item => item.id === button?.dataset?.eventId);
   return entity && activeMarketScope === 'stocks' && entity.instrument === currentInstrumentFilterId() ? entity : null;
 }
+async function persistTimelineEventEvidence(entity) {
+  const fetchedAt = entity.retrievedAt || new Date().toISOString();
+  const publishedAt = entity.publishedAt && Date.parse(entity.publishedAt) <= Date.parse(fetchedAt) ? entity.publishedAt : null;
+  const sourceName = entity.source?.name || '事件来源未标明';
+  const result = await decisionFetchJson('/api/evidence', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
+    id: `event-evidence-${entity.id}`, market: entity.market, instrument: entity.instrument, workspace: 'event-intelligence',
+    dataStatus: publishedAt ? 'historical' : 'partial',
+    source: { id: `event-source:${sourceName.toLowerCase().replace(/[^a-z0-9.-]+/g, '-')}`, name: sourceName, url: entity.source?.url || null },
+    observedAt: publishedAt || fetchedAt, fetchedAt,
+    fields: { title: entity.title, kind: entity.kind, occurredAt: entity.occurredAt, publishedAt: entity.publishedAt, retrievedAt: entity.retrievedAt, asOf: entity.asOf, sourceName, sourceUrl: entity.source?.url || null },
+    expectedFields: ['title', 'kind', 'occurredAt', 'publishedAt', 'retrievedAt', 'asOf', 'sourceName', 'sourceUrl'],
+    ...(!publishedAt ? { reason: '来源未提供可核实且不晚于抓取时间的发布时间；不可用于时点回测入场条件' } : {}),
+  }) });
+  return result.data;
+}
 function openEventKlineFromTimeline(button) {
   const entity = timelineSelectedEntity(button);
   if (!entity) return showToast('事件与当前标的不匹配，请刷新', 'error');
   window.openWorkspace('stock-quotes');
   applyStockKlineAsOf(entity.occurredAt.slice(0, 10));
 }
-function openEventResearchFromTimeline(button) {
+async function openEventResearchFromTimeline(button) {
   const entity = timelineSelectedEntity(button);
   if (!entity || !entity.publishedAt) return showToast('缺少可核实的发布时间，不能建立时点研究', 'error');
+  try { window.mm_selectedStudyEventEvidenceId = (await persistTimelineEventEvidence(entity)).id; }
+  catch (error) { return showToast(error.message || '事件证据快照保存失败', 'error'); }
   const start = new Date(Math.max(Date.parse(entity.occurredAt), Date.parse(entity.publishedAt)));
   const local = new Date(start.getTime() - start.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
   window.mm_selectedStudyEventId = entity.id;
@@ -10381,11 +10416,14 @@ function openEventResearchFromTimeline(button) {
   if (title) title.value = entity.title;
   document.getElementById('event-study-result')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
-function openEventDecisionFromTimeline(button) {
+async function openEventDecisionFromTimeline(button) {
   const entity = timelineSelectedEntity(button);
   if (!entity) return showToast('事件与当前标的不匹配，请刷新', 'error');
+  let evidence;
+  try { evidence = await persistTimelineEventEvidence(entity); }
+  catch (error) { return showToast(error.message || '事件证据快照保存失败', 'error'); }
   window.openWorkspace('decision-intelligence');
-  window.mm_decisionEvidenceIds = [...new Set([...(window.mm_decisionEvidenceIds || []), entity.id])];
+  window.mm_decisionEvidenceIds = [...new Set([...(window.mm_decisionEvidenceIds || []), evidence.id])];
   const field = document.getElementById('decision-thesis');
   if (field && !field.value) field.value = `围绕「${entity.title}」的研究假设：`;
   field?.focus();
@@ -13533,23 +13571,59 @@ async function loadSourceSloPanel() {
   if (!host) return;
   const markets = [['stocks', '股票'], ['options', '期权'], ['crypto', '虚拟币'], ['prediction', '预测市场']];
   try {
+    const auth = typeof waitForDashboardAuthState === 'function' ? await waitForDashboardAuthState() : { loggedIn: window.mm_isLoggedIn === true, guest: window.mm_isGuest === true };
     const reports = await Promise.all(markets.map(async ([market]) => {
       const response = await fetch(`/api/data/slo?market=${encodeURIComponent(market)}&window=7d`, { cache: 'no-store' });
       const payload = await response.json();
       if (!response.ok || !payload.success) throw new Error(payload.reason || payload.error || `${market} SLO 加载失败`);
       return { market, payload };
     }));
+    const summaryResponse = await fetch('/api/data/canaries/summary', { cache: 'no-store' });
+    const summaryPayload = await summaryResponse.json();
+    if (!summaryResponse.ok || !summaryPayload.success) throw new Error(summaryPayload.reason || '每日数据巡检摘要加载失败');
+    let canaryDetail = null;
+    if (auth.loggedIn && !auth.guest) {
+      const selectedMarket = ['stocks', 'options', 'crypto', 'prediction'].includes(activeMarketScope) ? activeMarketScope : '';
+      const detailResponse = await fetch(`/api/data/canaries?limit=1${selectedMarket ? `&market=${encodeURIComponent(selectedMarket)}` : ''}`, { cache: 'no-store' });
+      const detailPayload = await detailResponse.json();
+      if (detailResponse.ok && detailPayload.success) canaryDetail = detailPayload.data?.[0] || null;
+    }
     const rows = reports.flatMap(({ market, payload }) => (payload.sources || []).map(source => {
       const marketLabel = markets.find(([id]) => id === market)?.[1] || market;
       const coverage = source.dataCoveragePct == null ? '—' : `${source.dataCoveragePct}%`;
       const freshness = source.latestDataAt ? `${Math.floor(Number(source.dataFreshnessSeconds || 0) / 3600)} 小时前` : source.latestSuccessAt ? '有返回 · 来源未给数据时点' : '暂无成功响应';
       return `<tr><td>${safeNewsText(marketLabel)}</td><td>${safeNewsText(source.sourceName)}</td><td>${source.responseSuccessPct}% (${source.available}/${source.checks})</td><td>${coverage} · 连续空结果 ${source.consecutiveEmpty}</td><td>${safeNewsText(freshness)}</td></tr>`;
     }));
-    host.innerHTML = rows.length
+    const canarySummary = summaryPayload.data || {};
+    const canaryMarketLabels = markets.map(([id, label]) => {
+      const item = canarySummary.marketStatus?.[id] || { checked: 0, status: 'empty', reason: '尚无检查' };
+      return `<span style="display:inline-flex;gap:5px;align-items:center;padding:4px 7px;margin:2px;border:1px solid var(--border);border-radius:8px;">${safeNewsText(label)} <b>${safeNewsText(item.status)}</b> · ${Number(item.checked || 0)} 项${item.reason ? ` · ${safeNewsText(item.reason)}` : ''}</span>`;
+    }).join('');
+    const canaryRows = (canaryDetail?.results || []).map(item => {
+      const capabilities = Object.entries(item.capabilities || {}).map(([name, cap]) => `<div style="margin-left:10px;color:var(--text-secondary);">${safeNewsText(name)}：${safeNewsText(cap.status)} · ${safeNewsText(cap.source)} · ${Number(cap.count ?? 0)} 条 · 数据 ${safeNewsText(cap.updatedAt || '来源未提供时点')} · 检查 ${safeNewsText(cap.retrievedAt || item.checkedAt)}${cap.coverage ? ` · 覆盖 ${safeNewsText(cap.coverage.from || '—')} 至 ${safeNewsText(cap.coverage.to || '—')}` : ''}${cap.reason ? ` · ${safeNewsText(cap.reason)}` : ''}</div>`).join('');
+      return `<details style="padding:6px 0;border-top:1px solid var(--border);"><summary>${safeNewsText(item.label)} · ${safeNewsText(item.status)} · 检查 ${safeNewsText(item.checkedAt)}${item.reason ? ` · ${safeNewsText(item.reason)}` : ''}</summary>${capabilities || `<div style="color:var(--red);">${safeNewsText(item.reason || '巡检没有返回能力明细')}</div>`}</details>`;
+    }).join('');
+    const adminCanary = auth.loggedIn && !auth.guest
+      ? `<div style="margin-top:9px;"><button class="tab" type="button" onclick="runCoverageCanaryFromUi(this)">立即重跑四市场数据巡检</button>${canaryDetail ? `<div style="margin-top:5px;font-size:10px;">最近一次标的结果 ${canaryRows || '当前筛选市场没有标的巡检记录'}</div>` : ''}</div>` : '';
+    host.innerHTML = `${rows.length
       ? `<div style="font-size:12px;font-weight:700;margin-bottom:7px;">近 7 天：接口成功率与实际数据覆盖</div><div style="overflow-x:auto;"><table style="width:100%;min-width:600px;border-collapse:collapse;font-size:11px;"><thead><tr><th>市场</th><th>数据源</th><th>接口成功率</th><th>数据覆盖率</th><th>最近数据</th></tr></thead><tbody>${rows.join('')}</tbody></table></div><div style="font-size:10px;color:var(--text-secondary);margin-top:5px;">接口成功只代表来源响应正常；覆盖率统计返回实际记录的检查占比。</div>`
-      : '<div style="font-size:12px;color:var(--text-secondary);">近 7 天尚无来源检查记录；这不代表市场没有数据。</div>';
+      : '<div style="font-size:12px;color:var(--text-secondary);">近 7 天尚无来源检查记录；这不代表市场没有数据。</div>'}<div style="font-size:12px;font-weight:700;margin-top:10px;">四市场每日真实数据巡检 · ${safeNewsText(canarySummary.completedAt || '尚未运行')}</div><div style="margin-top:4px;">${canaryMarketLabels}</div>${canarySummary.reason ? `<div style="font-size:10px;color:var(--text-secondary);margin-top:4px;">${safeNewsText(canarySummary.reason)}</div>` : ''}${adminCanary}`;
   } catch (error) {
     host.innerHTML = `<div style="font-size:12px;color:var(--text-secondary);">覆盖率加载失败：${safeNewsText(error.message)} <button class="tab" onclick="loadSourceSloPanel()">重试</button></div>`;
+  }
+}
+async function runCoverageCanaryFromUi(button) {
+  if (window.mm_isLoggedIn !== true || window.mm_isGuest) { showToast('管理员登录后可运行数据巡检', 'error'); return; }
+  if (button) { button.disabled = true; button.textContent = '正在巡检真实来源…'; }
+  try {
+    const response = await fetch('/api/data/canaries/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    const payload = await response.json();
+    if (!response.ok || !payload.success) throw new Error(payload.reason || '覆盖巡检失败');
+    showToast(`巡检完成：${payload.data.summary.total} 个标的 · ${payload.data.status}`, 'success');
+    await loadSourceSloPanel();
+  } catch (error) {
+    showToast(error.message || '覆盖巡检失败', 'error');
+    if (button) { button.disabled = false; button.textContent = '立即重跑四市场数据巡检'; }
   }
 }
 function forecastLabMetric(label, value, sub = '', color = '') {

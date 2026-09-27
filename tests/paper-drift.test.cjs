@@ -59,6 +59,20 @@ test('drift gate persists per-market strategy pause and requires manual resume',
   assert.equal(gate.isPaused('stocks', 'test-ma', 'v1'), false);
 });
 
+test('drift gate stores daily evaluation history and deduplicates the same pause transition', () => {
+  const memory = new Map();
+  const store = { get: key => memory.get(key) || null, set: (key, value) => memory.set(key, value) };
+  const gate = new StrategyDriftGate(store);
+  const paused = analyzePaperDrift(Array.from({ length: 20 }, (_, index) => sample(index)), new Date('2026-09-25T00:00:00.000Z'));
+  assert.equal(gate.recordEvaluation('stocks', 'test-ma', 'v1', paused), true);
+  assert.equal(gate.recordEvaluation('stocks', 'test-ma', 'v1', paused), false);
+  assert.equal(gate.listHistory('stocks', 'test-ma', 'v1').length, 1);
+  assert.equal(gate.listHistory('crypto', 'test-ma', 'v1').length, 0);
+  assert.equal(gate.isPaused('stocks', 'test-ma', 'v1'), true);
+  gate.resume('stocks', 'test-ma', 'v1');
+  assert.equal(gate.listHistory('stocks', 'test-ma', 'v1')[0].result.status, 'paused');
+});
+
 test('only explicit same-market experiment and snapshot links become drift samples', () => {
   const paper = {
     id: 'paper-1', instrumentId: 'stock:us:AAPL', instrumentType: 'stock', side: 'SELL',
@@ -88,11 +102,13 @@ test('only explicit same-market experiment and snapshot links become drift sampl
 test('paper order and drift API wire lineage, scoped pause and manual resume', () => {
   const server = fs.readFileSync(path.join(__dirname, '../src/web/server.ts'), 'utf8');
   assert.match(server, /app\.get\('\/api\/research\/drift'/);
+  assert.match(server, /app\.get\('\/api\/research\/drift\/history'/);
   assert.match(server, /app\.post\('\/api\/research\/drift\/resume'/);
   assert.match(server, /collectPaperDriftSamples\(/);
   assert.match(server, /dataSnapshotId: body\.dataSnapshotId/);
-  assert.match(server, /driftGate\.update\(/);
+  assert.match(server, /driftGate\.recordEvaluation\(/);
   assert.match(server, /summarizePaperDriftCoverage\(/);
+  assert.match(server, /evaluatePaperDriftMonitor/);
 });
 
 test('analysis engine consults the persisted drift gate for strategy signals', () => {

@@ -1,5 +1,12 @@
 const assert = require('node:assert/strict');
-const { buildUpcomingEvents } = require('../dist/features/event-calendar');
+const { buildUpcomingEvents, classifyCalendarSourceStatus } = require('../dist/features/event-calendar');
+
+assert.deepEqual(classifyCalendarSourceStatus({ macroAvailable: false, macroStale: false, earningsSucceeded: 2, earningsRequested: 7 }), {
+  macro: 'unavailable', earnings: 'partial',
+});
+assert.deepEqual(classifyCalendarSourceStatus({ macroAvailable: true, macroStale: true, earningsSucceeded: 0, earningsRequested: 7 }), {
+  macro: 'cached', earnings: 'unavailable',
+});
 
 const result = buildUpcomingEvents({
   days: 7,

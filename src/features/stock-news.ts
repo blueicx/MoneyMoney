@@ -15,6 +15,14 @@ interface YahooSearchResponse {
 const NEWS_TTL_MS = 5 * 60_000;
 const cache = new Map<string, { at: number; value: NewsItem[] }>();
 
+export interface StockNewsSnapshot {
+  items: NewsItem[];
+  status: 'live' | 'cached';
+  updatedAt: string | null;
+  retrievedAt: string;
+  source: 'Yahoo Finance';
+}
+
 function clean(value: unknown): string {
   return String(value ?? '').trim();
 }
@@ -44,11 +52,14 @@ export function parseYahooNewsResponse(payload: YahooSearchResponse, symbolInput
   }).map(({ related: _related, ...item }) => item).slice(0, 15);
 }
 
-export async function getStockNews(symbolInput: string): Promise<NewsItem[]> {
+export async function getStockNewsSnapshot(symbolInput: string): Promise<StockNewsSnapshot> {
   const symbol = clean(symbolInput).toUpperCase();
   if (!/^[A-Z][A-Z0-9.-]{0,9}$/.test(symbol)) throw new Error('股票代码无效');
   const cached = cache.get(symbol);
-  if (cached && Date.now() - cached.at < NEWS_TTL_MS) return cached.value;
+  if (cached && Date.now() - cached.at < NEWS_TTL_MS) return {
+    items: cached.value, status: 'cached', updatedAt: cached.value.map(item => item.publishedAt).filter(Boolean).sort().at(-1) || null,
+    retrievedAt: new Date(cached.at).toISOString(), source: 'Yahoo Finance',
+  };
   const url = `https://query1.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(symbol)}&newsCount=15&quotesCount=0`;
   const response = await fetch(url, {
     headers: { Accept: 'application/json', 'User-Agent': 'MoneyMoney/1.0 (stock research; contact@moneymoney.app)' },
@@ -56,6 +67,14 @@ export async function getStockNews(symbolInput: string): Promise<NewsItem[]> {
   });
   if (!response.ok) throw new Error(`Yahoo Finance news HTTP ${response.status}`);
   const result = parseYahooNewsResponse(await response.json() as YahooSearchResponse, symbol);
-  cache.set(symbol, { at: Date.now(), value: result });
-  return result;
+  const freshRetrievedAt = new Date().toISOString();
+  cache.set(symbol, { at: Date.parse(freshRetrievedAt), value: result });
+  return {
+    items: result, status: 'live', updatedAt: result.map(item => item.publishedAt).filter(Boolean).sort().at(-1) || null,
+    retrievedAt: freshRetrievedAt, source: 'Yahoo Finance',
+  };
+}
+
+export async function getStockNews(symbolInput: string): Promise<NewsItem[]> {
+  return (await getStockNewsSnapshot(symbolInput)).items;
 }

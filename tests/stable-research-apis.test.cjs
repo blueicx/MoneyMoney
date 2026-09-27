@@ -22,6 +22,35 @@ test('stable research and paper API routes are registered', () => {
   ]) assert.ok(serverSource.includes(route), `missing ${route}`);
 });
 
+test('coverage canary exposes a public aggregate and private target history with an admin rerun', () => {
+  assert.ok(serverSource.includes("app.get('/api/data/canaries/summary'"));
+  assert.ok(serverSource.includes("app.get('/api/data/canaries'"));
+  assert.ok(serverSource.includes("app.post('/api/data/canaries/run'"));
+  const privateRoute = serverSource.slice(serverSource.indexOf("app.get('/api/data/canaries',"), serverSource.indexOf("app.get('/api/data/canaries/targets'"));
+  assert.match(privateRoute, /adminOnly/);
+  assert.match(serverSource, /dataCoverageCanary\.run/);
+});
+
+test('instrument events preserve source-health reasons instead of collapsing failed providers to empty', () => {
+  const instrumentSource = fs.readFileSync('src/features/unified-instruments.ts', 'utf8');
+  assert.ok(instrumentSource.includes('sourceStatus: { ...overview.sourceStatus }'));
+  assert.ok(instrumentSource.includes('sectionReasons: { ...overview.sectionReasons }'));
+  assert.match(serverSource, /summarizeTimelineAvailability\(/);
+  assert.match(serverSource, /timeline\.sourceStatus/);
+  assert.match(serverSource, /persistTimelineEventEvidence\(selectedEvent\)/);
+  assert.match(serverSource, /entityEvidence\.id|selectedEventEvidenceId/);
+  const html = fs.readFileSync('src/web/public/index.html', 'utf8');
+  assert.match(html, /persistTimelineEventEvidence\(entity\)/);
+  assert.match(html, /entityPayload\.sourceStatus/);
+});
+
+test('strategy drift has a scheduled evaluator and persisted per-version history API', () => {
+  assert.match(serverSource, /app\.get\('\/api\/research\/drift\/history'/);
+  assert.match(serverSource, /listHistory\(/);
+  assert.match(serverSource, /startPaperDriftMonitor\(/);
+  assert.match(serverSource, /recordEvaluation\(/);
+});
+
 test('options history route is registered before the dynamic asset route', () => {
   const history = serverSource.indexOf("app.get('/api/options/history'");
   const dynamic = serverSource.indexOf("app.get('/api/options/:asset'");

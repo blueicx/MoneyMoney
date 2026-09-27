@@ -1,4 +1,5 @@
 const assert = require('node:assert/strict');
+const test = require('node:test');
 const fs = require('node:fs');
 const path = require('node:path');
 
@@ -12,6 +13,7 @@ const {
   overviewDataStatus,
   filterEventsForInstrument,
   buildInstrumentTimeline,
+  summarizeTimelineAvailability,
   UNIFIED_AI_CACHE_TTL_MS,
 } = require('../dist/features/unified-instruments');
 
@@ -73,6 +75,44 @@ assert.equal(secTimeline[0].publishedAt, '2026-09-20T17:00:00.000Z');
 assert.equal(secTimeline[0].source, 'SEC EDGAR');
 assert.equal(secTimeline[0].url, 'https://www.sec.gov/example');
 assert.equal(secTimeline[1].publishedAt, null);
+test('timeline coverage keeps source-empty distinct from unavailable and unsupported markets', () => {
+  const empty = summarizeTimelineAvailability({
+    market: 'stocks', itemCount: 0,
+    sourceStatus: { events: 'ok', news: 'ok', filings: 'ok' },
+    sectionReasons: { events: '暂无财报事件', news: '暂无相关新闻' },
+  });
+  assert.equal(empty.dataStatus, 'empty');
+  assert.match(empty.reason, /来源已响应/);
+
+  const partial = summarizeTimelineAvailability({
+    market: 'stocks', itemCount: 0,
+    sourceStatus: { events: 'ok', news: 'unavailable', filings: 'unavailable' },
+    sectionReasons: { news: 'Yahoo timeout', filings: 'SEC timeout' },
+  });
+  assert.equal(partial.dataStatus, 'partial');
+  assert.match(partial.reason, /Yahoo timeout/);
+
+  const partialCalendar = summarizeTimelineAvailability({
+    market: 'stocks', itemCount: 0,
+    sourceStatus: { events: 'partial', news: 'ok', filings: 'unavailable' },
+    sectionReasons: { events: 'Nasdaq 财报日历 5/7 天请求失败', filings: 'SEC timeout' },
+  });
+  assert.equal(partialCalendar.dataStatus, 'partial');
+  assert.match(partialCalendar.reason, /财报日历/);
+
+  const unavailable = summarizeTimelineAvailability({
+    market: 'stocks', itemCount: 0,
+    sourceStatus: { events: 'unavailable', news: 'unavailable', filings: 'unavailable' },
+    sectionReasons: { events: 'calendar down', news: 'news down', filings: 'SEC down' },
+  });
+  assert.equal(unavailable.dataStatus, 'unavailable');
+  assert.match(unavailable.reason, /calendar down/);
+
+  const unsupported = summarizeTimelineAvailability({
+    market: 'crypto', itemCount: 0, sourceStatus: {}, sectionReasons: { events: '当前市场不支持' },
+  });
+  assert.equal(unsupported.dataStatus, 'unsupported');
+});
 const unifiedSource = fs.readFileSync(path.join(__dirname, '../src/features/unified-instruments.ts'), 'utf8');
 assert.doesNotMatch(unifiedSource, /normalized\.type === 'crypto'\s*\? newsFeed\.getNews\(\)/);
 

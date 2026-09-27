@@ -46,7 +46,7 @@ import { priceTracker } from '../features/price-tracker';
 import { kellySizer, backtester, ASSET_BACKTEST_STRATEGY_VERSION } from '../features/kelly-backtest';
 import { pushNotification } from '../features/notifications';
 import { newsFeed, settingsManager } from '../features/news-settings';
-import { getStockNews } from '../features/stock-news';
+import { getStockNews, getStockNewsSnapshot } from '../features/stock-news';
 import { reportScheduler } from '../features/report-scheduler';
 import { binanceFeed, alertManager, anomalyDetector } from '../features/binance';
 import { llmAnalyzer, redditSentiment, whaleMonitor, strategyComparison, tradeJournal } from '../features/ai-social';
@@ -84,13 +84,13 @@ import { getMarketRegime } from '../features/market-regime';
 import { getSupportResistance } from '../features/support-resistance';
 import { getMultiTimeframeConfluence } from '../features/multi-timeframe';
 import { getEventRisk } from '../features/event-risk';
-import { getCachedPredictionRadarSlice, getPredictionRadar, warmPredictionRadarCache } from '../features/prediction-radar';
+import { getCachedPredictionRadarSlice, getPredictionRadar, warmPredictionRadarCache, type PredictionMarket, type PredictionRadar } from '../features/prediction-radar';
 import { getPredictionHistory } from '../features/prediction-history';
 import { getForecastLabReport, resolveForecastCase } from '../features/forecast-lab';
 import { calculatePredictionPosition } from '../features/prediction-position-sizer';
 import { aiCommentaryConfigured, getAiMarketCommentary } from '../features/ai-commentary';
 import { getAiConfigurationStatus, testAiConnection, type AiChain } from '../features/ai-runtime-config';
-import { unifiedInstrumentService, normalizeInstrumentRef, type InstrumentType } from '../features/unified-instruments';
+import { unifiedInstrumentService, normalizeInstrumentRef, summarizeTimelineAvailability, type InstrumentType } from '../features/unified-instruments';
 import { stockDataService } from '../features/stock-data-service';
 import { buildStockCoverageMap } from '../features/instrument-coverage';
 import { MARKET_SCOPES, filterInstrumentResults, type MarketScope } from '../features/market-scope';
@@ -153,9 +153,11 @@ import { dataLakeWorker } from '../storage/data-lake-worker';
 import { EventStudyRepository, buildEventStudyCohort, classifyEventCategory, runEventStudy } from '../features/event-study';
 import { PredictionSettlementRepository, buildPolymarketResolutionEndpoint, buildSettlementEndpoint, normalizeSettlementEvidence, settlementPayloadMatches } from '../features/prediction-settlement';
 import { analyzePaperDrift, analyzePaperDriftByStrategy, collectPaperDriftSamples, summarizePaperDriftCoverage, samePaperInstrument, StrategyDriftGate } from '../features/paper-drift';
+import { DataCoverageCanary, DEFAULT_DATA_COVERAGE_CANARY_TARGETS, shouldRunOncePerShanghaiDay, summarizeCoverageCanaryHistory, toPublicCoverageCanarySummary, type CanaryCapabilityResult, type CanaryDataStatus, type DataCoverageCanaryTarget, type DataCoverageCanaryRun } from '../features/data-coverage-canary';
 import { buildEventEntities, clusterEventEntities, selectResearchEvent } from '../features/event-intelligence';
 import { curlCommand } from '../utils/platform-command';
 import { STOCK_KLINE_PERIODS, createYahooStockKlineAdapter } from '../data/yahoo-adapter';
+import { createBinanceKlineAdapter } from '../data/binance-kline-adapter';
 import { actionsForScreener, fieldsForScreener, filterRows, isScreenerScope, paginateRows, serializeTemplate, sortRows, type ScreenerFilter, type ScreenerScope, type ScreenerSort } from '../features/market-screener';
 import { compareInstruments, createCompareSnapshot, type CompareInstrument, type CompareScope } from '../features/instrument-compare';
 import {
@@ -195,6 +197,13 @@ const eventStudyRepository = new EventStudyRepository(stateStore);
 const predictionSettlementRepository = new PredictionSettlementRepository(stateStore);
 const predictionSettlementRefreshes = new Map<string, Promise<ReturnType<typeof normalizeSettlementEvidence>>>();
 const driftGate = new StrategyDriftGate(stateStore);
+const dataCoverageCanary = new DataCoverageCanary(stateStore, checkCoverageCanaryTarget);
+const cryptoCoverageAdapters = new Map<string, ReturnType<typeof createBinanceKlineAdapter>>();
+let coverageCanaryRadarPromise: Promise<PredictionRadar> | null = null;
+let coverageCanaryTimer: NodeJS.Timeout | null = null;
+let coverageCanaryTask: Promise<DataCoverageCanaryRun | null> | null = null;
+let paperDriftMonitorTimer: NodeJS.Timeout | null = null;
+let paperDriftMonitorTask: Promise<unknown> | null = null;
 // A rejected optional/background data refresh must not take down the dashboard.
 // Route handlers still report their own errors; this last-resort observer keeps
 // long-lived local sessions alive and records the source error without secrets.
@@ -633,7 +642,251 @@ app.get('/api/data/coverage', (req, res) => {
   if (rawMarket && !MARKET_IDS.includes(rawMarket as MarketId)) return res.status(400).json({ success: false, error: 'Invalid market context' });
   const data = dataLakeCatalog.listCoverage(rawMarket as MarketId | undefined, instrument, timeframe);
   const conflicts = rawMarket ? dataLakeCatalog.listDiscrepancies(rawMarket as MarketId, instrument).filter(item => !timeframe || item.timeframe === timeframe) : [];
-  res.json({ success: true, data, market: rawMarket || 'all', instrument: instrument || null, timeframe: timeframe || null, dataStatus: conflicts.length ? 'partial' : data.length ? 'historical' : 'empty', source: 'MoneyMoney local data coverage catalog', updatedAt: new Date().toISOString(), reason: conflicts.length ? `${conflicts.length} 条数据源差异待核对` : data.length ? null : '当前筛选范围暂无已发布数据分区', discrepancyCount: conflicts.length });
+  const isGuest = (req as any).user?.role === 'guest';
+  const runs = dataCoverageCanary.listRuns(90);
+  const canaryHistory = !isGuest ? {
+    windows: {
+      '7d': summarizeCoverageCanaryHistory(runs, 7).filter(item => (!rawMarket || item.market === rawMarket) && (!instrument || item.instrument === instrument)),
+      '30d': summarizeCoverageCanaryHistory(runs, 30).filter(item => (!rawMarket || item.market === rawMarket) && (!instrument || item.instrument === instrument)),
+    },
+    lastRun: toPublicCoverageCanarySummary(runs[0] || null),
+  } : toPublicCoverageCanarySummary(runs[0] || null);
+  const publicData = isGuest ? data.map(item => ({ market: item.market, dataset: item.dataset, timeframe: item.timeframe, status: item.status, partitionCount: item.partitionCount, rowCount: item.rowCount })) : data;
+  res.json({ success: true, data: publicData, market: rawMarket || 'all', instrument: isGuest ? null : instrument || null, timeframe: timeframe || null, dataStatus: conflicts.length ? 'partial' : data.length ? 'historical' : 'empty', source: 'MoneyMoney local data coverage catalog + scheduled source canary', updatedAt: new Date().toISOString(), reason: conflicts.length ? `${conflicts.length} 条数据源差异待核对` : data.length ? null : '当前筛选范围暂无已发布数据分区', discrepancyCount: isGuest ? undefined : conflicts.length, canary: canaryHistory });
+});
+
+const predictionSourceKey: Partial<Record<PredictionMarket['platform'], keyof PredictionRadar['sources']>> = {
+  Polymarket: 'polymarket', Kalshi: 'kalshi', Manifold: 'manifold',
+  'Good Judgment Open': 'gjopen', Metaculus: 'metaculus',
+};
+const predictionVenue: Record<PredictionMarket['platform'], string> = {
+  Polymarket: 'polymarket', Kalshi: 'kalshi', Manifold: 'manifold',
+  'Good Judgment Open': 'gjopen', Metaculus: 'metaculus',
+};
+
+function mapCoverageStatus(status: string): CanaryDataStatus {
+  if (status === 'fresh' || status === 'live') return 'live';
+  if (status === 'stale' || status === 'cached') return 'cached';
+  if (['partial', 'empty', 'unavailable', 'unsupported', 'failed', 'delayed'].includes(status)) return status as CanaryDataStatus;
+  return 'unavailable';
+}
+
+function coverageCapability(input: {
+  status: CanaryDataStatus; source: string; updatedAt?: string | null; retrievedAt?: string | null;
+  count?: number | null; coverage?: { from?: string | null; to?: string | null }; reason?: string | null;
+}): CanaryCapabilityResult {
+  return { ...input, updatedAt: input.updatedAt || null, retrievedAt: input.retrievedAt || null, count: input.count ?? null };
+}
+
+function coverageCryptoAdapter(symbol: string): ReturnType<typeof createBinanceKlineAdapter> {
+  const normalized = symbol.toUpperCase();
+  let adapter = cryptoCoverageAdapters.get(normalized);
+  if (!adapter) {
+    adapter = createBinanceKlineAdapter({ limit: 30 });
+    cryptoCoverageAdapters.set(normalized, adapter);
+  }
+  return adapter;
+}
+
+async function getCanaryPredictionRadar(): Promise<PredictionRadar> {
+  if (!coverageCanaryRadarPromise) coverageCanaryRadarPromise = getPredictionRadar('', 250);
+  return coverageCanaryRadarPromise;
+}
+
+function predictionTargetSource(market: PredictionMarket): keyof PredictionRadar['sources'] | null {
+  return predictionSourceKey[market.platform] || null;
+}
+
+function predictionPlatformForVenue(venue: string): PredictionMarket['platform'] | null {
+  return (Object.entries(predictionVenue) as Array<[PredictionMarket['platform'], string]>).find(([, value]) => value === venue)?.[0] || null;
+}
+
+async function checkCoverageCanaryTarget(target: DataCoverageCanaryTarget): Promise<{ capabilities: Record<string, CanaryCapabilityResult>; reason?: string | null }> {
+  const identity = target.instrument.match(/^([^:]+):([^:]+):(.+)$/)!;
+  const venue = identity[2];
+  const symbol = identity[3];
+  if (target.market === 'stocks') {
+    const stockSymbol = symbol.toUpperCase();
+    const [overview, news, insider] = await Promise.allSettled([
+      stockDataService.overview(stockSymbol), getStockNewsSnapshot(stockSymbol), getInsiderRadar(stockSymbol),
+    ]);
+    const map = buildStockCoverageMap(stockSymbol, {
+      overview,
+      news: news.status === 'fulfilled' ? { status: 'fulfilled', value: news.value.items } : news,
+      insider,
+    });
+    const capabilities = Object.fromEntries(Object.entries(map.capabilities).map(([name, item]) => [name, coverageCapability({
+      status: mapCoverageStatus(item.status), source: item.source, updatedAt: item.updatedAt,
+      retrievedAt: item.retrievedAt, count: item.count, coverage: item.coverage, reason: item.reason,
+    })]));
+    if (news.status === 'fulfilled') capabilities.news = coverageCapability({
+      status: news.value.status, source: news.value.source, updatedAt: news.value.updatedAt,
+      retrievedAt: news.value.retrievedAt, count: news.value.items.length,
+      reason: news.value.items.length ? null : 'Yahoo Finance 已响应，但没有该标的相关新闻',
+    });
+    return { capabilities };
+  }
+  if (target.market === 'options') {
+    if (venue !== 'cboe') return { capabilities: { optionsChain: coverageCapability({ status: 'unsupported', source: 'CBOE delayed options', reason: `当前期权巡检不支持交易场所 ${venue}` }) } };
+    try {
+      const snapshot = await getEquityOptionsSnapshot(symbol);
+      const rows = snapshot.expiries.flatMap(expiry => expiry.rows);
+      const expiries = snapshot.expiries.map(expiry => new Date(expiry.expiryMs).toISOString());
+      return { capabilities: {
+        optionsChain: coverageCapability({ status: rows.length ? 'delayed' : 'empty', source: snapshot.source, retrievedAt: snapshot.fetchedAt, count: rows.length, coverage: { from: expiries[0] || null, to: expiries.at(-1) || null }, reason: rows.length ? null : 'CBOE 已响应，但该标的没有返回期权合约记录' }),
+        underlyingQuote: coverageCapability({ status: 'delayed', source: snapshot.source, retrievedAt: snapshot.fetchedAt, count: Number.isFinite(snapshot.spot) ? 1 : 0, reason: 'CBOE 未提供该快照对应的底层报价时间戳' }),
+      } };
+    } catch (error: any) {
+      const reason = String(error?.message || 'CBOE 期权链请求失败');
+      const noRecords = /暂无|HTTP 404/i.test(reason);
+      const status: CanaryDataStatus = noRecords ? 'empty' : 'unavailable';
+      return { capabilities: { optionsChain: coverageCapability({ status, source: 'CBOE Delayed Quotes', reason }) }, reason };
+    }
+  }
+  if (target.market === 'crypto') {
+    if (venue !== 'binance') return { capabilities: { bars: coverageCapability({ status: 'unsupported', source: 'Binance public history', reason: `当前加密数据巡检不支持交易场所 ${venue}` }) } };
+    const snapshot = await coverageCryptoAdapter(symbol).fetch({ symbol, period: '1d', limit: 30 });
+    const bars = snapshot.data || [];
+    const first = bars[0];
+    const last = bars.at(-1);
+    const status: CanaryDataStatus = !bars.length
+      ? snapshot.status === 'unavailable' ? 'unavailable' : 'empty'
+      : snapshot.status === 'stale' ? 'cached' : snapshot.status === 'live' ? 'live' : 'unavailable';
+    return { capabilities: { bars: coverageCapability({
+      status, source: snapshot.source,
+      updatedAt: last ? new Date(last.time).toISOString() : null,
+      retrievedAt: snapshot.fetchedAt, count: bars.length,
+      coverage: { from: first ? new Date(first.time).toISOString() : null, to: last ? new Date(last.time).toISOString() : null },
+      reason: snapshot.error || (bars.length ? null : '来源成功响应，但没有历史K线记录'),
+    }) } };
+  }
+  const radar = await getCanaryPredictionRadar();
+  const selected = radar.markets.find(item => predictionVenue[item.platform] === venue && item.id === symbol);
+  if (!selected) {
+    const platform = predictionPlatformForVenue(venue);
+    const providerKey = platform ? predictionSourceKey[platform] : null;
+    const provider = providerKey ? radar.sources[providerKey] : null;
+    const status: CanaryDataStatus = !provider ? 'unsupported' : provider.ok ? 'empty' : 'unavailable';
+    return { capabilities: { probability: coverageCapability({ status, source: providerKey || 'prediction source', retrievedAt: provider?.checkedAt || radar.updatedAt, reason: provider?.error || (provider?.ok ? '来源已响应，但当前没有该活动事件' : '预测市场事件来源不可用') }) } };
+  }
+  const key = predictionTargetSource(selected);
+  const provider = key ? radar.sources[key] : null;
+  const checkedAt = provider?.checkedAt || radar.updatedAt;
+  const ageMs = Date.now() - Date.parse(checkedAt || '');
+  const status: CanaryDataStatus = !provider ? 'unsupported' : !provider.ok ? 'unavailable' : ageMs > 15 * 60_000 ? 'cached' : 'live';
+  return { capabilities: { probability: coverageCapability({
+    status, source: selected.platform, retrievedAt: checkedAt, count: 1,
+    reason: provider?.error || (status === 'cached' ? '显示最近一次来源快照；来源检查时间已超过15分钟' : null),
+  }) } };
+}
+
+async function resolveCoverageCanaryInputs(): Promise<{ targets: DataCoverageCanaryTarget[]; marketReasons?: DataCoverageCanaryRun['marketReasons'] }> {
+  const targets = dataCoverageCanary.listTargets();
+  if (targets.some(item => item.market === 'prediction')) return { targets };
+  try {
+    const radar = await getCanaryPredictionRadar();
+    const active = radar.markets.filter(item => {
+      const sourceKey = predictionTargetSource(item);
+      const source = sourceKey ? radar.sources[sourceKey] : null;
+      const closeAt = item.endDate ? Date.parse(item.endDate) : NaN;
+      const isOpen = !Number.isFinite(closeAt) || closeAt > Date.now();
+      const hasActivity = Number(item.activityScore) > 0 || Number(item.volume24h) > 0 || Number(item.liquidity) > 0;
+      return Boolean(source?.ok && item.id && item.title && isOpen && hasActivity && Number.isFinite(item.yesPrice) && item.yesPrice > 0 && item.yesPrice < 1);
+    }).sort((a, b) => Number(b.activityScore) - Number(a.activityScore));
+    const first = active[0];
+    if (first) {
+      const venue = predictionVenue[first.platform];
+      return { targets: [...targets, { market: 'prediction', instrument: `prediction:${venue}:${first.id}`, label: `活动预测事件 · ${(first.titleZh || first.title).slice(0, 90)}`, requiredCapabilities: ['probability'] }] };
+    }
+    const sources = Object.values(radar.sources);
+    const succeeded = sources.filter(item => item.ok).length;
+    const failed = sources.filter(item => !item.ok).length;
+    const status: CanaryDataStatus = failed && succeeded ? 'partial' : failed ? 'unavailable' : 'empty';
+    const details = sources.filter(item => !item.ok && item.error).map(item => item.error).slice(0, 3).join('；');
+    return { targets, marketReasons: { prediction: { status, source: 'prediction venue radar', reason: status === 'empty' ? '来源响应成功，但没有符合条件的活动事件' : details || '预测市场来源部分或全部不可用' } } };
+  } catch (error: any) {
+    return { targets, marketReasons: { prediction: { status: 'unavailable', source: 'prediction venue radar', reason: error?.message || '预测市场来源巡检失败' } } };
+  }
+}
+
+async function runCoverageCanaryNow(): Promise<DataCoverageCanaryRun> {
+  coverageCanaryRadarPromise = null;
+  try {
+    return await dataCoverageCanary.runResolved(resolveCoverageCanaryInputs, new Date());
+  } finally {
+    coverageCanaryRadarPromise = null;
+  }
+}
+
+async function runCoverageCanaryIfDue(): Promise<DataCoverageCanaryRun | null> {
+  if (coverageCanaryTask) return null;
+  coverageCanaryRadarPromise = null;
+  coverageCanaryTask = dataCoverageCanary.runIfDue(new Date(), resolveCoverageCanaryInputs)
+    .catch(error => {
+      if (!/already running/i.test(String(error?.message || error))) logger.warn('coverage_canary_run_failed', { error: String(error?.message || error) });
+      return null;
+    })
+    .finally(() => { coverageCanaryTask = null; coverageCanaryRadarPromise = null; });
+  return coverageCanaryTask as Promise<DataCoverageCanaryRun | null>;
+}
+
+function startCoverageCanaryMonitor(): void {
+  if (coverageCanaryTimer) return;
+  void runCoverageCanaryIfDue();
+  coverageCanaryTimer = setInterval(() => { void runCoverageCanaryIfDue(); }, 15 * 60_000);
+  coverageCanaryTimer.unref?.();
+}
+
+function stopCoverageCanaryMonitor(): void {
+  if (coverageCanaryTimer) clearInterval(coverageCanaryTimer);
+  coverageCanaryTimer = null;
+}
+
+app.get('/api/data/canaries/summary', (_req, res) => {
+  const latest = dataCoverageCanary.listRuns(1)[0] || null;
+  res.json({ success: true, data: toPublicCoverageCanarySummary(latest), dataStatus: latest?.status || 'empty', source: 'daily four-market data coverage canary', updatedAt: latest?.completedAt || null, reason: latest ? null : '尚无覆盖巡检记录' });
+});
+
+app.get('/api/data/canaries', (req, res) => {
+  if (!adminOnly(req, res)) return;
+  const market = typeof req.query.market === 'string' ? req.query.market as MarketId : undefined;
+  if (market && !MARKET_IDS.includes(market)) return res.status(400).json({ success: false, dataStatus: 'failed', reason: '市场范围无效' });
+  const limit = Math.max(1, Math.min(90, Number(req.query.limit) || 30));
+  const runs = dataCoverageCanary.listRuns(90).map(run => market ? { ...run, results: run.results.filter(item => item.market === market) } : run).slice(0, limit);
+  const now = new Date();
+  res.json({ success: true, data: runs, windows: {
+    '7d': summarizeCoverageCanaryHistory(dataCoverageCanary.listRuns(90), 7, now).filter(item => !market || item.market === market),
+    '30d': summarizeCoverageCanaryHistory(dataCoverageCanary.listRuns(90), 30, now).filter(item => !market || item.market === market),
+  }, market: market || 'all', dataStatus: runs.length ? 'historical' : 'empty', source: 'SQLite persisted daily coverage canary', updatedAt: runs[0]?.completedAt || null, reason: runs.length ? null : '暂无覆盖巡检历史' });
+});
+
+app.get('/api/data/canaries/targets', (req, res) => {
+  if (!adminOnly(req, res)) return;
+  const data = dataCoverageCanary.listTargets();
+  res.json({ success: true, data, dataStatus: data.length ? 'cached' : 'empty', source: 'SQLite coverage canary target registry', updatedAt: new Date().toISOString(), reason: null });
+});
+
+app.put('/api/data/canaries/targets', (req, res) => {
+  if (!adminOnly(req, res)) return;
+  try {
+    const data = dataCoverageCanary.saveTargets(Array.isArray(req.body?.targets) ? req.body.targets : []);
+    stateStore.appendAudit({ id: `coverage-canary-targets-${crypto.randomUUID()}`, action: 'coverage_canary_targets_updated', detail: `管理员更新了 ${data.length} 个巡检标的` });
+    res.json({ success: true, data, dataStatus: 'cached', source: 'SQLite coverage canary target registry', updatedAt: new Date().toISOString(), reason: null });
+  } catch (error: any) {
+    res.status(400).json({ success: false, dataStatus: 'failed', source: 'SQLite coverage canary target registry', updatedAt: new Date().toISOString(), reason: error?.message || '巡检标的配置无效' });
+  }
+});
+
+app.post('/api/data/canaries/run', async (req, res) => {
+  if (!adminOnly(req, res)) return;
+  try {
+    const run = await runCoverageCanaryNow();
+    stateStore.appendAudit({ id: `coverage-canary-run-${run.id}`, action: 'coverage_canary_run', detail: `管理员手动完成 ${run.summary.total} 个标的的覆盖巡检` });
+    res.json({ success: true, data: run, dataStatus: run.status, source: 'live provider coverage canary', updatedAt: run.completedAt, reason: null });
+  } catch (error: any) {
+    const conflict = /already running/i.test(String(error?.message || error));
+    res.status(conflict ? 409 : 503).json({ success: false, dataStatus: conflict ? 'partial' : 'unavailable', source: 'live provider coverage canary', updatedAt: new Date().toISOString(), reason: conflict ? '已有覆盖巡检任务运行中' : error?.message || '覆盖巡检失败' });
+  }
 });
 
 app.get('/api/data/discrepancies', (req, res) => {
@@ -727,6 +980,7 @@ app.post('/api/event-studies', express.json(), async (req, res) => {
     const asOf = new Date(Math.min(requestedAsOf, Date.now())).toISOString();
     assertMarketContext({ market, workspace: 'event-study', instrument });
     let selectedEvent: ReturnType<typeof selectResearchEvent> | null = null;
+    let selectedEventEvidenceId: string | null = null;
     let eventEntities: ReturnType<typeof buildEventEntities> = [];
     let cohortInstrument = instrument;
     if (market === 'stocks') {
@@ -736,6 +990,7 @@ app.post('/api/event-studies', express.json(), async (req, res) => {
       cohortInstrument = ref.id;
       if (eventId) {
         selectedEvent = selectResearchEvent(eventEntities, eventId, asOf);
+        selectedEventEvidenceId = persistTimelineEventEvidence(selectedEvent).id;
         eventAt = new Date(Math.max(Date.parse(selectedEvent.occurredAt), Date.parse(selectedEvent.publishedAt!))).toISOString();
       }
     } else if (eventId) {
@@ -773,7 +1028,7 @@ app.post('/api/event-studies', express.json(), async (req, res) => {
       warnings: [...result.warnings, ...(cohort?.warnings || []), ...(!targetTitle && market === 'stocks' ? ['未提供事件标题或关联来源事件，未计算同类历史事件分布。'] : []), ...(benchmarkReason ? [`基准数据不可用：${benchmarkReason}`] : [])],
       source: selectedEvent?.source.name || (typeof body.source === 'string' ? body.source.trim() || historical.source || undefined : historical.source || undefined),
       sourceUrl: selectedEvent?.source.url || (typeof body.sourceUrl === 'string' ? body.sourceUrl.trim() || undefined : undefined),
-      evidenceRefs: selectedEvent ? [selectedEvent.id, ...(historical.snapshot ? [historical.snapshot.id] : [])] : historical.snapshot ? [historical.snapshot.id] : [],
+      evidenceRefs: selectedEvent ? [selectedEvent.id, ...(selectedEventEvidenceId ? [selectedEventEvidenceId] : []), ...(historical.snapshot ? [historical.snapshot.id] : [])] : historical.snapshot ? [historical.snapshot.id] : [],
     });
     res.status(201).json(decisionEnvelope({ market, instrument, data: record, dataStatus: 'historical', source: historical.source || 'MoneyMoney local Parquet catalog', updatedAt: historical.updatedAt || undefined, reason: null }));
   } catch (error: any) {
@@ -2174,6 +2429,8 @@ app.get('/api/diagnostics', async (req, res) => {
     const sources = await getSourceHealth(market || 'all');
     const jobs = researchRepository.listJobs(market).slice(0, 50);
     const telegramConfig = getRuntimeTelegramConfig();
+    const coverageRuns = dataCoverageCanary.listRuns(90);
+    const coverageLatest = coverageRuns[0] || null;
     let recoveryDrill: unknown = null;
     try {
       const drillPath = path.join(DATA_ROOT, 'recovery-drill-last.json');
@@ -2186,6 +2443,19 @@ app.get('/api/diagnostics', async (req, res) => {
         version: process.env.APP_VERSION || process.env.npm_package_version || 'unknown',
         storage: getStorageHealth(),
         dataLake: dataLakeCatalog.getDiagnostics(),
+        coverageCanary: {
+          latest: coverageLatest,
+          windows: {
+            '7d': summarizeCoverageCanaryHistory(coverageRuns, 7).filter(item => !market || item.market === market),
+            '30d': summarizeCoverageCanaryHistory(coverageRuns, 30).filter(item => !market || item.market === market),
+          },
+        },
+        paperDriftMonitor: {
+          lastRunAt: stateStore.get<string>(PAPER_DRIFT_MONITOR_LAST_RUN_KEY),
+          lease: stateStore.getLease(PAPER_DRIFT_MONITOR_LEASE_KEY),
+          pausedStrategies: driftGate.list(market).filter(item => item.paused),
+          latestEvaluations: driftGate.listHistory(market, undefined, undefined, 30),
+        },
         recoveryDrill,
         sources: { total: sources.total, online: sources.online, updatedAt: sources.updatedAt, unavailable: sources.items.filter(item => !item.ok).map(item => ({ id: item.id, detail: item.detail })) },
         researchJobs: jobs.reduce<Record<string, number>>((acc, job) => { acc[job.status] = (acc[job.status] || 0) + 1; return acc; }, {}),
@@ -2621,12 +2891,17 @@ app.get('/api/stocks/:symbol/coverage', async (req, res) => {
     const data = buildStockCoverageMap(symbol, { overview, news, insider });
     const values = Object.values(data.capabilities);
     const available = values.filter(item => item.status === 'live' || item.status === 'cached').length;
-    res.json(createDataEnvelope({
+    const canaryRuns = dataCoverageCanary.listRuns(90);
+    const canary = {
+      '7d': summarizeCoverageCanaryHistory(canaryRuns, 7).find(item => item.market === 'stocks' && item.instrument === data.instrument) || null,
+      '30d': summarizeCoverageCanaryHistory(canaryRuns, 30).find(item => item.market === 'stocks' && item.instrument === data.instrument) || null,
+    };
+    res.json({ ...createDataEnvelope({
       market: 'stocks', instrument: data.instrument, data,
       dataStatus: available === values.length ? 'live' : available ? 'partial' : 'unavailable',
       source: 'instrument coverage map', updatedAt: data.updatedAt,
       reason: available ? null : '该标的当前没有可用数据能力',
-    }));
+    }), canary });
   } catch (error: any) {
     res.status(400).json({ success: false, market: 'stocks', instrument: `stock:us:${symbol}`, dataStatus: 'failed', source: 'instrument coverage map', updatedAt: null, reason: error?.message || '覆盖地图不可用' });
   }
@@ -2641,6 +2916,40 @@ function eventInstrumentRef(market: MarketId, instrumentId: string) {
   return normalizeInstrumentRef({ type: type as InstrumentType, venue, symbol, title: symbol, aliases: [] });
 }
 
+function persistTimelineEventEvidence(entity: ReturnType<typeof buildEventEntities>[number]) {
+  const retrievedAt = new Date(entity.retrievedAt).getTime();
+  const publishedAt = entity.publishedAt && Date.parse(entity.publishedAt) <= retrievedAt ? entity.publishedAt : null;
+  const hasPublishedEvidence = Boolean(publishedAt);
+  const evidence = createEvidenceSnapshot({
+    id: `event-evidence-${entity.id}`,
+    market: entity.market,
+    instrument: entity.instrument,
+    workspace: 'event-intelligence',
+    dataStatus: hasPublishedEvidence ? 'historical' : 'partial',
+    source: {
+      id: `event-source:${String(entity.source.name || 'unknown').toLowerCase().replace(/[^a-z0-9.-]+/g, '-')}`,
+      name: entity.source.name || '事件来源未标明',
+      url: entity.source.url,
+    },
+    observedAt: publishedAt || entity.retrievedAt,
+    fetchedAt: entity.retrievedAt,
+    fields: {
+      title: entity.title,
+      kind: entity.kind,
+      occurredAt: entity.occurredAt,
+      publishedAt: entity.publishedAt,
+      retrievedAt: entity.retrievedAt,
+      asOf: entity.asOf,
+      sourceName: entity.source.name,
+      sourceUrl: entity.source.url,
+    },
+    expectedFields: ['title', 'kind', 'occurredAt', 'publishedAt', 'retrievedAt', 'asOf', 'sourceName', 'sourceUrl'],
+    ...(hasPublishedEvidence ? {} : { reason: '来源未提供可核实且不晚于抓取时间的发布时间；不能用于时点回测入场条件' }),
+  });
+  decisionIntelligenceStore.saveEvidence(evidence);
+  return evidence;
+}
+
 async function readEventIntelligence(req: express.Request, res: express.Response, grouped: boolean): Promise<void> {
   const market = String(req.query.market || req.query.scope || '') as MarketId;
   const instrument = String(req.query.instrument || req.query.instrumentId || '').trim();
@@ -2653,7 +2962,8 @@ async function readEventIntelligence(req: express.Request, res: express.Response
     const timeline = await unifiedInstrumentService.timeline(ref);
     const entities = buildEventEntities(timeline.items, { market, instrument: ref.id, retrievedAt: timeline.generatedAt, asOf: timeline.generatedAt });
     const data = grouped ? clusterEventEntities(entities) : entities;
-    res.json(decisionEnvelope({ market, instrument: ref.id, data, dataStatus: data.length ? 'live' : market === 'stocks' ? 'empty' : 'unsupported', source: 'scoped instrument event timeline', updatedAt: timeline.generatedAt, reason: data.length ? null : market === 'stocks' ? '当前标的暂无可聚类事件或新闻' : '当前市场暂无可靠标的事件来源' }));
+    const availability = summarizeTimelineAvailability({ market, itemCount: data.length, sourceStatus: timeline.sourceStatus, sectionReasons: timeline.sectionReasons });
+    res.json({ ...decisionEnvelope({ market, instrument: ref.id, data, dataStatus: availability.dataStatus, source: 'scoped instrument timeline · Yahoo Finance / SEC EDGAR / earnings calendar', updatedAt: timeline.generatedAt, reason: availability.reason }), sourceStatus: availability.sourceStatuses, sectionReasons: timeline.sectionReasons || {} });
   } catch (error: any) {
     res.status(400).json({ success: false, market, instrument, dataStatus: 'unavailable', source: 'scoped instrument event timeline', updatedAt: null, reason: error?.message || '事件数据不可用' });
   }
@@ -6466,6 +6776,73 @@ function paperDriftSamples() {
   });
 }
 
+const PAPER_DRIFT_MONITOR_LAST_RUN_KEY = 'paper-drift-monitor:last-run-at';
+const PAPER_DRIFT_MONITOR_LEASE_KEY = 'paper-drift-monitor:daily-evaluation';
+const paperDriftMonitorOwner = `paper-drift-monitor-${process.pid}-${crypto.randomUUID()}`;
+
+async function evaluatePaperDriftMonitor(force = false, now = new Date()): Promise<{
+  ran: boolean; evaluatedAt: string; strategies: number; pausedTransitions: number; reason: string | null;
+}> {
+  if (!force && !shouldRunOncePerShanghaiDay(stateStore.get<string>(PAPER_DRIFT_MONITOR_LAST_RUN_KEY), now)) {
+    return { ran: false, evaluatedAt: now.toISOString(), strategies: 0, pausedTransitions: 0, reason: '今日策略偏差复核已完成或尚未到上海时间09:00' };
+  }
+  if (!stateStore.acquireLease(PAPER_DRIFT_MONITOR_LEASE_KEY, paperDriftMonitorOwner, now.getTime(), 20 * 60_000)) {
+    throw new Error('策略偏差日常复核正在其他进程运行');
+  }
+  try {
+    const marketForType = { stock: 'stocks', option: 'options', crypto: 'crypto', prediction: 'prediction' } as const;
+    const orders = unifiedPaperLedgerStore.get().orders;
+    const identities = new Map<string, { market: MarketId; strategyId: string; strategyVersion: string }>();
+    for (const order of orders) {
+      if (!order.strategy || !order.strategyVersion || !order.experimentId || !order.signalId || !order.dataSnapshotId || !Number.isInteger(order.backtestTradeIndex)) continue;
+      const market = marketForType[order.instrumentType];
+      const key = `${market}\0${order.strategy}\0${order.strategyVersion}`;
+      identities.set(key, { market, strategyId: order.strategy, strategyVersion: order.strategyVersion });
+    }
+    const samples = paperDriftSamples();
+    let pausedTransitions = 0;
+    for (const identity of identities.values()) {
+      const result = analyzePaperDrift(samples.filter(item => item.market === identity.market && item.strategyId === identity.strategyId && item.strategyVersion === identity.strategyVersion), now);
+      if (driftGate.recordEvaluation(identity.market, identity.strategyId, identity.strategyVersion, result)) {
+        pausedTransitions += 1;
+        const message = `${identity.market}/${identity.strategyId}@${identity.strategyVersion} 模拟盘与回测偏差超出既有门槛；仅该策略信号提醒已暂停，价格/风险/来源故障提醒和模拟持仓不受影响，需管理员确认恢复。`;
+        pushNotification('risk', message);
+        void telegram.send(`⚠️ ${message}`).catch(() => {});
+      }
+    }
+    const evaluatedAt = now.toISOString();
+    stateStore.set(PAPER_DRIFT_MONITOR_LAST_RUN_KEY, evaluatedAt, 1);
+    stateStore.appendAudit({ id: `paper-drift-evaluation-${evaluatedAt}`, action: 'paper_drift_daily_evaluation', detail: `每日复核 ${identities.size} 个策略版本，新增暂停 ${pausedTransitions} 个` });
+    return { ran: true, evaluatedAt, strategies: identities.size, pausedTransitions, reason: identities.size ? null : '没有带完整实验、信号、快照和成交索引的策略版本' };
+  } finally {
+    stateStore.releaseLease(PAPER_DRIFT_MONITOR_LEASE_KEY, paperDriftMonitorOwner);
+  }
+}
+
+function runPaperDriftMonitor(force = false): Promise<Awaited<ReturnType<typeof evaluatePaperDriftMonitor>>> {
+  if (paperDriftMonitorTask) return paperDriftMonitorTask as Promise<Awaited<ReturnType<typeof evaluatePaperDriftMonitor>>>;
+  paperDriftMonitorTask = evaluatePaperDriftMonitor(force).finally(() => { paperDriftMonitorTask = null; });
+  return paperDriftMonitorTask as Promise<Awaited<ReturnType<typeof evaluatePaperDriftMonitor>>>;
+}
+
+function startPaperDriftMonitor(): void {
+  if (paperDriftMonitorTimer) return;
+  void runPaperDriftMonitor().catch(error => {
+    if (!/other process|正在其他进程/.test(String(error?.message || error))) logger.warn('paper_drift_daily_evaluation_failed', { error: String(error?.message || error) });
+  });
+  paperDriftMonitorTimer = setInterval(() => {
+    void runPaperDriftMonitor().catch(error => {
+      if (!/other process|正在其他进程/.test(String(error?.message || error))) logger.warn('paper_drift_daily_evaluation_failed', { error: String(error?.message || error) });
+    });
+  }, 15 * 60_000);
+  paperDriftMonitorTimer.unref?.();
+}
+
+function stopPaperDriftMonitor(): void {
+  if (paperDriftMonitorTimer) clearInterval(paperDriftMonitorTimer);
+  paperDriftMonitorTimer = null;
+}
+
 function validatePaperOrderReferences(order: UnifiedPaperOrder): void {
   const fields = [order.experimentId, order.signalId, order.dataSnapshotId, order.strategyVersion];
   if (!fields.some(Boolean) && order.backtestTradeIndex === undefined) return;
@@ -6504,7 +6881,28 @@ app.get('/api/research/drift', (req, res) => {
   });
   const result = analyzePaperDrift(samples);
   const results = analyzePaperDriftByStrategy(samples);
-  res.json({ success: true, market, instrument: null, dataStatus: coverage.freshPairs ? 'historical' : coverage.stalePairs ? 'partial' : 'empty', source: 'paired research experiment + unified paper ledger', updatedAt: result.evaluatedAt, reason: coverage.freshPairs ? null : coverage.stalePairs ? '已有配对但数据快照过期，暂不判断策略偏差' : '没有可评估的明确配对成交', data: { result: strategyId && strategyVersion ? result : null, results, coverage, gates: driftGate.list(market) } });
+  res.json({ success: true, market, instrument: null, dataStatus: coverage.freshPairs ? 'historical' : coverage.stalePairs ? 'partial' : 'empty', source: 'paired research experiment + unified paper ledger', updatedAt: result.evaluatedAt, reason: coverage.freshPairs ? null : coverage.stalePairs ? '已有配对但数据快照过期，暂不判断策略偏差' : '没有可评估的明确配对成交', data: { result: strategyId && strategyVersion ? result : null, results, coverage, gates: driftGate.list(market), history: driftGate.listHistory(market, strategyId || undefined, strategyVersion || undefined, 30) } });
+});
+
+app.get('/api/research/drift/history', (req, res) => {
+  if (!adminOnly(req, res)) return;
+  const market = req.query.market == null ? undefined : String(req.query.market) as MarketId;
+  if (market && !MARKET_IDS.includes(market)) return res.status(400).json({ success: false, dataStatus: 'failed', reason: '市场范围无效' });
+  const strategyId = String(req.query.strategyId || '').trim() || undefined;
+  const strategyVersion = String(req.query.strategyVersion || '').trim() || undefined;
+  const limit = Math.max(1, Math.min(200, Number(req.query.limit) || 100));
+  const data = driftGate.listHistory(market, strategyId, strategyVersion, limit);
+  res.json({ success: true, data, market: market || 'all', instrument: null, dataStatus: data.length ? 'historical' : 'empty', source: 'SQLite per-strategy-version drift evaluation history', updatedAt: data[0]?.result.evaluatedAt || null, reason: data.length ? null : '暂无策略偏差复核记录' });
+});
+
+app.post('/api/research/drift/evaluate', async (req, res) => {
+  if (!adminOnly(req, res)) return;
+  try {
+    const result = await runPaperDriftMonitor(true);
+    res.json({ success: true, data: result, dataStatus: result.ran ? 'historical' : 'empty', source: 'manual strategy drift evaluation', updatedAt: result.evaluatedAt, reason: result.reason });
+  } catch (error: any) {
+    res.status(409).json({ success: false, dataStatus: 'partial', source: 'manual strategy drift evaluation', updatedAt: new Date().toISOString(), reason: error?.message || '策略偏差复核失败' });
+  }
 });
 
 app.post('/api/research/drift/resume', express.json(), (req, res) => {
@@ -6514,6 +6912,7 @@ app.post('/api/research/drift/resume', express.json(), (req, res) => {
   const strategyVersion = String(req.body?.strategyVersion || '').trim();
   if (!MARKET_IDS.includes(market) || !strategyId || !strategyVersion) return res.status(400).json({ success: false, reason: '需指定市场、策略和版本' });
   const resumed = driftGate.resume(market, strategyId, strategyVersion);
+  if (resumed) stateStore.appendAudit({ id: `paper-drift-resume-${crypto.randomUUID()}`, action: 'paper_drift_strategy_resumed', detail: `管理员确认恢复 ${market}/${strategyId}@${strategyVersion} 的信号提醒` });
   res.status(resumed ? 200 : 404).json({ success: resumed, market, instrument: null, dataStatus: resumed ? 'live' : 'empty', source: 'strategy drift gate', updatedAt: new Date().toISOString(), reason: resumed ? '管理员已恢复此策略提醒' : '没有待恢复的策略提醒暂停记录' });
 });
 
@@ -6555,7 +6954,7 @@ app.post('/api/paper/orders', (req, res) => {
       const samples = paperDriftSamples().filter(item => item.market === ({ stock: 'stocks', option: 'options', crypto: 'crypto', prediction: 'prediction' } as const)[order.instrumentType] && item.strategyId === order.strategy && item.strategyVersion === order.strategyVersion);
       const result = analyzePaperDrift(samples);
       const market = ({ stock: 'stocks', option: 'options', crypto: 'crypto', prediction: 'prediction' } as const)[order.instrumentType];
-      if (driftGate.update(market, order.strategy, order.strategyVersion, result)) {
+      if (driftGate.recordEvaluation(market, order.strategy, order.strategyVersion, result)) {
         const message = `${market}/${order.strategy}@${order.strategyVersion} 模拟盘与回测偏差超出门槛；仅策略信号提醒已暂停，需管理员复核恢复。`;
         pushNotification('risk', message);
         void telegram.send(`⚠️ ${message}`).catch(() => {});
@@ -7631,6 +8030,8 @@ async function main() {
     console.log(`  ║  http://localhost:${PORT}                        ║`);
     console.log(`  ╚══════════════════════════════════════════════╝\n`);
     riskPatrol.start();
+    startCoverageCanaryMonitor();
+    startPaperDriftMonitor();
     // Pre-fetch radar data so the first click on the tab is already warm.
     void warmPredictionRadarCache();
     startTelegramInteractionBot();
@@ -7663,6 +8064,8 @@ async function main() {
     shuttingDown = true;
     console.log('\n  Shutting down...');
     stopTelegramCommandCenterMonitor();
+    stopCoverageCanaryMonitor();
+    stopPaperDriftMonitor();
     reportScheduler.stop();
     const current = telegramInteractionBot;
     telegramInteractionBot = null;

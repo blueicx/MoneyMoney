@@ -155,12 +155,18 @@ export function analyzePaperDriftByStrategy(samples: readonly PaperDriftSample[]
 
 interface StateStore { get<T>(key: string): T | null; set<T>(key: string, value: T, version?: number): void; }
 export interface DriftGateRecord { market: MarketId; strategyId: string; strategyVersion: string; paused: boolean; reason: string; evaluatedAt: string; resumedAt?: string; }
+export interface DriftEvaluationRecord { id: string; market: MarketId; strategyId: string; strategyVersion: string; result: PaperDriftResult; }
 
 export class StrategyDriftGate {
-  constructor(private readonly store: StateStore, private readonly key = 'strategy-drift-gates') {}
+  constructor(private readonly store: StateStore, private readonly key = 'strategy-drift-gates', private readonly historyKey = 'strategy-drift-evaluations') {}
 
   private records(): DriftGateRecord[] { return this.store.get<DriftGateRecord[]>(this.key) || []; }
   list(market?: MarketId): DriftGateRecord[] { return this.records().filter(item => !market || item.market === market); }
+  listHistory(market?: MarketId, strategyId?: string, strategyVersion?: string, limit = 100): DriftEvaluationRecord[] {
+    const rows = this.store.get<DriftEvaluationRecord[]>(this.historyKey) || [];
+    const bounded = Math.max(1, Math.min(2_000, Number(limit) || 100));
+    return rows.filter(item => (!market || item.market === market) && (!strategyId || item.strategyId === strategyId) && (!strategyVersion || item.strategyVersion === strategyVersion)).slice(-bounded).reverse();
+  }
   isPaused(market: string, strategyId: string, strategyVersion: string): boolean {
     return this.records().some(item => item.market === market && item.strategyId === strategyId && item.strategyVersion === strategyVersion && item.paused);
   }
@@ -172,6 +178,15 @@ export class StrategyDriftGate {
     next.push({ market, strategyId, strategyVersion, paused: true, reason: result.reason, evaluatedAt: result.evaluatedAt });
     this.store.set(this.key, next, 1);
     return true;
+  }
+  recordEvaluation(market: MarketId, strategyId: string, strategyVersion: string, result: PaperDriftResult): boolean {
+    const id = `${market}:${strategyId}:${strategyVersion}:${result.evaluatedAt}`;
+    const current = this.store.get<DriftEvaluationRecord[]>(this.historyKey) || [];
+    if (!current.some(item => item.id === id)) {
+      const row: DriftEvaluationRecord = { id, market, strategyId, strategyVersion, result };
+      this.store.set(this.historyKey, [...current, row].slice(-2_000), 1);
+    }
+    return this.update(market, strategyId, strategyVersion, result);
   }
   resume(market: MarketId, strategyId: string, strategyVersion: string): boolean {
     const records = this.records();

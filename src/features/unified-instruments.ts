@@ -1,6 +1,6 @@
 import { binanceFeed, type BinanceTicker } from './binance';
 import type { NewsItem } from './news-settings';
-import { getStockNews } from './stock-news';
+import { getStockNewsSnapshot } from './stock-news';
 import { getUpcomingEventCalendar, type UpcomingEvent } from './event-calendar';
 import { getCachedPredictionRadarSlice, getPredictionRadar, type PredictionMarket } from './prediction-radar';
 import { getAiRuntimeConfig } from './ai-runtime-config';
@@ -35,6 +35,7 @@ export interface Freshness {
 }
 
 export type InstrumentSectionStatus = 'live' | 'cached' | 'degraded' | 'unavailable';
+export type InstrumentSourceStatus = 'ok' | 'stale' | 'partial' | 'unavailable';
 
 export interface InstrumentOverviewSection {
   id: 'quote' | 'history' | 'events' | 'news' | 'analysis' | 'timeline';
@@ -63,8 +64,8 @@ export interface UnifiedInstrumentOverview {
     cached: boolean;
   };
   freshness: Freshness;
-  sourceStatus: Record<string, 'ok' | 'stale' | 'unavailable'>;
-  sectionReasons?: Partial<Record<InstrumentOverviewSection['id'], string>>;
+  sourceStatus: Record<string, InstrumentSourceStatus>;
+  sectionReasons?: Partial<Record<InstrumentOverviewSection['id'] | 'filings', string>>;
   sections: InstrumentOverviewSection[];
   timeline: Array<Record<string, unknown>>;
   status: OverviewDataStatus;
@@ -135,18 +136,50 @@ export function dedupeInstrumentRefs(items: InstrumentRef[]): InstrumentRef[] {
   });
 }
 
-export function overviewDataStatus(sourceStatus: Record<string, 'ok' | 'stale' | 'unavailable'>): OverviewDataStatus {
+export function overviewDataStatus(sourceStatus: Record<string, InstrumentSourceStatus>): OverviewDataStatus {
   const statuses = Object.values(sourceStatus);
   const hasOk = statuses.includes('ok');
   const hasStale = statuses.includes('stale');
+  const hasPartial = statuses.includes('partial');
   const hasUnavailable = statuses.includes('unavailable');
-  if (!hasOk && hasStale) return { state: 'cached', reason: '当前仅有缓存数据' };
-  if (!hasOk) return { state: 'unavailable', reason: '当前没有可用数据源' };
-  if (hasStale || hasUnavailable) return { state: 'degraded', reason: '部分数据源不可用或已过期' };
+  if (!hasOk && hasStale && !hasPartial && !hasUnavailable) return { state: 'cached', reason: '当前仅有缓存数据' };
+  if (!hasOk) return { state: hasPartial ? 'degraded' : hasStale ? 'cached' : 'unavailable', reason: hasPartial ? '部分来源可用或数据缺失' : '当前没有可用数据源' };
+  if (hasStale || hasUnavailable || hasPartial) return { state: 'degraded', reason: '部分数据源不可用、部分成功或已过期' };
   return { state: 'live', reason: null };
 }
 
-function sectionStatus(sourceStatus: Record<string, 'ok' | 'stale' | 'unavailable'>, fallback: 'unavailable' | 'ok' = 'unavailable'): InstrumentSectionStatus {
+export function summarizeTimelineAvailability(input: {
+  market: MarketScope;
+  itemCount: number;
+  sourceStatus: Record<string, InstrumentSourceStatus>;
+  sectionReasons?: Partial<Record<InstrumentOverviewSection['id'] | 'filings', string>>;
+}): { dataStatus: 'live' | 'cached' | 'partial' | 'empty' | 'unavailable' | 'unsupported'; reason: string | null; sourceStatuses: Record<string, InstrumentSourceStatus> } {
+  const sourceStatuses = Object.fromEntries(['events', 'news', 'filings']
+    .filter(key => input.sourceStatus[key])
+    .map(key => [key, input.sourceStatus[key]])) as Record<string, InstrumentSourceStatus>;
+  if (input.market !== 'stocks') {
+    return { dataStatus: 'unsupported', reason: input.sectionReasons?.events || '当前市场不支持标的事件与新闻时间线', sourceStatuses };
+  }
+  const statuses = Object.values(sourceStatuses);
+  const good = statuses.filter(status => status === 'ok' || status === 'stale').length;
+  const failed = Object.entries(sourceStatuses).filter(([, status]) => status === 'unavailable' || status === 'partial').map(([key]) => key);
+  const failureReasons = failed.map(key => `${key}: ${input.sectionReasons?.[key as 'events' | 'news' | 'filings'] || '来源不可用'}`);
+  if (input.itemCount > 0) {
+    return {
+      dataStatus: failed.length ? 'partial' : statuses.includes('ok') ? 'live' : 'cached',
+      reason: failureReasons.length ? `部分来源不可用；${failureReasons.join('；')}` : null,
+      sourceStatuses,
+    };
+  }
+  if (good && failed.length) return { dataStatus: 'partial', reason: failureReasons.join('；'), sourceStatuses };
+  if (good) return { dataStatus: 'empty', reason: '事件与新闻来源已响应，但当前标的没有匹配记录', sourceStatuses };
+  const reason = statuses.length
+    ? Object.entries(sourceStatuses).map(([key]) => `${key}: ${input.sectionReasons?.[key as 'events' | 'news' | 'filings'] || '来源不可用'}`).join('；')
+    : '当前标的没有可核验的事件来源状态';
+  return { dataStatus: 'unavailable', reason, sourceStatuses };
+}
+
+function sectionStatus(sourceStatus: Record<string, InstrumentSourceStatus>, fallback: 'unavailable' | 'ok' = 'unavailable'): InstrumentSectionStatus {
   const keys = Object.keys(sourceStatus);
   return overviewDataStatus(keys.length ? sourceStatus : { value: fallback }).state;
 }
@@ -302,8 +335,9 @@ export class UnifiedInstrumentService {
     let marketData: Record<string, unknown> | null = null;
     let klines: unknown[] = [];
     let fetchedAt: string | null = null;
-    const sourceStatus: Record<string, 'ok' | 'stale' | 'unavailable'> = { quote: 'unavailable', market: 'unavailable', klines: 'unavailable', events: 'unavailable', news: 'unavailable' };
+    const sourceStatus: Record<string, InstrumentSourceStatus> = { quote: 'unavailable', market: 'unavailable', klines: 'unavailable', events: 'unavailable', news: 'unavailable', filings: 'unavailable' };
     let filings: StockFiling[] = [];
+    let filingsReason: string | undefined;
     try {
       if (normalized.type === 'crypto') {
         const ticker = await binanceFeed.getPrice(normalized.symbol);
@@ -344,27 +378,47 @@ export class UnifiedInstrumentService {
         filings = stockData.filings;
         sourceStatus.quote = stockStatus(stockData.sourceStatus['nasdaq-public-quote']);
         sourceStatus.klines = stockStatus(stockData.sourceStatus['nasdaq-public-history']);
+        sourceStatus.filings = stockStatus(stockData.sourceStatus['sec-edgar-submissions']);
+        filingsReason = stockData.snapshots.find(item => item.source === 'sec-edgar-submissions' && item.error)?.error ||
+          (sourceStatus.filings === 'unavailable' ? 'SEC EDGAR 申报来源不可用' : filings.length ? undefined : 'SEC 已响应，但没有匹配申报');
       }
     } catch { /* each source is independently optional */ }
-    const newsPromise = normalized.type === 'stock' ? getStockNews(normalized.symbol) : Promise.resolve([] as NewsItem[]);
-    const eventsPromise = normalized.type === 'stock' ? getUpcomingEventCalendar(7) : Promise.resolve({ events: [] as UpcomingEvent[] });
+    const newsPromise = normalized.type === 'stock'
+      ? getStockNewsSnapshot(normalized.symbol)
+      : Promise.resolve({ items: [] as NewsItem[], status: 'live' as const, updatedAt: null, retrievedAt: new Date().toISOString(), source: 'unsupported' as const });
+    const eventsPromise = normalized.type === 'stock'
+      ? getUpcomingEventCalendar(7)
+      : Promise.resolve({ events: [] as UpcomingEvent[], stale: false, sourceStatus: undefined, sourceReasons: undefined });
     const [eventsResult, newsResult] = await Promise.allSettled([eventsPromise, newsPromise]);
     const allEvents = eventsResult.status === 'fulfilled' ? eventsResult.value.events : [];
     const events = filterEventsForInstrument(allEvents, normalized);
-    const news = newsResult.status === 'fulfilled' ? newsResult.value : [];
-    if (normalized.type === 'stock' && eventsResult.status === 'fulfilled') sourceStatus.events = 'ok';
-    if (newsResult.status === 'fulfilled' && news.length) sourceStatus.news = 'ok';
+    const newsSnapshot = newsResult.status === 'fulfilled' ? newsResult.value : null;
+    const news = newsSnapshot?.items || [];
+    if (normalized.type === 'stock') {
+      const calendarState = eventsResult.status === 'fulfilled' ? eventsResult.value.sourceStatus?.earnings : null;
+      sourceStatus.events = eventsResult.status !== 'fulfilled' ? 'unavailable'
+        : calendarState === 'partial' ? 'partial'
+          : calendarState === 'unavailable' ? 'unavailable'
+            : calendarState === 'cached' || eventsResult.value.stale ? 'stale' : 'ok';
+    }
+    if (normalized.type === 'stock') sourceStatus.news = newsSnapshot ? newsSnapshot.status === 'cached' ? 'stale' : 'ok' : 'unavailable';
+    let eventsReason: string | undefined;
+    if (eventsResult.status === 'rejected') eventsReason = String(eventsResult.reason instanceof Error ? eventsResult.reason.message : eventsResult.reason || '事件来源不可用，请稍后重试');
+    else if (normalized.type !== 'stock') eventsReason = '当前市场暂不支持标的事件日历';
+    else if (eventsResult.value.sourceReasons?.earnings) eventsReason = eventsResult.value.sourceReasons.earnings;
+    else if (sourceStatus.events === 'partial') eventsReason = 'Nasdaq 财报日历部分日期请求失败';
+    else if (sourceStatus.events === 'unavailable') eventsReason = 'Nasdaq 财报日历来源不可用';
+    else if (eventsResult.value.stale || sourceStatus.events === 'stale') eventsReason = '事件日历当前显示最近缓存';
+    else if (!events.length) eventsReason = `暂无 ${normalized.symbol} 的财报事件`;
     const sectionReasons: UnifiedInstrumentOverview['sectionReasons'] = {
-      events: eventsResult.status === 'rejected'
-        ? '事件来源不可用，请稍后重试'
-        : normalized.type === 'stock'
-          ? (events.length ? undefined : `暂无 ${normalized.symbol} 的财报事件`)
-          : '当前市场暂不支持标的事件日历',
+      events: eventsReason,
       news: newsResult.status === 'rejected'
-        ? '新闻来源不可用，请稍后重试'
+        ? String(newsResult.reason instanceof Error ? newsResult.reason.message : newsResult.reason || '新闻来源不可用，请稍后重试')
+        : newsSnapshot?.status === 'cached' ? 'Yahoo Finance 新闻显示最近一次成功抓取缓存'
         : news.length
           ? undefined
           : normalized.type === 'stock' ? `暂无 ${normalized.symbol} 的相关新闻` : '当前市场暂不支持标的新闻',
+      filings: filingsReason,
     };
     const base: UnifiedInstrumentOverview = {
       instrument: normalized, quote, marketData, klines, events, news, analysis: emptyAnalysis, sectionReasons,
@@ -378,9 +432,9 @@ export class UnifiedInstrumentService {
     return base;
   }
 
-  async timeline(ref: InstrumentRef): Promise<{ instrument: InstrumentRef; items: Array<Record<string, unknown>>; generatedAt: string }> {
+  async timeline(ref: InstrumentRef): Promise<{ instrument: InstrumentRef; items: Array<Record<string, unknown>>; generatedAt: string; sourceStatus: UnifiedInstrumentOverview['sourceStatus']; sectionReasons?: UnifiedInstrumentOverview['sectionReasons'] }> {
     const overview = await this.overview(ref);
-    return { instrument: overview.instrument, items: overview.timeline, generatedAt: new Date().toISOString() };
+    return { instrument: overview.instrument, items: overview.timeline, generatedAt: new Date().toISOString(), sourceStatus: { ...overview.sourceStatus }, sectionReasons: { ...overview.sectionReasons } };
   }
 }
 
