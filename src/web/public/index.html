@@ -13838,10 +13838,14 @@ function mobileTab(tab) {
     }
     // Register service worker for PWA
     if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('/sw.js?v=59').catch(() => {});
+      const hadControllerAtLoad = Boolean(navigator.serviceWorker.controller);
+      navigator.serviceWorker.register('/sw.js?v=59').catch(() => {});
       let refreshing = false;
       navigator.serviceWorker.addEventListener('controllerchange', () => {
-        if (!refreshing) {
+        // First installation claims an already-current network page; reloading
+        // here interrupts startup requests. Only reload pages controlled by an
+        // older worker when an actual update takes over.
+        if (hadControllerAtLoad && !refreshing) {
           refreshing = true;
           window.location.reload();
         }

@@ -53,6 +53,12 @@ test('layout changes invalidate the cached service worker shell', () => {
   assert.match(html, /serviceWorker\.register\('\/sw\.js\?v=59'\)/);
 });
 
+test('first service-worker claim does not reload an already-current page', () => {
+  const serviceWorkerRegistration = html.slice(html.indexOf("if ('serviceWorker' in navigator)"));
+  assert.match(serviceWorkerRegistration, /const hadControllerAtLoad = Boolean\(navigator\.serviceWorker\.controller\);/);
+  assert.match(serviceWorkerRegistration, /if \(hadControllerAtLoad && !refreshing\)/);
+});
+
 test('stock exclusive workspaces keep the shared market bar and scope selection tools', () => {
   assert.match(html, /id="market-overview"[^>]*data-market-scopes="overview stocks options crypto prediction watchlist"/);
   assert.match(html, /id="workspace-dashboard-cards"[^>]*data-workspace-ids="overview"/);
