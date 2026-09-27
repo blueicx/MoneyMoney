@@ -1,12 +1,37 @@
 const assert = require('node:assert/strict');
+const { spawn } = require('node:child_process');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 const { chromium } = require('playwright');
 
+const port = 3192;
+const baseUrl = process.env.MONEYMONEY_SMOKE_URL || `http://127.0.0.1:${port}`;
+const username = process.env.MONEYMONEY_SMOKE_USER || 'browser-owner';
+const password = process.env.MONEYMONEY_SMOKE_PASS || 'local-browser-test-only-92!';
+const isolatedDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'moneymoney-auth-smoke-'));
+const child = process.env.MONEYMONEY_SMOKE_URL ? null : spawn(process.execPath, [path.join(__dirname, '../dist/web/server.js')], {
+  cwd: path.join(__dirname, '..'),
+  env: { ...process.env, MONEYMONEY_DATA_DIR: isolatedDataDir, APP_HOST: '127.0.0.1', APP_PORT: String(port), TELEGRAM_POLLING_ENABLED: 'false', AI_PAPER_TRADING_ENABLED: 'false', PRIVATE_KEY: '', API_KEY: '', MONEYMONEY_LOGIN_USER: username, MONEYMONEY_LOGIN_PASS: password, MONEYMONEY_JWT_SECRET: 'local-auth-smoke-jwt-secret-0123456789abcdef' },
+  stdio: 'ignore',
+});
+
+async function waitForServer() {
+  for (let index = 0; index < 50; index += 1) {
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}/api/health/live`);
+      if (response.ok) return;
+    } catch {}
+    await new Promise(resolve => setTimeout(resolve, 200));
+  }
+  throw new Error('isolated auth-smoke server did not become healthy');
+}
+
 async function main() {
-  const baseUrl = process.env.MONEYMONEY_SMOKE_URL || 'http://127.0.0.1:3017';
-  const username = process.env.MONEYMONEY_SMOKE_USER || 'browser-owner';
-  const password = process.env.MONEYMONEY_SMOKE_PASS || 'local-browser-test-only-92!';
-  const browser = await chromium.launch({ headless: true, channel: process.env.MONEYMONEY_SMOKE_BROWSER || 'chrome' });
+  let browser;
   try {
+    if (child) await waitForServer();
+    browser = await chromium.launch({ headless: true, channel: process.env.MONEYMONEY_SMOKE_BROWSER || 'chrome' });
     const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
     const pageErrors = [];
     page.on('pageerror', error => pageErrors.push(error.message));
@@ -42,7 +67,11 @@ async function main() {
     assert.deepEqual(pageErrors, []);
     console.log('Browser auth smoke passed: admin cookie, CSRF, logout, guest read-only, SLO');
   } finally {
-    await browser.close();
+    if (browser) await browser.close();
+    if (child) {
+      child.kill('SIGINT');
+      setTimeout(() => child.kill('SIGKILL'), 1000).unref();
+    }
   }
 }
 

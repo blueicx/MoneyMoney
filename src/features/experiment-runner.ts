@@ -10,7 +10,7 @@ export interface ExperimentPromotionRules {
 export interface ResearchExperimentInput {
   context: MarketContext & {
     strategyId?: string; strategyVersion?: string; dataSource?: string;
-    dataFrom?: string; dataTo?: string; feeRate?: number; slippage?: number; seed?: number;
+    dataFrom?: string; dataTo?: string; dataSnapshotHash?: string; feeRate?: number; slippage?: number; seed?: number;
   };
   prices: number[];
   signals: readonly BacktestSignal[];
@@ -58,6 +58,7 @@ export function runResearchExperiment(input: ResearchExperimentInput): ResearchE
     market: context.market, instrument: context.instrument, timeframe: context.timeframe,
     strategyId: input.context.strategyId, strategyVersion: input.context.strategyVersion,
     dataSource: input.context.dataSource || 'unknown', dataFrom: input.context.dataFrom, dataTo: input.context.dataTo,
+    dataSnapshotHash: input.context.dataSnapshotHash,
     feeRate, slippage, seed: input.context.seed,
   });
   const startingBalance = 100000;

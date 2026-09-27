@@ -1,11 +1,29 @@
-const CACHE_NAME = "moneymoney-v59-trusted-research";
+const CACHE_NAME = "moneymoney-v60-trusted-research";
 const STATIC_ASSETS = ["/", "/manifest.json"];
 const OFFLINE_SAFE_API_PATHS = ["/api/evidence", "/api/evidence/changes", "/api/evidence/source-health/history", "/api/scenarios", "/api/signals/quality"];
 const OFFLINE_SAFE_API_PREFIXES = ["/api/workspaces/shared/"];
 
 self.addEventListener("install", (event) => {
-  self.skipWaiting();
-  event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(STATIC_ASSETS)));
+  event.waitUntil((async () => {
+    await caches.open(CACHE_NAME).then((cache) => cache.addAll(STATIC_ASSETS));
+    // Claim on first install, but keep upgrades waiting until an explicit user action.
+    if (!self.registration.active) await self.skipWaiting();
+  })());
+});
+
+self.addEventListener("message", (event) => {
+  if (event.data?.type === "SKIP_WAITING") {
+    event.waitUntil(self.skipWaiting());
+    return;
+  }
+  if (event.data?.type === "CLEAR_PUBLIC_SNAPSHOTS") {
+    event.waitUntil((async () => {
+      const cache = await caches.open(CACHE_NAME);
+      const requests = await cache.keys();
+      await Promise.all(requests.filter((request) => new URL(request.url).pathname.startsWith("/api/" )).map((request) => cache.delete(request)));
+      event.ports?.[0]?.postMessage({ cleared: true });
+    })());
+  }
 });
 
 self.addEventListener("activate", (event) => {

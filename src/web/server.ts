@@ -43,7 +43,7 @@ import {
 import { getTelegramMarketButtons, getTelegramMenuEntries, moveTelegramMenuPage, resetTelegramMenuPage } from './telegram-menu';
 import { buildTelegramDeepLink, buildTelegramStockSearchRows, isTelegramWatchableStockId, telegramPublicBaseUrl } from './telegram-search';
 import { priceTracker } from '../features/price-tracker';
-import { kellySizer, backtester } from '../features/kelly-backtest';
+import { kellySizer, backtester, ASSET_BACKTEST_STRATEGY_VERSION } from '../features/kelly-backtest';
 import { pushNotification } from '../features/notifications';
 import { newsFeed, settingsManager } from '../features/news-settings';
 import { getStockNews } from '../features/stock-news';
@@ -109,6 +109,8 @@ import { getSourceHealth, refreshSourceHealth } from '../features/source-health'
 import { summarizeSourceSlo } from '../features/source-health-slo';
 import { zonedDigestClock } from '../features/digest-clock';
 import { filterStockBarsForTradingDate, resolveStockExchangeTimeZone } from '../features/stock-intraday-kline';
+import { buildBacktestPreflight } from '../features/backtest-preflight';
+import { assessResearchFreshness } from '../features/research-freshness';
 import { testNotificationChannels } from '../features/notification-channels';
 import { runResearchExperiment } from '../features/experiment-runner';
 import { assertMarketContext, createResearchJob, MARKET_IDS, type MarketId } from '../features/research-contracts';
@@ -134,6 +136,7 @@ import { buildDecisionMobileSummary } from '../features/decision-mobile-summary'
 import { researchRepository } from '../features/research-repository';
 import { analyzeFactor, getFactorCatalog } from '../features/factor-lab';
 import { StrategyCandidateRegistry } from '../features/strategy-candidates';
+import { globalStrategyRegistry } from '../features/strategy-registry';
 import { riskPatrol } from '../features/risk-patrol';
 import { createAccessMiddleware, validateAccessConfiguration } from './access-control';
 import { verifyLoginToken, extractAuthToken } from './auth';
@@ -6317,6 +6320,7 @@ app.post('/api/research/experiments', express.json(), (req, res) => {
       dataSource: body.dataSource ? String(body.dataSource) : undefined,
       dataFrom: body.dataFrom ? String(body.dataFrom) : undefined,
       dataTo: body.dataTo ? String(body.dataTo) : undefined,
+      dataSnapshotHash: body.dataSnapshotHash ? String(body.dataSnapshotHash) : undefined,
       strategyId: body.strategyId ? String(body.strategyId) : undefined,
       strategyVersion: body.strategyVersion ? String(body.strategyVersion) : undefined,
       feeRate: Number(body.feeRate || 0), slippage: Number(body.slippage || 0), seed: body.seed,
@@ -6346,6 +6350,49 @@ app.get('/api/research/experiments/:id', (req, res) => {
   if (!result) return res.status(404).json({ success: false, error: '实验不存在' });
   const experiment = result.experiment || {};
   res.json({ success: true, data: result, market: experiment.market || null, instrument: experiment.instrument || null, dataStatus: result.evidence?.checks?.data?.passed ? 'live' : 'unavailable', source: experiment.dataSource || null, updatedAt: experiment.createdAt || null, reason: result.evidence?.checks?.data?.passed ? null : '实验未声明可用数据源' });
+});
+
+function getResearchFreshness(input: { market: MarketId; instrument?: string; timeframe?: string; createdAt: string; dataSnapshotHash?: string; strategyId?: string; strategyVersion?: string }) {
+  const revisions = dataLakeCatalog.listRevisions(input.market);
+  const corporateActions = input.market === 'stocks' && input.instrument
+    ? dataLakeCatalog.listCorporateActions('stocks', input.instrument.replace(/^stock:(us|nasdaq|nyse):/i, '').replace(/^us(?=[a-z])/i, ''))
+    : [];
+  const currentStrategyVersion = input.strategyId && ['momentum', 'meanReversion'].includes(input.strategyId)
+    ? ASSET_BACKTEST_STRATEGY_VERSION
+    : input.strategyId ? globalStrategyRegistry.get(input.strategyId)?.version : undefined;
+  return assessResearchFreshness({ ...input, revisions, corporateActions, currentStrategyVersion });
+}
+
+app.get('/api/research/experiments/:id/freshness', (req, res) => {
+  if (!adminOnly(req, res)) return;
+  const result = researchRepository.getExperiment(String(req.params.id));
+  if (!result?.experiment) return res.status(404).json({ success: false, error: '实验不存在' });
+  try {
+    const experiment = result.experiment;
+    const freshness = getResearchFreshness({
+      market: decisionMarket(experiment.market), instrument: experiment.instrument, timeframe: experiment.timeframe,
+      createdAt: experiment.createdAt, dataSnapshotHash: experiment.dataSnapshotHash,
+      strategyId: experiment.strategyId, strategyVersion: experiment.strategyVersion,
+    });
+    return res.json({ success: true, data: freshness, market: experiment.market, instrument: experiment.instrument || null, dataStatus: freshness.status, source: 'research-freshness', updatedAt: new Date().toISOString(), reason: freshness.reason, manualRerunAvailable: Boolean(result.input) });
+  } catch (error) { return res.status(400).json({ success: false, error: error instanceof Error ? error.message : '研究时效检查失败' }); }
+});
+
+app.get('/api/research/freshness', (req, res) => {
+  if (!adminOnly(req, res)) return;
+  try {
+    const market = decisionMarket(req.query.market);
+    const instrument = String(req.query.instrument || '').trim();
+    const createdAt = String(req.query.since || '').trim();
+    if (!instrument || !createdAt) return res.status(400).json({ success: false, error: '缺少标的或候选保存时间' });
+    const freshness = getResearchFreshness({
+      market, instrument, timeframe: String(req.query.timeframe || '') || undefined, createdAt,
+      dataSnapshotHash: String(req.query.snapshotHash || '') || undefined,
+      strategyId: String(req.query.strategyId || '') || undefined,
+      strategyVersion: String(req.query.strategyVersion || '') || undefined,
+    });
+    return res.json({ success: true, data: freshness, market, instrument, dataStatus: freshness.status, source: 'research-freshness', updatedAt: new Date().toISOString(), reason: freshness.reason });
+  } catch (error) { return res.status(400).json({ success: false, error: error instanceof Error ? error.message : '研究时效检查失败' }); }
 });
 
 app.post('/api/research/experiments/:id/rerun', express.json(), (req, res) => {
@@ -6913,6 +6960,47 @@ setInterval(() => {
 }, 60_000);
 
 // --- Backtesting ---
+
+app.get('/api/backtest/preflight', async (req, res) => {
+  const scope = String(req.query.scope || '').trim();
+  const instrument = String(req.query.instrumentId || req.query.marketId || '').trim();
+  const lookback = Number(req.query.lookback || 10);
+  const holding = Number(req.query.holding || 5);
+  if (!['stocks', 'crypto'].includes(scope)) {
+    const result = buildBacktestPreflight({ market: scope, instrument, bars: [], source: null, lookback, holding });
+    return res.json({ success: false, ...result, updatedAt: new Date().toISOString() });
+  }
+  const identityCheck = buildBacktestPreflight({ market: scope, instrument, bars: [], source: null, lookback, holding });
+  if (identityCheck.dataStatus === 'unsupported') return res.json({ success: false, ...identityCheck, updatedAt: new Date().toISOString() });
+  try {
+    let bars: Array<{ time: number; open: number; high: number; low: number; close: number; volume?: number | null }> = [];
+    let source: string | null = null;
+    let sourceStatus: string | null = null;
+    let sourceError: string | null = null;
+    let updatedAt: string | null = null;
+    if (scope === 'stocks') {
+      const overview = await stockDataService.overview(instrument.replace(/^us(?=[A-Z])/i, ''));
+      bars = overview.bars;
+      const history = overview.snapshots.find(snapshot => snapshot.source.includes('history'));
+      source = history?.source || null;
+      sourceStatus = history?.status || null;
+      sourceError = history?.error || null;
+      updatedAt = history?.fetchedAt || null;
+    } else {
+      const pair = instrument.toUpperCase().replace(/[/:_-]/g, '');
+      const klines = await binanceFeed.getKlines(pair, '1d', 1000);
+      bars = klines.map((bar: any) => ({ time: Number(bar.time), open: Number(bar.open), high: Number(bar.high), low: Number(bar.low), close: Number(bar.close), volume: Number(bar.volume) }));
+      source = 'binance-public-klines';
+      sourceStatus = bars.length ? 'live' : 'empty';
+      updatedAt = bars.length ? new Date().toISOString() : null;
+    }
+    const result = buildBacktestPreflight({ market: scope, instrument, bars, source, sourceStatus, sourceError, lookback, holding });
+    return res.json({ success: result.dataStatus === 'ready', ...result, updatedAt, reason: result.reason });
+  } catch (error) {
+    const result = buildBacktestPreflight({ market: scope, instrument, bars: [], source: null, sourceStatus: 'unavailable', sourceError: error instanceof Error ? error.message : null, lookback, holding });
+    return res.json({ success: false, ...result, dataStatus: 'unavailable', updatedAt: new Date().toISOString(), reason: error instanceof Error ? error.message : '数据源预检失败' });
+  }
+});
 
 app.get('/api/backtest', async (req, res) => {
   const scope = String(req.query.scope || 'prediction');

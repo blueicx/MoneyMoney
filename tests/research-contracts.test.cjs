@@ -43,6 +43,16 @@ test('experiment records are reproducible and reject invalid time ranges', () =>
   assert.throws(() => createExperimentRecord({ market: 'stocks', dataFrom: '2026-02-01', dataTo: '2026-01-01' }), /range|区间|时间/i);
 });
 
+test('experiment record preserves pinned data hash in its reproducible identity', () => {
+  const input = { market: 'stocks', instrument: 'AAPL', dataSnapshotHash: 'a'.repeat(64), dataSource: 'fixture' };
+  const first = createExperimentRecord(input);
+  const same = createExperimentRecord(input);
+  const changed = createExperimentRecord({ ...input, dataSnapshotHash: 'b'.repeat(64) });
+  assert.equal(first.dataSnapshotHash, 'a'.repeat(64));
+  assert.equal(first.id, same.id);
+  assert.notEqual(first.id, changed.id);
+});
+
 test('signal lifecycle only permits safe forward transitions', () => {
   assert.equal(transitionSignal('generated', 'confirm'), 'confirmed');
   assert.equal(transitionSignal('confirmed', 'paper-fill'), 'paper-filled');

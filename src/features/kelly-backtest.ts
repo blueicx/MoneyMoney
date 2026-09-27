@@ -53,6 +53,7 @@ export class KellySizer {
 
 import fs from 'fs';
 import path from 'path';
+import { createHash } from 'node:crypto';
 
 import { DATA_ROOT } from '../utils/paths';
 import { stockDataService } from './stock-data-service';
@@ -84,6 +85,7 @@ export interface BacktestResult {
 }
 
 export type AssetMarket = 'stocks' | 'crypto' | 'options';
+export const ASSET_BACKTEST_STRATEGY_VERSION = 'asset-backtest-v1';
 
 export interface AssetBar {
   time: number;
@@ -114,6 +116,8 @@ export interface AssetBacktestResult {
   market: AssetMarket;
   instrumentId: string;
   dataSource: string;
+  dataSnapshotHash?: string;
+  strategyVersion?: string;
   barCount: number;
   startTime: number;
   endTime: number;
@@ -191,6 +195,10 @@ export function runAssetBacktest(input: AssetBacktestInput): AssetBacktestResult
   const cleanBars = input.bars
     .filter(bar => Number.isFinite(bar.time) && Number.isFinite(bar.close) && bar.close > 0)
     .sort((left, right) => left.time - right.time);
+  const dataSnapshotHash = createHash('sha256').update(JSON.stringify({
+    market: input.market, instrumentId, dataSource: input.dataSource,
+    bars: cleanBars.map(bar => [bar.time, bar.open, bar.high, bar.low, bar.close, bar.volume ?? null]),
+  })).digest('hex');
 
   if (!instrumentId) throw new Error('回测标的不能为空');
   if (!Number.isFinite(threshold) || threshold <= 0) throw new Error('回测阈值无效');
@@ -272,6 +280,8 @@ export function runAssetBacktest(input: AssetBacktestInput): AssetBacktestResult
     market: input.market,
     instrumentId,
     dataSource: input.dataSource,
+    dataSnapshotHash,
+    strategyVersion: ASSET_BACKTEST_STRATEGY_VERSION,
     barCount: cleanBars.length,
     startTime: cleanBars[0].time,
     endTime: cleanBars[cleanBars.length - 1].time,

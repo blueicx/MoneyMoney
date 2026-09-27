@@ -37,4 +37,8 @@ test('delivery history, ACK, retry and feedback routes are admin-only', () => {
   const feedbackUi = page.slice(page.indexOf('async function loadAlertDeliveryFeedback()'), page.indexOf('async function setAlertDeliveryFeedback'));
   assert.match(feedbackUi, /window\.mm_isLoggedIn !== true \|\| window\.mm_isGuest/);
   assert.doesNotMatch(feedbackUi, /localStorage\.getItem\(['"]mm_token['"]\)/, 'HttpOnly sessions do not expose a legacy browser token');
+  assert.match(feedbackUi, /queued|failed|suppressed/);
+  assert.match(feedbackUi, /retryAlertDelivery/);
+  assert.match(feedbackUi, /ackAlertDelivery/);
+  assert.match(page, /data-alert-delivery-management/);
 });

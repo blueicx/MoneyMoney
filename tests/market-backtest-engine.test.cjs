@@ -29,6 +29,7 @@ test('stock backtest uses asset semantics and preserves the stock identity', () 
   assert.equal(result.market, 'stocks');
   assert.equal(result.instrumentId, 'AAPL');
   assert.equal(result.dataSource, 'nasdaq-public-history');
+  assert.equal(result.strategyVersion, 'asset-backtest-v1');
   assert.ok(result.totalTrades > 0);
   assert.equal(result.trades[0].instrumentId, 'AAPL');
   assert.equal(result.trades[0].side, 'long');
@@ -62,6 +63,19 @@ test('crypto backtest uses crypto bars and crypto identity', () => {
   assert.equal(result.trades[0].side, 'long');
   assert.equal(result.assumptions.session, '24/7');
   assert.ok(Number.isFinite(result.metrics.feesImpactPct));
+});
+
+test('asset backtest pins the exact input-bar snapshot deterministically', () => {
+  const input = {
+    market: 'stocks', instrumentId: 'AAPL', dataSource: 'test-bars', bars: bars([100, 101, 103, 106, 109, 112, 115, 118]),
+    strategy: 'momentum', lookback: 1, threshold: 0.01, holding: 2, startingBalance: 1000,
+  };
+  const first = runAssetBacktest(input);
+  const again = runAssetBacktest(input);
+  const revised = runAssetBacktest({ ...input, bars: bars([100, 101, 103, 106, 109, 112, 115, 119]) });
+  assert.match(first.dataSnapshotHash, /^[a-f0-9]{64}$/);
+  assert.equal(first.dataSnapshotHash, again.dataSnapshotHash);
+  assert.notEqual(first.dataSnapshotHash, revised.dataSnapshotHash);
 });
 
 test('asset backtest rejects insufficient history instead of fabricating results', () => {

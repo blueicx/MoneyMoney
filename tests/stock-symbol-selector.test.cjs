@@ -49,14 +49,31 @@ test('market radar keeps the current market main panel visible', () => {
 });
 
 test('layout changes invalidate the cached service worker shell', () => {
-  assert.match(serviceWorker, /const CACHE_NAME = "moneymoney-v59-trusted-research"/);
-  assert.match(html, /serviceWorker\.register\('\/sw\.js\?v=59'\)/);
+  assert.match(serviceWorker, /const CACHE_NAME = "moneymoney-v60-trusted-research"/);
+  assert.match(html, /serviceWorker\.register\('\/sw\.js\?v=60'\)/);
 });
 
 test('first service-worker claim does not reload an already-current page', () => {
   const serviceWorkerRegistration = html.slice(html.indexOf("if ('serviceWorker' in navigator)"));
   assert.match(serviceWorkerRegistration, /const hadControllerAtLoad = Boolean\(navigator\.serviceWorker\.controller\);/);
   assert.match(serviceWorkerRegistration, /if \(hadControllerAtLoad && !refreshing\)/);
+});
+
+test('prediction quick actions use the HttpOnly admin session instead of a removed browser token', () => {
+  const predictionCard = html.slice(html.indexOf('function radarMarketCard'), html.indexOf('function renderPredictionRadar'));
+  assert.doesNotMatch(predictionCard, /localStorage\.getItem\(['"]mm_token['"]\)/);
+  assert.match(predictionCard, /window\.mm_isLoggedIn\s*===\s*true/);
+  assert.match(predictionCard, /window\.mm_isGuest\s*!==\s*true/);
+});
+
+test('PWA updates wait for user action and logout clears cached public snapshots', () => {
+  assert.match(serviceWorker, /CLEAR_PUBLIC_SNAPSHOTS/);
+  assert.match(serviceWorker, /SKIP_WAITING/);
+  assert.doesNotMatch(serviceWorker, /^\s+self\.skipWaiting\(\);$/m);
+  assert.match(html, /data-pwa-update/);
+  const auth = fs.readFileSync('src/web/public/modules/auth-client.js', 'utf8');
+  assert.match(auth, /CLEAR_PUBLIC_SNAPSHOTS/);
+  assert.match(auth, /setTimeout\(finish,\s*\d+\)/, 'logout must finish even if service-worker readiness never settles');
 });
 
 test('stock exclusive workspaces keep the shared market bar and scope selection tools', () => {

@@ -1944,6 +1944,13 @@
       flex-wrap: wrap;
     }
     .chart-fullscreen-toolbar .tab { font-size: 13px; }
+    .stock-chart-companion-panel { margin-top: 14px; padding: 12px; border: 1px solid var(--border); border-radius: 10px; background: color-mix(in srgb, var(--bg-secondary) 84%, transparent); }
+    .stock-chart-companion-toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; font-size: 12px; }
+    .stock-chart-companion-toolbar label { display: inline-flex; align-items: center; gap: 5px; color: var(--text-secondary); }
+    .stock-chart-companion-toolbar select { min-height: 30px; padding: 4px 8px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg-card); color: var(--text); }
+    .stock-chart-companion-toolbar [data-stock-chart-companion-status] { margin-left: auto; color: var(--text-secondary); }
+    .stock-chart-companion-stage { height: 260px; min-height: 190px; }
+    #stock-kline-companion { display: block; width: 100%; height: 100%; cursor: crosshair; }
     .chart-card-fullscreen {
       position: relative !important;
       inset: 0 !important;
@@ -1968,6 +1975,8 @@
     body[data-chart-fullscreen="crypto"] #bn-candlestick { height: max(420px, calc(100vh - 360px)) !important; }
     @media (max-width: 768px) {
       .chart-card-fullscreen { padding: 12px !important; }
+      .stock-chart-companion-stage { height: 220px; }
+      .stock-chart-companion-toolbar [data-stock-chart-companion-status] { width: 100%; margin-left: 0; }
     }
     </style>
 <script src="/chart-analysis.js"></script>
@@ -2260,6 +2269,7 @@
           <button class="tab" type="button" onclick="saveBacktestCandidate()">☆ 保存候选</button>
           <button class="tab" type="button" onclick="toggleBacktestCandidates()">📌 候选库</button>
         </div>
+        <div id="backtest-data-preflight" aria-live="polite" style="margin:8px 0 12px;"></div>
         <div id="backtest-results"></div>
         <div id="backtest-compare" style="margin-top:16px;"></div>
         <div id="backtest-candidates" class="backtest-panel" style="display:none;margin-top:16px;padding:12px;"></div>
@@ -2532,6 +2542,7 @@
               <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px;">
                 <div id="stock-chart-title" style="font-weight:700;font-size:15px;"></div>
                 <div class="kline-toolbar" data-kline-controls="stocks" aria-label="股票K线周期">
+                  <button class="tab" type="button" data-chart-layout-toggle onclick="toggleStockChartCompanion()" aria-expanded="false" title="打开同步双图工作区">▤ 双图</button>
                   <button class="tab chart-fullscreen-button" type="button" data-chart-fullscreen="stocks" onclick="toggleChartFullscreen('stocks')" title="放大查看股票K线">⛶ 全屏</button>
                   <span class="kline-data-status" aria-label="K线数据时间机器">
                     <label>数据时点 <input type="date" data-chart-as-of onchange="applyStockKlineAsOf(this.value)" aria-label="选择股票历史数据时点"></label>
@@ -2598,6 +2609,15 @@
               <div id="stock-chart-signals" class="chart-signal-list" aria-live="polite"></div>
               <div id="stock-chart-pattern-list" class="chart-pattern-list" aria-live="polite"></div>
               <div id="stock-chart-structure-list" class="chart-structure-list" aria-live="polite"></div>
+              <section class="stock-chart-companion-panel" data-stock-chart-companion hidden aria-label="同步双图工作区">
+                <div class="stock-chart-companion-toolbar">
+                  <strong>同步双图</strong>
+                  <label>视图 <select data-chart-companion-mode onchange="setStockChartCompanionMode(this.value)"><option value="same-symbol">同标的·不同周期</option><option value="benchmark">与 SPY 对照</option></select></label>
+                  <label>周期 <select data-chart-companion-period onchange="setStockChartCompanionPeriod(this.value)"><option value="5m">5分</option><option value="15m">15分</option><option value="1h" selected>1小时</option><option value="1d">日线</option><option value="1y">年线</option></select></label>
+                  <span data-stock-chart-companion-status aria-live="polite">等待加载</span>
+                </div>
+                <div class="stock-chart-companion-stage"><canvas id="stock-kline-companion" width="640" height="280" role="img" aria-label="同步的股票对照K线图" tabindex="0"></canvas></div>
+              </section>
             </div>
             <div style="display:flex;justify-content:flex-end;align-items:center;margin:4px 0 10px;">
               <button class="tab active" type="button" onclick="loadStockQuotes()">🔄 刷新行情</button>
@@ -4375,6 +4395,7 @@ function updateBacktestScopeNote() {
 }
 let lastBacktestResult = null;
 const BACKTEST_CANDIDATE_KEY = 'mm-backtest-candidates-v1';
+let backtestCandidateFreshnessRevision = 0;
 function readBacktestCandidates() {
   try {
     const value = JSON.parse(localStorage.getItem(BACKTEST_CANDIDATE_KEY) || '[]');
@@ -4389,8 +4410,35 @@ function renderBacktestCandidates() {
   if (!host) return;
   const rows = readBacktestCandidates().filter(item => item.scope === activeMarketScope);
   host.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px;"><strong>📌 ${backtestScopeLabel()}候选库</strong><span style="font-size:11px;color:var(--text-secondary);">仅本浏览器保存，不跨市场混用</span></div>` + (rows.length
-    ? rows.map((item, index) => `<div class="backtest-meta" style="justify-content:space-between;align-items:center;border-bottom:1px solid var(--border);padding:8px 0;margin:0;"><span><strong>${marketResearchEscape(item.instrument || '全市场')}</strong> · ${marketResearchEscape(item.strategyLabel || item.strategy)} · 收益 ${Number(item.returnPct || 0).toFixed(2)}% · 胜率 ${Number(item.winRatePct || 0).toFixed(0)}%</span><span style="display:flex;gap:5px;"><button type="button" class="tab" style="padding:4px 7px;font-size:11px;" onclick="loadBacktestCandidate(${index})">载入</button><button type="button" class="tab" style="padding:4px 7px;font-size:11px;" onclick="openCandidateMonitor(${index})">🔔 提醒</button></span></div>`).join('')
+    ? rows.map((item, index) => `<div class="backtest-meta" style="justify-content:space-between;align-items:center;border-bottom:1px solid var(--border);padding:8px 0;margin:0;flex-wrap:wrap;"><span><strong>${marketResearchEscape(item.instrument || '全市场')}</strong> · ${marketResearchEscape(item.strategyLabel || item.strategy)} · 收益 ${Number(item.returnPct || 0).toFixed(2)}% · 胜率 ${Number(item.winRatePct || 0).toFixed(0)}%<small data-candidate-freshness="${index}" style="display:block;color:var(--text-secondary);margin-top:4px;">等待时效核验…</small></span><span style="display:flex;gap:5px;flex-wrap:wrap;"><button type="button" class="tab" style="padding:4px 7px;font-size:11px;" onclick="loadBacktestCandidate(${index})">载入</button><button type="button" class="tab" style="padding:4px 7px;font-size:11px;" onclick="rerunBacktestCandidate(${index})">人工复跑</button><button type="button" class="tab" style="padding:4px 7px;font-size:11px;" onclick="openCandidateMonitor(${index})">🔔 提醒</button></span></div>`).join('')
     : '<div style="font-size:12px;color:var(--text-secondary);">当前市场还没有保存的回测候选。运行一组有交易记录的回测后即可保存。</div>');
+  refreshBacktestCandidateFreshness(rows);
+}
+async function refreshBacktestCandidateFreshness(rows) {
+  const revision = ++backtestCandidateFreshnessRevision;
+  if (window.mm_isLoggedIn !== true || window.mm_isGuest === true) {
+    document.querySelectorAll('[data-candidate-freshness]').forEach(el => { el.textContent = '登录主人账号后可检查数据修订与策略版本'; });
+    return;
+  }
+  await Promise.all(rows.map(async (item, index) => {
+    const el = document.querySelector(`[data-candidate-freshness="${index}"]`);
+    if (!el) return;
+    if (!item.savedAt) { el.textContent = '保存时间缺失，无法核验'; return; }
+    const query = new URLSearchParams({ market: item.scope, instrument: item.instrument || '', since: item.savedAt, timeframe: item.timeframe || '1d' });
+    if (item.dataSnapshotHash) query.set('snapshotHash', item.dataSnapshotHash);
+    if (item.strategy) query.set('strategyId', item.strategy);
+    if (item.strategyVersion) query.set('strategyVersion', item.strategyVersion);
+    try {
+      const response = await fetch(scopedUrl(`/api/research/freshness?${query.toString()}`), { cache: 'no-store' });
+      const payload = await response.json();
+      if (revision !== backtestCandidateFreshnessRevision) return;
+      if (!response.ok || !payload.success) throw new Error(payload.error || '时效核验失败');
+      el.textContent = payload.data.status === 'stale'
+        ? `已过期：${payload.data.findings.map(finding => finding.detail).join('；')}。可人工复跑。`
+        : payload.data.status === 'current' ? '固定数据快照未发现后续修订。' : `无法验证：${payload.data.reason}`;
+      el.dataset.status = payload.data.status;
+    } catch (error) { if (revision === backtestCandidateFreshnessRevision) el.textContent = `时效核验不可用：${error?.message || '请求失败'}`; }
+  }));
 }
 window.toggleBacktestCandidates = function() {
   const host = document.getElementById('backtest-candidates');
@@ -4427,6 +4475,10 @@ window.loadBacktestCandidate = function(index) {
   if (holding) holding.value = item.holding || 5;
   if (typeof window.showToast === 'function') window.showToast('候选参数已载入，可重新回测', 'info');
 };
+window.rerunBacktestCandidate = async function(index) {
+  window.loadBacktestCandidate(index);
+  await runBacktest();
+};
 window.openCandidateMonitor = function(index) {
   const rows = readBacktestCandidates().filter(item => item.scope === activeMarketScope);
   const item = rows[Number(index)];
@@ -4436,6 +4488,26 @@ window.openCandidateMonitor = function(index) {
   showTab('alerts');
   if (typeof window.showToast === 'function') window.showToast(`已带入 ${item.instrument || '当前市场'}，请在提醒页设置监控规则`, 'info');
 };
+async function preflightAssetBacktest(market, instrument, lookback, holding) {
+  const host = document.getElementById('backtest-data-preflight');
+  const query = new URLSearchParams({ instrumentId: instrument, lookback: String(lookback), holding: String(holding) });
+  if (host) host.innerHTML = '<div class="backtest-loading-skeleton" style="padding:8px 10px;">正在核验所选市场的真实K线覆盖…</div>';
+  try {
+    const response = await fetch(scopedUrl(`/api/backtest/preflight?${query.toString()}`), { cache: 'no-store' });
+    const payload = await response.json();
+    const range = payload.dataRange ? `${String(payload.dataRange.from).slice(0, 10)} 至 ${String(payload.dataRange.to).slice(0, 10)}` : '无可用日期范围';
+    const source = payload.source || '来源不可用';
+    const reason = payload.reason || '';
+    if (host) {
+      const ready = response.ok && payload.success === true && payload.dataStatus === 'ready';
+      host.innerHTML = `<div style="padding:9px 11px;border:1px solid ${ready ? 'var(--border)' : 'var(--red)'};border-radius:9px;background:var(--bg-card);font-size:11px;line-height:1.5;"><strong>${ready ? '数据预检通过' : '数据预检未通过'}</strong> · ${marketResearchEscape(market)} / ${marketResearchEscape(instrument)} · ${Number(payload.availableBars || 0)} / ${Number(payload.requiredBars || 0)} 根 · ${marketResearchEscape(range)} · ${marketResearchEscape(source)}<br><span style="color:var(--text-secondary);">${marketResearchEscape(reason || payload.calendarNote || '')} ${marketResearchEscape(payload.calendarNote || '')}</span></div>`;
+    }
+    return response.ok && payload.success === true && payload.dataStatus === 'ready';
+  } catch (error) {
+    if (host) host.innerHTML = `<div class="backtest-error-state"><strong>数据预检请求失败</strong><br><small>${marketResearchEscape(error?.message || '网络请求失败')}</small></div>`;
+    return false;
+  }
+}
 async function runBacktest() {
   const strategy = document.getElementById('bt-strategy').value;
   const marketId = backtestInstrumentInput();
@@ -4453,6 +4525,10 @@ async function runBacktest() {
     return;
   }
   resultsEl.innerHTML = "<div class=\"backtest-loading-skeleton\" style=\"text-align:center;padding:20px;\">\u23F3 \u6B63\u5728\u8FD0\u884C\u56DE\u6D4B...</div>";
+  if (['stocks', 'crypto'].includes(activeMarketScope)) {
+    const preflightReady = await preflightAssetBacktest(activeMarketScope, marketId, lookback, holding);
+    if (!preflightReady) { resultsEl.innerHTML = ''; return; }
+  }
   try {
     const marketQuery = marketId ? `&marketId=${encodeURIComponent(marketId)}` : '';
     const res = await fetch(scopedUrl(`/api/backtest?strategy=${encodeURIComponent(strategy)}${marketQuery}&lookback=${lookback}&threshold=${threshold}&holding=${holding}`));
@@ -4474,6 +4550,12 @@ async function runBacktest() {
       lookback: Number(lookback),
       threshold: Number(threshold),
       holding: Number(holding),
+      timeframe: '1d',
+      dataSnapshotHash: r.dataSnapshotHash || null,
+      strategyVersion: r.strategyVersion || null,
+      dataSource: r.dataSource || null,
+      dataFrom: r.startTime ? new Date(r.startTime).toISOString() : null,
+      dataTo: r.endTime ? new Date(r.endTime).toISOString() : null,
       returnPct: Number(r.totalReturnPct || 0),
       winRatePct: Number(r.winRate || 0) * 100,
       maxDrawdownPct: Number(r.maxDrawdownPct || 0),
@@ -4500,8 +4582,8 @@ async function runBacktest() {
               <div style="font-size:11px;color:var(--text-secondary);">胜率</div>
               <div style="font-size:20px;font-weight:700;">${(r.winRate * 100).toFixed(0)}%</div>
             </div>
-            <div class="backtest-result-card">
-              <div style="font-size:11px;color:var(--text-secondary);">夏普比率</div>
+            <div class="backtest-result-card" title="Sharpe：日收益均值 / 日收益标准差 × √252；按本次回测资金曲线计算，不代表未来收益。">
+              <div style="font-size:11px;color:var(--text-secondary);">夏普比率 · 252日年化</div>
               <div style="font-size:20px;font-weight:700;">${r.sharpeRatio}</div>
             </div>
             <div class="backtest-result-card">
@@ -4515,6 +4597,7 @@ async function runBacktest() {
           </div>
           ${r.metrics ? `<div class="backtest-meta"><span>CAGR：${metricText(metrics.cagrPct)}%</span><span>Sortino：${metricText(metrics.sortinoRatio)}</span><span>盈亏比：${metricText(metrics.profitFactor)}</span><span>换手率：${metricText(metrics.turnoverPct)}%</span><span>费用影响：-${metricText(metrics.feesImpactPct)}%</span><span>滑点影响：-${metricText(metrics.slippageImpactPct)}%</span><span>基准差异：${metricText(metrics.benchmarkDiffPct)}%</span></div>` : ''}
           ${r.assumptions ? `<div class="backtest-meta"><span>交易时段：${marketResearchEscape(assumptions.session || '—')}</span><span>结算：${marketResearchEscape(assumptions.settlement || '—')}</span><span>仓位：${metricText(assumptions.positionPct)}%</span><span>费用：${metricText(assumptions.feesBps)} bps</span><span>滑点：${metricText(assumptions.slippageBps)} bps</span></div>` : ''}
+          <details style="margin:8px 0 12px;font-size:11px;color:var(--text-secondary);"><summary style="cursor:pointer;">指标定义与本次输入口径</summary><div style="display:grid;gap:4px;padding:8px 4px;line-height:1.5;"><span>总收益 = (期末权益 / 初始资金 - 1) × 100%；净值已扣本次费用与滑点。</span><span>胜率 = 净盈利平仓笔数 / 全部平仓笔数；只是本段历史样本统计，不是未来命中概率。</span><span>Sharpe = 日收益均值 / 日收益标准差 × √252；仅在当前历史回测样本内年化。</span><span>最大回撤 = 权益曲线相对历史峰值的最大跌幅；Profit Factor = 盈利交易总额 / 亏损交易绝对额。</span><span>CAGR按实际数据首末时间折算；Sortino以负收益波动为风险分母；费用、滑点、交易周期与条数见上方实验参数。</span><span>样本：${Number(r.barCount || 0)} 根K线，${Number(r.totalTrades || 0)} 笔平仓，${marketResearchEscape(r.dataSource || '来源未记录')}，${r.startTime ? new Date(r.startTime).toISOString().slice(0, 10) : '起始时间未知'} 至 ${r.endTime ? new Date(r.endTime).toISOString().slice(0, 10) : '结束时间未知'}。</span></div></details>
           <div class="section-title">资金曲线</div>
           <canvas id="equity-chart" width="800" height="200" class="backtest-equity-chart"></canvas>
           <div class="section-title" style="margin-top:16px;">最近交易</div>
@@ -6692,19 +6775,19 @@ function renderFundamentalQuality(data) {
   const trendValues = history.map(point => point.netMarginPct);
   const cashTrendValues = history.map(point => point.operatingCashFlowMarginPct);
   const cards = [
-    ['营收增长', pct(m.revenueGrowthPct)],
-    ['毛利率', pct(m.grossMarginPct)],
-    ['经营利润率', pct(m.operatingMarginPct)],
-    ['净利率', pct(m.netMarginPct)],
-    ['现金流/净利', ratio(m.cashConversionRatio)],
-    ['应计占比', pct(m.accrualRatioPct)],
-    ['流动比率', ratio(m.currentRatio)],
-    ['负债/资产', pct(m.liabilitiesToAssetsPct)],
-    ['ROE', pct(m.returnOnEquityPct)]
-  ].map(([label, value]) =>
-    '<div style="background:var(--bg-secondary);border-radius:9px;padding:8px;min-width:0;">' +
+    ['营收增长', pct(m.revenueGrowthPct), `${periodBasis}营收同比：(本期营收 / 上年同期营收 - 1) × 100%`],
+    ['毛利率', pct(m.grossMarginPct), `${periodBasis}毛利率：毛利 / 营收 × 100%`],
+    ['经营利润率', pct(m.operatingMarginPct), `${periodBasis}经营利润率：经营利润 / 营收 × 100%`],
+    ['净利率', pct(m.netMarginPct), `${periodBasis}净利率：净利润 / 营收 × 100%`],
+    ['现金流/净利', ratio(m.cashConversionRatio), `${periodBasis}现金转化：经营现金流 / 净利润`],
+    ['应计占比', pct(m.accrualRatioPct), `${periodBasis}应计占资产：(净利润 - 经营现金流) / 总资产 × 100%`],
+    ['流动比率', ratio(m.currentRatio), '最近申报时点：流动资产 / 流动负债'],
+    ['负债/资产', pct(m.liabilitiesToAssetsPct), '最近申报时点：总负债 / 总资产 × 100%'],
+    ['ROE', pct(m.returnOnEquityPct), `${periodBasis}ROE：(净利润 / 最近申报股东权益) × 100%`]
+  ].map(([label, value, formula]) =>
+    `<div title="${stockEscapeHtml(formula)}" style="background:var(--bg-secondary);border-radius:9px;padding:8px;min-width:0;cursor:help;">` +
       '<div style="font-size:10px;color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + label + '</div>' +
-      '<strong style="font-size:12px;">' + value + '</strong></div>'
+      '<strong style="font-size:12px;">' + value + '</strong><div style="font-size:9px;color:var(--text-secondary);margin-top:3px;">公式与口径悬停查看</div></div>'
   ).join('');
   const historyRows = (data.history || []).map(point =>
     '<tr>' +
@@ -6734,9 +6817,10 @@ function renderFundamentalQuality(data) {
         <div style="min-width:0;">
           <div style="font-weight:800;font-size:14px;">${safeNewsText(data.companyName)}</div>
           <small style="color:var(--text-secondary);display:block;margin-top:3px;">${safeNewsText(data.symbol)} · ${periodBasis === 'TTM' ? 'TTM截至' : '财年截止'} ${safeNewsText(data.fiscalPeriodEnd)} · 最近相关申报 ${safeNewsText(data.reportFiledAt)}</small>
+          <small style="color:var(--text-secondary);display:block;margin-top:3px;">规则汇总评分，不是历史命中率、收益概率或未来表现。</small>
         </div>
         ${workspaceInlineRefresh('loadFundamentalQuality()', '刷新')}
-        <span class="workspace-signal-badge" style="color:white;background:${scoreColor};border-radius:99px;padding:5px 10px;font-size:11px;flex-shrink:0;">${score}/100 · ${safeNewsText(data.signalZh)}</span>
+        <span class="workspace-signal-badge" title="规则汇总评分，不是命中率、收益概率或未来表现" style="color:white;background:${scoreColor};border-radius:99px;padding:5px 10px;font-size:11px;flex-shrink:0;">${score}/100 · ${safeNewsText(data.signalZh)}</span>
       </div>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(105px,1fr));gap:7px;margin-top:11px;">${cards}</div>
       <div id="fundamental-history-trend" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:8px;margin-top:10px;">
@@ -8048,6 +8132,18 @@ let stockChartDailyContext = null;
 let stockChartIntradaySession = null;
 let stockChartExchangeTimezone = 'America/New_York';
 let stockKlineRequestRevision = 0;
+let stockChartCompanionOpen = false;
+let stockChartCompanionMode = 'same-symbol';
+let stockChartCompanionPeriod = '1h';
+let stockChartCompanionBars = [];
+let stockChartCompanionRequestRevision = 0;
+let stockChartCompanionKey = '';
+try {
+  stockChartCompanionOpen = localStorage.getItem('mm-stock-chart-layout-v1') === 'open';
+  const savedCompanion = JSON.parse(localStorage.getItem('mm-stock-chart-companion-v1') || '{}');
+  if (['same-symbol', 'benchmark'].includes(savedCompanion.mode)) stockChartCompanionMode = savedCompanion.mode;
+  if (['5m', '15m', '1h', '1d', '1y'].includes(savedCompanion.period)) stockChartCompanionPeriod = savedCompanion.period;
+} catch (e) {}
 let stockChartOverlayConfig = window.MoneyChartAnalysis?.normalizeOverlayConfig({ strategies:{ maCross:true, rsiReversal:false, bollinger:false, volumeBreakout:false } }) || { signals:true, patterns:false, structures:false, volume:true, indicators:{ ma:true, boll:false, macd:false }, strategies:{ maCross:true, rsiReversal:false, bollinger:false, volumeBreakout:false }, patternTypes:{}, maxLabels:80 };
 let cryptoChartStrategyConfig = { maCross:true, rsiReversal:false, bollinger:false, volumeBreakout:false };
 var INLINE_CANDLE_PATTERN_CATALOG = [
@@ -8233,19 +8329,22 @@ function renderChartPatternMarkers(targetId, patterns, getPosition) {
   const layer = document.getElementById(targetId);
   if (!layer) return;
   layer.innerHTML = '';
-  (patterns || []).forEach((item, index) => {
-    const position = getPosition(item);
-    if (!position) return;
+  const positioned = (patterns || []).map((item, index) => ({ item, index, position: getPosition(item) })).filter(entry => entry.position);
+  const chartWidth = layer.clientWidth || layer.parentElement?.clientWidth || 640;
+  const compact = positioned.length >= 6 && chartWidth / positioned.length < 55;
+  positioned.forEach(({ item, index, position }) => {
     const direction = item.direction === 'bullish' ? '看涨' : item.direction === 'bearish' ? '看跌' : '中性';
     const color = item.direction === 'bearish' ? '#fb7185' : item.direction === 'bullish' ? '#34d399' : '#fbbf24';
     const marker = document.createElement('button');
     marker.type = 'button';
     marker.className = 'chart-pattern-marker';
-    marker.style.cssText = `position:absolute;left:${position.x - 20}px;top:${Math.max(4, position.y)}px;width:40px;text-align:center;background:transparent;border:none;color:${color};font:10px Inter,system-ui,sans-serif;cursor:pointer;pointer-events:auto;`;
+    marker.dataset.displayMode = compact ? 'compact' : 'full';
+    marker.style.cssText = `position:absolute;left:${position.x - (compact ? 10 : 20)}px;top:${Math.max(4, position.y)}px;width:${compact ? 20 : 40}px;text-align:center;background:transparent;border:none;color:${color};font:${compact ? '14px' : '10px'} Inter,system-ui,sans-serif;cursor:pointer;pointer-events:auto;`;
     marker.tabIndex = 0;
-    marker.textContent = item.label;
+    marker.textContent = compact ? '◆' : item.label;
     const tooltipId = `${targetId}-tooltip-${item.index}-${index}`;
     marker.setAttribute('aria-label', `${item.label}，${direction}，点击查看形态说明`);
+    marker.title = `${item.label} · ${direction} · ${targetId === 'stock-chart-patterns' ? formatStockKlineTime(item.time) : formatChartTime(item.time)}`;
     marker.setAttribute('aria-expanded', 'false');
     marker.setAttribute('aria-describedby', tooltipId);
     if (position.y < 74) marker.classList.add('tooltip-below');
@@ -8321,6 +8420,7 @@ function updateStockKlineFocusControl() {
   const next = document.querySelector('[data-intraday-next]');
   if (previous) previous.disabled = !stockChartIntradaySession?.previousDate;
   if (next) next.disabled = !stockChartIntradaySession?.nextDate;
+  renderStockChartCompanion();
 }
 function redrawStockKlineSelection() {
   const canvas = document.getElementById('stock-kline');
@@ -8341,6 +8441,150 @@ function selectStockKlineCandle(event) {
   redrawStockKlineSelection();
   return sourceIndex;
 }
+function saveStockChartCompanionPreferences() {
+  try { localStorage.setItem('mm-stock-chart-layout-v1', stockChartCompanionOpen ? 'open' : 'closed'); } catch (e) {}
+  try { localStorage.setItem('mm-stock-chart-companion-v1', JSON.stringify({ mode: stockChartCompanionMode, period: stockChartCompanionPeriod })); } catch (e) {}
+}
+function syncStockChartCompanionControls() {
+  const panel = document.querySelector('[data-stock-chart-companion]');
+  const toggle = document.querySelector('[data-chart-layout-toggle]');
+  const mode = document.querySelector('[data-chart-companion-mode]');
+  const period = document.querySelector('[data-chart-companion-period]');
+  if (panel) panel.hidden = !stockChartCompanionOpen;
+  if (toggle) { toggle.setAttribute('aria-expanded', String(stockChartCompanionOpen)); toggle.textContent = stockChartCompanionOpen ? '▤ 收起双图' : '▤ 双图'; }
+  if (mode) mode.value = stockChartCompanionMode;
+  if (period) period.value = stockChartCompanionPeriod;
+}
+function toggleStockChartCompanion() {
+  stockChartCompanionOpen = !stockChartCompanionOpen;
+  saveStockChartCompanionPreferences();
+  syncStockChartCompanionControls();
+  if (stockChartCompanionOpen) loadStockChartCompanion();
+  else stockChartCompanionRequestRevision += 1;
+  return stockChartCompanionOpen;
+}
+function setStockChartCompanionMode(value) {
+  if (!['same-symbol', 'benchmark'].includes(value)) return false;
+  stockChartCompanionMode = value;
+  stockChartCompanionKey = '';
+  saveStockChartCompanionPreferences();
+  if (stockChartCompanionOpen) loadStockChartCompanion();
+  return true;
+}
+function setStockChartCompanionPeriod(value) {
+  if (!['5m', '15m', '1h', '1d', '1y'].includes(value)) return false;
+  stockChartCompanionPeriod = value;
+  stockChartCompanionKey = '';
+  saveStockChartCompanionPreferences();
+  if (stockChartCompanionOpen) loadStockChartCompanion();
+  return true;
+}
+function drawStockChartCompanion(canvas, bars) {
+  if (!canvas) return;
+  const dpr = Math.max(1, window.devicePixelRatio || 1);
+  const width = Math.max(280, canvas.clientWidth || 640), height = Math.max(180, canvas.clientHeight || 260);
+  canvas.width = Math.round(width * dpr); canvas.height = Math.round(height * dpr);
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, width, height);
+  const padL = 55, padR = 12, padT = 16, padB = 24, plotH = height - padT - padB;
+  const secondary = getComputedStyle(document.documentElement).getPropertyValue('--text-secondary') || '#94a3b8';
+  const border = getComputedStyle(document.documentElement).getPropertyValue('--border') || '#334155';
+  if (!bars?.length) {
+    ctx.fillStyle = secondary; ctx.font = '12px system-ui'; ctx.textAlign = 'center'; ctx.fillText('暂无可用对照K线数据', width / 2, height / 2); return;
+  }
+  const low = Math.min(...bars.map(bar => Number(bar.low))), high = Math.max(...bars.map(bar => Number(bar.high)));
+  const range = high - low || 1, xStep = (width - padL - padR) / bars.length;
+  const y = value => padT + (high - value) / range * plotH;
+  const exchangeDate = new Intl.DateTimeFormat('en-CA', { timeZone: stockChartExchangeTimezone, year: 'numeric', month: '2-digit', day: '2-digit' });
+  for (let tick = 0; tick <= 4; tick += 1) {
+    const price = low + range * tick / 4, yPos = y(price);
+    ctx.strokeStyle = border; ctx.beginPath(); ctx.moveTo(padL, yPos); ctx.lineTo(width - padR, yPos); ctx.stroke();
+    ctx.fillStyle = secondary; ctx.font = '10px system-ui'; ctx.textAlign = 'right'; ctx.textBaseline = 'middle'; ctx.fillText(price >= 1000 ? price.toFixed(0) : price.toFixed(2), padL - 5, yPos);
+  }
+  const focusBar = Number.isInteger(stockChartFocusIndex) ? stockChartKlines[stockChartFocusIndex] : null;
+  const focusTime = focusBar ? Number(focusBar.time) : null;
+  const focusDate = focusTime == null ? null : exchangeDate.format(new Date(focusTime));
+  const visible = bars;
+  visible.forEach((bar, index) => {
+    const x = padL + index * xStep + xStep / 2, up = Number(bar.close) >= Number(bar.open), color = up ? '#22c55e' : '#ef4444';
+    const barDate = exchangeDate.format(new Date(Number(bar.time)));
+    if (focusDate && barDate === focusDate) {
+      ctx.fillStyle = 'rgba(245,158,11,.10)'; ctx.fillRect(Math.max(padL, x - xStep / 2), padT, xStep, plotH);
+    }
+    ctx.strokeStyle = color; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(x, y(Number(bar.high))); ctx.lineTo(x, y(Number(bar.low))); ctx.stroke();
+    const bodyTop = Math.min(y(Number(bar.open)), y(Number(bar.close))), bodyHeight = Math.max(1.2, Math.abs(y(Number(bar.open)) - y(Number(bar.close))));
+    ctx.fillStyle = color; ctx.fillRect(x - Math.max(1, Math.min(7, xStep * .3)), bodyTop, Math.max(2, Math.min(14, xStep * .6)), bodyHeight);
+  });
+  const step = Math.max(1, Math.ceil(visible.length / 5));
+  ctx.fillStyle = secondary; ctx.font = '10px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+  visible.forEach((bar, index) => { if (index % step === 0 || index === visible.length - 1) ctx.fillText(new Date(bar.time).toLocaleDateString('zh-CN', { timeZone: stockChartExchangeTimezone, month: 'numeric', day: 'numeric' }), padL + index * xStep + xStep / 2, height - padB + 5); });
+}
+function renderStockChartCompanion() {
+  if (!stockChartCompanionOpen) return;
+  const canvas = document.getElementById('stock-kline-companion');
+  if (canvas) drawStockChartCompanion(canvas, stockChartCompanionBars);
+}
+function bindStockChartCompanionSelection() {
+  const canvas = document.getElementById('stock-kline-companion');
+  if (!canvas || canvas.dataset.selectionBound === 'true') return;
+  canvas.dataset.selectionBound = 'true';
+  canvas.addEventListener('click', event => {
+    if (!stockChartCompanionBars.length || !stockChartKlines.length) return;
+    const rect = canvas.getBoundingClientRect();
+    const plotWidth = Math.max(1, rect.width - 67);
+    const ratio = Math.max(0, Math.min(0.999999, (event.clientX - rect.left - 55) / plotWidth));
+    const visible = stockChartReplayIndex >= 0 ? Math.min(stockChartKlines.length, stockChartReplayIndex + 1) : stockChartKlines.length;
+    const index = Math.min(stockChartCompanionBars.length - 1, Math.floor(ratio * stockChartCompanionBars.length));
+    const focusTime = Number(stockChartCompanionBars[index]?.time);
+    if (!Number.isFinite(focusTime)) return;
+    let nearest = 0, nearestDelta = Infinity;
+    for (let primaryIndex = 0; primaryIndex < visible; primaryIndex += 1) {
+      const delta = Math.abs(Number(stockChartKlines[primaryIndex].time) - focusTime);
+      if (delta < nearestDelta) { nearest = primaryIndex; nearestDelta = delta; }
+    }
+    stockChartFocusIndex = nearest;
+    updateStockKlineFocusControl();
+    redrawStockKlineSelection();
+  });
+}
+async function loadStockChartCompanion() {
+  if (!stockChartCompanionOpen) return;
+  const canvas = document.getElementById('stock-kline-companion');
+  const status = document.querySelector('[data-stock-chart-companion-status]');
+  if (!canvas) return;
+  bindStockChartCompanionSelection();
+  const revision = ++stockChartCompanionRequestRevision;
+  const benchmark = stockChartCompanionMode === 'benchmark';
+  const symbol = benchmark ? 'usSPY' : currentStockSymbol;
+  const apiSymbol = benchmark ? 'SPY' : currentStockApiSymbol;
+  const key = `${stockChartCompanionMode}:${symbol}:${apiSymbol}:${stockChartCompanionPeriod}:${stockChartAsOf}`;
+  if (key === stockChartCompanionKey && stockChartCompanionBars.length) { renderStockChartCompanion(); return; }
+  stockChartCompanionKey = key;
+  stockChartCompanionBars = [];
+  if (status) status.textContent = '正在请求数据源…';
+  renderStockChartCompanion();
+  try {
+    const query = new URLSearchParams({ symbol, period: stockChartCompanionPeriod, interval: stockChartCompanionPeriod });
+    if (apiSymbol) query.set('api', apiSymbol);
+    if (stockChartAsOf) query.set('asOf', stockChartAsOf);
+    const response = await fetch(`/api/stock/kline?${query.toString()}`, { cache: 'no-store' });
+    const payload = await response.json();
+    if (revision !== stockChartCompanionRequestRevision) return;
+    if (!response.ok || !payload.success || !Array.isArray(payload.data) || !payload.data.length) throw new Error(payload.reason || '来源没有返回可用K线');
+    stockChartCompanionBars = payload.data;
+    if (status) status.textContent = `${benchmark ? 'SPY基准' : safeNewsText(currentStockSymbol)} · ${stockChartCompanionPeriod} · ${payload.source || '来源未知'} · ${payload.data.length}根 · ${payload.dataStatus || '状态未知'}`;
+    renderStockChartCompanion();
+  } catch (error) {
+    if (revision !== stockChartCompanionRequestRevision) return;
+    stockChartCompanionBars = [];
+    if (status) status.textContent = `来源不可用：${error?.message || '请求失败'}`;
+    renderStockChartCompanion();
+  }
+}
+syncStockChartCompanionControls();
+bindStockChartCompanionSelection();
+if (stockChartCompanionOpen) loadStockChartCompanion();
 function stockKlineVisibleCount() {
   return stockChartReplayIndex >= 0 ? Math.min(stockChartKlines.length, stockChartReplayIndex + 1) : stockChartKlines.length;
 }
@@ -8532,6 +8776,7 @@ async function loadStockKline(symbol, name, apiSymbol) {
     stockChartIntradayDate = '';
     stockChartIntradaySession = null;
     stockChartDailyContext = null;
+    stockChartCompanionKey = '';
   }
   if (symbol) currentStockSymbol = symbol;
   if (name) currentStockName = name;
@@ -8583,12 +8828,14 @@ async function loadStockKline(symbol, name, apiSymbol) {
     stockChartExchangeTimezone = d.timezone || stockChartExchangeTimezone;
     stockChartIntradaySession = d.session || null;
     const latestBarTime = stockChartKlinesTime(d.data[d.data.length - 1]);
-    setStockKlineStatus(`${freshness}${stockChartIntradayDate ? ` · ${stockChartIntradayDate} · ${currentStockKlinePeriod} · ${stockChartExchangeTimezone}` : ''} · K线时间 ${latestBarTime || '来源未提供'} · ${d.source || '股票行情'} · 抓取 ${d.updatedAt ? formatChartTime(d.updatedAt) : '时间未知'}${d.reason ? ` · ${d.reason}` : ''}`);
+    const actualCoverage = d.session?.dataWindow ? ` · 来源覆盖 ${d.session.dataWindow.firstBarLocalTime}–${d.session.dataWindow.lastBarLocalTime}（${d.session.dataWindow.bars}根；不代表完整交易时段）` : '';
+    setStockKlineStatus(`${freshness}${stockChartIntradayDate ? ` · ${stockChartIntradayDate} · ${currentStockKlinePeriod} · ${stockChartExchangeTimezone}` : ''}${actualCoverage} · K线时间 ${latestBarTime || '来源未提供'} · ${d.source || '股票行情'} · 抓取 ${d.updatedAt ? formatChartTime(d.updatedAt) : '时间未知'}${d.reason ? ` · ${d.reason}` : ''}`);
     stockChartKlines = d.data;
     stockChartReplayIndex = stockChartKlines.length - 1;
     loadStockChartOverlayConfig();
     if (window.stockMoneyKLine?.update) window.stockMoneyKLine.update(stockChartKlines, { resetReplay: true });
     else drawStockKline(canvas, stockChartKlines);
+    if (stockChartCompanionOpen) loadStockChartCompanion();
     canvas.style.visibility = 'visible';
   } catch(e) {
     currentStockKlineReason = '股票K线来源不可用，请稍后重试';
@@ -9686,18 +9933,59 @@ async function loadAlertDeliveryFeedback() {
     const response = await fetch('/api/alerts/deliveries?limit=12', { cache: 'no-store' });
     const payload = await response.json();
     if (!response.ok || !payload.success) return;
-    const rows = (payload.data || []).filter(item => ['sent', 'acknowledged'].includes(item.status));
+    host.querySelector('[data-alert-delivery-management]')?.remove();
+    const statuses = { queued: '排队中', retrying: '重试中', suppressed: '已抑制', failed: '投递失败', sent: '已发送', acknowledged: '已确认' };
+    const rows = (payload.data || []).filter(item => Object.hasOwn(statuses, item.status));
     const labels = { useful: '有用', irrelevant: '无关', duplicate: '重复' };
     const section = document.createElement('section');
+    section.dataset.alertDeliveryManagement = 'true';
     section.style.marginTop = '18px';
-    section.innerHTML = `<div style="font-weight:700;margin-bottom:8px;">最近提醒 · 帮助调整提醒质量</div>${rows.length ? rows.map(item => {
+    section.innerHTML = `<div style="font-weight:700;margin-bottom:8px;">提醒投递 · 状态、重试与确认</div>${rows.length ? rows.map(item => {
       const id = encodeURIComponent(String(item.id || ''));
       const rating = item.feedback?.rating;
       const message = safeNewsText(String(item.payload?.message || '提醒内容'));
-      return `<div style="padding:10px;margin:6px 0;border:1px solid var(--border);border-radius:9px;font-size:12px;"><div>${message}</div><div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-top:7px;"><span style="color:var(--text-secondary);">${rating ? `反馈：${labels[rating] || '已记录'}` : '这条提醒对你有帮助吗？'}</span>${rating ? '' : `<button class="tab" onclick="setAlertDeliveryFeedback('${id}','useful')">有用</button><button class="tab" onclick="setAlertDeliveryFeedback('${id}','irrelevant')">无关</button><button class="tab" onclick="setAlertDeliveryFeedback('${id}','duplicate')">重复</button>`}</div></div>`;
-    }).join('') : '<div style="font-size:12px;color:var(--text-secondary);">暂无已投递提醒。</div>'}`;
+      const status = statuses[item.status] || item.status;
+      const attempts = Number(item.attempts || 0);
+      const lastError = item.lastError ? `<div style="color:var(--red);margin-top:4px;">原因：${safeNewsText(String(item.lastError))}</div>` : '';
+      const context = item.context || {};
+      const canRetry = ['failed', 'queued'].includes(item.status);
+      const canAck = item.status === 'sent';
+      const evidenceButton = ['stocks', 'options', 'crypto', 'prediction'].includes(context.market) && context.instrument
+        ? `<button class="tab" onclick="openAlertDeliveryEvidence('${id}')">查看标的/证据</button>` : '';
+      return `<article style="padding:10px;margin:6px 0;border:1px solid var(--border);border-radius:9px;font-size:12px;"><div style="display:flex;justify-content:space-between;gap:8px;"><strong>${status}</strong><span style="color:var(--text-secondary);">${attempts} 次尝试 · ${safeNewsText(String(item.channel || '渠道未知'))}</span></div><div style="margin-top:5px;">${message}</div>${lastError}<div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-top:7px;">${evidenceButton}${canRetry ? `<button class="tab" onclick="retryAlertDelivery('${id}')">重试投递</button>` : ''}${canAck ? `<button class="tab" onclick="ackAlertDelivery('${id}')">确认已读</button>` : ''}${['sent', 'acknowledged'].includes(item.status) ? `<span style="color:var(--text-secondary);">${rating ? `反馈：${labels[rating] || '已记录'}` : '提醒质量反馈'}</span>${rating ? '' : `<button class="tab" onclick="setAlertDeliveryFeedback('${id}','useful')">有用</button><button class="tab" onclick="setAlertDeliveryFeedback('${id}','irrelevant')">无关</button><button class="tab" onclick="setAlertDeliveryFeedback('${id}','duplicate')">重复</button>`}` : ''}</div></article>`;
+    }).join('') : '<div style="font-size:12px;color:var(--text-secondary);">暂无提醒投递记录。</div>'}`;
     host.appendChild(section);
   } catch {}
+}
+async function retryAlertDelivery(encodedId) {
+  try {
+    const id = decodeURIComponent(String(encodedId || ''));
+    const response = await fetch(`/api/alerts/deliveries/${encodeURIComponent(id)}/retry`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    const payload = await response.json();
+    if (!response.ok || !payload.success) throw new Error(payload.error || '提醒重试失败');
+    if (typeof window.showToast === 'function') window.showToast('提醒已重新投递', 'success');
+    await loadAlerts();
+  } catch (error) { if (typeof window.showToast === 'function') window.showToast(error.message || '提醒重试失败', 'error'); }
+}
+async function ackAlertDelivery(encodedId) {
+  try {
+    const id = decodeURIComponent(String(encodedId || ''));
+    const response = await fetch(`/api/alerts/${encodeURIComponent(id)}/ack`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    const payload = await response.json();
+    if (!response.ok || !payload.success) throw new Error(payload.error || '提醒确认失败');
+    await loadAlerts();
+  } catch (error) { if (typeof window.showToast === 'function') window.showToast(error.message || '提醒确认失败', 'error'); }
+}
+function openAlertDeliveryEvidence(encodedId) {
+  const id = decodeURIComponent(String(encodedId || ''));
+  fetch('/api/alerts/deliveries?limit=100', { cache: 'no-store' }).then(response => response.json()).then(payload => {
+    const delivery = (payload.data || []).find(item => String(item.id) === id);
+    const context = delivery?.context || {};
+    if (!['stocks', 'options', 'crypto', 'prediction'].includes(context.market) || !context.instrument) throw new Error('提醒没有可定位的市场和标的证据');
+    const query = new URLSearchParams({ market: context.market, workspace: context.workspace || 'decision-intelligence', instrument: context.instrument });
+    if (Array.isArray(delivery.evidenceRefs) && delivery.evidenceRefs[0]) query.set('evidence', delivery.evidenceRefs[0]);
+    window.open(`${location.origin}/?${query.toString()}`, '_blank', 'noopener,noreferrer');
+  }).catch(error => { if (typeof window.showToast === 'function') window.showToast(error.message || '证据定位失败', 'error'); });
 }
 async function setAlertDeliveryFeedback(encodedId, rating) {
   try {
@@ -12053,6 +12341,7 @@ function setMarketScope(scope, options = {}) {
   syncWorkspaceContextUrl();
   renderNavigationState();
   updateBacktestScopeNote();
+  renderBacktestCandidates();
   const backtestInput = document.getElementById('bt-market-id');
   if (backtestInput) backtestInput.value = '';
   loadNewsTicker(); loadMarketTimeline();
@@ -12997,7 +13286,7 @@ function radarMarketCard(item) {
         <button class="tab" style="flex:1;padding:7px;" onclick="togglePredictionHistory('${token}')">📈 走势</button>
         <button class="tab" style="flex:1;padding:7px;" onclick="togglePredictionSizing('${token}')">🧮 仓位</button>
         <button class="tab" style="flex:1;padding:7px;" onclick="togglePredictionSettlement('${token}')">⚖️ 结算证据</button>
-              <button class="tab" style="flex:1;padding:7px;" title="${(function(){ const logged=window.mm_isLoggedIn && !!localStorage.getItem('mm_token'); if(!logged) return ' 登录后可用'; if(item.liquidity!=null && item.liquidity<1000) return ' 流动性不足'; if(item.endDate && new Date(item.endDate).getTime()<Date.now()) return ' 已过期'; return ' 🚀 快捷下单';})()}" ${ (function(){ const logged=window.mm_isLoggedIn && !!localStorage.getItem('mm_token'); const isExpired=item.endDate && new Date(item.endDate).getTime()<Date.now(); const lowLiq=item.liquidity!=null && item.liquidity<1000; if(!logged || isExpired || lowLiq) return 'disabled style="flex:1;padding:7px;opacity:.55;cursor:not-allowed;"'; return 'style="flex:1;padding:7px;"';})()} onclick="(function(tok){ if(!(window.mm_isLoggedIn && localStorage.getItem('mm_token'))){ location.href='/login?next='+encodeURIComponent(location.pathname); return; } const it=predictionRadarState.cards.get(tok); const lowLiq=it && it.liquidity!=null && it.liquidity<1000; const exp=it && it.endDate && new Date(it.endDate).getTime()<Date.now(); if(lowLiq||exp){ togglePredictionSizing(tok); return; } togglePredictionSizing(tok); setTimeout(()=>{ const el=document.getElementById('radar-sizing-'+tok); if(el) el.scrollIntoView({behavior:'smooth',block:'center'}); }, 120); })('${token}')">🚀 快捷下单</button>
+              <button class="tab" style="flex:1;padding:7px;" title="${(function(){ const logged=window.mm_isLoggedIn === true && window.mm_isGuest !== true; if(!logged) return ' 登录后可用'; if(item.liquidity!=null && item.liquidity<1000) return ' 流动性不足'; if(item.endDate && new Date(item.endDate).getTime()<Date.now()) return ' 已过期'; return ' 🚀 快捷下单';})()}" ${ (function(){ const logged=window.mm_isLoggedIn === true && window.mm_isGuest !== true; const isExpired=item.endDate && new Date(item.endDate).getTime()<Date.now(); const lowLiq=item.liquidity!=null && item.liquidity<1000; if(!logged || isExpired || lowLiq) return 'disabled style="flex:1;padding:7px;opacity:.55;cursor:not-allowed;"'; return 'style="flex:1;padding:7px;"';})()} onclick="(function(tok){ if(!(window.mm_isLoggedIn === true && window.mm_isGuest !== true)){ location.href='/login?next='+encodeURIComponent(location.pathname); return; } const it=predictionRadarState.cards.get(tok); const lowLiq=it && it.liquidity!=null && it.liquidity<1000; const exp=it && it.endDate && new Date(it.endDate).getTime()<Date.now(); if(lowLiq||exp){ togglePredictionSizing(tok); return; } togglePredictionSizing(tok); setTimeout(()=>{ const el=document.getElementById('radar-sizing-'+tok); if(el) el.scrollIntoView({behavior:'smooth',block:'center'}); }, 120); })('${token}')">🚀 快捷下单</button>
       </div>
       <div id="radar-history-${token}" style="display:none;"></div>
       <div id="radar-sizing-${token}" style="display:none;"></div>
@@ -13836,10 +14125,36 @@ function mobileTab(tab) {
   showTab(tab);
   window.scrollTo({ top: 0, behavior: 'smooth' });
     }
-    // Register service worker for PWA
+    // Register service worker for PWA. First install claims this page silently;
+    // subsequent versions wait until the user accepts the update.
     if ('serviceWorker' in navigator) {
       const hadControllerAtLoad = Boolean(navigator.serviceWorker.controller);
-      navigator.serviceWorker.register('/sw.js?v=59').catch(() => {});
+      const showPwaUpdate = (registration) => {
+        const waiting = registration?.waiting;
+        if (!waiting || !navigator.serviceWorker.controller || document.querySelector('[data-pwa-update]')) return;
+        const banner = document.createElement('div');
+        banner.dataset.pwaUpdate = 'true';
+        banner.setAttribute('role', 'status');
+        banner.style.cssText = 'position:fixed;left:50%;bottom:18px;transform:translateX(-50%);z-index:10000;display:flex;align-items:center;gap:12px;padding:10px 14px;border:1px solid var(--border);border-radius:12px;background:var(--bg-card);color:var(--text-primary);box-shadow:0 8px 26px rgba(0,0,0,.3);font:12px Inter,system-ui,sans-serif;';
+        banner.innerHTML = '<span>MoneyMoney 有可用更新</span><button type="button" class="tab" data-pwa-update-apply>更新并重新载入</button><button type="button" class="tab" data-pwa-update-dismiss aria-label="稍后更新">稍后</button>';
+        banner.querySelector('[data-pwa-update-apply]')?.addEventListener('click', () => {
+          const apply = banner.querySelector('[data-pwa-update-apply]');
+          if (apply) { apply.disabled = true; apply.textContent = '正在更新…'; }
+          waiting.postMessage({ type: 'SKIP_WAITING' });
+        });
+        banner.querySelector('[data-pwa-update-dismiss]')?.addEventListener('click', () => banner.remove());
+        document.body.appendChild(banner);
+      };
+      navigator.serviceWorker.register('/sw.js?v=60').then((registration) => {
+        showPwaUpdate(registration);
+        registration.addEventListener('updatefound', () => {
+          const installing = registration.installing;
+          if (!installing) return;
+          installing.addEventListener('statechange', () => {
+            if (installing.state === 'installed') showPwaUpdate(registration);
+          });
+        });
+      }).catch(() => {});
       let refreshing = false;
       navigator.serviceWorker.addEventListener('controllerchange', () => {
         // First installation claims an already-current network page; reloading
@@ -13969,6 +14284,7 @@ document.addEventListener('keydown', event => {
 window.addEventListener('resize', () => {
   const active = document.body?.dataset.chartFullscreen;
   if (active) redrawVisibleChart(active);
+  if (stockChartCompanionOpen) renderStockChartCompanion();
 });
 
 class MoneyKLine {

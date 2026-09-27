@@ -17,6 +17,7 @@ export function filterStockBarsForTradingDate(bars: readonly IntradayBar[], date
   const ordered = bars.filter(bar => Number.isFinite(bar.time) && [bar.open, bar.high, bar.low, bar.close, bar.volume].every(value => Number.isFinite(Number(value)))).slice().sort((a, b) => a.time - b.time);
   const dates = [...new Set(ordered.map(bar => tradingDateAt(bar.time, timeZone)))].sort();
   const selected = ordered.filter(bar => tradingDateAt(bar.time, timeZone) === date);
+  const localClock = new Intl.DateTimeFormat('en-GB', { timeZone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
   return {
     date,
     timeZone,
@@ -31,5 +32,11 @@ export function filterStockBarsForTradingDate(bars: readonly IntradayBar[], date
     previousDate: dates.filter(item => item < date).at(-1) || null,
     nextDate: dates.find(item => item > date) || null,
     availableDateRange: dates.length ? { from: dates[0], to: dates[dates.length - 1] } : null,
+    dataWindow: selected.length ? {
+      firstBarLocalTime: localClock.format(new Date(selected[0].time)),
+      lastBarLocalTime: localClock.format(new Date(selected[selected.length - 1].time)),
+      bars: selected.length,
+      note: '来源K线覆盖时段，不代表完整交易所交易时段',
+    } : null,
   };
 }

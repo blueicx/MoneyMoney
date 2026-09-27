@@ -14,6 +14,10 @@ test('intraday bars are selected by exchange-local trading date and include trut
   assert.equal(result.date, '2026-09-25');
   assert.equal(result.previousDate, null);
   assert.equal(result.nextDate, '2026-09-26');
+  assert.deepEqual(result.dataWindow, {
+    firstBarLocalTime: '09:30', lastBarLocalTime: '09:35', bars: 2,
+    note: '来源K线覆盖时段，不代表完整交易所交易时段',
+  });
   assert.throws(() => filterStockBarsForTradingDate(bars, '2026-02-30', 'America/New_York'), /date/i);
 });
 

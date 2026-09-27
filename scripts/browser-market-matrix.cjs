@@ -1,13 +1,16 @@
 const assert = require('node:assert/strict');
 const { spawn } = require('node:child_process');
 const path = require('node:path');
+const os = require('node:os');
+const fs = require('node:fs');
 const { chromium } = require('playwright');
 
 const port = 3191;
 const base = `http://127.0.0.1:${port}`;
+const isolatedDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'moneymoney-browser-matrix-'));
 const child = spawn(process.execPath, [path.join(__dirname, '../dist/web/server.js')], {
   cwd: path.join(__dirname, '..'),
-  env: { ...process.env, APP_HOST: '127.0.0.1', APP_PORT: String(port), TELEGRAM_POLLING_ENABLED: 'false', AI_PAPER_TRADING_ENABLED: 'false', PRIVATE_KEY: '', API_KEY: '', MONEYMONEY_LOGIN_USER: 'matrix-owner', MONEYMONEY_LOGIN_PASS: 'local-matrix-test-only-92!', MONEYMONEY_JWT_SECRET: 'local-matrix-jwt-secret-0123456789abcdef' },
+  env: { ...process.env, MONEYMONEY_DATA_DIR: isolatedDataDir, APP_HOST: '127.0.0.1', APP_PORT: String(port), TELEGRAM_POLLING_ENABLED: 'false', AI_PAPER_TRADING_ENABLED: 'false', PRIVATE_KEY: '', API_KEY: '', MONEYMONEY_LOGIN_USER: 'matrix-owner', MONEYMONEY_LOGIN_PASS: 'local-matrix-test-only-92!', MONEYMONEY_JWT_SECRET: 'local-matrix-jwt-secret-0123456789abcdef' },
   stdio: 'ignore',
 });
 
@@ -37,6 +40,16 @@ async function main() {
       if (response.url().includes('/api/prediction/settlement/')) settlementStatus = response.status();
     });
     const klineRequests = [];
+    let preflightReady = false;
+    let backtestRuns = 0;
+    let retryDeliveryCount = 0;
+    let acknowledgeDeliveryCount = 0;
+    const alertRows = [
+      { id: 'delivery-browser-sent', alertId: 'alert-browser-sent', status: 'sent', deliveredAt: '2026-09-27T07:00:00.000Z', attempts: 1, channel: 'web', context: { market: 'stocks', workspace: 'alerts', instrument: 'stock:us:AAPL', timeframe: '1d' }, payload: { message: 'AAPL 测试提醒' } },
+      { id: 'delivery-browser-failed', alertId: 'alert-browser-failed', status: 'failed', attempts: 2, lastError: '临时网络错误', channel: 'telegram', context: { market: 'stocks', workspace: 'alerts', instrument: 'stock:us:AAPL', timeframe: '1d' }, payload: { message: '失败提醒' } },
+      { id: 'delivery-browser-queued', alertId: 'alert-browser-queued', status: 'queued', attempts: 1, channel: 'web', context: { market: 'stocks', workspace: 'alerts', instrument: 'stock:us:AAPL', timeframe: '1d' }, payload: { message: '排队提醒' } },
+      { id: 'delivery-browser-suppressed', alertId: 'alert-browser-suppressed', status: 'suppressed', attempts: 0, channel: 'telegram', context: { market: 'stocks', workspace: 'alerts', instrument: 'stock:us:AAPL', timeframe: '1d' }, payload: { message: '静默时段提醒' } },
+    ];
     const dailyBars = [
       { time: Date.parse('2026-09-22T20:00:00.000Z'), open: 100, high: 104, low: 99, close: 103, volume: 1000 },
       { time: Date.parse('2026-09-23T20:00:00.000Z'), open: 103, high: 106, low: 102, close: 105, volume: 1200 },
@@ -46,7 +59,7 @@ async function main() {
       const url = new URL(route.request().url());
       const period = url.searchParams.get('period') || '1d';
       const date = url.searchParams.get('date');
-      klineRequests.push({ period, date, intradayPeriod: url.searchParams.get('intradayPeriod') });
+      klineRequests.push({ period, date, intradayPeriod: url.searchParams.get('intradayPeriod'), symbol: url.searchParams.get('symbol'), api: url.searchParams.get('api') });
       if (period === '15m') await new Promise(resolve => setTimeout(resolve, 450));
       const day = date || '2026-09-24';
       const bars = date
@@ -57,11 +70,28 @@ async function main() {
         ]
         : dailyBars;
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
-        success: true, market: 'stocks', instrument: 'stock:us:AAPL', dataStatus: 'historical',
+        success: true, market: 'stocks', instrument: `stock:us:${url.searchParams.get('api') || 'AAPL'}`, dataStatus: 'historical',
         source: 'Browser acceptance fixture', updatedAt: '2026-09-27T08:00:00.000Z', timezone: 'America/New_York',
-        session: date ? { date, previousDate: '2026-09-23', nextDate: '2026-09-25', ohlc: { open: 105, high: 109, low: 104, close: 108, volume: 780 } } : null,
+        session: date ? { date, previousDate: '2026-09-23', nextDate: '2026-09-25', dataWindow: { firstBarLocalTime: '09:30', lastBarLocalTime: '09:40', bars: 3, note: '来源K线覆盖时段，不代表完整交易所交易时段' }, ohlc: { open: 105, high: 109, low: 104, close: 108, volume: 780 } } : null,
         data: bars,
       }) });
+    });
+    await page.route('**/api/backtest/preflight**', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
+      success: preflightReady, market: 'stocks', instrument: 'AAPL', timeframe: '1d', dataStatus: preflightReady ? 'ready' : 'insufficient',
+      source: 'Browser acceptance fixture', sourceStatus: 'live', updatedAt: '2026-09-27T08:00:00.000Z', availableBars: preflightReady ? 40 : 6,
+      requiredBars: 16, dataRange: { from: '2026-07-01T00:00:00.000Z', to: '2026-09-27T00:00:00.000Z' },
+      calendarNote: '仅报告数据源实际返回的K线，不推断节假日、休市或缺失交易日。', reason: preflightReady ? null : '来源K线不足',
+    }) }));
+    await page.route('**/api/backtest?*', route => {
+      backtestRuns += 1;
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, scope: 'stocks', data: {
+        availability: 'ready', market: 'stocks', instrumentId: 'AAPL', dataSource: 'Browser acceptance fixture', dataSnapshotHash: 'a'.repeat(64), strategyVersion: 'asset-backtest-v1',
+        barCount: 40, startTime: Date.parse('2026-07-01T00:00:00.000Z'), endTime: Date.parse('2026-09-27T00:00:00.000Z'), totalTrades: 1, winningTrades: 1, losingTrades: 0,
+        winRate: 1, totalReturnPct: 1.2, maxDrawdownPct: 0.4, sharpeRatio: 1.1, trades: [{ instrumentId: 'AAPL', side: 'long', entryPrice: 100, exitPrice: 102, entryTime: Date.parse('2026-09-01T00:00:00.000Z'), exitTime: Date.parse('2026-09-05T00:00:00.000Z'), pnlPct: 1.2 }],
+        equityCurve: [{ time: Date.parse('2026-07-01T00:00:00.000Z'), equity: 1000 }, { time: Date.parse('2026-09-27T00:00:00.000Z'), equity: 1012 }],
+        metrics: { cagrPct: 5, sortinoRatio: 1.2, profitFactor: 2, turnoverPct: 5, feesImpactPct: 0.1, slippageImpactPct: 0.1, benchmarkDiffPct: 0.2 },
+        assumptions: { session: 'US regular session', settlement: 'T+1', positionPct: 5, feesBps: 10, slippageBps: 5 },
+      } }) });
     });
     await page.route('**/api/equity-options/**', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data: {
       market: 'us_equity', asset: 'SPY', source: 'CBOE browser fixture', fetchedAt: '2026-09-27T08:00:00.000Z', spot: 500,
@@ -89,18 +119,33 @@ async function main() {
       updatedAt: '2026-09-27T08:00:00.000Z', total: 1, online: 1, items: [{ id: 'fixture', name: '验收源', group: '测试', ok: true, latencyMs: 20, detail: '正常', status: 'live', capabilities: ['quote'] }],
     } }) }));
     let alertFeedback = null;
+    await page.route('**/api/research/freshness**', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data: { status: 'current', findings: [], reason: '已固定数据快照，未发现后续修订。' } }) }));
     await page.route('**/api/alerts/deliveries**', async route => {
       const request = route.request();
       const url = new URL(request.url());
       if (request.method() === 'POST' && url.pathname.endsWith('/feedback')) {
         alertFeedback = request.postDataJSON().rating;
-        return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data: { id: 'delivery-browser-1', status: 'sent', feedback: { rating: alertFeedback, at: '2026-09-27T08:00:00.000Z' } } }) });
+        const id = decodeURIComponent(url.pathname.split('/').at(-2));
+        const row = alertRows.find(item => item.id === id);
+        if (row) row.feedback = { rating: alertFeedback, at: '2026-09-27T08:00:00.000Z' };
+        return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data: row || { id, status: 'sent', feedback: { rating: alertFeedback, at: '2026-09-27T08:00:00.000Z' } } }) });
       }
-      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data: [{
-        id: 'delivery-browser-1', alertId: 'alert-browser-1', status: 'sent', deliveredAt: '2026-09-27T07:00:00.000Z',
-        context: { market: 'stocks', workspace: 'alerts', instrument: 'stock:us:AAPL', timeframe: '1d' }, payload: { message: 'AAPL 测试提醒' },
-        feedback: alertFeedback ? { rating: alertFeedback, at: '2026-09-27T08:00:00.000Z' } : undefined,
-      }] }) });
+      if (request.method() === 'POST' && url.pathname.endsWith('/retry')) {
+        retryDeliveryCount += 1;
+        const id = decodeURIComponent(url.pathname.split('/').at(-2));
+        const row = alertRows.find(item => item.id === id);
+        if (row) { row.status = 'sent'; row.attempts += 1; row.deliveredAt = '2026-09-27T08:01:00.000Z'; row.lastError = null; }
+        return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data: row }) });
+      }
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data: alertRows }) });
+    });
+    await page.route('**/api/alerts/**/ack', async route => {
+      acknowledgeDeliveryCount += 1;
+      const url = new URL(route.request().url());
+      const deliveryId = decodeURIComponent(url.pathname.split('/').at(-2));
+      const row = alertRows.find(item => item.id === deliveryId);
+      if (row) row.status = 'acknowledged';
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data: row || { id: deliveryId, status: 'acknowledged' } }) });
     });
     await page.route('**/api/prediction/settlement/**', route => route.fulfill({
       status: 200,
@@ -192,9 +237,24 @@ async function main() {
     await page.locator('.intraday-period[data-intraday-period="1m"]').click();
     await page.waitForFunction(() => document.querySelector('#stock-chart-card')?.getAttribute('aria-busy') !== 'true', null, { timeout: 10_000 });
     assert.ok(klineRequests.some(item => item.date === '2026-09-24' && item.intradayPeriod === '1m'));
+    assert.match(await page.locator('#stock-chart-data-status').innerText(), /来源覆盖 09:30–09:40/);
     await page.locator('[data-chart-candle-focus]').click();
     await page.waitForFunction(() => document.querySelector('[data-intraday-controls]')?.hidden === true, null, { timeout: 10_000 });
+    await page.waitForFunction(() => document.querySelector('#stock-chart-candle-selection')?.textContent?.includes('2026-09-24'), null, { timeout: 10_000 });
     assert.match(await page.locator('#stock-chart-candle-selection').innerText(), /2026-09-24/);
+    await page.locator('[data-chart-layout-toggle]').click();
+    await page.locator('[data-stock-chart-companion]').waitFor({ state: 'visible' });
+    await page.waitForFunction(() => document.querySelector('[data-stock-chart-companion-status]')?.textContent?.includes('Browser acceptance fixture'), null, { timeout: 10_000 });
+    assert.equal(await page.evaluate(() => localStorage.getItem('mm-stock-chart-layout-v1')), 'open');
+    const companionPreferences = await page.evaluate(() => JSON.parse(localStorage.getItem('mm-stock-chart-companion-v1')));
+    assert.equal(companionPreferences.period, '1h');
+    assert.ok(klineRequests.some(item => item.period === '1h' && item.symbol === 'usAAPL'), 'companion chart should use the selected stock in its own period');
+    const companion = page.locator('#stock-kline-companion');
+    await companion.click({ position: { x: 105, y: 110 } });
+    await page.waitForFunction(() => document.querySelector('[data-chart-candle-date]')?.value === '2026-09-22', null, { timeout: 10_000 });
+    await page.locator('[data-chart-companion-mode]').selectOption('benchmark');
+    await page.waitForFunction(() => document.querySelector('[data-stock-chart-companion-status]')?.textContent?.includes('SPY基准'), null, { timeout: 10_000 });
+    assert.ok(klineRequests.some(item => item.api === 'SPY' && item.symbol === 'usSPY'), 'benchmark chart must route to the stock benchmark only');
     await page.evaluate(() => openWorkspace('screener'));
     await page.locator('#market-compare-ids').waitFor({ state: 'visible' });
     await page.locator('#market-compare-ids').fill('stock:us:AAPL,stock:us:MSFT');
@@ -230,14 +290,38 @@ async function main() {
     const eventStudyText = await page.locator('#event-study-result').textContent();
     assert.match(eventStudyText, /同类历史事件/);
     assert.match(eventStudyText, /95% Bootstrap 区间/);
+    await page.evaluate(() => showTab('backtest'));
+    await page.locator('#bt-market-id').fill('AAPL');
+    await page.evaluate(() => runBacktest());
+    await page.waitForFunction(() => document.querySelector('#backtest-data-preflight')?.textContent?.includes('数据预检未通过'), null, { timeout: 10_000 });
+    assert.equal(backtestRuns, 0, 'backtest must not run when the market-scoped data preflight fails');
+    preflightReady = true;
+    await page.evaluate(() => runBacktest());
+    await page.waitForFunction(() => document.querySelector('#backtest-results')?.textContent?.includes('指标定义与本次输入口径'), null, { timeout: 10_000 });
+    assert.equal(backtestRuns, 1);
+    assert.match(await page.locator('#backtest-results').innerText(), /Browser acceptance fixture/);
+    assert.match(await page.locator('#backtest-results').innerText(), /252日年化/);
+    await page.evaluate(() => saveBacktestCandidate());
+    await page.locator('[data-candidate-freshness="0"]').waitFor({ state: 'visible' });
+    await page.waitForFunction(() => document.querySelector('[data-candidate-freshness="0"]')?.dataset.status === 'current', null, { timeout: 10_000 });
+    await page.locator('#backtest-candidates button').filter({ hasText: '人工复跑' }).click();
+    await page.waitForFunction(() => document.querySelector('#backtest-results')?.textContent?.includes('指标定义与本次输入口径'), null, { timeout: 10_000 });
+    assert.equal(backtestRuns, 2, 'candidate manual rerun should create a fresh backtest only after preflight');
     await page.evaluate(() => toggleRightLibrary());
     assert.equal(await page.locator('#market-workspace-shell').getAttribute('data-right-library'), 'collapsed');
     await page.evaluate(() => toggleRightLibrary());
     assert.notEqual(await page.locator('#market-workspace-shell').getAttribute('data-right-library'), 'collapsed');
     await page.evaluate(() => showTab('alerts'));
-    await page.waitForFunction(() => document.querySelector('#alerts-list')?.textContent?.includes('这条提醒对你有帮助'));
-    await page.locator('#alerts-list button').filter({ hasText: '有用' }).click();
-    await page.waitForFunction(() => document.querySelector('#alerts-list')?.textContent?.includes('反馈：有用'));
+    await page.waitForFunction(() => document.querySelector('[data-alert-delivery-management]')?.textContent?.includes('投递失败'));
+    assert.match(await page.locator('[data-alert-delivery-management]').innerText(), /已抑制/);
+    await page.locator('[data-alert-delivery-management] button').filter({ hasText: '重试投递' }).first().click();
+    await page.waitForFunction(() => document.querySelector('[data-alert-delivery-management]')?.textContent?.includes('已发送'), null, { timeout: 10_000 });
+    assert.equal(retryDeliveryCount, 1);
+    await page.locator('[data-alert-delivery-management] button').filter({ hasText: '确认已读' }).first().click();
+    await page.waitForFunction(() => document.querySelector('[data-alert-delivery-management]')?.textContent?.includes('已确认'), null, { timeout: 10_000 });
+    assert.equal(acknowledgeDeliveryCount, 1);
+    await page.locator('#alerts-list button').filter({ hasText: '有用' }).first().click();
+    await page.waitForFunction(() => document.querySelector('[data-alert-delivery-management]')?.textContent?.includes('反馈：有用'));
     assert.equal(alertFeedback, 'useful');
     await page.evaluate(() => showTab('settings'));
     await page.waitForFunction(() => document.querySelector('#source-slo-panel')?.textContent?.includes('接口成功率与实际数据覆盖'), null, { timeout: 10_000 });
@@ -245,7 +329,7 @@ async function main() {
     await page.setViewportSize({ width: 390, height: 844 });
     assert.equal(await page.locator('#center-workspace').isVisible(), true);
     assert.deepEqual(pageErrors, []);
-    console.log('Browser market matrix passed: four scopes, options quote-quality cells, chart freshness/loading/date-to-intraday/period switch/return, same-market comparison, alert feedback, SLO coverage, prediction event evidence, collapse/restore, mobile center, no page errors');
+    console.log('Browser market matrix passed: four scopes, options quote-quality cells, chart freshness/date drilldown/coverage, synchronized companion and same-market SPY comparison, data-preflight-blocked backtest/candidate freshness/manual rerun, alert retry/ACK/feedback, SLO, prediction evidence, collapse/restore, mobile center, no page errors');
   } finally {
     if (browser) await browser.close();
     child.kill('SIGINT');

@@ -122,6 +122,38 @@ describe('K-Line Upgrade & Advanced Capabilities', () => {
     assert.match(html, /确认状态/);
   });
 
+  it('compresses dense candle-pattern labels while preserving accessible details', () => {
+    const host = document.createElement('div');
+    host.id = 'dense-pattern-test';
+    document.body.appendChild(host);
+    Object.defineProperty(host, 'clientWidth', { configurable: true, value: 180 });
+    const patterns = Array.from({ length: 8 }, (_, index) => ({
+      label: `形态${index}`, index, time: index, direction: index % 2 ? 'bearish' : 'bullish',
+      confidence: 70, condition: '测试条件', meaning: '测试含义', open: 1, high: 2, low: 0.5, close: 1.5,
+    }));
+    window.renderChartPatternMarkers('dense-pattern-test', patterns, item => ({ x: item.index * 22, y: 50 }));
+    const markers = [...host.querySelectorAll('.chart-pattern-marker')];
+    assert.equal(markers.length, patterns.length);
+    assert.ok(markers.every(marker => marker.dataset.displayMode === 'compact'));
+    assert.ok(markers.every(marker => /形态\d+/.test(marker.getAttribute('aria-label'))));
+  });
+
+  it('exposes a persisted synchronized secondary stock chart layout', () => {
+    assert.ok(document.querySelector('[data-chart-layout-toggle]'));
+    assert.ok(document.querySelector('#stock-kline-companion'));
+    assert.ok(document.querySelector('[data-chart-companion-mode]'));
+    assert.match(fs.readFileSync(path.join(__dirname, '../src/web/public/index.html'), 'utf8'), /mm-stock-chart-layout-v1/);
+    assert.match(fs.readFileSync(path.join(__dirname, '../src/web/public/index.html'), 'utf8'), /mm-stock-chart-companion-v1/);
+  });
+
+  it('provides explicit metric definitions and distinguishes scores from historical hit rates', () => {
+    const html = fs.readFileSync(path.join(__dirname, '../src/web/public/index.html'), 'utf8');
+    assert.match(html, /营收增长[^\n]*营收同比/);
+    assert.match(html, /ROE[^\n]*净利润[^\n]*股东权益/);
+    assert.match(html, /规则汇总评分，不是命中率/);
+    assert.match(html, /Sharpe[^\n]*252/);
+  });
+
   it('supports selecting and focusing one daily candle', () => {
     const focusButton = document.querySelector('[data-chart-candle-focus]');
     assert.ok(focusButton, 'A candle focus action should be visible in the stock chart toolbar');

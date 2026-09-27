@@ -90,6 +90,7 @@ export interface ExperimentRecord {
   timeframe?: string;
   strategyId?: string;
   strategyVersion?: string;
+  dataSnapshotHash?: string;
   dataSource: string;
   dataFrom?: string;
   dataTo?: string;
@@ -108,17 +109,18 @@ function assertDateRange(from?: string, to?: string): void {
 export function createExperimentRecord(input: Omit<Partial<ExperimentRecord>, 'id' | 'createdAt'> & { market: MarketId; dataSource?: string; dataFrom?: string; dataTo?: string }): ExperimentRecord {
   assertMarketContext({ market: input.market, workspace: 'experiment', instrument: input.instrument });
   assertDateRange(input.dataFrom, input.dataTo);
+  if (input.dataSnapshotHash && !/^[a-f0-9]{64}$/i.test(input.dataSnapshotHash)) throw new Error('Data snapshot hash must be SHA-256 hex');
   const feeRate = Number(input.feeRate ?? 0); const slippage = Number(input.slippage ?? 0);
   if (!Number.isFinite(feeRate) || feeRate < 0 || !Number.isFinite(slippage) || slippage < 0) throw new Error('Invalid experiment cost model');
   const seed = Number.isInteger(input.seed) ? Number(input.seed) : 0;
-  const stable = JSON.stringify({ market: input.market, instrument: input.instrument || '', timeframe: input.timeframe || '', strategyId: input.strategyId || '', strategyVersion: input.strategyVersion || '', dataSource: input.dataSource || 'unknown', dataFrom: input.dataFrom || '', dataTo: input.dataTo || '', feeRate, slippage, seed });
+  const stable = JSON.stringify({ market: input.market, instrument: input.instrument || '', timeframe: input.timeframe || '', strategyId: input.strategyId || '', strategyVersion: input.strategyVersion || '', dataSnapshotHash: input.dataSnapshotHash || '', dataSource: input.dataSource || 'unknown', dataFrom: input.dataFrom || '', dataTo: input.dataTo || '', feeRate, slippage, seed });
   let hash = 2166136261;
   for (let index = 0; index < stable.length; index += 1) hash = Math.imul(hash ^ stable.charCodeAt(index), 16777619);
   return {
     id: `exp_${(hash >>> 0).toString(36)}`,
     market: input.market, instrument: input.instrument?.trim(), timeframe: input.timeframe,
     strategyId: input.strategyId, strategyVersion: input.strategyVersion, dataSource: input.dataSource || 'unknown',
-    dataFrom: input.dataFrom, dataTo: input.dataTo, feeRate, slippage, seed, createdAt: new Date().toISOString(),
+    dataSnapshotHash: input.dataSnapshotHash, dataFrom: input.dataFrom, dataTo: input.dataTo, feeRate, slippage, seed, createdAt: new Date().toISOString(),
   };
 }
 

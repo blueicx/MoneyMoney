@@ -57,7 +57,30 @@ window.mm_authReady = window.fetch('/api/auth/status').then((response) => respon
 
 window.mmLogout = function mmLogout() {
   if (!confirm('确定退出登录？')) return;
-  window.fetch('/api/auth/logout', { method: 'POST' }).finally(() => {
+  const clearPublicOfflineSnapshots = () => {
+    if (!('serviceWorker' in navigator)) return Promise.resolve();
+    return new Promise((resolve) => {
+      let channel;
+      let settled = false;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
+        channel?.port1.close();
+        resolve();
+      };
+      const timeout = setTimeout(finish, 1000);
+      navigator.serviceWorker.ready.then((registration) => {
+        const worker = navigator.serviceWorker.controller || registration.active;
+        if (!worker || typeof MessageChannel === 'undefined') return finish();
+        channel = new MessageChannel();
+        channel.port1.onmessage = finish;
+        worker.postMessage({ type: 'CLEAR_PUBLIC_SNAPSHOTS' }, [channel.port2]);
+      }).catch(finish);
+    });
+  };
+  window.fetch('/api/auth/logout', { method: 'POST' }).finally(async () => {
+    await clearPublicOfflineSnapshots();
     localStorage.removeItem('mm_token');
     localStorage.removeItem('mm_csrf');
     localStorage.removeItem('mm_user');
