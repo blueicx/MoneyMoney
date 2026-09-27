@@ -69,6 +69,16 @@
     };
   }
 
+  function chartDataStatusLabel(envelope = {}) {
+    const status = String(envelope.dataStatus || '').toLowerCase();
+    const labels = {
+      live: '最新可用行情（实时性未声明）', delayed: '延迟行情', historical: '历史时点数据',
+      cached: '缓存数据', stale: '过期缓存', degraded: '降级数据', partial: '部分数据',
+      empty: '暂无数据', unsupported: '当前市场不支持', unavailable: '来源不可用', failed: '请求失败',
+    };
+    return labels[status] || '数据状态未知';
+  }
+
   function detectCandlestickPatterns(inputBars = []) {
     const bars = inputBars.map(normalizeBar);
     const found = [];
@@ -511,5 +521,5 @@
     };
   }
 
-  return { DEFAULT_CONFIG, CANDLE_PATTERN_CATALOG, normalizeOverlayConfig, detectCandlestickPatterns, detectStructures, detectChanStructures, detectStrategySignals, movingAverage, bollingerBands, calculateMACD, buildChartOverlays, stepReplay, protectReplayContext, createDrawingTool };
+  return { DEFAULT_CONFIG, CANDLE_PATTERN_CATALOG, normalizeOverlayConfig, chartDataStatusLabel, detectCandlestickPatterns, detectStructures, detectChanStructures, detectStrategySignals, movingAverage, bollingerBands, calculateMACD, buildChartOverlays, stepReplay, protectReplayContext, createDrawingTool };
 });

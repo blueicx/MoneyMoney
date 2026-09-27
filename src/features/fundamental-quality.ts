@@ -10,7 +10,13 @@ import { buildSecHeaders } from './sec-edgar-client';
 
 export interface FundamentalHistoryPoint {
   endDate: string;
+  periodKey?: string;
+  filedAt?: string;
   revenueUsd: number | null;
+  netIncomeUsd?: number | null;
+  operatingCashFlowUsd?: number | null;
+  grossProfitUsd?: number | null;
+  operatingIncomeUsd?: number | null;
   netMarginPct: number | null;
   operatingCashFlowMarginPct: number | null;
   currentRatio: number | null;
@@ -46,6 +52,7 @@ export interface FundamentalRadarResult {
   companyName: string;
   updatedAt: string;
   fiscalPeriodEnd: string;
+  periodBasis: 'TTM' | 'Annual';
   reportFiledAt: string;
   dataAgeDays: number;
   score: number;
@@ -67,6 +74,7 @@ interface XbrlEntry {
   form?: string;
   fp?: string;
   filed?: string;
+  fy?: number;
 }
 
 interface CompanyFacts {
@@ -194,6 +202,183 @@ function clamp(value: number, minimum: number, maximum: number): number {
   return Math.max(minimum, Math.min(maximum, value));
 }
 
+function latestInstantValue(facts: CompanyFacts, tags: string[], input: { filedBy?: string; endBefore?: string }): number | null {
+  const gaap = facts.facts?.['us-gaap'] || {};
+  const filedBy = input.filedBy ? Date.parse(input.filedBy) : Infinity;
+  let best: { entry: XbrlEntry; rank: number } | null = null;
+  for (const [rank, tag] of tags.entries()) {
+    const entries = gaap[tag]?.units?.USD || [];
+    for (const entry of entries) {
+      if (entry.start || !Number.isFinite(entry.val)) continue;
+      if (!['10-K', '10-K/A', '10-Q', '10-Q/A'].includes(String(entry.form || '').toUpperCase())) continue;
+      const filed = Date.parse(String(entry.filed || entry.end));
+      if (filed > filedBy || (input.endBefore && entry.end > input.endBefore)) continue;
+      if (!best || entry.end > best.entry.end || (entry.end === best.entry.end && rank < best.rank) ||
+        (entry.end === best.entry.end && rank === best.rank && filed > Date.parse(String(best.entry.filed || best.entry.end)))) {
+        best = { entry, rank };
+      }
+    }
+  }
+  return best?.entry.val ?? null;
+}
+
+interface FlowQuarterValue { endDate: string; value: number; filedAt: string }
+const REVENUE_TAGS = ['RevenueFromContractWithCustomerExcludingAssessedTax', 'RevenueFromContractWithCustomerIncludingAssessedTax', 'Revenues', 'SalesRevenueNet'];
+
+function entryDurationDays(entry: XbrlEntry): number | null {
+  if (!entry.start) return null;
+  const days = (Date.parse(entry.end) - Date.parse(entry.start)) / 86_400_000;
+  return Number.isFinite(days) ? days : null;
+}
+
+function latestFiled(current: XbrlEntry | undefined, next: XbrlEntry): XbrlEntry {
+  return !current || String(next.filed || '').localeCompare(String(current.filed || '')) > 0 ? next : current;
+}
+
+function quarterlyFlowValues(facts: CompanyFacts, tags: string[]): Map<string, FlowQuarterValue> {
+  const output = new Map<string, FlowQuarterValue>();
+  const gaap = facts.facts?.['us-gaap'] || {};
+  for (const tag of tags) {
+    const entries = gaap[tag]?.units?.USD || [];
+    const direct = new Map<string, XbrlEntry>();
+    const ytd = new Map<string, XbrlEntry>();
+    const annual = new Map<number, XbrlEntry>();
+    for (const entry of entries) {
+      if (!Number.isFinite(entry.val) || !entry.start) continue;
+      const form = String(entry.form || '').toUpperCase();
+      if (!['10-Q', '10-Q/A', '10-K', '10-K/A'].includes(form)) continue;
+      const fp = String(entry.fp || '').toUpperCase();
+      const fy = Number(entry.fy) || Number(entry.end.slice(0, 4));
+      const days = entryDurationDays(entry);
+      if (!Number.isFinite(fy) || days == null) continue;
+      const directMatch = /^Q([1-4])$/.exec(fp);
+      if (directMatch && days >= 70 && days <= 110) {
+        const key = `${fy}:Q${directMatch[1]}`;
+        direct.set(key, latestFiled(direct.get(key), entry));
+      }
+      const ytdQuarter = /^Q([1-3])$/.exec(fp);
+      if (ytdQuarter) {
+        const quarter = Number(ytdQuarter[1]);
+        const bounds: Record<number, [number, number]> = { 1: [45, 130], 2: [150, 230], 3: [240, 330] };
+        const [minimum, maximum] = bounds[quarter];
+        if (days >= minimum && days <= maximum) {
+          const key = `${fy}:Q${quarter}`;
+          ytd.set(key, latestFiled(ytd.get(key), entry));
+        }
+      }
+      if (fp === 'FY' && ['10-K', '10-K/A'].includes(form) && days >= 300 && days <= 400) {
+        annual.set(fy, latestFiled(annual.get(fy), entry));
+      }
+    }
+
+    const fiscalYears = new Set<number>();
+    for (const key of [...direct.keys(), ...ytd.keys()]) fiscalYears.add(Number(key.split(':')[0]));
+    for (const fy of [...fiscalYears].sort((a, b) => a - b)) {
+      const qValues: Array<{ value: number; endDate: string; filedAt: string } | null> = [null];
+      for (let quarter = 1; quarter <= 3; quarter += 1) {
+        const key = `${fy}:Q${quarter}`;
+        const directEntry = direct.get(key);
+        if (directEntry) {
+          qValues[quarter] = { value: directEntry.val, endDate: directEntry.end, filedAt: directEntry.filed || directEntry.end };
+          continue;
+        }
+        const cumulative = ytd.get(key);
+        if (!cumulative) { qValues[quarter] = null; continue; }
+        const previousCumulative = quarter === 1 ? null : ytd.get(`${fy}:Q${quarter - 1}`);
+        if (quarter > 1 && !previousCumulative) { qValues[quarter] = null; continue; }
+        qValues[quarter] = {
+          value: cumulative.val - (previousCumulative?.val || 0),
+          endDate: cumulative.end,
+          filedAt: cumulative.filed || cumulative.end,
+        };
+      }
+      const q4Direct = direct.get(`${fy}:Q4`);
+      const annualEntry = annual.get(fy);
+      const q1ToQ3Available = qValues[1] && qValues[2] && qValues[3];
+      if (q4Direct) qValues[4] = { value: q4Direct.val, endDate: q4Direct.end, filedAt: q4Direct.filed || q4Direct.end };
+      else if (annualEntry && q1ToQ3Available) {
+        qValues[4] = {
+          value: annualEntry.val - qValues[1]!.value - qValues[2]!.value - qValues[3]!.value,
+          endDate: annualEntry.end,
+          filedAt: annualEntry.filed || annualEntry.end,
+        };
+      }
+      for (let quarter = 1; quarter <= 4; quarter += 1) {
+        const value = qValues[quarter];
+        const key = `${fy}:Q${quarter}`;
+        if (value && !output.has(key)) output.set(key, value);
+      }
+    }
+  }
+  return output;
+}
+
+export function buildQuarterlyFundamentalHistory(facts: CompanyFacts): FundamentalHistoryPoint[] {
+  const series = {
+    revenueUsd: quarterlyFlowValues(facts, REVENUE_TAGS),
+    netIncomeUsd: quarterlyFlowValues(facts, ['NetIncomeLoss', 'ProfitLoss']),
+    operatingCashFlowUsd: quarterlyFlowValues(facts, ['NetCashProvidedByUsedInOperatingActivities']),
+    grossProfitUsd: quarterlyFlowValues(facts, ['GrossProfit']),
+    operatingIncomeUsd: quarterlyFlowValues(facts, ['OperatingIncomeLoss']),
+  };
+  return [...series.revenueUsd.entries()].map(([periodKey, revenue]) => {
+    const valueAt = (items: Map<string, FlowQuarterValue>) => items.get(periodKey)?.value ?? null;
+    const netIncomeUsd = valueAt(series.netIncomeUsd);
+    const operatingCashFlowUsd = valueAt(series.operatingCashFlowUsd);
+    return {
+      endDate: revenue.endDate,
+      periodKey,
+      filedAt: [revenue.filedAt, series.netIncomeUsd.get(periodKey)?.filedAt, series.operatingCashFlowUsd.get(periodKey)?.filedAt]
+        .filter(Boolean).sort().at(-1),
+      revenueUsd: round(revenue.value, 0),
+      netIncomeUsd: round(netIncomeUsd, 0),
+      operatingCashFlowUsd: round(operatingCashFlowUsd, 0),
+      grossProfitUsd: round(valueAt(series.grossProfitUsd), 0),
+      operatingIncomeUsd: round(valueAt(series.operatingIncomeUsd), 0),
+      netMarginPct: round(marginPct(netIncomeUsd, revenue.value), 1),
+      operatingCashFlowMarginPct: round(marginPct(operatingCashFlowUsd, revenue.value), 1),
+      currentRatio: null,
+    };
+  }).sort((a, b) => a.endDate.localeCompare(b.endDate));
+}
+
+export function summarizeFundamentalTtm(history: FundamentalHistoryPoint[]) {
+  const sorted = [...history].sort((a, b) => a.endDate.localeCompare(b.endDate));
+  const current = sorted.slice(-4);
+  if (current.length !== 4 || current.some((row, index) => {
+    if (row.revenueUsd == null || row.netIncomeUsd == null || row.operatingCashFlowUsd == null) return true;
+    if (!index) return false;
+    const gap = (Date.parse(row.endDate) - Date.parse(current[index - 1].endDate)) / 86_400_000;
+    return gap < 60 || gap > 130;
+  })) return null;
+  const previous = sorted.slice(-8, -4);
+  const previousValid = previous.length === 4 && previous.every((row, index) => {
+    if (row.revenueUsd == null || row.netIncomeUsd == null || row.operatingCashFlowUsd == null) return false;
+    if (!index) return true;
+    const gap = (Date.parse(row.endDate) - Date.parse(previous[index - 1].endDate)) / 86_400_000;
+    return gap >= 60 && gap <= 130;
+  });
+  const sum = (rows: FundamentalHistoryPoint[], key: 'revenueUsd' | 'netIncomeUsd' | 'operatingCashFlowUsd' | 'grossProfitUsd' | 'operatingIncomeUsd') => {
+    if (rows.some(row => row[key] == null)) return null;
+    return rows.reduce((total, row) => total + Number(row[key]), 0);
+  };
+  const revenueUsd = sum(current, 'revenueUsd')!;
+  const netIncomeUsd = sum(current, 'netIncomeUsd')!;
+  const operatingCashFlowUsd = sum(current, 'operatingCashFlowUsd')!;
+  const priorRevenueUsd = previousValid ? sum(previous, 'revenueUsd') : null;
+  const priorNetIncomeUsd = previousValid ? sum(previous, 'netIncomeUsd') : null;
+  const priorOperatingCashFlowUsd = previousValid ? sum(previous, 'operatingCashFlowUsd') : null;
+  return {
+    periodEnd: current[3].endDate,
+    filedAt: current.map(row => row.filedAt || row.endDate).sort().at(-1) || current[3].endDate,
+    revenueUsd, netIncomeUsd, operatingCashFlowUsd,
+    grossProfitUsd: sum(current, 'grossProfitUsd'),
+    operatingIncomeUsd: sum(current, 'operatingIncomeUsd'),
+    priorRevenueUsd, priorNetIncomeUsd, priorOperatingCashFlowUsd,
+    revenueGrowthPct: priorRevenueUsd == null ? null : round(growthPct(revenueUsd, priorRevenueUsd), 1),
+  };
+}
+
 export function buildFundamentalFactors(metrics: FundamentalMetrics, score: number, ageDays: number): FundamentalFactors {
   const supportingFactors: FundamentalFactor[] = [];
   const riskFactors: FundamentalFactor[] = [];
@@ -230,106 +415,100 @@ export function buildFundamentalFactors(metrics: FundamentalMetrics, score: numb
   return { supportingFactors, riskFactors };
 }
 
-function buildSignal(score: number, metrics: FundamentalMetrics, ageDays: number) {
+export function buildFundamentalSignal(score: number, metrics: FundamentalMetrics, ageDays: number, periodBasis: 'TTM' | 'Annual' = 'Annual') {
+  const sampleLabel = periodBasis === 'TTM' ? '最近四个已披露季度的 TTM 样本' : '最近可用的年度申报样本';
   let signalZh = '基本面混合，需更多验证';
-  let adviceZh = '盈利与资产负债表信号不一致；把它作为筛选背景，等待价格结构、现金流和下一期财报共同确认。';
+  let adviceZh = `${sampleLabel}中的盈利与资产负债表指标方向不一致；请结合下方指标、缺失字段和披露日期理解结果。`;
 
   if (score >= 80) {
     signalZh = '高质量成长型基本面';
-    adviceZh = '增长、利润率和现金转化都较强；适合列入观察清单，但避免在估值和情绪过热时重仓追高。';
+    adviceZh = `${sampleLabel}中的营收增长、利润率和现金转换指标较强；该结果反映历史财务披露，不代表未来表现。`;
   } else if (score >= 66) {
     signalZh = '基本面偏强';
-    adviceZh = '核心盈利质量较好；可关注回调到关键支撑后的机会，并把财报日和市场风险放在前面。';
+    adviceZh = `${sampleLabel}中的核心盈利指标偏强；评分未涵盖估值、行业周期和披露后的经营变化。`;
   } else if (score >= 50) {
     signalZh = '基本面中性';
-    adviceZh = '没有明显短板，也没有足够强的优势；优先看行业景气度和技术面是否给出额外确认。';
+    adviceZh = `${sampleLabel}未显示突出的强项或短板；部分指标可能受行业差异和会计口径影响。`;
   } else if (score >= 34) {
     signalZh = '基本面偏弱';
-    adviceZh = '增长或盈利质量存在瑕疵；若持仓，降低仓位并设定更严格的止损，避免用故事弥补数据。';
+    adviceZh = `${sampleLabel}中的增长或盈利指标偏弱；相关风险项列于下方，不能据此推断短期价格方向。`;
   } else {
     signalZh = '高风险基本面';
-    adviceZh = '利润、现金或负债压力明显；只适合小仓位事件观察，不适合当作稳健核心持仓。';
+    adviceZh = `${sampleLabel}中的利润、现金流或负债指标存在明显压力；需结合原始 SEC 申报和后续披露核对。`;
   }
 
   if (metrics.cashConversionRatio != null && metrics.cashConversionRatio < 0.65 &&
     (metrics.netMarginPct ?? 0) > 0) {
-    adviceZh += ' 注意：净利润明显高于经营现金流，应核对应收、库存或会计确认节奏。';
+    adviceZh += ' 现金转换比率偏低：净利润与经营现金流的差异较大。';
   }
   if (metrics.currentRatio != null && metrics.currentRatio < 1.05) {
-    adviceZh += ' 短期偿债缓冲偏紧，留意再融资和营运资金变化。';
+    adviceZh += ' 流动比率偏低，短期资产对流动负债的覆盖较弱。';
   }
   if ((metrics.liabilitiesToAssetsPct ?? 0) > 78) {
-    adviceZh += ' 负债占总资产比例偏高，利率上行或收入下滑时会放大风险。';
+    adviceZh += ' 负债占总资产比例偏高，可能增加利率和收入变化带来的敏感性。';
   }
   if (ageDays > 420) {
-    adviceZh += ' 官方年报数据较旧，最新季度变化可能尚未体现。';
+    adviceZh += ` 最近纳入的官方申报距今 ${ageDays} 天；此后发布的数据尚未计入。`;
   }
 
   return { signalZh, adviceZh };
 }
 
 function buildResult(symbol: string, facts: CompanyFacts): FundamentalRadarResult {
+  const quarterlyHistory = buildQuarterlyFundamentalHistory(facts);
+  const ttm = summarizeFundamentalTtm(quarterlyHistory);
   const revenue = latestEntry(facts, [
-    'RevenueFromContractWithCustomerExcludingAssessedTax',
-    'RevenueFromContractWithCustomerIncludingAssessedTax',
-    'Revenues',
-    'SalesRevenueNet',
+    ...REVENUE_TAGS,
   ]);
   const netIncome = latestEntry(facts, ['NetIncomeLoss', 'ProfitLoss']);
-  if (!revenue || !netIncome) throw new Error('SEC 年度营收或净利润数据不足');
+  if ((!revenue || !netIncome) && !ttm) throw new Error('SEC 年度或季度营收、净利润数据不足');
 
-  // Prefer a fiscal year where the three core flow statements align.
-  const revenueRows = annualEntries(facts, [
-    'RevenueFromContractWithCustomerExcludingAssessedTax',
-    'RevenueFromContractWithCustomerIncludingAssessedTax',
-    'Revenues',
-    'SalesRevenueNet',
-  ]);
+  // Keep annual values as an explicit fallback; use TTM only when four contiguous reported quarters align.
+  const revenueRows = annualEntries(facts, REVENUE_TAGS);
   const netRows = annualEntries(facts, ['NetIncomeLoss', 'ProfitLoss']);
   const cashRows = annualEntries(facts, ['NetCashProvidedByUsedInOperatingActivities']);
   const coreEnds = new Set(revenueRows.map(row => row.entry.end));
   const netEnds = new Set(netRows.map(row => row.entry.end));
   const cashEnds = new Set(cashRows.map(row => row.entry.end));
   const alignedEnds = [...coreEnds].filter(end => netEnds.has(end) && cashEnds.has(end)).sort().reverse();
-  const fiscalPeriodEnd = alignedEnds[0] || revenue.entry.end;
+  const annualFiscalPeriodEnd = alignedEnds[0] || revenue?.entry.end || '';
+  const fiscalPeriodEnd = ttm?.periodEnd || annualFiscalPeriodEnd;
+  if (!fiscalPeriodEnd) throw new Error('SEC 没有可用的基本面报告期');
 
   const valueAt = (tags: string[], instant = false) =>
-    entryForEnd(facts, tags, fiscalPeriodEnd, instant);
+    entryForEnd(facts, tags, annualFiscalPeriodEnd, instant);
 
-  const revenueUsd = valueAt([
-    'RevenueFromContractWithCustomerExcludingAssessedTax',
-    'RevenueFromContractWithCustomerIncludingAssessedTax',
-    'Revenues',
-    'SalesRevenueNet',
-  ]);
-  const netIncomeUsd = valueAt(['NetIncomeLoss', 'ProfitLoss']);
-  const operatingCashFlowUsd = valueAt(['NetCashProvidedByUsedInOperatingActivities']);
-  const grossProfitUsd = valueAt(['GrossProfit']);
-  const operatingIncomeUsd = valueAt(['OperatingIncomeLoss']);
-  const totalAssetsUsd = valueAt(['Assets'], true);
-  const currentAssetsUsd = valueAt(['AssetsCurrent'], true);
-  const currentLiabilitiesUsd = valueAt(['LiabilitiesCurrent'], true);
-  const totalLiabilitiesUsd = valueAt(['Liabilities'], true);
-  const equityUsd = valueAt(['StockholdersEquity'], true);
+  const annualRevenueUsd = annualFiscalPeriodEnd ? valueAt(REVENUE_TAGS) : revenue?.entry.val ?? null;
+  const annualNetIncomeUsd = annualFiscalPeriodEnd ? valueAt(['NetIncomeLoss', 'ProfitLoss']) : netIncome?.entry.val ?? null;
+  const annualOperatingCashFlowUsd = annualFiscalPeriodEnd ? valueAt(['NetCashProvidedByUsedInOperatingActivities']) : null;
+  const annualGrossProfitUsd = annualFiscalPeriodEnd ? valueAt(['GrossProfit']) : null;
+  const annualOperatingIncomeUsd = annualFiscalPeriodEnd ? valueAt(['OperatingIncomeLoss']) : null;
+  const balanceAsOf = ttm?.filedAt || netIncome?.entry.filed || revenue?.entry.filed || annualFiscalPeriodEnd;
+  const totalAssetsUsd = latestInstantValue(facts, ['Assets'], { filedBy: balanceAsOf });
+  const currentAssetsUsd = latestInstantValue(facts, ['AssetsCurrent'], { filedBy: balanceAsOf });
+  const currentLiabilitiesUsd = latestInstantValue(facts, ['LiabilitiesCurrent'], { filedBy: balanceAsOf });
+  const totalLiabilitiesUsd = latestInstantValue(facts, ['Liabilities'], { filedBy: balanceAsOf });
+  const equityUsd = latestInstantValue(facts, ['StockholdersEquity'], { filedBy: balanceAsOf });
+  const revenueUsd = ttm?.revenueUsd ?? annualRevenueUsd;
+  const netIncomeUsd = ttm?.netIncomeUsd ?? annualNetIncomeUsd;
+  const operatingCashFlowUsd = ttm?.operatingCashFlowUsd ?? annualOperatingCashFlowUsd;
+  const grossProfitUsd = ttm ? ttm.grossProfitUsd : annualGrossProfitUsd;
+  const operatingIncomeUsd = ttm ? ttm.operatingIncomeUsd : annualOperatingIncomeUsd;
 
   // Find the immediately preceding comparable fiscal year.
   const priorEnd = revenueRows
     .map(row => row.entry.end)
-    .filter(end => end < fiscalPeriodEnd)
+    .filter(end => end < annualFiscalPeriodEnd)
     .sort()
     .reverse()[0];
   const priorValueAt = (tags: string[], instant = false) =>
     priorEnd ? entryForEnd(facts, tags, priorEnd, instant) : null;
-  const priorRevenue = priorValueAt([
-    'RevenueFromContractWithCustomerExcludingAssessedTax',
-    'RevenueFromContractWithCustomerIncludingAssessedTax',
-    'Revenues',
-    'SalesRevenueNet',
-  ]);
-  const priorNetIncome = priorValueAt(['NetIncomeLoss', 'ProfitLoss']);
-  const priorOperatingCashFlow = priorValueAt(['NetCashProvidedByUsedInOperatingActivities']);
-  const priorCurrentAssets = priorValueAt(['AssetsCurrent'], true);
-  const priorCurrentLiabilities = priorValueAt(['LiabilitiesCurrent'], true);
+  const priorRevenue = ttm ? ttm.priorRevenueUsd : priorValueAt(REVENUE_TAGS);
+  const priorNetIncome = ttm ? ttm.priorNetIncomeUsd : priorValueAt(['NetIncomeLoss', 'ProfitLoss']);
+  const priorOperatingCashFlow = ttm ? ttm.priorOperatingCashFlowUsd : priorValueAt(['NetCashProvidedByUsedInOperatingActivities']);
+  const priorAsOf = priorEnd || annualFiscalPeriodEnd;
+  const priorCurrentAssets = latestInstantValue(facts, ['AssetsCurrent'], { filedBy: balanceAsOf, endBefore: priorAsOf });
+  const priorCurrentLiabilities = latestInstantValue(facts, ['LiabilitiesCurrent'], { filedBy: balanceAsOf, endBefore: priorAsOf });
 
   const metrics: FundamentalMetrics = {
     revenueGrowthPct: round(growthPct(revenueUsd, priorRevenue), 1),
@@ -370,36 +549,37 @@ function buildResult(symbol: string, facts: CompanyFacts): FundamentalRadarResul
   if ((metrics.operatingCashFlowMarginPct ?? -999) >= (priorOcfMargin ?? -999) + 0.5) score = clamp(score + 1, 0, 100);
   if (priorCurrentRatio != null && (metrics.currentRatio ?? 999) < priorCurrentRatio - 0.18) score = clamp(score - 2, 0, 100);
 
-  const history: FundamentalHistoryPoint[] = [];
-  const recentRevenue = revenueRows.filter(row => row.entry.end <= fiscalPeriodEnd).slice(0, 3).reverse();
-  for (const row of recentRevenue) {
-    const pointNet = netRows.find(item => item.entry.end === row.entry.end)?.entry.val ?? null;
-    const pointCash = cashRows.find(item => item.entry.end === row.entry.end)?.entry.val ?? null;
-    history.push({
-      endDate: row.entry.end,
-      revenueUsd: round(row.entry.val, 0),
-      netMarginPct: round(marginPct(pointNet, row.entry.val), 1),
-      operatingCashFlowMarginPct: round(marginPct(pointCash, row.entry.val), 1),
-      currentRatio: round(safeRatio(
-        entryForEnd(facts, ['AssetsCurrent'], row.entry.end, true),
-        entryForEnd(facts, ['LiabilitiesCurrent'], row.entry.end, true)
-      )),
+  const history: FundamentalHistoryPoint[] = ttm
+    ? quarterlyHistory.slice(-8)
+    : revenueRows.filter(row => row.entry.end <= annualFiscalPeriodEnd).slice(0, 3).reverse().map(row => {
+      const pointNet = netRows.find(item => item.entry.end === row.entry.end)?.entry.val ?? null;
+      const pointCash = cashRows.find(item => item.entry.end === row.entry.end)?.entry.val ?? null;
+      return {
+        endDate: row.entry.end, revenueUsd: round(row.entry.val, 0),
+        netIncomeUsd: round(pointNet, 0), operatingCashFlowUsd: round(pointCash, 0),
+        netMarginPct: round(marginPct(pointNet, row.entry.val), 1),
+        operatingCashFlowMarginPct: round(marginPct(pointCash, row.entry.val), 1),
+        currentRatio: round(safeRatio(
+          entryForEnd(facts, ['AssetsCurrent'], row.entry.end, true),
+          entryForEnd(facts, ['LiabilitiesCurrent'], row.entry.end, true)
+        )),
+      };
     });
-  }
 
-  const reportCandidates = [netIncome?.entry, revenue.entry]
+  const reportCandidates = [netIncome?.entry, revenue?.entry]
     .map(entry => String(entry?.filed || entry?.end || ''))
     .filter(Boolean)
     .sort()
     .reverse();
-  const reportFiledAt = reportCandidates[0] || fiscalPeriodEnd;
+  const reportFiledAt = ttm?.filedAt || reportCandidates[0] || fiscalPeriodEnd;
   const dataAgeDays = Math.max(0, Math.round((Date.now() - Date.parse(reportFiledAt)) / 86_400_000));
   const missingFields = Object.entries(metrics)
     .filter(([, value]) => value == null)
     .map(([name]) => name);
   const coverage = (missingFields.length ? 10 - missingFields.length : 10) / 10;
   const confidence = Math.round(clamp(38 + coverage * 42 - Math.min(16, dataAgeDays / 40), 30, 88));
-  const signal = buildSignal(score, metrics, dataAgeDays);
+  const periodBasis: 'TTM' | 'Annual' = ttm ? 'TTM' : 'Annual';
+  const signal = buildFundamentalSignal(score, metrics, dataAgeDays, periodBasis);
   const factors = buildFundamentalFactors(metrics, score, dataAgeDays);
   const cik = String(facts.cik || '');
 
@@ -409,6 +589,7 @@ function buildResult(symbol: string, facts: CompanyFacts): FundamentalRadarResul
     companyName: facts.entityName || symbol.toUpperCase(),
     updatedAt: new Date().toISOString(),
     fiscalPeriodEnd,
+    periodBasis: ttm ? 'TTM' : 'Annual',
     reportFiledAt,
     dataAgeDays,
     score,

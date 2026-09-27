@@ -19,6 +19,14 @@ test('detects candlestick patterns with stable labels and directions', () => {
   assert.ok(found.every(item => item.label && Number.isInteger(item.index) && item.confidence && item.condition && item.meaning && item.disclaimer));
 });
 
+test('chart data status never calls a successful historical fetch real-time', () => {
+  assert.equal(analysis.chartDataStatusLabel({ dataStatus: 'live' }), '最新可用行情（实时性未声明）');
+  assert.equal(analysis.chartDataStatusLabel({ dataStatus: 'delayed' }), '延迟行情');
+  assert.equal(analysis.chartDataStatusLabel({ dataStatus: 'cached' }), '缓存数据');
+  assert.equal(analysis.chartDataStatusLabel({ dataStatus: 'historical', asOf: '2026-09-01T00:00:00.000Z' }), '历史时点数据');
+  assert.equal(analysis.chartDataStatusLabel({ dataStatus: 'empty' }), '暂无数据');
+});
+
 test('candlestick patterns carry the triggering candle price snapshot', () => {
   const found = analysis.detectCandlestickPatterns(bars());
   assert.ok(found.length > 0);

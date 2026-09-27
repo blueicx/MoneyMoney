@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3';
 import path from 'path';
 import fs from 'fs';
-import { ResearchJob, JobStatus, ArtifactManifest, MarketId, DataSnapshot, EvidenceBundle, LineageRef, AlertDelivery, assertMarketContext } from './research-contracts';
+import { ResearchJob, JobStatus, ArtifactManifest, MarketId, DataSnapshot, EvidenceBundle, LineageRef, AlertDelivery, applyAlertDeliveryFeedback, assertMarketContext } from './research-contracts';
 import { DATA_ROOT, ensureDir } from '../utils/paths';
 
 let db: Database.Database;
@@ -280,6 +280,13 @@ export const researchRepository = {
     const delivery = this.getAlertDelivery(id);
     if (!delivery) return null;
     const next = { ...delivery, status, ...(deliveredAt ? { deliveredAt } : {}) };
+    this.saveAlertDelivery(next);
+    return next;
+  },
+  updateAlertDeliveryFeedback(id: string, rating: unknown, at = new Date().toISOString()) {
+    const delivery = this.getAlertDelivery(id);
+    if (!delivery) return null;
+    const next = applyAlertDeliveryFeedback(delivery, rating, at);
     this.saveAlertDelivery(next);
     return next;
   },

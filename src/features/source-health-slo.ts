@@ -24,6 +24,12 @@ export interface SourceSloSummary {
     empty: number;
     failed: number;
     availabilityPct: number;
+    responseSuccessPct: number;
+    dataCoveragePct: number | null;
+    consecutiveEmpty: number;
+    latestDataAt: string | null;
+    latestSuccessAt: string | null;
+    dataFreshnessSeconds: number | null;
     p95LatencyMs: number | null;
     latestCheckAt: string;
     freshnessSeconds: number;
@@ -51,9 +57,16 @@ export function summarizeSourceSlo(
     rows.sort((a, b) => Date.parse(a.checkedAt) - Date.parse(b.checkedAt));
     const latencies = rows.map(row => row.latencyMs).filter((value): value is number => Number.isFinite(value) && Number(value) >= 0).map(Number).sort((a, b) => a - b);
     const failures = rows.filter(row => row.outcome === 'failed');
-    const available = rows.filter(row => row.outcome === 'success' || row.outcome === 'empty').length;
+    const responseSuccesses = rows.filter(row => row.outcome === 'success' || row.outcome === 'empty').length;
+    const available = responseSuccesses;
     const empty = rows.filter(row => row.outcome === 'empty').length;
     const latest = rows[rows.length - 1];
+    let consecutiveEmpty = 0;
+    for (let index = rows.length - 1; index >= 0 && rows[index].outcome === 'empty'; index -= 1) consecutiveEmpty += 1;
+    const latestData = [...rows].reverse().find(row => row.outcome === 'success') || null;
+    const latestSuccessAt = latestData?.checkedAt || null;
+    const latestDataAt = (latestData as (SourceHealthSample & { dataAt?: string }) | null)?.dataAt || null;
+    const parsedDataAt = latestDataAt ? Date.parse(latestDataAt) : NaN;
     const capabilities = [...new Set(rows.flatMap(row => row.capabilities || []))].sort();
     return {
       sourceId,
@@ -64,6 +77,12 @@ export function summarizeSourceSlo(
       empty,
       failed: failures.length,
       availabilityPct: Math.round((available / rows.length) * 10000) / 100,
+      responseSuccessPct: Math.round((responseSuccesses / rows.length) * 10000) / 100,
+      dataCoveragePct: responseSuccesses ? Math.round(((responseSuccesses - empty) / responseSuccesses) * 10000) / 100 : null,
+      consecutiveEmpty,
+      latestDataAt,
+      latestSuccessAt,
+      dataFreshnessSeconds: Number.isFinite(parsedDataAt) ? Math.max(0, Math.floor((end - parsedDataAt) / 1000)) : null,
       p95LatencyMs: latencies.length ? latencies[Math.max(0, Math.ceil(latencies.length * 0.95) - 1)] : null,
       latestCheckAt: latest.checkedAt,
       freshnessSeconds: Math.max(0, Math.floor((end - Date.parse(latest.checkedAt)) / 1000)),

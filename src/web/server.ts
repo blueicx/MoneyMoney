@@ -7361,9 +7361,11 @@ app.post('/api/alerts/dry-run', express.json(), (req, res) => {
   } catch (error: any) { res.status(400).json({ success: false, error: error?.message || '提醒试运行失败' }); }
 });
 app.get('/api/alerts/deliveries', (req, res) => {
+  if (!adminOnly(req, res)) return;
   res.json({ success: true, data: researchRepository.listAlertDeliveries(Number(req.query.limit) || 100) });
 });
 app.post('/api/alerts/deliveries/:id/retry', express.json(), async (req, res) => {
+  if (!adminOnly(req, res)) return;
   let queued: any;
   try {
     queued = researchRepository.retryAlertDelivery(String(req.params.id));
@@ -7388,9 +7390,20 @@ app.post('/api/alerts/deliveries/:id/retry', express.json(), async (req, res) =>
   }
 });
 app.post('/api/alerts/:id/ack', express.json(), (req, res) => {
+  if (!adminOnly(req, res)) return;
   const delivery = researchRepository.updateAlertDeliveryStatus(String(req.params.id), 'acknowledged', new Date().toISOString());
   if (!delivery) return res.status(404).json({ success: false, error: '提醒投递记录不存在' });
   res.json({ success: true, data: delivery });
+});
+app.post('/api/alerts/deliveries/:id/feedback', express.json(), (req, res) => {
+  if (!adminOnly(req, res)) return;
+  try {
+    const delivery = researchRepository.updateAlertDeliveryFeedback(String(req.params.id), req.body?.rating, new Date().toISOString());
+    if (!delivery) return res.status(404).json({ success: false, error: '提醒投递记录不存在' });
+    return res.json({ success: true, data: delivery });
+  } catch (error: any) {
+    return res.status(400).json({ success: false, error: error?.message || '提醒反馈无效' });
+  }
 });
 
 app.post('/api/settings', (req, res) => {

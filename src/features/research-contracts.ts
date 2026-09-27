@@ -297,12 +297,24 @@ export interface AlertDelivery {
   lastError?: string;
   lastAttemptAt?: string;
   deliveredAt?: string;
+  feedback?: AlertDeliveryFeedback;
+}
+export interface AlertDeliveryFeedback {
+  rating: 'useful' | 'irrelevant' | 'duplicate';
+  at: string;
+}
+export function applyAlertDeliveryFeedback(delivery: AlertDelivery, rating: unknown, at = new Date().toISOString()): AlertDelivery {
+  if (!['useful', 'irrelevant', 'duplicate'].includes(String(rating))) throw new Error('提醒反馈类型无效');
+  if (!['sent', 'acknowledged'].includes(String(delivery.status))) throw new Error('只有已投递提醒可以反馈');
+  const timestamp = new Date(at);
+  if (!Number.isFinite(timestamp.getTime())) throw new Error('提醒反馈时间无效');
+  return { ...delivery, feedback: { rating: rating as AlertDeliveryFeedback['rating'], at: timestamp.toISOString() } };
 }
 export function createAlertDelivery(input: Partial<AlertDelivery>): AlertDelivery {
   if (!input.id || !input.context || !input.alertId || !input.status) throw new Error('AlertDelivery requires id, context, alertId, status');
   return {
     id: input.id, context: assertMarketContext(input.context), alertId: input.alertId, status: input.status,
     channel: input.channel, payload: input.payload, attempts: input.attempts ?? 0,
-    lastError: input.lastError, lastAttemptAt: input.lastAttemptAt, deliveredAt: input.deliveredAt,
+    lastError: input.lastError, lastAttemptAt: input.lastAttemptAt, deliveredAt: input.deliveredAt, feedback: input.feedback,
   };
 }

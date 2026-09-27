@@ -18,6 +18,30 @@ export interface OptionRow {
   openInterest: number;
   delta?: number;
   gammaExposureUsd?: number;
+  quoteQuality?: OptionQuoteQuality;
+}
+
+export interface OptionQuoteQuality {
+  status: 'quoted' | 'low-liquidity' | 'wide-spread' | 'unquoted';
+  label: string;
+  referenceAsk: number | null;
+  referenceBid: number | null;
+}
+
+export function assessOptionQuoteQuality(row: Pick<OptionRow, 'bidPrice' | 'askPrice' | 'spreadPct' | 'volume' | 'openInterest'>): OptionQuoteQuality {
+  const bid = Number(row.bidPrice);
+  const ask = Number(row.askPrice);
+  if (!Number.isFinite(bid) || !Number.isFinite(ask) || bid <= 0 || ask < bid) {
+    return { status: 'unquoted', label: '无双边报价', referenceAsk: null, referenceBid: null };
+  }
+  const spread = Number(row.spreadPct);
+  if (Number.isFinite(spread) && spread > 25) {
+    return { status: 'wide-spread', label: '价差过宽', referenceAsk: ask, referenceBid: bid };
+  }
+  if ((Number.isFinite(spread) && spread > 10) || (Number(row.volume) <= 0 && Number(row.openInterest) <= 0)) {
+    return { status: 'low-liquidity', label: '流动性证据不足', referenceAsk: ask, referenceBid: bid };
+  }
+  return { status: 'quoted', label: '双边报价可见', referenceAsk: ask, referenceBid: bid };
 }
 
 export interface OptionExpiry {
@@ -368,7 +392,7 @@ function buildExpiry(expiryMs: number, rows: OptionRow[], spot: number): OptionE
     expiryMs,
     label: expiryLabel(expiryMs),
     daysToExpiry: Math.max(0, Math.round((expiryMs - Date.now()) / 86_400_000)),
-    rows: rows.sort((a, b) => a.strike - b.strike || a.optionType.localeCompare(b.optionType)),
+    rows: rows.map(row => ({ ...row, quoteQuality: assessOptionQuoteQuality(row) })).sort((a, b) => a.strike - b.strike || a.optionType.localeCompare(b.optionType)),
     callOpenInterest: callOI,
     putOpenInterest: putOI,
     callVolume,

@@ -2647,7 +2647,7 @@
         <details class="dash-collapse" data-collapse-key="stocks-fundamentals" data-market-scopes="stocks" data-workspace-id="fundamentals">
           <summary>
             <span class="collapse-title">📊 基本面质量雷达</span>
-            <span class="collapse-hint">SEC 10-K · 增长 · 现金流 · 负债</span>
+            <span class="collapse-hint">SEC 10-Q/10-K · TTM · 增长 · 现金流 · 负债</span>
             <span class="collapse-chevron">▾</span>
           </summary>
           <div class="collapse-body">
@@ -6687,6 +6687,8 @@ function renderFundamentalQuality(data) {
   const pct = value => value == null ? '--' : (Number(value) > 0 ? '+' : '') + Number(value).toFixed(1) + '%';
   const ratio = value => value == null ? '--' : Number(value).toFixed(2);
   const history = Array.isArray(data.history) ? data.history : [];
+  const periodBasis = data.periodBasis === 'TTM' ? 'TTM' : 'Annual';
+  const periodName = periodBasis === 'TTM' ? '季度' : '财年';
   const trendValues = history.map(point => point.netMarginPct);
   const cashTrendValues = history.map(point => point.operatingCashFlowMarginPct);
   const cards = [
@@ -6706,7 +6708,7 @@ function renderFundamentalQuality(data) {
   ).join('');
   const historyRows = (data.history || []).map(point =>
     '<tr>' +
-      '<td style="padding:6px 4px;color:var(--text-secondary);">' + stockEscapeHtml(String(point.endDate || '').slice(0, 10)) + '</td>' +
+      '<td style="padding:6px 4px;color:var(--text-secondary);">' + stockEscapeHtml(String(point.periodKey || point.endDate || '').replace(':', ' ')) + '</td>' +
       '<td style="padding:6px 4px;font-weight:600;">$' + compactUsd(point.revenueUsd || 0) + '</td>' +
       '<td style="padding:6px 4px;">' + pct(point.netMarginPct) + '</td>' +
       '<td style="padding:6px 4px;">' + pct(point.operatingCashFlowMarginPct) + '</td>' +
@@ -6731,7 +6733,7 @@ function renderFundamentalQuality(data) {
       <div class="workspace-signal-header" style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;">
         <div style="min-width:0;">
           <div style="font-weight:800;font-size:14px;">${safeNewsText(data.companyName)}</div>
-          <small style="color:var(--text-secondary);display:block;margin-top:3px;">${safeNewsText(data.symbol)} · 财年截止 ${safeNewsText(data.fiscalPeriodEnd)} · 申报 ${safeNewsText(data.reportFiledAt)}</small>
+          <small style="color:var(--text-secondary);display:block;margin-top:3px;">${safeNewsText(data.symbol)} · ${periodBasis === 'TTM' ? 'TTM截至' : '财年截止'} ${safeNewsText(data.fiscalPeriodEnd)} · 最近相关申报 ${safeNewsText(data.reportFiledAt)}</small>
         </div>
         ${workspaceInlineRefresh('loadFundamentalQuality()', '刷新')}
         <span class="workspace-signal-badge" style="color:white;background:${scoreColor};border-radius:99px;padding:5px 10px;font-size:11px;flex-shrink:0;">${score}/100 · ${safeNewsText(data.signalZh)}</span>
@@ -6743,7 +6745,7 @@ function renderFundamentalQuality(data) {
           ${workspaceTrendSvg(trendValues, 'var(--green)', '净利率')}
         </div>
         <div style="background:var(--bg-secondary);border-radius:10px;padding:10px;">
-          <div style="display:flex;justify-content:space-between;gap:8px;font-size:11px;font-weight:800;"><span>经营现金流率趋势</span><span style="color:var(--text-secondary);">${history.length ? `${history.length} 年` : '暂无历史'}</span></div>
+          <div style="display:flex;justify-content:space-between;gap:8px;font-size:11px;font-weight:800;"><span>经营现金流率趋势</span><span style="color:var(--text-secondary);">${history.length ? `${history.length} ${periodName}` : '暂无历史'}</span></div>
           ${workspaceTrendSvg(cashTrendValues, 'var(--purple)', '经营现金流率')}
         </div>
       </div>
@@ -6751,7 +6753,7 @@ function renderFundamentalQuality(data) {
         <div style="overflow-x:auto;margin-top:11px;border:1px solid var(--border);border-radius:10px;">
           <table style="width:100%;border-collapse:collapse;font-size:11px;min-width:430px;">
             <thead><tr style="background:var(--bg-secondary);color:var(--text-secondary);">
-              <th style="text-align:left;padding:7px 4px;">财年</th><th style="text-align:left;padding:7px 4px;">营收</th>
+              <th style="text-align:left;padding:7px 4px;">${periodName}</th><th style="text-align:left;padding:7px 4px;">营收</th>
               <th style="text-align:left;padding:7px 4px;">净利率</th><th style="text-align:left;padding:7px 4px;">现金流</th>
               <th style="text-align:left;padding:7px 4px;">流动比</th></tr></thead>
             <tbody>${historyRows}</tbody>
@@ -6763,11 +6765,11 @@ function renderFundamentalQuality(data) {
       </div>
       <div style="margin-top:10px;padding:10px;border-radius:10px;background:color-mix(in srgb,${scoreColor} 8%,transparent);font-size:11px;line-height:1.55;">
         <strong>解读：</strong>${safeNewsText(data.adviceZh)}<br>
-        <span style="color:var(--text-secondary);">置信度 ${data.confidence}/100 · 官方年报天然滞后 ${data.dataAgeDays} 天${missing.length ? ' · 缺失字段 ' + missing.length + ' 个' : ''}。</span>
+        <span style="color:var(--text-secondary);">${periodBasis === 'TTM' ? '按最近四个已披露季度计算 TTM' : '季度字段不足，回退至年度申报'} · 最近申报距今 ${data.dataAgeDays} 天 · 置信度 ${data.confidence}/100${missing.length ? ' · 缺失字段 ' + missing.length + ' 个' : ''}。</span>
       </div>
       ${missing.length ? `<div style="margin-top:8px;font-size:10.5px;color:var(--text-secondary);line-height:1.45;"><strong>未覆盖字段：</strong>${missing.map(item => `<span style="display:inline-block;margin:2px 4px 0 0;padding:3px 6px;border-radius:99px;background:var(--bg-secondary);">${safeNewsText(item)}</span>`).join('')}</div>` : ''}
       <div style="margin-top:8px;font-size:10.5px;color:var(--text-secondary);line-height:1.45;">
-        来源：SEC EDGAR XBRL / 10-K。基本面质量是筛选背景，不是买卖指令；估值、行业周期、最新季报和市场风险仍要一起看。
+        来源：SEC EDGAR XBRL / 10-Q、10-K。TTM 以可用季度申报合计，资产负债表指标取最近已披露时点；缺少连续季度时回退年度口径。基本面质量是筛选背景，不是买卖指令。
       </div>
     </div>`;
 }
@@ -7960,25 +7962,34 @@ function renderOptionChain() {
     optionMetricCard('Call/Put OI', compactUsd(expiry.callOpenInterest) + ' / ' + compactUsd(expiry.putOpenInterest), `成交 ${compactUsd(expiry.callVolume)} / ${compactUsd(expiry.putVolume)}`) +
     optionMetricCard('净 GEX / 1%', gex == null ? '--' : compactUsd(gex), gexHint);
   renderOptionStrategies(expiry);
-  updatedEl.textContent = optionsSnapshot.source + ' · 更新于 ' + new Date(optionsSnapshot.fetchedAt).toLocaleTimeString('zh-CN');
+  updatedEl.textContent = optionsSnapshot.source + ' · 抓取于 ' + new Date(optionsSnapshot.fetchedAt).toLocaleTimeString('zh-CN') + ' · 抓取时间不等于合约逐笔报价时间';
   const cell = (row, field, prefix='') => row ? `<td>${prefix}${row[field]}</td>` : '<td>--</td>';
   chainEl.innerHTML = `
     <div class="chain-wrap"><table class="chain-table">
       <thead><tr>
-        <th>OI</th><th>量</th><th>IV%</th><th>Delta</th><th>Bid/Ask</th><th>Premium</th><th class="strike-cell">行权价</th><th>Premium</th><th>Bid/Ask</th><th>Delta</th><th>IV%</th><th>量</th><th>OI</th>
+        <th>OI</th><th>量</th><th>IV%</th><th>Delta</th><th>Bid/Ask</th><th>价差</th><th>报价质量</th><th>Premium</th><th class="strike-cell">行权价</th><th>Premium</th><th>报价质量</th><th>价差</th><th>Bid/Ask</th><th>Delta</th><th>IV%</th><th>量</th><th>OI</th>
       </tr></thead>
       <tbody>
         ${strikes.map(strike => {
           const call = callMap.get(strike); const put = putMap.get(strike);
           const bidAsk = row => row && (row.bidPrice || row.askPrice) ? `${row.bidPrice || '--'}/${row.askPrice || '--'}` : '--';
+          const quoteQuality = row => {
+            const quality = row?.quoteQuality;
+            if (!quality) return '<td title="来源没有提供有效双边报价">无报价</td>';
+            const color = quality.status === 'quoted' ? 'var(--green)' : quality.status === 'wide-spread' ? 'var(--red)' : 'var(--yellow)';
+            const unit = optionsSnapshot.market === 'crypto' ? optionsSnapshot.asset : 'USD';
+            const refs = quality.referenceAsk == null ? '参考买/卖价不可用' : `参考买 ${quality.referenceAsk} ${unit} · 卖 ${quality.referenceBid} ${unit}`;
+            return `<td style="color:${color}" title="${refs}；只是盘口参考，不保证成交">${quality.label}</td>`;
+          };
+          const spread = row => `<td>${row?.spreadPct == null ? '--' : row.spreadPct.toFixed(1) + '%'}</td>`;
           const premium = row => row ? '$' + row.premiumUsd.toLocaleString(undefined,{maximumFractionDigits:2}) : '--';
           const iv = row => row && row.impliedVolPct ? row.impliedVolPct.toFixed(1) : '--';
           const delta = row => row && row.delta != null ? row.delta.toFixed(2) : '--';
           const classes = [strike === atmStrike ? 'atm' : '', strike === expiry.maxPainStrike ? 'max-pain' : ''].join(' ').trim();
           return `<tr class="${classes}">
-            <td>${call ? compactUsd(call.openInterest) : '--'}</td><td>${call ? compactUsd(call.volume) : '--'}</td><td>${iv(call)}</td><td>${delta(call)}</td><td>${bidAsk(call)}</td><td>${premium(call)}</td>
+            <td>${call ? compactUsd(call.openInterest) : '--'}</td><td>${call ? compactUsd(call.volume) : '--'}</td><td>${iv(call)}</td><td>${delta(call)}</td><td>${bidAsk(call)}</td>${spread(call)}${quoteQuality(call)}<td>${premium(call)}</td>
             <td class="strike-cell">${strike.toLocaleString()}${strike === atmStrike ? '<small style="display:block;font-weight:500;">ATM</small>' : ''}</td>
-            <td>${premium(put)}</td><td>${bidAsk(put)}</td><td>${delta(put)}</td><td>${iv(put)}</td><td>${put ? compactUsd(put.volume) : '--'}</td><td>${put ? compactUsd(put.openInterest) : '--'}</td>
+            <td>${premium(put)}</td>${quoteQuality(put)}${spread(put)}<td>${bidAsk(put)}</td><td>${delta(put)}</td><td>${iv(put)}</td><td>${put ? compactUsd(put.volume) : '--'}</td><td>${put ? compactUsd(put.openInterest) : '--'}</td>
           </tr>`;
         }).join('')}
       </tbody>
@@ -8085,6 +8096,13 @@ function formatChartTime(value) {
   if (Number.isNaN(date.getTime())) return '--';
   return date.toLocaleString('zh-CN', { year:'numeric', month:'numeric', day:'numeric', hour:'2-digit', minute:'2-digit' });
 }
+function stockKlineIsIntraday() { return ['1m', '5m', '15m', '1h'].includes(currentStockKlinePeriod); }
+function formatStockKlineTime(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '--';
+  if (!stockKlineIsIntraday()) return date.toISOString().slice(0, 10);
+  return `${new Intl.DateTimeFormat('zh-CN', { timeZone: stockChartExchangeTimezone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(date)} ${stockChartExchangeTimezone}`;
+}
 function renderMovingAverageValues(targetId, bars, periods) {
   const host = document.getElementById(targetId);
   if (!host) return;
@@ -8151,7 +8169,7 @@ function renderChartSignalList(targetId, signals, emptyText) {
     return;
   }
   el.innerHTML = recent.map(signal => {
-    const time = signal.time ? new Date(signal.time).toLocaleDateString('zh-CN', { month:'numeric', day:'numeric' }) : '--';
+    const time = signal.time ? (targetId === 'stock-chart-signals' ? formatStockKlineTime(signal.time) : new Date(signal.time).toLocaleDateString('zh-CN', { month:'numeric', day:'numeric' })) : '--';
     const price = Number(signal.price);
     const priceText = Number.isFinite(price) ? (price >= 1000 ? price.toFixed(0) : price.toFixed(2)) : '--';
     return `<span class="chart-signal-item ${signal.side === 'buy' ? 'buy' : 'sell'}" title="${stockEscapeHtml(signal.reason || '')}">${signal.side === 'buy' ? '▲' : '▼'} ${stockEscapeHtml(signal.label)} · ${time} · ${priceText}</span>`;
@@ -8167,7 +8185,7 @@ function renderChartPatternList(targetId, patterns, emptyText) {
   }
   el.innerHTML = recent.map(item => {
     const direction = item.direction === 'bullish' ? '看涨' : item.direction === 'bearish' ? '看跌' : '中性';
-    const time = formatChartTime(item.time);
+    const time = targetId === 'stock-chart-pattern-list' ? formatStockKlineTime(item.time) : formatChartTime(item.time);
     return `<article class="chart-pattern-item ${stockEscapeHtml(item.direction || 'neutral')}" data-pattern-index="${Number(item.index)}">
       <strong>${stockEscapeHtml(item.label)} · ${direction}</strong>
       <div class="chart-pattern-item-meta">${time} · 置信度 ${stockEscapeHtml(item.confidence || '未知')} · ${stockEscapeHtml(item.condition || '条件未知')}</div>
@@ -8205,7 +8223,7 @@ function renderChartStructureList(targetId, structures, chan, emptyText) {
   if (!items.length) { el.innerHTML = `<span class="chart-signal-empty">${stockEscapeHtml(emptyText)}</span>`; return; }
   el.innerHTML = '<div class="chart-pattern-controls-title">结构说明</div>' + items.reverse().map(item => {
     const direction = item.direction === 'bullish' ? '看涨' : item.direction === 'bearish' ? '看跌' : '中性';
-    const time = item.time ? new Date(item.time).toLocaleDateString('zh-CN', { month:'numeric', day:'numeric' }) : '--';
+    const time = item.time ? (targetId === 'stock-chart-structure-list' ? formatStockKlineTime(item.time) : new Date(item.time).toLocaleDateString('zh-CN', { month:'numeric', day:'numeric' })) : '--';
     const statusLabel = item.status === 'confirmed' ? '已确认' : item.status === 'invalidated' ? '已失效' : '准备中';
     const priceText = Number.isFinite(Number(item.price)) ? ` · 点位 ${stockEscapeHtml(formatChartPrice(item.price))}` : '';
     return `<article class="chart-structure-item ${stockEscapeHtml(item.direction || 'neutral')}"><strong>${stockEscapeHtml(item.label)} · ${direction}</strong><div class="chart-pattern-item-meta">${time}${priceText} · 确认状态 ${statusLabel} · 置信度 ${stockEscapeHtml(item.confidence || '未知')} · ${stockEscapeHtml(item.condition || '条件未知')}</div><div><b>通常含义：</b>${stockEscapeHtml(item.meaning || '暂无说明')}</div><div class="chart-pattern-item-meta">${stockEscapeHtml(item.disclaimer || '结构仅供研究参考，不构成交易指令。')}</div></article>`;
@@ -8238,7 +8256,7 @@ function renderChartPatternMarkers(targetId, patterns, getPosition) {
     tooltip.role = 'tooltip';
     tooltip.innerHTML = `
       <div style="font-weight:bold;margin-bottom:4px;color:var(--text)">${stockEscapeHtml(item.label)} <span style="font-size:10px;font-weight:normal;color:var(--text-secondary)">(${direction} · 置信度 ${stockEscapeHtml(item.confidence || '未知')})</span></div>
-      <div style="margin-bottom:4px"><strong>时间：</strong>${stockEscapeHtml(formatChartTime(item.time))}</div>
+      <div style="margin-bottom:4px"><strong>时间：</strong>${stockEscapeHtml(targetId === 'stock-chart-patterns' ? formatStockKlineTime(item.time) : formatChartTime(item.time))}</div>
       <div style="margin-bottom:4px"><strong>点位：</strong>${stockEscapeHtml(formatPatternOHLC(item))}</div>
       <div style="margin-bottom:4px"><strong>触发条件：</strong>${stockEscapeHtml(item.condition || '条件未知')}</div>
       <div style="margin-bottom:6px"><strong>通常含义：</strong>${stockEscapeHtml(item.meaning || '暂无说明')}</div>
@@ -8279,7 +8297,7 @@ function getStockKlineFocusStart(total, index) {
 function formatStockCandleSelection(bar) {
   if (!bar) return '点击图中某一根日K，可聚焦查看该日附近走势';
   const price = value => Number.isFinite(Number(value)) ? formatChartPrice(Number(value)) : '--';
-  return `已选 ${formatChartTime(bar.time)} · O ${price(bar.open)} · H ${price(bar.high)} · L ${price(bar.low)} · C ${price(bar.close)} · V ${price(bar.volume)}`;
+  return `已选 ${formatStockKlineTime(bar.time)} · ${stockKlineIsIntraday() ? stockChartExchangeTimezone : '交易日'} · O ${price(bar.open)} · H ${price(bar.high)} · L ${price(bar.low)} · C ${price(bar.close)} · V ${price(bar.volume)}`;
 }
 function updateStockKlineFocusControl() {
   const button = document.querySelector('[data-chart-candle-focus]');
@@ -8295,7 +8313,7 @@ function updateStockKlineFocusControl() {
     ? `${stockChartIntradaySession.date} ${stockChartExchangeTimezone} · O ${formatChartPrice(stockChartIntradaySession.ohlc.open)} · H ${formatChartPrice(stockChartIntradaySession.ohlc.high)} · L ${formatChartPrice(stockChartIntradaySession.ohlc.low)} · C ${formatChartPrice(stockChartIntradaySession.ohlc.close)} · V ${formatChartPrice(stockChartIntradaySession.ohlc.volume)}`
     : formatStockCandleSelection(bar);
   const dateInput = document.querySelector('[data-chart-candle-date]');
-  if (dateInput) dateInput.value = stockChartIntradayDate || (bar?.time ? new Intl.DateTimeFormat('en-CA', { timeZone: stockChartExchangeTimezone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(bar.time)) : '');
+  if (dateInput) dateInput.value = stockChartIntradayDate || (bar?.time ? (stockKlineIsIntraday() ? new Intl.DateTimeFormat('en-CA', { timeZone: stockChartExchangeTimezone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(bar.time)) : new Date(bar.time).toISOString().slice(0, 10)) : '');
   const intradayControls = document.querySelector('[data-intraday-controls]');
   if (intradayControls) intradayControls.hidden = !stockChartIntradayDate;
   document.querySelectorAll('.intraday-period').forEach(item => item.classList.toggle('active', item.dataset.intradayPeriod === stockChartIntradayPeriod));
@@ -8534,7 +8552,10 @@ async function loadStockKline(symbol, name, apiSymbol) {
   if (title) title.textContent = currentStockName + ' · ' + currentStockSymbol;
   if (!canvas) return;
   try {
-    setStockKlineStatus('正在加载真实数据…');
+    canvas.style.visibility = 'hidden';
+    const chartCard = document.getElementById('stock-chart-card');
+    chartCard?.setAttribute('aria-busy', 'true');
+    setStockKlineStatus(`正在加载 ${stockChartIntradayDate ? `${stockChartIntradayDate} ${currentStockKlinePeriod}` : currentStockKlinePeriod}；旧周期图形暂时隐藏…`);
     const asOfQuery = stockChartAsOf ? '&asOf=' + encodeURIComponent(stockChartAsOf) : '';
     const dateQuery = stockChartIntradayDate ? '&date=' + encodeURIComponent(stockChartIntradayDate) + '&intradayPeriod=' + encodeURIComponent(stockChartIntradayPeriod) : '';
     const res = await fetch('/api/stock/kline?symbol=' + encodeURIComponent(currentStockSymbol) + '&period=' + encodeURIComponent(currentStockKlinePeriod) + '&interval=' + encodeURIComponent(currentStockKlinePeriod) + asOfQuery + dateQuery + (currentStockApiSymbol ? '&api=' + encodeURIComponent(currentStockApiSymbol) : ''));
@@ -8558,19 +8579,28 @@ async function loadStockKline(symbol, name, apiSymbol) {
       return;
     }
     currentStockKlineReason = '';
-    const freshness = d.dataStatus === 'historical' ? `历史时点 ${d.asOf ? formatChartTime(d.asOf) : ''}` : d.dataStatus === 'cached' ? '缓存' : d.dataStatus === 'stale' ? '过期缓存' : d.dataStatus === 'degraded' ? '降级' : '实时';
+    const freshness = window.MoneyChartAnalysis?.chartDataStatusLabel?.(d) || '数据状态未知';
     stockChartExchangeTimezone = d.timezone || stockChartExchangeTimezone;
     stockChartIntradaySession = d.session || null;
-    setStockKlineStatus(`${freshness}${stockChartIntradayDate ? ` · ${stockChartIntradayDate} · ${currentStockKlinePeriod} · ${stockChartExchangeTimezone}` : ''} · ${d.source || '股票行情'} · ${d.updatedAt ? formatChartTime(d.updatedAt) : ''}${d.reason ? ` · ${d.reason}` : ''}`);
+    const latestBarTime = stockChartKlinesTime(d.data[d.data.length - 1]);
+    setStockKlineStatus(`${freshness}${stockChartIntradayDate ? ` · ${stockChartIntradayDate} · ${currentStockKlinePeriod} · ${stockChartExchangeTimezone}` : ''} · K线时间 ${latestBarTime || '来源未提供'} · ${d.source || '股票行情'} · 抓取 ${d.updatedAt ? formatChartTime(d.updatedAt) : '时间未知'}${d.reason ? ` · ${d.reason}` : ''}`);
     stockChartKlines = d.data;
     stockChartReplayIndex = stockChartKlines.length - 1;
     loadStockChartOverlayConfig();
     if (window.stockMoneyKLine?.update) window.stockMoneyKLine.update(stockChartKlines, { resetReplay: true });
     else drawStockKline(canvas, stockChartKlines);
+    canvas.style.visibility = 'visible';
   } catch(e) {
     currentStockKlineReason = '股票K线来源不可用，请稍后重试';
     setStockKlineStatus(currentStockKlineReason);
+  } finally {
+    if (requestRevision === stockKlineRequestRevision) document.getElementById('stock-chart-card')?.removeAttribute('aria-busy');
   }
+}
+function stockChartKlinesTime(bar) {
+  const value = Number(bar?.time);
+  if (!Number.isFinite(value)) return '';
+  return formatStockKlineTime(value);
 }
 function drawStockKline(canvas, klines) {
   if (!canvas || !window.MoneyChartAnalysis) return;
@@ -9636,17 +9666,47 @@ async function loadAlerts() {
     const el = document.getElementById('alerts-list');
     if (!alerts || alerts.length === 0) {
       el.innerHTML = "<div style=\"color:var(--text-secondary);font-size:13px;\">\u6682\u65E0\u9884\u8B66\uFF1B\u53EF\u5728\u4E0A\u65B9\u6DFB\u52A0\u3002</div>";
-      return;
-    }
-    el.innerHTML = alerts.map((a) => `
+    } else {
+      el.innerHTML = alerts.map((a) => `
           <div style="background:var(--bg-card);border-radius:10px;padding:12px 14px;margin-bottom:8px;box-shadow:var(--shadow);display:flex;justify-content:space-between;align-items:center;font-size:13px;">
             <div>
-              <strong>${a.symbol}</strong> ${a.direction === 'ABOVE' ? "\u2B06\uFE0F \u9AD8\u4E8E" : "\u2B07\uFE0F \u4F4E\u4E8E"} $${a.targetPrice}
+              <strong>${safeNewsText(a.symbol)}</strong> ${a.direction === 'ABOVE' ? "\u2B06\uFE0F \u9AD8\u4E8E" : "\u2B07\uFE0F \u4F4E\u4E8E"} $${safeNewsText(a.targetPrice)}
               ${a.triggered ? "<span style=\"color:var(--green);margin-left:8px;\">\u2713 \u5DF2\u89E6\u53D1</span>" : ''}
             </div>
-            <button onclick="removeAlert('${a.id}')" style="background:none;border:none;cursor:pointer;font-size:16px;">🗑</button>
+            <button onclick="removeAlert('${encodeURIComponent(a.id)}')" style="background:none;border:none;cursor:pointer;font-size:16px;">🗑</button>
           </div>`).join('');
+    }
+    await loadAlertDeliveryFeedback();
   } catch (e) {}
+}
+async function loadAlertDeliveryFeedback() {
+  const host = document.getElementById('alerts-list');
+  if (!host || window.mm_isLoggedIn !== true || window.mm_isGuest) return;
+  try {
+    const response = await fetch('/api/alerts/deliveries?limit=12', { cache: 'no-store' });
+    const payload = await response.json();
+    if (!response.ok || !payload.success) return;
+    const rows = (payload.data || []).filter(item => ['sent', 'acknowledged'].includes(item.status));
+    const labels = { useful: '有用', irrelevant: '无关', duplicate: '重复' };
+    const section = document.createElement('section');
+    section.style.marginTop = '18px';
+    section.innerHTML = `<div style="font-weight:700;margin-bottom:8px;">最近提醒 · 帮助调整提醒质量</div>${rows.length ? rows.map(item => {
+      const id = encodeURIComponent(String(item.id || ''));
+      const rating = item.feedback?.rating;
+      const message = safeNewsText(String(item.payload?.message || '提醒内容'));
+      return `<div style="padding:10px;margin:6px 0;border:1px solid var(--border);border-radius:9px;font-size:12px;"><div>${message}</div><div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-top:7px;"><span style="color:var(--text-secondary);">${rating ? `反馈：${labels[rating] || '已记录'}` : '这条提醒对你有帮助吗？'}</span>${rating ? '' : `<button class="tab" onclick="setAlertDeliveryFeedback('${id}','useful')">有用</button><button class="tab" onclick="setAlertDeliveryFeedback('${id}','irrelevant')">无关</button><button class="tab" onclick="setAlertDeliveryFeedback('${id}','duplicate')">重复</button>`}</div></div>`;
+    }).join('') : '<div style="font-size:12px;color:var(--text-secondary);">暂无已投递提醒。</div>'}`;
+    host.appendChild(section);
+  } catch {}
+}
+async function setAlertDeliveryFeedback(encodedId, rating) {
+  try {
+    const id = decodeURIComponent(String(encodedId || ''));
+    const response = await fetch(`/api/alerts/deliveries/${encodeURIComponent(id)}/feedback`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ rating }) });
+    const payload = await response.json();
+    if (!response.ok || !payload.success) throw new Error(payload.error || '反馈提交失败');
+    loadAlerts();
+  } catch (error) { if (typeof window.showToast === 'function') window.showToast(error.message || '反馈提交失败', 'error'); }
 }
 async function addAlert() {
   const symbol = document.getElementById('alert-symbol').value.trim().toUpperCase();
@@ -9659,6 +9719,7 @@ async function addAlert() {
   loadAlerts();
 }
 async function removeAlert(id) {
+  id = decodeURIComponent(String(id || ''));
   await fetch('/api/alerts/remove', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) });
   loadAlerts();
 }
@@ -11745,7 +11806,9 @@ function defaultTabForMarketScope(scope) { return MARKET_SCOPES.find(item => ite
 function defaultWorkspaceForMarketScope(scope) {
   return scope === 'watchlist' ? 'watchlist'
     : scope === 'stocks' ? 'stock-quotes'
-      : scope === 'crypto' ? 'crypto-quotes' : 'overview';
+      : scope === 'options' ? 'option-chain'
+        : scope === 'crypto' ? 'crypto-quotes'
+          : scope === 'prediction' ? 'prediction-radar' : 'overview';
 }
 function scopeAllowsView(declared) {
   const scopes = String(declared || '').split(/[\s,|]+/).filter(Boolean);
@@ -12228,7 +12291,16 @@ async function loadMarketCompare() {
     const payload = await response.json();
     if (!response.ok || !payload.success) throw new Error(payload.error || '比较数据暂不可用');
     const rows = Array.isArray(payload.data) ? payload.data : [];
-    resultsEl.innerHTML = rows.length ? rows.map(item => `<div class="market-compare-row"><strong>${marketResearchEscape(item.title || item.symbol)}</strong><span>价格 ${marketResearchEscape(item.quote?.price ?? '—')} · 涨跌 ${marketResearchEscape(item.quote?.changePct ?? '—')} · ${item.freshness?.status === 'fresh' ? '数据新鲜' : item.freshness?.status === 'stale' ? '数据可能过期' : '数据不可用'}</span></div>`).join('') : '暂无可比较数据。';
+    resultsEl.innerHTML = rows.length ? rows.map(item => {
+      const price = item.quote?.price != null && Number.isFinite(Number(item.quote.price)) ? Number(item.quote.price).toLocaleString(undefined, { maximumFractionDigits: 4 }) : '—';
+      const change = item.quote?.changePct != null && Number.isFinite(Number(item.quote.changePct)) ? `${Number(item.quote.changePct) > 0 ? '+' : ''}${Number(item.quote.changePct).toFixed(2)}%` : '暂无涨跌';
+      const freshness = item.freshness?.status === 'fresh' ? '数据新鲜' : item.freshness?.status === 'stale' ? '数据可能过期' : '数据不可用';
+      const fetchedAt = item.freshness?.fetchedAt ? new Date(item.freshness.fetchedAt).toLocaleString('zh-CN') : '时间未知';
+      const sources = item.sourceStatus && typeof item.sourceStatus === 'object'
+        ? Object.entries(item.sourceStatus).map(([source, status]) => `${source}: ${status}`).slice(0, 2).join(' · ')
+        : String(item.sourceStatus || '来源未提供');
+      return `<div class="market-compare-row"><strong>${marketResearchEscape(item.title || item.symbol)}</strong><span>价格 ${marketResearchEscape(price)} · 涨跌 ${marketResearchEscape(change)} · ${freshness} · ${marketResearchEscape(sources)} · ${marketResearchEscape(fetchedAt)}</span></div>`;
+    }).join('') : '暂无可比较数据。';
   } catch (error) {
     resultsEl.textContent = error?.message || '比较数据暂不可用';
   }
@@ -13158,11 +13230,37 @@ async function loadSourceHealth(force = false) {
           <thead><tr><th style="text-align:left;padding:8px;">数据源</th><th style="text-align:left;padding:8px;">用途</th><th style="text-align:left;padding:8px;">能力</th><th style="text-align:left;padding:8px;">状态</th><th style="text-align:right;padding:8px;">延迟</th></tr></thead>
           <tbody>${rows}</tbody>
         </table>
-      </div>`;
+      </div>
+      <div id="source-slo-panel" style="margin-top:14px;"><span style="font-size:12px;color:var(--text-secondary);">正在汇总近 7 天的数据覆盖…</span></div>`;
+    loadSourceSloPanel();
   } catch (error) {
     host.innerHTML = `<div style="font-size:12px;color:var(--red);">❌ ${safeNewsText(error.message)} <button class="tab" onclick="loadSourceHealth(true)">重试</button></div>`;
   } finally {
     sourceHealthLoading = false;
+  }
+}
+async function loadSourceSloPanel() {
+  const host = document.getElementById('source-slo-panel');
+  if (!host) return;
+  const markets = [['stocks', '股票'], ['options', '期权'], ['crypto', '虚拟币'], ['prediction', '预测市场']];
+  try {
+    const reports = await Promise.all(markets.map(async ([market]) => {
+      const response = await fetch(`/api/data/slo?market=${encodeURIComponent(market)}&window=7d`, { cache: 'no-store' });
+      const payload = await response.json();
+      if (!response.ok || !payload.success) throw new Error(payload.reason || payload.error || `${market} SLO 加载失败`);
+      return { market, payload };
+    }));
+    const rows = reports.flatMap(({ market, payload }) => (payload.sources || []).map(source => {
+      const marketLabel = markets.find(([id]) => id === market)?.[1] || market;
+      const coverage = source.dataCoveragePct == null ? '—' : `${source.dataCoveragePct}%`;
+      const freshness = source.latestDataAt ? `${Math.floor(Number(source.dataFreshnessSeconds || 0) / 3600)} 小时前` : source.latestSuccessAt ? '有返回 · 来源未给数据时点' : '暂无成功响应';
+      return `<tr><td>${safeNewsText(marketLabel)}</td><td>${safeNewsText(source.sourceName)}</td><td>${source.responseSuccessPct}% (${source.available}/${source.checks})</td><td>${coverage} · 连续空结果 ${source.consecutiveEmpty}</td><td>${safeNewsText(freshness)}</td></tr>`;
+    }));
+    host.innerHTML = rows.length
+      ? `<div style="font-size:12px;font-weight:700;margin-bottom:7px;">近 7 天：接口成功率与实际数据覆盖</div><div style="overflow-x:auto;"><table style="width:100%;min-width:600px;border-collapse:collapse;font-size:11px;"><thead><tr><th>市场</th><th>数据源</th><th>接口成功率</th><th>数据覆盖率</th><th>最近数据</th></tr></thead><tbody>${rows.join('')}</tbody></table></div><div style="font-size:10px;color:var(--text-secondary);margin-top:5px;">接口成功只代表来源响应正常；覆盖率统计返回实际记录的检查占比。</div>`
+      : '<div style="font-size:12px;color:var(--text-secondary);">近 7 天尚无来源检查记录；这不代表市场没有数据。</div>';
+  } catch (error) {
+    host.innerHTML = `<div style="font-size:12px;color:var(--text-secondary);">覆盖率加载失败：${safeNewsText(error.message)} <button class="tab" onclick="loadSourceSloPanel()">重试</button></div>`;
   }
 }
 function forecastLabMetric(label, value, sub = '', color = '') {
