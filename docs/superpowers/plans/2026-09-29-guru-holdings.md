@@ -80,7 +80,7 @@ test('missing current filing is labeled not disclosed rather than sold out', () 
 
 **文件：** 修改 `src/features/sec-edgar-client.ts`；扩展 `tests/guru-holdings.test.cjs`。
 
-- [ ] **步骤 1：先加 CIK、申报过滤和安全归档路径测试**
+- [x] **步骤 1：先加 CIK、申报过滤和安全归档路径测试**
 
 ```js
 const { normalizeSecCik, parseSec13FSubmissions, buildSec13FArchiveUrl } = require('../dist/features/sec-edgar-client.js');
@@ -98,19 +98,19 @@ test('SEC filer lookup normalizes CIK and keeps only 13F reports', () => {
     } },
   });
   assert.deepEqual(parsed.filings.map(item => item.form), ['13F-HR', '13F-HR/A']);
-  assert.equal(buildSec13FArchiveUrl('12345', '../bad.xml'), null);
+  assert.equal(buildSec13FArchiveUrl('12345', '0000012345-26-000001', '../bad.xml'), null);
 });
 ```
 
-- [ ] **步骤 2：运行测试确认新 SEC helper 缺失**
+- [x] **步骤 2：运行测试确认新 SEC helper 缺失**
 
 运行：`npm run build`，然后 `node --test tests/guru-holdings.test.cjs`。预期：新测试失败，既有 SEC ticker、submissions 和公司事实测试不受影响。
 
-- [ ] **步骤 3：实现共享 SEC 请求和 filings 规范化**
+- [x] **步骤 3：实现共享 SEC 请求和 filings 规范化**
 
 扩展 `SecSubmissionRecent`，读取平行的 `reportDate` 字段；导出 `normalizeSecCik()`、`parseSec13FSubmissions()`、`fetchSecText()`。仅接受合法十位 CIK 和 `13F-HR`/`13F-HR/A`，以 SEC 提供的 accession/primary document 构造归档路径；下载归档索引后只取经校验的 XML 信息表文件名，不拼接未经校验的路径。请求复用 `buildSecHeaders()`、超时和已有 SEC User-Agent 配置。金额保存原始申报数值和所用单位，并按该份 Form 13F 对应的格式规则规范化为 USD；无法确认单位时不计算金额权重。
 
-- [ ] **步骤 4：补齐成功/失败测试并提交**
+- [x] **步骤 4：补齐成功/失败测试并提交**
 
 运行：`npm run build`、`node --test tests/guru-holdings.test.cjs`。预期：合法 CIK/申报通过，错误 CIK、错误 XML 路径及 HTTP 失败返回明确错误；提交 `feat: load official sec 13f filings`。
 
