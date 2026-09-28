@@ -2,6 +2,7 @@ import Database from 'better-sqlite3';
 import path from 'path';
 import fs from 'fs';
 import { ResearchJob, JobStatus, ArtifactManifest, MarketId, DataSnapshot, EvidenceBundle, LineageRef, AlertDelivery, applyAlertDeliveryFeedback, assertMarketContext } from './research-contracts';
+import type { Guru13FReport } from './guru-holdings';
 import { DATA_ROOT, ensureDir } from '../utils/paths';
 
 let db: Database.Database;
@@ -108,6 +109,18 @@ function initDb(db: Database.Database) {
       data TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_signal_status_history_signal_at ON signal_status_history(market, signal_id, at ASC);
+    CREATE TABLE IF NOT EXISTS guru_13f_reports (
+      accession TEXT PRIMARY KEY,
+      cik TEXT NOT NULL,
+      report_period TEXT NOT NULL,
+      filed_at TEXT NOT NULL,
+      form TEXT NOT NULL,
+      source_url TEXT NOT NULL,
+      fetched_at TEXT NOT NULL,
+      content_hash TEXT NOT NULL,
+      data TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_guru_13f_cik_period ON guru_13f_reports(cik, report_period DESC, filed_at DESC);
   `);
 }
 
@@ -240,6 +253,60 @@ export const researchRepository = {
     assertMarketContext(snapshot.context);
     if (!snapshot.id || !snapshot.hash) throw new Error('Invalid DataSnapshot integrity');
     db.prepare("INSERT OR REPLACE INTO data_snapshots (id, data) VALUES (?, ?)").run(snapshot.id, JSON.stringify(snapshot));
+  },
+  saveGuru13FReport(report: Guru13FReport) {
+    const cik = report.cik;
+    const accession = report.accession;
+    const reportPeriod = report.reportPeriod;
+    const filedAt = report.filedAt;
+    const form = report.form;
+    const sourceUrl = report.sourceUrl;
+    const fetchedAt = report.fetchedAt;
+    const contentHash = report.contentHash;
+    if (typeof cik !== 'string' || !/^\d{10}$/.test(cik)
+      || typeof accession !== 'string' || !/^\d{10}-\d{2}-\d{6}$/.test(accession)
+      || typeof reportPeriod !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(reportPeriod)
+      || typeof filedAt !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(filedAt)
+      || (form !== '13F-HR' && form !== '13F-HR/A')
+      || typeof sourceUrl !== 'string' || !sourceUrl.startsWith('https://www.sec.gov/Archives/edgar/data/')
+      || typeof fetchedAt !== 'string' || !fetchedAt || typeof contentHash !== 'string' || !contentHash
+      || !Array.isArray(report.positions)) {
+      throw new Error('Invalid SEC 13F report snapshot');
+    }
+    if (accession.slice(0, 10) !== cik) throw new Error('SEC 13F report CIK does not match accession');
+    db.prepare(`
+      INSERT INTO guru_13f_reports (accession, cik, report_period, filed_at, form, source_url, fetched_at, content_hash, data)
+      VALUES (@accession, @cik, @reportPeriod, @filedAt, @form, @sourceUrl, @fetchedAt, @contentHash, @data)
+      ON CONFLICT(accession) DO UPDATE SET
+        cik = excluded.cik,
+        report_period = excluded.report_period,
+        filed_at = excluded.filed_at,
+        form = excluded.form,
+        source_url = excluded.source_url,
+        fetched_at = excluded.fetched_at,
+        content_hash = excluded.content_hash,
+        data = excluded.data
+    `).run({
+      accession: report.accession,
+      cik: report.cik,
+      reportPeriod: report.reportPeriod,
+      filedAt: report.filedAt,
+      form: report.form,
+      sourceUrl: report.sourceUrl,
+      fetchedAt: report.fetchedAt,
+      contentHash: report.contentHash,
+      data: JSON.stringify(report),
+    });
+  },
+  getGuru13FReport(accession: string): Guru13FReport | null {
+    const row = db.prepare('SELECT data FROM guru_13f_reports WHERE accession = ?').get(accession) as { data: string } | undefined;
+    return row ? JSON.parse(row.data) as Guru13FReport : null;
+  },
+  listGuru13FReports(cik: string, limit = 100): Guru13FReport[] {
+    if (!/^\d{10}$/.test(String(cik || ''))) throw new Error('Invalid SEC CIK');
+    const boundedLimit = Math.max(1, Math.min(500, Math.floor(Number(limit) || 100)));
+    return (db.prepare('SELECT data FROM guru_13f_reports WHERE cik = ? ORDER BY report_period DESC, filed_at DESC LIMIT ?').all(cik, boundedLimit) as Array<{ data: string }>)
+      .map(row => JSON.parse(row.data) as Guru13FReport);
   },
   getDataSnapshot(id: string): DataSnapshot | null {
     const row = db.prepare("SELECT data FROM data_snapshots WHERE id = ?").get(id) as any;

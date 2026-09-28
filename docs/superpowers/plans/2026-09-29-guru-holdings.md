@@ -118,19 +118,19 @@ test('SEC filer lookup normalizes CIK and keeps only 13F reports', () => {
 
 **文件：** 修改 `src/features/research-repository.ts`；新建 `tests/guru-holdings-repository.test.cjs`。
 
-- [ ] **步骤 1：先写 SQLite 持久化失败测试**
+- [x] **步骤 1：先写 SQLite 持久化失败测试**
 
 测试使用 `fs.mkdtempSync(path.join(os.tmpdir(), 'moneymoney-guru-'))` 建立临时目录，调用 `setDbPath(path.join(tempDir, 'research.sqlite'))`；保存两份不同报告期的申报，关闭数据库后重新 `setDbPath()`，断言 CIK、accession、报告期、来源链接及 positions JSON 完整恢复，并按报告期倒序返回。
 
-- [ ] **步骤 2：运行测试确认 repository 方法尚不存在**
+- [x] **步骤 2：运行测试确认 repository 方法尚不存在**
 
 运行：`npm run build`，然后 `node --test tests/guru-holdings-repository.test.cjs`。预期：仅因 `saveGuru13FReport`/`listGuru13FReports` 缺失而失败；临时目录清理测试库及 `-wal`、`-shm`。
 
-- [ ] **步骤 3：添加幂等报告表和 repository 方法**
+- [x] **步骤 3：添加幂等报告表和 repository 方法**
 
 在 `research-repository.ts` 初始化 `guru_13f_reports(accession PRIMARY KEY, cik, report_period, filed_at, form, source_url, fetched_at, content_hash, data)`，并建 `cik, report_period DESC` 索引。增加 `saveGuru13FReport(report)`（按 accession 幂等 upsert）、`listGuru13FReports(cik, limit)`（CIK 精确过滤、限额、按报告期/申报日倒序）和 `getGuru13FReport(accession)`。不迁移或读取现有生产/用户数据库以外的路径。
 
-- [ ] **步骤 4：运行隔离数据库测试并提交**
+- [x] **步骤 4：运行隔离数据库测试并提交**
 
 运行：`npm run build`、`node --test tests/guru-holdings-repository.test.cjs`。预期：关闭/重开后结果一致，重复保存不会产生重复行；提交 `feat: persist sec 13f snapshots`。
 
