@@ -1,5 +1,10 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const isolatedDataRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'moneymoney-guru-service-'));
+process.env.MONEYMONEY_DATA_DIR = isolatedDataRoot;
 const {
   parse13FInformationTable,
   parse13FCoverPage,
@@ -13,6 +18,16 @@ const {
   findSec13FInformationTable,
   fetchSecText,
 } = require('../dist/features/sec-edgar-client.js');
+const { GURU_MANAGER_REGISTRY, resolveGuruStockMapping, searchGuruManagerRegistry } = require('../dist/features/guru-holdings-registry.js');
+const { createGuruHoldingsService } = require('../dist/features/guru-holdings.js');
+const { researchRepository } = require('../dist/features/research-repository.js');
+const { stateStore } = require('../dist/storage/sqlite-state.js');
+
+test.after(() => {
+  researchRepository.close();
+  stateStore.close();
+  fs.rmSync(isolatedDataRoot, { recursive: true, force: true });
+});
 
 test('13F parser preserves CUSIP, class, shares, and reported value', () => {
   const xml = '<informationTable><infoTable><nameOfIssuer>APPLE INC</nameOfIssuer><titleOfClass>COM</titleOfClass><cusip>037833100</cusip><value>125000</value><shrsOrPrnAmt><sshPrnamt>500</sshPrnamt><sshPrnamtType>SH</sshPrnamtType></shrsOrPrnAmt></infoTable></informationTable>';
@@ -139,4 +154,129 @@ test('SEC text fetch uses identified SEC headers and preserves upstream errors',
     status: 403,
     text: async () => '',
   })), /SEC HTTP 403/);
+});
+
+test('guru registry uses canonical filer CIKs and exact CUSIP plus class mappings', () => {
+  assert.ok(GURU_MANAGER_REGISTRY.length > 0);
+  assert.ok(GURU_MANAGER_REGISTRY.every(item => /^\d{10}$/.test(item.cik)));
+  assert.ok(searchGuruManagerRegistry('Berkshire').some(item => item.cik === '0001067983'));
+  assert.equal(resolveGuruStockMapping('AAPL', '037833100', 'COM').symbol, 'AAPL');
+  assert.equal(resolveGuruStockMapping('AAPL', '037833100', 'PREFERRED'), null);
+  assert.equal(resolveGuruStockMapping('UNKNOWN', '037833100', 'COM'), null);
+});
+
+test('guru snapshots distinguish source-empty, source-failed, and expired cache', async () => {
+  const now = new Date('2026-09-29T00:00:00.000Z');
+  const emptyState = new Map([['guru13f:manager:0001067983:status', {
+    checkedAt: now.toISOString(), dataStatus: 'empty', reason: 'SEC submissions contain no 13F filings',
+  }]]);
+  const emptyService = createGuruHoldingsService({
+    repository: { listGuru13FReports: () => [] },
+    stateStore: {
+      get: key => emptyState.get(key) || null,
+      set: (key, value) => emptyState.set(key, value),
+      acquireLease: () => true,
+      releaseLease: () => true,
+    },
+    now: () => now,
+  });
+  assert.equal((await emptyService.getGuruManagerSnapshot('0001067983')).dataStatus, 'empty');
+
+  const failedState = new Map([['guru13f:manager:0001067983:status', {
+    checkedAt: now.toISOString(), dataStatus: 'unavailable', reason: 'SEC HTTP 403',
+  }]]);
+  const failedService = createGuruHoldingsService({
+    repository: { listGuru13FReports: () => [] },
+    stateStore: { get: key => failedState.get(key) || null, set: (key, value) => failedState.set(key, value), acquireLease: () => true, releaseLease: () => true },
+    now: () => now,
+  });
+  assert.equal((await failedService.getGuruManagerSnapshot('0001067983')).dataStatus, 'unavailable');
+
+  const staleReport = {
+    cik: '0001067983', accession: '0001067983-26-000001', reportPeriod: '2026-03-31', filedAt: '2026-05-14',
+    form: '13F-HR', sourceUrl: 'https://www.sec.gov/Archives/edgar/data/1067983/000106798326000001/',
+    fetchedAt: '2026-09-27T22:00:00.000Z', contentHash: 'sha256:fixture', positions: [],
+  };
+  const staleService = createGuruHoldingsService({
+    repository: { listGuru13FReports: () => [staleReport] },
+    stateStore: { get: () => null, set() {}, acquireLease: () => true, releaseLease: () => true },
+    now: () => now,
+  });
+  const stale = await staleService.getGuruManagerSnapshot('0001067983');
+  assert.equal(stale.dataStatus, 'delayed');
+  assert.match(stale.reason, /24|过期|缓存/i);
+});
+
+test('stock-centric view preserves prior 13F rows as not-disclosed instead of dropping them', async () => {
+  const cik = '0001067983';
+  const now = new Date('2026-09-29T00:00:00.000Z');
+  const previous = {
+    cik, accession: '0001067983-26-000001', reportPeriod: '2026-03-31', filedAt: '2026-05-14', form: '13F-HR',
+    sourceUrl: 'https://www.sec.gov/Archives/edgar/data/1067983/000106798326000001/',
+    informationTableUrl: 'https://www.sec.gov/Archives/edgar/data/1067983/000106798326000001/infotable.xml',
+    fetchedAt: now.toISOString(), contentHash: 'sha256:older', reportedValueUnit: 'thousand-usd',
+    positions: [{ issuerName: 'APPLE INC', classTitle: 'COM', cusip: '037833100', shares: 100, reportedValue: 20, reportedValueUsd: 20_000, putCall: null, investmentDiscretion: 'SOLE' }],
+  };
+  const current = {
+    ...previous,
+    accession: '0001067983-26-000002', reportPeriod: '2026-06-30', filedAt: '2026-08-14',
+    sourceUrl: 'https://www.sec.gov/Archives/edgar/data/1067983/000106798326000002/',
+    informationTableUrl: 'https://www.sec.gov/Archives/edgar/data/1067983/000106798326000002/infotable.xml',
+    contentHash: 'sha256:newer', positions: [],
+  };
+  const service = createGuruHoldingsService({
+    repository: { listGuru13FReports: () => [current, previous] },
+    stateStore: { get: () => null, set() {}, acquireLease: () => true, releaseLease: () => true },
+    now: () => now,
+  });
+
+  const result = await service.getGuruStockHolders('AAPL', [cik]);
+
+  assert.equal(result.holders.length, 1);
+  assert.equal(result.holders[0].change, 'not-disclosed');
+  assert.equal(result.holders[0].shares, null);
+  assert.equal(result.holders[0].previousShares, 100);
+});
+
+test('manager refresh stores only injected SEC evidence, normalizes reported value, and releases its lease', async () => {
+  const cik = '0001067983';
+  const now = new Date('2026-09-29T00:00:00.000Z');
+  const reports = [];
+  const states = new Map();
+  let leaseReleased = 0;
+  const service = createGuruHoldingsService({
+    repository: {
+      listGuru13FReports: queryCik => reports.filter(report => report.cik === queryCik).sort((a, b) => b.reportPeriod.localeCompare(a.reportPeriod)),
+      saveGuru13FReport: report => reports.push(report),
+    },
+    stateStore: {
+      get: key => states.get(key) || null,
+      set: (key, value) => states.set(key, value),
+      acquireLease: () => true,
+      releaseLease: () => { leaseReleased += 1; return true; },
+    },
+    loadSubmissions: async queryCik => ({
+      cik: queryCik,
+      companyName: 'Berkshire Hathaway Inc.',
+      filings: [{
+        form: '13F-HR', accessionNumber: `${queryCik}-26-000001`, filingDate: '2026-08-14', reportPeriod: '2026-06-30',
+        primaryDocument: 'primary_doc.xml', sourceUrl: 'https://www.sec.gov/Archives/edgar/data/1067983/000106798326000001/',
+      }],
+    }),
+    loadDocuments: async () => ({
+      informationTableXml: '<informationTable><infoTable><nameOfIssuer>APPLE INC</nameOfIssuer><titleOfClass>COM</titleOfClass><cusip>037833100</cusip><value>125000</value><shrsOrPrnAmt><sshPrnamt>500</sshPrnamt></shrsOrPrnAmt></infoTable></informationTable>',
+      coverPageXml: '<coverPage><isAmendment>false</isAmendment></coverPage>',
+      informationTableUrl: 'https://www.sec.gov/Archives/edgar/data/1067983/000106798326000001/infotable.xml',
+      sourceUrl: 'https://www.sec.gov/Archives/edgar/data/1067983/000106798326000001/',
+    }),
+    now: () => now,
+  });
+
+  const result = await service.refreshGuruManager(cik, true);
+
+  assert.equal(result.dataStatus, 'cached');
+  assert.equal(result.latestReport.positions[0].reportedValueUsd, 125_000_000);
+  assert.equal(result.latestReport.reportedValueUnit, 'thousand-usd');
+  assert.equal(result.latestReport.managerName, 'Berkshire Hathaway Inc.');
+  assert.equal(leaseReleased, 1);
 });

@@ -138,19 +138,19 @@ test('SEC filer lookup normalizes CIK and keeps only 13F reports', () => {
 
 **文件：** 新建 `src/features/guru-holdings-registry.ts`；修改 `src/features/guru-holdings.ts`；扩展 `tests/guru-holdings.test.cjs`。
 
-- [ ] **步骤 1：先添加精选主体、映射和缓存状态测试**
+- [x] **步骤 1：先添加精选主体、映射和缓存状态测试**
 
 覆盖：精选主体的 CIK 必须是十位数字；只用已核验的 CUSIP/类别映射到股票代码；同名多类别不唯一时进入 `unmapped`；无前一期报告时返回基线缺失；缓存超过 24 小时显示 `delayed`/过期原因；来源成功但无 13F 记录返回 `empty`，HTTP/解析失败返回 `unavailable`。
 
-- [ ] **步骤 2：运行测试确认 registry/service 能力缺失**
+- [x] **步骤 2：运行测试确认 registry/service 能力缺失**
 
 运行：`npm run build`、`node --test tests/guru-holdings.test.cjs`。预期：新用例因尚无 registry/service 函数失败。
 
-- [ ] **步骤 3：实现有来源约束的 registry 和聚合服务**
+- [x] **步骤 3：实现有来源约束的 registry 和聚合服务**
 
 在 `guru-holdings-registry.ts` 维护少量经 SEC CIK 和最新申报实查的申报主体条目；人物别名仅在关系可核实后加入。名字搜索匹配该核验目录，输入 CIK 可查询其他合法主体。维护热门股票的 CUSIP + 类别精确映射，不按公司名猜 ticker。`guru-holdings.ts` 提供 `listGuruManagers(query)`、`getGuruManagerSnapshot(cik)`、`getGuruStockHolders(symbol, ciks?)`、`refreshGuruManager(cik)` 和 `refreshFeaturedGuruManagers()`；复用 SEC client、researchRepository 与现有 SQLite lease，按 CIK 合并并限频请求。权重使用整份有效申报所有可解析记录的市值和（包括未映射证券）；报告不完整或单位不明时返回 null。源成功无记录与源失败分别表达。
 
-- [ ] **步骤 4：测试各类空状态、映射和重试并提交**
+- [x] **步骤 4：测试各类空状态、映射和重试并提交**
 
 运行：`npm run build`、`node --test tests/guru-holdings.test.cjs`。预期：没有 SEC fixture 之外的外网依赖；提交 `feat: model guru holdings and source states`。
 
