@@ -2654,6 +2654,29 @@
             <div id="institutional-radar"></div>
           </div>
         </details>
+        <details class="dash-collapse" data-collapse-key="stocks-guru-holdings" data-market-scopes="stocks" data-workspace-id="guru-holdings">
+          <summary>
+            <span class="collapse-title">◈ 大神持仓</span>
+            <span class="collapse-hint">SEC Form 13F · 投资人持仓与热门股票持有人</span>
+            <span class="collapse-chevron">▾</span>
+          </summary>
+          <div class="collapse-body">
+            <div id="guru-holdings-tab" style="background:var(--bg-card);border:1px solid var(--border);border-radius:12px;padding:14px;">
+              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
+                <button type="button" class="tab active" data-guru-view="managers" onclick="setGuruHoldingsView('managers')">投资人持仓</button>
+                <button type="button" class="tab" data-guru-view="stocks" onclick="setGuruHoldingsView('stocks')">热门股票持有人</button>
+                <input id="guru-holdings-search" type="search" maxlength="80" placeholder="搜索机构、人物或 CIK" aria-label="搜索 13F 申报机构" style="flex:1;min-width:180px;" oninput="guruHoldingsSearchDebounce()">
+                <button type="button" class="btn btn-secondary" onclick="loadGuruHoldings(true)">刷新</button>
+              </div>
+              <div id="guru-holdings-stock-picker" hidden style="display:flex;gap:7px;flex-wrap:wrap;margin-bottom:10px;"></div>
+              <div id="guru-holdings-source-status" role="status" aria-live="polite" style="color:var(--text-secondary);font-size:11px;margin-bottom:10px;">正在读取 SEC 13F 申报状态...</div>
+              <div id="guru-holdings-content"><div class="empty-tip">正在读取公开申报目录...</div></div>
+              <div id="guru-holdings-disclaimer" style="margin-top:12px;padding:10px;border-radius:9px;background:var(--bg-secondary);font-size:10.5px;line-height:1.55;color:var(--text-secondary);">
+                13F 是季度机构披露，可能在报告期结束后最多 45 天提交，不是实时仓位；不代表完整组合且不披露空头。股数变化只比较相邻披露，不用股价变化推断。未披露不等于清仓。
+              </div>
+            </div>
+          </div>
+        </details>
         <details class="dash-collapse" data-collapse-key="stocks-analyst" data-market-scopes="stocks" data-workspace-id="analyst">
           <summary>
             <span class="collapse-title">🎯 分析师共识雷达</span>
@@ -6505,6 +6528,7 @@ function selectStockFromInstrumentLibrary(symbol, name, apiSymbol) {
     loadUnifiedStockData(normalized);
     loadStockKline('us' + normalized, displayName, apiSymbol);
   }
+  if (activeWorkspaceId === 'guru-holdings') loadGuruHoldings();
   updateStockLibraryCurrent(normalized, displayName);
 }
 function selectStockSymbol(symbol, name, apiSymbol, options = {}) {
@@ -7253,6 +7277,219 @@ function renderInstitutionalOwnership(data) {
         来源：Nasdaq 公共机构持仓；13F 数据天然滞后，置信度 ${data.confidence}/100。这是筹码背景，不是买卖指令。
       </small>
     </div>`;
+}
+let guruHoldingsView = 'managers';
+let guruHoldingsRequestToken = 0;
+let guruHoldingsSearchTimer = 0;
+let guruCurrentManagerCik = '';
+let guruCurrentStockSymbol = '';
+let guruLastManagerPayload = null;
+const GURU_STATUS_ZH = { cached: '已缓存的 SEC 披露', delayed: '缓存较旧', partial: '部分来源可用', empty: '来源成功，暂无匹配申报', unavailable: '来源不可用', failed: '请求失败', historical: '历史披露目录' };
+function setGuruHoldingsView(view) {
+  guruHoldingsView = view === 'stocks' ? 'stocks' : 'managers';
+  document.querySelectorAll('[data-guru-view]').forEach(button => button.classList.toggle('active', button.dataset.guruView === guruHoldingsView));
+  const search = document.getElementById('guru-holdings-search');
+  const picker = document.getElementById('guru-holdings-stock-picker');
+  if (search) {
+    search.placeholder = guruHoldingsView === 'managers' ? '搜索机构、人物或 CIK' : '输入股票代码查看持有人';
+    search.setAttribute('aria-label', guruHoldingsView === 'managers' ? '搜索 13F 申报机构' : '搜索持仓股票代码');
+  }
+  if (picker) picker.hidden = guruHoldingsView !== 'stocks';
+  loadGuruHoldings();
+}
+function guruHoldingsSearchDebounce() {
+  clearTimeout(guruHoldingsSearchTimer);
+  guruHoldingsSearchTimer = setTimeout(() => {
+    if (guruHoldingsView === 'stocks') {
+      const symbol = String(document.getElementById('guru-holdings-search')?.value || '').trim().toUpperCase();
+      if (/^[A-Z][A-Z0-9.-]{0,9}$/.test(symbol)) loadGuruStockHolders(symbol);
+      else if (!symbol) loadGuruHoldings();
+    } else {
+      guruCurrentManagerCik = '';
+      loadGuruHoldings();
+    }
+  }, 300);
+}
+function guruStatusText(status) { return GURU_STATUS_ZH[status] || '状态未知'; }
+function guruSecureSecUrl(value) {
+  try {
+    const url = new URL(String(value || ''));
+    return url.protocol === 'https:' && url.hostname === 'www.sec.gov' && url.pathname.startsWith('/Archives/edgar/data/') ? url.href : '';
+  } catch { return ''; }
+}
+function guruChangeLabel(change) {
+  return ({ 'newly-disclosed': '新披露', increased: '增持股数', reduced: '减持股数', unchanged: '股数不变', 'not-disclosed': '本期未披露（不代表清仓）', unavailable: '变化不可比较' })[change] || '状态未知';
+}
+function loadGuruHoldings(force = false) {
+  if (activeMarketScope !== 'stocks') return;
+  if (guruHoldingsView === 'stocks') {
+    loadGuruStockPicker();
+    const symbol = String(document.getElementById('guru-holdings-search')?.value || guruCurrentStockSymbol || window._stockSelectedSymbol || currentStockSymbol || '').trim().toUpperCase();
+    if (symbol && /^[A-Z][A-Z0-9.-]{0,9}$/.test(symbol)) return loadGuruStockHolders(symbol, force);
+  }
+  return loadGuruManagerDirectory(force);
+}
+async function loadGuruManagerDirectory(force = false) {
+  const host = document.getElementById('guru-holdings-content');
+  const status = document.getElementById('guru-holdings-source-status');
+  if (!host || activeMarketScope !== 'stocks') return;
+  const token = ++guruHoldingsRequestToken;
+  if (status) status.textContent = '正在查询 SEC EDGAR Form 13F 申报目录…';
+  if (force) guruCurrentManagerCik = '';
+  const query = String(document.getElementById('guru-holdings-search')?.value || '').trim();
+  try {
+    const response = await fetch('/api/stocks/guru-holdings/managers?query=' + encodeURIComponent(query), { credentials: 'include', cache: 'no-store' });
+    const payload = await response.json();
+    if (token !== guruHoldingsRequestToken) return;
+    if (!response.ok || !Array.isArray(payload?.data)) throw new Error(payload?.reason || payload?.error || '申报目录请求失败');
+    guruLastManagerPayload = payload;
+    if (status) status.textContent = `${guruStatusText(payload.dataStatus)} · ${payload.source || 'SEC EDGAR'}${payload.updatedAt ? ` · 更新 ${new Date(payload.updatedAt).toLocaleString('zh-CN')}` : ''}${payload.reason ? ` · ${payload.reason}` : ''}`;
+    if (guruCurrentManagerCik) return loadGuruManagerReport(guruCurrentManagerCik, token);
+    renderGuruHoldingsManagers(payload);
+  } catch (error) {
+    if (token !== guruHoldingsRequestToken) return;
+    if (status) status.textContent = 'SEC 申报来源不可用';
+    host.innerHTML = `<div class="empty-tip">${marketResearchEscape(error?.message || '请求失败')}。可以稍后重试，或在搜索框输入机构 CIK。</div>`;
+  }
+}
+function renderGuruHoldingsManagers(payload) {
+  const host = document.getElementById('guru-holdings-content');
+  if (!host) return;
+  const managers = Array.isArray(payload?.data) ? payload.data : [];
+  if (!managers.length) { host.innerHTML = '<div class="empty-tip">没有匹配的 13F 申报主体。可尝试机构名称、关联人物或 CIK。</div>'; return; }
+  host.innerHTML = `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(245px,1fr));gap:8px;">${managers.map((manager, index) => `<button type="button" data-guru-manager-index="${index}" onclick="openGuruManagerFromList(this.dataset.guruManagerIndex)" style="text-align:left;color:var(--text);background:var(--bg-secondary);border:1px solid var(--border);border-radius:10px;padding:11px;cursor:pointer;"><strong>${marketResearchEscape(manager.personAssociation || manager.filingName)}</strong><small style="display:block;margin-top:3px;color:var(--text-secondary);">${marketResearchEscape(manager.filingName)} · CIK ${marketResearchEscape(manager.cik)}</small><small style="display:block;margin-top:5px;color:var(--text-secondary);">${manager.reportPeriod ? `报告期 ${marketResearchEscape(manager.reportPeriod)} · 申报 ${marketResearchEscape(manager.filedAt || '日期未知')}` : marketResearchEscape(manager.reason || guruStatusText(manager.dataStatus))}</small><small style="display:block;margin-top:3px;color:var(--text-secondary);">${marketResearchEscape(guruStatusText(manager.dataStatus))}</small></button>`).join('')}</div>`;
+}
+function openGuruManagerFromList(index) {
+  const manager = guruLastManagerPayload?.data?.[Number(index)];
+  if (!manager?.cik) return;
+  guruCurrentManagerCik = String(manager.cik);
+  loadGuruManagerReport(guruCurrentManagerCik);
+}
+async function loadGuruManagerReport(cik, tokenOverride) {
+  const host = document.getElementById('guru-holdings-content');
+  const status = document.getElementById('guru-holdings-source-status');
+  if (!host || !/^\d{1,10}$/.test(String(cik))) return;
+  const token = tokenOverride ?? ++guruHoldingsRequestToken;
+  try {
+    const response = await fetch('/api/stocks/guru-holdings/managers/' + encodeURIComponent(cik), { credentials: 'include', cache: 'no-store' });
+    const payload = await response.json();
+    if (token !== guruHoldingsRequestToken) return;
+    if (!response.ok || !payload?.manager) throw new Error(payload?.reason || payload?.error || '申报详情不可用');
+    if (status) status.textContent = `${guruStatusText(payload.dataStatus)} · ${payload.source || 'SEC EDGAR'} · ${payload.updatedAt ? `抓取 ${new Date(payload.updatedAt).toLocaleString('zh-CN')}` : '暂无抓取时间'}${payload.reason ? ` · ${payload.reason}` : ''}`;
+    renderGuruHoldingsReport(payload);
+  } catch (error) {
+    if (token !== guruHoldingsRequestToken) return;
+    if (status) status.textContent = 'SEC 申报来源不可用';
+    host.innerHTML = `<div class="empty-tip">${marketResearchEscape(error?.message || '无法读取该申报主体的披露')}</div>`;
+  }
+}
+function renderGuruHoldingsReport(payload) {
+  const host = document.getElementById('guru-holdings-content');
+  if (!host) return;
+  const manager = payload.manager || {};
+  const report = payload.latestReport;
+  if (!report) {
+    host.innerHTML = `<div style="margin-bottom:9px;"><button type="button" class="btn btn-secondary" onclick="backToGuruManagerList()">← 返回申报主体</button></div><div class="empty-tip">${marketResearchEscape(payload.reason || '暂无可用的 13F 报告')}。来源成功但无记录与来源失败会分别标记。</div>`;
+    return;
+  }
+  const changes = Array.isArray(payload.changes) ? payload.changes : [];
+  const positions = Array.isArray(report.positions) ? report.positions : [];
+  const byIdentity = new Map(positions.map(position => [[position.cusip, position.classTitle, position.putCall || ''].join('|'), position]));
+  const rows = changes.map(change => {
+    const position = byIdentity.get([change.cusip, change.classTitle, change.putCall || ''].join('|'));
+    return { ...change, position };
+  }).sort((a, b) => Number(b.position?.reportedValueUsd || 0) - Number(a.position?.reportedValueUsd || 0));
+  const filingUrl = guruSecureSecUrl(report.informationTableUrl || report.sourceUrl);
+  const refreshButton = window.mm_isGuest ? '' : `<button type="button" class="btn btn-secondary" onclick="refreshGuruManager('${marketResearchEscape(manager.cik)}')">管理员刷新 SEC</button>`;
+  host.innerHTML = `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px;"><button type="button" class="btn btn-secondary" onclick="backToGuruManagerList()">← 返回申报主体</button><button type="button" class="btn btn-secondary" onclick="setGuruHoldingsView('stocks')">查看热门股票持有人 →</button>${refreshButton}</div><div style="border:1px solid var(--border);border-radius:10px;padding:12px;background:var(--bg-secondary);"><strong>${marketResearchEscape(manager.personAssociation || manager.filingName)}</strong><div style="font-size:11px;color:var(--text-secondary);margin-top:4px;">SEC 申报主体：${marketResearchEscape(manager.filerName || manager.filingName)} · CIK ${marketResearchEscape(manager.cik)}</div><div style="font-size:11px;color:var(--text-secondary);margin-top:4px;">报告期截至 ${marketResearchEscape(report.reportPeriod || '未知')} · 申报时间 ${marketResearchEscape(report.filedAt || '未知')}</div><div style="font-size:11px;margin-top:7px;">${filingUrl ? `<a href="${marketResearchEscape(filingUrl)}" target="_blank" rel="noopener noreferrer">查看 SEC 原文申报 ↗</a>` : '原文链接不可用'}</div></div><div style="overflow:auto;margin-top:10px;border:1px solid var(--border);border-radius:10px;"><table style="width:100%;min-width:680px;border-collapse:collapse;font-size:11px;"><thead><tr style="background:var(--bg-secondary);color:var(--text-secondary);"><th style="text-align:left;padding:8px;">申报证券</th><th style="text-align:left;padding:8px;">CUSIP</th><th style="text-align:right;padding:8px;">报告股数</th><th style="text-align:right;padding:8px;">相邻期变化</th><th style="text-align:right;padding:8px;">申报市值（USD）</th><th style="text-align:left;padding:8px;">状态</th></tr></thead><tbody>${rows.map(row => `<tr><td style="padding:8px;border-top:1px solid var(--border);">${marketResearchEscape(row.issuerName)} · ${marketResearchEscape(row.classTitle)}${row.putCall ? ` · ${marketResearchEscape(row.putCall)}` : ''}</td><td style="padding:8px;border-top:1px solid var(--border);">${marketResearchEscape(row.cusip)}</td><td style="padding:8px;border-top:1px solid var(--border);text-align:right;">${row.currentShares == null ? '—' : Number(row.currentShares).toLocaleString()}</td><td style="padding:8px;border-top:1px solid var(--border);text-align:right;">${row.shareDelta == null ? '—' : `${row.shareDelta > 0 ? '+' : ''}${Number(row.shareDelta).toLocaleString()}`}</td><td style="padding:8px;border-top:1px solid var(--border);text-align:right;">${row.position?.reportedValueUsd == null ? '—' : '$' + Number(row.position.reportedValueUsd).toLocaleString(undefined, { maximumFractionDigits: 0 })}</td><td style="padding:8px;border-top:1px solid var(--border);">${marketResearchEscape(guruChangeLabel(row.change))}</td></tr>`).join('') || '<tr><td colspan="6" style="padding:12px;">该报告没有可展示的持仓明细。</td></tr>'}</tbody></table></div><div style="font-size:10.5px;color:var(--text-secondary);line-height:1.5;margin-top:8px;">${(payload.caveats || []).map(note => marketResearchEscape(note)).join(' ')}</div>`;
+}
+function backToGuruManagerList() { guruCurrentManagerCik = ''; loadGuruManagerDirectory(); }
+async function refreshGuruManager(cik) {
+  if (window.mm_isGuest) return;
+  const status = document.getElementById('guru-holdings-source-status');
+  if (status) status.textContent = '正在向 SEC 请求最新可用申报…';
+  try {
+    const response = await fetch(`/api/stocks/guru-holdings/managers/${encodeURIComponent(cik)}/refresh`, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload?.reason || payload?.error || '刷新失败');
+    if (status) status.textContent = `${guruStatusText(payload.dataStatus)}${payload.reason ? ` · ${payload.reason}` : ''}`;
+    guruCurrentManagerCik = String(cik);
+    await loadGuruManagerReport(cik);
+  } catch (error) { if (status) status.textContent = `SEC 刷新失败：${marketResearchEscape(error?.message || '请求失败')}`; }
+}
+async function loadGuruStockPicker() {
+  const picker = document.getElementById('guru-holdings-stock-picker');
+  if (!picker || picker.dataset.loading === '1') return;
+  picker.dataset.loading = '1';
+  try {
+    const [breadthResponse, watchlistResponse] = await Promise.all([
+      fetch('/api/stock/market-breadth', { cache: 'no-store' }).then(response => response.ok ? response.json() : null).catch(() => null),
+      fetch('/api/workspace/watchlist?scope=stocks&group=watchlist', { credentials: 'include', cache: 'no-store' }).then(response => response.ok ? response.json() : null).catch(() => null),
+    ]);
+    const selected = new Map();
+    const breadth = breadthResponse?.data;
+    for (const row of [...(breadth?.gainers || []).slice(0, 8), ...(breadth?.losers || []).slice(0, 8)]) {
+      const symbol = String(row.symbol || '').trim().toUpperCase();
+      if (/^[A-Z][A-Z0-9.-]{0,9}$/.test(symbol)) selected.set(symbol, { symbol, name: row.name || symbol, changePct: Number(row.changePct) });
+    }
+    for (const group of watchlistResponse?.groups || []) for (const item of group.items || []) {
+      const id = String(item.instrumentId || item.id || '');
+      const match = id.match(/^stock:[^:]+:([A-Z][A-Z0-9.-]{0,9})$/i);
+      if (match) selected.set(match[1].toUpperCase(), { symbol: match[1].toUpperCase(), name: item.title || match[1].toUpperCase(), watchlist: true });
+    }
+    const items = [...selected.values()];
+    if (!items.length) {
+      picker.innerHTML = `<span style="color:var(--text-secondary);font-size:11px;">${breadthResponse ? '市场宽度来源未提供可用代码' : '市场宽度来源不可用'}；当前股票自选也没有标的。可在上方输入代码查询。</span>`;
+      return;
+    }
+    picker.innerHTML = items.map(item => `<button type="button" class="tab${item.symbol === guruCurrentStockSymbol ? ' active' : ''}" data-guru-stock="${marketResearchEscape(item.symbol)}" onclick="loadGuruStockHolders(this.dataset.guruStock)">${marketResearchEscape(item.symbol)}${item.watchlist ? ' · 自选' : Number.isFinite(item.changePct) ? ` · ${item.changePct > 0 ? '+' : ''}${item.changePct.toFixed(2)}%` : ''}</button>`).join('');
+  } finally { delete picker.dataset.loading; }
+}
+async function loadGuruStockHolders(symbol, force = false) {
+  const normalized = String(symbol || '').trim().toUpperCase();
+  const host = document.getElementById('guru-holdings-content');
+  const status = document.getElementById('guru-holdings-source-status');
+  if (!host || !/^[A-Z][A-Z0-9.-]{0,9}$/.test(normalized) || activeMarketScope !== 'stocks') return;
+  guruCurrentStockSymbol = normalized;
+  const input = document.getElementById('guru-holdings-search');
+  if (input && input.value !== normalized && force) input.value = normalized;
+  const token = ++guruHoldingsRequestToken;
+  if (status) status.textContent = `正在查询 ${normalized} 对应的 SEC 披露…`;
+  host.innerHTML = '<div class="empty-tip">正在汇总已核验 CUSIP 对应的 13F 披露…</div>';
+  try {
+    const response = await fetch('/api/stocks/guru-holdings/symbols/' + encodeURIComponent(normalized), { credentials: 'include', cache: 'no-store' });
+    const payload = await response.json();
+    if (token !== guruHoldingsRequestToken) return;
+    if (!response.ok || !payload || payload.market !== 'stocks') throw new Error(payload?.reason || payload?.error || '股票持有人请求失败');
+    if (status) status.textContent = `${guruStatusText(payload.dataStatus)} · ${payload.source || 'SEC EDGAR Form 13F'} · ${payload.updatedAt ? `抓取 ${new Date(payload.updatedAt).toLocaleString('zh-CN')}` : '暂无抓取时间'}${payload.reason ? ` · ${payload.reason}` : ''}`;
+    renderGuruStockHolders(payload);
+    document.querySelectorAll('[data-guru-stock]').forEach(button => button.classList.toggle('active', button.dataset.guruStock === normalized));
+  } catch (error) {
+    if (token !== guruHoldingsRequestToken) return;
+    if (status) status.textContent = 'SEC 持仓数据不可用';
+    host.innerHTML = `<div class="empty-tip">${marketResearchEscape(error?.message || '请求失败')}。没有可靠证券映射时不会按名称猜测。</div>`;
+  }
+}
+function renderGuruStockHolders(payload) {
+  const host = document.getElementById('guru-holdings-content');
+  if (!host) return;
+  const holders = Array.isArray(payload.holders) ? payload.holders : [];
+  const mapping = payload.mapping;
+  const rows = holders.map((row, index) => {
+    const href = guruSecureSecUrl(row.sourceUrl);
+    const manager = row.manager || {};
+    return `<tr><td style="padding:8px;border-top:1px solid var(--border);"><button type="button" class="link-button" data-guru-cik="${marketResearchEscape(manager.cik)}" onclick="openGuruManagerFromHolder(this.dataset.guruCik)">${marketResearchEscape(manager.personAssociation || manager.filingName || 'SEC 申报主体')}</button><small style="display:block;color:var(--text-secondary);">${marketResearchEscape(manager.filingName || '')}</small></td><td style="padding:8px;border-top:1px solid var(--border);">${marketResearchEscape(row.reportPeriod || '未知')}<small style="display:block;color:var(--text-secondary);">申报 ${marketResearchEscape(row.filedAt || '未知')}</small></td><td style="padding:8px;border-top:1px solid var(--border);text-align:right;">${row.shares == null ? '—' : Number(row.shares).toLocaleString()}</td><td style="padding:8px;border-top:1px solid var(--border);text-align:right;">${row.shareDelta == null ? '—' : `${row.shareDelta > 0 ? '+' : ''}${Number(row.shareDelta).toLocaleString()}`}<small style="display:block;color:var(--text-secondary);">${marketResearchEscape(guruChangeLabel(row.change))}</small></td><td style="padding:8px;border-top:1px solid var(--border);text-align:right;">${row.reportedValueUsd == null ? '—' : '$' + Number(row.reportedValueUsd).toLocaleString(undefined, { maximumFractionDigits: 0 })}${row.portfolioWeightPct == null ? '' : `<small style="display:block;color:var(--text-secondary);">13F披露权重 ${Number(row.portfolioWeightPct).toFixed(2)}%</small>`}</td><td style="padding:8px;border-top:1px solid var(--border);">${href ? `<a href="${marketResearchEscape(href)}" target="_blank" rel="noopener noreferrer">SEC 原文 ↗</a>` : '原文不可用'}</td></tr>`;
+  }).join('');
+  host.innerHTML = `<div style="margin-bottom:9px;display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;"><strong>${marketResearchEscape(payload.instrument || guruCurrentStockSymbol)} · SEC 13F 披露持有人</strong><button type="button" class="btn btn-secondary" onclick="setGuruHoldingsView('managers')">← 投资人视角</button></div>${mapping ? `<div style="font-size:11px;color:var(--text-secondary);margin-bottom:8px;">证券映射：${marketResearchEscape(mapping.issuerName)} · CUSIP ${marketResearchEscape(mapping.cusip)} · ${marketResearchEscape(mapping.classTitle)}</div>` : ''}${rows ? `<div style="overflow:auto;border:1px solid var(--border);border-radius:10px;"><table style="width:100%;min-width:690px;border-collapse:collapse;font-size:11px;"><thead><tr style="background:var(--bg-secondary);color:var(--text-secondary);"><th style="text-align:left;padding:8px;">申报主体</th><th style="text-align:left;padding:8px;">报告期 / 申报日</th><th style="text-align:right;padding:8px;">股数</th><th style="text-align:right;padding:8px;">股数变化</th><th style="text-align:right;padding:8px;">申报市值</th><th style="text-align:left;padding:8px;">原文</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<div class="empty-tip">${marketResearchEscape(payload.reason || (payload.dataStatus === 'empty' ? '来源成功，但所选报告未披露该证券；不代表清仓。' : '当前没有可用的 SEC 持仓快照。'))}</div>`}<div style="font-size:10.5px;color:var(--text-secondary);line-height:1.5;margin-top:8px;">${(payload.caveats || []).map(note => marketResearchEscape(note)).join(' ')}</div>`;
+}
+function openGuruManagerFromHolder(cik) {
+  if (!/^\d{1,10}$/.test(String(cik))) return;
+  guruHoldingsView = 'managers';
+  guruCurrentManagerCik = String(cik);
+  document.querySelectorAll('[data-guru-view]').forEach(button => button.classList.toggle('active', button.dataset.guruView === 'managers'));
+  const picker = document.getElementById('guru-holdings-stock-picker');
+  if (picker) picker.hidden = true;
+  loadGuruManagerReport(cik);
 }
 let currentAnalystSymbol = 'AAPL';
 let analystRequestToken = 0;
@@ -11337,6 +11574,7 @@ const STOCK_SECTION_LOADERS = {
   'stocks-market': [loadStockQuotes, loadGlobalMetrics, loadMacroCalendar, loadStockKline],
   'stocks-insider': [() => loadInsiderRadar()],
   'stocks-institutional': [() => loadInstitutionalOwnership()],
+  'stocks-guru-holdings': [() => loadGuruHoldings()],
   'stocks-analyst': [() => loadAnalystConsensus()],
   'stocks-fundamentals': [() => loadFundamentalQuality()],
   'stocks-breadth': [loadMarketBreadth],
@@ -11698,7 +11936,7 @@ const WORKSPACE_ITEM_CATALOG = {
   'stock-quotes': ['▥', '行情与选股'], 'crypto-quotes': ['₿', '行情与K线'], events: ['▤', '市场事件与新闻'],
   backtest: ['⌘', '策略回测'], screener: ['⌕', '筛选与比较'], watchlist: ['★', '我的自选'], positions: ['▣', '我的持仓'],
   risk: ['♡', '风险监控'], 'decision-intelligence': ['◇', '可信决策'], breadth: ['▥', '市场宽度'],
-  insider: ['♟', '内部人交易'], institutional: ['♜', '机构持仓'], analyst: ['◎', '分析师共识'],
+  insider: ['♟', '内部人交易'], institutional: ['♜', '机构持仓'], 'guru-holdings': ['◈', '大神持仓'], analyst: ['◎', '分析师共识'],
   fundamentals: ['▥', '基本面质量'], 'short-interest': ['♟', '空头利息'],
   'option-chain': ['◌', '期权链'], volatility: ['∿', '隐含波动率'], greeks: ['Δ', 'Greeks'],
   'funding-rate': ['⇄', '资金费率'], 'open-interest': ['◫', '未平仓量'], 'on-chain': ['⌁', '链上数据'], 'order-flow': ['ϟ', '主动资金流'],
@@ -11711,7 +11949,7 @@ const WORKSPACE_BASE_GROUPS = [
 ];
 const WORKSPACE_SPECIFIC_IDS = {
   overview: [], watchlist: [],
-  stocks: ['stock-quotes', 'events', 'breadth', 'insider', 'institutional', 'analyst', 'fundamentals', 'short-interest'],
+  stocks: ['stock-quotes', 'events', 'breadth', 'insider', 'institutional', 'guru-holdings', 'analyst', 'fundamentals', 'short-interest'],
   options: ['events', 'option-chain', 'volatility', 'greeks'],
   crypto: ['crypto-quotes', 'events', 'funding-rate', 'open-interest', 'on-chain', 'order-flow'],
   prediction: ['events', 'prediction-radar'],
@@ -12018,8 +12256,9 @@ function workspaceTabFor(id) {
   if (id === 'watchlist' || id === 'positions') return 'positions';
   if (id === 'risk') return 'risk';
   if (id === 'decision-intelligence') return 'research';
+  if (id === 'guru-holdings') return 'stocks';
   if (id === 'search') return null;
-  if (['breadth', 'insider', 'institutional', 'analyst', 'fundamentals', 'short-interest'].includes(id)) return 'stocks';
+  if (['breadth', 'insider', 'institutional', 'guru-holdings', 'analyst', 'fundamentals', 'short-interest'].includes(id)) return 'stocks';
   if (['option-chain', 'volatility', 'greeks'].includes(id)) return 'options';
   if (['funding-rate', 'open-interest', 'on-chain', 'order-flow'].includes(id)) return 'binance';
   return 'command';
@@ -12050,6 +12289,7 @@ function loadActiveWorkspaceInstrument() {
     if (activeWorkspaceId === 'breadth') return loadMarketBreadth(), true;
     if (activeWorkspaceId === 'insider') return loadInsiderRadar(symbol, name), true;
     if (activeWorkspaceId === 'institutional') return loadInstitutionalOwnership(symbol, name), true;
+    if (activeWorkspaceId === 'guru-holdings') return loadGuruStockHolders(symbol), true;
     if (activeWorkspaceId === 'analyst') return loadAnalystConsensus(symbol, name), true;
     if (activeWorkspaceId === 'fundamentals') return loadFundamentalQuality(symbol, name), true;
     if (activeWorkspaceId === 'short-interest') return loadShortInterest(symbol, name), true;
@@ -12094,6 +12334,7 @@ window.openWorkspace = function(id) {
   const targetTab = workspaceTabFor(id);
   if (targetTab) showTab(targetTab, null, { scopeAlreadySynced: true });
   if (id === 'decision-intelligence') loadDecisionIntelligence();
+  if (id === 'guru-holdings' && !currentInstrumentId) loadGuruHoldings();
   if (currentInstrumentId) loadActiveWorkspaceInstrument();
   closeWorkspaceDrawer();
   const section = document.querySelector(`[data-workspace-id="${id}"].dash-collapse`);
@@ -12141,7 +12382,7 @@ function scopeAllowsView(declared) {
   return scopes.includes('all') || scopes.includes('common') || scopes.includes(activeMarketScope);
 }
 const EXCLUSIVE_WORKSPACE_IDS = new Set([
-  'stock-quotes', 'crypto-quotes', 'events', 'breadth', 'insider', 'institutional', 'analyst', 'fundamentals', 'short-interest', 'screener',
+  'stock-quotes', 'crypto-quotes', 'events', 'breadth', 'insider', 'institutional', 'guru-holdings', 'analyst', 'fundamentals', 'short-interest', 'screener',
   'option-chain', 'volatility', 'greeks', 'funding-rate', 'open-interest', 'on-chain', 'order-flow',
   'prediction-radar', 'decision-intelligence',
 ]);

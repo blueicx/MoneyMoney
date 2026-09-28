@@ -76,6 +76,7 @@ test('事件时间线区分无事件和事件数据源不可用', () => {
 });
 
 test('具体工作区只显示当前正文模块，并在总览时恢复市场模块', () => {
+  assert.match(html, /data-workspace-id="guru-holdings"/);
   assert.match(html, /data-workspace-id="insider"/);
   assert.match(html, /data-workspace-id="institutional"/);
   assert.match(html, /data-workspace-id="order-flow"/);
@@ -86,6 +87,18 @@ test('具体工作区只显示当前正文模块，并在总览时恢复市场�
   assert.match(html, /node\?\.dataset\?\.workspaceId/);
   assert.match(html, /if \(!visible && node\.tagName === 'DETAILS'\) node\.open = false/);
   assert.match(html, /applyWorkspaceView\(\);/);
+});
+
+test('大神持仓提供投资人和热门股票双视角，并展示 SEC 时点与来源', () => {
+  assert.match(html, /id="guru-holdings-tab"/);
+  assert.match(html, /data-guru-view="managers"/);
+  assert.match(html, /data-guru-view="stocks"/);
+  assert.match(html, /function loadGuruHoldings\(/);
+  assert.match(html, /\/api\/stocks\/guru-holdings\/managers/);
+  assert.match(html, /\/api\/stocks\/guru-holdings\/symbols\//);
+  assert.match(html, /guru-holdings-source-status/);
+  assert.match(html, /报告期|申报时间|SEC EDGAR/);
+  assert.match(html, /not-disclosed/);
 });
 
 test('独立功能面板在选中后扁平展示并保持展开', () => {

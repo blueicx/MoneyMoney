@@ -16,6 +16,7 @@ export type WorkspaceId =
   | 'breadth'
   | 'insider'
   | 'institutional'
+  | 'guru-holdings'
   | 'analyst'
   | 'fundamentals'
   | 'short-interest'
@@ -62,6 +63,7 @@ const ITEMS: Record<WorkspaceId, WorkspaceItem> = {
   breadth: { id: 'breadth', label: '市场宽度', icon: '▥', scopes: ['stocks'] },
   insider: { id: 'insider', label: '内部人交易', icon: '♟', scopes: ['stocks'], requiresInstrument: true },
   institutional: { id: 'institutional', label: '机构持仓', icon: '♜', scopes: ['stocks'], requiresInstrument: true },
+  'guru-holdings': { id: 'guru-holdings', label: '大神持仓', icon: '◈', scopes: ['stocks'] },
   analyst: { id: 'analyst', label: '分析师共识', icon: '◎', scopes: ['stocks'], requiresInstrument: true },
   fundamentals: { id: 'fundamentals', label: '基本面质量', icon: '▥', scopes: ['stocks'], requiresInstrument: true },
   'short-interest': { id: 'short-interest', label: '空头利息', icon: '♟', scopes: ['stocks'], requiresInstrument: true },
@@ -83,7 +85,7 @@ const BASE_GROUPS: readonly { id: WorkspaceGroup['id']; label: string; items: re
 
 const SPECIFIC_ITEMS: Record<MarketScope, readonly WorkspaceId[]> = {
   overview: [],
-  stocks: ['stock-quotes', 'events', 'breadth', 'insider', 'institutional', 'analyst', 'fundamentals', 'short-interest'],
+  stocks: ['stock-quotes', 'events', 'breadth', 'insider', 'institutional', 'guru-holdings', 'analyst', 'fundamentals', 'short-interest'],
   options: ['events', 'option-chain', 'volatility', 'greeks'],
   crypto: ['crypto-quotes', 'events', 'funding-rate', 'open-interest', 'on-chain', 'order-flow'],
   prediction: ['events', 'prediction-radar'],

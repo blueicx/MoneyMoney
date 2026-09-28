@@ -178,23 +178,23 @@ Router 只接受股票 symbol 和十位 CIK；管理员刷新路由由 `server.t
 
 **文件：** 修改 `src/features/market-workspace.ts`、`src/web/public/index.html`、`tests/market-workspace-navigation.test.cjs`、`tests/market-workspace-flow.test.cjs`。
 
-- [ ] **步骤 1：先加导航和页面接线失败断言**
+- [x] **步骤 1：先加导航和页面接线失败断言**
 
 在导航测试断言：`stocks` 包含 `guru-holdings`，其余三个市场不包含并且 `isWorkspaceAllowed('crypto','guru-holdings') === false`。在 flow 测试断言：HTML 存在 `data-workspace-id="guru-holdings"`、两个视角 tab、`loadGuruHoldings`、三个 API 路径及来源状态容器。
 
-- [ ] **步骤 2：运行两个测试确认导航/HTML 尚未更新**
+- [x] **步骤 2：运行两个测试确认导航/HTML 尚未更新**
 
 运行：`npm run build`，然后 `node --test tests/market-workspace-navigation.test.cjs tests/market-workspace-flow.test.cjs`。预期：只新增断言失败。
 
-- [ ] **步骤 3：添加股票导航项和中心面板骨架**
+- [x] **步骤 3：添加股票导航项和中心面板骨架**
 
 在 `market-workspace.ts` 的 `WorkspaceId`、`ITEMS` 和股票 `SPECIFIC_ITEMS` 中新增 `guru-holdings`，标记 `scopes: ['stocks']` 且不要求当前选中标的。HTML 增加股票专属面板，包含“投资人持仓/热门股票持有人”切换、搜索框、报告状态、持仓表和原文来源区域；沿用现有扁平工作区容器样式。热门股列表使用现有 `/api/stock/market-breadth` 涨跌样本并合并股票自选；来源失败时保留自选/搜索入口并显示失败原因，不回退成硬编码热门股。
 
-- [ ] **步骤 4：接通投资人查询、热门股反查和选股跳转**
+- [x] **步骤 4：接通投资人查询、热门股反查和选股跳转**
 
 新增 `loadGuruHoldings()`、`renderGuruHoldingsManagers()`、`renderGuruHoldingsReport()`、`renderGuruStockHolders()`。按现有 `AbortController`/请求 epoch 处理过期响应；从右侧股票库选中股票时仅刷新热门股视角，选择持有人再回到其完整申报。页面把“报告期截至、申报时间、延迟披露”固定展示；`not-disclosed` 文案不写成清仓；权重明确为 13F 披露范围。只对标准化 USD 字段加货币符号，缺失值显示“—”。
 
-- [ ] **步骤 5：运行导航和 UI 合同测试并提交**
+- [x] **步骤 5：运行导航和 UI 合同测试并提交**
 
 运行：`npm run build`、`node --test tests/market-workspace-navigation.test.cjs tests/market-workspace-flow.test.cjs`。预期：股票菜单出现新项，其余市场无该入口，HTML API/双视角合同断言通过；提交 `feat: add linked guru holdings workspace`。
 
