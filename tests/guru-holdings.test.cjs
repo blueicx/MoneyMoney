@@ -165,6 +165,21 @@ test('guru registry uses canonical filer CIKs and exact CUSIP plus class mapping
   assert.equal(resolveGuruStockMapping('UNKNOWN', '037833100', 'COM'), null);
 });
 
+test('unmapped hot stocks report the missing SEC identity mapping instead of guessed holders', async () => {
+  const service = createGuruHoldingsService({
+    repository: { listGuru13FReports: () => [] },
+    stateStore: { get: () => null, set() {}, acquireLease: () => true, releaseLease: () => true },
+    now: () => new Date('2026-09-29T00:00:00.000Z'),
+  });
+
+  const result = await service.getGuruStockHolders('SNDK');
+
+  assert.equal(result.dataStatus, 'unavailable');
+  assert.equal(result.mapping, null);
+  assert.deepEqual(result.holders, []);
+  assert.match(result.reason, /CUSIP.*类别映射/);
+});
+
 test('guru snapshots distinguish source-empty, source-failed, and expired cache', async () => {
   const now = new Date('2026-09-29T00:00:00.000Z');
   const emptyState = new Map([['guru13f:manager:0001067983:status', {
@@ -279,4 +294,38 @@ test('manager refresh stores only injected SEC evidence, normalizes reported val
   assert.equal(result.latestReport.reportedValueUnit, 'thousand-usd');
   assert.equal(result.latestReport.managerName, 'Berkshire Hathaway Inc.');
   assert.equal(leaseReleased, 1);
+});
+
+test('featured SEC refresh continues serially after an individual filer failure', async () => {
+  const calls = [];
+  const states = new Map();
+  let activeRequests = 0;
+  let maxConcurrentRequests = 0;
+  const service = createGuruHoldingsService({
+    repository: { listGuru13FReports: () => [] },
+    stateStore: {
+      get: key => states.get(key) || null,
+      set: (key, value) => states.set(key, value),
+      acquireLease: () => true,
+      releaseLease: () => true,
+    },
+    loadSubmissions: async cik => {
+      activeRequests += 1;
+      maxConcurrentRequests = Math.max(maxConcurrentRequests, activeRequests);
+      calls.push(cik);
+      await Promise.resolve();
+      activeRequests -= 1;
+      if (cik === GURU_MANAGER_REGISTRY[0].cik) throw new Error('fixture SEC timeout');
+      return { cik, companyName: 'Fixture', filings: [] };
+    },
+    now: () => new Date('2026-09-29T00:00:00.000Z'),
+  });
+
+  const snapshots = await service.refreshGuruFeaturedManagers();
+
+  assert.deepEqual(calls, GURU_MANAGER_REGISTRY.map(manager => manager.cik));
+  assert.equal(snapshots.length, GURU_MANAGER_REGISTRY.length);
+  assert.equal(maxConcurrentRequests, 1);
+  assert.equal(snapshots[0].dataStatus, 'unavailable');
+  assert.equal(snapshots[1].dataStatus, 'empty');
 });

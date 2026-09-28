@@ -10,7 +10,7 @@ const base = `http://127.0.0.1:${port}`;
 const isolatedDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'moneymoney-browser-matrix-'));
 const child = spawn(process.execPath, [path.join(__dirname, '../dist/web/server.js')], {
   cwd: path.join(__dirname, '..'),
-  env: { ...process.env, MONEYMONEY_DATA_DIR: isolatedDataDir, APP_HOST: '127.0.0.1', APP_PORT: String(port), TELEGRAM_POLLING_ENABLED: 'false', AI_PAPER_TRADING_ENABLED: 'false', PRIVATE_KEY: '', API_KEY: '', MONEYMONEY_LOGIN_USER: 'matrix-owner', MONEYMONEY_LOGIN_PASS: 'local-matrix-test-only-92!', MONEYMONEY_JWT_SECRET: 'local-matrix-jwt-secret-0123456789abcdef' },
+  env: { ...process.env, MONEYMONEY_DATA_DIR: isolatedDataDir, APP_HOST: '127.0.0.1', APP_PORT: String(port), TELEGRAM_POLLING_ENABLED: 'false', AI_PAPER_TRADING_ENABLED: 'false', MONEYMONEY_DISABLE_GURU_REFRESH: 'true', PRIVATE_KEY: '', API_KEY: '', MONEYMONEY_LOGIN_USER: 'matrix-owner', MONEYMONEY_LOGIN_PASS: 'local-matrix-test-only-92!', MONEYMONEY_JWT_SECRET: 'local-matrix-jwt-secret-0123456789abcdef' },
   stdio: 'ignore',
 });
 
@@ -76,6 +76,25 @@ async function main() {
         data: bars,
       }) });
     });
+    await page.route('**/api/stocks/guru-holdings/**', async route => {
+      const url = new URL(route.request().url());
+      const parts = url.pathname.split('/').filter(Boolean);
+      const last = parts.at(-1);
+      const secUrl = 'https://www.sec.gov/Archives/edgar/data/1067983/000106798326000001/infotable.xml';
+      let payload;
+      if (last === 'managers') {
+        payload = { market: 'stocks', dataStatus: 'historical', source: 'SEC EDGAR CIK fixture', updatedAt: '2026-09-29T01:00:00.000Z', reason: null, evidenceRefs: [], data: [{ cik: '0001067983', filingName: 'Berkshire Hathaway Inc.', personAssociation: 'Warren Buffett', dataStatus: 'cached', reportPeriod: '2026-06-30', filedAt: '2026-08-14' }] };
+      } else if (last === '0001067983') {
+        payload = { market: 'stocks', instrument: null, dataStatus: 'cached', source: 'SEC EDGAR Form 13F', updatedAt: '2026-09-29T01:00:00.000Z', reason: null, evidenceRefs: [secUrl], manager: { cik: '0001067983', filingName: 'Berkshire Hathaway Inc.', personAssociation: 'Warren Buffett', attributionNote: '公开关联人物；SEC 申报主体仍为公司' }, latestReport: { reportPeriod: '2026-06-30', filedAt: '2026-08-14', informationTableUrl: secUrl, positions: [{ issuerName: 'APPLE INC', classTitle: 'COM', cusip: '037833100', putCall: null, shares: 150, reportedValueUsd: 125000 }] }, previousReport: null, changes: [{ issuerName: 'APPLE INC', classTitle: 'COM', cusip: '037833100', putCall: null, currentShares: 150, previousShares: null, shareDelta: null, change: 'newly-disclosed' }], caveats: ['季度披露，非实时持仓。'] };
+      } else if (last === 'SNDK') {
+        payload = { market: 'stocks', instrument: 'SNDK', dataStatus: 'unavailable', source: 'SEC CUSIP/class registry', updatedAt: null, reason: '该股票尚无已核验的 SEC CUSIP 与证券类别映射，不能按公司名称猜测持仓。', evidenceRefs: [], mapping: null, holders: [], caveats: ['13F 报告期持仓，不是实时持仓。'] };
+      } else {
+        payload = { market: 'stocks', instrument: 'AAPL', dataStatus: 'cached', source: 'SEC EDGAR Form 13F fixture', updatedAt: '2026-09-29T01:00:00.000Z', reason: null, evidenceRefs: [secUrl], mapping: { cusip: '037833100', classTitle: 'COM', issuerName: 'Apple Inc.' }, holders: [{ manager: { cik: '0001067983', filingName: 'Berkshire Hathaway Inc.', personAssociation: 'Warren Buffett' }, reportPeriod: '2026-06-30', filedAt: '2026-08-14', sourceUrl: secUrl, shares: 150, reportedValueUsd: 125000, portfolioWeightPct: 1.25, previousShares: 100, shareDelta: 50, change: 'increased' }], caveats: ['13F 报告期持仓，不是实时持仓。'] };
+      }
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(payload) });
+    });
+    await page.route('**/api/stock/market-breadth', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data: { generatedAt: '2026-09-29T01:00:00.000Z', gainers: [{ symbol: 'SNDK', name: 'Fixture Semiconductor', changePct: 4.2 }], losers: [{ symbol: 'TEST', name: 'Fixture Test Inc.', changePct: -2.1 }] } }) }));
+    await page.route('**/api/workspace/watchlist**', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, groups: [{ id: 'watchlist', label: '我的自选', items: [{ instrumentId: 'stock:us:FIX', title: 'Fixture Watchlist' }] }] }) }));
     await page.route('**/api/backtest/preflight**', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
       success: preflightReady, market: 'stocks', instrument: 'AAPL', timeframe: '1d', dataStatus: preflightReady ? 'ready' : 'insufficient',
       source: 'Browser acceptance fixture', sourceStatus: 'live', updatedAt: '2026-09-27T08:00:00.000Z', availableBars: preflightReady ? 40 : 6,
@@ -290,6 +309,30 @@ async function main() {
     const eventStudyText = await page.locator('#event-study-result').textContent();
     assert.match(eventStudyText, /同类历史事件/);
     assert.match(eventStudyText, /95% Bootstrap 区间/);
+    await page.evaluate(() => selectStockFromInstrumentLibrary('SNDK', 'Fixture Semiconductor', 'SNDK'));
+    await page.locator('#workspace-sidebar-content [data-workspace-id="guru-holdings"]').click();
+    await page.locator('#guru-holdings-tab').waitFor({ state: 'visible' });
+    await page.waitForFunction(() => document.querySelector('#guru-holdings-content')?.textContent?.includes('SEC'), null, { timeout: 10_000 });
+    assert.equal(await page.evaluate(() => guruHoldingsView), 'stocks', 'selecting a stock in the right library should open the stock-holder view');
+    await page.locator('[data-guru-view="managers"]').click();
+    await page.waitForFunction(() => document.querySelector('#guru-holdings-content')?.textContent?.includes('Warren Buffett'), null, { timeout: 10_000 });
+    await page.locator('[data-guru-manager-index="0"]').click();
+    await page.waitForFunction(() => document.querySelector('#guru-holdings-content')?.textContent?.includes('报告期截至'), null, { timeout: 10_000 });
+    assert.match(await page.locator('#guru-holdings-content').innerText(), /2026-06-30/);
+    assert.match(await page.locator('#guru-holdings-content').innerText(), /查看 SEC 原文申报/);
+    assert.match(await page.locator('#guru-holdings-content a').getAttribute('href'), /^https:\/\/www\.sec\.gov\/Archives\/edgar\/data\//);
+    await page.locator('[data-guru-view="stocks"]').click();
+    await page.locator('[data-guru-stock="SNDK"]').click();
+    await page.waitForFunction(() => document.querySelector('#guru-holdings-content')?.textContent?.includes('不能按公司名称猜测持仓'), null, { timeout: 10_000 });
+    await page.locator('#guru-holdings-search').fill('AAPL');
+    await page.waitForFunction(() => document.querySelector('#guru-holdings-content tbody tr')?.textContent?.includes('Warren Buffett'), null, { timeout: 10_000 });
+    assert.match(await page.locator('#guru-holdings-content').innerText(), /股数变化/);
+    await page.locator('#guru-holdings-content [data-guru-cik="0001067983"]').click();
+    await page.waitForFunction(() => document.querySelector('#guru-holdings-content')?.textContent?.includes('申报证券'), null, { timeout: 10_000 });
+    await page.evaluate(() => setMarketScope('options'));
+    assert.equal(await page.locator('#workspace-sidebar-content [data-workspace-id="guru-holdings"]').count(), 0, 'guru holdings must not appear in options navigation');
+    assert.equal(await page.locator('#guru-holdings-tab').isVisible(), false, 'guru holdings panel must be hidden outside stocks');
+    await page.evaluate(() => setMarketScope('stocks'));
     await page.evaluate(() => showTab('backtest'));
     await page.locator('#bt-market-id').fill('AAPL');
     await page.evaluate(() => runBacktest());
@@ -329,7 +372,7 @@ async function main() {
     await page.setViewportSize({ width: 390, height: 844 });
     assert.equal(await page.locator('#center-workspace').isVisible(), true);
     assert.deepEqual(pageErrors, []);
-    console.log('Browser market matrix passed: four scopes, options quote-quality cells, chart freshness/date drilldown/coverage, synchronized companion and same-market SPY comparison, data-preflight-blocked backtest/candidate freshness/manual rerun, alert retry/ACK/feedback, SLO, prediction evidence, collapse/restore, mobile center, no page errors');
+    console.log('Browser market matrix passed: four scopes, SEC 13F manager/stock views and source links, strict guru market isolation, options quote-quality cells, chart freshness/date drilldown/coverage, synchronized companion and same-market SPY comparison, data-preflight-blocked backtest/candidate freshness/manual rerun, alert retry/ACK/feedback, SLO, prediction evidence, collapse/restore, mobile center, no page errors');
   } finally {
     if (browser) await browser.close();
     child.kill('SIGINT');

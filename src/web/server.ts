@@ -64,6 +64,7 @@ import { getMarketBreadthSnapshot } from '../features/market-breadth';
 import { getInstitutionalOwnershipSnapshot } from '../features/institutional-ownership';
 import { createGuruHoldingsRouter } from '../features/guru-holdings-router';
 import * as guruHoldings from '../features/guru-holdings';
+import { startGuruHoldingsRefreshMonitor, stopGuruHoldingsRefreshMonitor } from '../features/guru-holdings-refresh-monitor';
 import { getFearGreed, getFundingRates } from '../features/market-sentiment';
 import { getGlobalMacroSpotSnapshot } from '../features/global-macro-spot';
 import { getCrossAssetCorrelationRadar } from '../features/cross-asset-correlation';
@@ -8036,6 +8037,7 @@ async function main() {
     riskPatrol.start();
     startCoverageCanaryMonitor();
     startPaperDriftMonitor();
+    if (process.env.MONEYMONEY_DISABLE_GURU_REFRESH !== 'true') startGuruHoldingsRefreshMonitor();
     // Pre-fetch radar data so the first click on the tab is already warm.
     void warmPredictionRadarCache();
     startTelegramInteractionBot();
@@ -8070,6 +8072,7 @@ async function main() {
     stopTelegramCommandCenterMonitor();
     stopCoverageCanaryMonitor();
     stopPaperDriftMonitor();
+    if (process.env.MONEYMONEY_DISABLE_GURU_REFRESH !== 'true') await stopGuruHoldingsRefreshMonitor();
     reportScheduler.stop();
     const current = telegramInteractionBot;
     telegramInteractionBot = null;

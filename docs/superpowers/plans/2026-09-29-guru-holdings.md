@@ -202,27 +202,27 @@ Router 只接受股票 symbol 和十位 CIK；管理员刷新路由由 `server.t
 
 **文件：** 修改 `src/features/guru-holdings.ts`、`src/web/server.ts`；扩展 `tests/guru-holdings.test.cjs`、`tests/guru-holdings-api.test.cjs`。
 
-- [ ] **步骤 1：先添加每日刷新租约和停止行为测试**
+- [x] **步骤 1：先添加每日刷新租约和停止行为测试**
 
 使用注入的时钟/刷新函数测试：同一自然日不重复刷新精选 CIK；已有 SQLite lease 时第二实例不发请求；刷新结束释放 lease；服务停止清理 timer；管理员手动刷新可跳过 24 小时缓存但仍受 CIK 合并与 SEC 超时约束。测试调用真实 monitor 工厂但替换 SEC fetch 和 lease 方法，不启动真实定时等待。
 
-- [ ] **步骤 2：运行刷新测试确认缺少 monitor 导出**
+- [x] **步骤 2：运行刷新测试确认缺少 monitor 导出**
 
 运行：`npm run build`，然后 `node --test tests/guru-holdings.test.cjs`。预期：monitor 用例因 `startGuruHoldingsRefreshMonitor`/`stopGuruHoldingsRefreshMonitor` 尚不存在而失败。
 
-- [ ] **步骤 3：实现可启停的低频刷新监控**
+- [x] **步骤 3：实现可启停的低频刷新监控**
 
 实现 `startGuruHoldingsRefreshMonitor()`、`stopGuruHoldingsRefreshMonitor()`，在现有服务 listen callback 启动、SIGINT/SIGTERM shutdown 中停止。每日批次串行处理精选主体，持久化最近检查时间和错误；一个主体失败不阻断其他主体。请求不记录或输出任何 SEC 密钥，公开数据仅保存到现有 research DB。
 
-- [ ] **步骤 4：运行 monitor 测试并提交**
+- [x] **步骤 4：运行 monitor 测试并提交**
 
 运行：`npm run build`、`node --test tests/guru-holdings.test.cjs`。预期：日租约、单实例、启动停止及失败隔离通过；提交 `feat: schedule low-frequency sec filing refresh`。
 
-- [ ] **步骤 5：执行完整自动化门槛**
+- [x] **步骤 5：执行完整自动化门槛**
 
 依次运行 `npm test`、`npm run build`、`npm run smoke:web`、`npm run smoke:browser`、`npm run security:scan`、`git diff --check`。预期：全部退出码 0；数据库测试只在系统临时目录创建并自行清理。
 
-- [ ] **步骤 6：完成真实浏览器矩阵**
+- [x] **步骤 6：完成真实浏览器矩阵**
 
 验证股票菜单入口、访客只读访问、精选主体/CIK 查询、AAPL 与一个非热门搜索股票的反查、主体与股票双向跳转、报告时间/来源链接、空状态、修订/缓存状态、移动布局；切换期权、虚拟币和预测市场后确认入口消失。确认没有把 Nasdaq 数据与 SEC 行合并，也没有模拟/真实订单入口。
 

@@ -12289,7 +12289,7 @@ function loadActiveWorkspaceInstrument() {
     if (activeWorkspaceId === 'breadth') return loadMarketBreadth(), true;
     if (activeWorkspaceId === 'insider') return loadInsiderRadar(symbol, name), true;
     if (activeWorkspaceId === 'institutional') return loadInstitutionalOwnership(symbol, name), true;
-    if (activeWorkspaceId === 'guru-holdings') return loadGuruStockHolders(symbol), true;
+    if (activeWorkspaceId === 'guru-holdings') return setGuruHoldingsView('stocks'), true;
     if (activeWorkspaceId === 'analyst') return loadAnalystConsensus(symbol, name), true;
     if (activeWorkspaceId === 'fundamentals') return loadFundamentalQuality(symbol, name), true;
     if (activeWorkspaceId === 'short-interest') return loadShortInterest(symbol, name), true;
