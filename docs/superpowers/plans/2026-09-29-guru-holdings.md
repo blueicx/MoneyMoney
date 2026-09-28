@@ -158,19 +158,19 @@ test('SEC filer lookup normalizes CIK and keeps only 13F reports', () => {
 
 **文件：** 新建 `src/features/guru-holdings-router.ts`；修改 `src/web/server.ts`；新建 `tests/guru-holdings-api.test.cjs`；修改 `tests/stock-api.test.cjs`。
 
-- [ ] **步骤 1：先写 API 失败测试**
+- [x] **步骤 1：先写 API 失败测试**
 
 用 Express 临时 app 挂载 `createGuruHoldingsRouter(service, adminOnly)` 和 stub service，验证：`GET /api/stocks/guru-holdings/managers?query=` 返回精选主体；`GET /api/stocks/guru-holdings/managers/:cik` 返回报告时点；`GET /api/stocks/guru-holdings/symbols/:symbol?ciks=...` 返回所选申报主体的匹配持有人，未传 CIK 时仅查精选主体；非法 CIK、非法股票代码返回 400；`POST /api/stocks/guru-holdings/managers/:cik/refresh` 在访客态拒绝、管理员态调用一次刷新。所有 payload 都必须为 `market: "stocks"` 且包含 `dataStatus/source/updatedAt/reason/evidenceRefs`。
 
-- [ ] **步骤 2：运行 API 测试确认路由未挂载**
+- [x] **步骤 2：运行 API 测试确认路由未挂载**
 
 运行：`npm run build`，然后 `node --test tests/guru-holdings-api.test.cjs tests/stock-api.test.cjs`。预期：新路由测试失败，既有股票 API 测试仍通过。
 
-- [ ] **步骤 3：实现路由校验、adminOnly 注入和统一状态封装**
+- [x] **步骤 3：实现路由校验、adminOnly 注入和统一状态封装**
 
 Router 只接受股票 symbol 和十位 CIK；管理员刷新路由由 `server.ts` 注入/调用既有 `adminOnly(req,res)`，访客不能触发强制 SEC 请求。只读查询对访客可用。将三条 GET 路由挂载到现有 Express app；响应沿用项目 API envelope，不把 `empty` 转换为来源失败。
 
-- [ ] **步骤 4：验证接口隔离与权限并提交**
+- [x] **步骤 4：验证接口隔离与权限并提交**
 
 运行：`npm run build`、`node --test tests/guru-holdings-api.test.cjs tests/stock-api.test.cjs`。预期：股票 API 可读，options/crypto/prediction 标识、错误 CIK 和访客刷新均拒绝；提交 `feat: expose scoped guru holdings endpoints`。
 

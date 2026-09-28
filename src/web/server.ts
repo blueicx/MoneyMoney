@@ -62,6 +62,8 @@ import { getFundamentalQuality } from '../features/fundamental-quality';
 import { getShortInterestSnapshot } from '../features/short-interest';
 import { getMarketBreadthSnapshot } from '../features/market-breadth';
 import { getInstitutionalOwnershipSnapshot } from '../features/institutional-ownership';
+import { createGuruHoldingsRouter } from '../features/guru-holdings-router';
+import * as guruHoldings from '../features/guru-holdings';
 import { getFearGreed, getFundingRates } from '../features/market-sentiment';
 import { getGlobalMacroSpotSnapshot } from '../features/global-macro-spot';
 import { getCrossAssetCorrelationRadar } from '../features/cross-asset-correlation';
@@ -2421,6 +2423,8 @@ app.get('/api/stock/kline', async (req, res) => {
     });
   }
 });
+
+app.use('/api/stocks/guru-holdings', createGuruHoldingsRouter(guruHoldings, adminOnly));
 
 app.get('/api/diagnostics', async (req, res) => {
   if (!adminOnly(req, res)) return;
