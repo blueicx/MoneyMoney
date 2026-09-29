@@ -5,12 +5,14 @@ const DAILY_LEASE_KEY = 'guru13f:daily-refresh:lease';
 const LAST_RUN_KEY = 'guru13f:daily-refresh:last-run';
 const DAILY_LEASE_MS = 20 * 60_000;
 const POLL_INTERVAL_MS = 15 * 60_000;
+const MAX_DAILY_ATTEMPTS = 3;
 
 interface GuruRefreshRun {
   localDate: string;
   startedAt: string;
   completedAt: string;
   status: 'running' | 'succeeded' | 'partial' | 'failed';
+  attempt: number;
   managersChecked: number;
   failedManagers: Array<{ cik: string; reason: string }>;
   reason: string | null;
@@ -52,17 +54,28 @@ export function createGuruHoldingsRefreshMonitor(options: GuruHoldingsRefreshMon
     const currentTime = now();
     const localDate = shanghaiDate(currentTime);
     const previous = store.get<GuruRefreshRun>(LAST_RUN_KEY);
-    if (previous?.localDate === localDate && previous.status !== 'running') {
-      return { ran: false, reason: '今日已完成检查' };
-    }
     const nowMs = currentTime.getTime();
+    const sameDayPrevious = previous?.localDate === localDate ? previous : null;
+    const priorAttempt = sameDayPrevious
+      ? Number.isInteger(sameDayPrevious.attempt) && sameDayPrevious.attempt > 0 ? sameDayPrevious.attempt : 1
+      : 0;
+    if (sameDayPrevious?.status === 'succeeded') return { ran: false, reason: '今日已完成检查' };
+    if (sameDayPrevious && sameDayPrevious.status !== 'running') {
+      if (priorAttempt >= MAX_DAILY_ATTEMPTS) return { ran: false, reason: '每日重试次数已达上限 (attempt limit)' };
+      const completedAt = Date.parse(sameDayPrevious.completedAt);
+      const retryDelayMs = POLL_INTERVAL_MS * (2 ** Math.max(0, priorAttempt - 1));
+      if (Number.isFinite(completedAt) && nowMs < completedAt + retryDelayMs) {
+        return { ran: false, reason: 'SEC 刷新失败，仍在退避等待期' };
+      }
+    }
+    const attempt = priorAttempt + 1;
     if (!store.acquireLease(DAILY_LEASE_KEY, owner, nowMs, DAILY_LEASE_MS)) {
       return { ran: false, reason: '另一个服务实例持有每日刷新租约' };
     }
 
     const startedAt = now().toISOString();
     store.set(LAST_RUN_KEY, {
-      localDate, startedAt, completedAt: '', status: 'running', managersChecked: 0,
+      localDate, startedAt, completedAt: '', status: 'running', attempt, managersChecked: 0,
       failedManagers: [], reason: '刷新正在执行；若进程意外退出，租约过期后可重试。',
     } satisfies GuruRefreshRun);
 
@@ -77,6 +90,7 @@ export function createGuruHoldingsRefreshMonitor(options: GuruHoldingsRefreshMon
           localDate,
           startedAt,
           completedAt: now().toISOString(),
+          attempt,
           status: failedManagers.length === 0 ? 'succeeded' : failedManagers.length === snapshots.length ? 'failed' : 'partial',
           managersChecked: snapshots.length,
           failedManagers,
@@ -89,6 +103,7 @@ export function createGuruHoldingsRefreshMonitor(options: GuruHoldingsRefreshMon
           localDate,
           startedAt,
           completedAt: now().toISOString(),
+          attempt,
           status: 'failed',
           managersChecked: 0,
           failedManagers: [],

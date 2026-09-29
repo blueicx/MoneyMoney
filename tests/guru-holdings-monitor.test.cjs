@@ -44,6 +44,57 @@ test('daily refresh is once per Shanghai day and persists the result', async () 
   assert.equal(store.leases.size, 0);
 });
 
+test('same-day SEC failures retry with bounded exponential backoff', async () => {
+  const store = createStore();
+  store.set('guru13f:daily-refresh:last-run', {
+    localDate: '2026-09-29', startedAt: '2026-09-29T01:40:00.000Z', completedAt: '2026-09-29T01:45:00.000Z',
+    status: 'partial', managersChecked: 10, failedManagers: [{ cik: '0001067983', reason: 'SEC unavailable' }],
+  });
+  let currentTime = new Date('2026-09-29T02:00:00.000Z');
+  let refreshes = 0;
+  const monitor = createGuruHoldingsRefreshMonitor({
+    store,
+    owner: 'retry-test',
+    now: () => currentTime,
+    refreshFeaturedManagers: async () => { refreshes += 1; return [{ dataStatus: 'unavailable', reason: 'SEC still unavailable' }]; },
+  });
+
+  const secondAttempt = await monitor.runIfDue();
+  assert.equal(secondAttempt.ran, true);
+  assert.equal(store.values.get('guru13f:daily-refresh:last-run').attempt, 2);
+  assert.equal((await monitor.runIfDue()).ran, false, 'must not retry immediately');
+
+  currentTime = new Date('2026-09-29T02:29:59.999Z');
+  assert.equal((await monitor.runIfDue()).ran, false, 'second retry delay is 30 minutes');
+  currentTime = new Date('2026-09-29T02:30:00.000Z');
+  const thirdAttempt = await monitor.runIfDue();
+  assert.equal(thirdAttempt.ran, true);
+  assert.equal(store.values.get('guru13f:daily-refresh:last-run').attempt, 3);
+
+  currentTime = new Date('2026-09-29T04:00:00.000Z');
+  const exhausted = await monitor.runIfDue();
+  assert.equal(exhausted.ran, false);
+  assert.match(exhausted.reason, /每日重试次数已达上限/);
+  assert.equal(refreshes, 2);
+});
+
+test('a successful refresh remains once per Shanghai day', async () => {
+  const store = createStore();
+  store.set('guru13f:daily-refresh:last-run', {
+    localDate: '2026-09-29', startedAt: '2026-09-29T01:40:00.000Z', completedAt: '2026-09-29T01:45:00.000Z',
+    status: 'succeeded', attempt: 1, managersChecked: 10, failedManagers: [],
+  });
+  let refreshes = 0;
+  const monitor = createGuruHoldingsRefreshMonitor({
+    store,
+    now: () => new Date('2026-09-29T08:00:00.000Z'),
+    refreshFeaturedManagers: async () => { refreshes += 1; return []; },
+  });
+  const result = await monitor.runIfDue();
+  assert.equal(result.ran, false);
+  assert.equal(refreshes, 0);
+});
+
 test('a competing process with the daily lease does not start SEC refresh', async () => {
   const store = createStore();
   store.acquireLease('guru13f:daily-refresh:lease', 'other-process', Date.parse('2026-09-29T02:00:00Z'), 600_000);
