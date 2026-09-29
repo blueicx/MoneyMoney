@@ -84,7 +84,7 @@ export function createGuruHoldingsRefreshMonitor(options: GuruHoldingsRefreshMon
         // Daily checks must bypass the per-filer freshness cache so a previous
         // unavailable/partial SEC fetch can recover without an admin login.
         const snapshots = await refresh(true);
-        const failedManagers = snapshots.filter(item => item.dataStatus === 'unavailable')
+        const failedManagers = snapshots.filter(item => item.dataStatus === 'unavailable' || item.dataStatus === 'partial')
           .map(item => ({ cik: item.manager.cik, reason: item.reason || 'SEC 来源不可用' }));
         const result: GuruRefreshRun = {
           localDate,

@@ -56,12 +56,19 @@ test('same-day SEC failures retry with bounded exponential backoff', async () =>
     store,
     owner: 'retry-test',
     now: () => currentTime,
-    refreshFeaturedManagers: async () => { refreshes += 1; return [{ dataStatus: 'unavailable', reason: 'SEC still unavailable' }]; },
+    refreshFeaturedManagers: async () => {
+      refreshes += 1;
+      return [{ dataStatus: 'partial', manager: { cik: '0001067983' }, reason: 'new SEC filing could not be saved' }];
+    },
   });
 
   const secondAttempt = await monitor.runIfDue();
   assert.equal(secondAttempt.ran, true);
   assert.equal(store.values.get('guru13f:daily-refresh:last-run').attempt, 2);
+  assert.equal(store.values.get('guru13f:daily-refresh:last-run').status, 'failed');
+  assert.deepEqual(store.values.get('guru13f:daily-refresh:last-run').failedManagers, [
+    { cik: '0001067983', reason: 'new SEC filing could not be saved' },
+  ]);
   assert.equal((await monitor.runIfDue()).ran, false, 'must not retry immediately');
 
   currentTime = new Date('2026-09-29T02:29:59.999Z');
