@@ -116,6 +116,49 @@ export interface GuruStockHoldersSnapshot {
   caveats: string[];
 }
 
+export interface GuruConsensusManagerRow {
+  cik: string;
+  filingName: string;
+  personAssociation?: string;
+  reportPeriod: string;
+  filedAt: string;
+  sourceUrl: string;
+  shares: number | null;
+  previousShares: number | null;
+  shareDelta: number | null;
+  change: GuruHoldingChangeKind;
+}
+
+export interface GuruConsensusRow {
+  cusip: string;
+  classTitle: string;
+  putCall: string | null;
+  issuerName: string;
+  symbol: string | null;
+  disclosedManagerCount: number;
+  managers: GuruConsensusManagerRow[];
+}
+
+export interface GuruConsensusSnapshot {
+  market: 'stocks';
+  instrument: string | null;
+  reportPeriod: string | null;
+  availableReportPeriods: string[];
+  trackedManagerCount: number;
+  reportManagerCount: number;
+  missingManagerCount: number;
+  unavailableManagerCount: number;
+  partialManagerCount: number;
+  staleManagerCount: number;
+  incomparableManagerCount: number;
+  dataStatus: GuruHoldingsDataStatus;
+  source: string;
+  updatedAt: string | null;
+  reason: string | null;
+  evidenceRefs: string[];
+  rows: GuruConsensusRow[];
+}
+
 interface GuruRefreshState {
   checkedAt: string;
   dataStatus: 'cached' | 'partial' | 'empty' | 'unavailable';
@@ -344,6 +387,53 @@ export function compare13FReports(previous: Guru13FReport | null, current: Guru1
   });
 }
 
+export function aggregateGuruConsensus(
+  reports: Array<{ manager: GuruManagerDefinition; report: Guru13FReport; previous: Guru13FReport | null }>,
+  reportPeriod: string,
+): GuruConsensusRow[] {
+  const groups = new Map<string, GuruConsensusRow>();
+  for (const entry of reports) {
+    if (entry.report.reportPeriod !== reportPeriod || entry.report.comparisonAvailable === false) continue;
+    const sourceUrl = entry.report.informationTableUrl || entry.report.sourceUrl || '';
+    for (const change of compare13FReports(entry.previous, entry.report)) {
+      const identity = positionIdentity(change);
+      let row = groups.get(identity);
+      if (!row) {
+        row = {
+          cusip: String(change.cusip || '').trim().toUpperCase(),
+          classTitle: String(change.classTitle || '').trim().replace(/\s+/g, ' ').toUpperCase(),
+          putCall: change.putCall ? String(change.putCall).trim().toUpperCase() : null,
+          issuerName: change.issuerName,
+          symbol: resolveGuruMappingByCusip(change.cusip, change.classTitle)?.symbol || null,
+          disclosedManagerCount: 0,
+          managers: [],
+        };
+        groups.set(identity, row);
+      }
+      row.managers.push({
+        cik: entry.manager.cik,
+        filingName: entry.manager.filingName,
+        ...(entry.manager.personAssociation ? { personAssociation: entry.manager.personAssociation } : {}),
+        reportPeriod,
+        filedAt: entry.report.filedAt || '',
+        sourceUrl,
+        shares: change.currentShares,
+        previousShares: change.previousShares,
+        shareDelta: change.shareDelta,
+        change: change.change,
+      });
+    }
+  }
+  return [...groups.values()].map(row => ({
+    ...row,
+    disclosedManagerCount: row.managers.filter(manager => manager.shares != null).length,
+    managers: row.managers.sort((a, b) => a.filingName.localeCompare(b.filingName) || a.cik.localeCompare(b.cik)),
+  })).sort((a, b) => b.disclosedManagerCount - a.disclosedManagerCount
+    || String(a.symbol || a.cusip).localeCompare(String(b.symbol || b.cusip))
+    || a.classTitle.localeCompare(b.classTitle)
+    || String(a.putCall || '').localeCompare(String(b.putCall || '')));
+}
+
 const GURU_SOURCE = 'SEC EDGAR Form 13F';
 const GURU_CACHE_TTL_MS = 24 * 60 * 60_000;
 const GURU_REFRESH_LEASE_MS = 2 * 60_000;
@@ -477,6 +567,65 @@ export function createGuruHoldingsService(overrides: Partial<GuruHoldingsService
       previousReport,
       changes: latestReport ? compare13FReports(previousReport, latestReport) : [],
       caveats: GURU_POSITION_CAVEATS.slice(),
+    };
+  }
+
+  function getGuruConsensus(periodInput?: string, symbolInput?: string): GuruConsensusSnapshot {
+    const symbol = String(symbolInput || '').trim().toUpperCase() || null;
+    const snapshots = GURU_MANAGER_REGISTRY.map(manager => {
+      const reports = effectiveGuruReports(repository.listGuru13FReports(manager.cik, 500));
+      return { manager, reports, snapshot: getGuruManagerSnapshot(manager.cik) };
+    });
+    const availableReportPeriods = [...new Set(snapshots.flatMap(item => item.reports
+      .map(report => report.reportPeriod || '').filter(Boolean)))].sort((a, b) => b.localeCompare(a));
+    const reportPeriod = periodInput || availableReportPeriods[0] || null;
+    const matching = reportPeriod ? snapshots.flatMap(item => {
+      const index = item.reports.findIndex(report => report.reportPeriod === reportPeriod);
+      return index < 0 ? [] : [{
+        manager: item.manager,
+        report: item.reports[index],
+        previous: item.reports[index + 1] || null,
+        managerStatus: item.snapshot.dataStatus,
+      }];
+    }) : [];
+    const usable = matching.filter(item => item.report.comparisonAvailable !== false);
+    const unavailableManagerCount = snapshots.filter(item => item.snapshot.dataStatus === 'unavailable').length;
+    const partialManagerCount = snapshots.filter(item => item.snapshot.dataStatus === 'partial').length;
+    const staleManagerCount = matching.filter(item => item.managerStatus === 'delayed').length;
+    const unmappedSymbol = Boolean(symbol && !GURU_STOCK_MAPPINGS.some(item => item.symbol === symbol));
+    const rows = reportPeriod ? aggregateGuruConsensus(usable, reportPeriod)
+      .filter(row => !symbol || row.symbol === symbol) : [];
+    const missingManagerCount = GURU_MANAGER_REGISTRY.length - matching.length;
+    const incomparableManagerCount = matching.length - usable.length;
+    const updatedAt = matching.map(item => item.report.fetchedAt || '').filter(Boolean).sort().at(-1) || null;
+    const hasUnavailableData = unavailableManagerCount > 0 || partialManagerCount > 0 || staleManagerCount > 0
+      || missingManagerCount > 0 || incomparableManagerCount > 0;
+    const dataStatus: GuruHoldingsDataStatus = unmappedSymbol ? 'unavailable' : !reportPeriod
+      ? snapshots.every(item => item.snapshot.dataStatus === 'empty') ? 'empty' : 'unavailable'
+      : matching.length === 0 ? 'empty'
+        : hasUnavailableData ? 'partial' : 'cached';
+    const reason = !reportPeriod ? '尚无已保存的 13F 报告期。'
+      : unmappedSymbol ? '该股票尚无已核验的 CUSIP/证券类别映射，不能猜测持仓。'
+        : matching.length === 0 ? '该报告期没有已保存的有效申报。'
+          : hasUnavailableData ? '部分申报主体缺报、来源不可用、缓存过期或修订不可比较；未使用其他报告期填充。' : null;
+    return {
+      market: 'stocks',
+      instrument: symbol,
+      reportPeriod,
+      availableReportPeriods,
+      trackedManagerCount: GURU_MANAGER_REGISTRY.length,
+      reportManagerCount: matching.length,
+      missingManagerCount,
+      unavailableManagerCount,
+      partialManagerCount,
+      staleManagerCount,
+      incomparableManagerCount,
+      dataStatus,
+      source: GURU_SOURCE,
+      updatedAt,
+      reason,
+      evidenceRefs: [...new Set(usable.flatMap(item => [item.report.sourceUrl || '', item.report.informationTableUrl || '']).filter(Boolean))],
+      rows,
     };
   }
 
@@ -665,12 +814,13 @@ export function createGuruHoldingsService(overrides: Partial<GuruHoldingsService
     return results;
   }
 
-  return { listGuruManagers, getGuruManagerSnapshot, getGuruStockHolders, refreshGuruManager, refreshGuruFeaturedManagers };
+  return { listGuruManagers, getGuruManagerSnapshot, getGuruStockHolders, getGuruConsensus, refreshGuruManager, refreshGuruFeaturedManagers };
 }
 
 const defaultGuruHoldingsService = createGuruHoldingsService();
 export const listGuruManagers = defaultGuruHoldingsService.listGuruManagers;
 export const getGuruManagerSnapshot = defaultGuruHoldingsService.getGuruManagerSnapshot;
 export const getGuruStockHolders = defaultGuruHoldingsService.getGuruStockHolders;
+export const getGuruConsensus = defaultGuruHoldingsService.getGuruConsensus;
 export const refreshGuruManager = defaultGuruHoldingsService.refreshGuruManager;
 export const refreshGuruFeaturedManagers = defaultGuruHoldingsService.refreshGuruFeaturedManagers;

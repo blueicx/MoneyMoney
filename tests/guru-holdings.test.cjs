@@ -10,6 +10,7 @@ const {
   parse13FCoverPage,
   apply13FAmendment,
   compare13FReports,
+  aggregateGuruConsensus,
 } = require('../dist/features/guru-holdings.js');
 const {
   normalizeSecCik,
@@ -94,6 +95,84 @@ test('quarter comparison uses disclosed shares, not changing market value', () =
 
   assert.equal(row.change, 'increased');
   assert.equal(row.shareDelta, 20);
+});
+
+test('13F consensus groups only the same report period and exact security identity', () => {
+  const reports = [
+    { manager: { cik: '0001067983', filingName: 'Berkshire' }, report: {
+      reportPeriod: '2026-06-30', filedAt: '2026-08-14', sourceUrl: 'https://www.sec.gov/Archives/edgar/data/1067983/000106798326000001/',
+      positions: [
+        { issuerName: 'APPLE INC', cusip: '037833100', classTitle: 'COM', putCall: null, shares: 100, reportedValueUsd: 20000 },
+        { issuerName: 'APPLE INC', cusip: '037833100', classTitle: 'CL A', putCall: null, shares: 5, reportedValueUsd: 1000 },
+        { issuerName: 'APPLE INC', cusip: '037833100', classTitle: 'COM', putCall: 'Call', shares: 2, reportedValueUsd: 600 },
+      ],
+    }, previous: { reportPeriod: '2026-03-31', comparisonAvailable: true, positions: [
+      { issuerName: 'APPLE INC', cusip: '037833100', classTitle: 'COM', putCall: null, shares: 90, reportedValueUsd: 15000 },
+    ] } },
+    { manager: { cik: '0001350694', filingName: 'Bridgewater' }, report: {
+      reportPeriod: '2026-06-30', filedAt: '2026-08-14', sourceUrl: 'https://www.sec.gov/Archives/edgar/data/1350694/000135069426000001/',
+      positions: [{ issuerName: 'APPLE INC', cusip: '037833100', classTitle: 'COM', putCall: null, shares: 50, reportedValueUsd: 25000 }],
+    }, previous: null },
+    { manager: { cik: '0001040273', filingName: 'Third Point' }, report: {
+      reportPeriod: '2026-03-31', filedAt: '2026-05-14', sourceUrl: 'https://www.sec.gov/Archives/edgar/data/1040273/000104027326000001/',
+      positions: [{ issuerName: 'APPLE INC', cusip: '037833100', classTitle: 'COM', putCall: null, shares: 70, reportedValueUsd: 16000 }],
+    }, previous: null },
+  ];
+
+  const result = aggregateGuruConsensus(reports, '2026-06-30');
+  assert.equal(result.length, 3);
+  const common = result.find(row => row.classTitle === 'COM' && row.putCall === null);
+  assert.equal(common.disclosedManagerCount, 2);
+  assert.deepEqual(common.managers.map(row => row.change).sort(), ['increased', 'unavailable']);
+  assert.equal(common.managers.find(row => row.cik === '0001067983').shareDelta, 10);
+  assert.equal(common.managers.find(row => row.cik === '0001350694').shareDelta, null);
+});
+
+test('consensus service uses saved exact-period reports without SEC network requests', () => {
+  const now = new Date('2026-09-29T00:00:00.000Z');
+  const cikA = '0001067983';
+  const cikB = '0001350694';
+  const reports = [
+    { cik: cikA, accession: '0001067983-26-000001', reportPeriod: '2026-06-30', filedAt: '2026-08-14', form: '13F-HR',
+      sourceUrl: 'https://www.sec.gov/Archives/edgar/data/1067983/000106798326000001/', fetchedAt: now.toISOString(), contentHash: 'sha256:a',
+      positions: [{ issuerName: 'APPLE INC', classTitle: 'COM', cusip: '037833100', shares: 100, reportedValue: 20, reportedValueUsd: 20000, putCall: null }] },
+    { cik: cikB, accession: '0001350694-26-000001', reportPeriod: '2026-06-30', filedAt: '2026-08-14', form: '13F-HR',
+      sourceUrl: 'https://www.sec.gov/Archives/edgar/data/1350694/000135069426000001/', fetchedAt: now.toISOString(), contentHash: 'sha256:b',
+      positions: [{ issuerName: 'APPLE INC', classTitle: 'COM', cusip: '037833100', shares: 50, reportedValue: 25, reportedValueUsd: 25000, putCall: null }] },
+  ];
+  let secCalls = 0;
+  const service = createGuruHoldingsService({
+    repository: { listGuru13FReports: cik => reports.filter(report => report.cik === cik) },
+    stateStore: { get: () => null, set() {}, acquireLease: () => true, releaseLease: () => true },
+    loadSubmissions: async () => { secCalls += 1; throw new Error('must not fetch SEC during a read query'); },
+    now: () => now,
+  });
+
+  const result = service.getGuruConsensus('2026-06-30', 'AAPL');
+  assert.equal(result.reportPeriod, '2026-06-30');
+  assert.equal(result.reportManagerCount, 2);
+  assert.equal(result.missingManagerCount, GURU_MANAGER_REGISTRY.length - 2);
+  assert.equal(result.rows.length, 1);
+  assert.equal(result.rows[0].disclosedManagerCount, 2);
+  assert.equal(secCalls, 0);
+});
+
+test('consensus refuses ticker filters without a verified CUSIP and class mapping', () => {
+  const now = new Date('2026-09-29T00:00:00.000Z');
+  const service = createGuruHoldingsService({
+    repository: { listGuru13FReports: cik => cik === '0001067983' ? [{
+      cik, accession: '0001067983-26-000001', reportPeriod: '2026-06-30', filedAt: '2026-08-14', form: '13F-HR',
+      sourceUrl: 'https://www.sec.gov/Archives/edgar/data/1067983/000106798326000001/',
+      fetchedAt: now.toISOString(), contentHash: 'sha256:a', positions: [],
+    }] : [] },
+    stateStore: { get: () => null, set() {}, acquireLease: () => true, releaseLease: () => true },
+    now: () => now,
+  });
+
+  const result = service.getGuruConsensus('2026-06-30', 'SNDK');
+  assert.equal(result.dataStatus, 'unavailable');
+  assert.deepEqual(result.rows, []);
+  assert.match(result.reason, /已核验的 CUSIP/);
 });
 
 test('missing current filing is labeled not disclosed rather than sold out', () => {
