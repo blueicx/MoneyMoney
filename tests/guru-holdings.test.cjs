@@ -502,6 +502,62 @@ test('manager refresh stores only injected SEC evidence, normalizes reported val
   assert.equal(leaseReleased, 1);
 });
 
+test('13F refresh backfills at most four distinct periods and history deduplicates amendments', async () => {
+  const cik = '0001067983';
+  const persisted = [];
+  const downloaded = [];
+  const states = new Map();
+  const periods = ['2026-06-30', '2026-03-31', '2025-12-31', '2025-09-30', '2025-06-30'];
+  const filingDates = ['2026-08-14', '2026-05-14', '2026-02-14', '2025-11-14', '2025-08-14'];
+  const filings = periods.map((reportPeriod, index) => ({
+    form: '13F-HR', accessionNumber: `${cik}-26-${String(index + 1).padStart(6, '0')}`,
+    filingDate: filingDates[index], reportPeriod, primaryDocument: 'primary.xml',
+    sourceUrl: `https://www.sec.gov/Archives/edgar/data/1067983/${`${cik}-26-${String(index + 1).padStart(6, '0')}`.replace(/-/g, '')}/`,
+  }));
+  filings.push({
+    form: '13F-HR/A', accessionNumber: `${cik}-26-000006`, filingDate: '2026-08-15', reportPeriod: '2026-06-30',
+    primaryDocument: 'amendment.xml', sourceUrl: `https://www.sec.gov/Archives/edgar/data/1067983/${`${cik}-26-000006`.replace(/-/g, '')}/`,
+  });
+  const repository = {
+    listGuru13FReports: queryCik => persisted.filter(report => report.cik === queryCik),
+    saveGuru13FReport: report => persisted.push(report),
+  };
+  const service = createGuruHoldingsService({
+    repository,
+    stateStore: {
+      get: key => states.get(key) || null,
+      set: (key, value) => states.set(key, value),
+      acquireLease: () => true,
+      releaseLease: () => true,
+    },
+    loadSubmissions: async queryCik => ({ cik: queryCik, companyName: 'Berkshire Hathaway Inc.', filings }),
+    loadDocuments: async (_queryCik, filing) => {
+      downloaded.push(filing.accessionNumber);
+      const base = filing.sourceUrl;
+      const shares = filing.form === '13F-HR/A' ? 120 : 100;
+      return {
+        informationTableXml: `<informationTable><infoTable><nameOfIssuer>APPLE INC</nameOfIssuer><titleOfClass>COM</titleOfClass><cusip>037833100</cusip><value>125000</value><shrsOrPrnAmt><sshPrnamt>${shares}</sshPrnamt><sshPrnamtType>SH</sshPrnamtType></shrsOrPrnAmt></infoTable></informationTable>`,
+        coverPageXml: filing.form === '13F-HR/A'
+          ? '<coverPage><isAmendment>true</isAmendment><amendmentNo>1</amendmentNo><amendmentType>RESTATEMENT</amendmentType></coverPage>'
+          : '<coverPage><isAmendment>false</isAmendment></coverPage>',
+        informationTableUrl: `${base}infotable.xml`,
+        sourceUrl: base,
+      };
+    },
+    now: () => new Date('2026-09-29T00:00:00.000Z'),
+  });
+
+  await service.refreshGuruManager(cik, true);
+  assert.equal(new Set(persisted.map(report => report.reportPeriod)).size, 4);
+  assert.equal(persisted.some(report => report.reportPeriod === '2025-06-30'), false);
+  const history = service.getGuruManagerHistory(cik, 4);
+  assert.equal(history.reports.length, 4);
+  assert.equal(history.reports[0].form, '13F-HR/A');
+  assert.equal(history.reports[0].positions[0].shares, 120);
+  await service.refreshGuruManager(cik, true);
+  assert.equal(downloaded.length, 5);
+});
+
 test('featured SEC refresh continues serially after an individual filer failure', async () => {
   const calls = [];
   const states = new Map();

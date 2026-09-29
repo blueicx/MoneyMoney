@@ -629,6 +629,19 @@ export function createGuruHoldingsService(overrides: Partial<GuruHoldingsService
     };
   }
 
+  function getGuruManagerHistory(cikInput: string, limitInput = 4) {
+    const cik = normalizeSecCik(cikInput);
+    const parsedLimit = Math.floor(Number(limitInput));
+    const limit = Number.isFinite(parsedLimit) ? Math.max(1, Math.min(4, parsedLimit)) : 4;
+    const reports = effectiveGuruReports(repository.listGuru13FReports(cik, 500)).slice(0, limit);
+    return {
+      ...getGuruManagerSnapshot(cik),
+      reports,
+      availableReportCount: reports.length,
+      requestedLimit: limit,
+    };
+  }
+
   async function listGuruManagers(query = '') {
     const normalizedQuery = String(query || '').trim();
     let definitions = searchGuruManagerRegistry(normalizedQuery);
@@ -734,7 +747,7 @@ export function createGuruHoldingsService(overrides: Partial<GuruHoldingsService
 
     try {
       const submissions = await loadSubmissions(cik);
-      const periods = [...new Set(submissions.filings.map(filing => filing.reportPeriod))].sort((a, b) => b.localeCompare(a)).slice(0, 2);
+      const periods = [...new Set(submissions.filings.map(filing => filing.reportPeriod))].sort((a, b) => b.localeCompare(a)).slice(0, 4);
       if (!periods.length) {
         store.set(key, { checkedAt: now().toISOString(), dataStatus: 'empty', reason: 'SEC submissions 查询成功，但没有有效的 13F-HR 申报。' } satisfies GuruRefreshState);
         return getGuruManagerSnapshot(cik);
@@ -814,7 +827,15 @@ export function createGuruHoldingsService(overrides: Partial<GuruHoldingsService
     return results;
   }
 
-  return { listGuruManagers, getGuruManagerSnapshot, getGuruStockHolders, getGuruConsensus, refreshGuruManager, refreshGuruFeaturedManagers };
+  return {
+    listGuruManagers,
+    getGuruManagerSnapshot,
+    getGuruStockHolders,
+    getGuruConsensus,
+    getGuruManagerHistory,
+    refreshGuruManager,
+    refreshGuruFeaturedManagers,
+  };
 }
 
 const defaultGuruHoldingsService = createGuruHoldingsService();
@@ -822,5 +843,6 @@ export const listGuruManagers = defaultGuruHoldingsService.listGuruManagers;
 export const getGuruManagerSnapshot = defaultGuruHoldingsService.getGuruManagerSnapshot;
 export const getGuruStockHolders = defaultGuruHoldingsService.getGuruStockHolders;
 export const getGuruConsensus = defaultGuruHoldingsService.getGuruConsensus;
+export const getGuruManagerHistory = defaultGuruHoldingsService.getGuruManagerHistory;
 export const refreshGuruManager = defaultGuruHoldingsService.refreshGuruManager;
 export const refreshGuruFeaturedManagers = defaultGuruHoldingsService.refreshGuruFeaturedManagers;
