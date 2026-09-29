@@ -226,9 +226,11 @@ Router 只接受股票 symbol 和十位 CIK；管理员刷新路由由 `server.t
 
 验证股票菜单入口、访客只读访问、精选主体/CIK 查询、AAPL 与一个非热门搜索股票的反查、主体与股票双向跳转、报告时间/来源链接、空状态、修订/缓存状态、移动布局；切换期权、虚拟币和预测市场后确认入口消失。确认没有把 Nasdaq 数据与 SEC 行合并，也没有模拟/真实订单入口。
 
-- [ ] **步骤 7：提交、推送和安全部署**
+- [x] **步骤 7：提交、推送和安全部署**
 
 确认 `git status` 中只有本功能变更待提交；绝不 stage `data/lake/`、`data/research.db*` 或 `scratch/`。按项目既有发布流程提交并推送 GitHub；随后备份当前 VPS 版本、部署构建产物、核对本地/远端 SHA-256、健康/版本接口和正式域名页面，失败立即回滚，仅操作 `moneymoney.service`。
+
+发布验收记录：见 [`handover-2026-09-29-guru-holdings-fix.md`](../../handover-2026-09-29-guru-holdings-fix.md)。已核实 SEC 真实申报并在正式域名看到最新 Berkshire 持仓；Ray Dalio 与 Daniel Loeb 的信息表仍被明确标为来源不可用，未伪造或隐藏错误。
 
 ## 发布验收清单
 
