@@ -1,10 +1,21 @@
 import express from 'express';
 import type { Request, Response } from 'express';
-import type { GuruManagerSnapshot, GuruStockHoldersSnapshot } from './guru-holdings';
+import type {
+  Guru13FReport,
+  GuruConsensusSnapshot,
+  GuruManagerSnapshot,
+  GuruStockHoldersSnapshot,
+} from './guru-holdings';
 
 interface GuruHoldingsRouteService {
   listGuruManagers(query?: string): Promise<any[]>;
   getGuruManagerSnapshot(cik: string): GuruManagerSnapshot;
+  getGuruManagerHistory(cik: string, limit?: number): GuruManagerSnapshot & {
+    reports: Guru13FReport[];
+    availableReportCount: number;
+    requestedLimit: number;
+  };
+  getGuruConsensus(reportPeriod?: string, symbol?: string): GuruConsensusSnapshot;
   getGuruStockHolders(symbol: string, ciks?: string[]): Promise<GuruStockHoldersSnapshot>;
   refreshGuruManager(cik: string, force?: boolean): Promise<GuruManagerSnapshot>;
 }
@@ -32,6 +43,12 @@ function routeError(res: Response, status: number, reason: string): void {
 
 function normalizeCikPath(value: string): string | null {
   return /^\d{1,10}$/.test(value) && Number(value) > 0 ? value : null;
+}
+
+function isValidReportPeriod(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const date = new Date(`${value}T00:00:00.000Z`);
+  return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value;
 }
 
 function parseCikSelection(raw: unknown): { ciks?: string[]; error?: string } {
@@ -65,6 +82,41 @@ export function createGuruHoldingsRouter(service: GuruHoldingsRouteService, admi
       }, null));
     } catch (error) {
       return routeError(res, 500, error instanceof Error ? error.message : '读取申报机构目录失败');
+    }
+  });
+
+  router.get('/consensus', (req, res) => {
+    if (req.query.reportPeriod != null && typeof req.query.reportPeriod !== 'string') {
+      return routeError(res, 400, '报告期参数无效');
+    }
+    if (req.query.symbol != null && typeof req.query.symbol !== 'string') {
+      return routeError(res, 400, '股票代码参数无效');
+    }
+    const reportPeriod = typeof req.query.reportPeriod === 'string' ? req.query.reportPeriod : undefined;
+    const symbol = typeof req.query.symbol === 'string' ? req.query.symbol.trim().toUpperCase() || undefined : undefined;
+    if (reportPeriod && !isValidReportPeriod(reportPeriod)) {
+      return routeError(res, 400, '报告期必须为有效 YYYY-MM-DD 日期');
+    }
+    if (symbol && !/^[A-Z][A-Z0-9.-]{0,9}$/.test(symbol)) return routeError(res, 400, '股票代码无效');
+    try {
+      return res.json(envelope(service.getGuruConsensus(reportPeriod, symbol), symbol || null));
+    } catch (error) {
+      return routeError(res, 400, error instanceof Error ? error.message : '机构重合查询失败');
+    }
+  });
+
+  router.get('/managers/:cik/history', (req, res) => {
+    const cik = normalizeCikPath(req.params.cik);
+    if (!cik) return routeError(res, 400, 'CIK 必须为 1 至 10 位正整数');
+    const rawLimit = req.query.limit == null ? '4' : typeof req.query.limit === 'string' ? req.query.limit : '';
+    const limit = Number(rawLimit);
+    if (!/^\d+$/.test(rawLimit) || !Number.isInteger(limit) || limit < 1 || limit > 4) {
+      return routeError(res, 400, 'limit 必须为 1 至 4 的整数');
+    }
+    try {
+      return res.json(envelope(service.getGuruManagerHistory(cik, limit), null));
+    } catch (error) {
+      return routeError(res, 400, error instanceof Error ? error.message : '机构历史查询失败');
     }
   });
 

@@ -58,6 +58,36 @@ test('manager directory and CIK detail return stock-scoped evidence envelopes', 
   });
 });
 
+test('consensus and manager history are public read-only stock-scoped endpoints', async () => {
+  const calls = [];
+  const service = {
+    getGuruConsensus: (period, symbol) => {
+      calls.push(['consensus', period, symbol]);
+      return envelope({ reportPeriod: period, rows: [] });
+    },
+    getGuruManagerHistory: (cik, limit) => {
+      calls.push(['history', cik, limit]);
+      return envelope({ reports: [] });
+    },
+  };
+  await withApi(service, false, async base => {
+    const consensus = await fetch(`${base}/consensus?reportPeriod=2026-06-30&symbol=AAPL`).then(response => response.json());
+    const history = await fetch(`${base}/managers/0001067983/history?limit=4`).then(response => response.json());
+    assert.equal(consensus.market, 'stocks');
+    assert.equal(consensus.reportPeriod, '2026-06-30');
+    assert.equal(consensus.instrument, 'AAPL');
+    assert.equal(history.market, 'stocks');
+    assert.deepEqual(calls, [['consensus', '2026-06-30', 'AAPL'], ['history', '0001067983', 4]]);
+
+    assert.equal((await fetch(`${base}/consensus?reportPeriod=2026-02-30`)).status, 400);
+    assert.equal((await fetch(`${base}/consensus?symbol=AAPL%2FNVDA`)).status, 400);
+    assert.equal((await fetch(`${base}/consensus?reportPeriod=2026-06-30&reportPeriod=2026-03-31`)).status, 400);
+    assert.equal((await fetch(`${base}/managers/0001067983/history?limit=5`)).status, 400);
+    assert.equal((await fetch(`${base}/managers/0001067983/history?limit=2&limit=4`)).status, 400);
+    assert.equal((await fetch(`${base}/managers/0001067983/history/refresh`, { method: 'POST' })).status, 404);
+  });
+});
+
 test('stock holder query validates the equity symbol and bounds selected CIKs', async () => {
   let stockQuery = null;
   const service = {
