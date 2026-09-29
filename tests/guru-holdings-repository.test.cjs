@@ -31,16 +31,35 @@ test('13F reports persist idempotently and restore after reopening SQLite', () =
     fetchedAt: '2026-08-15T00:00:00.000Z',
     contentHash: 'sha256:newer',
   };
+  const filingAgentSubmitted = {
+    ...older,
+    cik: '0001067983',
+    accession: '0001193125-26-352200',
+    reportPeriod: '2026-06-30',
+    filedAt: '2026-08-14',
+    sourceUrl: 'https://www.sec.gov/Archives/edgar/data/1067983/000119312526352200/',
+    fetchedAt: '2026-08-15T00:00:00.000Z',
+    contentHash: 'sha256:filing-agent-accession',
+  };
 
   try {
     setDbPath(dbPath);
     researchRepository.saveGuru13FReport(older);
     researchRepository.saveGuru13FReport(newer);
     researchRepository.saveGuru13FReport(newer);
+    researchRepository.saveGuru13FReport(filingAgentSubmitted);
 
     setDbPath(dbPath);
     assert.deepEqual(researchRepository.getGuru13FReport(older.accession), older);
     assert.deepEqual(researchRepository.getGuru13FReport(newer.accession), newer);
+    assert.deepEqual(researchRepository.getGuru13FReport(filingAgentSubmitted.accession), filingAgentSubmitted);
+    assert.deepEqual(researchRepository.listGuru13FReports(filingAgentSubmitted.cik, 10).map(report => report.accession), [
+      filingAgentSubmitted.accession,
+    ]);
+    assert.throws(() => researchRepository.saveGuru13FReport({
+      ...filingAgentSubmitted,
+      sourceUrl: 'https://www.sec.gov/Archives/edgar/data/1193125/000119312526352200/',
+    }), /archive.*filer.*accession/i);
     assert.deepEqual(researchRepository.listGuru13FReports(older.cik, 10).map(report => report.accession), [
       newer.accession,
       older.accession,

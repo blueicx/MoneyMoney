@@ -273,7 +273,8 @@ export const researchRepository = {
       || !Array.isArray(report.positions)) {
       throw new Error('Invalid SEC 13F report snapshot');
     }
-    if (accession.slice(0, 10) !== cik) throw new Error('SEC 13F report CIK does not match accession');
+    const expectedSourceUrl = `https://www.sec.gov/Archives/edgar/data/${Number(cik)}/${accession.replace(/-/g, '')}/`;
+    if (sourceUrl !== expectedSourceUrl) throw new Error('SEC 13F archive does not match filer CIK and accession');
     db.prepare(`
       INSERT INTO guru_13f_reports (accession, cik, report_period, filed_at, form, source_url, fetched_at, content_hash, data)
       VALUES (@accession, @cik, @reportPeriod, @filedAt, @form, @sourceUrl, @fetchedAt, @contentHash, @data)

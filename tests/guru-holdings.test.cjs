@@ -17,6 +17,7 @@ const {
   buildSec13FArchiveUrl,
   findSec13FInformationTable,
   loadSec13FDocuments,
+  fetchSecJson,
   fetchSecText,
   reportedValueUnitForFilingDate,
 } = require('../dist/features/sec-edgar-client.js');
@@ -227,6 +228,19 @@ test('SEC text fetch uses identified SEC headers and preserves upstream errors',
     status: 403,
     text: async () => '',
   })), /SEC HTTP 403/);
+});
+
+test('SEC JSON and XML requests share a conservative request-rate limit', async () => {
+  const starts = [];
+  const fetchImpl = async url => {
+    starts.push(Date.now());
+    return { ok: true, json: async () => ({ url }), text: async () => `<xml>${url}</xml>` };
+  };
+
+  await fetchSecText('https://www.sec.gov/Archives/example.xml', fetchImpl);
+  await fetchSecJson('https://data.sec.gov/submissions/example.json', fetchImpl);
+
+  assert.ok(starts[1] - starts[0] >= 100, `SEC requests were only ${starts[1] - starts[0]}ms apart`);
 });
 
 test('guru registry uses canonical filer CIKs and exact CUSIP plus class mappings', () => {

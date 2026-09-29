@@ -39,8 +39,25 @@ export interface SecCompanyFactsPayload {
 const DEFAULT_USER_AGENT = 'MoneyMoney/1.0 (stock research; contact@moneymoney.app)';
 const TICKER_TTL_MS = 24 * 60 * 60_000;
 const SEC_TTL_MS = 12 * 60 * 60_000;
+const SEC_MIN_REQUEST_INTERVAL_MS = 125;
 const jsonCache = new Map<string, { ts: number; value: unknown }>();
+let secRequestQueue: Promise<void> = Promise.resolve();
+let nextSecRequestAt = 0;
 let tickerAdapter: ResilientDataSourceAdapter<SecTickerRecord[]> | null = null;
+
+async function waitForSecRequestSlot(): Promise<void> {
+  let releaseQueue!: () => void;
+  const previous = secRequestQueue;
+  secRequestQueue = new Promise<void>(resolve => { releaseQueue = resolve; });
+  await previous;
+  try {
+    const delayMs = nextSecRequestAt - Date.now();
+    if (delayMs > 0) await new Promise<void>(resolve => setTimeout(resolve, delayMs));
+    nextSecRequestAt = Date.now() + SEC_MIN_REQUEST_INTERVAL_MS;
+  } finally {
+    releaseQueue();
+  }
+}
 
 export interface Sec13FFiling {
   form: '13F-HR' | '13F-HR/A';
@@ -142,12 +159,14 @@ export function parseSecCompanyFacts(payload: SecCompanyFactsPayload): Omit<Stoc
 }
 
 export async function fetchSecJson<T>(url: string, fetchImpl: typeof fetch = fetch): Promise<T> {
+  await waitForSecRequestSlot();
   const response = await fetchImpl(url, { headers: buildSecHeaders(), signal: AbortSignal.timeout(15_000) });
   if (!response.ok) throw new Error(`SEC HTTP ${response.status}`);
   return response.json() as Promise<T>;
 }
 
 export async function fetchSecText(url: string, fetchImpl: typeof fetch = fetch): Promise<string> {
+  await waitForSecRequestSlot();
   const response = await fetchImpl(url, {
     headers: {
       ...buildSecHeaders(),
