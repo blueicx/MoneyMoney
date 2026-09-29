@@ -6172,33 +6172,64 @@ function renderOptionsLibraryQuick() {
   }
 }
 
-async function renderPredictionLibraryQuick() {
+const PREDICTION_LIBRARY_TIMEOUT_MS = 10_000;
+let predictionLibraryLoadPromise = null;
+function showPredictionLibraryStatus(element, message) {
+  const status = document.createElement('div');
+  status.className = 'empty-tip';
+  status.textContent = message;
+  const retry = document.createElement('button');
+  retry.id = 'prediction-library-retry';
+  retry.className = 'tab';
+  retry.type = 'button';
+  retry.setAttribute('aria-label', '重试加载预测事件');
+  retry.textContent = '重试';
+  retry.addEventListener('click', () => { void renderPredictionLibraryQuick(); });
+  element.replaceChildren(status, retry);
+}
+function renderPredictionLibraryQuick() {
   const element = document.getElementById('prediction-library-quick');
-  if (!element) return;
+  if (!element) return Promise.resolve();
+  if (predictionLibraryLoadPromise) return predictionLibraryLoadPromise;
   element.textContent = '正在读取真实预测事件…';
-  try {
-    const response = await fetch('/api/prediction-radar?limit=12');
-    const payload = await response.json();
-    if (!response.ok || !payload.success) throw new Error(payload.error || '预测事件来源不可用');
-    const markets = Array.isArray(payload.data?.markets) ? payload.data.markets.slice(0, 12) : [];
-    if (activeMarketScope !== 'prediction') return;
-    element.replaceChildren();
-    if (!markets.length) { element.textContent = '当前来源暂无可用预测事件；请刷新重试。'; return; }
-    for (const market of markets) {
-      const button = document.createElement('button');
-      button.className = 'stock-library-item';
-      button.type = 'button';
-      const title = document.createElement('strong');
-      title.textContent = market.titleZh || market.title || String(market.id);
-      const hint = document.createElement('small');
-      hint.textContent = `${market.platform || '未知来源'} · ${payload.data.updatedAt || '更新时间未知'}`;
-      button.append(title, hint);
-      button.addEventListener('click', () => selectPredictionLibraryEvent(market, payload.data.updatedAt));
-      element.append(button);
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), PREDICTION_LIBRARY_TIMEOUT_MS);
+  let loadPromise;
+  loadPromise = (async () => {
+    try {
+      const response = await fetch('/api/prediction-radar?limit=12', { signal: controller.signal });
+      const payload = await response.json();
+      if (!response.ok || !payload.success) throw new Error(payload.error || '预测事件来源不可用');
+      const markets = Array.isArray(payload.data?.markets) ? payload.data.markets.slice(0, 12) : [];
+      if (activeMarketScope !== 'prediction') return;
+      element.replaceChildren();
+      if (!markets.length) { showPredictionLibraryStatus(element, '当前来源暂无可用预测事件。'); return; }
+      for (const market of markets) {
+        const button = document.createElement('button');
+        button.className = 'stock-library-item';
+        button.type = 'button';
+        const title = document.createElement('strong');
+        title.textContent = market.titleZh || market.title || String(market.id);
+        const hint = document.createElement('small');
+        hint.textContent = `${market.platform || '未知来源'} · ${payload.data.updatedAt || '更新时间未知'}`;
+        button.append(title, hint);
+        button.addEventListener('click', () => selectPredictionLibraryEvent(market, payload.data.updatedAt));
+        element.append(button);
+      }
+    } catch (error) {
+      if (activeMarketScope === 'prediction') {
+        const message = controller.signal.aborted
+          ? `预测事件来源响应超时（${PREDICTION_LIBRARY_TIMEOUT_MS / 1000} 秒），可重试。`
+          : `预测事件来源不可用：${error.message || '请求失败'}`;
+        showPredictionLibraryStatus(element, message);
+      }
+    } finally {
+      window.clearTimeout(timeoutId);
+      if (predictionLibraryLoadPromise === loadPromise) predictionLibraryLoadPromise = null;
     }
-  } catch (error) {
-    if (activeMarketScope === 'prediction') element.textContent = `预测事件来源不可用：${error.message || '请求失败'}`;
-  }
+  })();
+  predictionLibraryLoadPromise = loadPromise;
+  return loadPromise;
 }
 function selectPredictionLibraryEvent(market, updatedAt) {
   if (activeMarketScope !== 'prediction' || !market?.id) return;
@@ -12132,18 +12163,19 @@ function renderWorkspaceMenu(groups) {
 function renderWorkspaceSidebar() {
   const shell = document.getElementById('market-workspace-shell');
   if (!shell) return;
-  shell.dataset.marketScope = activeMarketScope;
-  const state = workspaceNavigationState.get(activeMarketScope) || { groups: workspaceFallbackNavigation(activeMarketScope), requested: false };
-  workspaceNavigationState.set(activeMarketScope, state);
+  const scope = activeMarketScope;
+  shell.dataset.marketScope = scope;
+  const state = workspaceNavigationState.get(scope) || { groups: workspaceFallbackNavigation(scope), requested: false };
+  workspaceNavigationState.set(scope, state);
   renderWorkspaceMenu(state.groups);
   if (state.requested) return;
   state.requested = true;
-  fetch(`/api/workspace/navigation?scope=${encodeURIComponent(activeMarketScope)}`, { cache: 'no-store' })
+  fetch(`/api/workspace/navigation?scope=${encodeURIComponent(scope)}`, { cache: 'no-store' })
     .then(response => response.ok ? response.json() : null)
     .then(payload => {
       if (!payload?.success || !Array.isArray(payload.groups)) return;
-      workspaceNavigationState.set(activeMarketScope, { groups: payload.groups, requested: true });
-      if (shell.dataset.marketScope === activeMarketScope) renderWorkspaceMenu(payload.groups);
+      workspaceNavigationState.set(scope, { groups: payload.groups, requested: true });
+      if (shell.dataset.marketScope === scope && activeMarketScope === scope) renderWorkspaceMenu(payload.groups);
     })
     .catch(() => {});
 }

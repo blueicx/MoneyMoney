@@ -39,6 +39,20 @@ async function main() {
     page.on('response', response => {
       if (response.url().includes('/api/prediction/settlement/')) settlementStatus = response.status();
     });
+    await page.route('**/api/prediction-radar**', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
+      success: true,
+      data: {
+        updatedAt: '2026-09-29T01:00:00.000Z', opportunities: [],
+        sources: { polymarket: { ok: true, count: 1 }, kalshi: { ok: true, count: 0 }, manifold: { ok: true, count: 0 }, gjopen: { ok: true, count: 0 }, metaculus: { ok: true, count: 0 }, weather: { ok: true, count: 0 } },
+        markets: [{ id: 'matrix-prediction-001', platform: 'Polymarket', title: 'Browser acceptance prediction event', titleZh: '浏览器验收预测事件', category: 'Test', categoryZh: '测试', group: '综合', outcome: 'YES', url: 'https://polymarket.com/event/matrix-prediction-001', yesPrice: 0.61, noPrice: 0.39, bid: 0.6, ask: 0.62, spread: 0.02, volume24h: 1000, volumeTotal: 5000, liquidity: 2000, endDate: '2026-12-31T00:00:00.000Z', activityScore: 1, internalEdge: 0, modelProbability: 0.6, probabilityConfidence: 50, probabilityZh: '测试概率' }],
+      },
+    }) }));
+    await page.route('**/api/workspace/navigation**', async route => {
+      const url = new URL(route.request().url());
+      const response = await route.fetch();
+      if (url.searchParams.get('scope') === 'prediction') await new Promise(resolve => setTimeout(resolve, 400));
+      await route.fulfill({ response });
+    });
     const klineRequests = [];
     const guruConsensusRequests = [];
     let preflightReady = false;
@@ -208,6 +222,9 @@ async function main() {
     await Promise.all([page.waitForURL(url => url.pathname === '/', { timeout: 15_000 }), page.click('#submitBtn')]);
     await page.waitForFunction(() => window.mm_authReady && window.mm_isLoggedIn === true, null, { timeout: 10_000 });
     await page.waitForSelector('#market-workspace-shell');
+    await page.evaluate(() => { setMarketScope('prediction'); setMarketScope('stocks'); });
+    await page.waitForTimeout(500);
+    assert.ok(await page.locator('#workspace-sidebar-content [data-workspace-id="guru-holdings"]').count(), 'a late prediction navigation response must not overwrite the stocks menu');
     for (const market of ['stocks', 'options', 'crypto', 'prediction']) {
       await page.evaluate(scope => setMarketScope(scope), market);
       await page.waitForFunction(scope => document.body.dataset.marketScope === scope, market);
@@ -226,6 +243,7 @@ async function main() {
     await page.evaluate(() => setMarketScope('prediction'));
     await page.waitForFunction(() => !document.querySelector('#prediction-library-quick')?.textContent?.includes('正在读取'), null, { timeout: 30_000 });
     assert.ok((await page.locator('#prediction-library-quick').innerText()).trim());
+    assert.match(await page.locator('#prediction-library-quick').innerText(), /浏览器验收预测事件/);
     await page.evaluate(() => {
       predictionRadarState.loading = true;
       window.openWorkspace('prediction-radar');
@@ -331,6 +349,19 @@ async function main() {
     assert.match(eventStudyText, /同类历史事件/);
     assert.match(eventStudyText, /95% Bootstrap 区间/);
     await page.evaluate(() => selectStockFromInstrumentLibrary('SNDK', 'Fixture Semiconductor', 'SNDK'));
+    try {
+      await page.locator('#workspace-sidebar-content [data-workspace-id="guru-holdings"]').waitFor({ state: 'visible', timeout: 5_000 });
+    } catch {
+      const navigationDiagnostic = await page.evaluate(() => ({
+        activeMarketScope,
+        activeWorkspaceId,
+        currentInstrumentId,
+        sidebar: document.querySelector('#workspace-sidebar-content')?.innerText,
+        cachedGroups: workspaceNavigationState.get(activeMarketScope)?.groups,
+        fallbackGroups: workspaceFallbackNavigation(activeMarketScope),
+      }));
+      throw new Error(`guru-holdings navigation item missing: ${JSON.stringify(navigationDiagnostic)}`);
+    }
     await page.locator('#workspace-sidebar-content [data-workspace-id="guru-holdings"]').click();
     await page.locator('#guru-holdings-tab').waitFor({ state: 'visible' });
     await page.waitForFunction(() => document.querySelector('#guru-holdings-content')?.textContent?.includes('SEC'), null, { timeout: 10_000 });
