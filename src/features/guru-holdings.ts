@@ -144,15 +144,19 @@ function decodeXmlText(value: string): string {
     .trim();
 }
 
-function readSingleElement(xml: string, element: string, required = false): string | null {
+function readSingleElement(xml: string, element: string, required = false, namespacePrefix?: string): string | null {
   const escaped = element.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const matches = [...xml.matchAll(new RegExp(`<${escaped}\\b[^>]*>([\\s\\S]*?)<\\/${escaped}\\s*>`, 'gi'))];
+  const escapedPrefix = namespacePrefix?.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const expression = escapedPrefix === undefined
+    ? `<((?:[A-Za-z_][\\w.-]*:)?)${escaped}\\b[^>]*>([\\s\\S]*?)<\\/\\1${escaped}\\s*>`
+    : `<${escapedPrefix}${escaped}\\b[^>]*>([\\s\\S]*?)<\\/${escapedPrefix}${escaped}\\s*>`;
+  const matches = [...xml.matchAll(new RegExp(expression, 'gi'))];
   if (matches.length > 1) throw new Error(`Ambiguous 13F XML element: ${element}`);
   if (!matches.length) {
     if (required) throw new Error(`Missing 13F XML element: ${element}`);
     return null;
   }
-  return decodeXmlText(matches[0][1]);
+  return decodeXmlText(matches[0][escapedPrefix === undefined ? 2 : 1]);
 }
 
 function parseNonNegativeNumber(value: string | null, label: string): number {
@@ -204,30 +208,36 @@ function aggregate13FPositions(positions: Guru13FPosition[]): Guru13FPosition[] 
 }
 
 export function parse13FInformationTable(xml: string): Guru13FPosition[] {
-  if (typeof xml !== 'string' || !/<informationTable\b[^>]*>/i.test(xml) || !/<\/informationTable\s*>/i.test(xml)) {
+  if (typeof xml !== 'string') throw new Error('Malformed 13F information table XML');
+  const rootMatch = xml.match(/<((?:[A-Za-z_][\w.-]*:)?)informationTable\b[^>]*>/i);
+  if (!rootMatch) throw new Error('Malformed 13F information table XML');
+  const namespacePrefix = rootMatch[1] || '';
+  const escapedPrefix = namespacePrefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  if (!new RegExp(`<\/${escapedPrefix}informationTable\\s*>`, 'i').test(xml)) {
     throw new Error('Malformed 13F information table XML');
   }
-  const openCount = [...xml.matchAll(/<infoTable\b[^>]*>/gi)].length;
-  const closeCount = [...xml.matchAll(/<\/infoTable\s*>/gi)].length;
-  const blocks = [...xml.matchAll(/<infoTable\b[^>]*>([\s\S]*?)<\/infoTable\s*>/gi)];
+  const tableTag = `${escapedPrefix}infoTable`;
+  const openCount = [...xml.matchAll(new RegExp(`<${tableTag}\\b[^>]*>`, 'gi'))].length;
+  const closeCount = [...xml.matchAll(new RegExp(`<\\/${tableTag}\\s*>`, 'gi'))].length;
+  const blocks = [...xml.matchAll(new RegExp(`<${tableTag}\\b[^>]*>([\\s\\S]*?)<\\/${tableTag}\\s*>`, 'gi'))];
   if (openCount !== closeCount || blocks.length !== openCount) throw new Error('Malformed 13F information table XML');
 
   const positions = blocks.map((match): Guru13FPosition => {
     const block = match[1];
-    const issuerName = readSingleElement(block, 'nameOfIssuer', true) || '';
-    const classTitle = readSingleElement(block, 'titleOfClass', true) || '';
-    const cusip = (readSingleElement(block, 'cusip', true) || '').toUpperCase();
+    const issuerName = readSingleElement(block, 'nameOfIssuer', true, namespacePrefix) || '';
+    const classTitle = readSingleElement(block, 'titleOfClass', true, namespacePrefix) || '';
+    const cusip = (readSingleElement(block, 'cusip', true, namespacePrefix) || '').toUpperCase();
     if (!issuerName || !classTitle || !/^[A-Z0-9*@#]{9}$/.test(cusip)) {
       throw new Error('Invalid issuer, class, or CUSIP in 13F information table');
     }
 
-    const amountBlock = readSingleElement(block, 'shrsOrPrnAmt', true);
+    const amountBlock = readSingleElement(block, 'shrsOrPrnAmt', true, namespacePrefix);
     if (!amountBlock) throw new Error('Missing 13F share amount');
-    const shares = parseNonNegativeNumber(readSingleElement(amountBlock, 'sshPrnamt', true), 'share count');
-    const reportedValue = parseNonNegativeNumber(readSingleElement(block, 'value', true), 'reported value');
-    const putCall = readSingleElement(block, 'putCall')?.toUpperCase() || null;
-    const investmentDiscretion = readSingleElement(block, 'investmentDiscretion');
-    const rawAmountType = readSingleElement(amountBlock, 'sshPrnamtType')?.toUpperCase() || null;
+    const shares = parseNonNegativeNumber(readSingleElement(amountBlock, 'sshPrnamt', true, namespacePrefix), 'share count');
+    const reportedValue = parseNonNegativeNumber(readSingleElement(block, 'value', true, namespacePrefix), 'reported value');
+    const putCall = readSingleElement(block, 'putCall', false, namespacePrefix)?.toUpperCase() || null;
+    const investmentDiscretion = readSingleElement(block, 'investmentDiscretion', false, namespacePrefix);
+    const rawAmountType = readSingleElement(amountBlock, 'sshPrnamtType', false, namespacePrefix)?.toUpperCase() || null;
     if (rawAmountType && rawAmountType !== 'SH' && rawAmountType !== 'PRN') throw new Error('Invalid share amount type in 13F information table');
 
     return { issuerName, classTitle, cusip, reportedValue, shares, putCall, investmentDiscretion, shareAmountType: rawAmountType as 'SH' | 'PRN' | null };

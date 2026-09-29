@@ -47,6 +47,25 @@ test('13F parser preserves CUSIP, class, shares, and reported value', () => {
   }]);
 });
 
+test('13F parser accepts SEC information tables with a namespace prefix', () => {
+  const xml = '<ns1:informationTable xmlns:ns1="http://www.sec.gov/edgar/document/thirteenf/informationtable">'
+    + '<ns1:infoTable><ns1:nameOfIssuer>10X GENOMICS INC</ns1:nameOfIssuer><ns1:titleOfClass>CL A COM</ns1:titleOfClass>'
+    + '<ns1:cusip>88025U109</ns1:cusip><ns1:value>512798</ns1:value><ns1:shrsOrPrnAmt>'
+    + '<ns1:sshPrnamt>13375</ns1:sshPrnamt><ns1:sshPrnamtType>SH</ns1:sshPrnamtType></ns1:shrsOrPrnAmt>'
+    + '<ns1:investmentDiscretion>SOLE</ns1:investmentDiscretion></ns1:infoTable></ns1:informationTable>';
+
+  assert.deepEqual(parse13FInformationTable(xml), [{
+    issuerName: '10X GENOMICS INC',
+    classTitle: 'CL A COM',
+    cusip: '88025U109',
+    reportedValue: 512798,
+    shares: 13375,
+    putCall: null,
+    investmentDiscretion: 'SOLE',
+    shareAmountType: 'SH',
+  }]);
+});
+
 test('13F parser aggregates same security split across investment-discretion lines', () => {
   const xml = '<informationTable>'
     + '<infoTable><nameOfIssuer>APPLE INC</nameOfIssuer><titleOfClass>COM</titleOfClass><cusip>037833100</cusip><value>20</value><shrsOrPrnAmt><sshPrnamt>100</sshPrnamt><sshPrnamtType>SH</sshPrnamtType></shrsOrPrnAmt><investmentDiscretion>SOLE</investmentDiscretion></infoTable>'
