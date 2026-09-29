@@ -27,17 +27,19 @@ function createStore() {
 test('daily refresh is once per Shanghai day and persists the result', async () => {
   const store = createStore();
   let refreshes = 0;
+  const forceArguments = [];
   const monitor = createGuruHoldingsRefreshMonitor({
     store,
     owner: 'one',
     now: () => new Date('2026-09-29T02:00:00.000Z'),
-    refreshFeaturedManagers: async () => { refreshes += 1; return [{ dataStatus: 'cached' }, { dataStatus: 'unavailable', reason: 'SEC timeout' }]; },
+    refreshFeaturedManagers: async force => { refreshes += 1; forceArguments.push(force); return [{ dataStatus: 'cached' }, { dataStatus: 'unavailable', reason: 'SEC timeout' }]; },
   });
   const first = await monitor.runIfDue();
   const second = await monitor.runIfDue();
   assert.equal(first.ran, true);
   assert.equal(second.ran, false);
   assert.equal(refreshes, 1);
+  assert.deepEqual(forceArguments, [true]);
   assert.equal(store.values.get('guru13f:daily-refresh:last-run').localDate, '2026-09-29');
   assert.equal(store.leases.size, 0);
 });

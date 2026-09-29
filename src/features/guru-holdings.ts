@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { loadSec13FDocuments, loadSec13FSubmissions, normalizeSecCik, Sec13FFiling } from './sec-edgar-client';
+import { loadSec13FDocuments, loadSec13FSubmissions, normalizeSecCik, reportedValueUnitForFilingDate, Sec13FFiling } from './sec-edgar-client';
 import { researchRepository } from './research-repository';
 import { SQLiteStateStore, stateStore } from '../storage/sqlite-state';
 import {
@@ -21,6 +21,7 @@ export interface Guru13FPosition {
   shares: number;
   putCall: string | null;
   investmentDiscretion: string | null;
+  shareAmountType?: 'SH' | 'PRN' | null;
   reportedValueUsd?: number | null;
 }
 
@@ -177,6 +178,31 @@ function hasDuplicateIdentities(positions: Guru13FPosition[]): boolean {
   return false;
 }
 
+function aggregate13FPositions(positions: Guru13FPosition[]): Guru13FPosition[] {
+  const aggregated = new Map<string, Guru13FPosition>();
+  for (const position of positions) {
+    const identity = positionIdentity(position);
+    const existing = aggregated.get(identity);
+    if (!existing) {
+      aggregated.set(identity, { ...position });
+      continue;
+    }
+    if (!position.shareAmountType || !existing.shareAmountType || existing.shareAmountType !== position.shareAmountType
+      || existing.issuerName.trim().toUpperCase() !== position.issuerName.trim().toUpperCase()) {
+      throw new Error('Duplicate 13F position identity is ambiguous');
+    }
+    const shares = existing.shares + position.shares;
+    const reportedValue = existing.reportedValue + position.reportedValue;
+    if (!Number.isFinite(shares) || !Number.isFinite(reportedValue)) throw new Error('Aggregated 13F position exceeds numeric limits');
+    const discretion = [...new Set([existing.investmentDiscretion, position.investmentDiscretion]
+      .map(value => String(value || '').trim().toUpperCase()).filter(Boolean))].sort();
+    existing.shares = shares;
+    existing.reportedValue = reportedValue;
+    existing.investmentDiscretion = discretion.length ? discretion.join(',') : null;
+  }
+  return [...aggregated.values()];
+}
+
 export function parse13FInformationTable(xml: string): Guru13FPosition[] {
   if (typeof xml !== 'string' || !/<informationTable\b[^>]*>/i.test(xml) || !/<\/informationTable\s*>/i.test(xml)) {
     throw new Error('Malformed 13F information table XML');
@@ -201,12 +227,13 @@ export function parse13FInformationTable(xml: string): Guru13FPosition[] {
     const reportedValue = parseNonNegativeNumber(readSingleElement(block, 'value', true), 'reported value');
     const putCall = readSingleElement(block, 'putCall')?.toUpperCase() || null;
     const investmentDiscretion = readSingleElement(block, 'investmentDiscretion');
+    const rawAmountType = readSingleElement(amountBlock, 'sshPrnamtType')?.toUpperCase() || null;
+    if (rawAmountType && rawAmountType !== 'SH' && rawAmountType !== 'PRN') throw new Error('Invalid share amount type in 13F information table');
 
-    return { issuerName, classTitle, cusip, reportedValue, shares, putCall, investmentDiscretion };
+    return { issuerName, classTitle, cusip, reportedValue, shares, putCall, investmentDiscretion, shareAmountType: rawAmountType as 'SH' | 'PRN' | null };
   });
 
-  if (hasDuplicateIdentities(positions)) throw new Error('Duplicate 13F position identity is ambiguous');
-  return positions;
+  return aggregate13FPositions(positions);
 }
 
 export function parse13FCoverPage(xml: string): Guru13FCoverPage {
@@ -334,7 +361,18 @@ function managerDefinition(cik: string, filerName: string | null = null): GuruMa
 
 function effectiveGuruReports(input: Guru13FReport[]): Guru13FReport[] {
   const byPeriod = new Map<string, Guru13FReport[]>();
-  for (const report of input) {
+  for (const sourceReport of input) {
+    const reportedValueUnit = reportedValueUnitForFilingDate(sourceReport.filedAt);
+    const multiplier = reportedValueUnit === 'usd' ? 1 : reportedValueUnit === 'thousand-usd' ? 1_000 : null;
+    const report: Guru13FReport = {
+      ...sourceReport,
+      reportedValueUnit,
+      positions: sourceReport.positions.map(position => ({
+        ...position,
+        reportedValueUsd: multiplier == null || !Number.isFinite(position.reportedValue)
+          ? null : position.reportedValue * multiplier,
+      })),
+    };
     if (!report.reportPeriod) continue;
     const group = byPeriod.get(report.reportPeriod) || [];
     group.push(report);
@@ -554,6 +592,8 @@ export function createGuruHoldingsService(overrides: Partial<GuruHoldingsService
         try {
           const documents = await loadDocuments(cik, filing);
           const parsedPositions = parse13FInformationTable(documents.informationTableXml);
+          const reportedValueUnit = reportedValueUnitForFilingDate(filing.filingDate);
+          const valueMultiplier = reportedValueUnit === 'usd' ? 1 : reportedValueUnit === 'thousand-usd' ? 1_000 : null;
           const cover = documents.coverPageXml ? parse13FCoverPage(documents.coverPageXml)
             : filing.form === '13F-HR' ? { amendmentNumber: 0, amendmentType: null as Guru13FAmendmentType }
               : { amendmentNumber: null, amendmentType: 'UNKNOWN' as Guru13FAmendmentType };
@@ -574,11 +614,11 @@ export function createGuruHoldingsService(overrides: Partial<GuruHoldingsService
             fetchedAt,
             contentHash: `sha256:${createHash('sha256').update(content).digest('hex')}`,
             ...(submissions.companyName ? { managerName: submissions.companyName } : {}),
-            reportedValueUnit: 'thousand-usd',
+            reportedValueUnit,
             amendmentNumber: cover.amendmentNumber,
             amendmentType: amendmentMismatch ? 'UNKNOWN' : cover.amendmentType,
             comparisonAvailable: !amendmentMismatch,
-            positions: parsedPositions.map(position => ({ ...position, reportedValueUsd: position.reportedValue * 1_000 })),
+            positions: parsedPositions.map(position => ({ ...position, reportedValueUsd: valueMultiplier == null ? null : position.reportedValue * valueMultiplier })),
           };
           repository.saveGuru13FReport(report);
           existingAccessions.add(filing.accessionNumber);

@@ -20,7 +20,7 @@ interface GuruMonitorStore extends Pick<SQLiteStateStore, 'get' | 'set' | 'acqui
 
 export interface GuruHoldingsRefreshMonitorOptions {
   store?: GuruMonitorStore;
-  refreshFeaturedManagers?: () => Promise<GuruManagerSnapshot[]>;
+  refreshFeaturedManagers?: (force?: boolean) => Promise<GuruManagerSnapshot[]>;
   now?: () => Date;
   owner?: string;
   setIntervalFn?: typeof setInterval;
@@ -68,7 +68,9 @@ export function createGuruHoldingsRefreshMonitor(options: GuruHoldingsRefreshMon
 
     const run = (async () => {
       try {
-        const snapshots = await refresh();
+        // Daily checks must bypass the per-filer freshness cache so a previous
+        // unavailable/partial SEC fetch can recover without an admin login.
+        const snapshots = await refresh(true);
         const failedManagers = snapshots.filter(item => item.dataStatus === 'unavailable')
           .map(item => ({ cik: item.manager.cik, reason: item.reason || 'SEC 来源不可用' }));
         const result: GuruRefreshRun = {

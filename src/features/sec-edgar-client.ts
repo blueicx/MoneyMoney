@@ -54,7 +54,7 @@ export interface Sec13FFiling {
 export interface Sec13FSubmissionsPayload extends SecSubmissionsPayload {}
 
 interface SecArchiveIndexPayload {
-  directory?: { item?: Array<{ name?: string; type?: string }> };
+  directory?: { item?: Array<{ name?: string; type?: string; size?: string | number }> };
 }
 
 function text(value: unknown): string {
@@ -166,6 +166,13 @@ function validDate(value: unknown): value is string {
   return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === date;
 }
 
+export function reportedValueUnitForFilingDate(value: unknown): 'usd' | 'thousand-usd' | 'unknown' {
+  const filingDate = text(value);
+  if (!validDate(filingDate)) return 'unknown';
+  // SEC Form 13F values are rounded to dollars for filings made on/after Jan 3, 2023.
+  return filingDate >= '2023-01-03' ? 'usd' : 'thousand-usd';
+}
+
 function validAccession(value: unknown): value is string {
   return /^\d{10}-\d{2}-\d{6}$/.test(text(value));
 }
@@ -174,6 +181,14 @@ function safeXmlBasename(value: unknown): string | null {
   const name = text(value);
   if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}\.xml$/i.test(name) || name.includes('..')) return null;
   return name;
+}
+
+function safeSec13FPrimaryDocument(value: unknown): string | null {
+  const raw = text(value);
+  if (raw.includes('\\')) return null;
+  const parts = raw.split('/');
+  if (parts.some(part => !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(part) || part.includes('..'))) return null;
+  return safeXmlBasename(parts.at(-1));
 }
 
 export function buildSec13FArchiveUrl(cikInput: unknown, accessionInput: unknown, documentInput: unknown): string | null {
@@ -185,12 +200,13 @@ export function buildSec13FArchiveUrl(cikInput: unknown, accessionInput: unknown
   }
   const accession = text(accessionInput);
   const documentName = safeXmlBasename(documentInput);
-  if (!validAccession(accession) || !documentName || accession.slice(0, 10) !== cik) return null;
+  if (!validAccession(accession) || !documentName) return null;
   const accessionPath = accession.replace(/-/g, '');
   return `https://www.sec.gov/Archives/edgar/data/${Number(cik)}/${accessionPath}/${encodeURIComponent(documentName)}`;
 }
 
-export function parseSec13FSubmissions(payload: Sec13FSubmissionsPayload): { companyName: string; filings: Sec13FFiling[] } {
+export function parseSec13FSubmissions(payload: Sec13FSubmissionsPayload, filerCikInput?: unknown): { companyName: string; filings: Sec13FFiling[] } {
+  const filerCik = filerCikInput === undefined ? '' : normalizeSecCik(filerCikInput);
   const recent = payload?.filings?.recent || {};
   const forms = Array.isArray(recent.form) ? recent.form : [];
   const accessions = Array.isArray(recent.accessionNumber) ? recent.accessionNumber : [];
@@ -205,8 +221,9 @@ export function parseSec13FSubmissions(payload: Sec13FSubmissionsPayload): { com
     const reportPeriod = text(reportDates[index]);
     if ((form !== '13F-HR' && form !== '13F-HR/A') || !validAccession(accessionNumber)
       || !validDate(filingDate) || !validDate(reportPeriod)) continue;
-    const primaryDocument = safeXmlBasename(primaryDocuments[index]);
-    const sourceUrl = `https://www.sec.gov/Archives/edgar/data/${Number(accessionNumber.slice(0, 10))}/${accessionNumber.replace(/-/g, '')}/`;
+    const primaryDocument = safeSec13FPrimaryDocument(primaryDocuments[index]);
+    const archiveCik = filerCik || accessionNumber.slice(0, 10);
+    const sourceUrl = `https://www.sec.gov/Archives/edgar/data/${Number(archiveCik)}/${accessionNumber.replace(/-/g, '')}/`;
     filings.push({ form, accessionNumber, filingDate, reportPeriod, primaryDocument, sourceUrl });
   }
   return { companyName: text(payload?.name), filings };
@@ -223,10 +240,30 @@ export function findSec13FInformationTable(payload: SecArchiveIndexPayload): str
   return null;
 }
 
+function sec13FXmlCandidates(payload: SecArchiveIndexPayload, primaryDocument: string | null): string[] {
+  const items = Array.isArray(payload?.directory?.item) ? payload.directory.item : [];
+  const preferred = findSec13FInformationTable(payload)?.toLowerCase();
+  return items.flatMap((item, index) => {
+    const name = safeXmlBasename(item?.name);
+    if (!name || name.toLowerCase() === primaryDocument?.toLowerCase()) return [];
+    const size = Number(item?.size);
+    return [{ name, index, size: Number.isFinite(size) && size > 0 ? size : 0 }];
+  }).sort((a, b) => Number(b.name.toLowerCase() === preferred) - Number(a.name.toLowerCase() === preferred)
+    || b.size - a.size || a.index - b.index)
+    .slice(0, 12)
+    .map(item => item.name);
+}
+
+function isSec13FInformationTableXml(xml: string): boolean {
+  return /<(?:[A-Za-z_][\w.-]*:)?informationTable\b[^>]*>/i.test(xml)
+    && /<(?:[A-Za-z_][\w.-]*:)?infoTable\b[^>]*>/i.test(xml)
+    && /<\/(?:[A-Za-z_][\w.-]*:)?informationTable\s*>/i.test(xml);
+}
+
 export async function loadSec13FSubmissions(cikInput: unknown, fetchImpl: typeof fetch = fetch): Promise<{ companyName: string; cik: string; filings: Sec13FFiling[] }> {
   const cik = normalizeSecCik(cikInput);
   const payload = await fetchSecJson<Sec13FSubmissionsPayload>(`https://data.sec.gov/submissions/CIK${cik}.json`, fetchImpl);
-  const parsed = parseSec13FSubmissions(payload);
+  const parsed = parseSec13FSubmissions(payload, cik);
   return { ...parsed, cik };
 }
 
@@ -236,17 +273,27 @@ export async function loadSec13FDocuments(
   fetchImpl: typeof fetch = fetch,
 ): Promise<{ informationTableXml: string; coverPageXml: string | null; informationTableUrl: string; sourceUrl: string }> {
   const cik = normalizeSecCik(cikInput);
+  if (!validAccession(filing.accessionNumber)) throw new Error('SEC 13F accession is invalid');
+  const primaryDocument = safeSec13FPrimaryDocument(filing.primaryDocument);
   const archiveBase = `https://www.sec.gov/Archives/edgar/data/${Number(cik)}/${filing.accessionNumber.replace(/-/g, '')}/`;
-  if (!validAccession(filing.accessionNumber) || filing.accessionNumber.slice(0, 10) !== cik) throw new Error('SEC 13F accession does not match filer CIK');
   const index = await fetchSecJson<SecArchiveIndexPayload>(`${archiveBase}index.json`, fetchImpl);
-  const informationTableName = findSec13FInformationTable(index);
+  let informationTableName: string | null = null;
+  let informationTableUrl = '';
+  let informationTableXml = '';
+  for (const candidate of sec13FXmlCandidates(index, primaryDocument)) {
+    const candidateUrl = buildSec13FArchiveUrl(cik, filing.accessionNumber, candidate);
+    if (!candidateUrl) continue;
+    const candidateXml = await fetchSecText(candidateUrl, fetchImpl);
+    if (!isSec13FInformationTableXml(candidateXml)) continue;
+    informationTableName = candidate;
+    informationTableUrl = candidateUrl;
+    informationTableXml = candidateXml;
+    break;
+  }
   if (!informationTableName) throw new Error('SEC 13F information table XML is unavailable');
-  const informationTableUrl = buildSec13FArchiveUrl(cik, filing.accessionNumber, informationTableName);
-  if (!informationTableUrl) throw new Error('SEC 13F information table path is invalid');
-  const informationTableXml = await fetchSecText(informationTableUrl, fetchImpl);
-  const primaryDocumentUrl = buildSec13FArchiveUrl(cik, filing.accessionNumber, filing.primaryDocument);
+  const primaryDocumentUrl = buildSec13FArchiveUrl(cik, filing.accessionNumber, primaryDocument);
   const coverPageXml = primaryDocumentUrl ? await fetchSecText(primaryDocumentUrl, fetchImpl) : null;
-  return { informationTableXml, coverPageXml, informationTableUrl, sourceUrl: filing.sourceUrl };
+  return { informationTableXml, coverPageXml, informationTableUrl, sourceUrl: archiveBase };
 }
 
 function cached<T>(key: string, ttlMs: number): T | null {

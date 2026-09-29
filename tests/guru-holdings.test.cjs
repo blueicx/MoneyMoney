@@ -16,7 +16,9 @@ const {
   parseSec13FSubmissions,
   buildSec13FArchiveUrl,
   findSec13FInformationTable,
+  loadSec13FDocuments,
   fetchSecText,
+  reportedValueUnitForFilingDate,
 } = require('../dist/features/sec-edgar-client.js');
 const { GURU_MANAGER_REGISTRY, resolveGuruStockMapping, searchGuruManagerRegistry } = require('../dist/features/guru-holdings-registry.js');
 const { createGuruHoldingsService } = require('../dist/features/guru-holdings.js');
@@ -40,7 +42,28 @@ test('13F parser preserves CUSIP, class, shares, and reported value', () => {
     shares: 500,
     putCall: null,
     investmentDiscretion: null,
+    shareAmountType: 'SH',
   }]);
+});
+
+test('13F parser aggregates same security split across investment-discretion lines', () => {
+  const xml = '<informationTable>'
+    + '<infoTable><nameOfIssuer>APPLE INC</nameOfIssuer><titleOfClass>COM</titleOfClass><cusip>037833100</cusip><value>20</value><shrsOrPrnAmt><sshPrnamt>100</sshPrnamt><sshPrnamtType>SH</sshPrnamtType></shrsOrPrnAmt><investmentDiscretion>SOLE</investmentDiscretion></infoTable>'
+    + '<infoTable><nameOfIssuer>APPLE INC</nameOfIssuer><titleOfClass>COM</titleOfClass><cusip>037833100</cusip><value>10</value><shrsOrPrnAmt><sshPrnamt>50</sshPrnamt><sshPrnamtType>SH</sshPrnamtType></shrsOrPrnAmt><investmentDiscretion>DEFINED</investmentDiscretion></infoTable>'
+    + '</informationTable>';
+  const [position] = parse13FInformationTable(xml);
+  assert.equal(position.shares, 150);
+  assert.equal(position.reportedValue, 30);
+  assert.equal(position.shareAmountType, 'SH');
+  assert.equal(position.investmentDiscretion, 'DEFINED,SOLE');
+});
+
+test('13F parser rejects duplicate CUSIP rows with incompatible share/principal units', () => {
+  const xml = '<informationTable>'
+    + '<infoTable><nameOfIssuer>EXAMPLE CORP</nameOfIssuer><titleOfClass>NOTE</titleOfClass><cusip>037833100</cusip><value>20</value><shrsOrPrnAmt><sshPrnamt>100</sshPrnamt><sshPrnamtType>SH</sshPrnamtType></shrsOrPrnAmt></infoTable>'
+    + '<infoTable><nameOfIssuer>EXAMPLE CORP</nameOfIssuer><titleOfClass>NOTE</titleOfClass><cusip>037833100</cusip><value>30</value><shrsOrPrnAmt><sshPrnamt>200</sshPrnamt><sshPrnamtType>PRN</sshPrnamtType></shrsOrPrnAmt></infoTable>'
+    + '</informationTable>';
+  assert.throws(() => parse13FInformationTable(xml), /duplicate .* ambiguous/i);
 });
 
 test('quarter comparison uses disclosed shares, not changing market value', () => {
@@ -103,7 +126,7 @@ test('13F additive amendment with a duplicate line identity is not compared', ()
   assert.equal(apply13FAmendment(base, amendment).comparable, false);
 });
 
-test('SEC filer lookup normalizes CIK and keeps only 13F reports', () => {
+test('SEC filer lookup keeps filing-agent accession IDs under the queried filer archive CIK', () => {
   assert.equal(normalizeSecCik('12345'), '0000012345');
   assert.throws(() => normalizeSecCik('12345abc'), /invalid .*CIK/i);
 
@@ -111,20 +134,38 @@ test('SEC filer lookup normalizes CIK and keeps only 13F reports', () => {
     name: 'Example Capital',
     filings: { recent: {
       form: ['13F-HR', '4', '13F-HR/A'],
-      accessionNumber: ['0000000001-26-000001', '0000000001-26-000002', '0000000001-26-000003'],
+      accessionNumber: ['0001193125-26-226661', '0000000001-26-000002', '0001193125-26-352200'],
       filingDate: ['2026-05-14', '2026-05-15', '2026-08-14'],
       reportDate: ['2026-03-31', '', '2026-06-30'],
       primaryDocument: ['primary.xml', 'form4.xml', 'amendment.xml'],
     } },
-  });
+  }, '0001067983');
 
   assert.deepEqual(parsed.filings.map(item => item.form), ['13F-HR', '13F-HR/A']);
   assert.equal(parsed.filings[0].reportPeriod, '2026-03-31');
+  assert.equal(parsed.filings[0].sourceUrl, 'https://www.sec.gov/Archives/edgar/data/1067983/000119312526226661/');
 });
 
-test('SEC archive URLs require a safe accession and XML basename', () => {
+test('SEC 13F primary document preserves a safe basename from the submissions subdirectory', () => {
+  const parsed = parseSec13FSubmissions({ filings: { recent: {
+    form: ['13F-HR'], accessionNumber: ['0001193125-26-352200'], filingDate: ['2026-08-14'],
+    reportDate: ['2026-06-30'], primaryDocument: ['xslForm13F_X02/primary_doc.xml'],
+  } } }, '0001067983');
+  assert.equal(parsed.filings[0].primaryDocument, 'primary_doc.xml');
+});
+
+test('SEC 13F reported value unit follows the January 2023 filing-date rule', () => {
+  assert.equal(reportedValueUnitForFilingDate('2023-01-03'), 'usd');
+  assert.equal(reportedValueUnitForFilingDate('2026-08-14'), 'usd');
+  assert.equal(reportedValueUnitForFilingDate('2022-12-30'), 'thousand-usd');
+  assert.equal(reportedValueUnitForFilingDate('unknown'), 'unknown');
+});
+
+test('SEC archive URLs scope by filer CIK independently from filing-agent accession prefix', () => {
   assert.equal(buildSec13FArchiveUrl('12345', '0000012345-26-000001', 'infoTable.xml'),
     'https://www.sec.gov/Archives/edgar/data/12345/000001234526000001/infoTable.xml');
+  assert.equal(buildSec13FArchiveUrl('1067983', '0001193125-26-226661', '53405.xml'),
+    'https://www.sec.gov/Archives/edgar/data/1067983/000119312526226661/53405.xml');
   assert.equal(buildSec13FArchiveUrl('12345', '0000012345-26-000001', '../bad.xml'), null);
   assert.equal(buildSec13FArchiveUrl('12345', 'not-an-accession', 'infoTable.xml'), null);
 });
@@ -136,6 +177,38 @@ test('SEC archive index selects only a validated information-table XML file', ()
     { name: '../unsafe.xml', type: 'text/xml' },
   ] } }), 'infotable.xml');
   assert.equal(findSec13FInformationTable({ directory: { item: [{ name: 'primary_doc.xml' }] } }), null);
+});
+
+test('SEC filing loader discovers an opaque XML information table by content', async () => {
+  const requests = [];
+  const filing = {
+    form: '13F-HR', accessionNumber: '0001193125-26-226661', filingDate: '2026-05-15', reportPeriod: '2026-03-31',
+    primaryDocument: 'xslForm13F_X02/primary_doc.xml', sourceUrl: 'https://www.sec.gov/Archives/edgar/data/1067983/000119312526226661/',
+  };
+  const informationTableXml = '<informationTable><infoTable><nameOfIssuer>ALLY FINL INC</nameOfIssuer><titleOfClass>COM</titleOfClass><cusip>02005N100</cusip><value>498992850</value><shrsOrPrnAmt><sshPrnamt>12719675</sshPrnamt></shrsOrPrnAmt></infoTable></informationTable>';
+  const coverPageXml = '<coverPage><isAmendment>false</isAmendment></coverPage>';
+  const fetchImpl = async (url) => {
+    requests.push(url);
+    if (url.endsWith('/index.json')) return { ok: true, json: async () => ({ directory: { item: [
+      { name: 'primary_doc.xml', type: 'text/xml', size: '5555' },
+      { name: '53405.xml', type: 'text/xml', size: '45259' },
+    ] } }) };
+    if (url.endsWith('/53405.xml')) return { ok: true, text: async () => informationTableXml };
+    if (url.endsWith('/primary_doc.xml')) return { ok: true, text: async () => coverPageXml };
+    throw new Error(`Unexpected SEC URL ${url}`);
+  };
+
+  const result = await loadSec13FDocuments('0001067983', filing, fetchImpl);
+
+  assert.equal(result.informationTableXml, informationTableXml);
+  assert.equal(result.coverPageXml, coverPageXml);
+  assert.equal(result.informationTableUrl, 'https://www.sec.gov/Archives/edgar/data/1067983/000119312526226661/53405.xml');
+  assert.equal(result.sourceUrl, filing.sourceUrl);
+  assert.deepEqual(requests, [
+    'https://www.sec.gov/Archives/edgar/data/1067983/000119312526226661/index.json',
+    'https://www.sec.gov/Archives/edgar/data/1067983/000119312526226661/53405.xml',
+    'https://www.sec.gov/Archives/edgar/data/1067983/000119312526226661/primary_doc.xml',
+  ]);
 });
 
 test('SEC text fetch uses identified SEC headers and preserves upstream errors', async () => {
@@ -253,6 +326,27 @@ test('stock-centric view preserves prior 13F rows as not-disclosed instead of dr
   assert.equal(result.holders[0].previousShares, 100);
 });
 
+test('stored post-2023 13F snapshots are read as dollars even if saved with the legacy thousand-dollar unit', () => {
+  const now = new Date('2026-09-29T00:00:00.000Z');
+  const legacyReport = {
+    cik: '0001067983', accession: '0001193125-26-352200', reportPeriod: '2026-06-30', filedAt: '2026-08-14', form: '13F-HR',
+    sourceUrl: 'https://www.sec.gov/Archives/edgar/data/1067983/000119312526352200/',
+    fetchedAt: now.toISOString(), contentHash: 'sha256:legacy-value-unit', reportedValueUnit: 'thousand-usd',
+    positions: [{ issuerName: 'ALLY FINL INC', classTitle: 'COM', cusip: '02005N100', shares: 27_000_000,
+      reportedValue: 1_240_650_000, reportedValueUsd: 1_240_650_000_000, putCall: null, investmentDiscretion: 'DEFINED,SOLE', shareAmountType: 'SH' }],
+  };
+  const service = createGuruHoldingsService({
+    repository: { listGuru13FReports: () => [legacyReport] },
+    stateStore: { get: () => null, set() {}, acquireLease: () => true, releaseLease: () => true },
+    now: () => now,
+  });
+
+  const result = service.getGuruManagerSnapshot('0001067983');
+
+  assert.equal(result.latestReport.reportedValueUnit, 'usd');
+  assert.equal(result.latestReport.positions[0].reportedValueUsd, 1_240_650_000);
+});
+
 test('manager refresh stores only injected SEC evidence, normalizes reported value, and releases its lease', async () => {
   const cik = '0001067983';
   const now = new Date('2026-09-29T00:00:00.000Z');
@@ -290,8 +384,8 @@ test('manager refresh stores only injected SEC evidence, normalizes reported val
   const result = await service.refreshGuruManager(cik, true);
 
   assert.equal(result.dataStatus, 'cached');
-  assert.equal(result.latestReport.positions[0].reportedValueUsd, 125_000_000);
-  assert.equal(result.latestReport.reportedValueUnit, 'thousand-usd');
+  assert.equal(result.latestReport.positions[0].reportedValueUsd, 125_000);
+  assert.equal(result.latestReport.reportedValueUnit, 'usd');
   assert.equal(result.latestReport.managerName, 'Berkshire Hathaway Inc.');
   assert.equal(leaseReleased, 1);
 });
