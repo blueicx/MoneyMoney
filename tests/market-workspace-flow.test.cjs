@@ -101,6 +101,16 @@ test('大神持仓提供投资人和热门股票双视角，并展示 SEC 时点
   assert.match(html, /not-disclosed/);
 });
 
+test('大神持仓提供同报告期机构重合和最多四期机构历史', () => {
+  assert.match(html, /data-guru-view="consensus"/);
+  assert.match(html, /id="guru-holdings-report-period"/);
+  assert.match(html, /function loadGuruConsensus\(/);
+  assert.match(html, /\/api\/stocks\/guru-holdings\/consensus/);
+  assert.match(html, /\/api\/stocks\/guru-holdings\/managers\/.*history/);
+  assert.match(html, /同一报告期/);
+  assert.match(html, /最多四期/);
+});
+
 test('独立功能面板在选中后扁平展示并保持展开', () => {
   assert.match(html, /\.dash-collapse\.workspace-panel-flat[\s\S]*border:\s*0/);
   assert.match(html, /\.dash-collapse\.workspace-panel-flat[^}]*background:\s*transparent/);

@@ -40,6 +40,7 @@ async function main() {
       if (response.url().includes('/api/prediction/settlement/')) settlementStatus = response.status();
     });
     const klineRequests = [];
+    const guruConsensusRequests = [];
     let preflightReady = false;
     let backtestRuns = 0;
     let retryDeliveryCount = 0;
@@ -84,6 +85,26 @@ async function main() {
       let payload;
       if (last === 'managers') {
         payload = { market: 'stocks', dataStatus: 'historical', source: 'SEC EDGAR CIK fixture', updatedAt: '2026-09-29T01:00:00.000Z', reason: null, evidenceRefs: [], data: [{ cik: '0001067983', filingName: 'Berkshire Hathaway Inc.', personAssociation: 'Warren Buffett', dataStatus: 'cached', reportPeriod: '2026-06-30', filedAt: '2026-08-14' }] };
+      } else if (last === 'consensus') {
+        const reportPeriod = url.searchParams.get('reportPeriod') || '2026-06-30';
+        const symbol = url.searchParams.get('symbol') || null;
+        guruConsensusRequests.push({ reportPeriod, symbol });
+        payload = { market: 'stocks', instrument: symbol, reportPeriod, availableReportPeriods: ['2026-06-30', '2026-03-31'], trackedManagerCount: 10,
+          reportManagerCount: 2, missingManagerCount: 8, unavailableManagerCount: 8, partialManagerCount: 0, staleManagerCount: 0, incomparableManagerCount: 0,
+          dataStatus: 'partial', source: 'SEC EDGAR Form 13F fixture', updatedAt: '2026-09-29T01:00:00.000Z', reason: '部分机构尚未提供该报告期快照。', evidenceRefs: [secUrl],
+          rows: [{ cusip: '037833100', classTitle: 'COM', putCall: null, issuerName: 'APPLE INC', symbol: 'AAPL', disclosedManagerCount: 2, managers: [
+            { cik: '0001067983', filingName: 'Berkshire Hathaway Inc.', personAssociation: 'Warren Buffett', reportPeriod, filedAt: '2026-08-14', sourceUrl: secUrl, shares: 150, previousShares: 100, shareDelta: 50, change: 'increased' },
+            { cik: '0001350694', filingName: 'Bridgewater Associates, LP', personAssociation: 'Ray Dalio', reportPeriod, filedAt: '2026-08-14', sourceUrl: secUrl, shares: 90, previousShares: 80, shareDelta: 10, change: 'increased' },
+          ] }] };
+      } else if (last === 'history') {
+        payload = { market: 'stocks', dataStatus: 'cached', source: 'SEC EDGAR Form 13F fixture', updatedAt: '2026-09-29T01:00:00.000Z', reason: null,
+          evidenceRefs: [secUrl], manager: { cik: '0001067983', filingName: 'Berkshire Hathaway Inc.', personAssociation: 'Warren Buffett' },
+          availableReportCount: 4, requestedLimit: Number(url.searchParams.get('limit') || 4), reports: [
+            { reportPeriod: '2026-06-30', filedAt: '2026-08-14', form: '13F-HR', sourceUrl: secUrl, informationTableUrl: secUrl, positions: [{ cusip: '037833100' }] },
+            { reportPeriod: '2026-03-31', filedAt: '2026-05-14', form: '13F-HR', sourceUrl: secUrl, positions: [{ cusip: '037833100' }] },
+            { reportPeriod: '2025-12-31', filedAt: '2026-02-14', form: '13F-HR', sourceUrl: secUrl, positions: [] },
+            { reportPeriod: '2025-09-30', filedAt: '2025-11-14', form: '13F-HR/A', sourceUrl: secUrl, positions: [] },
+          ] };
       } else if (last === '0001067983') {
         payload = { market: 'stocks', instrument: null, dataStatus: 'cached', source: 'SEC EDGAR Form 13F', updatedAt: '2026-09-29T01:00:00.000Z', reason: null, evidenceRefs: [secUrl], manager: { cik: '0001067983', filingName: 'Berkshire Hathaway Inc.', personAssociation: 'Warren Buffett', attributionNote: '公开关联人物；SEC 申报主体仍为公司' }, latestReport: { reportPeriod: '2026-06-30', filedAt: '2026-08-14', informationTableUrl: secUrl, positions: [{ issuerName: 'APPLE INC', classTitle: 'COM', cusip: '037833100', putCall: null, shares: 150, reportedValueUsd: 125000 }] }, previousReport: null, changes: [{ issuerName: 'APPLE INC', classTitle: 'COM', cusip: '037833100', putCall: null, currentShares: 150, previousShares: null, shareDelta: null, change: 'newly-disclosed' }], caveats: ['季度披露，非实时持仓。'] };
       } else if (last === 'SNDK') {
@@ -320,7 +341,17 @@ async function main() {
     await page.waitForFunction(() => document.querySelector('#guru-holdings-content')?.textContent?.includes('报告期截至'), null, { timeout: 10_000 });
     assert.match(await page.locator('#guru-holdings-content').innerText(), /2026-06-30/);
     assert.match(await page.locator('#guru-holdings-content').innerText(), /查看 SEC 原文申报/);
-    assert.match(await page.locator('#guru-holdings-content a').getAttribute('href'), /^https:\/\/www\.sec\.gov\/Archives\/edgar\/data\//);
+    assert.match(await page.locator('#guru-holdings-content a').first().getAttribute('href'), /^https:\/\/www\.sec\.gov\/Archives\/edgar\/data\//);
+    assert.match(await page.locator('#guru-holdings-content').innerText(), /机构历史.*4/);
+    assert.ok(await page.locator('#guru-holdings-content a[target="_blank"]').count() >= 4, 'historical filings should link to SEC evidence');
+    await page.locator('[data-guru-view="consensus"]').click();
+    await page.waitForFunction(() => document.querySelector('#guru-holdings-content')?.textContent?.includes('同一报告期'), null, { timeout: 10_000 });
+    assert.match(await page.locator('#guru-holdings-content').innerText(), /Warren Buffett/);
+    assert.match(await page.locator('#guru-holdings-content').innerText(), /2 家申报主体/);
+    assert.match(await page.locator('#guru-holdings-content a').first().getAttribute('href'), /^https:\/\/www\.sec\.gov\/Archives\/edgar\/data\//);
+    await page.locator('#guru-holdings-report-period').selectOption('2026-03-31');
+    await page.waitForFunction(() => document.querySelector('#guru-holdings-source-status')?.textContent?.includes('2026-03-31'), null, { timeout: 10_000 });
+    assert.ok(guruConsensusRequests.some(item => item.reportPeriod === '2026-03-31'), 'quarter selector should reload the exact selected period');
     await page.locator('[data-guru-view="stocks"]').click();
     await page.locator('[data-guru-stock="SNDK"]').click();
     await page.waitForFunction(() => document.querySelector('#guru-holdings-content')?.textContent?.includes('不能按公司名称猜测持仓'), null, { timeout: 10_000 });
