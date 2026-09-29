@@ -13,7 +13,7 @@ test('server exposes unified stock endpoints while keeping legacy endpoints', ()
   assert.match(server, /app\.get\('\/api\/stocks\/:symbol\/fundamentals'/);
   assert.match(server, /app\.get\('\/api\/stocks\/:symbol\/source-health'/);
   assert.match(server, /app\.get\('\/api\/stock\/fundamentals\/:symbol'/);
-  assert.match(server, /createGuruHoldingsRouter\(guruHoldings, adminOnly\)/);
+  assert.match(server, /createGuruHoldingsRouter\(guruHoldings, adminOnly, \(\) => unifiedAlertStore\.listWatchlist\(\)\)/);
 });
 
 test('source health exposes stock source groups without prediction-only items', () => {

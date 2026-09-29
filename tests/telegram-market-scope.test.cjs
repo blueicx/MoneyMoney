@@ -68,4 +68,11 @@ test('server wires the chat scope into the menu and filters Telegram search resu
   assert.match(serverSource, /parseScopedTelegramCallback\(data, 'unified:show'/);
 });
 
+test('Telegram digest never guesses an unknown saved instrument is a stock', () => {
+  const digest = serverSource.slice(serverSource.indexOf('async function buildTelegramDigest'), serverSource.indexOf('async function monitorTelegramSourceRecovery'));
+  assert.match(digest, /const scope: MarketId \| null = ref \? .* : null/);
+  assert.match(digest, /未识别自选/);
+  assert.doesNotMatch(digest, /telegramFindMarket\(id\) \? 'prediction' : 'stocks'/);
+});
+
 setTimeout(() => process.exit(0), 10);

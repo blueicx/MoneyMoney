@@ -95,6 +95,9 @@ export interface GuruStockHolderRow {
   reportPeriod: string;
   filedAt: string;
   sourceUrl: string;
+  previousReportPeriod: string | null;
+  previousFiledAt: string | null;
+  previousSourceUrl: string | null;
   shares: number | null;
   reportedValueUsd: number | null;
   portfolioWeightPct: number | null;
@@ -701,6 +704,9 @@ export function createGuruHoldingsService(overrides: Partial<GuruHoldingsService
           reportPeriod: current.reportPeriod || '',
           filedAt: current.filedAt || '',
           sourceUrl: current.informationTableUrl || current.sourceUrl || snapshot.previousReport?.sourceUrl || '',
+          previousReportPeriod: snapshot.previousReport?.reportPeriod || null,
+          previousFiledAt: snapshot.previousReport?.filedAt || null,
+          previousSourceUrl: snapshot.previousReport?.informationTableUrl || snapshot.previousReport?.sourceUrl || null,
           shares: currentPosition?.shares ?? null,
           reportedValueUsd: valueUsd,
           portfolioWeightPct: valueUsd != null && totalUsd != null && totalUsd > 0 ? Math.round(valueUsd / totalUsd * 100_000) / 1_000 : null,

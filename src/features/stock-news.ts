@@ -48,7 +48,9 @@ export function parseYahooNewsResponse(payload: YahooSearchResponse, symbolInput
     return { title, source, url, publishedAt, related };
   }).filter(item => {
     const related = item.related as string[];
-    return Boolean(item.title && item.url && item.publishedAt && (!related.length || related.includes(symbol)));
+    // A search query can still return broad market headlines without symbol
+    // metadata. Keep only records Yahoo explicitly relates to this ticker.
+    return Boolean(item.title && item.url && item.publishedAt && related.includes(symbol));
   }).map(({ related: _related, ...item }) => item).slice(0, 15);
 }
 

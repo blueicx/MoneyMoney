@@ -78,7 +78,7 @@ test('PWA updates wait for user action and logout clears cached public snapshots
 
 test('stock exclusive workspaces keep the shared market bar and scope selection tools', () => {
   assert.match(html, /id="market-overview"[^>]*data-market-scopes="overview stocks options crypto prediction watchlist"/);
-  assert.match(html, /id="workspace-dashboard-cards"[^>]*data-workspace-ids="overview"/);
+  assert.match(html, /id="workspace-dashboard-cards"[^>]*data-market-scopes="overview stocks options crypto prediction watchlist"/);
   assert.match(html, /id="market-research-tools"[^>]*data-market-scopes="[^"]*stocks[^"]*"[^>]*data-workspace-ids="[^"]*screener[^"]*"/);
   assert.match(html, /const visible = \(!node\.dataset\.marketScopes \|\| scopeAllowsView\(node\.dataset\.marketScopes\)\) && workspaceAllowsView\(node\);/);
   assert.match(html, /if \(node\.classList\?\.contains\(['"]workspace-item['"]\)\) return true;/);

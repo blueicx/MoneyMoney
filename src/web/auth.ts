@@ -61,6 +61,7 @@ const GUEST_GET_PREFIXES = [
   '/screener',
   '/market-ticker',
   '/workspace',
+  '/changes',
   '/watchlist',
   '/evidence',
   '/data',

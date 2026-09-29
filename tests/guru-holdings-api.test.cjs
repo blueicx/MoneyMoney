@@ -16,13 +16,13 @@ function envelope(overrides = {}) {
   };
 }
 
-async function withApi(service, adminAllowed, run) {
+async function withApi(service, adminAllowed, run, watchlist = () => []) {
   const app = express();
   app.use('/api/stocks/guru-holdings', createGuruHoldingsRouter(service, (_req, res) => {
     if (adminAllowed) return true;
     res.status(403).json({ error: '管理员权限不足' });
     return false;
-  }));
+  }, watchlist));
   const server = http.createServer(app);
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   try {
@@ -142,4 +142,48 @@ test('API response envelope cannot be changed to another market by query input',
     assert.equal(body.market, 'stocks');
     assert.equal(body.instrument, null);
   });
+});
+
+test('自选13F变化只读取已核验的美股身份并保留机构和报告期明细', async () => {
+  const queried = [];
+  const service = {
+    getGuruStockHolders: async symbol => {
+      queried.push(symbol);
+      if (symbol === 'AAPL') return envelope({
+        instrument: symbol,
+        mapping: { cusip: '037833100', classTitle: 'COM', issuerName: 'Apple Inc.' },
+        holders: [{
+          manager: { cik: '1067983', filingName: 'Berkshire Hathaway Inc.', personAssociation: 'Warren Buffett' },
+          reportPeriod: '2026-06-30', filedAt: '2026-08-14', sourceUrl: 'https://www.sec.gov/Archives/aapl-current',
+          previousReportPeriod: '2026-03-31', previousFiledAt: '2026-05-15', previousSourceUrl: 'https://www.sec.gov/Archives/aapl-previous',
+          shares: 100, previousShares: 80, shareDelta: 20, change: 'increased',
+        }],
+      });
+      return envelope({ instrument: symbol, dataStatus: 'unavailable', mapping: null, holders: [], reason: '没有已核验的 CUSIP/类别映射' });
+    },
+  };
+  const watchlist = () => [
+    'stock:us:AAPL', 'stock:us:SNDK', 'stock:hk:0700', 'crypto:binance:BTCUSDT', 'AAPL', 'stock:us:AAPL260918C00200000',
+  ];
+  await withApi(service, true, async base => {
+    const response = await fetch(`${base}/watchlist/changes`);
+    const payload = await response.json();
+    assert.equal(response.status, 200);
+    assert.deepEqual(queried, ['AAPL', 'SNDK']);
+    assert.equal(payload.market, 'stocks');
+    assert.equal(payload.symbols.length, 2);
+    const row = payload.symbols[0].holders[0];
+    assert.equal(row.previousReportPeriod, '2026-03-31');
+    assert.equal(row.reportPeriod, '2026-06-30');
+    assert.equal(row.shareDelta, 20);
+    assert.equal(row.sourceUrl, 'https://www.sec.gov/Archives/aapl-current');
+    assert.equal('totalShares' in payload, false);
+    assert.equal('aggregateShares' in payload, false);
+    assert.match(payload.caveats.join(' '), /季度|滞后|实时/);
+  }, watchlist);
+
+  await withApi(service, false, async base => {
+    const response = await fetch(`${base}/watchlist/changes`);
+    assert.equal(response.status, 403);
+  }, watchlist);
 });

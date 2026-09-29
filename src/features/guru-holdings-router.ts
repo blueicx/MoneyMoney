@@ -21,6 +21,7 @@ interface GuruHoldingsRouteService {
 }
 
 type AdminOnly = (req: Request, res: Response) => boolean;
+type WatchlistProvider = () => string[];
 
 const ROUTE_SOURCE = 'SEC EDGAR Form 13F';
 
@@ -61,7 +62,11 @@ function parseCikSelection(raw: unknown): { ciks?: string[]; error?: string } {
   return { ciks: [...new Set(parts)] };
 }
 
-export function createGuruHoldingsRouter(service: GuruHoldingsRouteService, adminOnly: AdminOnly) {
+export function createGuruHoldingsRouter(
+  service: GuruHoldingsRouteService,
+  adminOnly: AdminOnly,
+  listWatchlist: WatchlistProvider = () => [],
+) {
   const router = express.Router();
 
   router.get('/managers', async (req, res) => {
@@ -139,6 +144,77 @@ export function createGuruHoldingsRouter(service: GuruHoldingsRouteService, admi
       return res.json(envelope(await service.getGuruStockHolders(symbol, selection.ciks), symbol));
     } catch (error) {
       return routeError(res, 400, error instanceof Error ? error.message : '股票持有人查询失败');
+    }
+  });
+
+  router.get('/watchlist/changes', async (req, res) => {
+    if (!adminOnly(req, res)) return;
+    try {
+      const symbols = [...new Set(listWatchlist().flatMap(id => {
+        const match = String(id || '').trim().match(/^stock:us:([A-Z][A-Z0-9.-]{0,9})$/i);
+        return match ? [match[1].toUpperCase()] : [];
+      }))].slice(0, 20);
+      if (!symbols.length) {
+        return res.json(envelope({
+          dataStatus: 'empty', instrument: null, symbols: [],
+          reason: '自选中没有可用于 SEC 13F 比较的已识别美股标的。',
+          caveats: ['13F 为季度滞后披露，不代表实时持仓。', '只展示逐机构申报变化，不将机构股数相加冒充市场总持仓。'],
+        }, null));
+      }
+      const results = await Promise.all(symbols.map(async symbol => {
+        try {
+          const snapshot = await service.getGuruStockHolders(symbol);
+          return { symbol, ...snapshot };
+        } catch (error) {
+          return {
+            symbol, market: 'stocks' as const, instrument: symbol, dataStatus: 'failed' as const,
+            source: ROUTE_SOURCE, updatedAt: null, reason: error instanceof Error ? error.message : '读取 SEC 快照失败',
+            evidenceRefs: [], mapping: null, holders: [], caveats: [],
+          };
+        }
+      }));
+      const updatedAt = results.map(item => item.updatedAt).filter((value): value is string => typeof value === 'string').sort().at(-1) || null;
+      const evidenceRefs = [...new Set(results.flatMap(item => item.evidenceRefs || []))].filter(value => /^https:\/\//i.test(value));
+      const hasFailure = results.some(item => item.dataStatus === 'failed' || item.dataStatus === 'unavailable' || item.dataStatus === 'partial');
+      const hasRows = results.some(item => item.holders.length > 0);
+      const dataStatus = hasFailure && hasRows ? 'partial' : hasFailure ? 'unavailable' : hasRows ? 'delayed' : 'empty';
+      return res.json(envelope({
+        dataStatus,
+        instrument: null,
+        source: ROUTE_SOURCE,
+        updatedAt,
+        reason: hasRows ? '以下仅为各机构最近已保存且可核验的季度披露变化。' : '没有可用的自选股票 13F 变化；可能缺少 SEC 身份映射或本地报告快照。',
+        evidenceRefs,
+        caveats: ['13F 通常在报告期结束后延迟申报，不代表实时持仓。', '股数只在同一机构、已核验证券身份和相邻可比报告期内比较。', '不汇总不同机构股数作为市场总持仓。'],
+        symbols: results.map(result => ({
+          symbol: result.symbol,
+          market: 'stocks',
+          instrument: result.symbol,
+          dataStatus: result.dataStatus,
+          source: result.source || ROUTE_SOURCE,
+          updatedAt: result.updatedAt,
+          reason: result.reason,
+          mapping: result.mapping,
+          evidenceRefs: result.evidenceRefs || [],
+          holders: result.holders.map(holder => ({
+            managerName: holder.manager.personAssociation || holder.manager.filingName,
+            filingName: holder.manager.filingName,
+            cik: holder.manager.cik,
+            reportPeriod: holder.reportPeriod,
+            filedAt: holder.filedAt,
+            previousReportPeriod: holder.previousReportPeriod || null,
+            previousFiledAt: holder.previousFiledAt || null,
+            shares: holder.shares,
+            previousShares: holder.previousShares,
+            shareDelta: holder.shareDelta,
+            change: holder.change,
+            sourceUrl: /^https:\/\//i.test(holder.sourceUrl) ? holder.sourceUrl : null,
+            previousSourceUrl: /^https:\/\//i.test(String(holder.previousSourceUrl || '')) ? holder.previousSourceUrl : null,
+          })),
+        })),
+      }, null));
+    } catch (error) {
+      return routeError(res, 500, error instanceof Error ? error.message : '读取自选 13F 变化失败');
     }
   });
 

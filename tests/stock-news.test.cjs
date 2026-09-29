@@ -9,6 +9,7 @@ test('stock news parser keeps ticker-scoped source evidence and drops malformed 
       { uuid: '1', title: 'Apple reports results', publisher: 'Yahoo Finance', link: 'https://finance.yahoo.com/news/apple', providerPublishTime: 1770000000, relatedTickers: ['AAPL'] },
       { uuid: '2', title: 'Other story', publisher: 'Yahoo Finance', link: '', providerPublishTime: 1770000000, relatedTickers: ['MSFT'] },
       { uuid: '3', title: '', publisher: 'Yahoo Finance', link: 'https://example.invalid', providerPublishTime: 1770000000, relatedTickers: ['AAPL'] },
+      { uuid: '4', title: 'Unrelated market headline', publisher: 'Yahoo Finance', link: 'https://example.com/general', providerPublishTime: 1770000000 },
     ],
   }, 'AAPL');
   assert.deepEqual(result, [{

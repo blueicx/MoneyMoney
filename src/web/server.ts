@@ -64,6 +64,7 @@ import { getMarketBreadthSnapshot } from '../features/market-breadth';
 import { getInstitutionalOwnershipSnapshot } from '../features/institutional-ownership';
 import { createGuruHoldingsRouter } from '../features/guru-holdings-router';
 import * as guruHoldings from '../features/guru-holdings';
+import { buildMarketChangeDigest, calculateEvidencePriceChanges, type MarketChangeRecord } from '../features/market-change-digest';
 import { startGuruHoldingsRefreshMonitor, stopGuruHoldingsRefreshMonitor } from '../features/guru-holdings-refresh-monitor';
 import { getFearGreed, getFundingRates } from '../features/market-sentiment';
 import { getGlobalMacroSpotSnapshot } from '../features/global-macro-spot';
@@ -98,7 +99,7 @@ import { stockDataService } from '../features/stock-data-service';
 import { buildStockCoverageMap } from '../features/instrument-coverage';
 import { MARKET_SCOPES, filterInstrumentResults, type MarketScope } from '../features/market-scope';
 import { defaultWorkspace, isWorkspaceAllowed, resolveWorkspaceNavigation, type WorkspaceId } from '../features/market-workspace';
-import { resolveMarketDashboardCards } from '../features/market-workspace-dashboard';
+import { collectDashboardResults, resolveMarketDashboardCards, type DashboardProviderResult } from '../features/market-workspace-dashboard';
 import { marketDepthCapabilities } from '../features/market-depth-capabilities';
 import { filterAssistantReport, filterRiskOverview, filterUnifiedPaperLedger, scopeForAction } from '../features/market-scope-view';
 import { unifiedAlertStore, triggerUnifiedAlerts, previewUnifiedAlerts } from '../features/unified-alerts';
@@ -348,13 +349,330 @@ app.get('/api/workspace/navigation', (req, res) => {
   return res.json({ success: true, scope, groups: resolveWorkspaceNavigation(scope) });
 });
 
-app.get('/api/workspace/dashboard', (req, res) => {
+async function dashboardStockIndices(): Promise<DashboardProviderResult> {
+  try {
+    let data = getCached('stockIndices');
+    let fetchedAt = responseCache.get('stockIndices')?.ts || null;
+    if (!Array.isArray(data)) {
+      const text = await fetchTencentText('https://qt.gtimg.cn/q=sh000001,sz399001,hkHSI,usDJI,usIXIC,usINX');
+      data = await sanitizeUsQuoteNames(text.split(';').map(row => parseTencentStock(row.trim())).filter(Boolean));
+      if (data.length) setCached('stockIndices', data);
+      fetchedAt = responseCache.get('stockIndices')?.ts || Date.now();
+    }
+    const rows = (Array.isArray(data) ? data : []).filter((row: any) => Number(row.price) > 0);
+    return {
+      market: 'stocks', source: 'Tencent Finance', fetchedAt: fetchedAt ? new Date(fetchedAt).toISOString() : null,
+      status: rows.length ? 'live' : 'empty', reason: rows.length ? '行情来源未暴露源端时间戳；展示 MoneyMoney 接收时间。' : 'Tencent Finance 请求成功，但没有可用指数记录。',
+      metrics: rows.slice(0, 6).map((row: any) => ({ label: String(row.nameCN || row.name || row.code), value: Number(row.price), changePct: Number.isFinite(Number(row.changePct)) ? Number(row.changePct) : null })),
+      data: rows.slice(0, 6).map((row: any) => ({ code: row.code, name: row.name, price: row.price, changePct: row.changePct })),
+    };
+  } catch (error) {
+    return { market: 'stocks', status: 'failed', source: 'Tencent Finance', reason: error instanceof Error ? error.message : '股票指数请求失败', metrics: [], evidenceRefs: [] };
+  }
+}
+
+function dashboardOptionsCoverage(): DashboardProviderResult {
+  const rows = dataLakeCatalog.listCoverage('options').filter(row => row.dataset.toLowerCase().includes('options-chain'));
+  const count = rows.reduce((sum, row) => sum + row.rowCount, 0);
+  return {
+    market: 'options', source: 'MoneyMoney 本地数据湖', status: rows.length ? 'historical' : 'empty',
+    updatedAt: rows.map(row => row.latestPublishedAt).sort().at(-1) || null,
+    metrics: rows.length ? [{ label: '已存合约行', value: count }, { label: '覆盖标的', value: new Set(rows.map(row => row.instrument)).size }, { label: '分区', value: rows.reduce((sum, row) => sum + row.partitionCount, 0) }] : [],
+    reason: rows.length ? '只展示已提交的真实期权链快照；历史不足时不推算 IV/Greeks。' : '本地尚无真实期权链快照，不回填推测历史。', data: rows,
+  };
+}
+
+async function buildDashboardProviderMap(scope: MarketScope, guest: boolean): Promise<Record<string, () => Promise<DashboardProviderResult> | DashboardProviderResult>> {
+  const providers: Record<string, () => Promise<DashboardProviderResult> | DashboardProviderResult> = {};
+  if (scope === 'overview') {
+    providers['overview-markets'] = async () => {
+      const [stockResult, cryptoResult] = await Promise.allSettled([dashboardStockIndices(), binanceFeed.getMultiplePrices(['BTCUSDT', 'ETHUSDT'])]);
+      const metrics: NonNullable<DashboardProviderResult['metrics']> = [];
+      const sources: string[] = [];
+      const missing: string[] = [];
+      if (stockResult.status === 'fulfilled' && stockResult.value.metrics?.length) { metrics.push(...stockResult.value.metrics.slice(0, 3)); sources.push('Tencent Finance'); } else missing.push('股票指数');
+      if (cryptoResult.status === 'fulfilled' && Object.keys(cryptoResult.value).length) {
+        Object.values(cryptoResult.value).forEach((ticker: any) => metrics.push({ label: ticker.symbol, value: ticker.price, changePct: ticker.change24hPct })); sources.push('Binance Public');
+      } else missing.push('虚拟币行情');
+      const prediction = getCachedPredictionRadarSlice('', 240);
+      if (prediction) { metrics.push({ label: '预测市场机会', value: prediction.opportunities.length }); sources.push('预测市场缓存'); } else missing.push('预测市场缓存');
+      return { market: 'overview', source: sources.join(' / ') || '跨市场摘要', status: !sources.length ? 'unavailable' : missing.length ? 'partial' : 'cached',
+        updatedAt: prediction?.updatedAt || (stockResult.status === 'fulfilled' ? stockResult.value.fetchedAt || null : null), metrics: metrics.slice(0, 8),
+        reason: missing.length ? `未取得${missing.join('、')}；仅展示当前成功来源。` : '各市场数据分别读取，不跨市场填充。' };
+    };
+    providers['overview-events'] = async () => {
+      const calendar = await getUpcomingEventCalendar(2);
+      const states = Object.values(calendar.sourceStatus || {});
+      const succeeded = states.filter(value => ['live', 'cached', 'partial'].includes(value)).length;
+      return { market: 'overview', source: calendar.source, fetchedAt: calendar.fetchedAt,
+        status: !succeeded ? 'unavailable' : calendar.events.length ? (succeeded < states.length ? 'partial' : 'live') : 'empty',
+        metrics: calendar.events.length ? [{ label: '未来两天事件', value: calendar.events.length }, ...calendar.events.slice(0, 3).map(item => ({ label: item.categoryLabel, value: item.titleZh || item.title }))] : [],
+        reason: calendar.events.length ? calendar.warnings.join('；') || null : succeeded ? '事件源成功响应，未来两天暂无记录。' : Object.values(calendar.sourceReasons || {}).join('；') || '事件来源不可用。', data: calendar.events.slice(0, 10) };
+    };
+  } else if (scope === 'stocks') {
+    providers['stock-indices'] = dashboardStockIndices;
+    providers['stock-breadth'] = async () => {
+      const data = await getMarketBreadthSnapshot();
+      return { market: 'stocks', source: data.source, updatedAt: data.generatedAt, status: 'live',
+        metrics: [{ label: '上涨占比', value: data.advancersPct, unit: '%' }, { label: '上涨/下跌', value: `${data.advancers}/${data.decliners}` }, { label: '平均涨跌', value: data.averageChangePct, unit: '%' }, ...data.leadingSectors.slice(0, 2).map(item => ({ label: item.nameZh || item.name, value: item.advancersPct, unit: '%' }))],
+        reason: data.summaryZh, data };
+    };
+    providers['stock-events'] = async () => {
+      const data = await getEarningsCalendar();
+      return { market: 'stocks', source: data.source, fetchedAt: data.fetchedAt, status: data.count ? 'live' : 'empty',
+        metrics: data.count ? [{ label: '当日财报公司', value: data.count }, ...data.items.slice(0, 3).map(item => ({ label: item.symbol, value: item.timingLabel }))] : [],
+        reason: data.count ? 'Nasdaq 当日财报日历；这是市场级数据，不代表任一单只股票已发布事件。' : 'Nasdaq 请求成功，但当前日期暂无日历记录。', data: data.items.slice(0, 20) };
+    };
+    if (!guest) providers['stock-guru-watchlist'] = async () => {
+      const symbols = [...new Set(unifiedAlertStore.listWatchlist().flatMap(id => { const match = String(id || '').match(/^stock:us:([A-Z][A-Z0-9.-]{0,9})$/i); return match ? [match[1].toUpperCase()] : []; }))].slice(0, 20);
+      if (!symbols.length) return { market: 'stocks', status: 'empty', source: 'SEC EDGAR Form 13F', reason: '自选中没有可比较的美股标的。', metrics: [] };
+      const snapshots = await Promise.all(symbols.map(symbol => guruHoldings.getGuruStockHolders(symbol).catch(error => ({ market: 'stocks' as const, instrument: symbol, dataStatus: 'failed' as const, source: 'SEC EDGAR Form 13F', updatedAt: null, reason: error instanceof Error ? error.message : '读取 SEC 快照失败', evidenceRefs: [], mapping: null, holders: [], caveats: [] }))));
+      const rows = snapshots.flatMap(snapshot => snapshot.holders.map(holder => ({ symbol: snapshot.instrument, manager: holder.manager.personAssociation || holder.manager.filingName, reportPeriod: holder.reportPeriod, filedAt: holder.filedAt, change: holder.change, shareDelta: holder.shareDelta, sourceUrl: holder.sourceUrl })));
+      const hasFailure = snapshots.some(snapshot => ['failed', 'unavailable', 'partial'].includes(snapshot.dataStatus));
+      return { market: 'stocks', source: 'SEC EDGAR Form 13F', status: rows.length ? hasFailure ? 'partial' : 'historical' : hasFailure ? 'unavailable' : 'empty',
+        updatedAt: snapshots.map(snapshot => snapshot.updatedAt).filter((value): value is string => Boolean(value)).sort().at(-1) || null,
+        metrics: [{ label: '自选股票', value: symbols.length }, { label: '机构披露行', value: rows.length }, { label: '报告变化', value: rows.filter(row => !['unchanged', 'unavailable'].includes(row.change)).length }],
+        reason: rows.length ? '13F 是季度滞后披露；逐机构呈现，不汇总成市场总持仓。' : snapshots.map(snapshot => snapshot.reason).filter(Boolean).slice(0, 3).join('；') || '已读取 SEC 快照，但当前自选无可比较披露。',
+        evidenceRefs: [...new Set(snapshots.flatMap(snapshot => snapshot.evidenceRefs || []))], data: rows.slice(0, 30) };
+    };
+  } else if (scope === 'options') {
+    providers['option-chain'] = dashboardOptionsCoverage;
+    providers['option-volatility'] = () => { const result = dashboardOptionsCoverage(); return { ...result, reason: result.status === 'historical' ? '仅展示真实期权链历史覆盖；没有足够快照时不推算 IV/Greeks。' : '没有可验证的本地期权链历史，IV/Greeks 暂不可用。' }; };
+    providers['option-events'] = () => ({ market: 'options', status: 'unsupported', source: '期权事件映射', reason: '尚未指定期权及底层标的；不会将股票市场事件直接填入期权看板。' });
+  } else if (scope === 'crypto') {
+    providers['crypto-prices'] = async () => {
+      const data = await binanceFeed.getMultiplePrices(['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT']);
+      const rows = Object.values(data);
+      return { market: 'crypto', source: 'Binance Public', fetchedAt: new Date().toISOString(), status: rows.length ? 'live' : 'unavailable',
+        metrics: rows.map(item => ({ label: item.symbol, value: item.price, changePct: item.change24hPct })), data: rows,
+        reason: rows.length ? 'Binance 适配器未提供源端时间戳；时间为 MoneyMoney 接收时间。' : 'Binance 公共行情未返回数据；适配器没有区分空响应和请求失败。' };
+    };
+    providers['crypto-derivatives'] = async () => {
+      const data = await getPerpetualCrowding(); const rows = data.rows || [];
+      return { market: 'crypto', source: data.source, fetchedAt: data.generatedAt, status: rows.length ? 'cached' : 'empty',
+        metrics: rows.slice(0, 4).map(item => ({ label: `${item.symbol} 资金费率`, value: item.fundingRatePct, unit: '%' })), reason: rows.length ? '公开永续快照来自现有适配器缓存。' : '来源成功，但当前没有可展示永续合约记录。', data: rows };
+    };
+    providers['crypto-chain'] = async () => {
+      const data = await getBitcoinOnchainRadar();
+      return { market: 'crypto', source: data.source, fetchedAt: data.generatedAt, status: 'cached', metrics: data.metrics.slice(0, 3).map(item => ({ label: item.labelZh, value: item.displayZh })), reason: data.summaryZh, data };
+    };
+  } else if (scope === 'prediction') {
+    const cachedPrediction = (): DashboardProviderResult => {
+      const data = getCachedPredictionRadarSlice('', 240);
+      if (!data) return { market: 'prediction', status: 'unavailable', source: '预测市场公共雷达缓存', reason: '当前进程没有预测市场缓存；看板不主动触发上游抓取。' };
+      const sourceStates = Object.values(data.sources || {}); const succeeded = sourceStates.filter(item => item.ok).length;
+      return { market: 'prediction', source: 'Predict.fun / 公共雷达缓存', updatedAt: data.updatedAt || null, status: !succeeded ? 'unavailable' : data.opportunities.length ? 'cached' : 'empty',
+        metrics: [{ label: '有效市场', value: data.markets.length }, { label: '可查看机会', value: data.opportunities.length }],
+        reason: data.opportunities.length ? '读取预测市场自身的公共缓存。' : succeeded ? '来源成功响应，但当前快照没有可展示机会。' : '预测市场来源不可用。', data: { markets: data.markets.length, opportunities: data.opportunities.length } };
+    };
+    providers['prediction-probability'] = cachedPrediction;
+    providers['prediction-liquidity'] = cachedPrediction;
+  } else if (scope === 'watchlist' && !guest) {
+    providers['watchlist-summary'] = () => {
+      const ids = unifiedAlertStore.listWatchlist(); const counts = { stocks: 0, options: 0, crypto: 0, prediction: 0 };
+      ids.forEach(id => { if (/^stock:/i.test(id)) counts.stocks += 1; else if (/^option:/i.test(id)) counts.options += 1; else if (/^(crypto|binance):/i.test(id)) counts.crypto += 1; else if (/^(prediction|predict|market):/i.test(id)) counts.prediction += 1; });
+      return { market: 'watchlist', source: '管理员自选库', status: ids.length ? 'historical' : 'empty', metrics: Object.entries(counts).map(([label, value]) => ({ label, value })), reason: ids.length ? '按显式市场 ID 分组显示，不跨市场填充。' : '管理员自选库为空。' };
+    };
+    providers['watchlist-events'] = () => ({ market: 'watchlist', status: 'unsupported', source: '市场专属事件源', reason: '自选页包含多个市场；请切换至具体市场查看事件。' });
+  }
+  return providers;
+}
+
+app.get('/api/workspace/dashboard', async (req, res) => {
   const rawScope = String(req.query.scope || 'overview');
   if (!MARKET_SCOPES.includes(rawScope as MarketScope)) {
     return res.status(400).json({ success: false, error: '未知市场 scope' });
   }
   const scope = rawScope as MarketScope;
-  return res.json({ success: true, scope, cards: resolveMarketDashboardCards(scope) });
+  const guest = (req as any).user?.role === 'guest';
+  try {
+    const providers = await buildDashboardProviderMap(scope, guest);
+    const results = await collectDashboardResults(providers);
+    return res.json({ success: true, scope, cards: resolveMarketDashboardCards(scope, results, { guest }) });
+  } catch (error) {
+    const cards = resolveMarketDashboardCards(scope, {}, { guest }).map(card => ({ ...card, status: 'failed' as const, reason: error instanceof Error ? error.message : '看板数据聚合失败' }));
+    return res.json({ success: true, scope, cards });
+  }
+});
+
+const MARKET_DIGEST_PENDING_KEY = 'market-change-digest:pending';
+const MARKET_DIGEST_ACK_KEY = 'market-change-digest:acknowledged';
+const MARKET_DIGEST_VIEWED_KEY = 'market-change-digest:last-viewed';
+
+function canonicalDigestWatchlist(ids: string[]): Array<{ market: MarketId; instrument: string; symbol?: string }> {
+  const result = new Map<string, { market: MarketId; instrument: string; symbol?: string }>();
+  for (const raw of ids.slice(0, 100)) {
+    const id = String(raw || '').trim();
+    if (!id) continue;
+    let ref = telegramRefFromId(id);
+    if (!ref && isTelegramWatchableStockId(id)) {
+      const match = id.match(/^(us|hk|sh|sz|bj)(.+)$/i);
+      if (match) {
+        const venue = ({ us: 'us', hk: 'hk', sh: 'sh', sz: 'sz', bj: 'bj' } as Record<string, string>)[match[1].toLowerCase()];
+        ref = normalizeInstrumentRef({ type: 'stock', venue, symbol: /^(sh|sz|bj)$/i.test(match[1]) ? `${match[1]}${match[2]}` : match[2], title: id, aliases: [] });
+      }
+    }
+    if (!ref) continue;
+    const market: MarketId = ref.type === 'stock' ? 'stocks' : ref.type === 'option' ? 'options' : ref.type === 'crypto' ? 'crypto' : 'prediction';
+    const instrument = String(ref.id || '').trim();
+    if (!instrument) continue;
+    result.set(`${market}:${instrument}`, { market, instrument, ...(ref.type === 'stock' ? { symbol: String(ref.symbol || '').toUpperCase() } : {}) });
+  }
+  return [...result.values()];
+}
+
+async function buildSharedMarketChangeDigest(ids: string[], since: string): Promise<MarketChangeRecord[]> {
+  const watched = canonicalDigestWatchlist(ids);
+  const watchedByMarket = new Map<MarketId, Set<string>>();
+  watched.forEach(item => watchedByMarket.set(item.market, new Set([...(watchedByMarket.get(item.market) || []), item.instrument])));
+  const records: MarketChangeRecord[] = [];
+  const markets: MarketId[] = ['stocks', 'options', 'crypto', 'prediction'];
+
+  for (const market of markets) {
+    const marketWatchlist = [...(watchedByMarket.get(market) || new Set<string>())];
+    const evidence = decisionIntelligenceStore.listEvidence(market).slice(0, 2_000);
+    const canonicalEvidence = evidence.map(item => {
+      const identity = item.instrument ? canonicalDigestWatchlist([item.instrument]).find(row => row.market === market) : undefined;
+      return identity ? { ...item, instrument: identity.instrument } : item;
+    });
+    records.push(...calculateEvidencePriceChanges(canonicalEvidence.map(item => ({
+      id: item.id, market: item.market, instrument: item.instrument, source: item.source,
+      fetchedAt: item.fetchedAt, fields: item.fields, dataStatus: item.dataStatus,
+    })), { since, watchlist: marketWatchlist, minimumChangePct: 1 }));
+
+    for (const item of canonicalEvidence) {
+      if (!item.instrument || !marketWatchlist.includes(item.instrument)) continue;
+      const title = typeof item.fields.title === 'string' ? item.fields.title : '';
+      if (!title || item.workspace !== 'event-intelligence') continue;
+      const publishedAt = typeof item.fields.publishedAt === 'string' ? item.fields.publishedAt : item.observedAt;
+      const sourceUrl = typeof item.fields.sourceUrl === 'string' ? item.fields.sourceUrl : item.source.url || undefined;
+      const kind = /news|headline/i.test(String(item.fields.kind || '')) ? 'news' : 'event';
+      records.push({
+        id: `evidence:${item.id}`, dedupeKey: item.id, market, instrument: item.instrument, kind,
+        title, summary: item.reason || undefined, source: item.source.name, sourceUrl,
+        occurredAt: typeof item.fields.occurredAt === 'string' ? item.fields.occurredAt : undefined,
+        publishedAt, observedAt: item.observedAt, evidenceRefs: [item.id, ...(sourceUrl ? [sourceUrl] : [])], dataStatus: item.dataStatus,
+      });
+    }
+
+    for (const signal of decisionIntelligenceStore.listSignalOutcomes(market).slice(0, 5_000)) {
+      const identity = canonicalDigestWatchlist([signal.instrument]).find(row => row.market === market);
+      if (!identity || !marketWatchlist.includes(identity.instrument)) continue;
+      const triggeredMillis = Number(signal.triggeredAt);
+      if (!Number.isFinite(triggeredMillis)) continue;
+      const triggeredAt = new Date(triggeredMillis).toISOString();
+      records.push({ id: `signal:${signal.id}`, dedupeKey: signal.id, market, instrument: identity.instrument,
+        kind: 'signal', title: signal.pattern || signal.strategyId || '策略信号',
+        summary: `${signal.status || 'generated'} · ${signal.source} · ${signal.timeframe}`,
+        source: signal.source, observedAt: triggeredAt, evidenceRefs: signal.evidenceRefs || [],
+        dataStatus: 'historical' });
+    }
+
+    for (const event of researchRepository.listSourceHealthEvents(market, 200)) {
+      if (!['outage', 'recovery'].includes(String(event.kind)) || !event.at) continue;
+      records.push({ id: `source:${event.id}`, dedupeKey: event.id, market,
+        kind: event.kind === 'recovery' ? 'source-recovery' : 'source-outage',
+        title: `${event.sourceName || event.sourceId || '数据源'}${event.kind === 'recovery' ? '已恢复' : '故障'}`,
+        summary: event.detail || `${event.from || 'unknown'} → ${event.to || 'unknown'}`,
+        source: event.sourceName || event.sourceId, observedAt: event.at, dataStatus: event.to || 'unavailable' });
+    }
+  }
+
+  // Public Yahoo news is queried only for a bounded set of explicitly watched US stocks.
+  const watchedStocks = watched.filter(item => item.market === 'stocks' && item.symbol).slice(0, 5);
+  const newsResults = await Promise.allSettled(watchedStocks.map(async item => ({ item, snapshot: await getStockNewsSnapshot(item.symbol!) })));
+  for (const result of newsResults) {
+    if (result.status !== 'fulfilled') {
+      const item = watchedStocks[newsResults.indexOf(result)];
+      if (!item) continue;
+      const observedAt = new Date().toISOString();
+      const reason = result.reason instanceof Error ? result.reason.message : '新闻来源请求失败';
+      records.push({ id: `source-failure:news:${item.instrument}:${observedAt.slice(0, 13)}`, dedupeKey: `news:${item.instrument}:${observedAt.slice(0, 13)}`,
+        market: 'stocks', instrument: item.instrument, kind: 'source-failure', title: 'Yahoo Finance 新闻请求失败',
+        summary: reason.slice(0, 240), source: 'Yahoo Finance', observedAt, dataStatus: 'failed' });
+      continue;
+    }
+    const { item, snapshot } = result.value;
+    for (const news of snapshot.items.slice(0, 3)) {
+      const observedAt = snapshot.retrievedAt || news.publishedAt;
+      const id = crypto.createHash('sha256').update(`${item.instrument}:${news.url}`).digest('hex').slice(0, 20);
+      records.push({ id: `news:${id}`, dedupeKey: news.url, market: 'stocks', instrument: item.instrument,
+        kind: 'news', title: news.title, source: news.source, sourceUrl: news.url,
+        publishedAt: news.publishedAt, observedAt, dataStatus: snapshot.status });
+    }
+  }
+
+  // SEC 13F rows are already locally cached and identity-mapped; expose each manager separately.
+  const guruStocks = watchedStocks.slice(0, 5);
+  const guruResults = await Promise.allSettled(guruStocks.map(async item => ({ item, snapshot: await guruHoldings.getGuruStockHolders(item.symbol!) })));
+  for (const result of guruResults) {
+    if (result.status !== 'fulfilled') {
+      const item = guruStocks[guruResults.indexOf(result)];
+      if (!item) continue;
+      const observedAt = new Date().toISOString();
+      const reason = result.reason instanceof Error ? result.reason.message : 'SEC 13F 快照读取失败';
+      records.push({ id: `source-failure:13f:${item.instrument}:${observedAt.slice(0, 13)}`, dedupeKey: `13f:${item.instrument}:${observedAt.slice(0, 13)}`,
+        market: 'stocks', instrument: item.instrument, kind: 'source-failure', title: 'SEC 13F 来源请求失败',
+        summary: reason.slice(0, 240), source: 'SEC EDGAR Form 13F', observedAt, dataStatus: 'failed' });
+      continue;
+    }
+    const { item, snapshot } = result.value;
+    for (const row of snapshot.holders) {
+      if (!row.filedAt || ['unchanged', 'unavailable'].includes(row.change)) continue;
+      records.push({ id: `13f:${item.instrument}:${row.manager.cik}:${row.reportPeriod}`, dedupeKey: `${row.manager.cik}:${row.reportPeriod}:${item.instrument}`,
+        market: 'stocks', instrument: item.instrument, kind: '13f-change',
+        title: `${row.manager.personAssociation || row.manager.filingName}：${row.change}`,
+        summary: `报告期 ${row.reportPeriod} · 申报 ${row.filedAt}${row.shareDelta == null ? '' : ` · 股数变化 ${row.shareDelta > 0 ? '+' : ''}${row.shareDelta}`}`,
+        source: 'SEC EDGAR Form 13F', sourceUrl: row.sourceUrl, publishedAt: row.filedAt, observedAt: row.filedAt,
+        evidenceRefs: [row.sourceUrl], dataStatus: snapshot.dataStatus });
+    }
+  }
+
+  return buildMarketChangeDigest({ records, watchlist: watched.map(item => item.instrument), since, limit: 60 });
+}
+
+app.get('/api/changes/digest', async (req, res) => {
+  const guest = (req as any).user?.role === 'guest';
+  const now = new Date().toISOString();
+  try {
+    const requestedSince = String(req.query.since || '').trim();
+    const since = requestedSince && Number.isFinite(Date.parse(requestedSince))
+      ? new Date(requestedSince).toISOString()
+      : (guest ? new Date(Date.now() - 24 * 60 * 60_000).toISOString() : stateStore.get<string>(MARKET_DIGEST_VIEWED_KEY) || new Date(Date.now() - 24 * 60 * 60_000).toISOString());
+    const watchlist = guest ? [] : unifiedAlertStore.listWatchlist();
+    const fresh = await buildSharedMarketChangeDigest(watchlist, since);
+    const acknowledged = new Set(guest ? [] : stateStore.get<string[]>(MARKET_DIGEST_ACK_KEY) || []);
+    const pending = guest ? [] : stateStore.get<MarketChangeRecord[]>(MARKET_DIGEST_PENDING_KEY) || [];
+    const merged = new Map<string, MarketChangeRecord>();
+    [...pending, ...fresh].forEach(item => { if (!acknowledged.has(item.id)) merged.set(item.id, item); });
+    const records = [...merged.values()].sort((left, right) => Date.parse(right.observedAt) - Date.parse(left.observedAt)).slice(0, 60);
+    const hasFailures = records.some(item => item.kind === 'source-failure' || item.kind === 'source-outage');
+    if (!guest) {
+      stateStore.set(MARKET_DIGEST_PENDING_KEY, records, 1);
+      stateStore.set(MARKET_DIGEST_VIEWED_KEY, now, 1);
+    }
+    return res.json({ success: true, market: 'overview', instrument: null, data: records, records,
+      dataStatus: records.length ? hasFailures ? 'partial' : fresh.length ? 'live' : 'cached' : 'empty', source: 'shared web/Telegram market-change digest',
+      updatedAt: now, reason: hasFailures ? '摘要包含来源故障记录；其余有效变化仍按市场与标的隔离展示。' : records.length ? null : guest ? '访客摘要不读取私人自选；当前没有公开来源故障记录。' : '自上次查看以来暂无新的自选变化。',
+      evidenceRefs: [...new Set(records.flatMap(item => item.evidenceRefs || []))], guest });
+  } catch (error) {
+    return res.status(500).json({ success: false, market: 'overview', instrument: null, data: [], records: [],
+      dataStatus: 'failed', source: 'shared web/Telegram market-change digest', updatedAt: now,
+      reason: error instanceof Error ? error.message : '变化摘要生成失败', evidenceRefs: [] });
+  }
+});
+
+app.post('/api/changes/digest/ack', express.json(), (req, res) => {
+  if (!adminOnly(req, res)) return;
+  const id = String(req.body?.id || '').trim();
+  if (!id || id.length > 160) return res.status(400).json({ success: false, error: '摘要记录 ID 无效' });
+  const pending = stateStore.get<MarketChangeRecord[]>(MARKET_DIGEST_PENDING_KEY) || [];
+  if (!pending.some(item => item.id === id)) return res.status(404).json({ success: false, error: '摘要记录不存在或已确认' });
+  const acknowledged = stateStore.get<string[]>(MARKET_DIGEST_ACK_KEY) || [];
+  stateStore.set(MARKET_DIGEST_ACK_KEY, [...new Set([...acknowledged, id])].slice(-5_000), 1);
+  stateStore.set(MARKET_DIGEST_PENDING_KEY, pending.filter(item => item.id !== id), 1);
+  stateStore.appendAudit({ id: `market-digest-ack:${crypto.randomUUID()}`, action: 'market_change_digest_ack', detail: `管理员已确认摘要记录 ${id}` });
+  return res.json({ success: true, id, acknowledgedAt: new Date().toISOString(), dataStatus: 'live', source: 'MoneyMoney local digest state', reason: null });
 });
 
 app.get('/api/market-depth/capabilities', (req, res) => {
@@ -2425,7 +2743,7 @@ app.get('/api/stock/kline', async (req, res) => {
   }
 });
 
-app.use('/api/stocks/guru-holdings', createGuruHoldingsRouter(guruHoldings, adminOnly));
+app.use('/api/stocks/guru-holdings', createGuruHoldingsRouter(guruHoldings, adminOnly, () => unifiedAlertStore.listWatchlist()));
 
 app.get('/api/diagnostics', async (req, res) => {
   if (!adminOnly(req, res)) return;
@@ -4231,19 +4549,21 @@ async function buildTelegramDigest(chatId: string): Promise<string> {
   const since = previousDigest?.at || new Date(Date.now() - 24 * 60 * 60_000).toISOString();
   const marketIds: MarketId[] = ['stocks', 'options', 'crypto', 'prediction'];
   const marketNames: Record<MarketId, string> = { stocks: '股票', options: '期权', crypto: '虚拟币', prediction: '预测市场' };
+  const sharedChanges = await buildSharedMarketChangeDigest(ids, since);
   const evidenceSummary = marketIds.map(market => {
-    const recentEvidence = decisionIntelligenceStore.listEvidence(market).filter(item => item.fetchedAt >= since);
-    const recentSignals = decisionIntelligenceStore.listSignalOutcomes(market).filter(item => new Date(item.triggeredAt).toISOString() >= since);
-    const outages = researchRepository.listSourceHealthEvents(market, 200).filter((item: any) => item.kind === 'outage' && item.at >= since);
-    const base = telegramPublicBaseUrl();
-    const href = buildTelegramDeepLink(base, { market, instrument: recentEvidence[0]?.instrument || '', workspace: market === 'stocks' ? 'stock-quotes' : 'decision-intelligence' });
-    const label = `${marketNames[market]}：${recentEvidence.length} 条新证据 · ${recentSignals.length} 个信号 · ${outages.length} 次来源故障`;
-    const evidence = recentEvidence[0];
-    const sourceUrl = telegramSafeExternalUrl((evidence?.source as any)?.url);
-    const detail = evidence ? ` · 最新来源 ${escapeTelegramHtml(evidence.source.name)}${sourceUrl ? ` <a href="${escapeTelegramHtml(sourceUrl)}">原文</a>` : ''}` : '';
-    return `· ${href ? `<a href="${escapeTelegramHtml(href)}">${escapeTelegramHtml(label)}</a>` : escapeTelegramHtml(label)}${detail}`;
+    const changes = sharedChanges.filter(item => item.market === market);
+    if (!changes.length) return `<b>${marketNames[market]}</b> · 自上次摘要后暂无自选变化`;
+    const rows = changes.slice(0, 4).map(item => {
+      const workspace = item.kind === '13f-change' ? 'guru-holdings' : item.kind === 'news' || item.kind === 'event' ? 'events' : item.kind === 'signal' ? 'decision-intelligence' : market === 'stocks' ? 'stock-quotes' : `${market}-market`;
+      const href = buildTelegramDeepLink(telegramPublicBaseUrl(), { market, instrument: item.instrument || '', timeframe: '1d', workspace });
+      const title = `${item.title}${item.summary ? ` · ${item.summary}` : ''}`;
+      const linked = href ? `<a href="${escapeTelegramHtml(href)}">${escapeTelegramHtml(title)}</a>` : escapeTelegramHtml(title);
+      const sourceUrl = telegramSafeExternalUrl(item.sourceUrl);
+      const original = sourceUrl ? ` <a href="${escapeTelegramHtml(sourceUrl)}">${escapeTelegramHtml(item.source || '来源')}</a>` : item.source ? ` · ${escapeTelegramHtml(item.source)}` : '';
+      return `· ${linked}${original} · ${escapeTelegramHtml(item.observedAt.slice(0, 16))}`;
+    });
+    return `<b>${marketNames[market]}</b> · ${changes.length} 项变化\n${rows.join('\n')}`;
   });
-  const watchGroups: Record<MarketId, string[]> = { stocks: [], options: [], crypto: [], prediction: [] };
   const watchItems = ids.slice(0, 12).map(id => {
     let ref = telegramRefFromId(id);
     if (!ref && isTelegramWatchableStockId(id)) {
@@ -4251,11 +4571,10 @@ async function buildTelegramDigest(chatId: string): Promise<string> {
       const venue = ({ us: 'us', hk: 'hk', sh: 'sh', sz: 'sz', bj: 'bj' } as Record<string, string>)[match[1].toLowerCase()];
       ref = normalizeInstrumentRef({ type: 'stock', venue, symbol: /^(sh|sz|bj)$/i.test(match[1]) ? `${match[1]}${match[2]}` : match[2], title: id, aliases: [] });
     }
-    const scope: MarketId = ref ? (ref.type === 'stock' ? 'stocks' : ref.type === 'option' ? 'options' : ref.type === 'crypto' ? 'crypto' : 'prediction') : telegramFindMarket(id) ? 'prediction' : 'stocks';
-    watchGroups[scope].push(id);
+    const scope: MarketId | null = ref ? (ref.type === 'stock' ? 'stocks' : ref.type === 'option' ? 'options' : ref.type === 'crypto' ? 'crypto' : 'prediction') : telegramFindMarket(id) ? 'prediction' : null;
     return { id, ref, scope };
   });
-  const watchLines: string[] = [];
+  const watchLines: string[] = watchItems.filter(item => !item.scope).map(item => `· ${escapeTelegramHtml(item.id)} · 未识别自选，未归入任何市场`);
   for (const market of marketIds) {
     const items = watchItems.filter(item => item.scope === market).slice(0, 4);
     if (!items.length) { watchLines.push(`<b>${marketNames[market]}</b> · 暂无自选`); continue; }
@@ -4281,7 +4600,7 @@ async function buildTelegramDigest(chatId: string): Promise<string> {
           const priceValue = quote.price ?? quote.yesPrice;
           price = Number.isFinite(Number(priceValue)) ? Number(priceValue) : null;
           change = Number.isFinite(Number(quote.changePct)) ? Number(quote.changePct) : null;
-          source = item.scope === 'stocks' ? '股票行情聚合源' : item.scope === 'crypto' ? 'Binance 公共行情' : item.scope === 'options' ? String((overview.marketData as any)?.source || 'CBOE 延迟期权') : '预测市场来源';
+          source = market === 'stocks' ? '股票行情聚合源' : market === 'crypto' ? 'Binance 公共行情' : market === 'options' ? String((overview.marketData as any)?.source || 'CBOE 延迟期权') : '预测市场来源';
           capturedAt = overview.freshness.fetchedAt || '';
           reason = overview.status.reason || '';
           label = item.ref.title || item.ref.symbol;
@@ -4289,7 +4608,7 @@ async function buildTelegramDigest(chatId: string): Promise<string> {
       } else {
         reason = '标的 ID 无法识别，未跨市场猜测';
       }
-      const deepMarket = item.scope;
+      const deepMarket = market;
       const href = buildTelegramDeepLink(telegramPublicBaseUrl(), { market: deepMarket, instrument: item.ref?.id || item.id, timeframe: '1d', workspace: deepMarket === 'stocks' ? 'stock-quotes' : `${deepMarket}-market` });
       const dataText = price == null ? escapeTelegramHtml(reason || '暂无数据') : `${market === 'prediction' ? 'YES ' : ''}${formatTelegramNumber(price, market === 'prediction' ? 1 : 2)}${market === 'prediction' ? '%' : ''}${change == null ? '' : ` · ${change >= 0 ? '+' : ''}${formatTelegramNumber(change, 2)}%`}`;
       return `· ${href ? `<a href="${escapeTelegramHtml(href)}">${escapeTelegramHtml(label)}</a>` : escapeTelegramHtml(label)} · ${dataText}${source ? ` · ${escapeTelegramHtml(source)}` : ''}${capturedAt ? ` · ${escapeTelegramHtml(capturedAt.slice(0, 16))}` : ''}`;

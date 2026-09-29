@@ -298,9 +298,24 @@
     .market-instrument-library { display:block; }
     .workspace-dashboard-cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:8px; margin:-6px 0 16px; }
     .workspace-dashboard-card { min-width:0; padding:10px 11px; border:1px solid var(--border); border-radius:11px; background:linear-gradient(135deg,var(--glass-highlight),var(--bg-card)); box-shadow:var(--shadow); }
-    .workspace-dashboard-card-title { font-size:12px; font-weight:800; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .workspace-dashboard-card-title { display:block; width:100%; border:0; padding:0; background:transparent; color:var(--text); text-align:left; font-size:12px; font-weight:800; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; cursor:pointer; }
+    .workspace-dashboard-card-title:focus-visible { outline:2px solid var(--purple); outline-offset:3px; border-radius:3px; }
     .workspace-dashboard-card-meta { display:flex; justify-content:space-between; gap:6px; margin-top:6px; font-size:10px; color:var(--text-secondary); }
     .workspace-dashboard-status { color:var(--yellow); }
+    .workspace-dashboard-card[data-dashboard-workspace] { cursor:pointer; transition:transform .16s ease,border-color .16s ease; }
+    .workspace-dashboard-card[data-dashboard-workspace]:hover { transform:translateY(-2px); border-color:var(--purple); }
+    .workspace-dashboard-card-metrics { display:flex; flex-wrap:wrap; gap:5px 10px; margin-top:8px; font-size:11px; }
+    .workspace-dashboard-metric { color:var(--text); }
+    .workspace-dashboard-card-reason { margin-top:7px; color:var(--text-secondary); font-size:10px; line-height:1.45; }
+    .workspace-dashboard-card-time { margin-top:5px; color:var(--text-secondary); font-size:9px; }
+    .market-change-digest { margin:-4px 0 16px; padding:12px; border:1px solid var(--border); border-radius:12px; background:linear-gradient(135deg,var(--glass-highlight),var(--bg-card)); }
+    .market-change-digest-head { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+    .market-change-digest-list { display:grid; gap:7px; margin-top:9px; }
+    .market-change-digest-item { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; gap:8px; padding:8px 9px; border-radius:9px; background:var(--bg-secondary); font-size:11px; }
+    .market-change-digest-item-main { min-width:0; line-height:1.5; overflow-wrap:anywhere; }
+    .market-change-digest-item-meta { display:block; color:var(--text-secondary); font-size:9px; }
+    .market-change-digest-group { color:var(--purple); font-weight:800; }
+    @media(max-width:640px) { .market-change-digest-item { grid-template-columns:1fr; } .market-change-digest-item button { justify-self:end; } }
     .watchlist-view-toggle { display:flex; gap:5px; }
     .workspace-watchlist-group { margin-top:14px; }
     .workspace-watchlist-group-title { display:flex; justify-content:space-between; gap:8px; color:var(--text-secondary); font-size:11px; font-weight:800; margin-bottom:7px; }
@@ -2098,7 +2113,12 @@
         </div>
         <span id="market-overview-status" style="flex:0 0 auto;color:var(--text-secondary);font-size:10px;white-space:nowrap;">数据更新时间：-</span>
       </div>
-      <div id="workspace-dashboard-cards" class="workspace-dashboard-cards" data-workspace-ids="overview" aria-current="page" aria-label="当前市场看板层级"></div>
+      <div id="workspace-dashboard-cards" class="workspace-dashboard-cards" data-market-scopes="overview stocks options crypto prediction watchlist" aria-label="当前市场看板层级"></div>
+      <section id="market-change-digest" class="market-change-digest" aria-label="自选变化摘要" aria-live="polite">
+        <div class="market-change-digest-head"><strong>🧭 自选变化摘要</strong><button type="button" class="tab" onclick="loadMarketChangeDigest(true)">刷新</button></div>
+        <div id="market-change-digest-status" class="workspace-dashboard-card-reason">正在读取最近的行情、新闻、13F、信号和来源变化...</div>
+        <div id="market-change-digest-list" class="market-change-digest-list"></div>
+      </section>
       <section id="market-research-tools" data-market-scopes="stocks options crypto prediction" data-workspace-ids="screener" style="display:grid;grid-template-columns:minmax(300px,1.2fr) minmax(260px,1fr);gap:12px;margin-bottom:16px;">
         <div id="market-screener" class="glass-card" style="padding:14px;border-radius:14px;">
           <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px;"><strong>🔎 当前市场筛选</strong><button class="tab" type="button" onclick="loadMarketResearch()">刷新</button></div>
@@ -7301,6 +7321,10 @@ function setGuruHoldingsView(view) {
   if (search) {
     if (guruHoldingsView === 'consensus' && previousView !== 'consensus') {
       search.value = previousView === 'stocks' ? guruCurrentStockSymbol : '';
+    } else if (guruHoldingsView === 'managers' && previousView !== 'managers') {
+      search.value = '';
+    } else if (guruHoldingsView === 'stocks' && previousView === 'consensus') {
+      search.value = guruCurrentStockSymbol || window._stockSelectedSymbol || '';
     }
     search.placeholder = guruHoldingsView === 'managers' ? '搜索机构、人物或 CIK'
       : guruHoldingsView === 'stocks' ? '输入股票代码查看持有人' : '可选：输入已核验股票代码筛选';
@@ -12149,24 +12173,51 @@ function renderWorkspaceSidebar() {
 }
 
 const WORKSPACE_DASHBOARD_FALLBACK = {
-  overview: [['overview-markets', '跨市场大盘', 'MoneyMoney 综合数据'], ['overview-events', '跨市场事件', '公开事件源']],
-  stocks: [['stock-indices', '股票指数', 'Nasdaq / Tencent Finance'], ['stock-breadth', '市场宽度', 'Nasdaq Public Screener'], ['stock-events', '股票事件', 'SEC EDGAR / 财报日历']],
-  options: [['option-chain', '期权链', 'CBOE / Deribit Public'], ['option-volatility', '波动率与 Greeks', '公开期权链'], ['option-events', '期权相关事件', '公开事件源']],
-  crypto: [['crypto-prices', '交易所行情', 'Binance Public'], ['crypto-derivatives', '衍生品结构', 'Binance Public'], ['crypto-chain', '链上与事件', 'CoinGecko / DeFiLlama']],
-  prediction: [['prediction-probability', '预测概率', 'Predict.fun / Polymarket Public'], ['prediction-liquidity', '市场流动性', '公开预测市场快照']],
-  watchlist: [['watchlist-summary', '自选摘要', '本地自选库'], ['watchlist-events', '自选事件', '当前市场事件源']],
+  overview: [['overview-markets', '跨市场大盘', 'MoneyMoney 综合数据', 'overview'], ['overview-events', '跨市场事件', '公开事件源', 'events']],
+  stocks: [['stock-indices', '股票指数', 'Nasdaq / Tencent Finance', 'stock-quotes'], ['stock-breadth', '市场宽度', 'Nasdaq Public Screener', 'breadth'], ['stock-events', '股票事件', 'SEC EDGAR / 财报日历', 'events'], ['stock-guru-watchlist', '自选 13F 变化', 'SEC EDGAR Form 13F', 'guru-holdings']],
+  options: [['option-chain', '期权链', 'CBOE / Deribit Public', 'option-chain'], ['option-volatility', '波动率与 Greeks', '公开期权链', 'volatility'], ['option-events', '期权相关事件', '公开事件源', 'events']],
+  crypto: [['crypto-prices', '交易所行情', 'Binance Public', 'crypto-quotes'], ['crypto-derivatives', '衍生品结构', 'Binance Public', 'funding-rate'], ['crypto-chain', '链上与事件', 'CoinGecko / DeFiLlama', 'on-chain']],
+  prediction: [['prediction-probability', '预测概率', 'Predict.fun / Polymarket Public', 'prediction-radar'], ['prediction-liquidity', '市场流动性', '公开预测市场快照', 'prediction-radar']],
+  watchlist: [['watchlist-summary', '自选摘要', '本地自选库', 'watchlist'], ['watchlist-events', '自选事件', '当前市场事件源', 'watchlist']],
 };
 const workspaceDashboardState = new Map();
 
 function renderWorkspaceDashboardCards(cards) {
   const host = document.getElementById('workspace-dashboard-cards');
   if (!host) return;
-  host.innerHTML = (cards || []).map(card => `<div class="workspace-dashboard-card" data-dashboard-card="${marketResearchEscape(card.id)}"><div class="workspace-dashboard-card-title">${marketResearchEscape(card.title)}</div><div class="workspace-dashboard-card-meta"><span>${marketResearchEscape(card.source)}</span><span class="workspace-dashboard-status">${card.status === 'live' ? '实时' : card.status === 'stale' ? '缓存' : card.status === 'degraded' ? '部分可用' : '待加载'}</span></div></div>`).join('');
+  const labels = { live:'实时', delayed:'延迟', cached:'缓存', partial:'部分成功', empty:'暂无记录', unavailable:'来源不可用', unsupported:'当前市场不支持', failed:'请求失败', historical:'历史数据' };
+  host.innerHTML = (cards || []).map(card => {
+    const scope = card.market || activeMarketScope;
+    const metrics = (Array.isArray(card.metrics) ? card.metrics : []).slice(0, 6).map(metric => `<span class="workspace-dashboard-metric"><b>${marketResearchEscape(metric.label)}：</b>${marketResearchEscape(metric.value)}${metric.unit ? marketResearchEscape(metric.unit) : ''}${metric.changePct != null && Number.isFinite(Number(metric.changePct)) ? ` <small>${Number(metric.changePct) >= 0 ? '+' : ''}${Number(metric.changePct).toFixed(2)}%</small>` : ''}</span>`).join('');
+    const links = (Array.isArray(card.evidenceRefs) ? card.evidenceRefs : []).slice(0, 2).map(value => {
+      try { const url = new URL(value); return ['https:', 'http:'].includes(url.protocol) ? `<a href="${marketResearchEscape(url.href)}" target="_blank" rel="noopener noreferrer">来源</a>` : ''; } catch (_) { return ''; }
+    }).join(' ');
+    return `<article class="workspace-dashboard-card" data-dashboard-card="${marketResearchEscape(card.id)}" data-status="${marketResearchEscape(card.status)}"><button type="button" class="workspace-dashboard-card-title" data-dashboard-workspace="${marketResearchEscape(card.workspace || '')}" data-dashboard-scope="${marketResearchEscape(scope)}" data-dashboard-instrument="${marketResearchEscape(card.instrument || '')}">${marketResearchEscape(card.title)} ↗</button><div class="workspace-dashboard-card-meta"><span>${marketResearchEscape(card.source || '数据源未标明')}</span><span class="workspace-dashboard-status-label">${marketResearchEscape(labels[card.status] || '状态未知')}</span></div>${metrics ? `<div class="workspace-dashboard-card-metrics">${metrics}</div>` : ''}${card.reason ? `<div class="workspace-dashboard-card-reason">${marketResearchEscape(card.reason)}</div>` : ''}${card.updatedAt || card.fetchedAt ? `<div class="workspace-dashboard-card-time">更新时间：${marketResearchEscape(card.updatedAt || card.fetchedAt)}</div>` : ''}${links ? `<div class="workspace-dashboard-card-time">${links}</div>` : ''}</article>`;
+  }).join('');
+  host.querySelectorAll('[data-dashboard-workspace]').forEach(button => button.addEventListener('click', () => openDashboardWorkspace(button.dataset.dashboardScope, button.dataset.dashboardWorkspace, button.dataset.dashboardInstrument)));
+}
+
+function openDashboardWorkspace(scope, workspace, instrument = '') {
+  if (!isMarketScope(scope)) return;
+  const open = () => {
+    const groups = workspaceNavigationState.get(scope)?.groups || workspaceFallbackNavigation(scope);
+    const allowed = groups.some(group => group.items.some(item => item.id === workspace));
+    const target = allowed ? workspace : defaultWorkspaceForMarketScope(scope);
+    if (scope !== activeMarketScope) setMarketScope(scope, { openTab: false });
+    if (instrument) {
+      setWorkspaceInstrument(instrument);
+      const symbol = instrument.match(/^stock:us:([^:]+)$/i)?.[1];
+      if (symbol) window._stockSelectedSymbol = symbol.toUpperCase();
+    }
+    window.openWorkspace(target);
+  };
+  open();
 }
 
 function loadWorkspaceDashboardCards() {
   const scope = activeMarketScope;
-  const fallback = (WORKSPACE_DASHBOARD_FALLBACK[scope] || []).map(([id, title, source]) => ({ id, title, source, status: 'unavailable' }));
+  loadMarketChangeDigest();
+  const fallback = (WORKSPACE_DASHBOARD_FALLBACK[scope] || []).map(([id, title, source, workspace]) => ({ id, title, source, workspace, market: scope, status: 'unavailable', reason: '正在读取该市场的数据；失败时会显示具体原因。', metrics: [] }));
   const cached = workspaceDashboardState.get(scope);
   renderWorkspaceDashboardCards(cached?.cards || fallback);
   if (cached?.requested) return;
@@ -12180,6 +12231,52 @@ function loadWorkspaceDashboardCards() {
       renderWorkspaceDashboardCards(payload.cards);
     })
     .catch(() => {});
+}
+
+let marketChangeDigestPromise = null;
+function marketChangeWorkspace(record) {
+  if (record.kind === '13f-change') return 'guru-holdings';
+  if (record.kind === 'news' || record.kind === 'event') return 'events';
+  if (record.kind === 'signal') return 'decision-intelligence';
+  return record.market === 'stocks' ? 'stock-quotes' : record.market === 'options' ? 'option-chain' : record.market === 'crypto' ? 'crypto-quotes' : 'prediction-radar';
+}
+function marketChangeInternalHref(record) {
+  const params = new URLSearchParams({ market: record.market, workspace: marketChangeWorkspace(record) });
+  if (record.instrument) params.set('instrument', record.instrument);
+  return `${location.pathname}?${params.toString()}`;
+}
+function renderMarketChangeDigest(payload) {
+  const host = document.getElementById('market-change-digest-list');
+  const status = document.getElementById('market-change-digest-status');
+  if (!host || !status) return;
+  const records = Array.isArray(payload?.records) ? payload.records : [];
+  status.textContent = payload?.reason || (records.length ? `自上次查看后有 ${records.length} 项变化 · ${payload.updatedAt ? `更新于 ${payload.updatedAt}` : '更新时间未知'}` : '自上次查看以来暂无新的变化。');
+  if (!records.length) { host.innerHTML = ''; return; }
+  const names = { stocks:'股票', options:'期权', crypto:'虚拟币', prediction:'预测市场' };
+  host.innerHTML = records.map(record => {
+    const external = (() => { try { const url = new URL(record.sourceUrl); return ['https:', 'http:'].includes(url.protocol) ? `<a href="${marketResearchEscape(url.href)}" target="_blank" rel="noopener noreferrer">${marketResearchEscape(record.source || '来源原文')}</a>` : ''; } catch (_) { return ''; } })();
+    const summary = [record.summary, record.publishedAt ? `发布 ${record.publishedAt}` : '', record.observedAt].filter(Boolean).join(' · ');
+    return `<div class="market-change-digest-item" data-digest-id="${marketResearchEscape(record.id)}"><div class="market-change-digest-item-main"><span class="market-change-digest-group">${marketResearchEscape(names[record.market] || record.market)}</span> · <a href="${marketResearchEscape(marketChangeInternalHref(record))}">${marketResearchEscape(record.title)}</a><span class="market-change-digest-item-meta">${marketResearchEscape(summary)}${external ? ` · ${external}` : record.source ? ` · ${marketResearchEscape(record.source)}` : ''}</span></div>${payload.guest ? '' : `<button type="button" class="tab" data-digest-ack="${marketResearchEscape(record.id)}">已读</button>`}</div>`;
+  }).join('');
+  host.querySelectorAll('[data-digest-ack]').forEach(button => button.addEventListener('click', () => acknowledgeMarketChange(button.dataset.digestAck)));
+}
+function loadMarketChangeDigest(force = false) {
+  if (marketChangeDigestPromise && !force) return marketChangeDigestPromise;
+  const status = document.getElementById('market-change-digest-status');
+  if (force && status) status.textContent = '正在刷新自选变化...';
+  marketChangeDigestPromise = fetch('/api/changes/digest', { credentials: 'include', cache: 'no-store' })
+    .then(response => response.ok ? response.json() : Promise.reject(new Error(`摘要请求失败 (${response.status})`)))
+    .then(payload => { if (!payload?.success) throw new Error(payload?.reason || '摘要读取失败'); renderMarketChangeDigest(payload); return payload; })
+    .catch(error => { if (status) status.textContent = error?.message || '变化摘要暂不可用'; return null; })
+    .finally(() => { marketChangeDigestPromise = null; });
+  return marketChangeDigestPromise;
+}
+async function acknowledgeMarketChange(id) {
+  if (!id) return;
+  const csrf = document.cookie.split(';').map(value => value.trim()).find(value => value.startsWith('mm_csrf='))?.slice('mm_csrf='.length) || '';
+  const response = await fetch('/api/changes/digest/ack', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json', 'x-csrf-token': decodeURIComponent(csrf) }, body: JSON.stringify({ id }) });
+  if (!response.ok) { const status = document.getElementById('market-change-digest-status'); if (status) status.textContent = `确认失败 (${response.status})，请刷新后重试。`; return; }
+  await loadMarketChangeDigest(true);
 }
 
 let workspaceWatchlistView = 'table';
@@ -12396,7 +12493,15 @@ function loadActiveWorkspaceInstrument() {
     if (activeWorkspaceId === 'breadth') return loadMarketBreadth(), true;
     if (activeWorkspaceId === 'insider') return loadInsiderRadar(symbol, name), true;
     if (activeWorkspaceId === 'institutional') return loadInstitutionalOwnership(symbol, name), true;
-    if (activeWorkspaceId === 'guru-holdings') return setGuruHoldingsView('stocks'), true;
+    if (activeWorkspaceId === 'guru-holdings') {
+      if (guruHoldingsView === 'consensus') {
+        guruCurrentStockSymbol = symbol;
+        const search = document.getElementById('guru-holdings-search');
+        if (search) search.value = symbol;
+        loadGuruConsensus();
+      } else setGuruHoldingsView('stocks');
+      return true;
+    }
     if (activeWorkspaceId === 'analyst') return loadAnalystConsensus(symbol, name), true;
     if (activeWorkspaceId === 'fundamentals') return loadFundamentalQuality(symbol, name), true;
     if (activeWorkspaceId === 'short-interest') return loadShortInterest(symbol, name), true;

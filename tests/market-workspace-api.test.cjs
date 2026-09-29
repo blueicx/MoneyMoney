@@ -21,7 +21,8 @@ test('workspace context API validates workspace against the requested scope', ()
 
 test('workspace dashboard API is registered with scope validation', () => {
   assert.match(serverSource, /app\.get\(['"]\/api\/workspace\/dashboard['"]/);
-  assert.match(serverSource, /resolveMarketDashboardCards\(scope\)/);
+  assert.match(serverSource, /resolveMarketDashboardCards\(scope, results, \{ guest \}\)/);
+  assert.match(serverSource, /collectDashboardResults\(/);
 });
 
 test('workspace watchlist API is scoped and hides owner information', () => {

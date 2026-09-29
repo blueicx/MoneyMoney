@@ -57,9 +57,11 @@ test('Telegram daily digest is per-chat, market-grouped, evidence-linked and sch
   const server = fs.readFileSync('src/web/server.ts', 'utf8');
   const digest = server.slice(server.indexOf('async function buildTelegramDigest'), server.indexOf('async function monitorTelegramSourceRecovery'));
   assert.match(digest, /按市场分组/);
+  assert.match(digest, /await buildSharedMarketChangeDigest\(ids, since\)/);
   assert.match(digest, /sourceUrl/);
-  assert.match(digest, /listSignalOutcomes\(market\)/);
-  assert.match(digest, /listSourceHealthEvents\(market/);
+  const sharedDigest = server.slice(server.indexOf('async function buildSharedMarketChangeDigest'), server.indexOf("app.get('/api/changes/digest'"));
+  assert.match(sharedDigest, /listSignalOutcomes\(market\)/);
+  assert.match(sharedDigest, /listSourceHealthEvents\(market/);
   assert.match(server, /zonedDigestClock\(now, 'Asia\/Shanghai'\)/);
   assert.match(server, /notifications\.dailyReport/);
   assert.match(server, /action === 'digest_sent'/);
