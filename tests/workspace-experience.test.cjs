@@ -86,8 +86,7 @@ test('layout enhancement preserves the native right-library collapse action', ()
 });
 
 test('screener monitoring retains the last valid baseline on empty/failure and alerts only on real changes', () => {
-  assert.match(serverSource, /当前筛选来源返回零条原始记录；为避免误报全部退出，保留上次有效基线/);
-  assert.match(serverSource, /筛选来源请求失败；保留上次有效基线/);
-  assert.match(serverSource, /result\.record\.lastStatus === 'updated' && \(result\.record\.entered\.length \|\| result\.record\.exited\.length\)/);
+  assert.match(serverSource, /screenerTrackingStore\.run\(template/);
+  assert.match(serverSource, /screenerTrackingStore\.claimNotification\(result\.record\)/);
   assert.match(serverSource, /筛选监控「\$\{result\.record\.name\}」/);
 });

@@ -10206,8 +10206,8 @@ async function loadMarketTimeline() {
     const query = new URLSearchParams({ scope: activeMarketScope });
     const instrumentId = currentInstrumentFilterId();
     if (instrumentId) query.set('instrumentId', instrumentId);
-    if (activeMarketScope === 'stocks' && instrumentId.startsWith('stock:')) {
-      const entityResponse = await fetch('/api/events/entities?market=stocks&instrumentId=' + encodeURIComponent(instrumentId), { signal });
+    if (instrumentId && (activeMarketScope === 'stocks' || !window.mm_isGuest)) {
+      const entityResponse = await fetch('/api/events/entities?market=' + encodeURIComponent(activeMarketScope) + '&instrumentId=' + encodeURIComponent(instrumentId), { signal });
       const entityPayload = await entityResponse.json();
       if (!entityResponse.ok || !entityPayload.success) throw new Error(entityPayload.reason || '标的事件来源不可用');
       if (!isCurrentMarketScopeToken(scopeToken) || signal.aborted) return;
@@ -10219,7 +10219,7 @@ async function loadMarketTimeline() {
         const evidence = formatSourceEvidence({ title: item.title, sourceName: item.source?.name, sourceUrl: item.source?.url, publishedAt: item.publishedAt, fetchedAt: item.retrievedAt, sourceStatus: item.publishedAt ? 'live' : 'partial' });
         const id = safeAttr(item.id);
         const canStudy = item.publishedAt && Date.parse(item.occurredAt) <= Date.now();
-        return `${evidence}<div class="event-research-actions"><button class="tab" type="button" data-event-id="${id}" onclick="openEventKlineFromTimeline(this)">定位 K 线</button><button class="tab guest-admin-only" type="button" data-event-id="${id}" onclick="openEventResearchFromTimeline(this)" ${canStudy ? '' : 'disabled title="尚未发生或缺少可核实的发布时间"'}>事件研究</button><button class="tab guest-admin-only" type="button" data-event-id="${id}" onclick="openEventDecisionFromTimeline(this)">写决策日记</button></div>`;
+        return `${evidence}<div class="event-research-actions">${activeMarketScope === 'stocks' ? `<button class="tab" type="button" data-event-id="${id}" onclick="openEventKlineFromTimeline(this)">定位 K 线</button><button class="tab guest-admin-only" type="button" data-event-id="${id}" onclick="openEventResearchFromTimeline(this)" ${canStudy ? '' : 'disabled title="尚未发生或缺少可核实的发布时间"'}>事件研究</button><button class="tab guest-admin-only" type="button" data-event-id="${id}" onclick="openEventDecisionFromTimeline(this)">写决策日记</button>` : '<span>真实快照变化；尚无可核验发布时间的记录不进入事件研究。</span>'}</div>`;
       }).join('') : `<div class="empty-tip">${safeNewsText(entityPayload.reason || '该股票暂无可核实的事件与新闻')}</div>`);
       return;
     }
@@ -10919,8 +10919,25 @@ function renderDecisionJournal(items) {
 function renderDecisionPortfolio(data, reason) {
   const host = document.getElementById('decision-portfolio');
   if (!host) return;
-  if (!data?.positions?.length) { host.innerHTML = `<div class="empty-tip">${safeNewsText(reason || '当前市场暂无模拟或导入仓位')}</div>`; return; }
-  host.innerHTML = `<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:7px;">${commandMetric('组合市值', '$' + Number(data.totalValue || 0).toFixed(2), `${data.positions.length} 个仓位`)}${commandMetric('最大集中度', Number(data.concentrationPct || 0).toFixed(1) + '%', '单一仓位占比')}${commandMetric('超额收益', Number(data.excessReturnPct || 0).toFixed(2) + '%', '相对输入基准')}</div><div style="margin-top:8px;font-size:10px;color:var(--text-secondary);">压力测试：${(data.stressTests || []).map(item => `${item.shockPct}% → $${Number(item.value).toFixed(0)}`).join(' · ')}</div><div style="margin-top:6px;font-size:10px;color:var(--text-secondary);">因子暴露：${Object.entries(data.byFactor || {}).map(([key,value]) => `${safeNewsText(key)} $${Number(value).toFixed(0)}`).join(' · ') || '缺少因子标签'}<br>风险贡献：${(data.riskContributions || []).map(item => `${safeNewsText(item.instrument)} ${Number(item.contributionPct).toFixed(1)}%`).join(' · ') || safeNewsText(data.riskContributionReason || '暂无')}<br>相关性：${(data.correlations || []).map(item => `${safeNewsText(item.left)}/${safeNewsText(item.right)} ${Number(item.correlation).toFixed(2)}`).join(' · ') || safeNewsText(data.correlationReason || '暂无')}</div>`;
+  const selection = data?.accountSource || 'paper';
+  const controls = `<label>账户来源 <select id="decision-portfolio-source"><option value="paper">模拟仓位</option><option value="imported">导入仓位</option><option value="combined">显式合并</option></select></label>`;
+  const metric = (value, suffix = '') => value == null ? '不可用' : Number(value).toFixed(2) + suffix;
+  const positions = data?.positions || [];
+  host.innerHTML = controls + (!positions.length ? `<p class="empty-tip">${safeNewsText(reason || '所选账户暂无仓位')}</p>` : `
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-top:8px;">
+    ${commandMetric('组合市值', metric(data.totalValue), safeNewsText(data.currencyReason || Object.keys(data.byCurrency || {}).join('/')))}
+    ${commandMetric('最大集中度', metric(data.concentrationPct, '%'), '同币种仓位占比')}
+    ${commandMetric('超额收益', metric(data.excessReturnPct, '%'), safeNewsText(data.returnReason || '相对已提供基准'))}</div>
+    <p>${safeNewsText(reason || '')}</p>
+    <p>按币种计价：${Object.entries(data.byCurrency || {}).map(([currency,value]) => safeNewsText(currency) + ' ' + Number(value).toFixed(2)).join(' · ')}</p>
+    <p>协方差风险贡献：${(data.riskContributions || []).map(item => safeNewsText(item.instrument) + ' ' + Number(item.contributionPct).toFixed(2) + '%').join(' · ') || safeNewsText(data.riskContributionReason)}</p>
+    <p>日期对齐相关性：${(data.correlations || []).map(item => safeNewsText(item.left) + '/' + safeNewsText(item.right) + ' ' + item.correlation + '（' + item.samples + '日）').join(' · ') || safeNewsText(data.correlationReason)}</p>
+    <table class="workspace-watchlist-table"><thead><tr><th>标的</th><th>数量</th><th>币种</th><th>成本</th><th>来源</th></tr></thead><tbody>${positions.map(row => `<tr><td>${safeNewsText(row.instrument)}</td><td>${row.quantity}</td><td>${safeNewsText(row.currency)}</td><td>${metric(row.averageCost)}</td><td>${safeNewsText(row.accountSource || '导入')}</td></tr>`).join('')}</tbody></table>`);
+  const select = host.querySelector('#decision-portfolio-source'); select.value = selection;
+  select.onchange = async () => {
+    try { const result = await decisionFetchJson('/api/portfolio/analytics?' + new URLSearchParams({ market: activeMarketScope, accountSource: select.value })); renderDecisionPortfolio(result.data,result.reason); }
+    catch (error) { showToast(error.message,'error'); }
+  };
 }
 
 function renderDecisionSignalQuality(data, reason) {
@@ -14726,7 +14743,7 @@ function mobileTab(tab) {
         banner.querySelector('[data-pwa-update-dismiss]')?.addEventListener('click', () => banner.remove());
         document.body.appendChild(banner);
       };
-      navigator.serviceWorker.register('/sw.js?v=60').then((registration) => {
+      navigator.serviceWorker.register('/sw.js?v=61').then((registration) => {
         showPwaUpdate(registration);
         registration.addEventListener('updatefound', () => {
           const installing = registration.installing;
@@ -14926,7 +14943,9 @@ window.MoneyMoneyChartBridge = {
 </script>
 
       
-<script src="/experience-enhancements.js?v=20261001"></script>
+<script src="/experience-enhancements.js?v=20261001-action61"></script>
+<link rel="stylesheet" href="/action-research-workspace.css?v=20261001">
+<script src="/action-research-workspace.js?v=20261001" defer></script>
       <div class="drawer density-compact density-comfortable"></div>
 <div id="chart-fullscreen-overlay" class="chart-fullscreen-overlay" aria-hidden="true" hidden></div>
 </body></html>

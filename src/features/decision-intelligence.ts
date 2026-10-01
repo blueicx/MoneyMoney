@@ -352,6 +352,11 @@ export interface PortfolioRow {
   factor?: string;
   volatilityPct?: number;
   returns?: number[];
+  datedReturns?: Array<{ date: string; value: number }>;
+  accountSource?: string;
+  accountId?: string;
+  averageCost?: number;
+  cashFlows?: Array<{ at: string; amount: number; currency: string }>;
 }
 
 export function importPortfolioRows(rows: Array<Partial<PortfolioRow>>): { accepted: PortfolioRow[]; rejected: Array<{ row: Partial<PortfolioRow>; reason: string }> } {
@@ -365,7 +370,7 @@ export function importPortfolioRows(rows: Array<Partial<PortfolioRow>>): { accep
       assertMarketContext({ market, workspace: 'portfolio-import', instrument });
       if (!Number.isFinite(Number(row.quantity)) || Number(row.quantity) <= 0) throw new Error('数量必须大于 0');
       if (!Number.isFinite(Number(row.price)) || Number(row.price) <= 0) throw new Error('价格必须大于 0');
-      if (!/^[A-Z]{3}$/.test(String(row.currency || '').toUpperCase())) throw new Error('币种单位无效');
+      if (!/^[A-Z]{3,8}$/.test(String(row.currency || '').toUpperCase())) throw new Error('币种单位无效');
       const key = `${market}:${instrument.toUpperCase()}:${String(row.currency).toUpperCase()}`;
       if (seen.has(key)) throw new Error('重复仓位');
       seen.add(key);
@@ -373,7 +378,12 @@ export function importPortfolioRows(rows: Array<Partial<PortfolioRow>>): { accep
       if (volatilityPct != null && (!Number.isFinite(volatilityPct) || volatilityPct < 0)) throw new Error('波动率无效');
       const returns = row.returns == null ? undefined : row.returns.map(Number);
       if (returns?.some(value => !Number.isFinite(value))) throw new Error('收益序列无效');
-      accepted.push({ instrument, market, quantity: Number(row.quantity), price: Number(row.price), currency: String(row.currency).toUpperCase(), ...(row.sector ? { sector: String(row.sector) } : {}), ...(row.factor ? { factor: String(row.factor) } : {}), ...(volatilityPct != null ? { volatilityPct } : {}), ...(returns ? { returns } : {}) });
+      const datedReturns = row.datedReturns;
+      if (datedReturns && (new Set(datedReturns.map(point => point.date)).size !== datedReturns.length || datedReturns.some(point => !/^\d{4}-\d{2}-\d{2}$/.test(point.date) || !Number.isFinite(Date.parse(point.date)) || !Number.isFinite(point.value)))) throw new Error('收益日期重复或数值无效');
+      if (row.averageCost != null && (!Number.isFinite(row.averageCost) || row.averageCost < 0)) throw new Error('成本无效');
+      if (row.cashFlows?.some(flow => !Number.isFinite(Date.parse(flow.at)) || !Number.isFinite(flow.amount) || !/^[A-Z]{3,8}$/.test(flow.currency))) throw new Error('现金流无效');
+      accepted.push({ instrument, market, quantity: Number(row.quantity), price: Number(row.price), currency: String(row.currency).toUpperCase(), ...(row.sector ? { sector: String(row.sector) } : {}), ...(row.factor ? { factor: String(row.factor) } : {}), ...(volatilityPct != null ? { volatilityPct } : {}), ...(returns ? { returns } : {}),
+        ...(datedReturns ? { datedReturns } : {}), ...(row.accountSource ? { accountSource: String(row.accountSource) } : {}), ...(row.accountId ? { accountId: String(row.accountId) } : {}), ...(row.averageCost == null ? {} : { averageCost: row.averageCost }), ...(row.cashFlows ? { cashFlows: row.cashFlows } : {}) });
     } catch (error: any) {
       rejected.push({ row, reason: error.message || '仓位记录无效' });
     }
@@ -388,8 +398,10 @@ export function analyzePortfolio(rows: PortfolioRow[], input: { benchmarkReturnP
   const bySector = rows.reduce<Record<string, number>>((acc, row, index) => { const key = row.sector || '未分类'; acc[key] = (acc[key] || 0) + values[index]; return acc; }, {});
   const byFactor = rows.reduce<Record<string, number>>((acc, row, index) => { const key = row.factor || '未分类'; acc[key] = (acc[key] || 0) + values[index]; return acc; }, {});
   const largest = values.length ? Math.max(...values) : 0;
-  const benchmarkReturnPct = Number(input.benchmarkReturnPct || 0);
-  const portfolioReturnPct = Number(input.portfolioReturnPct || 0);
+  const benchmarkReturnPct = input.benchmarkReturnPct != null && Number.isFinite(input.benchmarkReturnPct) ? input.benchmarkReturnPct : null;
+  const portfolioReturnPct = input.portfolioReturnPct != null && Number.isFinite(input.portfolioReturnPct) ? input.portfolioReturnPct : null;
+  const byCurrency = rows.reduce<Record<string, number>>((acc, row, index) => { acc[row.currency] = (acc[row.currency] || 0) + values[index]; return acc; }, {});
+  const comparableCurrency = Object.keys(byCurrency).length <= 1 && !Object.hasOwn(byCurrency, 'UNKNOWN');
   const rawRisks = rows.map((row, index) => row.volatilityPct == null ? null : values[index] * row.volatilityPct);
   const totalRisk = rawRisks.reduce<number>((sum, value) => sum + (value || 0), 0);
   const riskContributions = rows.flatMap((row, index) => rawRisks[index] == null ? [] : [{ instrument: row.instrument, contributionPct: totalRisk ? Number(((rawRisks[index] || 0) / totalRisk * 100).toFixed(4)) : 0 }]);
@@ -402,27 +414,44 @@ export function analyzePortfolio(rows: PortfolioRow[], input: { benchmarkReturnP
     const denominator = Math.sqrt(l.reduce((sum, value) => sum + (value - lm) ** 2, 0) * r.reduce((sum, value) => sum + (value - rm) ** 2, 0));
     return denominator ? Number((numerator / denominator).toFixed(4)) : null;
   };
-  const correlations: Array<{ left: string; right: string; correlation: number }> = [];
+  const correlations: Array<{ left: string; right: string; correlation: number; samples: number }> = [];
   for (let left = 0; left < rows.length; left += 1) for (let right = left + 1; right < rows.length; right += 1) {
-    if (!rows[left].returns || !rows[right].returns) continue;
-    const value = correlation(rows[left].returns!, rows[right].returns!);
-    if (value != null) correlations.push({ left: rows[left].instrument, right: rows[right].instrument, correlation: value });
+    if (!rows[left].datedReturns || !rows[right].datedReturns) continue;
+    const rightValues = new Map(rows[right].datedReturns!.map(point => [point.date, point.value]));
+    const pairs = rows[left].datedReturns!.filter(point => rightValues.has(point.date));
+    const value = correlation(pairs.map(point => point.value), pairs.map(point => rightValues.get(point.date)!));
+    if (value != null) correlations.push({ left: rows[left].instrument, right: rows[right].instrument, correlation: value, samples: pairs.length });
+  }
+  // Every covariance element uses the same completed trading dates, not array positions.
+  const commonDates = rows.length ? (rows[0].datedReturns || []).map(point => point.date).filter(date => rows.every(row => row.datedReturns?.some(point => point.date === date))) : [];
+  const covarianceRisk: Array<{ instrument: string; contributionPct: number }> = [];
+  if (comparableCurrency && totalValue > 0 && commonDates.length >= 2 && rows.every(row => ['stocks', 'crypto'].includes(row.market))) {
+    const series = rows.map(row => { const byDate = new Map(row.datedReturns!.map(point => [point.date, point.value])); return commonDates.map(date => byDate.get(date)!); });
+    const means = series.map(points => points.reduce((sum, value) => sum + value, 0) / points.length);
+    const covariance = series.map((points, i) => series.map((other, j) => points.reduce((sum, value, k) => sum + (value - means[i]) * (other[k] - means[j]), 0) / (commonDates.length - 1)));
+    const weights = values.map(value => value / totalValue);
+    const marginal = covariance.map(points => points.reduce((sum, value, j) => sum + value * weights[j], 0));
+    const variance = marginal.reduce((sum, value, i) => sum + value * weights[i], 0);
+    if (variance > 0) rows.forEach((row, i) => covarianceRisk.push({ instrument: row.instrument, contributionPct: Number((weights[i] * marginal[i] / variance * 100).toFixed(4)) }));
   }
   return {
-    totalValue: Number(totalValue.toFixed(2)),
-    concentrationPct: totalValue ? Number((largest / totalValue * 100).toFixed(2)) : 0,
+    totalValue: comparableCurrency ? Number(totalValue.toFixed(2)) : null,
+    byCurrency, currencyReason: comparableCurrency ? null : '缺少汇率，不同币种不合并计价',
+    concentrationPct: comparableCurrency && totalValue ? Number((largest / totalValue * 100).toFixed(2)) : null,
     benchmarkReturnPct,
     portfolioReturnPct,
-    excessReturnPct: Number((portfolioReturnPct - benchmarkReturnPct).toFixed(2)),
-    byMarket,
-    bySector,
-    byFactor,
-    riskContributions,
-    riskContributionReason: riskContributions.length ? null : '缺少波动率，无法计算风险贡献',
+    excessReturnPct: portfolioReturnPct != null && benchmarkReturnPct != null ? Number((portfolioReturnPct - benchmarkReturnPct).toFixed(2)) : null,
+    returnReason: portfolioReturnPct == null || benchmarkReturnPct == null ? '缺少账本收益历史或日期对齐的基准，收益比较不可用' : null,
+    byMarket: comparableCurrency ? byMarket : {},
+    bySector: comparableCurrency ? bySector : {},
+    byFactor: comparableCurrency ? byFactor : {},
+    riskContributions: covarianceRisk,
+    volatilityExposure: comparableCurrency ? riskContributions : [],
+    riskContributionReason: covarianceRisk.length ? null : '缺少同币种、日期对齐的股票/虚拟币收益序列，无法计算协方差风险贡献',
     correlations,
     correlationReason: correlations.length ? null : '缺少可比收益序列，未生成相关性',
-    stressTests: [-20, -10, -5, 5].map(shockPct => ({ shockPct, value: Number((totalValue * (1 + shockPct / 100)).toFixed(2)), impact: Number((totalValue * shockPct / 100).toFixed(2)) })),
-    rebalanceDraft: Object.entries(byMarket).map(([market, value]) => ({ market, currentPct: totalValue ? Number((value / totalValue * 100).toFixed(2)) : 0 })),
+    stressTests: comparableCurrency ? [-20, -10, -5, 5].map(shockPct => ({ shockPct, value: Number((totalValue * (1 + shockPct / 100)).toFixed(2)), impact: Number((totalValue * shockPct / 100).toFixed(2)) })) : [],
+    rebalanceDraft: comparableCurrency ? Object.entries(byMarket).map(([market, value]) => ({ market, currentPct: totalValue ? Number((value / totalValue * 100).toFixed(2)) : 0 })) : [],
     disclaimer: '组合分析和再平衡仅为研究草稿，不会创建订单。',
   };
 }
@@ -448,6 +477,9 @@ export interface SignalOutcome {
   market: MarketId;
   instrument: string;
   strategyId: string;
+  strategyVersion?: string;
+  experimentId?: string;
+  expiresAt?: number;
   pattern?: string;
   timeframe: string;
   source: string;

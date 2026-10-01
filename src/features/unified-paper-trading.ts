@@ -36,6 +36,7 @@ export interface UnifiedPaperPosition {
   currentPrice: number;
   openedAt: string;
   realizedPnl: number;
+  currency?: string;
 }
 
 export interface UnifiedPaperLedger {

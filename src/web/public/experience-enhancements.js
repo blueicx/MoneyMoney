@@ -266,7 +266,7 @@
     if (!panel.querySelector('.mm-watchlist-toolbar')) {
       const toolbar = document.createElement('div');
       toolbar.className = 'mm-watchlist-toolbar';
-      toolbar.innerHTML = '<input type="search" data-mm-watchlist-search aria-label="筛选自选" placeholder="筛选代码或名称"><select data-mm-watchlist-sort aria-label="自选排序"><option value="pinned">置顶优先</option><option value="name">名称 A-Z</option></select><button type="button" class="tab" data-mm-watchlist-collapse-all>折叠分组</button><button type="button" class="tab guest-admin-only" data-mm-watchlist-select-all>全选可见</button><button type="button" class="tab guest-admin-only" data-mm-watchlist-alert disabled>批量提醒（0）</button><button type="button" class="tab guest-admin-only" data-mm-watchlist-remove disabled>批量移出</button><span data-mm-watchlist-count aria-live="polite"></span>';
+      toolbar.innerHTML = '<input type="search" data-mm-watchlist-search aria-label="筛选自选" placeholder="筛选代码或名称"><select data-mm-watchlist-sort aria-label="自选排序"><option value="pinned">置顶优先</option><option value="name">名称 A-Z</option><option value="upcoming">临近事件优先（加载行动后）</option><option value="status">来源异常优先（加载行动后）</option><option value="pending">待处理数量（加载行动后）</option></select><button type="button" class="tab" data-mm-watchlist-collapse-all>折叠分组</button><button type="button" class="tab guest-admin-only" data-mm-watchlist-select-all>全选可见</button><button type="button" class="tab guest-admin-only" data-mm-watchlist-alert disabled>批量提醒（0）</button><button type="button" class="tab guest-admin-only" data-mm-watchlist-remove disabled>批量移出</button><span data-mm-watchlist-count aria-live="polite"></span>';
       const columns = panel.querySelector('#workspace-watchlist-columns');
       panel.insertBefore(toolbar, columns || host);
       const sort = toolbar.querySelector('[data-mm-watchlist-sort]');
@@ -392,6 +392,11 @@
           const ap = groupId === 'watchlist' && watchlistPins.has(aid) ? 1 : 0;
           const bp = groupId === 'watchlist' && watchlistPins.has(bid) ? 1 : 0;
           if (sort === 'pinned' && ap !== bp) return bp - ap;
+          const am=window.mmActionSortMeta?.[aid] || { pending:0,upcoming:Infinity,status:0 };
+          const bm=window.mmActionSortMeta?.[bid] || { pending:0,upcoming:Infinity,status:0 };
+          if (sort === 'pending' && am.pending !== bm.pending) return bm.pending-am.pending;
+          if (sort === 'status' && am.status !== bm.status) return bm.status-am.status;
+          if (sort === 'upcoming' && am.upcoming !== bm.upcoming) return am.upcoming-bm.upcoming;
           return (a.dataset.mmWatchlistName || '').localeCompare(b.dataset.mmWatchlistName || '', 'zh-CN', { numeric: true });
         });
         if (items.some((item, index) => item !== existingItems[index])) items.forEach(item => selector.appendChild(item));
@@ -402,6 +407,8 @@
     }
     updateWatchlistSelection();
   }
+
+  window.addEventListener('mm-action-items-updated', applyWatchlistView);
 
   function selectedWatchlistIds() {
     return [...new Set([...document.querySelectorAll('#workspace-watchlist-groups [data-mm-watchlist-select]:checked')].map(input => input.value))].slice(0, 20);

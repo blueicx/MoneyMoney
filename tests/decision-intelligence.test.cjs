@@ -137,7 +137,8 @@ test('portfolio analytics uses supplied volatility and return histories without 
     { instrument: 'AAPL', market: 'stocks', quantity: 10, price: 200, currency: 'USD', factor: 'quality', volatilityPct: 20, returns: [1, 2, -1, 3] },
     { instrument: 'MSFT', market: 'stocks', quantity: 5, price: 400, currency: 'USD', factor: 'quality', volatilityPct: 10, returns: [1.1, 1.8, -0.8, 2.7] },
   ];
-  const analytics = analyzePortfolio(rows);
+  const datedRows = rows.map(row => ({ ...row, datedReturns: row.returns.map((value, index) => ({ date: `2026-01-0${index + 1}`, value })) }));
+  const analytics = analyzePortfolio(datedRows);
   assert.equal(analytics.byFactor.quality, 4000);
   assert.equal(analytics.riskContributions.length, 2);
   assert.equal(Math.round(analytics.riskContributions.reduce((sum, item) => sum + item.contributionPct, 0)), 100);

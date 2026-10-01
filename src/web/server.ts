@@ -65,6 +65,7 @@ import { getInstitutionalOwnershipSnapshot } from '../features/institutional-own
 import { createGuruHoldingsRouter } from '../features/guru-holdings-router';
 import * as guruHoldings from '../features/guru-holdings';
 import { buildMarketChangeDigest, calculateEvidencePriceChanges, type MarketChangeRecord } from '../features/market-change-digest';
+import { ActionCenterStore, buildActionCenter, type ActionCenterItem } from '../features/action-center';
 import { startGuruHoldingsRefreshMonitor, stopGuruHoldingsRefreshMonitor } from '../features/guru-holdings-refresh-monitor';
 import { getFearGreed, getFundingRates } from '../features/market-sentiment';
 import { getGlobalMacroSpotSnapshot } from '../features/global-macro-spot';
@@ -94,7 +95,7 @@ import { getForecastLabReport, resolveForecastCase } from '../features/forecast-
 import { calculatePredictionPosition } from '../features/prediction-position-sizer';
 import { aiCommentaryConfigured, getAiMarketCommentary } from '../features/ai-commentary';
 import { getAiConfigurationStatus, testAiConnection, type AiChain } from '../features/ai-runtime-config';
-import { unifiedInstrumentService, normalizeInstrumentRef, summarizeTimelineAvailability, type InstrumentType } from '../features/unified-instruments';
+import { unifiedInstrumentService, normalizeInstrumentRef, summarizeTimelineAvailability, filterEventsForInstrument, type InstrumentType } from '../features/unified-instruments';
 import { stockDataService } from '../features/stock-data-service';
 import { buildStockCoverageMap } from '../features/instrument-coverage';
 import { MARKET_SCOPES, filterInstrumentResults, type MarketScope } from '../features/market-scope';
@@ -117,6 +118,9 @@ import { buildBacktestPreflight } from '../features/backtest-preflight';
 import { assessResearchFreshness } from '../features/research-freshness';
 import { testNotificationChannels } from '../features/notification-channels';
 import { runResearchExperiment } from '../features/experiment-runner';
+import { compareExperiments } from '../features/experiment-comparison';
+import { compareOptionSnapshots, summarizeMarketHistory } from '../features/market-history-comparison';
+import { observeForwardSignal } from '../features/signal-forward';
 import { assertMarketContext, createResearchJob, MARKET_IDS, type MarketId } from '../features/research-contracts';
 import {
   analyzePortfolio,
@@ -165,6 +169,7 @@ import { createBinanceKlineAdapter } from '../data/binance-kline-adapter';
 import { actionsForScreener, fieldsForScreener, filterRows, isScreenerScope, paginateRows, serializeTemplate, sortRows, type ScreenerFilter, type ScreenerScope, type ScreenerSort } from '../features/market-screener';
 import { compareInstruments, createCompareSnapshot, type CompareInstrument, type CompareScope } from '../features/instrument-compare';
 import { diffScreenerMembership } from '../features/workspace-experience';
+import { ScreenerTrackingStore } from '../features/screener-tracking';
 import {
   addResearchNote,
   addResearchSnapshot,
@@ -632,6 +637,77 @@ async function buildSharedMarketChangeDigest(ids: string[], since: string): Prom
   return buildMarketChangeDigest({ records, watchlist: watched.map(item => item.instrument), since, limit: 60 });
 }
 
+const actionCenterStore = new ActionCenterStore(stateStore);
+async function collectWatchlistActions(ids: string[], suppliedDigest?: MarketChangeRecord[]): Promise<ActionCenterItem[]> {
+  const now = new Date().toISOString();
+  const watched = canonicalDigestWatchlist(ids);
+  const digest = suppliedDigest || await buildSharedMarketChangeDigest(ids, new Date(Date.now() - 7 * 86400_000).toISOString());
+  const items: ActionCenterItem[] = digest.map(row => ({
+    id: row.id, market: row.market, instrument: row.instrument,
+    kind: row.kind === '13f-change' ? '13f' : row.kind === 'price-change' ? 'price' : row.kind.startsWith('source-') ? 'source' : row.kind === 'signal' ? 'signal' : 'event',
+    title: row.title, summary: row.summary, occurredAt: row.occurredAt, publishedAt: row.publishedAt,
+    observedAt: row.observedAt, source: row.source || '未声明来源', sourceUrl: row.sourceUrl,
+    dataStatus: row.dataStatus || 'cached', evidenceRefs: row.evidenceRefs || [],
+  }));
+  const watchedSet = new Set(watched.map(row => row.instrument));
+  for (const row of unifiedAlertStore.listHistory(100).filter(row => row.ownerId === 'admin' && watchedSet.has(row.instrumentId))) {
+    const ref = watched.find(item => item.instrument === row.instrumentId)!;
+    items.push({ id: `alert:${row.id}`, market: ref.market, instrument: ref.instrument, kind: 'alert', title: row.message,
+      observedAt: row.createdAt, source: 'MoneyMoney 提醒记录', dataStatus: 'historical', evidenceRefs: [] });
+  }
+  for (const row of loadScreenerTracking()) {
+    if (!watched.some(item => item.market === row.scope)) continue;
+    items.push({ id: `screener:${row.runId || row.templateId + ':' + row.attemptedAt}`, market: row.scope as MarketId, kind: 'screener', title: `筛选跟踪：${row.name}`,
+      summary: row.lastStatus === 'failed' ? row.reason || '来源失败' : `新进 ${row.entered.length} · 退出 ${row.exited.length}`, observedAt: row.attemptedAt,
+      source: row.source || '筛选跟踪历史', dataStatus: row.dataStatus, reason: row.reason || undefined, evidenceRefs: [] });
+  }
+  for (const market of MARKET_IDS) for (const decision of decisionIntelligenceStore.listDecisions(market)) {
+    if (decision.status !== 'open' || Date.parse(decision.horizonAt) > Date.now() || !watchedSet.has(decision.instrument)) continue;
+    items.push({ id: `review:${decision.id}`, market, instrument: decision.instrument, kind: 'review', title: '决策已到期，等待复盘', summary: decision.thesis,
+      observedAt: decision.horizonAt, source: '私人决策日记', dataStatus: 'historical', evidenceRefs: decision.evidenceIds, decisionId: decision.id });
+  }
+  if (watched.some(row => row.market === 'stocks')) {
+    try {
+      const calendar = await getUpcomingEventCalendar(7);
+      for (const ref of watched.filter(row => row.market === 'stocks')) {
+        for (const event of filterEventsForInstrument(calendar.events, { type: 'stock', symbol: ref.symbol || '' })) {
+          items.push({ id: `upcoming:${ref.instrument}:${event.id}`, market: 'stocks', instrument: ref.instrument, kind: 'event', title: event.titleZh || event.title,
+            summary: event.detailZh || event.detail, occurredAt: event.date, observedAt: calendar.fetchedAt, source: event.source,
+            dataStatus: calendar.sourceStatus?.earnings || (calendar.stale ? 'cached' : 'delayed'), evidenceRefs: [], eventId: event.id,
+            reason: calendar.sourceReasons?.earnings });
+        }
+      }
+    } catch (error) {
+      items.push({ id: 'source:upcoming-calendar', market: 'stocks', kind: 'source', title: '未来事件来源请求失败', observedAt: now,
+        source: '事件日历', dataStatus: 'failed', reason: error instanceof Error ? error.message : '请求失败', evidenceRefs: [] });
+    }
+  }
+  return items;
+}
+
+app.get('/api/watchlist/action-center', async (req, res) => {
+  if (!adminOnly(req, res)) return;
+  try {
+    const market = req.query.market ? decisionMarket(req.query.market) : undefined;
+    const records = await collectWatchlistActions(unifiedAlertStore.listWatchlist());
+    const result = buildActionCenter(records, { market, states: actionCenterStore.states('admin') });
+    stateStore.set('action-center:items:admin', records);
+    const failures = result.items.some(row => ['failed', 'unavailable', 'partial'].includes(row.dataStatus));
+    return res.json({ success: true, ...result, market: market || 'overview', source: '自选、提醒、筛选、13F与决策记录',
+      dataStatus: failures ? 'partial' : result.dataStatus, evidenceRefs: [...new Set(result.items.flatMap(row => row.evidenceRefs))] });
+  } catch (error) { return res.status(500).json({ success: false, dataStatus: 'failed', reason: error instanceof Error ? error.message : '行动中心加载失败' }); }
+});
+app.patch('/api/watchlist/action-center/:id', express.json(), (req, res) => {
+  if (!adminOnly(req, res)) return;
+  const item = (stateStore.get<ActionCenterItem[]>('action-center:items:admin') || []).find(row => row.id === String(req.params.id));
+  if (!item) return res.status(404).json({ success: false, reason: '记录不存在，请刷新行动中心' });
+  try {
+    const change = req.body || {};
+    if (Object.keys(change).some(key => !['read', 'pinned', 'snoozedUntil'].includes(key))) throw new Error('不支持的处理字段');
+    return res.json({ success: true, id: item.id, market: item.market, data: actionCenterStore.update('admin', item, change), source: 'SQLite 私人处理状态', dataStatus: 'cached' });
+  } catch (error) { return res.status(400).json({ success: false, reason: error instanceof Error ? error.message : '处理失败' }); }
+});
+
 app.get('/api/changes/digest', async (req, res) => {
   const guest = (req as any).user?.role === 'guest';
   const now = new Date().toISOString();
@@ -779,7 +855,7 @@ async function loadScopedScreenerRows(scope: ScreenerScope): Promise<Record<stri
       // Keep the identity requested by the screener. Some upstream quote
       // fallbacks echo the last completed symbol when requests are concurrent.
       const symbol = SCREENER_STOCK_SYMBOLS[index];
-      return [{ id: `stock:us:${symbol}`, symbol, title: symbol, price: quote.price, changePct: quote.changePct, marketCap: null, dataTime: quote.asOf, source: result.value.snapshot.source }];
+      return [{ id: `stock:us:${symbol}`, symbol, title: symbol, price: quote.price, changePct: quote.changePct, marketCap: null, dataTime: quote.asOf, source: result.value.snapshot.source, _sourceIncomplete: settled.some(item => item.status === 'rejected' || !item.value.quote) }];
     });
   }
   if (scope === 'options') {
@@ -787,7 +863,7 @@ async function loadScopedScreenerRows(scope: ScreenerScope): Promise<Record<stri
     return settled.flatMap(result => {
       if (result.status !== 'fulfilled') return [];
       const snapshot = result.value;
-      return [{ id: `option:cboe:${snapshot.asset}`, symbol: snapshot.asset, title: `${snapshot.asset} 期权`, price: snapshot.spot, changePct: snapshot.quote?.changePercent ?? null, impliedVolPct: snapshot.quote?.iv30Pct ?? null, openInterest: snapshot.totalCallOpenInterest + snapshot.totalPutOpenInterest, putCallOIRatio: snapshot.totalPutCallOIRatio, dataTime: snapshot.fetchedAt, source: snapshot.source }];
+      return [{ id: `option:cboe:${snapshot.asset}`, symbol: snapshot.asset, title: `${snapshot.asset} 期权`, price: snapshot.spot, changePct: snapshot.quote?.changePercent ?? null, impliedVolPct: snapshot.quote?.iv30Pct ?? null, openInterest: snapshot.totalCallOpenInterest + snapshot.totalPutOpenInterest, putCallOIRatio: snapshot.totalPutCallOIRatio, dataTime: snapshot.fetchedAt, source: snapshot.source, _sourceIncomplete:settled.some(item => item.status === 'rejected') }];
     });
   }
   if (scope === 'crypto') {
@@ -832,69 +908,11 @@ function adminOnly(req: express.Request, res: express.Response): boolean {
   return true;
 }
 
-interface StoredScreenerTracking {
-  templateId: string;
-  scope: ScreenerScope;
-  name: string;
-  lastRunAt: string;
-  attemptedAt: string;
-  lastStatus: 'baseline' | 'updated' | 'failed';
-  dataStatus: 'live' | 'empty' | 'failed';
-  reason: string | null;
-  currentIds: string[];
-  entered: string[];
-  exited: string[];
-  unchanged: string[];
-}
-
-const SCREENER_TRACKING_KEY = 'screener-tracking-v1';
-function loadScreenerTracking(): StoredScreenerTracking[] {
-  return stateStore.get<StoredScreenerTracking[]>(SCREENER_TRACKING_KEY) || [];
-}
-function saveScreenerTracking(value: StoredScreenerTracking[]): void {
-  stateStore.set(SCREENER_TRACKING_KEY, value.slice(-100), 1);
-}
-
-async function refreshScreenerTemplateTracking(template: StoredScreenerTemplate): Promise<{ success: boolean; record: StoredScreenerTracking }> {
-  const previous = loadScreenerTracking();
-  const existing = previous.find(item => item.templateId === template.id);
-  const attemptedAt = new Date().toISOString();
-  const save = (record: StoredScreenerTracking) => saveScreenerTracking([...previous.filter(item => item.templateId !== template.id), record]);
-  try {
-    const raw = await loadScopedScreenerRows(template.scope);
-    // An empty upstream result is ambiguous; never interpret it as every tracked
-    // instrument exiting the screen.
-    if (!raw.length) {
-      const record: StoredScreenerTracking = {
-        templateId: template.id, scope: template.scope, name: template.name,
-        lastRunAt: existing?.lastRunAt || '', attemptedAt, lastStatus: 'failed', dataStatus: 'empty',
-        reason: '当前筛选来源返回零条原始记录；为避免误报全部退出，保留上次有效基线。',
-        currentIds: existing?.currentIds || [], entered: existing?.entered || [], exited: existing?.exited || [], unchanged: existing?.unchanged || [],
-      };
-      save(record);
-      return { success: false, record };
-    }
-    const filtered = filterRows(template.scope, raw, template.filters || {});
-    const rows = template.sort ? sortRows(template.scope, filtered, template.sort) : filtered;
-    const currentIds = [...new Set(rows.map(row => String(row.id || row.symbol || '').trim()).filter(Boolean))].sort();
-    const delta = existing?.lastRunAt ? diffScreenerMembership(existing.currentIds, currentIds) : { entered: [], exited: [], unchanged: currentIds };
-    const record: StoredScreenerTracking = {
-      templateId: template.id, scope: template.scope, name: template.name,
-      lastRunAt: attemptedAt, attemptedAt, lastStatus: existing?.lastRunAt ? 'updated' : 'baseline', dataStatus: 'live', reason: null,
-      currentIds, ...delta,
-    };
-    save(record);
-    return { success: true, record };
-  } catch (error: any) {
-    const record: StoredScreenerTracking = {
-      templateId: template.id, scope: template.scope, name: template.name,
-      lastRunAt: existing?.lastRunAt || '', attemptedAt, lastStatus: 'failed', dataStatus: 'failed',
-      reason: error?.message || '筛选来源请求失败；保留上次有效基线。',
-      currentIds: existing?.currentIds || [], entered: existing?.entered || [], exited: existing?.exited || [], unchanged: existing?.unchanged || [],
-    };
-    save(record);
-    return { success: false, record };
-  }
+const screenerTrackingStore = new ScreenerTrackingStore(stateStore);
+function loadScreenerTracking() { return screenerTrackingStore.list(); }
+async function refreshScreenerTemplateTracking(template: StoredScreenerTemplate) {
+  return screenerTrackingStore.run(template, () => loadScopedScreenerRows(template.scope),
+    () => loadScreenerTemplates().some(item => item.id === template.id && item.ownerId === 'admin'));
 }
 
 function decisionMarket(value: unknown): MarketId {
@@ -929,7 +947,7 @@ app.get('/api/evidence', async (req, res) => {
     const market = decisionMarket(req.query.market);
     const instrument = String(req.query.instrument || '').trim() || undefined;
     assertMarketContext({ market, workspace: 'evidence', instrument });
-    const stored = decisionIntelligenceStore.listEvidence(market, instrument);
+    const stored = (req as any).user?.role === 'guest' ? [] : decisionIntelligenceStore.listEvidence(market, instrument);
     const health = await getSourceHealth(market);
     const live = health.items.map(item => createEvidenceSnapshot({
       market,
@@ -1483,6 +1501,7 @@ app.post('/api/evidence', express.json(), (req, res) => {
 });
 
 app.get('/api/evidence/changes', (req, res) => {
+  if (!adminOnly(req, res)) return;
   try {
     const market = decisionMarket(req.query.market);
     const instrument = String(req.query.instrument || '').trim() || undefined;
@@ -1516,10 +1535,16 @@ app.post('/api/evidence/source-health/retry', express.json(), async (req, res) =
   }
 });
 
+app.get('/api/evidence/:id', (req, res) => {
+  if (!adminOnly(req, res)) return;
+  const item = MARKET_IDS.flatMap(market => decisionIntelligenceStore.listEvidence(market)).find(row => row.id === String(req.params.id));
+  if (!item) return res.status(404).json({ success:false,reason:'证据快照不存在' });
+  return res.json(decisionEnvelope({ market:item.market,instrument:item.instrument,data:item,dataStatus:item.dataStatus,source:item.source.name,updatedAt:item.fetchedAt,evidenceRefs:[item.id] }));
+});
 app.get('/api/scenarios', (req, res) => {
   try {
     const market = decisionMarket(req.query.market);
-    const stored = decisionIntelligenceStore.listScenarios(market);
+    const stored = (req as any).user?.role === 'guest' ? [] : decisionIntelligenceStore.listScenarios(market);
     const byId = new Map([...SCENARIO_PRESETS.filter(item => item.market === market), ...stored].map(item => [item.id, item]));
     res.json(decisionEnvelope({ market, data: [...byId.values()], source: 'MoneyMoney deterministic scenario catalog' }));
   } catch (error: any) {
@@ -1663,16 +1688,40 @@ app.get('/api/portfolio/analytics', (req, res) => {
     const market = decisionMarket(req.query.market);
     const imported = decisionIntelligenceStore.listPortfolio(market);
     const typeByMarket: Record<string, string> = { stocks: 'stock', options: 'option', crypto: 'crypto', prediction: 'prediction' };
-    const paper: PortfolioRow[] = unifiedPaperLedgerStore.get().positions.filter(item => item.instrumentType === typeByMarket[market]).map(item => ({ instrument: item.instrumentId, market, quantity: item.quantity, price: item.currentPrice, currency: 'USD' }));
-    const rows = [...imported, ...paper];
-    const data = analyzePortfolio(rows, { benchmarkReturnPct: Number(req.query.benchmarkReturnPct || 0), portfolioReturnPct: Number(req.query.portfolioReturnPct || 0) });
-    res.json(decisionEnvelope({ market, data: { ...data, positions: rows }, dataStatus: rows.length ? 'cached' : 'empty', source: 'paper ledger + validated manual imports', reason: rows.length ? null : '当前市场暂无模拟或导入仓位' }));
+    const paper: PortfolioRow[] = unifiedPaperLedgerStore.get().positions.filter(item => item.instrumentType === typeByMarket[market]).map(item => ({ instrument: item.instrumentId, market, quantity: item.quantity, price: item.currentPrice, currency: item.currency || 'UNKNOWN', averageCost: item.averageEntryPrice, accountSource: 'paper', accountId: 'unified-paper-ledger' }));
+    const selection = String(req.query.accountSource || 'paper');
+    if (!['paper', 'imported', 'combined'].includes(selection)) throw new Error('请选择模拟盘、导入仓位或显式合并');
+    const rows = selection === 'combined' ? [...imported, ...paper] : selection === 'imported' ? imported : paper;
+    const data = analyzePortfolio(rows, {
+      ...(req.query.benchmarkReturnPct == null ? {} : { benchmarkReturnPct: Number(req.query.benchmarkReturnPct) }),
+      ...(req.query.portfolioReturnPct == null ? {} : { portfolioReturnPct: Number(req.query.portfolioReturnPct) }),
+    });
+    res.json(decisionEnvelope({ market, data: { ...data, positions: rows, accounts: { imported, paper }, accountSource: selection }, dataStatus: rows.length ? data.currencyReason ? 'partial' : 'cached' : 'empty', source: selection === 'paper' ? '统一模拟账本' : selection === 'imported' ? '校验后的导入仓位' : '用户显式选择合并', reason: rows.length ? data.currencyReason || data.returnReason : '所选账户当前市场暂无仓位' }));
   } catch (error: any) {
     res.status(400).json({ success: false, error: error.message, dataStatus: 'unavailable', reason: error.message });
   }
 });
 
+app.get('/api/signals/forward', async (req, res) => {
+  if (!adminOnly(req, res)) return;
+  try {
+    const market = decisionMarket(req.query.market), now = new Date().toISOString();
+    const signals = decisionIntelligenceStore.listSignalOutcomes(market).slice(-30);
+    const histories = new Map<string, Promise<Awaited<ReturnType<typeof dataLakeCatalog.queryBarsAsOf>>>>();
+    const data = [];
+    for (const signal of signals) {
+      const key = `${signal.instrument}:${signal.timeframe}`;
+      if (!histories.has(key)) histories.set(key, dataLakeCatalog.queryBarsAsOf({ market,instrument:signal.instrument,timeframe:signal.timeframe,asOf:now }));
+      try {
+        const history = await histories.get(key)!;
+        data.push({ ...observeForwardSignal(signal, history.rows.map(row => ({ time: String(row.timestamp), high:Number(row.high),low:Number(row.low),close:Number(row.close) }))), historyReason:history.reason || null });
+      } catch (error) { data.push({ id:signal.id,instrument:signal.instrument,dataStatus:'unavailable',reason:error instanceof Error ? error.message : '历史来源不可用',points:[] }); }
+    }
+    return res.json({ success:true,market,data,dataStatus:data.length ? 'historical' : 'empty',source:'已发布数据湖分区',updatedAt:now,reason:data.length ? null : '尚无前向观察信号' });
+  } catch (error) { return res.status(400).json({ success:false,reason:error instanceof Error ? error.message : '观察失败' }); }
+});
 app.get('/api/signals/quality', (req, res) => {
+  if (!adminOnly(req, res)) return;
   try {
     const market = decisionMarket(req.query.market);
     const instrument = String(req.query.instrument || '').trim() || undefined;
@@ -1818,7 +1867,7 @@ app.delete('/api/screener/templates/:id', (req, res) => {
   if (!adminOnly(req, res)) return;
   const before = loadScreenerTemplates();
   saveScreenerTemplates(before.filter(item => item.id !== String(req.params.id)));
-  saveScreenerTracking(loadScreenerTracking().filter(item => item.templateId !== String(req.params.id)));
+  screenerTrackingStore.stop(String(req.params.id));
   res.json({ success: true, removed: before.length !== loadScreenerTemplates().length });
 });
 
@@ -1832,15 +1881,19 @@ app.post('/api/screener/tracking/:id/run', async (req, res) => {
   const template = loadScreenerTemplates().find(item => item.id === String(req.params.id) && item.ownerId === 'admin');
   if (!template) return res.status(404).json({ success: false, error: '筛选模板不存在或不属于当前管理员' });
   const result = await refreshScreenerTemplateTracking(template);
+  if (result.busy || result.cancelled) return res.status(409).json({ success: false, dataStatus: result.busy ? 'partial' : 'empty', error: result.busy ? '当前模板已在检查中' : '模板已停止或删除，本次结果未保存' });
   if (result.success) return res.json({ success: true, data: result.record });
-  return res.status(result.record.dataStatus === 'empty' ? 503 : 502).json({ success: false, data: result.record, error: result.record.reason });
+  return res.status(result.record?.dataStatus === 'empty' ? 503 : 502).json({ success: false, data: result.record, error: result.record?.reason });
+});
+
+app.get('/api/screener/tracking/:id/history', (req, res) => {
+  if (!adminOnly(req, res)) return;
+  res.json({ success: true, data: screenerTrackingStore.history(String(req.params.id)), dataStatus: 'historical', source: 'SQLite screener run history' });
 });
 
 app.delete('/api/screener/tracking/:id', (req, res) => {
   if (!adminOnly(req, res)) return;
-  const before = loadScreenerTracking();
-  saveScreenerTracking(before.filter(item => item.templateId !== String(req.params.id)));
-  return res.json({ success: true, removed: before.length !== loadScreenerTracking().length });
+  return res.json({ success: true, removed: screenerTrackingStore.stop(String(req.params.id)) });
 });
 
 let screenerMonitorCycleRunning = false;
@@ -1850,15 +1903,15 @@ async function runDueScreenerMonitorCycle(): Promise<void> {
   try {
     const now = Date.now();
     const templates = new Map(loadScreenerTemplates().filter(item => item.ownerId === 'admin').map(item => [item.id, item]));
-    const due = loadScreenerTracking().filter(item => item.lastRunAt && now - Date.parse(item.attemptedAt || item.lastRunAt) >= 24 * 60 * 60_000).slice(0, 3);
+    const due = loadScreenerTracking().filter(item => now - Date.parse(item.attemptedAt || item.lastRunAt) >= 24 * 60 * 60_000).slice(0, 3);
     for (const tracked of due) {
       const template = templates.get(tracked.templateId);
       if (!template) {
-        saveScreenerTracking(loadScreenerTracking().filter(item => item.templateId !== tracked.templateId));
+        screenerTrackingStore.stop(tracked.templateId);
         continue;
       }
       const result = await refreshScreenerTemplateTracking(template);
-      if (result.success && result.record.lastStatus === 'updated' && (result.record.entered.length || result.record.exited.length)) {
+      if (result.success && result.record && screenerTrackingStore.claimNotification(result.record)) {
         const entered = result.record.entered.slice(0, 5).map(id => id.split(':').pop()).join('、');
         const exited = result.record.exited.slice(0, 5).map(id => id.split(':').pop()).join('、');
         const delta = [entered ? `新进入 ${entered}` : '', exited ? `已离开 ${exited}` : ''].filter(Boolean).join('；');
@@ -2994,6 +3047,63 @@ function handleOptionsHistory(req: express.Request, res: express.Response) {
 
 app.get('/api/options/history', handleOptionsHistory);
 
+app.get('/api/options/history/compare', (req, res) => {
+  if (!adminOnly(req, res)) return;
+  try {
+    const instrument = String(req.query.instrument || '');
+    const data = compareOptionSnapshots(dataLakeCatalog.listOptionSnapshots({ market: 'options', instrument, from: req.query.from ? String(req.query.from) : undefined, to: req.query.to ? String(req.query.to) : undefined }));
+    return res.json({ success: true, market: 'options', instrument, data, dataStatus: data.coverage.length ? 'historical' : 'empty', source: data.coverage.at(-1)?.source || '本地真实期权快照', updatedAt: data.coverage.at(-1)?.at || null, reason: data.reason });
+  } catch (error) { return res.status(400).json({ success: false, dataStatus: 'failed', reason: error instanceof Error ? error.message : '比较失败' }); }
+});
+app.get('/api/market-history', (req, res) => {
+  if (!adminOnly(req, res)) return;
+  try {
+    const market = decisionMarket(req.query.market), instrument = String(req.query.instrument || '');
+    const data = summarizeMarketHistory(decisionIntelligenceStore.listEvidence(market, instrument).filter(row => row.workspace === 'market-history'), market, instrument);
+    return res.json({ success: true, ...data, source: [...new Set(data.series.map(row => row.source.name))].join(', ') || '本地证据快照', updatedAt: data.series.at(-1)?.observedAt || null });
+  } catch (error) { return res.status(400).json({ success: false, dataStatus: 'failed', reason: error instanceof Error ? error.message : '查询失败' }); }
+});
+app.post('/api/market-history/capture', express.json(), async (req, res) => {
+  if (!adminOnly(req, res)) return;
+  try {
+    const market = decisionMarket(req.body?.market), instrument = String(req.body?.instrument || '');
+    assertMarketContext({ market, instrument, workspace: 'market-history' });
+    const previous = decisionIntelligenceStore.listEvidence(market, instrument).find(row => row.workspace === 'market-history');
+    if (previous && Date.now() - Date.parse(previous.fetchedAt) < 120_000) return res.json({ success: true, data: previous, dataStatus: 'cached', reason: '两分钟采集冷却期间使用已有真实快照' });
+    let fields: Record<string, unknown> = {}, source = '', observedAt = '', sourceUrl = '';
+    if (market === 'crypto') {
+      const parts = instrument.match(/^crypto:(binance|gateio):([A-Z0-9_]+)$/i);
+      if (!parts) throw new Error('当前仅支持 Binance 现货深度或 Gate.io 永续，必须明确交易场所');
+      if (parts[1].toLowerCase() === 'binance') {
+        const data = await getOrderFlowLiquidityRadar();
+        const row = data.rows.find(row => row.symbol.toUpperCase() === parts[2].toUpperCase());
+        if (!row) throw new Error('当前 Binance 来源未覆盖该标的');
+        fields = { bidDepthUsd: row.bidUsd, askDepthUsd: row.askUsd, spreadPct: row.spreadBps / 100, price: row.price };
+        source = data.source; observedAt = data.generatedAt; sourceUrl = 'https://www.binance.com';
+      } else {
+        const data = await getPerpetualCrowding();
+        const row = data.rows.find(row => row.contract.toUpperCase() === parts[2].toUpperCase());
+        if (!row) throw new Error('当前 Gate.io 永续来源未覆盖该合约');
+        fields = { fundingRatePct: row.fundingRatePct, openInterestUsd: row.openInterestUsd, price: row.price, contract: row.contract };
+        source = data.source; observedAt = data.generatedAt; sourceUrl = 'https://www.gate.io';
+      }
+    } else if (market === 'prediction') {
+      const ref = telegramRefFromId(instrument);
+      if (!ref) throw new Error('预测市场身份无法解析');
+      const radar = getCachedPredictionRadarSlice('', 240);
+      const row = radar?.markets.find(row => row.id === (ref.marketId || ref.symbol) && row.platform.toLowerCase().replace(/\s+/g, '-') === ref.venue.toLowerCase());
+      if (!row || !radar) throw new Error('当前预测来源缓存未覆盖该事件；请先打开或刷新当前事件');
+      if (!Number.isFinite(row.yesPrice)) throw new Error('来源未提供真实概率');
+      const settlement = predictionSettlementRepository.latest(row.platform, row.id);
+      fields = { probability: row.yesPrice, liquidity: row.liquidity, deadline: row.endDate || null, rules: settlement?.rulesText || null,
+        settlementStatus: settlement?.status || 'unknown', settlementEvidenceUrl: settlement?.sourceUrl || null, settlementEvidenceOfficial: Boolean(settlement?.sourceUrl) };
+      source = row.platform; observedAt = radar.updatedAt; sourceUrl = row.url || '';
+    } else return res.status(400).json({ success: false, dataStatus: 'unsupported', reason: '股票使用事件时间线，期权使用真实链快照，不混入此采集入口' });
+    const evidence = createEvidenceSnapshot({ market, instrument, workspace: 'market-history', dataStatus: 'cached', source: { id: `${market}:${instrument.split(':')[1]}`, name: source, url: sourceUrl || null }, observedAt, fetchedAt: new Date().toISOString(), fields });
+    decisionIntelligenceStore.saveEvidence(evidence);
+    return res.json({ success: true, market, instrument, data: evidence, evidenceRefs: [evidence.id], source, updatedAt: observedAt, dataStatus: 'cached', reason: null });
+  } catch (error) { return res.status(503).json({ success: false, dataStatus: 'unavailable', reason: error instanceof Error ? error.message : '来源不可用' }); }
+});
 app.get('/api/options/:asset', async (req, res) => {
   try {
     const asset = String(req.params.asset || 'BTC').trim().toUpperCase();
@@ -3397,6 +3507,26 @@ async function readEventIntelligence(req: express.Request, res: express.Response
   }
   try {
     const ref = eventInstrumentRef(market, instrument);
+    if (market !== 'stocks' && (req as any).user?.role === 'admin') {
+      const now = new Date().toISOString();
+      let rows: Array<Record<string, unknown>> = [], reason: string | null = null, source = '当前市场历史快照';
+      if (market === 'options') {
+        const comparison = compareOptionSnapshots(dataLakeCatalog.listOptionSnapshots({ market:'options',instrument:ref.id }));
+        rows = comparison.changes.map(change => ({ kind:'event',at:change.toAt,title:`期权链快照变化：${change.contracts.length} 个可比合约`,source:comparison.coverage.find(row => row.id === change.to)?.source, publishedAt:null }));
+        reason = comparison.reason;
+        source = comparison.coverage.at(-1)?.source || '真实期权链归档';
+      } else {
+        const history = summarizeMarketHistory(decisionIntelligenceStore.listEvidence(market,ref.id).filter(row => row.workspace === 'market-history'),market,ref.id);
+        rows = history.changes.map(change => ({ kind:'event',at:change.at,publishedAt:null,source:change.source,
+          title:market === 'crypto' ? `同源资金/深度变化：${Object.entries(change.deltas).map(([key,value]) => `${key} ${value >= 0 ? '+' : ''}${value}`).join(' · ') || '字段暂无可比变化'}` : `概率/规则/结算变化：${Object.entries(change.deltas).map(([key,value]) => `${key} ${value >= 0 ? '+' : ''}${value}`).join(' · ')} ${change.revisions.join('、')}` }));
+        reason = history.reason || (history.series.length < 2 ? '真实快照不足两个，暂无可比事件；结算结果未知时不推断' : null);
+        source = [...new Set(history.series.map(row => row.source.name))].join(', ') || source;
+      }
+      const entities = buildEventEntities(rows,{ market,instrument:ref.id,retrievedAt:now,asOf:now });
+      const data = grouped ? clusterEventEntities(entities) : entities;
+      res.json(decisionEnvelope({ market,instrument:ref.id,data,dataStatus:data.length ? 'historical' : 'empty',source,updatedAt:now,reason:reason || (data.length ? '采集变化事件，不代表官方新闻发布时间；不用于推断历史入场条件' : '当前历史区间没有可比快照事件') }));
+      return;
+    }
     const timeline = await unifiedInstrumentService.timeline(ref);
     const entities = buildEventEntities(timeline.items, { market, instrument: ref.id, retrievedAt: timeline.generatedAt, asOf: timeline.generatedAt });
     const data = grouped ? clusterEventEntities(entities) : entities;
@@ -4665,6 +4795,8 @@ async function buildTelegramDigest(chatId: string): Promise<string> {
   const marketIds: MarketId[] = ['stocks', 'options', 'crypto', 'prediction'];
   const marketNames: Record<MarketId, string> = { stocks: '股票', options: '期权', crypto: '虚拟币', prediction: '预测市场' };
   const sharedChanges = await buildSharedMarketChangeDigest(ids, since);
+  const actionSummary = buildActionCenter(await collectWatchlistActions(ids,sharedChanges),{ states:actionCenterStore.states('admin') });
+  const pendingActions = actionSummary.items.filter(row => !row.read && !row.snoozed);
   const evidenceSummary = marketIds.map(market => {
     const changes = sharedChanges.filter(item => item.market === market);
     if (!changes.length) return `<b>${marketNames[market]}</b> · 自上次摘要后暂无自选变化`;
@@ -4746,6 +4878,11 @@ async function buildTelegramDigest(chatId: string): Promise<string> {
     '',
     '<b>⭐ 自选简报（按市场分组）</b>',
     ...(ids.length ? watchLines : ['· 暂无自选标的']),
+    '',
+    '<b>📌 自选行动</b>',
+    `待处理 ${pendingActions.length} 项 · 未来七天 ${actionSummary.counts.upcoming} 项`,
+    ...pendingActions.slice(0,5).map(row => `· ${escapeTelegramHtml(row.title)} · ${escapeTelegramHtml(row.source)} · ${escapeTelegramHtml(row.dataStatus)}`),
+    '查看与处理：/actioncenter',
     '',
     '<b>🧾 自上次摘要以来</b>',
     ...evidenceSummary,
@@ -4841,6 +4978,27 @@ export function getTelegramCommandHandlers(): Record<string, TelegramCommandHand
     },
     menu_page: () => telegramReply('当前菜单页。'),
     start: ({ chatId }) => telegramMarketSelectorReply(chatId),
+    actioncenter: async ({ chatId, args }) => {
+      const scope = telegramScopeForChat(chatId);
+      const key = `action-center:telegram:${chatId}`;
+      if (['read','pin','later'].includes(String(args[0]))) {
+        const saved = stateStore.get<{ at:string; scope:string; items:ActionCenterItem[] }>(key);
+        const index = Number(args[1]);
+        if (!saved || saved.scope !== scope || Date.now() - Date.parse(saved.at) > 15 * 60_000 || !Number.isInteger(index) || index < 1 || !saved.items[index - 1]) return '条目已过期或市场已切换，请先发送 /actioncenter 刷新。';
+        const item = saved.items[index-1];
+        const state = actionCenterStore.update('admin',item,args[0] === 'read' ? { read:true } : args[0] === 'pin' ? { pinned:true } : { snoozedUntil:new Date(Date.now()+86400_000).toISOString() });
+        return `✅ 已同步网页处理状态：${escapeTelegramHtml(item.title)}\n${state.read ? '已读' : ''}${state.pinned ? ' · 置顶' : ''}${state.snoozedUntil ? ' · 稍后处理' : ''}`;
+      }
+      const items = await collectWatchlistActions(telegramScopedWatchIds(chatId,scope));
+      const result = buildActionCenter(items,{ market:MARKET_IDS.includes(scope as MarketId) ? scope as MarketId : undefined,states:actionCenterStore.states('admin') });
+      const shown = result.items.filter(row => !row.read && !row.snoozed).slice(0,8);
+      stateStore.set(key,{ at:new Date().toISOString(),scope,items:shown });
+      const lines = shown.map((row,index) => {
+        const href = buildTelegramDeepLink(telegramPublicBaseUrl(),{ market:row.market,instrument:row.instrument || '',workspace:'watchlist' });
+        return `${index+1}. ${escapeTelegramHtml(row.title)} · ${escapeTelegramHtml(row.dataStatus)}\n${escapeTelegramHtml(row.source)} · ${escapeTelegramHtml(row.observedAt)}${href ? `\n<a href="${escapeTelegramHtml(href)}">网页与证据</a>` : ''}`;
+      });
+      return ['<b>自选行动中心</b>',...lines,shown.length ? '处理：/actioncenter read 1 · pin 1 · later 1（15分钟内有效）' : '当前没有待处理条目；来源无记录与来源故障分别展示。'].join('\n');
+    },
     session: ({ chatId, args }) => {
       if (String(args[0] || '').toLowerCase() === 'reset') {
         telegramCommandCenterStore.resetSession(chatId);
@@ -7097,7 +7255,30 @@ app.post('/api/research/experiments', express.json(), (req, res) => {
   }
 });
 
+app.get('/api/research/experiments', (req, res) => {
+  if (!adminOnly(req, res)) return;
+  try {
+    const market = decisionMarket(req.query.market);
+    const data = researchRepository.listExperiments(200).filter(row => row.experiment?.market === market).map(row => ({ ...row.experiment, metrics: row.backtest?.metrics, outOfSample: row.evidence?.outOfSample }));
+    return res.json({ success: true, market, data, dataStatus: data.length ? 'historical' : 'empty', source: '持久化研究实验', updatedAt: new Date().toISOString(), reason: data.length ? null : '当前市场尚无研究实验' });
+  } catch (error) { return res.status(400).json({ success: false, reason: error instanceof Error ? error.message : '查询失败' }); }
+});
+app.get('/api/research/experiments/compare', (req, res) => {
+  if (!adminOnly(req, res)) return;
+  try {
+    const ids = String(req.query.ids || '').split(',').filter(Boolean);
+    if (ids.length < 2 || ids.length > 6) throw new Error('请选择2–6个实验');
+    const results = ids.map(id => researchRepository.getExperiment(id));
+    if (results.some(row => !row)) return res.status(404).json({ success: false, reason: '实验不存在' });
+    const data = compareExperiments(results);
+    const comparison = { ...data, experiments: data.experiments.map(row => ({ ...row,
+      freshness: getResearchFreshness({ market: row.market, instrument: row.instrument, timeframe: row.timeframe, createdAt: row.createdAt,
+        dataSnapshotHash: row.dataSnapshotHash, strategyId: row.strategyId, strategyVersion: row.strategyVersion }) })) };
+    return res.json({ success: true, market: data.market, data: comparison, dataStatus: 'historical', source: '持久化实验原始结果', updatedAt: new Date().toISOString(), reason: data.reason });
+  } catch (error) { return res.status(400).json({ success: false, reason: error instanceof Error ? error.message : '比较失败' }); }
+});
 app.get('/api/research/experiments/:id', (req, res) => {
+  if (!adminOnly(req, res)) return;
   const result = researchRepository.getExperiment(String(req.params.id));
   if (!result) return res.status(404).json({ success: false, error: '实验不存在' });
   const experiment = result.experiment || {};

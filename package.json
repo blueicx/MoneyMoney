@@ -24,6 +24,7 @@
     "smoke:web": "node scripts/web-smoke.cjs",
     "smoke:browser": "node scripts/browser-market-matrix.cjs",
     "smoke:experience": "node scripts/workspace-experience-smoke.cjs",
+    "smoke:actions": "node scripts/action-research-smoke.cjs",
     "smoke:guru": "node scripts/guru-consensus-selection-smoke.cjs",
     "smoke:prediction-library": "node scripts/prediction-library-timeout-smoke.cjs",
     "smoke:production": "node scripts/production-readonly-canary.cjs",

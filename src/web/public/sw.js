@@ -1,6 +1,6 @@
-const CACHE_NAME = "moneymoney-v60-trusted-research";
+const CACHE_NAME = "moneymoney-v61-private-action-research";
 const STATIC_ASSETS = ["/", "/manifest.json"];
-const OFFLINE_SAFE_API_PATHS = ["/api/evidence", "/api/evidence/changes", "/api/evidence/source-health/history", "/api/scenarios", "/api/signals/quality"];
+const OFFLINE_SAFE_API_PATHS = ["/api/evidence/source-health/history"];
 const OFFLINE_SAFE_API_PREFIXES = ["/api/workspaces/shared/"];
 
 self.addEventListener("install", (event) => {
