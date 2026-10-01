@@ -33,3 +33,20 @@ test('stock coverage distinguishes empty data from source failure and reports ac
 test('stock coverage rejects cross-market identifiers', () => {
   assert.throws(() => buildStockCoverageMap('crypto:binance:BTCUSDT', {}), /股票代码/);
 });
+
+test('Form 4 archive failures remain unavailable or partial instead of becoming a false empty result', () => {
+  const unavailable = buildStockCoverageMap('MU', { insider: { status: 'fulfilled', value: {
+    symbol: 'MU', windowDays: 90, updatedAt: '2026-10-01T00:00:00.000Z', transactions: [],
+    dataStatus: 'unavailable', failedFilings: 4, successfulFilings: 0, reason: 'SEC Form 4 原文 4/4 下载失败',
+  } } });
+  assert.equal(unavailable.capabilities.insider.status, 'unavailable');
+  assert.match(unavailable.capabilities.insider.reason, /原文 4\/4 下载失败/);
+
+  const partial = buildStockCoverageMap('MU', { insider: { status: 'fulfilled', value: {
+    symbol: 'MU', windowDays: 90, updatedAt: '2026-10-01T00:00:00.000Z', transactions: [{ filedAt: '2026-09-28' }],
+    dataStatus: 'partial', failedFilings: 2, successfulFilings: 3, reason: 'SEC Form 4 原文部分下载失败',
+  } } });
+  assert.equal(partial.capabilities.insider.status, 'partial');
+  assert.equal(partial.capabilities.insider.count, 1);
+  assert.match(partial.capabilities.insider.reason, /部分下载失败/);
+});

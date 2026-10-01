@@ -120,6 +120,8 @@ import { testNotificationChannels } from '../features/notification-channels';
 import { runResearchExperiment } from '../features/experiment-runner';
 import { compareExperiments } from '../features/experiment-comparison';
 import { compareOptionSnapshots, summarizeMarketHistory } from '../features/market-history-comparison';
+import { MarketHistoryCaptureScheduler } from '../features/market-history-scheduler';
+import { mergeStockDisclosureTimeline } from '../features/stock-disclosure-timeline';
 import { observeForwardSignal } from '../features/signal-forward';
 import { assertMarketContext, createResearchJob, MARKET_IDS, type MarketId } from '../features/research-contracts';
 import {
@@ -205,6 +207,7 @@ dataLakeWorker.start();
 const strategyCandidateRegistry = new StrategyCandidateRegistry();
 const eventStudyRepository = new EventStudyRepository(stateStore);
 const predictionSettlementRepository = new PredictionSettlementRepository(stateStore);
+const marketHistoryCaptureScheduler = new MarketHistoryCaptureScheduler(stateStore, 3);
 const predictionSettlementRefreshes = new Map<string, Promise<ReturnType<typeof normalizeSettlementEvidence>>>();
 const driftGate = new StrategyDriftGate(stateStore);
 const dataCoverageCanary = new DataCoverageCanary(stateStore, checkCoverageCanaryTarget);
@@ -214,6 +217,8 @@ let coverageCanaryTimer: NodeJS.Timeout | null = null;
 let coverageCanaryTask: Promise<DataCoverageCanaryRun | null> | null = null;
 let paperDriftMonitorTimer: NodeJS.Timeout | null = null;
 let paperDriftMonitorTask: Promise<unknown> | null = null;
+let marketHistoryCaptureTimer: NodeJS.Timeout | null = null;
+let marketHistoryCaptureTask: Promise<unknown> | null = null;
 // A rejected optional/background data refresh must not take down the dashboard.
 // Route handlers still report their own errors; this last-resort observer keeps
 // long-lived local sessions alive and records the source error without secrets.
@@ -1390,7 +1395,7 @@ app.post('/api/event-studies', express.json(), async (req, res) => {
     let cohortInstrument = instrument;
     if (market === 'stocks') {
       const ref = eventInstrumentRef(market, instrument.includes(':') ? instrument : `stock:us:${instrument.toUpperCase()}`);
-      const timeline = await unifiedInstrumentService.timeline(ref);
+      const timeline = await loadStockEventTimeline(ref);
       eventEntities = buildEventEntities(timeline.items, { market, instrument: ref.id, retrievedAt: timeline.generatedAt, asOf });
       cohortInstrument = ref.id;
       if (eventId) {
@@ -2785,7 +2790,8 @@ app.get('/api/stock/search', async (req, res) => {
 
 app.get('/api/stock/insider/:symbol', async (req, res) => {
   try {
-    res.json({ success: true, data: await getInsiderRadar(String(req.params.symbol || '')) });
+    const data = await getInsiderRadar(String(req.params.symbol || ''));
+    res.json({ success: true, market: 'stocks', instrument: `stock:us:${data.symbol}`, dataStatus: data.dataStatus, source: 'SEC EDGAR Form 4', updatedAt: data.updatedAt, reason: data.reason, data });
   } catch (e: any) {
     res.status(404).json({ success: false, error: e.message, data: null });
   }
@@ -2947,6 +2953,14 @@ app.get('/api/diagnostics', async (req, res) => {
           pausedStrategies: driftGate.list(market).filter(item => item.paused),
           latestEvaluations: driftGate.listHistory(market, undefined, undefined, 30),
         },
+        marketHistoryCapture: {
+          enabled: process.env.MONEYMONEY_DISABLE_HISTORY_CAPTURE !== 'true',
+          lastRun: stateStore.get(MARKET_HISTORY_CAPTURE_LAST_RUN_KEY),
+          scheduler: marketHistoryCaptureScheduler.state(),
+          lease: stateStore.getLease('market-history:capture-scheduler:lease'),
+          intervalMinutes: 30,
+          maxInstrumentsPerRun: 3,
+        },
         recoveryDrill,
         sources: { total: sources.total, online: sources.online, updatedAt: sources.updatedAt, unavailable: sources.items.filter(item => !item.ok).map(item => ({ id: item.id, detail: item.detail })) },
         researchJobs: jobs.reduce<Record<string, number>>((acc, job) => { acc[job.status] = (acc[job.status] || 0) + 1; return acc; }, {}),
@@ -3063,27 +3077,43 @@ app.get('/api/market-history', (req, res) => {
     return res.json({ success: true, ...data, source: [...new Set(data.series.map(row => row.source.name))].join(', ') || '本地证据快照', updatedAt: data.series.at(-1)?.observedAt || null });
   } catch (error) { return res.status(400).json({ success: false, dataStatus: 'failed', reason: error instanceof Error ? error.message : '查询失败' }); }
 });
-app.post('/api/market-history/capture', express.json(), async (req, res) => {
-  if (!adminOnly(req, res)) return;
+async function captureMarketHistoryEvidence(market: MarketId, instrument: string, mode: 'daily' | 'manual' = 'manual') {
+  assertMarketContext({ market, instrument, workspace: 'market-history' });
+  const previous = decisionIntelligenceStore.listEvidence(market, instrument).find(row => row.workspace === 'market-history');
+  if (previous && Date.now() - Date.parse(previous.fetchedAt) < 120_000) return { evidence: previous, reused: true };
+  const leaseKey = `market-history:capture:${market}:${instrument}`;
+  const owner = `history-item-${process.pid}-${crypto.randomUUID()}`;
+  if (!stateStore.acquireLease(leaseKey, owner, Date.now(), 180_000)) throw new Error('该标的的历史快照正在由另一个请求采集');
   try {
-    const market = decisionMarket(req.body?.market), instrument = String(req.body?.instrument || '');
-    assertMarketContext({ market, instrument, workspace: 'market-history' });
-    const previous = decisionIntelligenceStore.listEvidence(market, instrument).find(row => row.workspace === 'market-history');
-    if (previous && Date.now() - Date.parse(previous.fetchedAt) < 120_000) return res.json({ success: true, data: previous, dataStatus: 'cached', reason: '两分钟采集冷却期间使用已有真实快照' });
-    let fields: Record<string, unknown> = {}, source = '', observedAt = '', sourceUrl = '';
-    if (market === 'crypto') {
+    let fields: Record<string, unknown> = {}, source = '', observedAt = '', sourceUrl = '', dataStatus: 'cached' | 'delayed' | 'live' = 'cached';
+    let optionSnapshotId: string | undefined;
+    if (market === 'options') {
+      const parts = instrument.match(/^option:(cboe|deribit):([A-Z][A-Z0-9.]{0,14})$/i);
+      if (!parts) throw new Error('期权快照只接受 option:cboe:SYMBOL 或 option:deribit:BTC/ETH');
+      const venue = parts[1].toLowerCase(), asset = parts[2].toUpperCase();
+      if (venue === 'deribit' && !['BTC', 'ETH'].includes(asset)) throw new Error('Deribit 当前只支持 BTC、ETH 期权链');
+      const snapshot = venue === 'cboe' ? await getEquityOptionsSnapshot(asset) : await getOptionsSnapshot(asset);
+      const contractCount = snapshot.expiries.reduce((sum, expiry) => sum + expiry.rows.length, 0);
+      if (!contractCount) throw new Error(`${snapshot.source} 没有返回可保存的真实期权合约`);
+      const saved = dataLakeCatalog.saveOptionsChainSnapshot({ market: 'options', instrument, underlyingMarket: venue === 'cboe' ? 'stocks' : 'crypto', source: snapshot.source as any, fetchedAt: snapshot.fetchedAt, timezone: venue === 'cboe' ? 'America/New_York' : 'UTC', mode, snapshot: snapshot as any });
+      optionSnapshotId = saved.id;
+      fields = { spot: snapshot.spot, expiryCount: snapshot.expiries.length, contractCount, totalCallOpenInterest: snapshot.totalCallOpenInterest, totalPutOpenInterest: snapshot.totalPutOpenInterest, putCallOpenInterestRatio: snapshot.totalPutCallOIRatio, iv30Pct: snapshot.quote?.iv30Pct ?? null, snapshotId: saved.id, contentHash: saved.contentHash };
+      source = snapshot.source; observedAt = snapshot.fetchedAt; sourceUrl = venue === 'cboe' ? 'https://www.cboe.com' : 'https://www.deribit.com';
+      dataStatus = venue === 'cboe' ? 'delayed' : 'live';
+    } else if (market === 'crypto') {
       const parts = instrument.match(/^crypto:(binance|gateio):([A-Z0-9_]+)$/i);
       if (!parts) throw new Error('当前仅支持 Binance 现货深度或 Gate.io 永续，必须明确交易场所');
       if (parts[1].toLowerCase() === 'binance') {
         const data = await getOrderFlowLiquidityRadar();
-        const row = data.rows.find(row => row.symbol.toUpperCase() === parts[2].toUpperCase());
+        const requestedBase = parts[2].toUpperCase().replace(/(?:USDT|USDC)$/, '');
+        const row = data.rows.find(row => row.symbol.toUpperCase() === requestedBase);
         if (!row) throw new Error('当前 Binance 来源未覆盖该标的');
-        fields = { bidDepthUsd: row.bidUsd, askDepthUsd: row.askUsd, spreadPct: row.spreadBps / 100, price: row.price };
+        fields = { bidDepthUsd: row.bidUsd, askDepthUsd: row.askUsd, spreadPct: row.spreadBps / 100, price: row.price, pair: parts[2].toUpperCase() };
         source = data.source; observedAt = data.generatedAt; sourceUrl = 'https://www.binance.com';
       } else {
         const data = await getPerpetualCrowding();
         const row = data.rows.find(row => row.contract.toUpperCase() === parts[2].toUpperCase());
-        if (!row) throw new Error('当前 Gate.io 永续来源未覆盖该合约');
+        if (!row) throw new Error('当前 Gate.io 来源未覆盖该永续合约');
         fields = { fundingRatePct: row.fundingRatePct, openInterestUsd: row.openInterestUsd, price: row.price, contract: row.contract };
         source = data.source; observedAt = data.generatedAt; sourceUrl = 'https://www.gate.io';
       }
@@ -3098,10 +3128,49 @@ app.post('/api/market-history/capture', express.json(), async (req, res) => {
       fields = { probability: row.yesPrice, liquidity: row.liquidity, deadline: row.endDate || null, rules: settlement?.rulesText || null,
         settlementStatus: settlement?.status || 'unknown', settlementEvidenceUrl: settlement?.sourceUrl || null, settlementEvidenceOfficial: Boolean(settlement?.sourceUrl) };
       source = row.platform; observedAt = radar.updatedAt; sourceUrl = row.url || '';
-    } else return res.status(400).json({ success: false, dataStatus: 'unsupported', reason: '股票使用事件时间线，期权使用真实链快照，不混入此采集入口' });
-    const evidence = createEvidenceSnapshot({ market, instrument, workspace: 'market-history', dataStatus: 'cached', source: { id: `${market}:${instrument.split(':')[1]}`, name: source, url: sourceUrl || null }, observedAt, fetchedAt: new Date().toISOString(), fields });
+    } else throw new Error('当前市场不支持该历史快照采集能力');
+    const fetchedAt = new Date().toISOString();
+    const evidence = createEvidenceSnapshot({ market, instrument, workspace: 'market-history', dataStatus, source: { id: `${market}:${instrument.split(':')[1]}`, name: source, url: sourceUrl || null }, observedAt, fetchedAt, fields, expectedFields: Object.keys(fields) });
     decisionIntelligenceStore.saveEvidence(evidence);
-    return res.json({ success: true, market, instrument, data: evidence, evidenceRefs: [evidence.id], source, updatedAt: observedAt, dataStatus: 'cached', reason: null });
+    return { evidence, reused: false, optionSnapshotId };
+  } finally { stateStore.releaseLease(leaseKey, owner); }
+}
+
+const MARKET_HISTORY_CAPTURE_LAST_RUN_KEY = 'market-history:capture-scheduler:last-run';
+async function runMarketHistoryCaptureCycle(): Promise<unknown> {
+  if (marketHistoryCaptureTask) return marketHistoryCaptureTask;
+  marketHistoryCaptureTask = (async () => {
+    const ids = unifiedAlertStore.listWatchlist();
+    const result = await marketHistoryCaptureScheduler.runOnce(ids, async target => {
+      const { evidence } = await captureMarketHistoryEvidence(target.market, target.instrument, 'daily');
+      return { status: evidence.dataStatus, reason: evidence.reason };
+    });
+    stateStore.set(MARKET_HISTORY_CAPTURE_LAST_RUN_KEY, { at: new Date().toISOString(), attempted: result.attempted, acquired: result.acquired, results: result.results });
+    return result;
+  })().finally(() => { marketHistoryCaptureTask = null; });
+  return marketHistoryCaptureTask;
+}
+
+function startMarketHistoryCaptureMonitor(): void {
+  if (process.env.MONEYMONEY_DISABLE_HISTORY_CAPTURE === 'true' || marketHistoryCaptureTimer) return;
+  marketHistoryCaptureTimer = setInterval(() => { void runMarketHistoryCaptureCycle().catch(error => logger.warn('market-history capture cycle failed', { reason: error instanceof Error ? error.message : String(error) })); }, 30 * 60_000);
+  marketHistoryCaptureTimer.unref();
+  void runMarketHistoryCaptureCycle().catch(error => logger.warn('market-history initial capture failed', { reason: error instanceof Error ? error.message : String(error) }));
+}
+
+async function stopMarketHistoryCaptureMonitor(): Promise<void> {
+  if (marketHistoryCaptureTimer) clearInterval(marketHistoryCaptureTimer);
+  marketHistoryCaptureTimer = null;
+  await marketHistoryCaptureTask?.catch(() => {});
+}
+
+app.post('/api/market-history/capture', express.json(), async (req, res) => {
+  if (!adminOnly(req, res)) return;
+  try {
+    const market = decisionMarket(req.body?.market), instrument = String(req.body?.instrument || '');
+    assertMarketContext({ market, instrument, workspace: 'market-history' });
+    const { evidence, reused, optionSnapshotId } = await captureMarketHistoryEvidence(market, instrument, 'manual');
+    return res.json(decisionEnvelope({ market, instrument, data: evidence, dataStatus: reused ? 'cached' : evidence.dataStatus, source: evidence.source.name, updatedAt: evidence.observedAt, reason: reused ? '两分钟采集冷却期间使用已有真实快照' : evidence.reason, evidenceRefs: [evidence.id, ...(optionSnapshotId ? [optionSnapshotId] : [])] }));
   } catch (error) { return res.status(503).json({ success: false, dataStatus: 'unavailable', reason: error instanceof Error ? error.message : '来源不可用' }); }
 });
 app.get('/api/options/:asset', async (req, res) => {
@@ -3464,6 +3533,42 @@ function eventInstrumentRef(market: MarketId, instrumentId: string) {
   return normalizeInstrumentRef({ type: type as InstrumentType, venue, symbol, title: symbol, aliases: [] });
 }
 
+async function loadStockEventTimeline(ref: ReturnType<typeof eventInstrumentRef>) {
+  if (ref.type !== 'stock') throw new Error('股票披露时间线只接受股票标的');
+  const timeline = await unifiedInstrumentService.timeline(ref);
+  const [form4Result, form13fResult] = await Promise.allSettled([
+    getInsiderRadar(ref.symbol),
+    guruHoldings.getGuruStockHolders(ref.symbol),
+  ]);
+  const form4 = form4Result.status === 'fulfilled' ? form4Result.value : null;
+  const form13f = form13fResult.status === 'fulfilled' ? form13fResult.value : null;
+  const merged = mergeStockDisclosureTimeline({
+    market: 'stocks',
+    instrument: ref.id,
+    retrievedAt: timeline.generatedAt,
+    baseItems: timeline.items,
+    form4: form4?.transactions || [],
+    form4Status: form4 ? ({ live: 'ok', empty: 'empty', partial: 'partial', unavailable: 'unavailable' } as const)[form4.dataStatus] : 'unavailable',
+    form4Reason: form4?.reason || (form4Result.status === 'rejected' ? String(form4Result.reason instanceof Error ? form4Result.reason.message : form4Result.reason) : null),
+    form4RetrievedAt: form4?.updatedAt,
+    form13f: (form13f?.holders || []).map(row => ({
+      mapped: Boolean(form13f?.mapping), managerName: row.manager.filingName,
+      reportPeriod: row.reportPeriod, filedAt: row.filedAt,
+      previousReportPeriod: row.previousReportPeriod, previousShares: row.previousShares,
+      shares: row.shares, shareDelta: row.shareDelta, change: row.change, sourceUrl: row.sourceUrl,
+    })),
+    form13fStatus: form13f?.dataStatus || 'unavailable',
+    form13fReason: form13f?.reason || (form13fResult.status === 'rejected' ? String(form13fResult.reason instanceof Error ? form13fResult.reason.message : form13fResult.reason) : null),
+    form13fRetrievedAt: form13f?.updatedAt,
+  });
+  return {
+    ...timeline,
+    items: merged.items,
+    sourceStatus: { ...timeline.sourceStatus, ...merged.sourceStatus },
+    sectionReasons: { ...(timeline.sectionReasons || {}), ...merged.sectionReasons },
+  };
+}
+
 function persistTimelineEventEvidence(entity: ReturnType<typeof buildEventEntities>[number]) {
   const retrievedAt = new Date(entity.retrievedAt).getTime();
   const publishedAt = entity.publishedAt && Date.parse(entity.publishedAt) <= retrievedAt ? entity.publishedAt : null;
@@ -3527,11 +3632,11 @@ async function readEventIntelligence(req: express.Request, res: express.Response
       res.json(decisionEnvelope({ market,instrument:ref.id,data,dataStatus:data.length ? 'historical' : 'empty',source,updatedAt:now,reason:reason || (data.length ? '采集变化事件，不代表官方新闻发布时间；不用于推断历史入场条件' : '当前历史区间没有可比快照事件') }));
       return;
     }
-    const timeline = await unifiedInstrumentService.timeline(ref);
+    const timeline = market === 'stocks' ? await loadStockEventTimeline(ref) : await unifiedInstrumentService.timeline(ref);
     const entities = buildEventEntities(timeline.items, { market, instrument: ref.id, retrievedAt: timeline.generatedAt, asOf: timeline.generatedAt });
     const data = grouped ? clusterEventEntities(entities) : entities;
     const availability = summarizeTimelineAvailability({ market, itemCount: data.length, sourceStatus: timeline.sourceStatus, sectionReasons: timeline.sectionReasons });
-    res.json({ ...decisionEnvelope({ market, instrument: ref.id, data, dataStatus: availability.dataStatus, source: 'scoped instrument timeline · Yahoo Finance / SEC EDGAR / earnings calendar', updatedAt: timeline.generatedAt, reason: availability.reason }), sourceStatus: availability.sourceStatuses, sectionReasons: timeline.sectionReasons || {} });
+    res.json({ ...decisionEnvelope({ market, instrument: ref.id, data, dataStatus: availability.dataStatus, source: '标的事件时间线 · 行情新闻 / 财报日历 / SEC Form 4 / 13F', updatedAt: timeline.generatedAt, reason: availability.reason }), sourceStatus: availability.sourceStatuses, sectionReasons: timeline.sectionReasons || {} });
   } catch (error: any) {
     res.status(400).json({ success: false, market, instrument, dataStatus: 'unavailable', source: 'scoped instrument event timeline', updatedAt: null, reason: error?.message || '事件数据不可用' });
   }
@@ -8674,6 +8779,7 @@ async function main() {
     riskPatrol.start();
     startCoverageCanaryMonitor();
     startPaperDriftMonitor();
+    startMarketHistoryCaptureMonitor();
     if (process.env.MONEYMONEY_DISABLE_GURU_REFRESH !== 'true') startGuruHoldingsRefreshMonitor();
     // Pre-fetch radar data so the first click on the tab is already warm.
     void warmPredictionRadarCache();
@@ -8709,6 +8815,7 @@ async function main() {
     stopTelegramCommandCenterMonitor();
     stopCoverageCanaryMonitor();
     stopPaperDriftMonitor();
+    await stopMarketHistoryCaptureMonitor();
     if (process.env.MONEYMONEY_DISABLE_GURU_REFRESH !== 'true') await stopGuruHoldingsRefreshMonitor();
     reportScheduler.stop();
     const current = telegramInteractionBot;

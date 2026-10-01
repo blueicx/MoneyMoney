@@ -152,9 +152,10 @@ export function summarizeTimelineAvailability(input: {
   market: MarketScope;
   itemCount: number;
   sourceStatus: Record<string, InstrumentSourceStatus>;
-  sectionReasons?: Partial<Record<InstrumentOverviewSection['id'] | 'filings', string>>;
+  sectionReasons?: Partial<Record<InstrumentOverviewSection['id'] | 'filings' | 'secForm4' | 'sec13f', string>>;
 }): { dataStatus: 'live' | 'cached' | 'partial' | 'empty' | 'unavailable' | 'unsupported'; reason: string | null; sourceStatuses: Record<string, InstrumentSourceStatus> } {
-  const sourceStatuses = Object.fromEntries(['events', 'news', 'filings']
+  const sourceKeys = ['events', 'news', 'filings', 'secForm4', 'sec13f'] as const;
+  const sourceStatuses = Object.fromEntries(sourceKeys
     .filter(key => input.sourceStatus[key])
     .map(key => [key, input.sourceStatus[key]])) as Record<string, InstrumentSourceStatus>;
   if (input.market !== 'stocks') {
@@ -163,18 +164,28 @@ export function summarizeTimelineAvailability(input: {
   const statuses = Object.values(sourceStatuses);
   const good = statuses.filter(status => status === 'ok' || status === 'stale').length;
   const failed = Object.entries(sourceStatuses).filter(([, status]) => status === 'unavailable' || status === 'partial').map(([key]) => key);
-  const failureReasons = failed.map(key => `${key}: ${input.sectionReasons?.[key as 'events' | 'news' | 'filings'] || '来源不可用'}`);
+  const failureReasons = failed.map(key => `${key}: ${input.sectionReasons?.[key as typeof sourceKeys[number]] || '来源不可用'}`);
+  const staleReasons = Object.entries(sourceStatuses)
+    .filter(([key, status]) => status === 'stale' && input.sectionReasons?.[key as typeof sourceKeys[number]])
+    .map(([key]) => `${key}: ${input.sectionReasons?.[key as typeof sourceKeys[number]]}`);
+  const emptyReasons = Object.entries(sourceStatuses)
+    .filter(([key, status]) => status === 'ok' && input.sectionReasons?.[key as typeof sourceKeys[number]])
+    .map(([key]) => `${key}: ${input.sectionReasons?.[key as typeof sourceKeys[number]]}`);
+  const diagnostics = [...failureReasons, ...staleReasons];
   if (input.itemCount > 0) {
     return {
       dataStatus: failed.length ? 'partial' : statuses.includes('ok') ? 'live' : 'cached',
-      reason: failureReasons.length ? `部分来源不可用；${failureReasons.join('；')}` : null,
+      reason: diagnostics.length ? `${failureReasons.length ? '部分来源不可用；' : ''}${diagnostics.join('；')}` : null,
       sourceStatuses,
     };
   }
-  if (good && failed.length) return { dataStatus: 'partial', reason: failureReasons.join('；'), sourceStatuses };
-  if (good) return { dataStatus: 'empty', reason: '事件与新闻来源已响应，但当前标的没有匹配记录', sourceStatuses };
+  if (good && failed.length) return { dataStatus: 'partial', reason: diagnostics.join('；'), sourceStatuses };
+  if (good) {
+    const explanations = [...staleReasons, ...emptyReasons];
+    return { dataStatus: statuses.includes('stale') ? 'cached' : 'empty', reason: explanations.length ? `来源已响应；${explanations.join('；')}` : '事件与新闻来源已响应，但当前标的没有匹配记录', sourceStatuses };
+  }
   const reason = statuses.length
-    ? Object.entries(sourceStatuses).map(([key]) => `${key}: ${input.sectionReasons?.[key as 'events' | 'news' | 'filings'] || '来源不可用'}`).join('；')
+    ? Object.entries(sourceStatuses).map(([key]) => `${key}: ${input.sectionReasons?.[key as typeof sourceKeys[number]] || '来源不可用'}`).join('；')
     : '当前标的没有可核验的事件来源状态';
   return { dataStatus: 'unavailable', reason, sourceStatuses };
 }

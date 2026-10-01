@@ -21,6 +21,10 @@ async function main() {
     await Promise.all([page.waitForURL(url=>url.pathname==='/'),page.click('#submitBtn')]);
     const auth = (await (await context.request.get(base+'/api/auth/status')).json()).data;
     const headers = { 'x-csrf-token':auth.csrfToken };
+    const diagnostics = await (await context.request.get(base+'/api/diagnostics')).json();
+    assert.equal(diagnostics.data.marketHistoryCapture.enabled,true);
+    assert.equal(diagnostics.data.marketHistoryCapture.intervalMinutes,30);
+    assert.equal(diagnostics.data.marketHistoryCapture.maxInstrumentsPerRun,3);
     async function post(url,data) { const response = await context.request.post(base+url,{ data,headers }); const body=await response.json(); assert.ok(response.ok(),JSON.stringify(body));return body; }
     await post('/api/watchlist',{ instrumentId:'crypto:binance:BTCUSDT' });
     const now = new Date().toISOString();
@@ -66,7 +70,7 @@ async function main() {
     assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth+2),'mobile shell fits viewport');
     const noCsrf = await context.request.patch(base+'/api/watchlist/action-center/'+encodeURIComponent(event.id),{ data:{ read:false } }); assert.equal(noCsrf.status(),403);
     const guestContext=await browser.newContext(); await guestContext.request.post(base+'/api/auth/guest');
-    for (const url of ['/api/watchlist/action-center','/api/research/experiments?market=stocks','/api/research/experiments/compare?ids='+experiments.join(','),'/api/signals/quality?market=stocks','/api/market-history?market=crypto&instrument=crypto:binance:BTCUSDT']) assert.equal((await guestContext.request.get(base+url)).status(),403,url);
+    for (const url of ['/api/watchlist/action-center','/api/research/experiments?market=stocks','/api/research/experiments/compare?ids='+experiments.join(','),'/api/signals/quality?market=stocks','/api/market-history?market=crypto&instrument=crypto:binance:BTCUSDT','/api/diagnostics']) assert.equal((await guestContext.request.get(base+url)).status(),403,url);
     await guestContext.close(); assert.deepEqual(errors,[]);
     console.log('Action/research Chromium smoke passed: real API aggregation, read/pin/snooze persistence, evidence drawer, experiment comparison, mobile, CSRF and guest isolation');
   } finally {

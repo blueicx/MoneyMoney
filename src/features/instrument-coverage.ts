@@ -85,7 +85,18 @@ export function buildStockCoverageMap(symbolInput: string, input: {
   }
   if (input.news?.status === 'fulfilled') capabilities.news = { status: input.news.value.length ? 'live' : 'empty', source: 'Yahoo Finance', count: input.news.value.length, updatedAt: latestTimestamp(input.news.value.map(item => item.publishedAt)), retrievedAt: new Date().toISOString(), reason: input.news.value.length ? null : '新闻源已响应，但没有返回该标的新闻' };
   else capabilities.news = failure('Yahoo Finance', input.news);
-  if (input.insider?.status === 'fulfilled') capabilities.insider = { status: input.insider.value.transactions.length ? 'live' : 'empty', source: 'SEC EDGAR Form 4', count: input.insider.value.transactions.length, updatedAt: latestTimestamp(input.insider.value.transactions.map(item => item.filedAt)), retrievedAt: input.insider.value.updatedAt || null, reason: input.insider.value.transactions.length ? null : `SEC 已响应；近 ${input.insider.value.windowDays} 天没有可解析交易` };
+  if (input.insider?.status === 'fulfilled') {
+    const insider = input.insider.value;
+    const status = insider.dataStatus || (insider.transactions.length ? 'live' : 'empty');
+    capabilities.insider = {
+      status,
+      source: 'SEC EDGAR Form 4',
+      count: insider.transactions.length,
+      updatedAt: latestTimestamp(insider.transactions.map(item => item.filedAt)),
+      retrievedAt: insider.updatedAt || null,
+      reason: status === 'live' ? null : insider.reason || (status === 'empty' ? `SEC 已响应；近 ${insider.windowDays} 天没有可解析交易` : 'SEC Form 4 来源不可用'),
+    };
+  }
   else capabilities.insider = failure('SEC EDGAR Form 4', input.insider);
   return { market: 'stocks', instrument: `stock:us:${symbol}`, updatedAt: new Date().toISOString(), capabilities };
 }

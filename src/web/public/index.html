@@ -6762,17 +6762,29 @@ function renderInsiderRadar(data) {
   const signalColor = data.signalZh.includes('卖出偏多') ? 'var(--red)' :
     data.signalZh.includes('买入偏积极') ? 'var(--green)' : '#b7791f';
   const planPct = Math.round((data.planSellRatio || 0) * 100);
-  const rows = data.transactions.map(trade => {
+  const availabilityLabel = ({ partial: '部分申报原文不可用', unavailable: 'SEC Form 4 来源不可用', empty: '暂无可解析记录' })[data.dataStatus] || '';
+  const availabilityColor = data.dataStatus === 'unavailable' ? 'var(--red)' : '#b7791f';
+  const transactions = Array.isArray(data.transactions) ? data.transactions : [];
+  const hasActivity = transactions.length > 0;
+  const rows = transactions.map(trade => {
     const buy = trade.action === 'BUY';
     const color = trade.action === 'OTHER' ? 'var(--text-secondary)' : buy ? 'var(--green)' : 'var(--red)';
     const label = trade.action === 'BUY' ? '买入' : trade.action === 'SELL' ? '卖出' : '其他';
     const price = trade.priceUsd > 0 ? ' @ $' + trade.priceUsd.toFixed(2) : '';
+    let filingLink = '';
+    try {
+      const url = new URL(String(trade.sourceUrl || ''));
+      if (url.protocol === 'https:' && (url.hostname === 'sec.gov' || url.hostname.endsWith('.sec.gov'))) {
+        filingLink = `<a href="${stockEscapeHtml(url.href)}" target="_blank" rel="noopener noreferrer" style="color:var(--purple);">SEC 原文 ↗</a>`;
+      }
+    } catch (_) {}
     return '<div style="padding:10px 0;border-top:1px solid var(--border);display:flex;gap:10px;align-items:flex-start;justify-content:space-between;">' +
       '<div style="min-width:0;"><div style="font-weight:700;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + stockEscapeHtml(trade.ownerName) + '">' +
         stockEscapeHtml(trade.ownerName) + '</div>' +
       '<div style="font-size:10.5px;color:var(--text-secondary);margin-top:3px;line-height:1.4;">' +
         stockEscapeHtml(trade.ownerTitleZh) + ' · ' + stockEscapeHtml(trade.transactionDate) +
         (trade.plan10b5 ? ' · <span title="Rule 10b5-1 预设计划">预设计划</span>' : '') +
+        (filingLink ? ' · ' + filingLink : '') +
       '</div></div>' +
       '<div style="flex-shrink:0;text-align:right;"><span style="font-weight:800;color:' + color + ';">' + label + '</span>' +
       '<div style="font-size:10.5px;color:var(--text-secondary);margin-top:2px;">' + trade.shares.toLocaleString() + ' 股' + stockEscapeHtml(price) +
@@ -6786,17 +6798,18 @@ function renderInsiderRadar(data) {
           <div style="font-size:11px;color:var(--text-secondary);margin-top:3px;">${safeNewsText(data.symbol)} · 近 ${data.windowDays} 天 · 扫描 ${data.scannedFilings} 份 Form 4</div>
         </div>
         ${workspaceInlineRefresh('loadInsiderRadar()', '刷新')}
-        <span class="workspace-signal-badge" style="color:white;background:${signalColor};border-radius:99px;padding:5px 9px;font-size:10.5px;flex-shrink:0;">${safeNewsText(data.signalZh)}</span>
+        <span class="workspace-signal-badge" style="color:white;background:${availabilityLabel ? availabilityColor : signalColor};border-radius:99px;padding:5px 9px;font-size:10.5px;flex-shrink:0;">${safeNewsText(availabilityLabel || data.signalZh)}</span>
       </div>
-      <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:12px;">
+      ${data.reason && hasActivity ? `<div style="margin-top:8px;padding:8px 10px;border-radius:9px;background:color-mix(in srgb,${availabilityColor} 9%,transparent);color:${availabilityColor};font-size:11px;line-height:1.45;">${safeNewsText(data.reason)}</div>` : ''}
+      ${hasActivity ? `<div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:12px;">
         <div style="background:var(--bg-secondary);border-radius:10px;padding:9px;"><div style="font-size:10px;color:var(--text-secondary);">买入</div><strong style="color:var(--green);">$${compactUsd(data.buyValueUsd)}</strong><div style="font-size:10px;color:var(--text-secondary);">${data.buyCount} 笔</div></div>
         <div style="background:var(--bg-secondary);border-radius:10px;padding:9px;"><div style="font-size:10px;color:var(--text-secondary);">卖出</div><strong style="color:var(--red);">$${compactUsd(data.sellValueUsd)}</strong><div style="font-size:10px;color:var(--text-secondary);">${data.sellCount} 笔 · 计划 ${planPct}%</div></div>
         <div style="background:var(--bg-secondary);border-radius:10px;padding:9px;"><div style="font-size:10px;color:var(--text-secondary);">净额</div><strong style="color:${positive ? 'var(--green)' : 'var(--red)'};">$${compactUsd(data.netValueUsd)}</strong><div style="font-size:10px;color:var(--text-secondary);">${data.ownerCount} 位内部人</div></div>
-      </div>
-      <div style="margin-top:10px;padding:10px;border-radius:10px;background:color-mix(in srgb,${signalColor} 8%,transparent);font-size:11px;color:var(--text-primary);line-height:1.5;">
+      </div>` : ''}
+      ${hasActivity ? `<div style="margin-top:10px;padding:10px;border-radius:10px;background:color-mix(in srgb,${signalColor} 8%,transparent);font-size:11px;color:var(--text-primary);line-height:1.5;">
         <strong>解读：</strong>${safeNewsText(data.adviceZh)}<br><span style="font-size:10px;color:var(--text-secondary);">信号置信度 ${data.confidence}/100；官方申报有延迟。</span>
-      </div>
-      ${rows ? '<div style="margin-top:6px;">' + rows + '</div>' : '<div style="margin-top:10px;color:var(--text-secondary);font-size:12px;">窗口内没有可解析的非衍生品买卖记录。</div>'}
+      </div>` : ''}
+      ${hasActivity ? '<div style="margin-top:6px;">' + rows + '</div>' : `<div style="margin-top:10px;padding:10px;border-radius:9px;background:var(--bg-secondary);color:var(--text-secondary);font-size:12px;line-height:1.5;">${safeNewsText(data.reason || '窗口内没有可解析的非衍生品买卖记录。')}</div>`}
       <div style="margin-top:8px;font-size:10.5px;color:var(--text-secondary);line-height:1.45;">来源：SEC EDGAR Form 4。内部人出售常与薪酬、税务和分散化有关，不能单独作为卖出依据；不构成投资建议。</div>
     </div>
   `;

@@ -17,6 +17,7 @@ export interface InsiderTrade {
   priceUsd: number;
   valueUsd: number;
   plan10b5: boolean;
+  sourceUrl?: string;
 }
 
 export interface InsiderRadarResult {
@@ -26,6 +27,10 @@ export interface InsiderRadarResult {
   updatedAt: string;
   windowDays: number;
   scannedFilings: number;
+  successfulFilings: number;
+  failedFilings: number;
+  dataStatus: 'live' | 'partial' | 'empty' | 'unavailable';
+  reason: string | null;
   transactions: InsiderTrade[];
   ownerCount: number;
   buyCount: number;
@@ -130,7 +135,7 @@ interface SubmissionsPayload {
   };
 }
 
-function parseTransactions(xml: string, filedAt: string): InsiderTrade[] {
+function parseTransactions(xml: string, filedAt: string, sourceUrl?: string): InsiderTrade[] {
   const tableMatch = xml.match(/<nonDerivativeTable>([\s\S]*?)<\/nonDerivativeTable>/i);
   if (!tableMatch) return [];
 
@@ -173,6 +178,7 @@ function parseTransactions(xml: string, filedAt: string): InsiderTrade[] {
       priceUsd: round(price, 4),
       valueUsd: round(shares * price, 0),
       plan10b5: plan,
+      ...(sourceUrl ? { sourceUrl } : {}),
     });
   }
   return trades;
@@ -235,6 +241,34 @@ function buildSummary(
   };
 }
 
+export function classifyForm4Coverage(input: {
+  totalFilings: number;
+  scannedFilings: number;
+  successfulFilings: number;
+  failedFilings: number;
+  transactionCount: number;
+}): Pick<InsiderRadarResult, 'dataStatus' | 'reason'> {
+  const total = Math.max(0, Math.floor(Number(input.totalFilings) || 0));
+  const scanned = Math.min(total, Math.max(0, Math.floor(Number(input.scannedFilings) || 0)));
+  const successful = Math.max(0, Math.floor(Number(input.successfulFilings) || 0));
+  const failed = Math.max(0, Math.floor(Number(input.failedFilings) || 0));
+  const unscanned = Math.max(0, total - scanned);
+  if (total === 0) return { dataStatus: 'empty', reason: `SEC submissions 已响应；近 ${WINDOW_DAYS} 天没有 Form 4 申报` };
+  if (scanned > 0 && failed >= scanned && successful === 0) {
+    const omitted = unscanned ? `；另有 ${unscanned} 份本次未扫描` : '';
+    return { dataStatus: 'unavailable', reason: `SEC submissions 找到 ${total} 份 Form 4；已扫描的 ${scanned} 份原文均读取失败${omitted}` };
+  }
+  if (failed > 0 || unscanned > 0) {
+    const details = [
+      failed ? `${failed}/${scanned} 份已扫描原文读取失败` : '',
+      unscanned ? `另有 ${unscanned} 份超过本次扫描上限，未读取` : '',
+    ].filter(Boolean).join('；');
+    return { dataStatus: 'partial', reason: `SEC Form 4 覆盖不完整（${details}）；结果仅包含成功解析的申报` };
+  }
+  if (input.transactionCount > 0) return { dataStatus: 'live', reason: null };
+  return { dataStatus: 'empty', reason: `SEC submissions 已响应；近 ${WINDOW_DAYS} 天没有可解析的内部人交易记录` };
+}
+
 export async function getInsiderRadar(symbolInput: string): Promise<InsiderRadarResult> {
   const symbol = symbolInput.trim().toUpperCase().replace(/^US/, '');
   if (!symbol || /[^A-Z.-]/.test(symbol)) throw new Error('Invalid US symbol');
@@ -267,18 +301,22 @@ export async function getInsiderRadar(symbolInput: string): Promise<InsiderRadar
   }
 
   // Stay well below public-rate limits while keeping the radar responsive.
+  const scannedEntries = entries.slice(0, 16);
   const chunks: SubmissionEntry[][] = [];
-  for (let i = 0; i < Math.min(entries.length, 16); i += 3) chunks.push(entries.slice(i, i + 3));
+  for (let i = 0; i < scannedEntries.length; i += 3) chunks.push(scannedEntries.slice(i, i + 3));
 
   const transactions: InsiderTrade[] = [];
+  let successfulFilings = 0;
+  let failedFilings = 0;
   for (const chunk of chunks) {
     const results = await Promise.allSettled(chunk.map(async entry => {
       const noDash = entry.accessionNumber.replace(/-/g, '');
       let lastError: unknown = new Error('Unexpected Form 4 payload');
       for (const candidate of buildSecArchiveCandidates(entry.accessionNumber, entry.primaryDocument)) {
         try {
-          const xml = await fetchText(`https://www.sec.gov/Archives/edgar/data/${paddedCik}/${noDash}/${candidate}`);
-          if (/<ownershipDocument/i.test(xml)) return parseTransactions(xml, entry.filingDate);
+          const sourceUrl = `https://www.sec.gov/Archives/edgar/data/${Number(record.cik)}/${noDash}/${encodeURIComponent(candidate)}`;
+          const xml = await fetchText(sourceUrl);
+          if (/<ownershipDocument/i.test(xml)) return parseTransactions(xml, entry.filingDate, sourceUrl);
           lastError = new Error(`Unexpected Form 4 payload: ${candidate}`);
         } catch (error) {
           lastError = error;
@@ -287,21 +325,26 @@ export async function getInsiderRadar(symbolInput: string): Promise<InsiderRadar
       throw lastError;
     }));
     for (const result of results) {
-      if (result.status === 'fulfilled') transactions.push(...result.value);
+      if (result.status === 'fulfilled') { successfulFilings += 1; transactions.push(...result.value); }
+      else failedFilings += 1;
     }
   }
 
   transactions.sort((a, b) =>
     b.transactionDate.localeCompare(a.transactionDate) || a.ownerName.localeCompare(b.ownerName)
   );
-  const summary = buildSummary(symbol, transactions, entries.length);
+  const summary = buildSummary(symbol, transactions, scannedEntries.length);
+  const coverage = classifyForm4Coverage({ totalFilings: entries.length, scannedFilings: scannedEntries.length, successfulFilings, failedFilings, transactionCount: transactions.length });
   const value: InsiderRadarResult = {
     symbol,
     cik: paddedCik,
     companyName: record.title || text(payload.name),
     updatedAt: new Date().toISOString(),
     windowDays: WINDOW_DAYS,
-    scannedFilings: entries.length,
+    scannedFilings: scannedEntries.length,
+    successfulFilings,
+    failedFilings,
+    ...coverage,
     transactions: transactions.slice(0, 12),
     ...summary,
     sources: ['SEC EDGAR Form 4', 'SEC Company Tickers'],

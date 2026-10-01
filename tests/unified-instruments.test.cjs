@@ -83,6 +83,7 @@ test('timeline coverage keeps source-empty distinct from unavailable and unsuppo
   });
   assert.equal(empty.dataStatus, 'empty');
   assert.match(empty.reason, /来源已响应/);
+  assert.match(empty.reason, /暂无财报事件/);
 
   const partial = summarizeTimelineAvailability({
     market: 'stocks', itemCount: 0,
@@ -99,6 +100,15 @@ test('timeline coverage keeps source-empty distinct from unavailable and unsuppo
   });
   assert.equal(partialCalendar.dataStatus, 'partial');
   assert.match(partialCalendar.reason, /财报日历/);
+
+  const disclosureFailure = summarizeTimelineAvailability({
+    market: 'stocks', itemCount: 0,
+    sourceStatus: { events: 'ok', news: 'ok', filings: 'ok', secForm4: 'unavailable', sec13f: 'stale' },
+    sectionReasons: { secForm4: 'SEC Form 4 HTTP 403', sec13f: '13F 数据已延迟' },
+  });
+  assert.equal(disclosureFailure.dataStatus, 'partial');
+  assert.match(disclosureFailure.reason, /SEC Form 4 HTTP 403/);
+  assert.match(disclosureFailure.reason, /13F 数据已延迟/);
 
   const unavailable = summarizeTimelineAvailability({
     market: 'stocks', itemCount: 0,
