@@ -164,6 +164,7 @@ import { STOCK_KLINE_PERIODS, createYahooStockKlineAdapter } from '../data/yahoo
 import { createBinanceKlineAdapter } from '../data/binance-kline-adapter';
 import { actionsForScreener, fieldsForScreener, filterRows, isScreenerScope, paginateRows, serializeTemplate, sortRows, type ScreenerFilter, type ScreenerScope, type ScreenerSort } from '../features/market-screener';
 import { compareInstruments, createCompareSnapshot, type CompareInstrument, type CompareScope } from '../features/instrument-compare';
+import { diffScreenerMembership } from '../features/workspace-experience';
 import {
   addResearchNote,
   addResearchSnapshot,
@@ -829,6 +830,71 @@ function adminOnly(req: express.Request, res: express.Response): boolean {
     return false;
   }
   return true;
+}
+
+interface StoredScreenerTracking {
+  templateId: string;
+  scope: ScreenerScope;
+  name: string;
+  lastRunAt: string;
+  attemptedAt: string;
+  lastStatus: 'baseline' | 'updated' | 'failed';
+  dataStatus: 'live' | 'empty' | 'failed';
+  reason: string | null;
+  currentIds: string[];
+  entered: string[];
+  exited: string[];
+  unchanged: string[];
+}
+
+const SCREENER_TRACKING_KEY = 'screener-tracking-v1';
+function loadScreenerTracking(): StoredScreenerTracking[] {
+  return stateStore.get<StoredScreenerTracking[]>(SCREENER_TRACKING_KEY) || [];
+}
+function saveScreenerTracking(value: StoredScreenerTracking[]): void {
+  stateStore.set(SCREENER_TRACKING_KEY, value.slice(-100), 1);
+}
+
+async function refreshScreenerTemplateTracking(template: StoredScreenerTemplate): Promise<{ success: boolean; record: StoredScreenerTracking }> {
+  const previous = loadScreenerTracking();
+  const existing = previous.find(item => item.templateId === template.id);
+  const attemptedAt = new Date().toISOString();
+  const save = (record: StoredScreenerTracking) => saveScreenerTracking([...previous.filter(item => item.templateId !== template.id), record]);
+  try {
+    const raw = await loadScopedScreenerRows(template.scope);
+    // An empty upstream result is ambiguous; never interpret it as every tracked
+    // instrument exiting the screen.
+    if (!raw.length) {
+      const record: StoredScreenerTracking = {
+        templateId: template.id, scope: template.scope, name: template.name,
+        lastRunAt: existing?.lastRunAt || '', attemptedAt, lastStatus: 'failed', dataStatus: 'empty',
+        reason: '当前筛选来源返回零条原始记录；为避免误报全部退出，保留上次有效基线。',
+        currentIds: existing?.currentIds || [], entered: existing?.entered || [], exited: existing?.exited || [], unchanged: existing?.unchanged || [],
+      };
+      save(record);
+      return { success: false, record };
+    }
+    const filtered = filterRows(template.scope, raw, template.filters || {});
+    const rows = template.sort ? sortRows(template.scope, filtered, template.sort) : filtered;
+    const currentIds = [...new Set(rows.map(row => String(row.id || row.symbol || '').trim()).filter(Boolean))].sort();
+    const delta = existing?.lastRunAt ? diffScreenerMembership(existing.currentIds, currentIds) : { entered: [], exited: [], unchanged: currentIds };
+    const record: StoredScreenerTracking = {
+      templateId: template.id, scope: template.scope, name: template.name,
+      lastRunAt: attemptedAt, attemptedAt, lastStatus: existing?.lastRunAt ? 'updated' : 'baseline', dataStatus: 'live', reason: null,
+      currentIds, ...delta,
+    };
+    save(record);
+    return { success: true, record };
+  } catch (error: any) {
+    const record: StoredScreenerTracking = {
+      templateId: template.id, scope: template.scope, name: template.name,
+      lastRunAt: existing?.lastRunAt || '', attemptedAt, lastStatus: 'failed', dataStatus: 'failed',
+      reason: error?.message || '筛选来源请求失败；保留上次有效基线。',
+      currentIds: existing?.currentIds || [], entered: existing?.entered || [], exited: existing?.exited || [], unchanged: existing?.unchanged || [],
+    };
+    save(record);
+    return { success: false, record };
+  }
 }
 
 function decisionMarket(value: unknown): MarketId {
@@ -1752,8 +1818,57 @@ app.delete('/api/screener/templates/:id', (req, res) => {
   if (!adminOnly(req, res)) return;
   const before = loadScreenerTemplates();
   saveScreenerTemplates(before.filter(item => item.id !== String(req.params.id)));
+  saveScreenerTracking(loadScreenerTracking().filter(item => item.templateId !== String(req.params.id)));
   res.json({ success: true, removed: before.length !== loadScreenerTemplates().length });
 });
+
+app.get('/api/screener/tracking', (req, res) => {
+  if (!adminOnly(req, res)) return;
+  res.json({ success: true, data: loadScreenerTracking() });
+});
+
+app.post('/api/screener/tracking/:id/run', async (req, res) => {
+  if (!adminOnly(req, res)) return;
+  const template = loadScreenerTemplates().find(item => item.id === String(req.params.id) && item.ownerId === 'admin');
+  if (!template) return res.status(404).json({ success: false, error: '筛选模板不存在或不属于当前管理员' });
+  const result = await refreshScreenerTemplateTracking(template);
+  if (result.success) return res.json({ success: true, data: result.record });
+  return res.status(result.record.dataStatus === 'empty' ? 503 : 502).json({ success: false, data: result.record, error: result.record.reason });
+});
+
+app.delete('/api/screener/tracking/:id', (req, res) => {
+  if (!adminOnly(req, res)) return;
+  const before = loadScreenerTracking();
+  saveScreenerTracking(before.filter(item => item.templateId !== String(req.params.id)));
+  return res.json({ success: true, removed: before.length !== loadScreenerTracking().length });
+});
+
+let screenerMonitorCycleRunning = false;
+async function runDueScreenerMonitorCycle(): Promise<void> {
+  if (screenerMonitorCycleRunning) return;
+  screenerMonitorCycleRunning = true;
+  try {
+    const now = Date.now();
+    const templates = new Map(loadScreenerTemplates().filter(item => item.ownerId === 'admin').map(item => [item.id, item]));
+    const due = loadScreenerTracking().filter(item => item.lastRunAt && now - Date.parse(item.attemptedAt || item.lastRunAt) >= 24 * 60 * 60_000).slice(0, 3);
+    for (const tracked of due) {
+      const template = templates.get(tracked.templateId);
+      if (!template) {
+        saveScreenerTracking(loadScreenerTracking().filter(item => item.templateId !== tracked.templateId));
+        continue;
+      }
+      const result = await refreshScreenerTemplateTracking(template);
+      if (result.success && result.record.lastStatus === 'updated' && (result.record.entered.length || result.record.exited.length)) {
+        const entered = result.record.entered.slice(0, 5).map(id => id.split(':').pop()).join('、');
+        const exited = result.record.exited.slice(0, 5).map(id => id.split(':').pop()).join('、');
+        const delta = [entered ? `新进入 ${entered}` : '', exited ? `已离开 ${exited}` : ''].filter(Boolean).join('；');
+        pushNotification('alert', `筛选监控「${result.record.name}」(${result.record.scope})：${delta}`);
+      }
+    }
+  } finally { screenerMonitorCycleRunning = false; }
+}
+const screenerMonitorTimer = setInterval(() => { void runDueScreenerMonitorCycle(); }, 60 * 60_000);
+screenerMonitorTimer.unref?.();
 
 function parseCompareId(value: string, scope: CompareScope): { type: CompareInstrument['type']; venue: string; symbol: string; id: string } | null {
   const raw = decodeURIComponent(String(value || '').trim());
@@ -6581,17 +6696,20 @@ app.get('/api/binance/price/:symbol', async (req, res) => {
 // --- Price Alerts ---
 
 app.get('/api/alerts', (req, res) => {
+  if (!adminOnly(req, res)) return;
   const scope = requestedMarketScope(req.query.scope);
   res.json({ success: true, data: scope && !['overview', 'crypto'].includes(scope) ? [] : alertManager.getAlerts() });
 });
 
 app.post('/api/alerts/add', async (req, res) => {
+  if (!adminOnly(req, res)) return;
   const { symbol, targetPrice, direction } = req.body;
   const alert = alertManager.addAlert(symbol.toUpperCase(), parseFloat(targetPrice), direction.toUpperCase());
   res.json({ success: true, data: alert });
 });
 
 app.post('/api/alerts/remove', (req, res) => {
+  if (!adminOnly(req, res)) return;
   const removed = alertManager.removeAlert(req.body.id);
   res.json({ success: removed, message: removed ? '预警已删除' : '未找到预警' });
 });
@@ -8098,7 +8216,10 @@ app.get('/api/instruments/:type/:venue/:symbol/timeline', async (req, res) => {
 
 // Shared web/Telegram state. The current deployment intentionally has one
 // owner; ownerId remains explicit so a future multi-user migration is local.
-app.get('/api/watchlist', (_req, res) => res.json({ success: true, data: unifiedAlertStore.listWatchlist(), ownerId: 'admin' }));
+app.get('/api/watchlist', (req, res) => {
+  if (!adminOnly(req, res)) return;
+  res.json({ success: true, data: unifiedAlertStore.listWatchlist(), ownerId: 'admin' });
+});
 app.get('/api/workspace/watchlist', (req, res) => {
   const rawScope = String(req.query.scope || 'watchlist');
   if (!MARKET_SCOPES.includes(rawScope as MarketScope)) {
@@ -8122,11 +8243,11 @@ app.get('/api/workspace/watchlist', (req, res) => {
     title: String(instrumentId),
     type: scopeForId(String(instrumentId)),
   }));
-  const watchlist = scope === 'overview' || scope === 'watchlist'
-    ? allWatchlist
-    : allWatchlist.filter(item => item.type === scope);
   const token = extractAuthToken(req as any);
   const payload = token ? verifyLoginToken(token) : null;
+  const watchlist = payload?.role === 'guest' ? [] : scope === 'overview' || scope === 'watchlist'
+    ? allWatchlist
+    : allWatchlist.filter(item => item.type === scope);
   const paper = payload?.role === 'guest' ? [] : (scope === 'overview' || scope === 'watchlist'
     ? unifiedPaperLedgerStore.get().positions
     : filterUnifiedPaperLedger(unifiedPaperLedgerStore.get(), scope).positions).map(position => ({
@@ -8143,29 +8264,45 @@ app.get('/api/workspace/watchlist', (req, res) => {
   return res.json({ success: true, scope, group: requestedGroup, groups });
 });
 app.post('/api/watchlist', (req, res) => {
+  if (!adminOnly(req, res)) return;
   const instrumentId = String(req.body?.instrumentId || '').trim();
   if (!instrumentId) return res.status(400).json({ success: false, error: '缺少标的 ID' });
   res.json({ success: true, data: unifiedAlertStore.addWatchlist(instrumentId), ownerId: 'admin' });
 });
-app.delete('/api/watchlist/:instrumentId', (req, res) => res.json({ success: true, data: unifiedAlertStore.removeWatchlist(decodeURIComponent(req.params.instrumentId)), ownerId: 'admin' }));
+app.delete('/api/watchlist/:instrumentId', (req, res) => {
+  if (!adminOnly(req, res)) return;
+  res.json({ success: true, data: unifiedAlertStore.removeWatchlist(decodeURIComponent(req.params.instrumentId)), ownerId: 'admin' });
+});
 
-app.get('/api/alert-rules', (_req, res) => res.json({ success: true, data: unifiedAlertStore.listRules(), ownerId: 'admin' }));
+app.get('/api/alert-rules', (req, res) => {
+  if (!adminOnly(req, res)) return;
+  res.json({ success: true, data: unifiedAlertStore.listRules(), ownerId: 'admin' });
+});
 app.post('/api/alert-rules', (req, res) => {
+  if (!adminOnly(req, res)) return;
   try {
     const rule = unifiedAlertStore.createRule({ ...(req.body || {}), ownerId: 'admin' });
     res.status(201).json({ success: true, data: rule });
   } catch (error: any) { res.status(400).json({ success: false, error: error?.message || '提醒规则无效' }); }
 });
 app.patch('/api/alert-rules/:id', (req, res) => {
+  if (!adminOnly(req, res)) return;
   try {
     const rule = unifiedAlertStore.updateRule(String(req.params.id), req.body || {});
     if (!rule) return res.status(404).json({ success: false, error: '提醒规则不存在' });
     res.json({ success: true, data: rule });
   } catch (error: any) { res.status(400).json({ success: false, error: error?.message || '提醒规则无效' }); }
 });
-app.delete('/api/alert-rules/:id', (req, res) => res.json({ success: unifiedAlertStore.removeRule(String(req.params.id)) }));
-app.get('/api/alerts/history', (req, res) => res.json({ success: true, data: unifiedAlertStore.listHistory(Number(req.query.limit) || 100) }));
+app.delete('/api/alert-rules/:id', (req, res) => {
+  if (!adminOnly(req, res)) return;
+  res.json({ success: unifiedAlertStore.removeRule(String(req.params.id)) });
+});
+app.get('/api/alerts/history', (req, res) => {
+  if (!adminOnly(req, res)) return;
+  res.json({ success: true, data: unifiedAlertStore.listHistory(Number(req.query.limit) || 100) });
+});
 app.post('/api/alerts/dry-run', express.json(), (req, res) => {
+  if (!adminOnly(req, res)) return;
   try {
     const observations = Array.isArray(req.body?.observations) ? req.body.observations : [];
     res.json({ success: true, data: previewUnifiedAlerts(unifiedAlertStore, observations.map((item: any) => ({ instrumentId: String(item.instrumentId || ''), observation: item.observation || item }))) });

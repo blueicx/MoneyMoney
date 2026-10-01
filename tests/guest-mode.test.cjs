@@ -43,10 +43,41 @@ test('guest access only permits explicit read-only GET paths', () => {
 });
 
 test('guest can read the stock library and search but cannot read private paper state', () => {
-  assert.equal(auth.isGuestRequestAllowed('GET', '/watchlist'), true);
+  assert.equal(auth.isGuestRequestAllowed('GET', '/watchlist'), false, 'the global personal watchlist is private');
+  assert.equal(auth.isGuestRequestAllowed('GET', '/workspace/watchlist'), true, 'the scoped workspace endpoint returns an empty private group to guests');
   assert.equal(auth.isGuestRequestAllowed('GET', '/paper/positions'), false);
   assert.equal(auth.isGuestRequestAllowed('GET', '/stock/search'), true);
   assert.equal(auth.isGuestRequestAllowed('POST', '/watchlist'), false);
+});
+
+test('guest workspace response never includes owner watchlist or paper positions', () => {
+  assert.match(serverSrc, /const watchlist = payload\?\.role === 'guest' \? \[\] :/);
+  assert.match(serverSrc, /const paper = payload\?\.role === 'guest' \? \[\] :/);
+  assert.match(indexHtml, /canReadPrivate \? fetch\('\/api\/watchlist'/);
+  assert.match(indexHtml, /访客模式不读取私人自选/);
+  assert.match(indexHtml, /自选大盘包含个人自选与模拟持仓；访客模式不读取私人数据/);
+});
+
+test('legacy alerts and private watchlist handlers explicitly require an admin session', () => {
+  for (const route of [
+    "app.get('/api/alerts'",
+    "app.post('/api/alerts/add'",
+    "app.post('/api/alerts/remove'",
+    "app.get('/api/watchlist'",
+    "app.post('/api/watchlist'",
+    "app.delete('/api/watchlist/:instrumentId'",
+    "app.get('/api/alert-rules'",
+    "app.post('/api/alert-rules'",
+    "app.patch('/api/alert-rules/:id'",
+    "app.delete('/api/alert-rules/:id'",
+    "app.get('/api/alerts/history'",
+    "app.post('/api/alerts/dry-run'",
+  ]) {
+    const start = serverSrc.indexOf(route);
+    assert.notEqual(start, -1, `${route} exists`);
+    const handler = serverSrc.slice(start, serverSrc.indexOf('\n});', start) + 4);
+    assert.match(handler, /adminOnly\(req, res\)/, `${route} is admin-only`);
+  }
 });
 
 test('server exposes guest login and enforces guest read-only middleware', () => {
