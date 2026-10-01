@@ -15,15 +15,26 @@
 
 本批首轮本地完整测试 648 项通过；其后追加的披露时间线、采集调度和内部人卡片修正，最新完整测试为 661/661 通过。最新构建、Web/认证/四市场浏览器/行动研究冒烟及安全扫描通过；`git diff --check` 退出码为 0（只有 Windows 行尾提示）。
 行动冒烟使用隔离 SQLite 和明确标识的测试样本，不向生产注入测试事件或模拟订单。
-生产发布需单独检查正式域名版本、构建 Hash、健康和只读浏览器抽检；本文件不是生产成功声明。
+本批生产发布记录见下方“追加交付”；较早的本地验证记录不单独代表生产成功。
 
-## 追加交付（2026-10-01，待生产发布）
+## 追加交付（2026-10-01，已发布）
 
 - 采集调度接入服务启动/停止与管理员诊断：SQLite 全局租约、每轮最多 3 个自选标的、失败原因与轮转游标持久化；加密货币/预测市场每小时冷却，期权链每日冷却；只使用已支持交易场所和真实来源。
 - 股票事件时间线现在合并 SEC Form 4 和可核验映射的 13F 逐机构变化；事件定位采用公开申报日，Form 4 交易日只作明细，13F 未披露明确不等于清仓。事件研究与时间线复用同一合并结果，并保留来源状态/失败原因。
 - SEC Form 4 原文部分或全部下载失败会显示 `partial/unavailable`，不再伪装成成功空结果；无交易记录时隐藏 0 买卖、净额和信号置信度；真实交易卡片仅提供通过 HTTPS/SEC 域名校验的原文链接。
 - SEC Form 4 每次最多扫描 16 份；若近期申报超过上限，计数只报告实际扫描数，未扫描部分使状态变为 `partial`，不会误称完整覆盖。
-- 最新本地验证：`npm test` 660/660；`npm run build`、`smoke:web`、`smoke:auth`、`smoke:actions`、`smoke:browser`、`security:scan` 通过。
+- 最新本地验证：`npm test` 661/661；`npm run build`、`smoke:web`、`smoke:auth`、`smoke:actions`、`smoke:browser`、`security:scan` 通过；`git diff --check` 通过。
+
+### 生产发布证据
+
+- 应用代码提交：`17067972a6c2506f4aeac915310c789f6c13c5f3`；已推送 GitHub 分支 `codex/stock-free-data-sources` 和 `master`。
+- 正式域名 `https://bluetrade.bbroot.com` TLS 校验通过，公开入口按预期跳转登录；`/api/health/version` 返回上述应用提交版本。
+- VPS `moneymoney.service` 状态为 `active`；部署后健康接口恢复成功。
+- 线上产物 SHA-256：`dist/web/server.js` = `72efae91b23f72e737df0382496e6ab3c2b5b94ce46653968447383427cf67dd`；`dist/web/public/index.html` = `74d94ba08c2073d3fee281079defa97d0880f31fefc32ab6c9f4e64151961bfe`。
+- 发布包 SHA-256：`43a76c74dd2ecc993845802b2f4facf514e390d8088e1d20e359724e476c2a81`。
+- 发布前备份：`/opt/moneymoney/backups/dist-pre-form4-timeline-20261001-223101`；回滚目录：`/opt/moneymoney/dist.rollback-form4-timeline-20261001-223101`，均保留。
+- 生产只读抽检：MU 的 SEC Form 4 接口返回 `live`，扫描 8 份、12 条交易；股票事件时间线返回 `partial`，并明确指出 filings 来源不可用、13F 缓存超过 24 小时。该结果是来源降级的真实状态，不代表全市场事件覆盖完整。
+- 本次只发布应用提交 `17067972…`。若本交接文档之后另行提交，仅更新 Git 文档，不触发线上重启。
 
 ## 尚未完成，不能视为整份扩充计划已交付
 
