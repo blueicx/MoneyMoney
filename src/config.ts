@@ -96,7 +96,7 @@ export function validateLoginConfiguration(input: {
   if (!input.loginUser.trim()) errors.push('公网模式必须设置 MONEYMONEY_LOGIN_USER');
   if (!input.loginPass) errors.push('公网模式必须设置 MONEYMONEY_LOGIN_PASS');
   if (input.loginUser === 'admin' && input.loginPass === 'admin123') errors.push('公网模式禁止使用默认管理员凭据 admin/admin123');
-  if (input.loginPass && input.loginPass.length < 12) errors.push('MONEYMONEY_LOGIN_PASS 至少需要 12 个字符');
+  if (input.loginPass && input.loginPass.length < 8) errors.push('MONEYMONEY_LOGIN_PASS 至少需要 8 个字符');
   if (!input.jwtSecretConfigured) errors.push('公网模式必须设置独立的 MONEYMONEY_JWT_SECRET');
   return errors;
 }

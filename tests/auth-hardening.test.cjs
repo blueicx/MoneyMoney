@@ -112,10 +112,18 @@ test('public authentication configuration rejects missing or legacy credentials'
   });
   assert.ok(legacy.some((item) => item.includes('默认管理员凭据')));
 
+  const tooShort = configMod.validateLoginConfiguration({
+    publicMode: true,
+    loginUser: 'owner',
+    loginPass: 'seven77',
+    jwtSecretConfigured: true,
+  });
+  assert.ok(tooShort.some((item) => item.includes('至少需要 8 个字符')));
+
   assert.deepEqual(configMod.validateLoginConfiguration({
     publicMode: true,
     loginUser: 'owner',
-    loginPass: 'a-long-unique-password',
+    loginPass: 'valid-88',
     jwtSecretConfigured: true,
   }), []);
 });
