@@ -1,0 +1,6 @@
+const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs');
+const server=fs.readFileSync(require('node:path').join(__dirname,'../src/web/server.ts'),'utf8');
+test('action center buttons use signed chat-bound item identity rather than untrusted indices',()=>{assert.match(server,/issueTelegramCallback\('action:handle'/);assert.match(server,/consumeTelegramCallback\(data, 'action:handle', ctx.chatId\)/);assert.match(server,/saved.items.find\(item => item.id === itemId\)/);});
+test('TG contracts use the shared read-only contract service and enforce crypto scope',()=>{assert.match(server,/contracts: async \(\{ args, chatId \}\)/);assert.match(server,/contractResearchService.detail\(instrument\)/);assert.match(server,/当前市场不支持合约查询/);});
+test('research task buttons dispatch signed operations to the existing task handler',()=>{assert.match(server,/issueTelegramCallback\('task:handle'/);assert.match(server,/consumeTelegramCallback\(data, 'task:handle', ctx.chatId\)/);});
+test('13F card preserves SEC source and disclosure periods instead of guessing realtime holdings',()=>{assert.match(server,/guru: async \(\{ args, chatId \}\)/);assert.match(server,/guruHoldings.getGuruStockHolders\(ref.symbol\)/);assert.match(server,/row.reportPeriod/);assert.match(server,/row.filedAt/);assert.match(server,/13F 季度滞后/);});

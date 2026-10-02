@@ -74,6 +74,7 @@ export type TelegramReplyMarkup = TelegramInlineKeyboardMarkup | TelegramReplyKe
 
 export interface TelegramReply {
   text: string;
+  photo?: Buffer;
   replyMarkup?: TelegramReplyMarkup;
   replyKeyboard?: 'menu';
 }
@@ -93,6 +94,7 @@ export type TelegramCallbackHandler = (context: TelegramCallbackContext) => Tele
 export interface TelegramTransport {
   getUpdates(offset: number, timeoutSeconds: number, signal?: AbortSignal): Promise<TelegramUpdate[]>;
   sendMessage(chatId: string, text: string, replyMarkup?: TelegramReplyMarkup): Promise<void>;
+  sendPhoto?(chatId: string, photo: Buffer): Promise<void>;
   answerCallbackQuery(callbackQueryId: string, text?: string): Promise<void>;
 }
 
@@ -233,6 +235,17 @@ export class TelegramApiTransport implements TelegramTransport {
     } finally {
       request.cleanup();
     }
+  }
+
+  async sendPhoto(chatId: string, photo: Buffer): Promise<void> {
+    if (!telegramNetworkAllowed()) throw new Error('Telegram network disabled');
+    if (photo.length > 9_000_000) throw new Error('Chart image too large');
+    const form = new FormData(); form.append('chat_id', chatId); form.append('photo', new Blob([new Uint8Array(photo)], { type: 'image/png' }), 'kline.png');
+    try {
+      const response = await fetch(`${TELEGRAM_API}/bot${this.token}/sendPhoto`, { method: 'POST', body: form, signal: AbortSignal.timeout(20000) });
+      const parsed = await response.json() as TelegramApiResponse<unknown>;
+      if (!response.ok || !parsed.ok) throw new Error('Image upload rejected');
+    } catch { throw new Error('Telegram K线图片投递失败'); }
   }
 
   private async callApiWithCurl<T>(url: string, body: Record<string, unknown>, timeoutMs: number, signal?: AbortSignal): Promise<TelegramApiResponse<T>> {
@@ -460,6 +473,10 @@ export class TelegramInteractionBot {
   private async sendReply(chatId: string, reply: TelegramCommandResult): Promise<void> {
     if (reply === undefined || reply === '') return;
     const normalized = typeof reply === 'string' ? { text: reply } : reply;
+    if (normalized.photo) {
+      try { if (!this.transport.sendPhoto) throw new Error('图片传输不可用'); await this.transport.sendPhoto(chatId, normalized.photo); }
+      catch { await this.transport.sendMessage(chatId, 'K线图片发送失败；以下为真实数据摘要，可稍后重试 /chart。'); }
+    }
     const replyMarkup = normalized.replyKeyboard === 'menu'
       ? buildTelegramBottomMenu(chatId, this.menuScope(chatId))
       : normalized.replyMarkup;
