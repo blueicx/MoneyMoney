@@ -150,7 +150,9 @@ async function main() {
     assert.ok(await page.locator('#mm-command-actions .mm-command-action').count() >= 10, 'command palette should expose real workspace actions');
     await page.keyboard.press('Escape');
 
-    await page.evaluate(() => {
+    await page.evaluate(()=>{setMarketScope('stocks');openWorkspace('overview');});
+    await page.evaluate(async () => {
+      await marketChangeDigestPromise;
       renderMarketChangeDigest({ updatedAt: '2026-09-25T01:00:00.000Z', records: [
         { id: 'digest-price', market: 'stocks', kind: 'price-change', title: 'AAPL 行情变化', instrument: 'stock:us:AAPL' },
         { id: 'digest-event', market: 'stocks', kind: 'news', title: 'AAPL 新闻事件', instrument: 'stock:us:AAPL' },
@@ -213,7 +215,9 @@ async function main() {
     await page.locator('[data-mm-watchlist-alert]').click();
     await page.locator('.mm-modal [data-mm-bulk-alert-save]').waitFor({ state: 'visible', timeout: 10_000 });
     console.log('Chromium checkpoint: bulk alert preview visible');
+    const savedRule=page.waitForResponse(response=>response.url().endsWith('/api/alert-rules') && response.request().method()==='POST');
     await page.locator('.mm-modal [data-mm-bulk-alert-save]').click();
+    const savedResponse=await savedRule;assert.equal(savedResponse.status(),201,JSON.stringify(await savedResponse.json()));
     await page.waitForFunction(async () => {
       const response = await fetch('/api/alert-rules');
       const body = await response.json();

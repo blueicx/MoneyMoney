@@ -18,6 +18,7 @@ export class BinanceFeed {
   private cache: Map<string, { data: any; time: number }> = new Map();
   private ttlMs = 10000;
   private baseUrl = 'https://data-api.binance.vision';
+  cachedAt(key: string): string | null { const entry=this.cache.get(key); return entry ? new Date(entry.time).toISOString():null; }
 
   async getPrice(symbol: string = 'BTCUSDT'): Promise<BinanceTicker | null> {
     const cached = this.cache.get(symbol);

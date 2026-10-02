@@ -2104,7 +2104,7 @@
       <button id="workspace-drawer-open" class="workspace-drawer-open" type="button" onclick="openWorkspaceDrawer()">☰ 功能区</button>
       <div id="mm-toast-container"></div>
       <!-- Market Overview Bar -->
-      <div id="market-overview" data-market-scopes="overview stocks options crypto prediction watchlist" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:16px;padding:12px 14px;background:var(--bg-card);border-radius:12px;border:1px solid var(--border);overflow-x:auto;">
+      <div id="market-overview" data-workspace-id="overview" data-market-scopes="overview stocks options crypto prediction watchlist" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:16px;padding:12px 14px;background:var(--bg-card);border-radius:12px;border:1px solid var(--border);overflow-x:auto;">
         <span id="market-overview-heading" style="flex:0 0 auto;font-size:11px;font-weight:800;color:var(--purple);white-space:nowrap;">总体大盘</span>
         <div id="market-overview-items" style="display:flex;gap:8px;flex:1;flex-wrap:wrap;min-width:0;">
           <span class="skl" style="min-width:100px;height:36px;"></span>
@@ -2114,8 +2114,8 @@
         </div>
         <span id="market-overview-status" style="flex:0 0 auto;color:var(--text-secondary);font-size:10px;white-space:nowrap;">数据更新时间：-</span>
       </div>
-      <div id="workspace-dashboard-cards" class="workspace-dashboard-cards" data-market-scopes="overview stocks options crypto prediction watchlist" aria-label="当前市场看板层级"></div>
-      <section id="market-change-digest" class="market-change-digest" aria-label="自选变化摘要" aria-live="polite">
+      <div id="workspace-dashboard-cards" class="workspace-dashboard-cards" data-workspace-id="overview" data-market-scopes="overview stocks options crypto prediction watchlist" aria-label="当前市场看板层级"></div>
+      <section id="market-change-digest" class="market-change-digest" data-workspace-ids="overview watchlist" aria-label="自选变化摘要" aria-live="polite">
         <div class="market-change-digest-head"><strong>🧭 自选变化摘要</strong><button type="button" class="tab" onclick="loadMarketChangeDigest(true)">刷新</button></div>
         <div id="market-change-digest-status" class="workspace-dashboard-card-reason">正在读取最近的行情、新闻、13F、信号和来源变化...</div>
         <div id="market-change-digest-list" class="market-change-digest-list"></div>
@@ -2178,7 +2178,7 @@
         <div id="categories-list" class="categories-list"></div>
       </div>
       <div id="positions-tab" class="tab-content">
-        <div id="workspace-watchlist-panel" class="stock-library-panel" data-market-scopes="watchlist" style="margin-bottom:20px;">
+        <div id="workspace-watchlist-panel" class="stock-library-panel" data-workspace-id="watchlist" data-market-scopes="watchlist" style="margin-bottom:20px;">
           <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
             <div class="section-title" style="margin-bottom:0;">⭐ 我的自选</div>
             <div class="workspace-watchlist-actions">
@@ -7568,6 +7568,7 @@ function renderGuruHoldingsReport(payload) {
 function renderGuruManagerHistory(history) {
   const host = document.getElementById('guru-holdings-content');
   if (!host || !history || !Array.isArray(history.reports)) return;
+  window.MoneyMoneyGuruReplay?.render(host,history);
   const reports = history.reports.slice(0, 4);
   const reportCards = reports.map(report => {
     const positions = Array.isArray(report.positions) ? report.positions : [];
@@ -10933,7 +10934,7 @@ function renderDecisionPortfolio(data, reason) {
   const host = document.getElementById('decision-portfolio');
   if (!host) return;
   const selection = data?.accountSource || 'paper';
-  const controls = `<label>账户来源 <select id="decision-portfolio-source"><option value="paper">模拟仓位</option><option value="imported">导入仓位</option><option value="combined">显式合并</option></select></label>`;
+  const controls = `<label>账户来源 <select id="decision-portfolio-source"><option value="paper">模拟仓位</option><option value="imported">导入仓位</option><option value="combined">显式合并</option></select></label> <button type="button" id="decision-portfolio-history">读取本地历史与风险序列</button>`;
   const metric = (value, suffix = '') => value == null ? '不可用' : Number(value).toFixed(2) + suffix;
   const positions = data?.positions || [];
   host.innerHTML = controls + (!positions.length ? `<p class="empty-tip">${safeNewsText(reason || '所选账户暂无仓位')}</p>` : `
@@ -10947,6 +10948,11 @@ function renderDecisionPortfolio(data, reason) {
     <p>日期对齐相关性：${(data.correlations || []).map(item => safeNewsText(item.left) + '/' + safeNewsText(item.right) + ' ' + item.correlation + '（' + item.samples + '日）').join(' · ') || safeNewsText(data.correlationReason)}</p>
     <table class="workspace-watchlist-table"><thead><tr><th>标的</th><th>数量</th><th>币种</th><th>成本</th><th>来源</th></tr></thead><tbody>${positions.map(row => `<tr><td>${safeNewsText(row.instrument)}</td><td>${row.quantity}</td><td>${safeNewsText(row.currency)}</td><td>${metric(row.averageCost)}</td><td>${safeNewsText(row.accountSource || '导入')}</td></tr>`).join('')}</tbody></table>`);
   const select = host.querySelector('#decision-portfolio-source'); select.value = selection;
+  if (data?.history) {
+    const section=document.createElement('section');section.innerHTML='<p>'+safeNewsText(data.historyReason)+'</p><div data-portfolio-history></div><p>历史状态：'+safeNewsText(data.history.reason || data.history.dataStatus)+'</p><h4>成本与现金流口径</h4>'+(data.costCoverage || []).map(row=>'<p>'+safeNewsText(row.instrument)+' · '+safeNewsText(row.currency)+' · 未实现盈亏 '+metric(row.unrealizedPnl)+' · '+safeNewsText(row.reason || '')+'</p>').join('')+'<p>已记录现金流 '+(data.cashFlows || []).length+' 项；缺少历史仓位或汇率时不生成账户回报。</p>';host.append(section);
+    window.MoneyMoneyHistoryChart?.render(section.querySelector('[data-portfolio-history]'),data.history.series,{title:'当前持仓历史风险序列（非账户回报）',unit:'%',reason:data.history.reason});
+  }
+  host.querySelector('#decision-portfolio-history').onclick=async()=>{try{const result=await decisionFetchJson('/api/portfolio/analytics?'+new URLSearchParams({market:activeMarketScope,accountSource:select.value,history:'1'}));renderDecisionPortfolio(result.data,result.reason);}catch(error){showToast(error.message,'error');}};
   select.onchange = async () => {
     try { const result = await decisionFetchJson('/api/portfolio/analytics?' + new URLSearchParams({ market: activeMarketScope, accountSource: select.value })); renderDecisionPortfolio(result.data,result.reason); }
     catch (error) { showToast(error.message,'error'); }
@@ -12143,6 +12149,7 @@ const WORKSPACE_ITEM_CATALOG = {
   'stock-quotes': ['▥', '行情与选股'], 'crypto-quotes': ['₿', '行情与K线'], events: ['▤', '市场事件与新闻'],
   backtest: ['⌘', '策略回测'], screener: ['⌕', '筛选与比较'], watchlist: ['★', '我的自选'], positions: ['▣', '我的持仓'],
   risk: ['♡', '风险监控'], 'decision-intelligence': ['◇', '可信决策'], breadth: ['▥', '市场宽度'],
+  'research-lab': ['▧', '研究实验室'], 'action-center': ['✓', '自选行动'],
   insider: ['♟', '内部人交易'], institutional: ['♜', '机构持仓'], 'guru-holdings': ['◈', '大神持仓'], analyst: ['◎', '分析师共识'],
   fundamentals: ['▥', '基本面质量'], 'short-interest': ['♟', '空头利息'],
   'option-chain': ['◌', '期权链'], volatility: ['∿', '隐含波动率'], greeks: ['Δ', 'Greeks'],
@@ -12152,7 +12159,7 @@ const WORKSPACE_ITEM_CATALOG = {
 const WORKSPACE_BASE_GROUPS = [
   ['market', '市场', ['overview', 'radar', 'analysis']],
   ['research', '研究', ['screener', 'backtest', 'risk']],
-  ['intelligence', '决策', ['decision-intelligence']],
+  ['intelligence', '决策', ['decision-intelligence', 'research-lab', 'action-center']],
 ];
 const WORKSPACE_SPECIFIC_IDS = {
   overview: [], watchlist: [],
@@ -12183,6 +12190,9 @@ function syncWorkspaceContextUrl() {
   if (workspaceContext.instrument) params.set('instrument', workspaceContext.instrument);
   else params.delete('instrument');
   history.replaceState({}, '', `${location.pathname}?${params}${location.hash}`);
+  const shell = document.getElementById('market-workspace-shell');
+  if (shell) { shell.dataset.workspace = activeWorkspaceId; shell.dataset.instrument = currentInstrumentFilterId(); }
+  window.dispatchEvent(new CustomEvent('mm-workspace-context', { detail: { market: activeMarketScope, workspace: activeWorkspaceId, instrument: currentInstrumentFilterId() } }));
 }
 
 function setWorkspaceInstrument(instrument) {
@@ -12200,7 +12210,7 @@ function restoreWorkspaceContextFromUrl() {
   activeWorkspaceId = allowed ? requestedWorkspace : defaultWorkspaceForMarketScope(activeMarketScope);
   currentInstrumentId = String(params.get('instrument') || '').trim() || null;
   if (activeMarketScope === 'stocks' && currentInstrumentId) {
-    const restoredSymbol = currentInstrumentId.replace(/^us/i, '').toUpperCase();
+    const restoredSymbol = currentInstrumentId.replace(/^stock:us:/i, '').replace(/^us/i, '').toUpperCase();
     if (stockInstrumentId(restoredSymbol)) window._stockSelectedSymbol = restoredSymbol;
   }
   workspaceContext.scope = activeMarketScope;
@@ -12528,6 +12538,7 @@ window.closeWorkspaceDrawer = function() {
   document.getElementById('workspace-drawer-open')?.focus();
 };
 function workspaceTabFor(id) {
+  if (id === 'research-lab' || id === 'action-center') return 'research';
   if (id === 'overview') return 'command';
   if (id === 'stock-quotes' || id === 'events') return 'stocks';
   if (id === 'screener') return defaultTabForMarketScope(activeMarketScope);
@@ -12559,7 +12570,7 @@ function loadActiveWorkspaceInstrument() {
   const raw = String(currentInstrumentId || '').trim();
   if (!raw) return false;
   if (activeMarketScope === 'stocks') {
-    const symbol = raw.replace(/^us/i, '').toUpperCase();
+    const symbol = raw.replace(/^stock:us:/i, '').replace(/^us/i, '').toUpperCase();
     const name = stockNameForSymbol(symbol);
     window._stockSelectedSymbol = symbol;
     if (activeWorkspaceId === 'events') return loadMarketTimeline(), true;
@@ -12587,7 +12598,7 @@ function loadActiveWorkspaceInstrument() {
     return false;
   }
   if (activeMarketScope === 'crypto') {
-    const symbol = raw.toUpperCase();
+    const symbol = raw.replace(/^crypto:binance:/i, '').toUpperCase();
     bnCurrentSymbol = symbol;
     if (activeWorkspaceId === 'events') return loadMarketTimeline(), true;
     if (activeWorkspaceId === 'crypto-quotes') return loadBinanceDashboard(), true;
@@ -12598,7 +12609,7 @@ function loadActiveWorkspaceInstrument() {
     return false;
   }
   if (activeMarketScope === 'options') {
-    const symbol = raw.toUpperCase();
+    const symbol = raw.replace(/^option:cboe:/i, '').toUpperCase();
     const input = document.getElementById('option-symbol');
     if (input) input.value = symbol;
     if (activeWorkspaceId === 'events') return loadMarketTimeline(), true;
@@ -12676,6 +12687,7 @@ const EXCLUSIVE_WORKSPACE_IDS = new Set([
   'stock-quotes', 'crypto-quotes', 'events', 'breadth', 'insider', 'institutional', 'guru-holdings', 'analyst', 'fundamentals', 'short-interest', 'screener',
   'option-chain', 'volatility', 'greeks', 'funding-rate', 'open-interest', 'on-chain', 'order-flow',
   'prediction-radar', 'decision-intelligence',
+  'research-lab', 'action-center',
 ]);
 function workspaceIdsForNode(node) {
   return String(node?.dataset?.workspaceIds || node?.dataset?.workspaceId || '')
@@ -12687,6 +12699,8 @@ function workspaceAllowsView(node) {
   return ids.length === 0 || ids.includes(activeWorkspaceId);
 }
 function applyWorkspaceView() {
+  const shell = document.getElementById('market-workspace-shell');
+  if (shell) shell.dataset.workspace = activeWorkspaceId;
   const exclusive = EXCLUSIVE_WORKSPACE_IDS.has(activeWorkspaceId);
   document.querySelectorAll('[data-workspace-id], [data-workspace-ids]').forEach(node => {
     const visible = (!node.dataset.marketScopes || scopeAllowsView(node.dataset.marketScopes)) && workspaceAllowsView(node);
@@ -12729,6 +12743,7 @@ function applyMarketScopeView() {
     empty.hidden = hasVisibleSection;
     empty.textContent = `${labels[activeMarketScope] || '当前市场'}暂无可用的宏观工作区。请从对应市场首页进入专属功能。`;
   }
+  applyWorkspaceView();
 }
 function selectOptionLibraryAsset(symbol) {
   if (activeMarketScope !== 'options') return;
@@ -14957,8 +14972,11 @@ window.MoneyMoneyChartBridge = {
 
       
 <script src="/experience-enhancements.js?v=20261001-action61"></script>
-<link rel="stylesheet" href="/action-research-workspace.css?v=20261001">
-<script src="/action-research-workspace.js?v=20261001" defer></script>
+<link rel="stylesheet" href="/action-research-workspace.css?v=20261002">
+<script src="/interactive-history.js?v=20261002" defer></script>
+<script src="/guru-replay.js?v=20261002" defer></script>
+<script src="/action-research-workspace.js?v=20261002" defer></script>
+<script src="/practical-experience.js?v=20261002" defer></script>
       <div class="drawer density-compact density-comfortable"></div>
 <div id="chart-fullscreen-overlay" class="chart-fullscreen-overlay" aria-hidden="true" hidden></div>
 </body></html>

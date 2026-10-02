@@ -13,6 +13,8 @@ export type WorkspaceId =
   | 'positions'
   | 'risk'
   | 'decision-intelligence'
+  | 'research-lab'
+  | 'action-center'
   | 'breadth'
   | 'insider'
   | 'institutional'
@@ -60,6 +62,8 @@ const ITEMS: Record<WorkspaceId, WorkspaceItem> = {
   positions: { id: 'positions', label: '我的持仓', icon: '▣', scopes: ALL_SCOPES },
   risk: { id: 'risk', label: '风险监控', icon: '♡', scopes: ASSET_SCOPES, requiresInstrument: true },
   'decision-intelligence': { id: 'decision-intelligence', label: '可信决策', icon: '◇', scopes: ASSET_SCOPES },
+  'research-lab': { id: 'research-lab', label: '研究实验室', icon: '▧', scopes: ASSET_SCOPES },
+  'action-center': { id: 'action-center', label: '自选行动', icon: '✓', scopes: ALL_SCOPES },
   breadth: { id: 'breadth', label: '市场宽度', icon: '▥', scopes: ['stocks'] },
   insider: { id: 'insider', label: '内部人交易', icon: '♟', scopes: ['stocks'], requiresInstrument: true },
   institutional: { id: 'institutional', label: '机构持仓', icon: '♜', scopes: ['stocks'], requiresInstrument: true },
@@ -80,7 +84,7 @@ const ITEMS: Record<WorkspaceId, WorkspaceItem> = {
 const BASE_GROUPS: readonly { id: WorkspaceGroup['id']; label: string; items: readonly WorkspaceId[] }[] = [
   { id: 'market', label: '市场', items: ['overview', 'radar', 'analysis'] },
   { id: 'research', label: '研究', items: ['screener', 'backtest', 'risk'] },
-  { id: 'intelligence', label: '决策', items: ['decision-intelligence'] },
+  { id: 'intelligence', label: '决策', items: ['decision-intelligence', 'research-lab', 'action-center'] },
 ];
 
 const SPECIFIC_ITEMS: Record<MarketScope, readonly WorkspaceId[]> = {

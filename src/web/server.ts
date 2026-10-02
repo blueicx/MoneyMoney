@@ -19,6 +19,7 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { config, isJwtSecretDefault, validateLoginConfiguration } from '../config';
 import { buildEventEvidence, filterTimelineItems, type EventEvidence } from '../features/event-evidence';
+import { assembleHistory } from '../features/portfolio-history';
 
 import { getRuntimeTelegramConfig, parseChatIds, runtimeSecrets } from '../config/runtime-secrets';
 import { api } from '../api';
@@ -103,7 +104,8 @@ import { defaultWorkspace, isWorkspaceAllowed, resolveWorkspaceNavigation, type 
 import { collectDashboardResults, resolveMarketDashboardCards, type DashboardProviderResult } from '../features/market-workspace-dashboard';
 import { marketDepthCapabilities } from '../features/market-depth-capabilities';
 import { filterAssistantReport, filterRiskOverview, filterUnifiedPaperLedger, scopeForAction } from '../features/market-scope-view';
-import { unifiedAlertStore, triggerUnifiedAlerts, previewUnifiedAlerts } from '../features/unified-alerts';
+import { unifiedAlertStore, triggerUnifiedAlerts, previewUnifiedAlerts, alertMetricFields, validateUnifiedAlertRule, evaluateUnifiedAlert, type UnifiedAlertRule, type UnifiedAlertObservation } from '../features/unified-alerts';
+import { completedBarMetrics } from '../features/alert-metrics';
 import { buildPortfolioRiskOverview } from '../features/risk-overview';
 import { getRiskHistory, recordRiskHistory } from '../features/risk-history';
 import { buildDailyResearchBriefing } from '../features/research-briefing';
@@ -1687,7 +1689,17 @@ app.post('/api/portfolio/import', express.json(), (req, res) => {
   res.status(result.rejected.length && !result.accepted.length ? 400 : 200).json({ success: result.accepted.length > 0 || result.rejected.length === 0, data: result, dataStatus: result.accepted.length ? (result.rejected.length ? 'partial' : 'cached') : 'empty', source: 'manual/CSV portfolio import', updatedAt: new Date().toISOString(), reason: result.rejected.length ? `${result.rejected.length} 条记录未通过校验` : null });
 });
 
-app.get('/api/portfolio/analytics', (req, res) => {
+app.get('/api/research/price-comparison', async (req, res) => {
+  if (!adminOnly(req,res)) return;
+  try {
+    const market=decisionMarket(req.query.market), instruments=String(req.query.instruments || '').split(',').filter(Boolean);
+    if (instruments.length<2 || instruments.length>6) throw new Error('请选择 2–6 个同市场标的');
+    const data=await assembleHistory(dataLakeCatalog,market,instruments,String(req.query.asOf || new Date().toISOString()),Number(req.query.days || 365));
+    res.json(decisionEnvelope({market,data,dataStatus:data.dataStatus as any,source:'已发布日线分区',reason:data.reason || undefined,evidenceRefs:data.evidenceRefs}));
+  } catch(error:any) {res.status(400).json({success:false,dataStatus:'failed',reason:error.message});}
+});
+
+app.get('/api/portfolio/analytics', async (req, res) => {
   if (!adminOnly(req, res)) return;
   try {
     const market = decisionMarket(req.query.market);
@@ -1696,12 +1708,22 @@ app.get('/api/portfolio/analytics', (req, res) => {
     const paper: PortfolioRow[] = unifiedPaperLedgerStore.get().positions.filter(item => item.instrumentType === typeByMarket[market]).map(item => ({ instrument: item.instrumentId, market, quantity: item.quantity, price: item.currentPrice, currency: item.currency || 'UNKNOWN', averageCost: item.averageEntryPrice, accountSource: 'paper', accountId: 'unified-paper-ledger' }));
     const selection = String(req.query.accountSource || 'paper');
     if (!['paper', 'imported', 'combined'].includes(selection)) throw new Error('请选择模拟盘、导入仓位或显式合并');
-    const rows = selection === 'combined' ? [...imported, ...paper] : selection === 'imported' ? imported : paper;
+    const rows = (selection === 'combined' ? [...imported, ...paper] : selection === 'imported' ? imported : paper).map(row=>({...row}));
+    let history: Awaited<ReturnType<typeof assembleHistory>> | null = null;
+    if (req.query.history === '1' && rows.length && rows.length <= 20) {
+      history=await assembleHistory(dataLakeCatalog,market,[...new Set(rows.map(row=>row.instrument))],new Date().toISOString(),Number(req.query.days || 365));
+      for (const row of rows) {
+        const actual=history.series.find(item=>item.instrument===row.instrument);
+        if (actual?.dataStatus==='historical' && actual.datedReturns.length) row.datedReturns=actual.datedReturns;
+      }
+    }
     const data = analyzePortfolio(rows, {
       ...(req.query.benchmarkReturnPct == null ? {} : { benchmarkReturnPct: Number(req.query.benchmarkReturnPct) }),
       ...(req.query.portfolioReturnPct == null ? {} : { portfolioReturnPct: Number(req.query.portfolioReturnPct) }),
     });
-    res.json(decisionEnvelope({ market, data: { ...data, positions: rows, accounts: { imported, paper }, accountSource: selection }, dataStatus: rows.length ? data.currencyReason ? 'partial' : 'cached' : 'empty', source: selection === 'paper' ? '统一模拟账本' : selection === 'imported' ? '校验后的导入仓位' : '用户显式选择合并', reason: rows.length ? data.currencyReason || data.returnReason : '所选账户当前市场暂无仓位' }));
+    const cashFlows=rows.flatMap(row=>(row.cashFlows || []).map(flow=>({...flow,instrument:row.instrument,accountId:row.accountId || null})));
+    const costCoverage=rows.map(row=>({instrument:row.instrument,currency:row.currency,averageCost:row.averageCost ?? null,unrealizedPnl:row.averageCost == null ? null : (row.price-row.averageCost)*row.quantity,reason:row.averageCost == null ? '旧记录未关联成本，未推算盈亏':null}));
+    res.json(decisionEnvelope({ market, data: { ...data, positions: rows, accounts: { imported, paper }, accountSource: selection,history,cashFlows,costCoverage,historyReason:history ? '历史曲线用于当前持仓的风险研究；缺少完整历史仓位、现金流或汇率时，不作为实际账户收益。' : '可读取本地历史装配风险序列' }, dataStatus: rows.length ? data.currencyReason || history?.dataStatus === 'partial' || history?.dataStatus === 'unavailable' ? 'partial' : 'cached' : 'empty', source: selection === 'paper' ? '统一模拟账本' : selection === 'imported' ? '校验后的导入仓位' : '用户显式选择合并', reason: rows.length ? data.currencyReason || data.returnReason : '所选账户当前市场暂无仓位' }));
   } catch (error: any) {
     res.status(400).json({ success: false, error: error.message, dataStatus: 'unavailable', reason: error.message });
   }
@@ -6524,20 +6546,68 @@ async function monitorTelegramPriceAlerts(): Promise<void> {
   }
 }
 
+async function metricObservation(rule: Partial<UnifiedAlertRule>):Promise<UnifiedAlertObservation> {
+  const id=String(rule.instrumentId || ''),fields=alertMetricFields(id);
+  if(!fields.length) return {kind:'metric',scope:rule.scope,dataStatus:'unsupported',reason:'当前交易场所不支持组合条件'};
+  const clauses=rule.condition?.clauses || [], wantsTechnical=clauses.some(c=>['volume','rsi','pattern'].includes(c.field));
+  try {
+    if(id.startsWith('stock:us:')) {
+      const symbol=id.split(':')[2],quote=await stockDataService.quote(symbol);
+      const metrics:Record<string,number|string>={};if(quote.quote?.price!=null) metrics.price=Number(quote.quote.price);
+      let technical:any=null;
+      if(wantsTechnical) {const history=await dataLakeCatalog.queryBarsAsOf({market:'stocks',instrument:symbol,timeframe:'1d',asOf:new Date().toISOString()});technical=completedBarMetrics(history.rows.map(row=>({...row,time:Date.parse(String(row.timestamp))})));Object.assign(metrics,technical.metrics);}
+      return {kind:'metric',scope:'stocks',metrics,observedAt:quote.snapshot.fetchedAt,dataStatus:['live','fallback'].includes(quote.snapshot.status) ? 'delayed':'unavailable',source:quote.snapshot.source,reason:quote.snapshot.error || technical?.reason || undefined};
+    }
+    if(id.startsWith('crypto:binance:')) {
+      const symbol=id.split(':')[2],price=await binanceFeed.getPrice(symbol);
+      const metrics:Record<string,number|string>={};if(price) metrics.price=price.price;
+      const technical=wantsTechnical ? completedBarMetrics(await binanceFeed.getKlines(symbol,'1d',30)):null;
+      if(technical) Object.assign(metrics,technical.metrics);
+      return {kind:'metric',scope:'crypto',metrics,observedAt:binanceFeed.cachedAt(symbol) || undefined,dataStatus:price ? 'delayed':'unavailable',source:'Binance Public',reason:technical?.reason || undefined};
+    }
+    const radar=await getPerpetualCrowding(),contract=id.split(':')[2],row=radar.rows.find(item=>item.contract===contract);
+    return {kind:'metric',scope:'crypto',metrics:row ? {price:row.price,fundingRatePct:row.fundingRatePct,openInterestUsd:row.openInterestUsd}:{},observedAt:radar.generatedAt,dataStatus:row ? 'delayed':'unavailable',source:radar.source,reason:row ? undefined:'该永续合约没有真实来源记录'};
+  } catch(error:any) {return {kind:'metric',scope:rule.scope,dataStatus:'unavailable',reason:error.message};}
+}
+let unifiedAlertMonitorBusy=false;
+let unifiedAlertMonitorTimer: NodeJS.Timeout | null=null;
+let unifiedAlertMonitorLeaseOwned=false;
+const unifiedAlertMonitorOwner='web-alerts:'+process.pid+':'+crypto.randomUUID();
+function startUnifiedAlertMonitor(): void {
+  if(!unifiedAlertMonitorTimer) unifiedAlertMonitorTimer=setInterval(()=>{void monitorUnifiedAlertRules().catch(error=>logger.warn('Unified alert monitor failed',error));},60_000);
+}
+function stopUnifiedAlertMonitor(): void {
+  if(unifiedAlertMonitorTimer) clearInterval(unifiedAlertMonitorTimer);
+  unifiedAlertMonitorTimer=null;
+}
 async function monitorUnifiedAlertRules(): Promise<void> {
-  const rules = unifiedAlertStore.listRules().filter(rule => rule.enabled);
+  if(unifiedAlertMonitorBusy || !unifiedAlertStore.listRules().some(rule=>rule.enabled)) return;
+  if(!stateStore.acquireLease('unified-alert-monitor',unifiedAlertMonitorOwner,Date.now(),90_000)) return;
+  unifiedAlertMonitorBusy=true;
+  unifiedAlertMonitorLeaseOwned=true;
+  const heartbeat=setInterval(()=>{unifiedAlertMonitorLeaseOwned=stateStore.refreshLease('unified-alert-monitor',unifiedAlertMonitorOwner,Date.now(),90_000);},30_000);
+  try { await runUnifiedAlertMonitor(); } finally {clearInterval(heartbeat);stateStore.releaseLease('unified-alert-monitor',unifiedAlertMonitorOwner);unifiedAlertMonitorLeaseOwned=false;unifiedAlertMonitorBusy=false;}
+}
+async function runUnifiedAlertMonitor(): Promise<void> {
+  const rules = unifiedAlertStore.listRules().filter(rule => rule.enabled && (!rule.expiresAt || Date.parse(rule.expiresAt)>Date.now()));
   if (!rules.length) return;
   const radar = getCachedPredictionRadarSlice('', 240);
   const calendar = await getUpcomingEventCalendar(2).catch(() => null);
   const news = await newsFeed.getNews().catch(() => []);
   const observations: Array<{ instrumentId: string; observation: any }> = [];
+  const metricCache=new Map<string,Promise<UnifiedAlertObservation>>();
   for (const rule of rules) {
-    if (rule.kind === 'price') {
+    if(rule.kind==='metric') {
+      if(!metricCache.has(rule.instrumentId) && metricCache.size>=6) continue;
+      if(!metricCache.has(rule.instrumentId)) {const clauses=rules.filter(r=>r.instrumentId===rule.instrumentId && r.kind==='metric').flatMap(r=>r.condition.clauses || []);metricCache.set(rule.instrumentId,metricObservation({...rule,condition:{...rule.condition,clauses}}));}
+      observations.push({instrumentId:rule.instrumentId,observation:await metricCache.get(rule.instrumentId)});
+    } else if (rule.kind === 'price') {
       let price: number | undefined;
       if (rule.instrumentId.startsWith('crypto:binance:')) price = (await binanceFeed.getPrice(rule.instrumentId.split(':').pop() || ''))?.price;
       else if (rule.instrumentId.startsWith('prediction:')) price = radar?.markets.find(item => String(item.id) === rule.instrumentId.split(':').pop())?.yesPrice;
-      else price = Number((await unifiedInstrumentService.overview({ id: rule.instrumentId, type: 'stock', venue: 'us', symbol: rule.instrumentId.split(':').pop() || '', title: '', aliases: [] })).quote?.price);
-      if (price != null && Number.isFinite(price)) observations.push({ instrumentId: rule.instrumentId, observation: { kind: 'price', value: price, observedAt: new Date().toISOString() } });
+      else if (rule.instrumentId.startsWith('stock:us:')) price = Number((await stockDataService.quote(rule.instrumentId.split(':').pop() || '')).quote?.price);
+      const priceScope=rule.instrumentId.startsWith('crypto:binance:') ? 'crypto':rule.instrumentId.startsWith('prediction:') ? 'prediction':rule.instrumentId.startsWith('stock:us:') ? 'stocks':null;
+      if (priceScope && price != null && Number.isFinite(price)) observations.push({ instrumentId: rule.instrumentId, observation: { kind: 'price', scope: priceScope, value: price, observedAt: new Date().toISOString() } });
     } else if (rule.kind === 'event') {
       const event = calendar?.events.filter(item => item.impact === 'high').sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())[0];
       if (event) observations.push({ instrumentId: rule.instrumentId, observation: { kind: 'event', minutesUntil: (new Date(event.date).getTime() - Date.now()) / 60_000, title: event.titleZh || event.title, actual: event.actual, forecast: event.forecast, observedAt: new Date().toISOString() } });
@@ -6546,6 +6616,7 @@ async function monitorUnifiedAlertRules(): Promise<void> {
       if (hit) observations.push({ instrumentId: rule.instrumentId, observation: { kind: 'news', title: hit.title, content: hit.source, value: hit.sentimentScore, observedAt: hit.publishedAt } });
     }
   }
+  if(!unifiedAlertMonitorLeaseOwned || !stateStore.refreshLease('unified-alert-monitor',unifiedAlertMonitorOwner,Date.now(),90_000)) return;
   const triggered = triggerUnifiedAlerts(unifiedAlertStore, observations);
   if (!triggered.length) return;
   const telegramConfig = getRuntimeTelegramConfig();
@@ -6606,7 +6677,7 @@ async function monitorTelegramSlowAlerts(): Promise<void> {
 
 function startTelegramCommandCenterMonitor(): void {
   if (!telegramInteractionBot) return;
-  if (!telegramPriceMonitor) telegramPriceMonitor = setInterval(() => { void Promise.all([monitorTelegramPriceAlerts(), monitorUnifiedAlertRules()]).catch(() => {}); }, 60_000);
+  if (!telegramPriceMonitor) telegramPriceMonitor = setInterval(() => { void monitorTelegramPriceAlerts().catch(() => {}); }, 60_000);
   if (!telegramDigestMonitor) telegramDigestMonitor = setInterval(() => { void monitorTelegramDigests().catch(() => {}); }, 60_000);
   if (!telegramEventMonitor) telegramEventMonitor = setInterval(() => { void monitorTelegramEventAlerts().catch(() => {}); }, 60_000);
   if (!telegramSlowMonitor) telegramSlowMonitor = setInterval(() => { void Promise.all([monitorTelegramSlowAlerts(), monitorTelegramSmartAlerts()]).catch(() => {}); }, 10 * 60_000);
@@ -7364,7 +7435,9 @@ app.get('/api/research/experiments', (req, res) => {
   if (!adminOnly(req, res)) return;
   try {
     const market = decisionMarket(req.query.market);
-    const data = researchRepository.listExperiments(200).filter(row => row.experiment?.market === market).map(row => ({ ...row.experiment, metrics: row.backtest?.metrics, outOfSample: row.evidence?.outOfSample }));
+    const instrument=String(req.query.instrument || '').trim();
+    if(instrument) assertMarketContext({market,workspace:'research-lab',instrument});
+    const data = researchRepository.listExperiments(200).filter(row => row.experiment?.market === market && (!instrument || row.experiment.instrument===instrument)).map(row => ({ ...row.experiment, metrics: row.backtest?.metrics, outOfSample: row.evidence?.outOfSample }));
     return res.json({ success: true, market, data, dataStatus: data.length ? 'historical' : 'empty', source: '持久化研究实验', updatedAt: new Date().toISOString(), reason: data.length ? null : '当前市场尚无研究实验' });
   } catch (error) { return res.status(400).json({ success: false, reason: error instanceof Error ? error.message : '查询失败' }); }
 });
@@ -8564,6 +8637,19 @@ app.get('/api/alert-rules', (req, res) => {
   if (!adminOnly(req, res)) return;
   res.json({ success: true, data: unifiedAlertStore.listRules(), ownerId: 'admin' });
 });
+app.get('/api/alerts/metric-capabilities', (req,res)=>{
+  if(!adminOnly(req,res)) return;
+  const instrument=String(req.query.instrument || '');
+  res.json({success:true,instrument,fields:alertMetricFields(instrument),source:'当前市场和交易场所能力',dataStatus:alertMetricFields(instrument).length ? 'cached':'unsupported'});
+});
+app.post('/api/alerts/metric-preview', express.json(),async(req,res)=>{
+  if(!adminOnly(req,res)) return;
+  const input={...req.body,kind:'metric'} as Partial<UnifiedAlertRule>,validation=validateUnifiedAlertRule(input);
+  if(!validation.ok) return res.status(400).json({success:false,reason:validation.error});
+  const observation=await metricObservation(input),at=Date.parse(observation.observedAt || '');
+  const result=evaluateUnifiedAlert(input as UnifiedAlertRule,observation),fresh=Number.isFinite(at) && at<=Date.now()+60_000 && Date.now()-at<=120_000;
+  res.json({success:true,data:{...result,matched:result.matched && fresh,observation,durationMinutes:input.condition?.durationMinutes || 0},dataStatus:observation.dataStatus,reason:!fresh ? '来源快照过期或没有时间，当前不能触发提醒':observation.reason || null});
+});
 app.post('/api/alert-rules', (req, res) => {
   if (!adminOnly(req, res)) return;
   try {
@@ -8777,6 +8863,7 @@ async function main() {
     console.log(`  ║  http://localhost:${PORT}                        ║`);
     console.log(`  ╚══════════════════════════════════════════════╝\n`);
     riskPatrol.start();
+    startUnifiedAlertMonitor();
     startCoverageCanaryMonitor();
     startPaperDriftMonitor();
     startMarketHistoryCaptureMonitor();
@@ -8813,6 +8900,7 @@ async function main() {
     shuttingDown = true;
     console.log('\n  Shutting down...');
     stopTelegramCommandCenterMonitor();
+    stopUnifiedAlertMonitor();
     stopCoverageCanaryMonitor();
     stopPaperDriftMonitor();
     await stopMarketHistoryCaptureMonitor();

@@ -76,7 +76,9 @@ test('PWA updates wait for user action and logout clears cached public snapshots
   assert.match(auth, /setTimeout\(finish,\s*\d+\)/, 'logout must finish even if service-worker readiness never settles');
 });
 
-test('stock exclusive workspaces keep the shared market bar and scope selection tools', () => {
+test('stock exclusive workspaces keep scope tools but dashboard content belongs only to overview', () => {
+  assert.match(html, /id="market-overview"[^>]*data-workspace-id="overview"/);
+  assert.match(html, /id="workspace-dashboard-cards"[^>]*data-workspace-id="overview"/);
   assert.match(html, /id="market-overview"[^>]*data-market-scopes="overview stocks options crypto prediction watchlist"/);
   assert.match(html, /id="workspace-dashboard-cards"[^>]*data-market-scopes="overview stocks options crypto prediction watchlist"/);
   assert.match(html, /id="market-research-tools"[^>]*data-market-scopes="[^"]*stocks[^"]*"[^>]*data-workspace-ids="[^"]*screener[^"]*"/);
@@ -160,7 +162,7 @@ test('restored stock context is not overwritten by the default AAPL loader', () 
   assert.match(html, /restoreWorkspaceContextFromUrl\(\)[\s\S]*currentInstrumentId = String\(params\.get\('instrument'\)/);
   assert.match(html, /function loadStockQuotes\(\)[\s\S]*const selectedSymbol = window\._stockSelectedSymbol \|\| currentInstrumentId \|\| 'AAPL'/);
   assert.match(html, /loadStockQuotes\(\)[\s\S]*selectStockSymbol\(selectedSymbol, stockNameForSymbol\(selectedSymbol\)/);
-  assert.match(html, /restoreWorkspaceContextFromUrl\(\)[\s\S]*const restoredSymbol = currentInstrumentId\.replace\(\/\^us\/i, ''\)\.toUpperCase\(\)[\s\S]*window\._stockSelectedSymbol = restoredSymbol/);
+  assert.match(html, /restoreWorkspaceContextFromUrl\(\)[\s\S]*const restoredSymbol = currentInstrumentId\.replace\(\/\^stock:us:\/i, ''\)\.replace\(\/\^us\/i, ''\)\.toUpperCase\(\)[\s\S]*window\._stockSelectedSymbol = restoredSymbol/);
 });
 
 test('dashboard restores deep-linked market and instrument after auth is ready', () => {

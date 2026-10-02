@@ -59,13 +59,16 @@ async function main() {
       const result = await post('/api/research/experiments',{ market:'stocks',workspace:'backtest',instrument:'stock:us:AAPL',timeframe:'1d',dataStatus:'historical',dataSource:'isolated deterministic fixture',dataFrom:'2026-01-01',dataTo:'2026-02-01',strategyId:'momentum',strategyVersion:'v1',feeRate,slippage:.001,seed:10,prices:[100,101,99,102,104,103,106,108],signals:[],split:{ trainSize:4,testSize:2 } });
       experiments.push(result.data?.experiment?.id || result.experiment?.id);
     }
-    await page.locator('details').filter({ has:page.locator('#mm-experiment-load') }).locator('summary').click();
+    await page.evaluate(()=>{setMarketScope('stocks');openWorkspace('research-lab');});
+    await page.locator('#mm-research-lab').waitFor({state:'visible'});
+    await page.locator('[data-research-tab="experiments"]').click();
     await page.click('#mm-experiment-load'); await page.locator('#mm-experiment-options input').first().waitFor();
     for (const input of await page.locator('#mm-experiment-options input').all()) await input.check();
     await page.click('#mm-experiment-compare'); await page.locator('#mm-experiment-result [data-curves] svg').waitFor();
     await page.locator('#mm-experiment-result [data-drawdowns] svg').waitFor();
     assert.match(await page.locator('#mm-experiment-result').innerText(),/不可直接.*排名/);
     await page.setViewportSize({ width:390,height:844 });
+    await page.evaluate(()=>openWorkspace('action-center'));
     assert.ok(await page.locator('#mm-action-refresh').isVisible());
     assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth+2),'mobile shell fits viewport');
     const noCsrf = await context.request.patch(base+'/api/watchlist/action-center/'+encodeURIComponent(event.id),{ data:{ read:false } }); assert.equal(noCsrf.status(),403);
