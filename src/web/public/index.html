@@ -7527,7 +7527,7 @@ async function loadGuruManagerReport(cik, tokenOverride) {
   try {
     const [response, historyResponse] = await Promise.all([
       fetch('/api/stocks/guru-holdings/managers/' + encodeURIComponent(cik), { credentials: 'include', cache: 'no-store' }),
-      fetch('/api/stocks/guru-holdings/managers/' + encodeURIComponent(cik) + '/history?limit=4', { credentials: 'include', cache: 'no-store' }).catch(() => null),
+      fetch('/api/stocks/guru-holdings/managers/' + encodeURIComponent(cik) + '/history?limit=24', { credentials: 'include', cache: 'no-store' }).catch(() => null),
     ]);
     const payload = await response.json();
     if (token !== guruHoldingsRequestToken) return;
@@ -12155,6 +12155,7 @@ const WORKSPACE_ITEM_CATALOG = {
   'option-chain': ['◌', '期权链'], volatility: ['∿', '隐含波动率'], greeks: ['Δ', 'Greeks'],
   'funding-rate': ['⇄', '资金费率'], 'open-interest': ['◫', '未平仓量'], 'on-chain': ['⌁', '链上数据'], 'order-flow': ['ϟ', '主动资金流'],
   'prediction-radar': ['◎', '预测雷达'],
+  contracts: ['⇋', '永续与交割合约'],
 };
 const WORKSPACE_BASE_GROUPS = [
   ['market', '市场', ['overview', 'radar', 'analysis']],
@@ -12165,7 +12166,7 @@ const WORKSPACE_SPECIFIC_IDS = {
   overview: [], watchlist: [],
   stocks: ['stock-quotes', 'events', 'breadth', 'insider', 'institutional', 'guru-holdings', 'analyst', 'fundamentals', 'short-interest'],
   options: ['events', 'option-chain', 'volatility', 'greeks'],
-  crypto: ['crypto-quotes', 'events', 'funding-rate', 'open-interest', 'on-chain', 'order-flow'],
+  crypto: ['crypto-quotes', 'events', 'contracts', 'funding-rate', 'open-interest', 'on-chain', 'order-flow'],
   prediction: ['events', 'prediction-radar'],
 };
 let activeMarketScope = 'overview';
@@ -12538,6 +12539,7 @@ window.closeWorkspaceDrawer = function() {
   document.getElementById('workspace-drawer-open')?.focus();
 };
 function workspaceTabFor(id) {
+  if(id==='contracts') return 'binance';
   if (id === 'research-lab' || id === 'action-center') return 'research';
   if (id === 'overview') return 'command';
   if (id === 'stock-quotes' || id === 'events') return 'stocks';
@@ -12598,6 +12600,8 @@ function loadActiveWorkspaceInstrument() {
     return false;
   }
   if (activeMarketScope === 'crypto') {
+    if(activeWorkspaceId==='contracts') return true;
+    if(/^crypto:(?!binance:)/i.test(raw) && activeWorkspaceId==='crypto-quotes') return false;
     const symbol = raw.replace(/^crypto:binance:/i, '').toUpperCase();
     bnCurrentSymbol = symbol;
     if (activeWorkspaceId === 'events') return loadMarketTimeline(), true;
@@ -12684,6 +12688,7 @@ function scopeAllowsView(declared) {
   return scopes.includes('all') || scopes.includes('common') || scopes.includes(activeMarketScope);
 }
 const EXCLUSIVE_WORKSPACE_IDS = new Set([
+  'contracts',
   'stock-quotes', 'crypto-quotes', 'events', 'breadth', 'insider', 'institutional', 'guru-holdings', 'analyst', 'fundamentals', 'short-interest', 'screener',
   'option-chain', 'volatility', 'greeks', 'funding-rate', 'open-interest', 'on-chain', 'order-flow',
   'prediction-radar', 'decision-intelligence',
@@ -14952,6 +14957,15 @@ class MoneyKLine {
 }
 window.MoneyKLine = MoneyKLine;
 window.MoneyMoneyChartBridge = {
+  async locateDay(instrument,day) {
+    if(activeMarketScope!=='stocks' || !/^stock:us:[A-Z0-9.-]+$/.test(instrument) || !/^\d{4}-\d{2}-\d{2}$/.test(day)) return null;
+    const symbol=instrument.slice('stock:us:'.length);
+    stockChartIntradayDate='';stockChartIntradaySession=null;stockChartDailyContext=null;currentStockKlinePeriod='1d';
+    await loadStockKline('us'+symbol,stockNameForSymbol(symbol),'');
+    if(activeMarketScope!=='stocks' || currentInstrumentFilterId()!==instrument) return null;
+    const index=focusStockKlineDate(day);if(index==null)return null;
+    stockChartFocusEnabled=true;updateStockKlineFocusControl();redrawStockKlineSelection();return index;
+  },
   getContext() { return { symbol: currentStockSymbol, apiSymbol: currentStockApiSymbol || String(currentStockSymbol || '').replace(/^(?:us|sh|sz|hk)/i, ''), asOf: stockChartAsOf }; },
   draw(canvas, bars) { drawStockChartCompanion(canvas, Array.isArray(bars) ? bars : []); },
   focusTimestamp(timestamp) {
@@ -14974,9 +14988,12 @@ window.MoneyMoneyChartBridge = {
 <script src="/experience-enhancements.js?v=20261001-action61"></script>
 <link rel="stylesheet" href="/action-research-workspace.css?v=20261002-guru2">
 <script src="/interactive-history.js?v=20261002" defer></script>
-<script src="/guru-replay.js?v=20261002-guru2" defer></script>
-<script src="/action-research-workspace.js?v=20261002" defer></script>
-<script src="/practical-experience.js?v=20261002" defer></script>
+<script src="/guru-replay.js?v=20261002-contracts1" defer></script>
+<script src="/workflow-polish.js?v=20261002-contracts1" defer></script>
+<script src="/action-research-workspace.js?v=20261002-contracts1" defer></script>
+<script src="/practical-experience.js?v=20261002-contracts1" defer></script>
+<script src="/contracts-workspace.js?v=20261002-contracts1" defer></script>
+<link rel="stylesheet" href="/contracts-workspace.css?v=20261002-contracts1">
       <div class="drawer density-compact density-comfortable"></div>
 <div id="chart-fullscreen-overlay" class="chart-fullscreen-overlay" aria-hidden="true" hidden></div>
 </body></html>

@@ -72,6 +72,7 @@ import { getFearGreed, getFundingRates } from '../features/market-sentiment';
 import { getGlobalMacroSpotSnapshot } from '../features/global-macro-spot';
 import { getCrossAssetCorrelationRadar } from '../features/cross-asset-correlation';
 import { getPerpetualCrowding } from '../features/perpetual-crowding';
+import { ContractResearchService, contractIdentity, contractScenario } from '../features/contract-research';
 import { getFundingCarryRadar } from '../features/funding-carry';
 import { getOrderFlowLiquidityRadar } from '../features/order-flow-liquidity';
 import { getBitcoinOnchainRadar } from '../features/bitcoin-onchain';
@@ -104,7 +105,7 @@ import { defaultWorkspace, isWorkspaceAllowed, resolveWorkspaceNavigation, type 
 import { collectDashboardResults, resolveMarketDashboardCards, type DashboardProviderResult } from '../features/market-workspace-dashboard';
 import { marketDepthCapabilities } from '../features/market-depth-capabilities';
 import { filterAssistantReport, filterRiskOverview, filterUnifiedPaperLedger, scopeForAction } from '../features/market-scope-view';
-import { unifiedAlertStore, triggerUnifiedAlerts, previewUnifiedAlerts, alertMetricFields, validateUnifiedAlertRule, evaluateUnifiedAlert, type UnifiedAlertRule, type UnifiedAlertObservation } from '../features/unified-alerts';
+import { unifiedAlertStore, triggerUnifiedAlerts, previewUnifiedAlerts, alertMetricFields, validateUnifiedAlertRule, evaluateUnifiedAlert, explainMetricConditions, type UnifiedAlertRule, type UnifiedAlertObservation } from '../features/unified-alerts';
 import { completedBarMetrics } from '../features/alert-metrics';
 import { buildPortfolioRiskOverview } from '../features/risk-overview';
 import { getRiskHistory, recordRiskHistory } from '../features/risk-history';
@@ -1340,6 +1341,7 @@ app.post('/api/data/instruments/confirm', express.json(), (req, res) => {
 });
 
 app.post('/api/data/backfills', (req, res) => {
+  if(!adminOnly(req,res))return;
   try {
     const job = dataLakeCatalog.createBackfill(req.body || {});
     res.status(202).json({ success: true, data: job, market: job.market, instrument: job.instrument, dataStatus: 'queued', source: 'MoneyMoney data worker queue', updatedAt: job.updatedAt, reason: job.reason });
@@ -3702,6 +3704,22 @@ app.get('/api/funding-rates', async (req, res) => {
   }
 });
 
+const contractResearchService = new ContractResearchService();
+app.get('/api/contracts/catalog', async (req,res)=>{
+  try { if(req.query.market && req.query.market!=='crypto') throw new Error('合约工作区仅支持虚拟币市场');
+    res.json({success:true,...await contractResearchService.catalog(String(req.query.kind || 'perpetual') as 'perpetual'|'delivery',String(req.query.q || ''))});
+  } catch(error:any) {res.status(400).json({success:false,market:'crypto',dataStatus:'failed',reason:error.message});}
+});
+app.get('/api/contracts/detail', async (req,res)=>{
+  try {if(req.query.market && req.query.market!=='crypto')throw new Error('合约市场不一致');res.json({success:true,...await contractResearchService.detail(String(req.query.instrument || ''))});}
+  catch(error:any){res.status(400).json({success:false,market:'crypto',dataStatus:'failed',reason:error.message});}
+});
+app.post('/api/contracts/scenario', express.json(),(req,res)=>{
+  if(!adminOnly(req,res))return;
+  if(String(req.body.instrument || '').startsWith('crypto:gateio-delivery:') && (Number(req.body.fundingRate || 0)!==0 || Number(req.body.fundingPeriods || 0)!==0))return res.status(400).json({success:false,dataStatus:'failed',reason:'交割合约不适用永续资金费率，请将资金费率和期数设为零'});
+  try {if(req.body.market!=='crypto')throw new Error('合约市场不一致');contractIdentity(String(req.body.instrument || ''));res.json({success:true,market:'crypto',instrument:req.body.instrument,data:contractScenario(req.body),dataStatus:'historical',source:'明确输入的压力情景假设',updatedAt:new Date().toISOString(),reason:'压力测试，不是行情预测或真实订单'});}
+  catch(error:any){res.status(400).json({success:false,dataStatus:'failed',reason:error.message});}
+});
 app.get('/api/perpetual-crowding', async (_req, res) => {
   try {
     res.json({ success: true, data: await getPerpetualCrowding() });
@@ -5121,8 +5139,10 @@ export function getTelegramCommandHandlers(): Record<string, TelegramCommandHand
       const shown = result.items.filter(row => !row.read && !row.snoozed).slice(0,8);
       stateStore.set(key,{ at:new Date().toISOString(),scope,items:shown });
       const lines = shown.map((row,index) => {
-        const href = buildTelegramDeepLink(telegramPublicBaseUrl(),{ market:row.market,instrument:row.instrument || '',workspace:'watchlist' });
-        return `${index+1}. ${escapeTelegramHtml(row.title)} · ${escapeTelegramHtml(row.dataStatus)}\n${escapeTelegramHtml(row.source)} · ${escapeTelegramHtml(row.observedAt)}${href ? `\n<a href="${escapeTelegramHtml(href)}">网页与证据</a>` : ''}`;
+        const href = buildTelegramDeepLink(telegramPublicBaseUrl(),{ market:row.market,instrument:row.instrument || '',workspace:'action-center' });
+        const chart = row.market==='stocks' && row.instrument ? buildTelegramDeepLink(telegramPublicBaseUrl(),{market:row.market,instrument:row.instrument,workspace:'stock-quotes',timeframe:'1d',focusDate:(row.occurredAt || row.publishedAt || '').slice(0,10)}):null;
+        const status=({live:'实时',delayed:'延迟',cached:'缓存',partial:'部分成功',empty:'来源成功但无记录',unavailable:'来源不可用',failed:'请求失败',unsupported:'不支持',historical:'历史数据'} as Record<string,string>)[row.dataStatus] || row.dataStatus;
+        return `${index+1}. ${escapeTelegramHtml(row.title)} · ${escapeTelegramHtml(status)}\n${escapeTelegramHtml(row.source)} · ${escapeTelegramHtml(row.observedAt)}${row.reason ? '\n原因：'+escapeTelegramHtml(row.reason):''}${href ? `\n<a href="${escapeTelegramHtml(href)}">网页与证据</a>` : ''}${chart ? ` · <a href="${escapeTelegramHtml(chart)}">对应日期图表</a>`:''}`;
       });
       return ['<b>自选行动中心</b>',...lines,shown.length ? '处理：/actioncenter read 1 · pin 1 · later 1（15分钟内有效）' : '当前没有待处理条目；来源无记录与来源故障分别展示。'].join('\n');
     },
@@ -7462,6 +7482,17 @@ app.get('/api/research/experiments/:id', (req, res) => {
   const experiment = result.experiment || {};
   res.json({ success: true, data: result, market: experiment.market || null, instrument: experiment.instrument || null, dataStatus: result.evidence?.checks?.data?.passed ? 'live' : 'unavailable', source: experiment.dataSource || null, updatedAt: experiment.createdAt || null, reason: result.evidence?.checks?.data?.passed ? null : '实验未声明可用数据源' });
 });
+app.get('/api/research/experiments/:id/links',(req,res)=>{
+  if(!adminOnly(req,res))return;
+  const id=String(req.params.id),result=researchRepository.getExperiment(id);
+  if(!result)return res.status(404).json({success:false,reason:'实验不存在'});
+  const market=result.experiment.market;
+  const signals=researchRepository.getAllSignals().filter((row:any)=>row.market===market && row.experimentId===id).map((row:any)=>({id:row.id,instrument:row.instrument,evidenceRefs:row.evidenceRefs || []}));
+  const type=({stocks:'stock',crypto:'crypto',options:'option',prediction:'prediction'} as Record<string,string>)[market];
+  const orders=unifiedPaperLedgerStore.get().orders.filter(row=>row.instrumentType===type && row.experimentId===id).map(row=>({id:row.id,instrument:row.instrumentId,signalId:row.signalId || null,timestamp:row.timestamp}));
+  const decisions=decisionIntelligenceStore.listDecisions(market).filter((row:any)=>row.experimentId===id).map(row=>({id:row.id,instrument:row.instrument}));
+  res.json({success:true,market,data:{signals,orders,decisions},dataStatus:signals.length || orders.length || decisions.length?'historical':'empty',reason:'只按显式实验 ID 建立关联；旧记录未关联，不按时间或策略名称猜测配对'});
+});
 
 function getResearchFreshness(input: { market: MarketId; instrument?: string; timeframe?: string; createdAt: string; dataSnapshotHash?: string; strategyId?: string; strategyVersion?: string }) {
   const revisions = dataLakeCatalog.listRevisions(input.market);
@@ -8648,7 +8679,8 @@ app.post('/api/alerts/metric-preview', express.json(),async(req,res)=>{
   if(!validation.ok) return res.status(400).json({success:false,reason:validation.error});
   const observation=await metricObservation(input),at=Date.parse(observation.observedAt || '');
   const result=evaluateUnifiedAlert(input as UnifiedAlertRule,observation),fresh=Number.isFinite(at) && at<=Date.now()+60_000 && Date.now()-at<=120_000;
-  res.json({success:true,data:{...result,matched:result.matched && fresh,observation,durationMinutes:input.condition?.durationMinutes || 0},dataStatus:observation.dataStatus,reason:!fresh ? '来源快照过期或没有时间，当前不能触发提醒':observation.reason || null});
+  const clauses=explainMetricConditions(input.condition || {},observation).map(row=>fresh ? row:{...row,matched:false,reason:'来源快照过期或没有时间'});
+  res.json({success:true,data:{...result,matched:result.matched && fresh,clauses,observation,durationMinutes:input.condition?.durationMinutes || 0},dataStatus:observation.dataStatus,reason:!fresh ? '来源快照过期或没有时间，当前不能触发提醒':observation.reason || null});
 });
 app.post('/api/alert-rules', (req, res) => {
   if (!adminOnly(req, res)) return;

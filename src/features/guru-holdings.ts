@@ -635,8 +635,8 @@ export function createGuruHoldingsService(overrides: Partial<GuruHoldingsService
   function getGuruManagerHistory(cikInput: string, limitInput = 4) {
     const cik = normalizeSecCik(cikInput);
     const parsedLimit = Math.floor(Number(limitInput));
-    const limit = Number.isFinite(parsedLimit) ? Math.max(1, Math.min(4, parsedLimit)) : 4;
-    const reports = effectiveGuruReports(repository.listGuru13FReports(cik, 500)).slice(0, limit);
+    const limit = Number.isFinite(parsedLimit) ? Math.max(1, Math.min(24, parsedLimit)) : 4;
+    const reports = effectiveGuruReports(repository.listGuru13FReports(cik, 500)).slice(0, limit).map(report=>({...report,positions:report.positions.map(position=>({...position,mappedInstrument:!position.putCall && position.shareAmountType==='SH' ? (()=>{const mapping=resolveGuruMappingByCusip(position.cusip,position.classTitle);return mapping?'stock:us:'+mapping.symbol:null;})():null}))}));
     return {
       ...getGuruManagerSnapshot(cik),
       reports,

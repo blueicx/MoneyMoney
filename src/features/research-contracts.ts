@@ -98,6 +98,7 @@ export interface ExperimentRecord {
   slippage: number;
   seed: number;
   createdAt: string;
+  parameters?: Record<string,number|string|boolean>;
 }
 
 function assertDateRange(from?: string, to?: string): void {
@@ -113,14 +114,15 @@ export function createExperimentRecord(input: Omit<Partial<ExperimentRecord>, 'i
   const feeRate = Number(input.feeRate ?? 0); const slippage = Number(input.slippage ?? 0);
   if (!Number.isFinite(feeRate) || feeRate < 0 || !Number.isFinite(slippage) || slippage < 0) throw new Error('Invalid experiment cost model');
   const seed = Number.isInteger(input.seed) ? Number(input.seed) : 0;
-  const stable = JSON.stringify({ market: input.market, instrument: input.instrument || '', timeframe: input.timeframe || '', strategyId: input.strategyId || '', strategyVersion: input.strategyVersion || '', dataSnapshotHash: input.dataSnapshotHash || '', dataSource: input.dataSource || 'unknown', dataFrom: input.dataFrom || '', dataTo: input.dataTo || '', feeRate, slippage, seed });
+  if(input.parameters && (Array.isArray(input.parameters) || Object.keys(input.parameters).length>64 || Object.entries(input.parameters).some(([key,value])=>!/^[A-Za-z0-9_.-]{1,64}$/.test(key) || !['number','string','boolean'].includes(typeof value) || typeof value==='number' && !Number.isFinite(value) || typeof value==='string' && value.length>256)))throw new Error('实验参数需为有限的具名基本值');
+  const stable = JSON.stringify({ market: input.market, instrument: input.instrument || '', timeframe: input.timeframe || '', strategyId: input.strategyId || '', strategyVersion: input.strategyVersion || '', dataSnapshotHash: input.dataSnapshotHash || '', dataSource: input.dataSource || 'unknown', dataFrom: input.dataFrom || '', dataTo: input.dataTo || '', feeRate, slippage, seed,...(input.parameters?{parameters:Object.fromEntries(Object.entries(input.parameters).sort(([a],[b])=>a.localeCompare(b)))}:{}) });
   let hash = 2166136261;
   for (let index = 0; index < stable.length; index += 1) hash = Math.imul(hash ^ stable.charCodeAt(index), 16777619);
   return {
     id: `exp_${(hash >>> 0).toString(36)}`,
     market: input.market, instrument: input.instrument?.trim(), timeframe: input.timeframe,
     strategyId: input.strategyId, strategyVersion: input.strategyVersion, dataSource: input.dataSource || 'unknown',
-    dataSnapshotHash: input.dataSnapshotHash, dataFrom: input.dataFrom, dataTo: input.dataTo, feeRate, slippage, seed, createdAt: new Date().toISOString(),
+    dataSnapshotHash: input.dataSnapshotHash, dataFrom: input.dataFrom, dataTo: input.dataTo, feeRate, slippage, seed, createdAt: new Date().toISOString(),...(input.parameters?{parameters:{...input.parameters}}:{}),
   };
 }
 

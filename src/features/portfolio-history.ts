@@ -3,13 +3,14 @@ import type { CorporateAction } from '../storage/data-lake';
 
 interface HistoryCatalog {
   resolveInstrument?(market: MarketId, query: string): {id: string} | null;
-  queryBarsAsOf(input: { market: MarketId; instrument: string; timeframe: string; asOf: string }): Promise<{ rows: Array<Record<string, unknown>>; source: string | null; updatedAt?: string | null; reason?: string; snapshot?: { id: string; contentHash: string } }>;
+  queryBarsAsOf(input: { market: MarketId; instrument: string; timeframe: string; asOf: string }): Promise<{ rows: Array<Record<string, unknown>>; source: string | null; adjustment?: string; updatedAt?: string | null; reason?: string; snapshot?: { id: string; contentHash: string } }>;
   listCorporateActions(market: MarketId, instrument: string): CorporateAction[];
 }
 export interface HistoricalSeries {
   instrument: string; source: string | null; updatedAt: string | null; dataStatus: string; reason: string | null;
   points: Array<{ date: string; close: number | null; value: number | null }>;
   datedReturns: Array<{ date: string; value: number }>; evidenceRefs: string[];
+  rawPoints: Array<{date:string;close:number|null;value:number|null}>; corporateActions: CorporateAction[]; adjustment: string | null;
 }
 export function historyIdentity(market: MarketId, id: string): { symbol: string; supported: boolean } {
   const match = id.match(/^(stock|crypto|option|prediction):([^:]+):(.+)$/i);
@@ -33,7 +34,7 @@ export async function assembleHistory(catalog: HistoryCatalog, market: MarketId,
   const series: HistoricalSeries[] = [];
   const dateFormatter = new Intl.DateTimeFormat('en-CA',{ timeZone:market === 'stocks' ? 'America/New_York':'UTC',year:'numeric',month:'2-digit',day:'2-digit' });
   for (const ref of refs) {
-    const entry: HistoricalSeries = { instrument:ref.instrument,source:null,updatedAt:null,dataStatus:'unavailable',reason:null,points:[],datedReturns:[],evidenceRefs:[] };
+    const entry: HistoricalSeries = { instrument:ref.instrument,source:null,updatedAt:null,dataStatus:'unavailable',reason:null,points:[],datedReturns:[],evidenceRefs:[],rawPoints:[],corporateActions:[],adjustment:null };
     series.push(entry);
     if (!ref.supported) { entry.dataStatus=ref.identityReason ? 'unavailable':'unsupported';entry.reason=ref.identityReason || '当前交易场所没有可用的同口径日线历史，未回退其他市场或交易所';continue; }
     try {
@@ -53,7 +54,13 @@ export async function assembleHistory(catalog: HistoryCatalog, market: MarketId,
       const points=[...byDate].sort(([a],[b])=>a.localeCompare(b)).map(([date,point])=>({date,close:point.close,value:null as number|null}));
       const start=points[0]?.date;
       const actions=market === 'stocks' ? catalog.listCorporateActions('stocks',ref.symbol).filter(action=>start && action.effectiveAt.slice(0,10)>=start && Date.parse(action.effectiveAt)<=Date.parse(asOf)) : [];
-      if (actions.length) {entry.reason='区间内存在公司行动，分区复权口径尚不能核验，暂停计算收益；可查看原始证据';continue;}
+      entry.rawPoints=points.map(point=>({...point}));entry.corporateActions=actions;entry.adjustment=history.adjustment || null;
+      if (actions.length) {
+        const verified=history.adjustment==='unadjusted' && actions.every(action=>action.kind==='split' && Number.isFinite(action.factor) && action.factor!>0 && action.source?.trim() && action.publishedAt && Date.parse(action.publishedAt)<=Date.parse(asOf));
+        if(!verified){entry.reason='区间内存在公司行动，分区复权口径或行动发布时间尚不能核验，暂停计算收益；保留原始价格、分红/拆股证据';continue;}
+        for(const point of points)if(point.close!=null)for(const action of actions)if(point.date<action.effectiveAt.slice(0,10))point.close/=action.factor!;
+        entry.adjustment='verified-split-adjusted';entry.evidenceRefs.push(...actions.map(action=>action.id));
+      }
       entry.points=points;
       for (let i=1;i<points.length;i++) if (points[i-1].close != null && points[i].close != null) entry.datedReturns.push({date:points[i].date,value:points[i].close!/points[i-1].close!-1});
       entry.dataStatus=points.length>=2 ? 'historical':'unavailable';

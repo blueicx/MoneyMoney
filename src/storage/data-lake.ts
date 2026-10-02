@@ -13,7 +13,7 @@ export interface DatasetManifest { id: string; dataset: string; market: MarketId
 export interface DatasetPartition { id: string; manifestId: string; path: string; dataset: string; market: MarketId; instrument: string; timeframe: string; periodStart: string; periodEnd: string; publishedAt: string; fetchedAt: string; rowCount: number; status: DatasetStatus; contentHash: string; }
 export interface PointInTimeSnapshot { id: string; market: MarketId; instrument: string; dataset: string; timeframe: string; asOf: string; partitionId: string; contentHash: string; source: string | null; createdAt: string; }
 export interface DataRevision { id: string; dataset: string; market: MarketId; instrument: string; timeframe: string; partitionId: string; publishedAt: string; contentHash: string; supersedes?: string; reason?: string; }
-export interface CorporateAction { id: string; market: 'stocks'; instrument: string; kind: 'split' | 'dividend' | 'symbol-change' | 'delisting'; effectiveAt: string; factor?: number; oldSymbol?: string; newSymbol?: string; source: string; }
+export interface CorporateAction { id: string; market: 'stocks'; instrument: string; kind: 'split' | 'dividend' | 'symbol-change' | 'delisting'; effectiveAt: string; publishedAt?: string; factor?: number; oldSymbol?: string; newSymbol?: string; source: string; }
 export interface ProviderContract { id: string; provider: string; market: MarketId; datasets: string[]; timezone: string; units: Record<string, string>; revisionPolicy: 'point-in-time' | 'latest'; }
 export interface DataQualityReport { valid: boolean; rowCount: number; duplicateTimestamps: number; outOfOrderRows: number; missingFields: string[]; futureRows: number; errors: string[]; checkedAt: string; }
 export interface BackfillCheckpoint { cursor?: string; rowsWritten: number; partitionsCommitted: number; }
@@ -139,6 +139,7 @@ export class DataLakeCatalog {
       CREATE INDEX IF NOT EXISTS idx_snapshots_lookup ON point_in_time_snapshots (market, instrument, dataset, timeframe, as_of);
     `);
     this.ensureBackfillColumns();
+    if (!(this.db.prepare('PRAGMA table_info(corporate_actions)').all() as Array<{name:string}>).some(row=>row.name==='published_at')) this.db.exec('ALTER TABLE corporate_actions ADD COLUMN published_at TEXT');
     this.migrateLegacyInstrumentIdentities();
   }
 
@@ -289,12 +290,12 @@ export class DataLakeCatalog {
     return { ...partition, quality };
   }
 
-  async queryBarsAsOf(input: { market: MarketId; instrument: string; timeframe: string; asOf: string }): Promise<{ rows: Array<Record<string, unknown>>; dataStatus: 'historical' | 'unavailable'; source: string | null; updatedAt: string | null; reason?: string; snapshot?: PointInTimeSnapshot }> {
+  async queryBarsAsOf(input: { market: MarketId; instrument: string; timeframe: string; asOf: string }): Promise<{ rows: Array<Record<string, unknown>>; dataStatus: 'historical' | 'unavailable'; source: string | null; adjustment?: string; updatedAt: string | null; reason?: string; snapshot?: PointInTimeSnapshot }> {
     validateInstrument(input.market, input.instrument);
     if (this.listInstrumentQuarantine(input.market).some(item => item.instrument === input.instrument)) return { rows: [], dataStatus: 'unavailable', source: null, updatedAt: null, reason: '标的身份未确认，旧分区已隔离' };
     const asOf = Date.parse(input.asOf);
     if (!Number.isFinite(asOf)) throw new Error('invalid asOf');
-    const candidates = this.db.prepare('SELECT p.*, m.source AS source FROM dataset_partitions p JOIN dataset_manifests m ON m.id = p.manifest_id WHERE p.market = ? AND p.dataset = ? AND p.instrument = ? AND p.timeframe = ? AND p.published_at <= ? AND p.status = ? ORDER BY p.period_start ASC, p.period_end ASC, p.published_at DESC, p.id DESC').all(input.market, 'bars', input.instrument, input.timeframe, new Date(asOf).toISOString(), 'committed') as Array<Record<string, any>>;
+    const candidates = this.db.prepare('SELECT p.*, m.source AS source, m.adjustment AS adjustment FROM dataset_partitions p JOIN dataset_manifests m ON m.id = p.manifest_id WHERE p.market = ? AND p.dataset = ? AND p.instrument = ? AND p.timeframe = ? AND p.published_at <= ? AND p.status = ? ORDER BY p.period_start ASC, p.period_end ASC, p.published_at DESC, p.id DESC').all(input.market, 'bars', input.instrument, input.timeframe, new Date(asOf).toISOString(), 'committed') as Array<Record<string, any>>;
     const selected: Array<Record<string, any>> = [];
     const periods = new Set<string>();
     for (const candidate of candidates) {
@@ -322,7 +323,8 @@ export class DataLakeCatalog {
       const contentHash = crypto.createHash('sha256').update(selected.map(item => String(item.content_hash)).join('|')).digest('hex');
       const snapshot: PointInTimeSnapshot = { id: `snapshot_${contentHash.slice(0, 24)}_${asOf}`, market: input.market, instrument: input.instrument, dataset: 'bars', timeframe: input.timeframe, asOf: new Date(asOf).toISOString(), partitionId: selected.map(item => String(item.id)).join(','), contentHash, source: source || null, createdAt: new Date().toISOString() };
       this.db.prepare('INSERT OR IGNORE INTO point_in_time_snapshots (id,market,instrument,dataset,timeframe,as_of,partition_id,content_hash,source,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)').run(snapshot.id, snapshot.market, snapshot.instrument, snapshot.dataset, snapshot.timeframe, snapshot.asOf, snapshot.partitionId, snapshot.contentHash, snapshot.source, snapshot.createdAt);
-      return { rows, dataStatus: 'historical', source, updatedAt: String(latest.published_at || ''), snapshot: this.getSnapshot(snapshot.id) || snapshot };
+      const adjustments=[...new Set(selected.map(row=>row.adjustment))];
+      return { rows, dataStatus: 'historical', source, adjustment:adjustments.length===1?adjustments[0]:'mixed', updatedAt: String(latest.published_at || ''), snapshot: this.getSnapshot(snapshot.id) || snapshot };
     } finally { connection.closeSync(); instance.closeSync(); }
   }
 
@@ -344,10 +346,11 @@ export class DataLakeCatalog {
     validateInstrument(input.market, input.instrument);
     if (!['split', 'dividend', 'symbol-change', 'delisting'].includes(input.kind)) throw new Error('Invalid corporate action kind');
     if (!Number.isFinite(Date.parse(input.effectiveAt)) || !input.source?.trim()) throw new Error('Corporate action requires effectiveAt and source');
+    if(input.publishedAt && !Number.isFinite(Date.parse(input.publishedAt))) throw new Error('Corporate action publication time invalid');
     if (input.kind === 'split' && (!Number.isFinite(input.factor) || Number(input.factor) <= 0)) throw new Error('Split factor must be positive');
     if (input.kind === 'dividend' && (!Number.isFinite(input.factor) || Number(input.factor) < 0)) throw new Error('Dividend amount must be nonnegative');
     if (input.kind === 'symbol-change' && (!input.oldSymbol || !input.newSymbol || input.oldSymbol === input.newSymbol)) throw new Error('Symbol change requires distinct old and new symbols');
-    this.db.prepare('INSERT OR REPLACE INTO corporate_actions (id,market,instrument,kind,effective_at,factor,old_symbol,new_symbol,source) VALUES (?,?,?,?,?,?,?,?,?)').run(input.id, input.market, input.instrument, input.kind, new Date(input.effectiveAt).toISOString(), input.factor ?? null, input.oldSymbol || null, input.newSymbol || null, input.source.trim());
+    this.db.prepare('INSERT OR REPLACE INTO corporate_actions (id,market,instrument,kind,effective_at,factor,old_symbol,new_symbol,source,published_at) VALUES (?,?,?,?,?,?,?,?,?,?)').run(input.id,input.market,input.instrument,input.kind,new Date(input.effectiveAt).toISOString(),input.factor ?? null,input.oldSymbol || null,input.newSymbol || null,input.source.trim(),input.publishedAt?new Date(input.publishedAt).toISOString():null);
     return { ...input, effectiveAt: new Date(input.effectiveAt).toISOString(), source: input.source.trim() };
   }
 
@@ -357,7 +360,8 @@ export class DataLakeCatalog {
       : market
         ? this.db.prepare('SELECT id,market,instrument,kind,effective_at AS effectiveAt,factor,old_symbol AS oldSymbol,new_symbol AS newSymbol,source FROM corporate_actions WHERE market = ? ORDER BY effective_at').all(market)
         : this.db.prepare('SELECT id,market,instrument,kind,effective_at AS effectiveAt,factor,old_symbol AS oldSymbol,new_symbol AS newSymbol,source FROM corporate_actions ORDER BY effective_at').all()) as Array<Record<string, unknown>>;
-    return rows.map(row => ({ id: String(row.id), market: row.market as 'stocks', instrument: String(row.instrument), kind: row.kind as CorporateAction['kind'], effectiveAt: String(row.effectiveAt), ...(row.factor == null ? {} : { factor: Number(row.factor) }), ...(row.oldSymbol ? { oldSymbol: String(row.oldSymbol) } : {}), ...(row.newSymbol ? { newSymbol: String(row.newSymbol) } : {}), source: String(row.source) }));
+    const published=new Map((this.db.prepare('SELECT id,published_at FROM corporate_actions WHERE published_at IS NOT NULL').all() as Array<{id:string;published_at:string}>).map(row=>[row.id,row.published_at]));
+    return rows.map(row => ({ id: String(row.id), market: row.market as 'stocks', instrument: String(row.instrument), kind: row.kind as CorporateAction['kind'], effectiveAt: String(row.effectiveAt), ...(published.has(String(row.id))?{publishedAt:published.get(String(row.id))}:{}), ...(row.factor == null ? {} : { factor: Number(row.factor) }), ...(row.oldSymbol ? { oldSymbol: String(row.oldSymbol) } : {}), ...(row.newSymbol ? { newSymbol: String(row.newSymbol) } : {}), source: String(row.source) }));
   }
 
   registerProviderContract(input: ProviderContract): ProviderContract {
@@ -543,6 +547,10 @@ export class DataLakeCatalog {
     if (!MARKET_IDS.includes(input.market)) throw new Error('invalid market');
     validateInstrument(input.market, input.instrument);
     if (!input.dataset || !input.timeframe || !Number.isFinite(Date.parse(input.from)) || !Number.isFinite(Date.parse(input.to)) || Date.parse(input.from) >= Date.parse(input.to)) throw new Error('invalid backfill range');
+    const existing=this.db.prepare("SELECT id FROM data_backfill_jobs WHERE market=? AND dataset=? AND instrument=? AND timeframe=? AND from_at=? AND to_at=? AND status IN ('queued','running','paused') ORDER BY created_at DESC LIMIT 1").get(input.market,input.dataset,input.instrument,input.timeframe,input.from,input.to) as {id:string}|undefined;
+    if(existing)return this.getBackfill(existing.id)!;
+    const queue=this.db.prepare("SELECT COUNT(*) AS count FROM data_backfill_jobs WHERE status IN ('queued','running','paused')").get() as {count:number};
+    if(queue.count>=16)throw new Error('回补任务预算已满（最多16个待完成任务），请等待当前任务或取消不需要的任务');
     const now = new Date().toISOString();
     const job: DataBackfillJob = { id: `backfill_${crypto.randomUUID()}`, ...input, status: 'queued', reason: '已登记，等待单并发数据 Worker 按 Provider 契约执行', createdAt: now, updatedAt: now, checkpoint: { rowsWritten: 0, partitionsCommitted: 0 } };
     this.db.prepare('INSERT INTO data_backfill_jobs (id,market,dataset,instrument,timeframe,from_at,to_at,status,reason,created_at,updated_at,lease_owner,lease_expires_at,checkpoint) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run(job.id, job.market, job.dataset, job.instrument, job.timeframe, job.from, job.to, job.status, job.reason, job.createdAt, job.updatedAt, null, null, JSON.stringify(job.checkpoint));

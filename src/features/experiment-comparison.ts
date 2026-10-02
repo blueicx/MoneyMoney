@@ -7,7 +7,7 @@ export function compareExperiments(input: ResearchExperimentResult[]) {
   if (new Set(ids).size !== ids.length) throw new Error('实验选择重复');
   if (new Set(input.map(row => row.experiment.market)).size !== 1) throw new Error('仅允许比较同一市场的实验');
   for (const row of input) assertMarketContext({ ...row.experiment, workspace: 'experiment-comparison' });
-  const fields = ['instrument', 'timeframe', 'strategyId', 'strategyVersion', 'dataFrom', 'dataTo', 'dataSource', 'dataSnapshotHash', 'feeRate', 'slippage', 'seed'] as const;
+  const fields = ['instrument', 'timeframe', 'strategyId', 'strategyVersion', 'dataFrom', 'dataTo', 'dataSource', 'dataSnapshotHash', 'feeRate', 'slippage', 'seed','parameters'] as const;
   const differences = fields.flatMap(field => {
     const values = input.map(row => ({ id: row.experiment.id, value: row.experiment[field] ?? null }));
     return new Set(values.map(row => JSON.stringify(row.value))).size > 1 ? [{ field, values }] : [];

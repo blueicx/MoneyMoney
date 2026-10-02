@@ -145,17 +145,20 @@ export function isAlertSuppressed(rule: UnifiedAlertRule, now = new Date()): boo
   return false;
 }
 
+export function explainMetricConditions(condition: UnifiedAlertRule['condition'], observation: UnifiedAlertObservation) {
+  const usable=['live','delayed'].includes(observation.dataStatus || '');
+  return (condition.clauses || []).map(clause=>{
+    const actual=observation.metrics?.[clause.field];
+    const valid=clause.field==='pattern' ? typeof actual==='string' : typeof actual==='number' && Number.isFinite(actual);
+    const matched=usable && valid && (clause.operator==='eq' ? actual===clause.value : typeof actual==='number' && typeof clause.value==='number' && (clause.operator==='gte' ? actual>=clause.value:actual<=clause.value));
+    return {...clause,actual:valid?actual:null,matched,reason:!usable ? observation.reason || '数据状态不可触发':!valid ? '来源字段缺失或数值无效':matched?'该条件满足':'实际值未达到条件'};
+  });
+}
 export function evaluateUnifiedAlert(rule: UnifiedAlertRule, observation: UnifiedAlertObservation): { matched: boolean; direction: EventResultDirection | 'above' | 'below' | 'neutral'; message: string } {
   if (rule.kind !== observation.kind) return { matched: false, direction: 'neutral', message: '' };
   if (rule.kind === 'metric') {
     if (!['live','delayed'].includes(observation.dataStatus || '')) return {matched:false,direction:'neutral',message:observation.reason || '组合条件数据不是可用的实时/延迟来源'};
-    const matches=(rule.condition.clauses || []).map(clause=>{
-      const actual=observation.metrics?.[clause.field];
-      if (actual==null) return false;
-      if (clause.field==='pattern') return actual===clause.value;
-      if (typeof actual!=='number' || !Number.isFinite(actual) || typeof clause.value!=='number') return false;
-      return clause.operator==='gte' ? actual>=clause.value : clause.operator==='lte' ? actual<=clause.value : actual===clause.value;
-    });
+    const matches=explainMetricConditions(rule.condition,observation).map(row=>row.matched);
     const matched=matches.length>0 && (rule.condition.join==='any' ? matches.some(Boolean) : matches.every(Boolean));
     return {matched,direction:'neutral',message:matched ? `组合条件满足：${rule.condition.clauses?.map(c=>`${c.field} ${c.operator} ${c.value}`).join(rule.condition.join==='any' ? ' 或 ':' 且 ')}`:'组合条件未满足或字段不可用'};
   }

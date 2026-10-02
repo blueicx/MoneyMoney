@@ -29,6 +29,7 @@ export type WorkspaceId =
   | 'open-interest'
   | 'on-chain'
   | 'order-flow'
+  | 'contracts'
   | 'prediction-radar';
 
 export interface WorkspaceItem {
@@ -78,6 +79,7 @@ const ITEMS: Record<WorkspaceId, WorkspaceItem> = {
   'open-interest': { id: 'open-interest', label: '未平仓量', icon: '◫', scopes: ['crypto'], requiresInstrument: true },
   'on-chain': { id: 'on-chain', label: '链上数据', icon: '⌁', scopes: ['crypto'], requiresInstrument: true },
   'order-flow': { id: 'order-flow', label: '主动资金流', icon: 'ϟ', scopes: ['crypto'], requiresInstrument: true },
+  contracts: {id:'contracts',label:'永续与交割合约',icon:'⇋',scopes:['crypto'],requiresInstrument:true},
   'prediction-radar': { id: 'prediction-radar', label: '预测雷达', icon: '◎', scopes: ['prediction'] },
 };
 
@@ -91,7 +93,7 @@ const SPECIFIC_ITEMS: Record<MarketScope, readonly WorkspaceId[]> = {
   overview: [],
   stocks: ['stock-quotes', 'events', 'breadth', 'insider', 'institutional', 'guru-holdings', 'analyst', 'fundamentals', 'short-interest'],
   options: ['events', 'option-chain', 'volatility', 'greeks'],
-  crypto: ['crypto-quotes', 'events', 'funding-rate', 'open-interest', 'on-chain', 'order-flow'],
+  crypto: ['crypto-quotes', 'events', 'contracts', 'funding-rate', 'open-interest', 'on-chain', 'order-flow'],
   prediction: ['events', 'prediction-radar'],
   watchlist: [],
 };

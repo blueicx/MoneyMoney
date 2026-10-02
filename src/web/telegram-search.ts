@@ -23,6 +23,7 @@ export interface TelegramDeepLinkContext {
   instrument: string;
   timeframe?: string;
   workspace?: string;
+  focusDate?: string;
 }
 
 export function telegramPublicBaseUrl(env: Record<string, string | undefined> = process.env): string | null {
@@ -50,6 +51,7 @@ export function buildTelegramDeepLink(baseUrl: string | null | undefined, contex
     url.searchParams.set('workspace', String(context.workspace || 'analysis'));
     url.searchParams.set('instrument', String(context.instrument || ''));
     if (context.timeframe) url.searchParams.set('timeframe', String(context.timeframe));
+    if(context.focusDate && /^\d{4}-\d{2}-\d{2}$/.test(context.focusDate))url.searchParams.set('focusDate',context.focusDate);
     return url.toString();
   } catch {
     return null;

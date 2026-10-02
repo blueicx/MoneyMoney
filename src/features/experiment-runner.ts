@@ -11,6 +11,7 @@ export interface ResearchExperimentInput {
   context: MarketContext & {
     strategyId?: string; strategyVersion?: string; dataSource?: string;
     dataFrom?: string; dataTo?: string; dataSnapshotHash?: string; feeRate?: number; slippage?: number; seed?: number;
+    parameters?: Record<string,number|string|boolean>;
   };
   prices: number[];
   signals: readonly BacktestSignal[];
@@ -59,7 +60,7 @@ export function runResearchExperiment(input: ResearchExperimentInput): ResearchE
     strategyId: input.context.strategyId, strategyVersion: input.context.strategyVersion,
     dataSource: input.context.dataSource || 'unknown', dataFrom: input.context.dataFrom, dataTo: input.context.dataTo,
     dataSnapshotHash: input.context.dataSnapshotHash,
-    feeRate, slippage, seed: input.context.seed,
+    feeRate, slippage, seed: input.context.seed, parameters: input.context.parameters,
   });
   const startingBalance = 100000;
   const backtest = new BacktestEngine({
