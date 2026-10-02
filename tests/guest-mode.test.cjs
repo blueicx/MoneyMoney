@@ -27,6 +27,10 @@ test('normal login tokens remain admin tokens', () => {
 });
 
 test('guest access only permits explicit read-only GET paths', () => {
+  assert.equal(auth.isGuestRequestAllowed('GET', '/contracts/catalog'), true);
+  assert.equal(auth.isGuestRequestAllowed('GET', '/contracts/detail'), true);
+  assert.equal(auth.isGuestRequestAllowed('POST', '/contracts/scenario'), false);
+  assert.equal(auth.isGuestRequestAllowed('GET', '/contracts/orders'), false);
   assert.equal(auth.isGuestRequestAllowed('GET', '/overview'), true);
   assert.equal(auth.isGuestRequestAllowed('GET', '/cross-asset-correlation'), true);
   assert.equal(auth.isGuestRequestAllowed('GET', '/markets'), true);

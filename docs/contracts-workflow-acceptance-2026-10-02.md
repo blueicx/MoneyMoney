@@ -14,7 +14,7 @@
 
 ## 验证证据
 
-- `npm test`：694通过，0失败。
+- `npm test`：首批694通过；发布修复后695通过，0失败，包含首页接线及访客合约权限回归。
 - `npm run build`：TypeScript与资源复制成功。
 - `npm run smoke:web`、`npm run smoke:auth`：通过。
 - `npm run smoke:browser`：四市场、SEC/13F、选中标的、图表日期、空状态、收缩恢复和手机布局通过。
@@ -29,3 +29,7 @@
 来源缺失不造数据；合约只支持本批已明确接入的 Gate USDT 线性产品。未增加币本位、真实下单、强平价、真实交易密钥或TradingView依赖。Telegram实际私聊消息发送不属于本次自动验收。
 
 保留用户已有 `scripts/browser-market-matrix.cjs` 修改、SQLite/数据湖及 `scratch/`；不纳入本批提交。部署只操作 `moneymoney.service`。
+
+## 生产检查修复
+
+首批正式域名四市场只读巡检通过，但新增合约目录实测返回访客403。修复仅开放两个公共GET：`/contracts/catalog`和`/contracts/detail`；情景POST和未知合约路径仍拒绝访客。增加权限回归测试。首页接线增加独立断言，防止模块文件存在但真实首页没有入口。

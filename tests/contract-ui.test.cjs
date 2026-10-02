@@ -1,4 +1,7 @@
 const test=require('node:test');const assert=require('node:assert/strict');const {JSDOM}=require('jsdom');const fs=require('node:fs');
+test('production homepage wires contracts and workflow scripts with an isolated navigation entry',()=>{
+ const page=fs.readFileSync('src/web/public/index.html','utf8');assert.match(page,/src="\/contracts-workspace\.js\?/);assert.match(page,/src="\/workflow-polish\.js\?/);assert.match(page,/contracts: \['⇋', '永续与交割合约'\]/);assert.match(page,/async locateDay\(instrument,day\)/);
+});
 test('contracts appear only in crypto workspace and right library selection preserves venue identity',async()=>{
  const dom=new JSDOM('<main id="market-workspace-shell" data-market-scope="stocks" data-workspace="insider" data-instrument="stock:us:AAPL"><div id="center-workspace"></div><aside data-market-library="crypto"><div id="spot-list">BTC spot</div></aside></main>',{url:'https://test.invalid',runScripts:'outside-only'}),win=dom.window,shell=win.document.querySelector('main');let selected=null;
  win.fetch=async url=>({ok:true,json:async()=>url.includes('/catalog')?{success:true,dataStatus:'delayed',updatedAt:'2026-10-02',items:[{instrument:'crypto:gateio:BTC_USDT',name:'BTC_USDT',kind:'perpetual'}]}:{success:false,reason:'source unavailable'}});win.setWorkspaceInstrument=id=>{selected=id;shell.dataset.instrument=id;win.dispatchEvent(new win.Event('mm-workspace-context'));};

@@ -49,6 +49,8 @@ const GUEST_GET_PREFIXES = [
   '/cross-asset',
   '/cross-asset-correlation',
   '/perpetual',
+  '/contracts/catalog',
+  '/contracts/detail',
   '/funding',
   '/order-flow',
   '/bitcoin-onchain',
