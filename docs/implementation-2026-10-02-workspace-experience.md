@@ -26,3 +26,18 @@
 - 组合提醒按实际来源声明能力，技术形态使用已完成日线；免费来源预算最多同时启用 6 个不同指标标的，同标的可以保存多条规则。网页监控不依赖 Telegram 启用，使用 SQLite 租约去重。
 - 13F 为季度延迟披露；退出指本期未披露，不能推断机构实时清仓。修订、非相邻季度或证券身份不明不强行比较。
 - 本批不启用实盘、外部 TradingView 或无可靠来源的历史回填。
+
+## 发布证据（2026-10-02）
+
+- 应用版本：`3bac9840f1f2c0b7d32de1ba20db97197744c666`；已推送功能分支及 master。
+- 门槛：完整 679 项测试、build、smoke:actions、smoke:practical、smoke:experience、smoke:guru、smoke:prediction-library、smoke:web、smoke:auth、smoke:browser、security:scan（498 文件）及 diff 检查全部通过。
+- 正式域名 `https://bluetrade.bbroot.com` 的生产只读 Chromium 巡检通过四市场、SNDK、来源/空状态、访客权限、右侧收缩恢复及手机布局。
+- 独立 Chrome 标签实测大神持仓：真实 SEC 目录返回后，市场大盘、驾驶舱卡片、变化摘要、行动中心及研究实验室全部隐藏；再次执行市场渲染后仍无混入。测试标签已关闭。
+- 远端 moneymoney.service active，健康接口 alive，正式域名 version 返回上述应用版本；server/index 及新交互资源 Hash 与本地一致。
+- 包 Hash：`f0ae311b9914a2f2c13f46dd3ce3bfb86ca58454b6b2edce4ad9f410877c8618`。
+- server Hash：`2912fb4e2a1050988d07a0bd293af5338131cfe65e3c22d09d73786a987634f8`。
+- index Hash：`0eac0dd45c48a1e10c2a27ae40c0077148461b40d2ddc1d733d1b064b4789646`。
+- 备份：`/opt/moneymoney/backups/dist-pre-workspace-3bac984-20261002-162457`。
+- 回滚目录：`/opt/moneymoney/dist.rollback-workspace-3bac984-20261002-162457`。
+- 部署只切换 dist 并操作 moneymoney.service，未覆盖数据库/数据湖；用户浏览器脚本及 scratch 保留未提交。
+- 本节为发布后文档补充，文档提交不改变上述应用产物版本。
