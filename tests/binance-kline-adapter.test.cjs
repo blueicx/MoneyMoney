@@ -27,3 +27,21 @@ test('Binance kline adapter scopes the symbol and interval in the public request
   assert.match(requestUrl, /interval=5m/);
   assert.match(requestUrl, /limit=20/);
 });
+test('Binance kline adapter supports a validated UTC date window for intraday drill-down', async () => {
+  let requestUrl = '';
+  const adapter = createBinanceKlineAdapter({
+    baseUrl: 'https://binance.test',
+    fetchImpl: async (input) => { requestUrl = String(input); return { ok: true, json: async () => [[1760000000000, '1', '2', '0.5', '1.5', '8']] }; },
+  });
+  const startTime = 1760000000000, endTime = startTime + 86_399_999;
+  const result = await adapter.fetch({ symbol: 'BTC', period: '5m', limit: 1000, startTime, endTime });
+  assert.equal(result.status, 'live');
+  assert.match(requestUrl, /startTime=1760000000000/);
+  assert.match(requestUrl, /endTime=1760086399999/);
+  let called = false;
+  const invalid = createBinanceKlineAdapter({ fetchImpl: async () => { called = true; throw new Error('must not request'); } });
+  const rejected = await invalid.fetch({ symbol: 'BTC', period: '1m', startTime: endTime, endTime: startTime });
+  assert.equal(rejected.status, 'unavailable');
+  assert.equal(called, false);
+  assert.match(rejected.error, /time window/i);
+});

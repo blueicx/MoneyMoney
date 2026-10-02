@@ -122,6 +122,21 @@ test('persists alert policy, cooldown metadata, and journal entries', () => {
   assert.equal(store.listJournalEntries('100')[0].marketId, '42');
 });
 
+test('migrates old digest preferences and persists independent pre-open and post-close schedules', () => {
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'telegram-digest-schedules-')), 'state.json');
+  const store = new TelegramCommandCenterStore(file);
+  const defaults = store.getAlertPolicy('100').digest;
+  assert.deepEqual([defaults.enabled, defaults.time, defaults.preOpenEnabled, defaults.preOpenTime, defaults.postCloseEnabled, defaults.postCloseTime], [false, '08:30', false, '21:00', false, '05:00']);
+  store.updateAlertPolicy('100', { digest: { ...defaults, preOpenEnabled: true, preOpenTime: '21:15', postCloseEnabled: true, postCloseTime: '05:10' } });
+  const restored = new TelegramCommandCenterStore(file).getAlertPolicy('100').digest;
+  assert.equal(restored.preOpenEnabled, true); assert.equal(restored.preOpenTime, '21:15');
+  assert.equal(restored.postCloseEnabled, true); assert.equal(restored.postCloseTime, '05:10');
+  const legacy = path.join(path.dirname(file), 'legacy.json');
+  fs.writeFileSync(legacy, JSON.stringify({ version: 3, policies: { '200': { digest: { enabled: true, time: '08:30' } } } }));
+  const migrated = new TelegramCommandCenterStore(legacy).getAlertPolicy('200').digest;
+  assert.equal(migrated.enabled, true); assert.equal(migrated.preOpenEnabled, false); assert.equal(migrated.postCloseTime, '05:00');
+});
+
 test('migrates version one state without losing existing preferences or price alerts', () => {
   const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'telegram-center-')), 'state.json');
   fs.writeFileSync(file, JSON.stringify({

@@ -1,9 +1,12 @@
 import express from 'express';
+import fs from 'node:fs';
+import path from 'node:path';
 import { researchRepository } from './research-repository';
 import { assertMarketContext, createResearchJob, JobStatus, MARKET_IDS, MarketId, ResearchJob } from './research-contracts';
 import { runResearchExperiment, generateExperimentArtifacts } from './experiment-runner';
 import { unifiedInstrumentService } from './unified-instruments';
 import { stateStore } from '../storage/sqlite-state';
+import { DATA_ROOT } from '../utils/paths';
 
 import { globalStrategyRegistry } from './strategy-registry';
 
@@ -141,6 +144,15 @@ async function processJob(job: ResearchJob) {
         }
 
         const artifacts = generateExperimentArtifacts(job.id, result);
+        if (!/^[a-zA-Z0-9_-]{1,128}$/.test(job.id)) throw new Error('Invalid research job identifier for artifact storage');
+        const artifactDirectory = path.join(DATA_ROOT, 'research-artifacts', job.id);
+        fs.mkdirSync(artifactDirectory, { recursive: true });
+        for (const [name, contents] of Object.entries(artifacts.files)) {
+            const target = path.join(artifactDirectory, name);
+            const temporary = target + '.' + process.pid + '.' + Date.now() + '.tmp';
+            fs.writeFileSync(temporary, contents, { encoding: 'utf8', flag: 'wx' });
+            fs.renameSync(temporary, target);
+        }
         artifacts.manifests.forEach(m => {
             researchRepository.saveArtifact(m);
             researchRepository.saveEvidenceBundle({

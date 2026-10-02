@@ -75,6 +75,7 @@ export type TelegramReplyMarkup = TelegramInlineKeyboardMarkup | TelegramReplyKe
 export interface TelegramReply {
   text: string;
   photo?: Buffer;
+  document?: { data: Buffer; filename: string };
   replyMarkup?: TelegramReplyMarkup;
   replyKeyboard?: 'menu';
 }
@@ -95,6 +96,7 @@ export interface TelegramTransport {
   getUpdates(offset: number, timeoutSeconds: number, signal?: AbortSignal): Promise<TelegramUpdate[]>;
   sendMessage(chatId: string, text: string, replyMarkup?: TelegramReplyMarkup): Promise<void>;
   sendPhoto?(chatId: string, photo: Buffer): Promise<void>;
+  sendDocument?(chatId: string, document: Buffer, filename: string): Promise<void>;
   answerCallbackQuery(callbackQueryId: string, text?: string): Promise<void>;
 }
 
@@ -246,6 +248,17 @@ export class TelegramApiTransport implements TelegramTransport {
       const parsed = await response.json() as TelegramApiResponse<unknown>;
       if (!response.ok || !parsed.ok) throw new Error('Image upload rejected');
     } catch { throw new Error('Telegram K线图片投递失败'); }
+  }
+
+  async sendDocument(chatId: string, document: Buffer, filename: string): Promise<void> {
+    if (!telegramNetworkAllowed()) throw new Error('Telegram network disabled');
+    if (document.length > 9_000_000 || !/^[a-zA-Z0-9._-]{1,80}$/.test(filename)) throw new Error('Document rejected');
+    const form = new FormData(); form.append('chat_id', chatId); form.append('document', new Blob([new Uint8Array(document)]), filename);
+    try {
+      const response = await fetch(`${TELEGRAM_API}/bot${this.token}/sendDocument`, { method: 'POST', body: form, signal: AbortSignal.timeout(20000) });
+      const parsed = await response.json() as TelegramApiResponse<unknown>;
+      if (!response.ok || !parsed.ok) throw new Error('Document upload rejected');
+    } catch { throw new Error('Telegram 证据文件投递失败'); }
   }
 
   private async callApiWithCurl<T>(url: string, body: Record<string, unknown>, timeoutMs: number, signal?: AbortSignal): Promise<TelegramApiResponse<T>> {
@@ -476,6 +489,12 @@ export class TelegramInteractionBot {
     if (normalized.photo) {
       try { if (!this.transport.sendPhoto) throw new Error('图片传输不可用'); await this.transport.sendPhoto(chatId, normalized.photo); }
       catch { await this.transport.sendMessage(chatId, 'K线图片发送失败；以下为真实数据摘要，可稍后重试 /chart。'); }
+    }
+    if (normalized.document) {
+      try {
+        if (!this.transport.sendDocument) throw new Error('文件传输不可用');
+        await this.transport.sendDocument(chatId, normalized.document.data, normalized.document.filename);
+      } catch { await this.transport.sendMessage(chatId, '证据文件发送失败；可稍后通过 /tasks artifact 重试。'); }
     }
     const replyMarkup = normalized.replyKeyboard === 'menu'
       ? buildTelegramBottomMenu(chatId, this.menuScope(chatId))

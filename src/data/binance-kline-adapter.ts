@@ -20,7 +20,7 @@ export const CRYPTO_KLINE_PERIODS: Record<string, { label: string; interval: str
   '1w': { label: '1周', interval: '1w' },
 };
 
-type BinanceKlineInput = { symbol?: string; period?: string; limit?: number };
+type BinanceKlineInput = { symbol?: string; period?: string; limit?: number; startTime?: number; endTime?: number };
 type FetchLike = typeof fetch;
 
 function normalizeSymbol(value: string): string {
@@ -62,7 +62,11 @@ export function createBinanceKlineAdapter(options: { fetchImpl?: FetchLike; base
       if (!symbol) throw new Error('Crypto symbol is required');
       if (!config) throw new Error(`Unsupported crypto period: ${period}`);
       const limit = Math.max(1, Math.min(1000, Math.trunc(Number(source.limit || options.limit || 1000))));
-      const response = await fetchImpl(`${baseUrl}/api/v3/klines?symbol=${encodeURIComponent(symbol)}&interval=${encodeURIComponent(config.interval)}&limit=${limit}`, { signal });
+      const hasStart = source.startTime !== undefined, hasEnd = source.endTime !== undefined;
+      if (hasStart !== hasEnd || (hasStart && (!Number.isSafeInteger(source.startTime) || !Number.isSafeInteger(source.endTime) || Number(source.endTime) < Number(source.startTime)))) throw new Error('Invalid Binance time window');
+      const query = new URLSearchParams({ symbol, interval: config.interval, limit: String(limit) });
+      if (hasStart && hasEnd) { query.set('startTime', String(source.startTime)); query.set('endTime', String(source.endTime)); }
+      const response = await fetchImpl(`${baseUrl}/api/v3/klines?${query.toString()}`, { signal });
       if (!response.ok) throw new Error(`Binance API failed with status: ${response.status}`);
       const bars = normalizeBinanceKlines(await response.json());
       if (!bars.length) throw new Error('Binance returned no historical bars');

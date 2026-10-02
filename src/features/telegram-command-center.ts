@@ -47,7 +47,7 @@ export interface TelegramSmartAlert {
 export interface TelegramAlertPolicy {
   pausedUntil?: string;
   quietHours: { enabled: boolean; start: string; end: string };
-  digest: { enabled: boolean; time: string };
+  digest: { enabled: boolean; time: string; preOpenEnabled?: boolean; preOpenTime?: string; postCloseEnabled?: boolean; postCloseTime?: string };
 }
 
 export interface TelegramJournalEntry {
@@ -250,7 +250,7 @@ function emptyState(): TelegramCommandCenterState {
 }
 
 function defaultAlertPolicy(): TelegramAlertPolicy {
-  return { quietHours: { enabled: false, start: '22:00', end: '07:00' }, digest: { enabled: false, time: '08:30' } };
+  return { quietHours: { enabled: false, start: '22:00', end: '07:00' }, digest: { enabled: false, time: '08:30', preOpenEnabled: false, preOpenTime: '21:00', postCloseEnabled: false, postCloseTime: '05:00' } };
 }
 
 function normalizeMarketId(value: string): string {

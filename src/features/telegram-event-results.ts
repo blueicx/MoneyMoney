@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 interface EventRecord { id?: string; title: string; titleZh?: string; date: string; country?: string; impact?: string; actual?: string | null; forecast?: string | null; source?: string; }
 interface Result { actual: string | null; status: string; reason?: string; source?: string; url?: string; publishedAt?: string; }
 interface Store { get<T>(key: string): T | null; set<T>(key: string, value: T): void; acquireLease?(key: string, owner: string, now: number, ttl: number): boolean; releaseLease?(key: string, owner: string): void; }
-interface Delivery { id: string; event: EventRecord; text: string; status: 'pending' | 'sent' | 'failed'; attempts: number; nextAttempt: number; error?: string; }
+interface Delivery { id: string; event: EventRecord; text: string; status: 'pending' | 'sent' | 'failed' | 'acknowledged'; attempts: number; nextAttempt: number; error?: string; }
 interface State { events: Record<string, EventRecord>; deliveries: Delivery[]; }
 export function hasEventActual(value: unknown): boolean {
   return value !== null && value !== undefined && !/^(?:|n\/a|na|null|unknown|pending|—|-)$/i.test(String(value).trim());
@@ -17,6 +17,13 @@ export class TelegramEventResultMonitor {
   private readonly owner = 'event-results:' + process.pid + ':' + createHash('sha256').update(String(Math.random())).digest('hex');
   constructor(private readonly store: Store, private readonly lookup: (event: EventRecord) => Promise<Result>, private readonly clock = Date.now) {}
   history(chat: string): Delivery[] { return this.store.get<State>('telegram-event-results:' + chat)?.deliveries ?? []; }
+  update(chat: string, id: string, action: 'ack' | 'retry'): boolean {
+    const key='telegram-event-results:'+chat, state=this.store.get<State>(key); if(!state) return false;
+    const item=state.deliveries.find(row=>row.id===id); if(!item) return false;
+    if(action==='ack') { if(item.status==='pending') return false; item.status='acknowledged'; }
+    else { if(item.status!=='failed' && item.status!=='pending') return false; item.status='pending'; item.nextAttempt=this.clock(); item.attempts=0; delete item.error; }
+    this.store.set(key,state); return true;
+  }
   async run(chat: string, events: EventRecord[], send: (text: string) => Promise<unknown>, deliveryEnabled = true): Promise<void> {
     if (this.busy.has(chat)) return;
     const lease = 'telegram-event-results-monitor:' + chat;
