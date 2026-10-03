@@ -34,6 +34,7 @@ import { paperEngine } from '../features/paper-trading';
 import { telegram } from '../features/telegram';
 import {
   TelegramInteractionBot,
+  TelegramApiTransport,
   type TelegramCallbackHandler,
   type TelegramCommandHandler,
   type TelegramInlineKeyboardButton,
@@ -143,6 +144,8 @@ import {
   type ScenarioDefinition,
 } from '../features/decision-intelligence';
 import { decisionIntelligenceStore } from '../features/decision-intelligence-store';
+import { capturePortfolioSnapshots, comparePortfolioSnapshots } from '../features/portfolio-snapshot-history';
+import { listTelegramTestDeliveries, runTelegramTestDelivery } from '../features/telegram-test-delivery';
 import { buildDecisionMobileSummary } from '../features/decision-mobile-summary';
 import { researchRepository } from '../features/research-repository';
 import { analyzeFactor, getFactorCatalog } from '../features/factor-lab';
@@ -167,6 +170,7 @@ import { EventStudyRepository, buildEventStudyCohort, classifyEventCategory, run
 import { PredictionSettlementRepository, buildPolymarketResolutionEndpoint, buildSettlementEndpoint, normalizeSettlementEvidence, settlementPayloadMatches } from '../features/prediction-settlement';
 import { analyzePaperDrift, analyzePaperDriftByStrategy, collectPaperDriftSamples, summarizePaperDriftCoverage, samePaperInstrument, StrategyDriftGate } from '../features/paper-drift';
 import { DataCoverageCanary, DEFAULT_DATA_COVERAGE_CANARY_TARGETS, shouldRunOncePerShanghaiDay, summarizeCoverageCanaryHistory, toPublicCoverageCanarySummary, type CanaryCapabilityResult, type CanaryDataStatus, type DataCoverageCanaryTarget, type DataCoverageCanaryRun } from '../features/data-coverage-canary';
+import { summarizePublishedCoverage, type CoverageSourceObservation } from '../features/data-coverage-status';
 import { buildEventEntities, clusterEventEntities, selectResearchEvent } from '../features/event-intelligence';
 import { curlCommand } from '../utils/platform-command';
 import { STOCK_KLINE_PERIODS, createYahooStockKlineAdapter } from '../data/yahoo-adapter';
@@ -909,11 +913,14 @@ function saveScreenerTemplates(value: StoredScreenerTemplate[]): void {
 }
 
 function adminOnly(req: express.Request, res: express.Response): boolean {
-  if ((req as any).user?.role === 'guest') {
+  const role = (req as any).user?.role;
+  if (role === 'admin') return true;
+  if (role === 'guest') {
     res.status(403).json({ success: false, error: '访客模式仅支持公开读取', code: 'GUEST_READ_ONLY' });
-    return false;
+  } else {
+    res.status(401).json({ success: false, error: '需要管理员登录', code: 'UNAUTHORIZED' });
   }
-  return true;
+  return false;
 }
 
 const screenerTrackingStore = new ScreenerTrackingStore(stateStore);
@@ -1057,15 +1064,27 @@ app.get('/api/data/coverage', (req, res) => {
   const conflicts = rawMarket ? dataLakeCatalog.listDiscrepancies(rawMarket as MarketId, instrument).filter(item => !timeframe || item.timeframe === timeframe) : [];
   const isGuest = (req as any).user?.role === 'guest';
   const runs = dataCoverageCanary.listRuns(90);
+  const inScope = (item: { market: MarketId; instrument: string }) => (!rawMarket || item.market === rawMarket) && (!instrument || item.instrument === instrument);
+  const sourceObservations: CoverageSourceObservation[] = runs.flatMap(run => run.results
+    .filter(inScope)
+    .map(item => ({ market: item.market, instrument: item.instrument, checkedAt: item.checkedAt, status: item.status, reason: item.reason, capabilities: item.capabilities })));
+  const coverageStatus = summarizePublishedCoverage({ market: rawMarket as MarketId | undefined, instrument, partitions: data, discrepancyCount: conflicts.length, observations: sourceObservations });
+  const scopedRuns = runs.map(run => {
+    const results = run.results.filter(inScope);
+    const byMarket = { stocks: 0, options: 0, crypto: 0, prediction: 0 } as Record<MarketId, number>;
+    const byStatus = { live: 0, delayed: 0, cached: 0, partial: 0, empty: 0, unavailable: 0, unsupported: 0, failed: 0 } as Record<CanaryDataStatus, number>;
+    results.forEach(item => { byMarket[item.market] += 1; byStatus[item.status] += 1; });
+    return { ...run, results, summary: { total: results.length, byMarket, byStatus } };
+  }).filter(run => run.results.length > 0);
   const canaryHistory = !isGuest ? {
     windows: {
-      '7d': summarizeCoverageCanaryHistory(runs, 7).filter(item => (!rawMarket || item.market === rawMarket) && (!instrument || item.instrument === instrument)),
-      '30d': summarizeCoverageCanaryHistory(runs, 30).filter(item => (!rawMarket || item.market === rawMarket) && (!instrument || item.instrument === instrument)),
+      '7d': summarizeCoverageCanaryHistory(scopedRuns, 7),
+      '30d': summarizeCoverageCanaryHistory(scopedRuns, 30),
     },
-    lastRun: toPublicCoverageCanarySummary(runs[0] || null),
-  } : toPublicCoverageCanarySummary(runs[0] || null);
+    lastRun: toPublicCoverageCanarySummary(scopedRuns[0] || null),
+  } : toPublicCoverageCanarySummary(scopedRuns[0] || null);
   const publicData = isGuest ? data.map(item => ({ market: item.market, dataset: item.dataset, timeframe: item.timeframe, status: item.status, partitionCount: item.partitionCount, rowCount: item.rowCount })) : data;
-  res.json({ success: true, data: publicData, market: rawMarket || 'all', instrument: isGuest ? null : instrument || null, timeframe: timeframe || null, dataStatus: conflicts.length ? 'partial' : data.length ? 'historical' : 'empty', source: 'MoneyMoney local data coverage catalog + scheduled source canary', updatedAt: new Date().toISOString(), reason: conflicts.length ? `${conflicts.length} 条数据源差异待核对` : data.length ? null : '当前筛选范围暂无已发布数据分区', discrepancyCount: isGuest ? undefined : conflicts.length, canary: canaryHistory });
+  res.json({ success: true, data: publicData, market: rawMarket || 'all', instrument: isGuest ? null : instrument || null, timeframe: timeframe || null, dataStatus: coverageStatus.dataStatus, partitionStatus: coverageStatus.partitionStatus, sourceStatus: coverageStatus.sourceStatus, sourceCheckedAt: coverageStatus.sourceCheckedAt, source: 'MoneyMoney local data coverage catalog + scheduled source canary', updatedAt: new Date().toISOString(), reason: coverageStatus.reason, discrepancyCount: isGuest ? undefined : conflicts.length, ...(isGuest ? {} : { sourceObservations }), canary: canaryHistory });
 });
 
 const predictionSourceKey: Partial<Record<PredictionMarket['platform'], keyof PredictionRadar['sources']>> = {
@@ -1684,11 +1703,45 @@ app.get('/api/decisions/negative-knowledge', (req, res) => {
 app.post('/api/portfolio/import', express.json(), (req, res) => {
   if (!adminOnly(req, res)) return;
   const result = importPortfolioRows(Array.isArray(req.body?.rows) ? req.body.rows : []);
+  let snapshotsRecorded = 0;
   if (req.body?.commit === true && result.accepted.length) {
     const existing = decisionIntelligenceStore.listPortfolio();
-    decisionIntelligenceStore.replacePortfolio([...existing, ...result.accepted]);
+    const committed = [...existing, ...result.accepted];
+    decisionIntelligenceStore.replacePortfolio(committed);
+    snapshotsRecorded = decisionIntelligenceStore.savePortfolioSnapshots(capturePortfolioSnapshots(committed)).length;
   }
-  res.status(result.rejected.length && !result.accepted.length ? 400 : 200).json({ success: result.accepted.length > 0 || result.rejected.length === 0, data: result, dataStatus: result.accepted.length ? (result.rejected.length ? 'partial' : 'cached') : 'empty', source: 'manual/CSV portfolio import', updatedAt: new Date().toISOString(), reason: result.rejected.length ? `${result.rejected.length} 条记录未通过校验` : null });
+  res.status(result.rejected.length && !result.accepted.length ? 400 : 200).json({ success: result.accepted.length > 0 || result.rejected.length === 0, data: { ...result, snapshotsRecorded }, dataStatus: result.accepted.length ? (result.rejected.length ? 'partial' : 'cached') : 'empty', source: 'manual/CSV portfolio import', updatedAt: new Date().toISOString(), reason: result.rejected.length ? `${result.rejected.length} 条记录未通过校验` : null });
+});
+
+app.get('/api/portfolio/snapshots', (req, res) => {
+  if (!adminOnly(req, res)) return;
+  try {
+    const market = decisionMarket(req.query.market);
+    const accountSource = typeof req.query.accountSource === 'string' ? req.query.accountSource.trim() || undefined : undefined;
+    const accountId = typeof req.query.accountId === 'string' ? req.query.accountId.trim() || undefined : undefined;
+    const rawLimit = Number(req.query.limit || 50);
+    if (!Number.isInteger(rawLimit) || rawLimit < 1 || rawLimit > 200) throw new Error('limit 必须为 1–200');
+    const data = decisionIntelligenceStore.listPortfolioSnapshots(market, accountSource, accountId).slice(0, rawLimit);
+    res.json(decisionEnvelope({ market, data, dataStatus: data.length ? 'historical' : 'empty', source: 'committed manual/CSV valuation snapshots', reason: data.length ? '快照记录的是导入时估值，不代表投资收益。' : '该市场暂无已提交的组合估值快照' }));
+  } catch (error: any) {
+    res.status(400).json({ success: false, dataStatus: 'failed', reason: error.message });
+  }
+});
+
+app.get('/api/portfolio/snapshots/compare', (req, res) => {
+  if (!adminOnly(req, res)) return;
+  try {
+    const beforeId = String(req.query.before || '').trim();
+    const afterId = String(req.query.after || '').trim();
+    if (!beforeId || !afterId || beforeId === afterId) throw new Error('请选择两条不同的组合快照');
+    const before = decisionIntelligenceStore.getPortfolioSnapshot(beforeId);
+    const after = decisionIntelligenceStore.getPortfolioSnapshot(afterId);
+    if (!before || !after) throw new Error('快照不存在或已过期');
+    const data = comparePortfolioSnapshots(before, after);
+    res.json(decisionEnvelope({ market: data.market, data, dataStatus: data.dataStatus, source: 'private committed portfolio valuation snapshots', reason: data.reason }));
+  } catch (error: any) {
+    res.status(400).json({ success: false, dataStatus: 'unavailable', reason: error.message });
+  }
 });
 
 app.get('/api/research/price-comparison', async (req, res) => {
@@ -9091,11 +9144,34 @@ app.post('/api/ai/test', async (req, res) => {
 // --- Telegram Test ---
 
 app.post('/api/telegram/test', async (req, res) => {
+  if (!adminOnly(req, res)) return;
   const sent = await telegram.send('🤖 Predict.fun Bot connected! You will receive trading signals here.');
   res.json({ success: sent, message: sent ? '测试消息已发送！' : 'Telegram 未配置或发送失败' });
 });
 
-app.get('/api/telegram/status', (_req, res) => {
+app.post('/api/telegram/test-delivery', express.json(), async (req, res) => {
+  if (!adminOnly(req, res)) return;
+  const telegramConfig = getRuntimeTelegramConfig();
+  const adminChats = [...telegramAdminChatIds()];
+  const allowedChats = parseChatIds(telegramConfig.allowedChatIds, telegramConfig.chatId);
+  const recipientId = typeof req.body?.chatId === 'string' && req.body.chatId.trim() ? req.body.chatId.trim() : adminChats[0] || '';
+  const result = await runTelegramTestDelivery({
+    store: stateStore,
+    recipientId,
+    adminChatIds: adminChats,
+    allowedChatIds: allowedChats,
+    botConfigured: Boolean(telegramConfig.botToken),
+    idempotencyKey: String(req.body?.idempotencyKey || ''),
+    sendMessage: (chatId, text) => new TelegramApiTransport(telegramConfig.botToken, telegramConfig.proxyUrl).sendMessage(chatId, text),
+  });
+  const deliveryStatus = result.status === 'duplicate' ? result.record?.status : result.status;
+  const statusCode = deliveryStatus === 'sent' ? 200 : deliveryStatus === 'sending' ? 202 : deliveryStatus === 'rejected' ? 403 : deliveryStatus === 'suppressed' ? 429 : deliveryStatus === 'failed' ? 502 : 503;
+  const dataStatus = deliveryStatus === 'sent' ? 'live' : deliveryStatus === 'failed' ? 'failed' : deliveryStatus === 'sending' ? 'partial' : 'unavailable';
+  res.status(statusCode).json({ success: deliveryStatus === 'sent', data: result, dataStatus, source: 'explicit administrator Telegram delivery test', updatedAt: new Date().toISOString(), reason: result.reason });
+});
+
+app.get('/api/telegram/status', (req, res) => {
+  if (!adminOnly(req, res)) return;
   const telegramConfig = getRuntimeTelegramConfig();
   res.json({
     success: true,
@@ -9107,11 +9183,13 @@ app.get('/api/telegram/status', (_req, res) => {
       offset: telegramInteractionBot?.offset ?? null,
       polling: telegramInteractionBot?.pollingStatus || null,
       lease: stateStore.getLease('telegram:getUpdates'),
+      testDeliveryHistory: listTelegramTestDeliveries(stateStore),
     },
   });
 });
 
-app.get('/api/telegram/command-center', (_req, res) => {
+app.get('/api/telegram/command-center', (req, res) => {
+  if (!adminOnly(req, res)) return;
   const telegramConfig = getRuntimeTelegramConfig();
   const alerts = telegramCommandCenterStore.listPriceAlerts().filter(item => !item.triggered);
   res.json({
@@ -9127,7 +9205,8 @@ app.get('/api/telegram/command-center', (_req, res) => {
 
 // --- Notification Channel Test ---
 
-app.post('/api/notification-channels/test', async (_req, res) => {
+app.post('/api/notification-channels/test', async (req, res) => {
+  if (!adminOnly(req, res)) return;
   const result = await testNotificationChannels();
   res.json({ success: true, data: result });
 });
@@ -9135,6 +9214,7 @@ app.post('/api/notification-channels/test', async (_req, res) => {
 // --- Daily Report ---
 
 app.post('/api/report/daily', async (req, res) => {
+  if (!adminOnly(req, res)) return;
   const report = await reportScheduler.sendDailyReport();
   res.json({ success: true, data: { report } });
 });

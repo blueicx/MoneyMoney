@@ -58,8 +58,9 @@ self.addEventListener("fetch", (event) => {
     event.respondWith(
       fetch(event.request)
         .then((res) => {
-          if (!res.ok) throw new Error("API unavailable");
-          if (offlineSafe) caches.open(CACHE_NAME).then((cache) => cache.put(event.request, res.clone()));
+          // HTTP errors are real API responses (auth/CSRF, validation, or server
+          // failures), not network outages. Preserve their status and body.
+          if (offlineSafe && res.ok) caches.open(CACHE_NAME).then((cache) => cache.put(event.request, res.clone()));
           return res;
         })
         .catch(async () => {

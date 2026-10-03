@@ -84,6 +84,15 @@ test('legacy alerts and private watchlist handlers explicitly require an admin s
   }
 });
 
+test('adminOnly fails closed for missing roles instead of treating them as administrators', () => {
+  const start = serverSrc.indexOf('function adminOnly(');
+  assert.notEqual(start, -1);
+  const guard = serverSrc.slice(start, serverSrc.indexOf('\n}', start) + 2);
+  assert.match(guard, /role\s*===\s*['"]admin['"]\)\s*return true/);
+  assert.match(guard, /status\(401\)/);
+  assert.match(guard, /status\(403\)/);
+});
+
 test('server exposes guest login and enforces guest read-only middleware', () => {
   assert.match(authRoutesSrc, /app\.post\(['"]\/api\/auth\/guest['"]/, 'guest login endpoint exists');
   assert.match(authRoutesSrc, /role:\s*['"]guest['"]/, 'guest response identifies role');

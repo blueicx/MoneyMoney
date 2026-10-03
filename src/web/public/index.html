@@ -5102,10 +5102,12 @@ function renderTelegramSettingsForm(tg) {
     '<input id="telegram-polling-enabled" type="checkbox" ' + (tg.telegramPollingEnabled ? 'checked' : '') + '> 开启机器人接收指令</label>' +
     '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:12px;">' +
     '<button class="tab active" onclick="saveTelegramSettings()">💾 保存 Telegram 配置</button>' +
-    '<button class="tab" onclick="testTelegramSettings()">🔌 发送测试消息</button>' +
+    '<button class="tab" onclick="testTelegramSettings()">🔌 手动发送测试消息</button>' +
     '<span id="telegram-settings-result" style="font-size:11px;color:var(--text-secondary);"></span></div>' +
+    '<div id="telegram-test-delivery-history" style="font-size:11px;color:var(--text-secondary);margin-top:8px;">正在读取最近测试投递…</div>' +
     '<div style="font-size:11px;color:var(--text-secondary);line-height:1.6;margin-top:10px;">Token 使用密码框输入，服务器只返回配置状态，不会回显密钥。保存后机器人会自动重新加载。</div>' +
     '</div>';
+  void loadTelegramTestDeliveryHistory();
 }
 async function saveTelegramSettings() {
   const body = { telegramPollingEnabled: document.getElementById('telegram-polling-enabled').checked };
@@ -5131,17 +5133,43 @@ async function saveTelegramSettings() {
   }
 }
 async function testTelegramSettings() {
+  if (!confirm('这会向已配置的管理员 Telegram 聊天发送一条真实测试消息。现在发送吗？')) return;
   const resultEl = document.getElementById('telegram-settings-result');
   resultEl.style.color = 'var(--text-secondary)';
   resultEl.textContent = '⏳ 正在发送...';
   try {
-    const res = await fetch('/api/telegram/test', { method: 'POST' });
-    const data = await res.json();
-    resultEl.textContent = data.success ? '✅ 测试消息已发送' : '❌ ' + (data.message || '发送失败');
-    resultEl.style.color = data.success ? 'var(--green)' : 'var(--red)';
+    const idempotencyKey = crypto.randomUUID ? crypto.randomUUID() : `ui-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const res = await fetch('/api/telegram/test-delivery', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ idempotencyKey }) });
+    const payload = await res.json();
+    const data = payload.data || {};
+    const deliveryStatus = data.status === 'duplicate' ? data.record?.status : data.status;
+    const sent = deliveryStatus === 'sent';
+    const statusLabel = { sent: '已发送', failed: '投递失败', sending: '投递状态确认中', suppressed: '已抑制', rejected: '请求被拒绝', unavailable: '发送不可用' }[deliveryStatus] || '发送未确认';
+    resultEl.textContent = (sent ? '✅ ' : deliveryStatus === 'sending' ? '⏳ ' : '❌ ') + statusLabel + ' · ' + (data.reason || payload.reason || '暂无说明');
+    resultEl.style.color = sent ? 'var(--green)' : 'var(--red)';
+    await loadTelegramTestDeliveryHistory();
   } catch (error) {
     resultEl.textContent = '❌ ' + (error.message || '发送失败');
     resultEl.style.color = 'var(--red)';
+  }
+}
+async function loadTelegramTestDeliveryHistory() {
+  const host = document.getElementById('telegram-test-delivery-history');
+  if (!host) return;
+  if (window.mm_isGuest || window.mm_isLoggedIn !== true) {
+    host.textContent = '投递记录仅管理员可见。';
+    return;
+  }
+  try {
+    const response = await fetch('/api/telegram/status', { cache: 'no-store' });
+    const payload = await response.json();
+    if (!response.ok || !payload.success) throw new Error(payload.reason || payload.error || '状态读取失败');
+    const latest = payload.data?.testDeliveryHistory?.[0];
+    if (!latest) { host.textContent = '最近测试投递：尚无记录；页面加载不会自动发送消息。'; return; }
+    const labels = { sent: '已发送', failed: '投递失败', sending: '投递中', suppressed: '已抑制' };
+    host.textContent = `最近测试投递：${labels[latest.status] || latest.status} · ${latest.completedAt || latest.attemptedAt} · ${latest.reason || '无补充说明'}`;
+  } catch (error) {
+    host.textContent = `最近测试投递状态不可用：${error.message || '读取失败'}`;
   }
 }
 async function saveAiSettings(chain) {
@@ -10952,11 +10980,73 @@ function renderDecisionPortfolio(data, reason) {
     const section=document.createElement('section');section.innerHTML='<p>'+safeNewsText(data.historyReason)+'</p><div data-portfolio-history></div><p>历史状态：'+safeNewsText(data.history.reason || data.history.dataStatus)+'</p><h4>成本与现金流口径</h4>'+(data.costCoverage || []).map(row=>'<p>'+safeNewsText(row.instrument)+' · '+safeNewsText(row.currency)+' · 未实现盈亏 '+metric(row.unrealizedPnl)+' · '+safeNewsText(row.reason || '')+'</p>').join('')+'<p>已记录现金流 '+(data.cashFlows || []).length+' 项；缺少历史仓位或汇率时不生成账户回报。</p>';host.append(section);
     window.MoneyMoneyHistoryChart?.render(section.querySelector('[data-portfolio-history]'),data.history.series,{title:'当前持仓历史风险序列（非账户回报）',unit:'%',reason:data.history.reason});
   }
+  const snapshotPanel = document.createElement('section');
+  snapshotPanel.dataset.portfolioSnapshotHistory = 'true';
+  snapshotPanel.style.cssText = 'margin-top:14px;padding-top:10px;border-top:1px solid var(--border);';
+  snapshotPanel.innerHTML = '<div style="display:flex;justify-content:space-between;gap:8px;align-items:center;"><strong>导入估值快照</strong><button type="button" class="tab" data-refresh-portfolio-snapshots>刷新</button></div><div style="font-size:10px;color:var(--text-secondary);margin:5px 0;">只记录已确认导入时的估值；差额不是投资收益，不推算缺失现金流或汇率。</div><div data-portfolio-snapshot-list class="empty-tip">正在读取私有快照…</div><div data-portfolio-snapshot-comparison></div>';
+  host.append(snapshotPanel);
+  snapshotPanel.querySelector('[data-refresh-portfolio-snapshots]').onclick = () => loadPortfolioSnapshotHistory(activeMarketScope);
+  void loadPortfolioSnapshotHistory(activeMarketScope);
   host.querySelector('#decision-portfolio-history').onclick=async()=>{try{const result=await decisionFetchJson('/api/portfolio/analytics?'+new URLSearchParams({market:activeMarketScope,accountSource:select.value,history:'1'}));renderDecisionPortfolio(result.data,result.reason);}catch(error){showToast(error.message,'error');}};
   select.onchange = async () => {
     try { const result = await decisionFetchJson('/api/portfolio/analytics?' + new URLSearchParams({ market: activeMarketScope, accountSource: select.value })); renderDecisionPortfolio(result.data,result.reason); }
     catch (error) { showToast(error.message,'error'); }
   };
+}
+
+async function loadPortfolioSnapshotHistory(market) {
+  const panel = document.querySelector('[data-portfolio-snapshot-history]');
+  const list = panel?.querySelector('[data-portfolio-snapshot-list]');
+  if (!panel || !list) return;
+  const comparison = panel.querySelector('[data-portfolio-snapshot-comparison]');
+  if (window.mm_isGuest || window.mm_isLoggedIn !== true) {
+    list.innerHTML = '<div class="empty-tip">私人估值快照仅对管理员开放。</div>';
+    return;
+  }
+  list.textContent = '正在读取…';
+  try {
+    const body = await decisionFetchJson('/api/portfolio/snapshots?' + new URLSearchParams({ market, limit: '50' }));
+    const snapshots = body.data || [];
+    if (!snapshots.length) {
+      list.innerHTML = `<div class="empty-tip">${safeNewsText(body.reason || '尚无已确认导入的估值快照')}</div>`;
+      return;
+    }
+    list.innerHTML = snapshots.slice(0, 8).map(item => `<div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;padding:6px 0;border-bottom:1px dashed var(--border);font-size:10px;"><span>${safeNewsText(item.capturedAt)} · ${safeNewsText(item.accountSource)} · 账户 ${safeNewsText(item.accountId || '未关联')}</span><b>${Object.entries(item.currencyValues || {}).map(([currency, value]) => `${safeNewsText(currency)} ${Number(value).toFixed(2)}`).join(' · ')}</b></div>`).join('');
+    const comparable = new Map();
+    for (const item of snapshots) {
+      if (!item.accountId) continue;
+      const key = `${item.market}\0${item.accountSource}\0${item.accountId}`;
+      const group = comparable.get(key) || [];
+      group.push(item);
+      comparable.set(key, group);
+    }
+    const pair = [...comparable.values()].find(group => group.length >= 2);
+    if (pair) {
+      const latest = [...pair].sort((a, b) => b.capturedAt.localeCompare(a.capturedAt));
+      const before = encodeURIComponent(latest[1].id), after = encodeURIComponent(latest[0].id);
+      comparison.innerHTML = `<button class="tab" type="button" data-compare-snapshots data-before="${before}" data-after="${after}">比较同一账户最近两次估值</button>`;
+      comparison.querySelector('[data-compare-snapshots]').onclick = () => comparePortfolioSnapshotHistory(before, after);
+    } else {
+      comparison.innerHTML = '<div class="empty-tip">需至少两次同一已关联账户的快照才能比较；未关联账户不会按时间猜测。</div>';
+    }
+  } catch (error) {
+    list.innerHTML = `<div class="empty-tip" style="color:var(--red);">${safeNewsText(error.message || '私有快照读取失败')}</div>`;
+  }
+}
+
+async function comparePortfolioSnapshotHistory(encodedBefore, encodedAfter) {
+  const panel = document.querySelector('[data-portfolio-snapshot-history]');
+  const output = panel?.querySelector('[data-portfolio-snapshot-comparison]');
+  if (!output) return;
+  output.innerHTML = '<div class="empty-tip">正在比较估值快照…</div>';
+  try {
+    const before = decodeURIComponent(encodedBefore), after = decodeURIComponent(encodedAfter);
+    const body = await decisionFetchJson('/api/portfolio/snapshots/compare?' + new URLSearchParams({ before, after }));
+    const data = body.data || {};
+    output.innerHTML = `<div style="margin-top:8px;padding:8px;border:1px solid var(--border);border-radius:9px;font-size:10px;"><strong>估值变化（非投资收益）</strong><div style="margin-top:5px;">${Object.entries(data.currencies || {}).map(([currency, item]) => `${safeNewsText(currency)}：${Number(item.before).toFixed(2)} → ${Number(item.after).toFixed(2)}（${Number(item.delta) >= 0 ? '+' : ''}${Number(item.delta).toFixed(2)}${item.deltaPct == null ? '' : ` / ${Number(item.deltaPct).toFixed(2)}%`}` + '）').join('<br>') || '没有共同可比币种'}</div><div style="color:var(--text-secondary);margin-top:5px;">${safeNewsText(data.reason || body.reason || '未计算投资收益率')}</div></div>`;
+  } catch (error) {
+    output.innerHTML = `<div class="empty-tip" style="color:var(--red);">${safeNewsText(error.message || '估值快照比较失败')}</div>`;
+  }
 }
 
 function renderDecisionSignalQuality(data, reason) {

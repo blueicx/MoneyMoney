@@ -3,12 +3,14 @@ import { stateStore } from '../storage/sqlite-state';
 import type { MarketId } from './research-contracts';
 import { researchRepository } from './research-repository';
 import type { DecisionRecord, DecisionReviewDraft, EvidenceSnapshot, PortfolioRow, SavedWorkspace, ScenarioDefinition, SignalLifecycleStatus, SignalOutcome } from './decision-intelligence';
+import { appendPortfolioSnapshots, type PortfolioValuationSnapshot } from './portfolio-snapshot-history';
 
 const KEYS = {
   evidence: 'decision-intelligence:evidence',
   scenarios: 'decision-intelligence:scenarios',
   decisions: 'decision-intelligence:decisions',
   portfolio: 'decision-intelligence:portfolio',
+  portfolioSnapshots: 'decision-intelligence:portfolio-snapshots',
   signals: 'decision-intelligence:signal-outcomes',
   workspaces: 'decision-intelligence:workspaces',
   reviewDrafts: 'decision-intelligence:review-drafts',
@@ -50,6 +52,18 @@ export const decisionIntelligenceStore = {
 
   replacePortfolio(rows: PortfolioRow[]) { stateStore.set(KEYS.portfolio, rows, 1); return rows; },
   listPortfolio(market?: MarketId) { return list<PortfolioRow>(KEYS.portfolio).filter(item => !market || item.market === market); },
+  savePortfolioSnapshots(snapshots: PortfolioValuationSnapshot[]) {
+    const current = list<PortfolioValuationSnapshot>(KEYS.portfolioSnapshots);
+    const saved = appendPortfolioSnapshots(current, snapshots, 500);
+    stateStore.set(KEYS.portfolioSnapshots, saved, 1);
+    return snapshots;
+  },
+  listPortfolioSnapshots(market?: MarketId, accountSource?: string, accountId?: string) {
+    return list<PortfolioValuationSnapshot>(KEYS.portfolioSnapshots)
+      .filter(item => (!market || item.market === market) && (!accountSource || item.accountSource === accountSource) && (!accountId || item.accountId === accountId))
+      .sort((left, right) => right.capturedAt.localeCompare(left.capturedAt));
+  },
+  getPortfolioSnapshot(id: string) { return list<PortfolioValuationSnapshot>(KEYS.portfolioSnapshots).find(item => item.id === id) || null; },
 
   saveSignalOutcome(item: SignalOutcome) {
     const existing = this.getSignalOutcome(item.id);
