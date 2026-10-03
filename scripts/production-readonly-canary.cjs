@@ -46,6 +46,12 @@ function containsInstrumentIdentity(centerText, symbol) {
   });
 }
 
+function explicitLibraryEmptyReason(market, libraryText) {
+  if (market !== 'prediction') return null;
+  const text = String(libraryText || '').trim();
+  return /当前来源暂无可用预测事件|预测事件来源不可用|预测事件来源响应超时/.test(text) ? text : null;
+}
+
 async function enterGuest(page, baseUrl) {
   await page.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: 30_000 });
   if (new URL(page.url()).pathname.startsWith('/login')) {
@@ -107,14 +113,21 @@ async function checkSettlementEvidence(page) {
 
 async function selectRightLibraryItem(page, market) {
   const quick = page.locator(`#${market}-library-quick .stock-library-item`).first();
-  await quick.waitFor({ state: 'visible', timeout: 20_000 });
+  try {
+    await quick.waitFor({ state: 'visible', timeout: 20_000 });
+  } catch (error) {
+    const libraryText = await page.locator(`#${market}-library-quick`).innerText().catch(() => '');
+    const explicitReason = explicitLibraryEmptyReason(market, libraryText);
+    if (explicitReason) return { status: 'empty', reason: explicitReason };
+    throw new Error(`${market} 标的库没有可选标的，也没有明确空状态；当前内容：${libraryText.slice(0, 400) || '（空白）'}；${error.message}`);
+  }
   await quick.click();
   const symbolSelector = market === 'options' ? '#options-library-current-symbol' : market === 'crypto' ? '#crypto-library-current-symbol' : '#prediction-library-current-symbol';
   const symbol = (await page.locator(symbolSelector).innerText()).trim();
   assert.ok(symbol && symbol !== '--', `${market} selection should update the right-side context`);
   const center = await page.locator('#center-workspace').innerText();
   assert.ok(containsInstrumentIdentity(center, symbol) || /暂无数据|来源不可用|请求失败|当前市场不支持|缓存数据/.test(center), `${market} center must show selected instrument or explicit data reason`);
-  return symbol;
+  return { status: 'selected', symbol };
 }
 
 async function sendFailureNotice(text) {
@@ -165,7 +178,8 @@ async function runProductionCanary({ baseUrl, artifactDir } = {}) {
     report.nonPopularStock = 'SNDK';
     for (const market of ['options', 'crypto', 'prediction']) {
       await selectMarket(page, market);
-      await selectRightLibraryItem(page, market);
+      const libraryResult = await selectRightLibraryItem(page, market);
+      if (market === 'prediction') report.predictionLibrary = libraryResult;
       if (market === 'prediction') report.settlementEvidence = await checkSettlementEvidence(page);
     }
     await page.evaluate(() => window.setMarketScope('stocks'));
@@ -204,4 +218,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { validatePublicBaseUrl, containsInstrumentIdentity, runProductionCanary };
+module.exports = { validatePublicBaseUrl, containsInstrumentIdentity, explicitLibraryEmptyReason, runProductionCanary };

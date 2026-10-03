@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const test = require('node:test');
-const { validatePublicBaseUrl, containsInstrumentIdentity } = require('../scripts/production-readonly-canary.cjs');
+const { validatePublicBaseUrl, containsInstrumentIdentity, explicitLibraryEmptyReason } = require('../scripts/production-readonly-canary.cjs');
 
 test('production canary accepts only public HTTPS targets', () => {
   assert.equal(validatePublicBaseUrl('https://54.211.146.2/'), 'https://54.211.146.2');
@@ -36,4 +36,13 @@ test('selected crypto identity matches chart labels with market separators but n
   assert.equal(containsInstrumentIdentity('BTC/USDT · 15M', 'BTCUSDT'), true);
   assert.equal(containsInstrumentIdentity('SPY · 1D', 'SPY'), true);
   assert.equal(containsInstrumentIdentity('whether the source is unavailable', 'ETH'), false);
+});
+
+test('production canary accepts an explicit prediction source empty/unavailable state, never a blank/loading library', () => {
+  assert.match(explicitLibraryEmptyReason('prediction', '当前来源暂无可用预测事件。'), /暂无可用预测事件/);
+  assert.match(explicitLibraryEmptyReason('prediction', '预测事件来源不可用：上游请求失败'), /来源不可用/);
+  assert.match(explicitLibraryEmptyReason('prediction', '预测事件来源响应超时（10 秒），可重试。'), /响应超时/);
+  assert.equal(explicitLibraryEmptyReason('prediction', '正在读取真实预测事件…'), null);
+  assert.equal(explicitLibraryEmptyReason('prediction', ''), null);
+  assert.equal(explicitLibraryEmptyReason('stocks', '当前来源暂无可用预测事件。'), null);
 });
