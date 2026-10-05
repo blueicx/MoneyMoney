@@ -44,6 +44,8 @@ import {
   type AssistantJournalSummary,
 } from './assistant-journal';
 import { notifyHighSuccessResults } from './high-success-notifier';
+import { stockDataService, type StockDataService } from './stock-data-service';
+import type { TelegramStockSignalCandidate } from './telegram-stock-signal-universe';
 
 export interface OptionStrategySpec {
   kind: 'iron-condor' | 'bull-put-spread' | 'bear-call-spread' | 'protective-put';
@@ -540,150 +542,220 @@ function marketLabel(symbol: string): string {
   return '全球股票';
 }
 
-async function analyzeStockTechnicals(): Promise<AssistantAction[]> {
-  let quotes = new Map<string, StockQuote>();
-  try {
-    quotes = await fetchStockQuotes(STOCK_SYMBOLS);
-  } catch {
-    // Daily bars still contain a usable last close.
+type StockTechnicalEnhancements = {
+  shortInterest?: Awaited<ReturnType<typeof getShortInterestSnapshot>> | null;
+  institutionalOwnership?: Awaited<ReturnType<typeof getInstitutionalOwnershipSnapshot>> | null;
+  analystConsensus?: Awaited<ReturnType<typeof getAnalystConsensusSnapshot>> | null;
+};
+
+export function scoreStockTechnicalSnapshot(
+  symbol: string,
+  quote: StockQuote | null,
+  daily: KlineLike[],
+  enhancements: StockTechnicalEnhancements = {},
+): AssistantAction | null {
+  if (daily.length < 60 || daily.some(item => ![item.open, item.high, item.low, item.close].every(Number.isFinite)
+    || item.low <= 0 || item.high < item.low || item.open < item.low || item.open > item.high || item.close < item.low || item.close > item.high)) return null;
+  const current = quote?.price ?? daily[daily.length - 1].close;
+  if (!Number.isFinite(current) || current <= 0) return null;
+
+  const closes = daily.map(item => item.close);
+  const ma20 = sma(closes, 20)!;
+  const ma50 = sma(closes, 50)!;
+  const rsiValue = rsi(closes, 14);
+  const histogram = macdHistogram(closes);
+  const volatility = atr(daily, 14);
+  const roc = ((closes[closes.length - 1] - closes[closes.length - 11]) / closes[closes.length - 11]) * 100;
+  const { shortInterest = null, institutionalOwnership = null, analystConsensus = null } = enhancements;
+  let score = 0;
+  const reasons: string[] = [];
+  if (current > ma20) { score += 16; reasons.push('价格站上 20 日均线'); }
+  else { score -= 16; reasons.push('价格跌破 20 日均线'); }
+  if (ma20 > ma50) { score += 13; reasons.push('20/50 日均线多头排列'); }
+  else { score -= 13; reasons.push('20/50 日均线空头排列'); }
+  if (rsiValue <= 30) { score += 24; reasons.push(`RSI ${round(rsiValue, 1)}，进入超卖区`); }
+  else if (rsiValue <= 45) { score += 7; reasons.push(`RSI ${round(rsiValue, 1)}，偏弱但有修复空间`); }
+  else if (rsiValue >= 70) { score -= 24; reasons.push(`RSI ${round(rsiValue, 1)}，进入超买区`); }
+  else if (rsiValue >= 55) { score -= 6; reasons.push(`RSI ${round(rsiValue, 1)}，强势但追高风险升高`); }
+  else { reasons.push(`RSI ${round(rsiValue, 1)}，动能中性`); }
+  if (histogram > 0) { score += 17; reasons.push('MACD 柱状图转正'); }
+  else if (histogram < 0) { score -= 17; reasons.push('MACD 柱状图为负'); }
+  if (roc > 3) { score += 12; reasons.push(`10 日涨幅 ${round(roc, 2)}%`); }
+  else if (roc < -3) { score -= 12; reasons.push(`10 日跌幅 ${round(roc, 2)}%`); }
+  else { reasons.push(`10 日变动 ${round(roc, 2)}%`); }
+
+  if (shortInterest?.signal === 'covering') { score += 4; reasons.push('空头利息回落，回补压力减轻'); }
+  else if (shortInterest?.signal === 'squeeze-risk') {
+    const tilt = score > 0 ? 4 : -3;
+    score += tilt;
+    reasons.push(tilt > 0 ? '空头拥挤升高，突破有逼空放大可能' : '空头拥挤升高，方向分歧和波动风险加大');
+  } else if (shortInterest?.signal === 'crowded') {
+    const tilt = score > 0 ? 3 : -3;
+    score += tilt;
+    reasons.push('空头押注集中，警惕急速反向波动');
   }
 
+  if (institutionalOwnership?.signal === 'accumulation') { score += 4; reasons.push('机构净增持，中期筹码背景偏正面'); }
+  else if (institutionalOwnership?.signal === 'distribution') { score -= 4; reasons.push('机构减持压力明显，反弹要求更高确认'); }
+  else if (institutionalOwnership?.signal === 'mixed') {
+    score += institutionalOwnership.netSharePctOfHoldings > 0 ? 2 : -2;
+    reasons.push('机构持仓分歧加大，方向需等价格确认');
+  }
+
+  if (analystConsensus?.signal === 'strong-buy' || analystConsensus?.signal === 'buy') {
+    score += analystConsensus.signal === 'strong-buy' ? 4 : 3;
+    reasons.push(`卖方共识${analystConsensus.consensus}，分析师背景偏正面`);
+  } else if (analystConsensus?.signal === 'sell' || analystConsensus?.signal === 'strong-sell') {
+    score += analystConsensus.signal === 'strong-sell' ? -4 : -3;
+    reasons.push(`卖方共识${analystConsensus.consensus}，机构研究偏谨慎`);
+  } else if (analystConsensus && Math.abs(analystConsensus.impliedUpsidePctFromMedian) >= 20) {
+    score += analystConsensus.impliedUpsidePctFromMedian > 0 ? 2 : -2;
+    reasons.push('目标价与现价分歧较大，只作小幅方向提示');
+  }
+
+  const direction = score > 0 ? 1 : -1;
+  const confidence = 50 + clamp(Math.abs(score) * 0.42, 0, 28);
+  const action: AssistantAction['action'] = confidence >= 57 ? (direction > 0 ? 'BUY' : 'SELL') : 'WAIT';
+  const stopDistance = Math.max(volatility * 1.8, current * 0.025);
+  const digits = current < 10 ? 4 : 2;
+  return {
+    id: `stock-${symbol}`,
+    venue: 'Stocks',
+    symbol,
+    title: `${quote?.name || STOCK_FALLBACK_NAMES[symbol] || symbol} 技术面`,
+    action,
+    actionZh: action === 'BUY' ? '考虑买入/加仓' : action === 'SELL' ? '考虑减仓/卖出' : '等待',
+    direction: direction > 0 ? 'LONG' : 'SHORT',
+    confidencePct: round(confidence, 1),
+    entry: round(current, digits),
+    stopLoss: round(direction > 0 ? current - stopDistance : current + stopDistance, digits),
+    takeProfit: round(direction > 0 ? current + stopDistance * 2 : current - stopDistance * 2, digits),
+    suggestedRiskPct: confidence >= 66 ? 1 : 0.5,
+    horizon: '数日至数周（日线）',
+    reasons,
+    metrics: {
+      市场: marketLabel(symbol),
+      RSI: round(rsiValue, 1),
+      ROC10d: `${round(roc, 2)}%`,
+      ATR: round(volatility, digits),
+      当日涨跌: `${round(quote?.changePct ?? 0, 2)}%`,
+      ...(shortInterest ? { 空头信号: shortInterest.signalZh } : {}),
+      ...(institutionalOwnership ? { 机构信号: institutionalOwnership.signalZh } : {}),
+      ...(analystConsensus ? { 分析师共识: `${analystConsensus.consensus} ${analystConsensus.score}/5` } : {}),
+    },
+  };
+}
+
+async function analyzeStockTechnicals(): Promise<AssistantAction[]> {
+  let quotes = new Map<string, StockQuote>();
+  try { quotes = await fetchStockQuotes(STOCK_SYMBOLS); } catch { /* Daily bars remain a source of context. */ }
+
   const results = await Promise.allSettled(STOCK_SYMBOLS.map(async (symbol): Promise<AssistantAction> => {
-    const quote = quotes.get(symbol.toUpperCase())
-      || quotes.get(symbol.replace(/^(us|hk|sh|sz)/i, '').toUpperCase());
+    const quote = quotes.get(symbol.toUpperCase()) || quotes.get(symbol.replace(/^(us|hk|sh|sz)/i, '').toUpperCase());
     const daily = await fetchStockKlines(symbol, quote?.symbol);
-    const current = quote?.price ?? daily[daily.length - 1].close;
-    if (!Number.isFinite(current) || current <= 0) throw new Error(`${symbol} price unavailable`);
-
-    const closes = daily.map(item => item.close);
-    const ma20 = sma(closes, 20)!;
-    const ma50 = sma(closes, 50)!;
-    const rsiValue = rsi(closes, 14);
-    const histogram = macdHistogram(closes);
-    const volatility = atr(daily, 14);
-    const roc = ((closes[closes.length - 1] - closes[closes.length - 11])
-      / closes[closes.length - 11]) * 100;
     const shortInterest = /^us[A-Z]/.test(symbol) && symbol.toLowerCase() !== 'usspy'
-      ? await getShortInterestSnapshot(symbol.slice(2)).catch(() => null)
-      : null;
-    const institutionalOwnership = /^us[A-Z]/.test(symbol)
-      && !['usspy', 'usqqq'].includes(symbol.toLowerCase())
-      ? await getInstitutionalOwnershipSnapshot(symbol.slice(2)).catch(() => null)
-      : null;
-    const analystConsensus = /^us[A-Z]/.test(symbol)
-      && !['usspy', 'usqqq'].includes(symbol.toLowerCase())
-      ? await getAnalystConsensusSnapshot(symbol.slice(2)).catch(() => null)
-      : null;
-
-    let score = 0;
-    const reasons: string[] = [];
-    if (current > ma20) { score += 16; reasons.push('价格站上 20 日均线'); }
-    else { score -= 16; reasons.push('价格跌破 20 日均线'); }
-
-    if (ma20 > ma50) { score += 13; reasons.push('20/50 日均线多头排列'); }
-    else { score -= 13; reasons.push('20/50 日均线空头排列'); }
-
-    if (rsiValue <= 30) { score += 24; reasons.push(`RSI ${round(rsiValue, 1)}，进入超卖区`); }
-    else if (rsiValue <= 45) { score += 7; reasons.push(`RSI ${round(rsiValue, 1)}，偏弱但有修复空间`); }
-    else if (rsiValue >= 70) { score -= 24; reasons.push(`RSI ${round(rsiValue, 1)}，进入超买区`); }
-    else if (rsiValue >= 55) { score -= 6; reasons.push(`RSI ${round(rsiValue, 1)}，强势但追高风险升高`); }
-    else { reasons.push(`RSI ${round(rsiValue, 1)}，动能中性`); }
-
-    if (histogram > 0) { score += 17; reasons.push('MACD 柱状图转正'); }
-    else if (histogram < 0) { score -= 17; reasons.push('MACD 柱状图为负'); }
-
-    if (roc > 3) { score += 12; reasons.push(`10 日涨幅 ${round(roc, 2)}%`); }
-    else if (roc < -3) { score -= 12; reasons.push(`10 日跌幅 ${round(roc, 2)}%`); }
-    else { reasons.push(`10 日变动 ${round(roc, 2)}%`); }
-
-    if (shortInterest) {
-      if (shortInterest.signal === 'covering') {
-        score += 4;
-        reasons.push('空头利息回落，回补压力减轻');
-      } else if (shortInterest.signal === 'squeeze-risk') {
-        // A crowded short can amplify either side; treat it as a small
-        // volatility bonus only when the price structure already leans bullish.
-        const tilt = score > 0 ? 4 : -3;
-        score += tilt;
-        reasons.push(tilt > 0 ? '空头拥挤升高，突破有逼空放大可能' : '空头拥挤升高，方向分歧和波动风险加大');
-      } else if (shortInterest.signal === 'crowded') {
-        const tilt = score > 0 ? 3 : -3;
-        score += tilt;
-        reasons.push('空头押注集中，警惕急速反向波动');
-      }
-    }
-
-    if (institutionalOwnership) {
-      if (institutionalOwnership.signal === 'accumulation') {
-        score += 4;
-        reasons.push('机构净增持，中期筹码背景偏正面');
-      } else if (institutionalOwnership.signal === 'distribution') {
-        score -= 4;
-        reasons.push('机构减持压力明显，反弹要求更高确认');
-      } else if (institutionalOwnership.signal === 'mixed') {
-        const tilt = institutionalOwnership.netSharePctOfHoldings > 0 ? 2 : -2;
-        score += tilt;
-        reasons.push('机构持仓分歧加大，方向需等价格确认');
-      }
-    }
-
-    if (analystConsensus) {
-      if (analystConsensus.signal === 'strong-buy' || analystConsensus.signal === 'buy') {
-        const tilt = analystConsensus.signal === 'strong-buy' ? 4 : 3;
-        score += tilt;
-        reasons.push(`卖方共识${analystConsensus.consensus}，分析师背景偏正面`);
-      } else if (analystConsensus.signal === 'sell' || analystConsensus.signal === 'strong-sell') {
-        const tilt = analystConsensus.signal === 'strong-sell' ? -4 : -3;
-        score += tilt;
-        reasons.push(`卖方共识${analystConsensus.consensus}，机构研究偏谨慎`);
-      } else if (Math.abs(analystConsensus.impliedUpsidePctFromMedian) >= 20) {
-        const tilt = analystConsensus.impliedUpsidePctFromMedian > 0 ? 2 : -2;
-        score += tilt;
-        reasons.push('目标价与现价分歧较大，只作小幅方向提示');
-      }
-    }
-
-    const direction = score > 0 ? 1 : -1;
-    // Daily signals are slower and noisier after gaps, so confidence is capped lower.
-    const confidence = 50 + clamp(Math.abs(score) * 0.42, 0, 28);
-    const action: AssistantAction['action'] = confidence >= 57
-      ? (direction > 0 ? 'BUY' : 'SELL')
-      : 'WAIT';
-    const stopDistance = Math.max(volatility * 1.8, current * 0.025);
-    const digits = current < 10 ? 4 : 2;
-
-    return {
-      id: `stock-${symbol}`,
-      venue: 'Stocks',
-      symbol,
-      title: `${quote?.name || STOCK_FALLBACK_NAMES[symbol] || symbol} 技术面`,
-      action,
-      actionZh: action === 'BUY' ? '考虑买入/加仓' : action === 'SELL' ? '考虑减仓/卖出' : '等待',
-      direction: direction > 0 ? 'LONG' : 'SHORT',
-      confidencePct: round(confidence, 1),
-      entry: round(current, digits),
-      stopLoss: round(direction > 0 ? current - stopDistance : current + stopDistance, digits),
-      takeProfit: round(direction > 0 ? current + stopDistance * 2 : current - stopDistance * 2, digits),
-      suggestedRiskPct: confidence >= 66 ? 1 : 0.5,
-      horizon: '数日至数周（日线）',
-      reasons,
-      metrics: {
-        市场: marketLabel(symbol),
-        RSI: round(rsiValue, 1),
-        ROC10d: `${round(roc, 2)}%`,
-        ATR: round(volatility, digits),
-        当日涨跌: `${round(quote?.changePct ?? 0, 2)}%`,
-        ...(shortInterest ? { 空头信号: shortInterest.signalZh } : {}),
-        ...(institutionalOwnership ? { 机构信号: institutionalOwnership.signalZh } : {}),
-        ...(analystConsensus ? { 分析师共识: `${analystConsensus.consensus} ${analystConsensus.score}/5` } : {}),
-      },
-    };
+      ? await getShortInterestSnapshot(symbol.slice(2)).catch(() => null) : null;
+    const institutionalOwnership = /^us[A-Z]/.test(symbol) && !['usspy', 'usqqq'].includes(symbol.toLowerCase())
+      ? await getInstitutionalOwnershipSnapshot(symbol.slice(2)).catch(() => null) : null;
+    const analystConsensus = /^us[A-Z]/.test(symbol) && !['usspy', 'usqqq'].includes(symbol.toLowerCase())
+      ? await getAnalystConsensusSnapshot(symbol.slice(2)).catch(() => null) : null;
+    const action = scoreStockTechnicalSnapshot(symbol, quote || null, daily, { shortInterest, institutionalOwnership, analystConsensus });
+    if (!action) throw new Error(`${symbol} daily history is invalid or insufficient`);
+    return action;
   }));
-
   return results
     .filter((item): item is PromiseFulfilledResult<AssistantAction> => item.status === 'fulfilled')
     .map(item => item.value)
     .sort((a, b) => b.confidencePct - a.confidencePct);
+}
+
+export interface StockSignalCandidateAnalysis {
+  candidate: TelegramStockSignalCandidate;
+  status: 'ready' | 'unavailable';
+  dataStatus: 'live' | 'delayed' | 'cached' | 'stale' | 'unavailable';
+  action: AssistantAction | null;
+  source: string;
+  updatedAt: string | null;
+  reason?: string;
+}
+
+export interface StockSignalAnalysisOptions {
+  stockData?: Pick<StockDataService, 'quote' | 'history'>;
+  fetchTencentQuotes?: typeof fetchStockQuotes;
+  fetchTencentKlines?: typeof fetchStockKlines;
+  now?: () => number;
+}
+
+function isFreshStockSnapshot(snapshot: { status: string; expiresAt: string }, now: number): boolean {
+  const expiresAt = Date.parse(snapshot.expiresAt);
+  return ['live', 'fallback', 'cached'].includes(snapshot.status)
+    && Number.isFinite(expiresAt) && expiresAt >= now;
+}
+
+function unavailableStockSignal(
+  candidate: TelegramStockSignalCandidate,
+  source: string,
+  dataStatus: StockSignalCandidateAnalysis['dataStatus'],
+  updatedAt: string | null,
+  reason: string,
+): StockSignalCandidateAnalysis {
+  return { candidate, status: 'unavailable', dataStatus, action: null, source, updatedAt, reason };
+}
+
+/** Analyze one explicitly identified stock using only that exchange's provider. */
+export async function analyzeStockSignalCandidate(
+  candidate: TelegramStockSignalCandidate,
+  options: StockSignalAnalysisOptions = {},
+): Promise<StockSignalCandidateAnalysis> {
+  const now = (options.now || Date.now)();
+  if (candidate.market === 'us') {
+    const service = options.stockData || stockDataService;
+    const [quoteResult, historyResult] = await Promise.all([
+      service.quote(candidate.symbol),
+      service.history(candidate.symbol),
+    ]);
+    const source = [...new Set([quoteResult.snapshot.source, historyResult.snapshot.source].filter(Boolean))].join(' + ');
+    const updatedAt = quoteResult.quote?.asOf || quoteResult.snapshot.fetchedAt || historyResult.snapshot.fetchedAt || null;
+    const quoteFresh = isFreshStockSnapshot(quoteResult.snapshot, now);
+    const historyFresh = isFreshStockSnapshot(historyResult.snapshot, now);
+    if (!quoteFresh || !historyFresh || !quoteResult.quote || quoteResult.quote.price <= 0) {
+      const stale = quoteResult.snapshot.status === 'stale' || historyResult.snapshot.status === 'stale'
+        || (!!quoteResult.quote && !quoteFresh) || (historyResult.bars.length > 0 && !historyFresh);
+      const reason = quoteResult.snapshot.error || historyResult.snapshot.error
+        || (!quoteResult.quote ? '当前报价不可用' : !historyResult.bars.length ? '历史 K 线不可用' : '行情或历史数据已过期');
+      return unavailableStockSignal(candidate, source || 'Nasdaq/公开股票数据', stale ? 'stale' : 'unavailable', updatedAt, reason);
+    }
+    const bars: KlineLike[] = historyResult.bars.map(bar => ({ ...bar, volume: bar.volume || 0 }));
+    const action = scoreStockTechnicalSnapshot(`us${candidate.symbol}`, {
+      symbol: candidate.symbol,
+      name: candidate.name || candidate.symbol,
+      price: quoteResult.quote.price,
+      changePct: quoteResult.quote.changePct ?? 0,
+    }, bars);
+    if (!action) return unavailableStockSignal(candidate, source, 'unavailable', updatedAt, '有效日线不足 60 根或 OHLC 数据异常');
+    const dataStatus = quoteResult.snapshot.status === 'cached' || historyResult.snapshot.status === 'cached'
+      ? 'cached'
+      : quoteResult.snapshot.status === 'fallback' ? 'delayed' : 'live';
+    return { candidate, status: 'ready', dataStatus, action, source, updatedAt };
+  }
+
+  const legacyId = `${candidate.market}${candidate.symbol}`;
+  const fetchQuotes = options.fetchTencentQuotes || fetchStockQuotes;
+  const fetchKlines = options.fetchTencentKlines || fetchStockKlines;
+  const observedAt = new Date(now).toISOString();
+  try {
+    const quotes = await fetchQuotes([legacyId]);
+    const quote = quotes.get(legacyId.toUpperCase())
+      || quotes.get(candidate.symbol.toUpperCase())
+      || quotes.get(candidate.symbol.replace(/^(us|hk|sh|sz|bj)/i, '').toUpperCase());
+    if (!quote || quote.price <= 0) return unavailableStockSignal(candidate, 'Tencent Finance', 'unavailable', observedAt, '当前市场报价不可用');
+    const daily = await fetchKlines(legacyId, quote.symbol);
+    const action = scoreStockTechnicalSnapshot(legacyId, quote, daily);
+    if (!action) return unavailableStockSignal(candidate, 'Tencent Finance', 'unavailable', observedAt, '有效日线不足 60 根或 OHLC 数据异常');
+    return { candidate, status: 'ready', dataStatus: 'delayed', action, source: 'Tencent Finance', updatedAt: observedAt };
+  } catch (error) {
+    return unavailableStockSignal(candidate, 'Tencent Finance', 'unavailable', observedAt, error instanceof Error ? error.message : String(error));
+  }
 }
 
 function macroGroupLabel(group: MacroSeries['group']): string {

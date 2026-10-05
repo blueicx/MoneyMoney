@@ -28,7 +28,7 @@
 
 **完成条件：** 定向测试通过；固定池名单和来源权限有显式断言。
 
-### 2. 动态股票数据与逐标的结果
+### 2. 动态股票数据与逐标的结果（已完成）
 
 在 `src/features/stock-data-service.ts` 增加不访问 SEC/基本面的缓存历史读取方法，返回 quote/history 的来源快照与失败原因；在 `src/features/trade-assistant.ts` 抽出可复用的单标的技术分析，使动态美股使用 Nasdaq quote/history、明确交易所身份的 A/H 股使用现有腾讯适配器，不再对未知美股代码猜 `.OQ`。保留既有评分阈值。新增扫描结果模型，候选即使数据失败/未轮到/历史不足也产出 `unavailable/pending` 状态，不把故障折叠成无信号。
 
