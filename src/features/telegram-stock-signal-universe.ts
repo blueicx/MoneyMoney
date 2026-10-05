@@ -1,6 +1,6 @@
 export type TelegramStockMarket = 'us' | 'hk' | 'sh' | 'sz' | 'bj';
 export type TelegramStockSignalSource = 'fixed' | 'mover' | 'watchlist';
-export type TelegramMoverSourceState = 'live' | 'stale' | 'empty' | 'unavailable';
+export type TelegramMoverSourceState = 'pending' | 'live' | 'cached' | 'stale' | 'empty' | 'unavailable';
 
 export interface TelegramStockSignalIdentity {
   market: TelegramStockMarket;
@@ -129,7 +129,7 @@ export function buildTelegramStockSignalUniverse(input: BuildTelegramStockSignal
     ...(input.moverStatus.reason ? { reason: input.moverStatus.reason } : {}),
   };
   const acceptedMovers = input.movers || [];
-  if ((moverStatus.state === 'live' || moverStatus.state === 'stale') && acceptedMovers.length) {
+  if (['live', 'cached', 'stale'].includes(moverStatus.state) && acceptedMovers.length) {
     for (const row of acceptedMovers) {
       const identity = normalizeTelegramStockSignalIdentity(`stock:us:${row.symbol}`);
       if (!identity || !Number.isFinite(row.changePct)) continue;
@@ -139,7 +139,7 @@ export function buildTelegramStockSignalUniverse(input: BuildTelegramStockSignal
       });
     }
   }
-  if (moverStatus.state === 'live' && ![...candidates.values()].some(item => item.sources.includes('mover'))) {
+  if (['live', 'cached'].includes(moverStatus.state) && ![...candidates.values()].some(item => item.sources.includes('mover'))) {
     moverStatus.state = 'empty';
   }
 

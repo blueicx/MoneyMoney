@@ -44,6 +44,8 @@ import {
 } from '../features/telegram-bot';
 import { getTelegramMarketButtons, getTelegramMenuEntries, moveTelegramMenuPage, resetTelegramMenuPage } from './telegram-menu';
 import { buildTelegramDeepLink, buildTelegramStockSearchRows, isTelegramWatchableStockId, telegramPublicBaseUrl } from './telegram-search';
+import { handleTelegramStockSignalsCommand, type TelegramStockMoverDiscovery } from '../features/telegram-stock-signal-command';
+import { TelegramStockSignalScanner, selectTelegramStockSignalAlerts, telegramStockSignalNotificationKey } from '../features/telegram-stock-signals';
 import { priceTracker } from '../features/price-tracker';
 import { kellySizer, backtester, ASSET_BACKTEST_STRATEGY_VERSION } from '../features/kelly-backtest';
 import { pushNotification } from '../features/notifications';
@@ -111,7 +113,7 @@ import { getRiskHistory, recordRiskHistory } from '../features/risk-history';
 import { buildDailyResearchBriefing } from '../features/research-briefing';
 import { getAssistantCalibration, getAssistantJournalTrades, saveTradeNote } from '../features/assistant-journal';
 import { exportJournalCsv, exportPaperCsv, exportCalibrationCsv, exportForecastLabCsv } from '../features/data-export';
-import { generateAssistantReport } from '../features/trade-assistant';
+import { analyzeStockSignalCandidate, generateAssistantReport } from '../features/trade-assistant';
 import { getSourceHealth, refreshSourceHealth } from '../features/source-health';
 import { summarizeSourceSlo } from '../features/source-health-slo';
 import { zonedDigestClock } from '../features/digest-clock';
@@ -210,6 +212,7 @@ import os from 'os';
 import { parseRssItems } from '../utils/rss';
 
 export const app = express();
+const telegramStockSignalScanner = new TelegramStockSignalScanner({ store: stateStore, concurrency: 4, ttlMs: 15 * 60_000 });
 dataLakeWorker.start();
 const strategyCandidateRegistry = new StrategyCandidateRegistry();
 const eventStudyRepository = new EventStudyRepository(stateStore);
@@ -4453,7 +4456,7 @@ const TELEGRAM_HELP = [
   '/today   今日总览（行情、风险、事件）',
   '/status  查看服务与配置状态',
   '/risk    查看模拟盘风险摘要',
-  '/signals 查看最近一份助手信号',
+  '/signals 扫描固定热门、美股异动和当前聊天股票自选；/signals 2 翻页，/signals continue 续扫，/signals refresh 刷新',
   '/signal  查看单条信号详情，例如 /signal 1',
   '/search  同时搜索预测市场和股票，例如 /search AAPL 或 election',
   '/q       快速查询代码，例如直接发送 SNDK、AAPL、BTC 或 /q SNDK',
@@ -5691,6 +5694,28 @@ export function getTelegramCommandHandlers(): Record<string, TelegramCommandHand
     },
     signal: ({ chatId, args }) => {
       const scope = telegramScopeForChat(chatId);
+      if (scope === 'stocks') {
+        const snapshot = telegramStockSignalScanner.get(chatId);
+        if (!snapshot) return '股票扫描尚无可用快照。请发送 /signals 启动扫描。';
+        const parsed = Number.parseInt(String(args[0] || '1'), 10);
+        const index = Number.isFinite(parsed) && parsed > 0 ? parsed - 1 : 0;
+        const row = snapshot.candidates[index];
+        if (!row) return `未找到第 ${index + 1} 个股票候选，共 ${snapshot.candidates.length} 个。发送 /signals 查看列表。`;
+        const candidate = row.candidate;
+        const state = row.status === 'pending' ? '等待扫描' : row.status === 'unavailable' ? '数据不可用' : row.action?.actionZh || row.action?.action || 'WAIT';
+        const sourceNames: Record<string, string> = { fixed: '固定热门', mover: '美股异动', watchlist: '自选' };
+        return [
+          `<b>股票信号详情 #${index + 1}</b>`,
+          `${escapeTelegramHtml(candidate.name || candidate.symbol)} · ${escapeTelegramHtml(candidate.instrumentId)}`,
+          `状态：${escapeTelegramHtml(state)} · 来源池：${candidate.sources.map(item => sourceNames[item] || item).join('＋')}`,
+          row.dataStatus ? `数据状态：${escapeTelegramHtml(row.dataStatus)}` : '',
+          row.source ? `行情源：${escapeTelegramHtml(row.source)}` : '',
+          row.updatedAt ? `数据时间：${escapeTelegramHtml(row.updatedAt)}` : '',
+          row.reason ? `原因：${escapeTelegramHtml(row.reason)}` : '',
+          ...(row.action?.reasons || []).slice(0, 6).map(reason => `· ${escapeTelegramHtml(reason)}`),
+          '', '仅作研究信息，不构成投资建议，不会自动下单。',
+        ].filter(Boolean).join('\n');
+      }
       if (!lastAdvisorReport) {
         refreshAdvisorReportInBackground();
         return '助手报告尚未准备好，已在后台刷新。稍后再次发送 /signal 1。';
@@ -5820,8 +5845,45 @@ export function getTelegramCommandHandlers(): Record<string, TelegramCommandHand
         '统计仅针对本地模拟盘，历史结果不代表未来表现。',
       ].join('\n');
     },
-    signals: ({ chatId }) => {
+    signals: async ({ chatId, args }) => {
       const scope = telegramScopeForChat(chatId);
+      if (scope === 'stocks') {
+        const isAdmin = isTelegramAdmin(chatId);
+        return handleTelegramStockSignalsCommand({
+          chatId,
+          scope,
+          args,
+          isAdmin,
+          telegramWatchlistIds: telegramCommandCenterStore.listWatchlist(chatId),
+          administratorWatchlistIds: isAdmin ? unifiedAlertStore.listWatchlist() : [],
+          scanner: telegramStockSignalScanner,
+          analyze: analyzeStockSignalCandidate,
+          discoverMovers: async (): Promise<TelegramStockMoverDiscovery> => {
+            const breadth = await getMarketBreadthSnapshot();
+            const updatedAt = String(breadth.generatedAt || '');
+            const generatedAt = Date.parse(updatedAt);
+            if (!Number.isFinite(generatedAt) || generatedAt > Date.now() + 5 * 60_000) {
+              return { movers: [], status: 'unavailable', source: breadth.source || 'Nasdaq Public Screener', updatedAt: Number.isFinite(generatedAt) ? updatedAt : null, reason: '异动来源更新时间无效' };
+            }
+            const movers = [...(breadth.gainers || []), ...(breadth.losers || [])].map(row => ({
+              symbol: row.symbol,
+              name: row.name,
+              changePct: row.changePct,
+              volume: row.volume,
+              marketCapUsd: row.marketCapUsd,
+            }));
+            const ageMs = Math.max(0, Date.now() - generatedAt);
+            const freshness = ageMs > 2 * 60 * 60_000 ? 'stale' : ageMs > 5 * 60_000 ? 'cached' : 'live';
+            return {
+              movers,
+              status: movers.length ? freshness : 'empty',
+              source: breadth.source || 'Nasdaq Public Screener',
+              updatedAt,
+              ...(freshness === 'stale' ? { reason: '异动数据超过两小时，结果可能过期' } : {}),
+            };
+          },
+        });
+      }
       if (!lastAdvisorReport) {
         refreshAdvisorReportInBackground();
         return '助手报告尚未准备好，已在后台刷新。稍后再次发送 /signals。';
@@ -7014,16 +7076,51 @@ async function monitorTelegramSlowAlerts(): Promise<void> {
         await telegramInteractionBot.sendToChat(chatId, telegramReply(`⚠️ <b>模拟盘风险预警</b>\n最大回撤已达 ${formatTelegramNumber(portfolio.maxDrawdownPct, 1)}%，VaR95 $${formatTelegramNumber(metrics.var95Usd)}。建议先检查集中度和临近截止仓位。`));
       }
     }
-    const signalKey = `${chatId}:${lastAdvisorReport?.generatedAt || ''}`;
-    if (notifications.signals && lastAdvisorReport && !telegramSignalPushes.has(signalKey)) {
-      const actionable = telegramActions().filter(item => item.action !== 'WAIT').slice(0, 3);
-      if (actionable.length) {
-        await telegramInteractionBot.sendToChat(chatId, telegramReply([
-          '<b>📡 新助手信号</b>',
-          ...actionable.map(item => `· ${escapeTelegramHtml(item.title || item.symbol)} · ${escapeTelegramHtml(item.actionZh)} · ${formatTelegramNumber(item.confidencePct, 0)}%`),
-          '', '发送 /signals 查看完整列表。',
-        ].join('\n')));
-        telegramSignalPushes.add(signalKey);
+    if (notifications.signals && !telegramAlertSuppressed(chatId, 'normal')) {
+      const scope = telegramScopeForChat(chatId);
+      if (scope === 'stocks') {
+        const snapshot = telegramStockSignalScanner.get(chatId);
+        if (snapshot?.status === 'complete') {
+          const key = telegramStockSignalNotificationKey(chatId, snapshot);
+          const deliveryStateKey = `telegram:stock-signal-last-delivered:${chatId}`;
+          const deliveryLeaseKey = `telegram:stock-signal-delivery:${chatId}`;
+          const alreadySent = stateStore.get<string>(deliveryStateKey) === snapshot.id;
+          const actionable = selectTelegramStockSignalAlerts(snapshot).slice(0, 3);
+          if (actionable.length && !alreadySent) {
+            const owner = `stock-signal:${crypto.randomUUID()}`;
+            if (stateStore.acquireLease(deliveryLeaseKey, owner, Date.now(), 30_000)) {
+              try {
+                const latest = telegramStockSignalScanner.get(chatId);
+                const latestNotifications = telegramCommandCenterStore.getPreferences(chatId).notifications;
+                if (latest?.id === snapshot.id && telegramScopeForChat(chatId) === 'stocks'
+                  && latestNotifications.signals && !telegramAlertSuppressed(chatId, 'normal')) {
+                  await telegramInteractionBot.sendToChat(chatId, telegramReply([
+                    '<b>📡 股票信号更新</b>',
+                    ...actionable.map(row => `· ${escapeTelegramHtml(row.candidate.name || row.candidate.symbol)} · ${escapeTelegramHtml(row.action?.actionZh || row.action?.action || '')} · ${escapeTelegramHtml(row.source)}`),
+                    '', '发送 /signals 查看当前聊天可见的完整股票池。',
+                  ].join('\n')));
+                  stateStore.set(deliveryStateKey, snapshot.id, 1);
+                  telegramCommandCenterStore.recordAudit(chatId, 'stock_signal_scan_push', key);
+                }
+              } finally {
+                stateStore.releaseLease(deliveryLeaseKey, owner);
+              }
+            }
+          }
+        }
+      } else if (lastAdvisorReport) {
+        const signalKey = `${chatId}:${scope}:${lastAdvisorReport.generatedAt}`;
+        if (!telegramSignalPushes.has(signalKey)) {
+          const actionable = telegramActions(scope).filter(item => item.action !== 'WAIT').slice(0, 3);
+          if (actionable.length) {
+            await telegramInteractionBot.sendToChat(chatId, telegramReply([
+              `<b>📡 ${escapeTelegramHtml(TELEGRAM_SCOPE_LABELS[scope])}市场新助手信号</b>`,
+              ...actionable.map(item => `· ${escapeTelegramHtml(item.title || item.symbol)} · ${escapeTelegramHtml(item.actionZh)} · ${formatTelegramNumber(item.confidencePct, 0)}%`),
+              '', '发送 /signals 查看完整列表。',
+            ].join('\n')));
+            telegramSignalPushes.add(signalKey);
+          }
+        }
       }
     }
   }
