@@ -6,6 +6,8 @@ export type UnifiedPaperSide = 'BUY' | 'SELL' | 'YES' | 'NO';
 
 export interface UnifiedPaperOrder {
   id?: string;
+  accountId?: string;
+  runnerId?: string;
   instrumentId: string;
   instrumentType: UnifiedPaperInstrumentType;
   title?: string;
@@ -24,6 +26,8 @@ export interface UnifiedPaperOrder {
   pnlUsd?: number;
   feeUsd?: number;
   slippageUsd?: number;
+  /** Informational midpoint-to-fill spread estimate; fill price already includes it. */
+  spreadUsd?: number;
 }
 
 export interface UnifiedPaperPosition {
@@ -37,6 +41,9 @@ export interface UnifiedPaperPosition {
   openedAt: string;
   realizedPnl: number;
   currency?: string;
+  markUpdatedAt?: string;
+  markStatus?: 'live' | 'delayed' | 'cached' | 'stale' | 'unavailable';
+  markSource?: string;
 }
 
 export interface UnifiedPaperLedger {
@@ -47,6 +54,15 @@ export interface UnifiedPaperLedger {
   realizedPnl: number;
   peakEquity: number;
   maxDrawdownPct: number;
+  runnerAccounts?: Record<string, UnifiedPaperRunnerAccount>;
+}
+
+export interface UnifiedPaperRunnerAccount extends Omit<UnifiedPaperLedger, 'runnerAccounts'> {
+  accountId: string;
+  runnerId: string;
+  valuationUpdatedAt?: string;
+  valuationStatus?: 'live' | 'delayed' | 'cached' | 'stale' | 'unavailable' | 'partial';
+  valuationReason?: string;
 }
 
 export function emptyUnifiedPaperLedger(startingCash = 1000): UnifiedPaperLedger {
@@ -229,6 +245,72 @@ export function replayUnifiedPaperOrders(input: { startingCash?: number; orders:
 export class UnifiedPaperLedgerStore {
   constructor(private readonly store: SQLiteStateStore = stateStore) {}
   get(): UnifiedPaperLedger { return this.store.get<UnifiedPaperLedger>('paper-ledger') || emptyUnifiedPaperLedger(); }
+  ensureRunnerAccount(accountId: string, runnerId: string, startingCash: number): UnifiedPaperRunnerAccount {
+    if (!accountId.trim() || !runnerId.trim()) throw new Error('AI 跑单账户标识缺失');
+    return this.store.transaction(() => {
+      const ledger = this.get();
+      const account = ledger.runnerAccounts?.[accountId];
+      if (account) {
+        if (account.runnerId !== runnerId) throw new Error('AI 跑单账户已关联其他跑单');
+        return account;
+      }
+      const created: UnifiedPaperRunnerAccount = { ...emptyUnifiedPaperLedger(startingCash), accountId, runnerId };
+      this.store.set('paper-ledger', { ...ledger, runnerAccounts: { ...(ledger.runnerAccounts || {}), [accountId]: created } }, 2);
+      return created;
+    });
+  }
+  getRunnerAccount(accountId: string): UnifiedPaperRunnerAccount | null {
+    const account = this.get().runnerAccounts?.[accountId];
+    return account ? { ...account, positions: account.positions.map(item => ({ ...item })), orders: account.orders.map(item => ({ ...item })) } : null;
+  }
+  applyRunnerOrder(accountId: string, runnerId: string, order: UnifiedPaperOrder, startingCash = 1000): UnifiedPaperRunnerAccount {
+    if (!accountId.trim() || !runnerId.trim()) throw new Error('AI 跑单账户标识缺失');
+    if (order.accountId && order.accountId !== accountId || order.runnerId && order.runnerId !== runnerId) throw new Error('AI 跑单账户关联不一致');
+    return this.store.transaction(() => {
+      const ledger = this.get();
+      const accounts = { ...(ledger.runnerAccounts || {}) };
+      const existingAccount = accounts[accountId];
+      if (existingAccount && existingAccount.runnerId !== runnerId) throw new Error('AI 跑单账户已关联其他跑单');
+      const account: UnifiedPaperRunnerAccount = existingAccount || {
+        ...emptyUnifiedPaperLedger(startingCash), accountId, runnerId,
+      };
+      const scopedOrder = { ...order, id: order.id || randomUUID(), accountId, runnerId };
+      const existingOrder = account.orders.find(item => item.id === scopedOrder.id);
+      if (existingOrder) {
+        const fields = ['instrumentId', 'instrumentType', 'side', 'outcome', 'price', 'quantity', 'timestamp', 'feeUsd', 'slippageUsd', 'spreadUsd', 'strategy', 'strategyVersion', 'experimentId', 'signalId', 'dataSnapshotId', 'backtestTradeIndex', 'reason', 'accountId', 'runnerId'] as const;
+        if (fields.some(key => existingOrder[key] !== scopedOrder[key])) throw new Error('重复订单 ID 的内容不一致');
+        return account;
+      }
+      const next = applyUnifiedPaperOrder(account, scopedOrder) as UnifiedPaperRunnerAccount;
+      accounts[accountId] = { ...next, accountId, runnerId };
+      this.store.set('paper-ledger', { ...ledger, runnerAccounts: accounts }, 2);
+      return accounts[accountId];
+    });
+  }
+  markRunnerAccountPrices(accountId: string, prices: Map<string, number>, meta: {
+    status: UnifiedPaperRunnerAccount['valuationStatus']; positionStatus?: NonNullable<UnifiedPaperPosition['markStatus']>; source?: string; updatedAt?: string; reason?: string;
+  }): UnifiedPaperRunnerAccount | null {
+    return this.store.transaction(() => {
+      const ledger = this.get();
+      const account = ledger.runnerAccounts?.[accountId];
+      if (!account) return null;
+      const marked = markUnifiedPaperPrices(account, prices) as UnifiedPaperRunnerAccount;
+      const updatedAt = meta.updatedAt || new Date().toISOString();
+      const next: UnifiedPaperRunnerAccount = {
+        ...marked,
+        accountId: account.accountId,
+        runnerId: account.runnerId,
+        valuationUpdatedAt: updatedAt,
+        valuationStatus: meta.status || 'unavailable',
+        valuationReason: meta.reason,
+        positions: marked.positions.map(position => prices.has(`${position.instrumentId}:${position.outcome || ''}`) || prices.has(position.instrumentId)
+          ? { ...position, markUpdatedAt: updatedAt, markStatus: meta.positionStatus || (meta.status === 'partial' ? 'unavailable' : meta.status) || 'unavailable', markSource: meta.source }
+          : position),
+      };
+      this.store.set('paper-ledger', { ...ledger, runnerAccounts: { ...(ledger.runnerAccounts || {}), [accountId]: next } }, 2);
+      return next;
+    });
+  }
   apply(order: UnifiedPaperOrder): UnifiedPaperLedger {
     return this.store.transaction(() => {
       const ledger = this.get();
@@ -250,7 +332,7 @@ export class UnifiedPaperLedgerStore {
       return next;
     });
   }
-  reset(startingCash?: number): UnifiedPaperLedger { const ledger = emptyUnifiedPaperLedger(startingCash); this.store.set('paper-ledger', ledger, 2); return ledger; }
+  reset(startingCash?: number): UnifiedPaperLedger { const ledger = { ...emptyUnifiedPaperLedger(startingCash), runnerAccounts: this.get().runnerAccounts || {} }; this.store.set('paper-ledger', ledger, 2); return ledger; }
   performance() { return calculateUnifiedPerformance(this.get()); }
   migrateLegacyPredictionPortfolio(legacy: LegacyPredictionPortfolio): UnifiedPaperLedger {
     return this.store.transaction(() => {

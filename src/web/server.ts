@@ -8228,8 +8228,17 @@ import {
   createAiRunner, stopAiRunner, getAiRunners,
   runnerOpenPosition, runnerClosePosition,
   summarizeRunner, updateAiRunnerPolicy, pauseAiRunner, resumeAiRunner, resetAiRunnerCircuit,
+  evaluateRunnerOpen, resolveRunnerFill, evaluateRunnerQuoteGate, calculateRunnerExecutionCosts,
+  evaluateAiRunnerTrigger, isAiRunnerCallAllowed, appendAiRunnerDecision, listAiRunnerHistory,
+  updateAiRunnerMarketState, recordAiRunnerModelCall, evaluateRunnerIndicatorEvidence,
+  normalizeAiRunnerStockKlines,
+  type AiRunner, type AiRunnerDecisionRecord, type AiRunnerInstrumentRef, type AiRunnerMarket,
+  type AiRunnerQuote, type AiRunnerDataEvidence,
 } from '../features/ai-paper-runner';
 import { ResilientDataSourceAdapter } from '../data/source-adapter';
+import { AiRunnerTickCoordinator, buildAiRunnerTickIdempotencyKey } from '../features/ai-runner-coordinator';
+import { requestAiRunnerIntent, type AiRunnerModelSnapshot } from '../features/ai-runner-model';
+import { getAiRuntimeConfig } from '../features/ai-runtime-config';
 
 app.post('/api/kelly', (req, res) => {
   const { probability, price, bankroll, fraction } = req.body;
@@ -8239,31 +8248,42 @@ app.post('/api/kelly', (req, res) => {
 
 // --- AI Paper Runner ---
 
-app.get('/api/ai-runners', (_req, res) => {
+const aiRunnerTickCoordinator = new AiRunnerTickCoordinator(stateStore);
+
+app.get('/api/ai-runners', (req, res) => {
+  if (!adminOnly(req, res)) return;
   const runners = getAiRunners().map(r => ({ ...r, summary: summarizeRunner(r) }));
-  res.json({ success: true, data: runners });
+  res.json({ success: true, enabled: config.aiPaperTradingEnabled, data: runners });
 });
 
 app.post('/api/ai-runners/create', express.json(), (req, res) => {
+  if (!adminOnly(req, res)) return;
   if (!config.aiPaperTradingEnabled) return res.status(403).json({ success: false, error: 'AI 自动纸面交易默认关闭，请先设置 AI_PAPER_TRADING_ENABLED=true' });
-  const { venue, symbolOrMarketId, title, budgetUsd } = req.body ?? {};
+  const { venue, symbolOrMarketId, title, budgetUsd, mode, trigger, universe, model } = req.body ?? {};
   if (!venue || !symbolOrMarketId || !budgetUsd || typeof budgetUsd !== 'number' || budgetUsd < 1) {
     return res.status(400).json({ success: false, error: '请填写平台、标的和金额（≥$1）' });
   }
+  if (mode != null && !['rules', 'ai-review', 'ai-autonomous-paper'].includes(String(mode))) return res.status(400).json({ success: false, error: '跑单模式无效' });
+  if (trigger != null && !['scheduled', 'signal'].includes(String(trigger))) return res.status(400).json({ success: false, error: 'AI 触发方式无效' });
+  if (model != null && (typeof model !== 'string' || model.length > 160)) return res.status(400).json({ success: false, error: '模型标识无效' });
   try {
-    const runner = createAiRunner(venue, String(symbolOrMarketId), String(title || symbolOrMarketId), budgetUsd, req.body?.policy);
+    const runner = createAiRunner(venue, String(symbolOrMarketId), String(title || symbolOrMarketId), budgetUsd, req.body?.policy, { mode, trigger, universe, model });
     res.json({ success: true, data: runner });
   } catch (e: any) { res.status(400).json({ success: false, error: e.message }); }
 });
 
 app.post('/api/ai-runners/policy', express.json(), (req, res) => {
+  if (!adminOnly(req, res)) return;
   const { id, policy } = req.body ?? {};
-  const runner = id && policy ? updateAiRunnerPolicy(String(id), policy) : null;
+  let runner;
+  try { runner = id && policy ? updateAiRunnerPolicy(String(id), policy) : null; }
+  catch (error) { return res.status(400).json({ success: false, error: error instanceof Error ? error.message : '策略风控参数无效' }); }
   if (!runner) return res.status(404).json({ success: false, error: '未找到策略' });
   res.json({ success: true, data: runner });
 });
 
 app.post('/api/ai-runners/pause', express.json(), (req, res) => {
+  if (!adminOnly(req, res)) return;
   const { id, reason } = req.body ?? {};
   const runner = id ? pauseAiRunner(String(id), String(reason || '手动暂停')) : null;
   if (!runner) return res.status(404).json({ success: false, error: '未找到策略' });
@@ -8271,6 +8291,7 @@ app.post('/api/ai-runners/pause', express.json(), (req, res) => {
 });
 
 app.post('/api/ai-runners/resume', express.json(), (req, res) => {
+  if (!adminOnly(req, res)) return;
   const { id } = req.body ?? {};
   const runner = id ? resumeAiRunner(String(id)) : null;
   if (!runner) return res.status(404).json({ success: false, error: '未找到策略或仍处于熔断状态' });
@@ -8278,6 +8299,7 @@ app.post('/api/ai-runners/resume', express.json(), (req, res) => {
 });
 
 app.post('/api/ai-runners/reset-circuit', express.json(), (req, res) => {
+  if (!adminOnly(req, res)) return;
   const { id } = req.body ?? {};
   const runner = id ? resetAiRunnerCircuit(String(id)) : null;
   if (!runner) return res.status(404).json({ success: false, error: '未找到策略' });
@@ -8324,10 +8346,7 @@ function getRunnerStockKlineAdapter(symbol: string): ResilientDataSourceAdapter<
         const dataKey = Object.keys(payload.data || {})[0];
         const rows = dataKey ? (payload.data[dataKey].qfqday || payload.data[dataKey].day) : null;
         if (!Array.isArray(rows) || !rows.length) throw new Error('股票 K 线为空');
-        return rows.map((row: unknown[]) => [
-          new Date(String(row[0])).getTime(),
-          Number(row[1]), Number(row[2]), Number(row[3]), Number(row[4]), Number(row[5]),
-        ]);
+        return normalizeAiRunnerStockKlines(rows as unknown[][]);
       },
     });
     runnerStockKlineAdapters.set(key, adapter);
@@ -8336,113 +8355,471 @@ function getRunnerStockKlineAdapter(symbol: string): ResilientDataSourceAdapter<
 }
 
 app.post('/api/ai-runners/stop', express.json(), (req, res) => {
+  if (!adminOnly(req, res)) return;
   const { id } = req.body ?? {};
   const runner = id ? stopAiRunner(String(id)) : null;
   if (!runner) return res.status(404).json({ success: false, error: '未找到跑单或已停止' });
   res.json({ success: true, data: runner });
 });
 
+interface AiRunnerInstrumentSnapshot extends AiRunnerModelSnapshot {
+  ref: AiRunnerInstrumentRef;
+  dataStatus: string;
+  source?: string;
+  dataAt?: string;
+  reason?: string;
+  snapshotHash: string;
+  evidence?: AiRunnerDataEvidence[];
+  quote?: AiRunnerQuote;
+  indicatorDataStatus?: string;
+  indicatorDataAt?: string;
+  indicatorRetrievedAt?: string;
+  modelProbability?: number;
+  requestedAction?: 'BUY' | 'SELL';
+  requestedSide?: 'YES' | 'NO' | 'LONG';
+  requestReason?: string;
+}
+
+function runnerLedgerInstrumentId(instrument: AiRunnerInstrumentRef): string {
+  const symbol = instrument.symbolOrMarketId.toUpperCase();
+  if (instrument.venue === 'Stocks') return `stock:us:${symbol}`;
+  if (instrument.venue === 'Options') return `option:us:${symbol}`;
+  if (instrument.venue === 'Predict.fun') return `prediction:predictfun:${symbol}`;
+  return `crypto:binance:${symbol}`;
+}
+
+function runnerBookStatus(timestamp: number, maxAgeMs: number, now = Date.now()): 'live' | 'delayed' | 'stale' | 'unavailable' {
+  if (!Number.isFinite(timestamp) || timestamp <= 0) return 'unavailable';
+  const age = now - timestamp;
+  if (age < 0) return 'unavailable';
+  if (age <= 15_000) return 'live';
+  if (age <= maxAgeMs) return 'delayed';
+  return 'stale';
+}
+
+function runnerIndicators(rows: unknown[][]): { closes: number[]; price?: number; rsi14?: number; sma10?: number } {
+  const closes = rows.map(row => Number(row[4])).filter(value => Number.isFinite(value) && value > 0);
+  if (closes.length < 15) return { closes };
+  let gains = 0;
+  let losses = 0;
+  for (let index = closes.length - 14; index < closes.length; index += 1) {
+    const change = closes[index] - closes[index - 1];
+    if (change > 0) gains += change;
+    else losses += Math.abs(change);
+  }
+  const rs = gains / (losses || 1e-9);
+  return {
+    closes,
+    price: closes[closes.length - 1],
+    rsi14: 100 - 100 / (1 + rs),
+    sma10: closes.slice(-10).reduce((sum, value) => sum + value, 0) / 10,
+  };
+}
+
+function runnerSnapshotHash(snapshot: Omit<AiRunnerInstrumentSnapshot, 'snapshotHash'>): string {
+  return crypto.createHash('sha256').update(JSON.stringify({
+    market: snapshot.market, instrument: snapshot.instrument, status: snapshot.dataStatus,
+    source: snapshot.source, dataAt: snapshot.dataAt, price: snapshot.price,
+    rsi14: snapshot.rsi14, sma10: snapshot.sma10, quote: snapshot.quote,
+    indicatorDataStatus: snapshot.indicatorDataStatus, indicatorDataAt: snapshot.indicatorDataAt,
+    indicatorRetrievedAt: snapshot.indicatorRetrievedAt, evidence: snapshot.evidence,
+    modelProbability: snapshot.modelProbability, candidateSignals: snapshot.candidateSignals,
+  })).digest('hex');
+}
+
+async function loadAiRunnerInstrumentSnapshot(runner: AiRunner, ref: AiRunnerInstrumentRef): Promise<AiRunnerInstrumentSnapshot> {
+  const market = runner.universe?.market || (ref.venue === 'Stocks' ? 'stocks' : ref.venue === 'Options' ? 'options' : ref.venue === 'Predict.fun' ? 'prediction' : 'crypto');
+  const instrument = ref.symbolOrMarketId.toUpperCase();
+  let row: Omit<AiRunnerInstrumentSnapshot, 'snapshotHash'> = {
+    ref, market, instrument, dataStatus: 'unavailable', reason: '当前标的来源不可用', candidateSignals: [], evidence: [],
+  };
+  try {
+    if (ref.venue === 'Options') {
+      row = { ...row, dataStatus: 'unsupported', reason: '期权合约身份或可靠买卖价不足，当前跑单不支持' };
+    } else if (ref.venue === 'Binance') {
+      const [barsResult, depth] = await Promise.all([
+        getRunnerKlineAdapter(instrument).fetch(),
+        binanceFeed.getDepth(instrument, 5),
+      ]);
+      const bars = barsResult.data || [];
+      const metrics = runnerIndicators(bars);
+      const indicatorDataAtMs = bars.length ? Number(bars[bars.length - 1][0]) : Number.NaN;
+      const indicatorDataAt = Number.isFinite(indicatorDataAtMs) ? new Date(indicatorDataAtMs).toISOString() : undefined;
+      const indicatorGate = evaluateRunnerIndicatorEvidence({ status: barsResult.status, dataAt: indicatorDataAt, retrievedAt: barsResult.fetchedAt }, runner.policy.minFreshnessMs);
+      const bookAt = Number(depth?.freshness);
+      const bookStatus = depth?.sourceStatus === 'ok' ? runnerBookStatus(bookAt, runner.policy.minFreshnessMs) : 'unavailable';
+      const bid = Number(depth?.bids?.[0]?.[0]);
+      const ask = Number(depth?.asks?.[0]?.[0]);
+      const validBook = Number.isFinite(bid) && bid > 0 && Number.isFinite(ask) && ask >= bid;
+      const dataStatus = !bars.length ? (barsResult.status === 'stale' ? 'stale' : 'unavailable') : validBook ? bookStatus : 'unavailable';
+      const dataAt = Number.isFinite(bookAt) && bookAt > 0 ? new Date(bookAt).toISOString() : bars.length ? new Date(Number(bars[bars.length - 1][0])).toISOString() : undefined;
+      const mid = validBook ? (bid + ask) / 2 : metrics.price;
+      const quote: AiRunnerQuote = {
+        market: 'crypto', status: dataStatus, dataStatus, price: Number(mid), fetchedAt: dataAt,
+        source: 'Binance 公共盘口', bestBid: validBook ? bid : undefined, bestAsk: validBook ? ask : undefined,
+        reason: !bars.length ? barsResult.error || '暂无K线历史' : !validBook ? '盘口没有有效双边报价' : dataStatus === 'stale' ? '盘口报价过期' : undefined,
+      };
+      const candidateSignals: string[] = [];
+      if (indicatorGate.allowed && metrics.rsi14 != null && metrics.rsi14 < 32) candidateSignals.push(`RSI14=${metrics.rsi14.toFixed(1)} 超卖`);
+      const aboveSma = metrics.price != null && metrics.sma10 != null && metrics.price > metrics.sma10;
+      if (indicatorGate.allowed && metrics.rsi14 != null && metrics.rsi14 > 68) candidateSignals.push(`RSI14=${metrics.rsi14.toFixed(1)} 超买`);
+      row = {
+        ...row, dataStatus, source: 'Binance K线 + 公共盘口', dataAt,
+        indicatorDataStatus: bars.length ? barsResult.status : 'unavailable', indicatorDataAt, indicatorRetrievedAt: barsResult.fetchedAt,
+        evidence: [
+          { dataset: 'bars', source: 'Binance 1h K线', status: bars.length ? barsResult.status : 'unavailable', dataAt: indicatorDataAt, retrievedAt: barsResult.fetchedAt, reason: indicatorGate.reason || barsResult.error },
+          { dataset: 'quote', source: 'Binance 公共盘口', status: bookStatus, dataAt: dataAt, retrievedAt: dataAt, reason: quote.reason },
+        ],
+        ...(!indicatorGate.allowed ? { reason: indicatorGate.reason } : {}),
+        ...(metrics.price != null ? { price: Number(mid) || metrics.price } : {}),
+        ...(metrics.rsi14 != null ? { rsi14: metrics.rsi14 } : {}),
+        ...(metrics.sma10 != null ? { sma10: metrics.sma10 } : {}),
+        candidateSignals, quote,
+        reason: dataStatus === 'unavailable' ? quote.reason || barsResult.error || '行情或盘口不可用' : dataStatus === 'stale' ? '报价已过期，禁止触发新订单' : undefined,
+      };
+      (row as any).aboveSma = aboveSma;
+    } else if (ref.venue === 'Stocks') {
+      const symbol = instrument.replace(/^US/i, '').split('.')[0];
+      if (!/^[A-Z][A-Z0-9.:-]{0,19}$/.test(symbol)) throw new Error('股票代码格式无效');
+      const history = await getRunnerStockKlineAdapter(symbol).fetch();
+      const bars = history.data || [];
+      const metrics = runnerIndicators(bars);
+      const dataAtMs = bars.length ? Number(bars[bars.length - 1][0]) : Number.NaN;
+      const dataAt = Number.isFinite(dataAtMs) ? new Date(dataAtMs).toISOString() : undefined;
+      const candidateSignals: string[] = [];
+      if (metrics.rsi14 != null && metrics.rsi14 < 32) candidateSignals.push(`RSI14=${metrics.rsi14.toFixed(1)} 超卖`);
+      if (metrics.rsi14 != null && metrics.rsi14 > 68) candidateSignals.push(`RSI14=${metrics.rsi14.toFixed(1)} 超买`);
+      row = {
+        ...row, dataStatus: bars.length ? 'historical' : history.status === 'stale' ? 'stale' : 'unavailable',
+        source: '腾讯证券日K历史', dataAt, ...(metrics.price != null ? { price: metrics.price } : {}),
+        indicatorDataStatus: bars.length ? 'historical' : history.status, indicatorDataAt: dataAt, indicatorRetrievedAt: history.fetchedAt,
+        evidence: [{ dataset: 'bars', source: '腾讯证券日K历史', status: bars.length ? 'historical' : history.status, dataAt, retrievedAt: history.fetchedAt, reason: bars.length ? '历史日K无可验证实时盘口，只用于研究' : history.error }],
+        ...(metrics.rsi14 != null ? { rsi14: metrics.rsi14 } : {}), ...(metrics.sma10 != null ? { sma10: metrics.sma10 } : {}),
+        candidateSignals, quote: { market: 'stocks', status: 'historical', dataStatus: 'historical', price: metrics.price || 0, fetchedAt: dataAt, source: '腾讯证券日K历史', reason: '当前来源仅提供历史日K，缺少可验证的实时买卖盘口，不能模拟成交' },
+        reason: bars.length ? '当前来源仅提供历史日K，缺少可验证的实时买卖盘口，不能模拟成交' : history.error || '暂无股票历史K线',
+      };
+      (row as any).aboveSma = metrics.price != null && metrics.sma10 != null && metrics.price > metrics.sma10;
+    } else if (ref.venue === 'Predict.fun') {
+      if (!/^\d+$/.test(instrument)) {
+        row = { ...row, dataStatus: 'unsupported', source: 'Predict.fun 官方 API', reason: '事件 ID 不是当前 Predict.fun 接口支持的数字 ID' };
+      } else {
+        const [marketResponse, bookResponse] = await Promise.all([api.getMarketById(Number(instrument)), api.getOrderbook(Number(instrument))]);
+        const marketItem = marketResponse.success ? marketResponse.data : null;
+        const outcomeNames = marketItem?.outcomes?.map(item => String(item.name).trim().toUpperCase()) || [];
+        if (!marketItem) {
+          row = { ...row, dataStatus: 'unavailable', source: 'Predict.fun 官方 API', reason: 'Predict.fun 事件详情不可用' };
+        } else if (!((outcomeNames.includes('YES') && outcomeNames.includes('NO')) || (outcomeNames.includes('是') && outcomeNames.includes('否')))) {
+          row = { ...row, dataStatus: 'unsupported', source: 'Predict.fun 官方 API', reason: '该事件不是经核验的 YES/NO 二元合约，当前跑单不估算合约价格' };
+        } else {
+          const book = bookResponse.success ? bookResponse.data : null;
+          const bookAt = Number(book?.updateTimestampMs);
+          const bookStatus = book ? runnerBookStatus(bookAt, runner.policy.minFreshnessMs) : 'unavailable';
+          const bid = Number(book?.bids?.[0]?.[0]);
+          const ask = Number(book?.asks?.[0]?.[0]);
+          const validBook = Number.isFinite(bid) && bid > 0 && Number.isFinite(ask) && ask >= bid && ask < 1;
+          const status = !validBook ? 'unavailable' : bookStatus;
+          const dataAt = Number.isFinite(bookAt) ? new Date(bookAt).toISOString() : undefined;
+          const midpoint = validBook ? (bid + ask) / 2 : 0;
+          const quote: AiRunnerQuote = { market: 'prediction', status, dataStatus: status, price: midpoint, fetchedAt: dataAt, source: 'Predict.fun 官方事件订单簿', bestBid: validBook ? bid : undefined, bestAsk: validBook ? ask : undefined, reason: !validBook ? '订单簿缺少有效双边 YES/NO 报价' : status === 'stale' ? '订单簿报价过期' : undefined };
+          row = {
+            ...row, dataStatus: status, source: 'Predict.fun 官方事件详情 + 订单簿', dataAt, price: midpoint,
+            evidence: [
+              { dataset: 'market', source: 'Predict.fun 官方事件详情', status: marketResponse.success ? 'live' : 'unavailable', retrievedAt: new Date().toISOString(), reason: marketResponse.success ? undefined : '官方事件详情不可用' },
+              { dataset: 'quote', source: 'Predict.fun 官方 YES/NO 订单簿', status: bookStatus, dataAt, retrievedAt: dataAt, reason: quote.reason },
+            ],
+            candidateSignals: [], quote,
+            reason: quote.reason || '仅取得当前订单簿；缺少独立校准概率，因此规则模式不会推断交易优势',
+          };
+        }
+      }
+    }
+  } catch (error) {
+    const failureReason = error instanceof Error ? error.message.slice(0, 240) : '数据请求失败';
+    const failureSource = row.source || (ref.venue === 'Binance' ? 'Binance 公共行情接口' : ref.venue === 'Stocks' ? '腾讯证券行情接口' : ref.venue === 'Predict.fun' ? 'Predict.fun 官方 API' : '当前市场数据源');
+    row = {
+      ...row, dataStatus: 'unavailable', source: failureSource, reason: failureReason,
+      evidence: [...(row.evidence || []), { dataset: 'market', source: failureSource, status: 'unavailable', retrievedAt: new Date().toISOString(), reason: failureReason }],
+    };
+  }
+  const openPosition = runner.positions.some(position => position.status === 'OPEN' && (position.instrumentId === runnerLedgerInstrumentId(ref) || position.instrument?.symbolOrMarketId === ref.symbolOrMarketId));
+  row.openPosition = openPosition;
+  const indicatorsUsable = !row.indicatorDataStatus || evaluateRunnerIndicatorEvidence({
+    status: row.indicatorDataStatus, dataAt: row.indicatorDataAt, retrievedAt: row.indicatorRetrievedAt,
+  }, runner.policy.minFreshnessMs).allowed;
+  if (row.quote?.status && ['live', 'delayed'].includes(row.quote.status) && indicatorsUsable && row.rsi14 != null && row.price != null) {
+    if (ref.venue !== 'Predict.fun' && !openPosition && row.rsi14 < 32) row.candidateSignals = [...(row.candidateSignals || []), '规则策略候选买入'];
+    if (ref.venue !== 'Predict.fun' && openPosition && (row.rsi14 > 68 || (row as any).aboveSma === false)) row.candidateSignals = [...(row.candidateSignals || []), '规则策略候选退出'];
+  }
+  return { ...row, snapshotHash: runnerSnapshotHash(row) };
+}
+
+function predictionOutcomeQuote(quote: AiRunnerQuote, side: string | undefined): AiRunnerQuote {
+  if (quote.market !== 'prediction' || side !== 'NO') return quote;
+  const yesBid = Number(quote.bestBid);
+  const yesAsk = Number(quote.bestAsk);
+  if (!Number.isFinite(yesBid) || !Number.isFinite(yesAsk)) return { ...quote, bestBid: undefined, bestAsk: undefined };
+  return { ...quote, price: 1 - (yesBid + yesAsk) / 2, bestBid: 1 - yesAsk, bestAsk: 1 - yesBid };
+}
+
+interface PreparedAiRunnerTick {
+  runnerId: string;
+  idempotencyKey: string;
+  snapshots: AiRunnerInstrumentSnapshot[];
+  records: AiRunnerDecisionRecord[];
+  intent?: { action: 'BUY' | 'SELL' | 'HOLD'; instrument: string; side?: 'YES' | 'NO' | 'LONG'; rationale: string; counterEvidence: string[]; riskNotes: string[] };
+  modelVersion?: string;
+}
+
+async function prepareAiRunnerTick(runnerId: string, idempotencyKey: string): Promise<PreparedAiRunnerTick> {
+  const runner = getAiRunners().find(item => item.id === runnerId);
+  const now = new Date();
+  if (!runner) return { runnerId, idempotencyKey, snapshots: [], records: [] };
+  if (runner.status !== 'RUNNING') return { runnerId, idempotencyKey, snapshots: [], records: [] };
+  const refs = runner.universe?.instruments || [{ venue: runner.venue, symbolOrMarketId: runner.symbolOrMarketId, title: runner.title }];
+  const snapshots: AiRunnerInstrumentSnapshot[] = [];
+  for (const ref of refs.slice(0, 5)) snapshots.push(await loadAiRunnerInstrumentSnapshot(runner, ref));
+  const candidateSignal = snapshots.some(item => item.candidateSignals?.length && ['live', 'delayed'].includes(item.quote?.dataStatus || ''));
+  let intent: PreparedAiRunnerTick['intent'];
+  let modelVersion: string | undefined;
+  let aiStatusReason: string | undefined;
+  if (runner.executionState === 'legacy-readonly') aiStatusReason = '旧跑单没有可核验的统一账本关联，仅保留只读历史';
+  if (runner.mode !== 'rules') {
+    const latestRunner = getAiRunners().find(item => item.id === runnerId);
+    if (!aiStatusReason && (!latestRunner || latestRunner.status !== 'RUNNING')) aiStatusReason = '跑单已停止或暂停，本轮未调用模型';
+    const trigger = aiStatusReason ? { allowed: false, reason: aiStatusReason } : evaluateAiRunnerTrigger(latestRunner || runner, candidateSignal, now);
+    if (!trigger.allowed) aiStatusReason = trigger.reason;
+    else {
+      const runtime = getAiRuntimeConfig('openrouter');
+      const allowance = isAiRunnerCallAllowed(runner, runtime.configured, now);
+      if (!allowance.allowed) aiStatusReason = allowance.reason;
+      else {
+        const decisionId = `${idempotencyKey}:model`;
+        try {
+          recordAiRunnerModelCall(runner.id, { at: now.toISOString(), model: runner.model || runtime.model, decisionId });
+          const result = await requestAiRunnerIntent(runner, runtime, snapshots);
+          if (result.ok) { intent = result.intent; modelVersion = result.model; }
+          else { aiStatusReason = result.reason; modelVersion = result.model; }
+        } catch (error) { aiStatusReason = error instanceof Error ? error.message : 'AI 调用失败'; }
+      }
+    }
+  }
+  const records = snapshots.map(snapshot => {
+    const isChosen = intent?.instrument === snapshot.instrument;
+    let action: AiRunnerDecisionRecord['action'] = 'NONE';
+    let reason = snapshot.reason || '本轮规则条件未触发';
+    const signals = [...(snapshot.candidateSignals || [])];
+    const quoteGate = snapshot.quote ? evaluateRunnerQuoteGate(runner.policy, snapshot.quote, now) : { allowed: false, reason: '没有可验证报价' };
+    const indicatorGate = snapshot.indicatorDataStatus
+      ? evaluateRunnerIndicatorEvidence({ status: snapshot.indicatorDataStatus, dataAt: snapshot.indicatorDataAt, retrievedAt: snapshot.indicatorRetrievedAt }, runner.policy.minFreshnessMs, now)
+      : { allowed: true as const };
+    const riskChecks: AiRunnerDecisionRecord['riskChecks'] = [
+      { name: 'market-scope', passed: snapshot.market === runner.universe?.market, reason: snapshot.market === runner.universe?.market ? undefined : '跨市场数据已拒绝' },
+      { name: 'quote-freshness', passed: quoteGate.allowed, reason: quoteGate.reason },
+      { name: 'strategy-indicator-evidence', passed: indicatorGate.allowed, reason: indicatorGate.reason },
+    ];
+    if (runner.executionState === 'legacy-readonly') {
+      action = 'REJECTED'; reason = '旧跑单没有可核验的统一账本关联，仅保留只读历史';
+      riskChecks.push({ name: 'ledger-isolation', passed: false, reason });
+    } else if (runner.mode === 'rules') {
+      const hasOpen = snapshot.openPosition === true;
+      if (!quoteGate.allowed) {
+        reason = quoteGate.reason || snapshot.reason || '没有可执行的新鲜盘口';
+      } else if (!indicatorGate.allowed) {
+        reason = indicatorGate.reason || '策略指标证据不可用';
+      } else if (snapshot.market === 'prediction') {
+        if (!hasOpen && snapshot.modelProbability != null && snapshot.quote?.price && snapshot.modelProbability - snapshot.quote.price >= 0.05) {
+          (snapshot as any).requestedAction = 'BUY'; (snapshot as any).requestedSide = 'YES';
+          (snapshot as any).requestReason = `概率差 ${(snapshot.modelProbability - snapshot.quote.price) * 100}pp`;
+        } else if (hasOpen && snapshot.modelProbability != null && snapshot.quote?.price && snapshot.modelProbability <= snapshot.quote.price) {
+          (snapshot as any).requestedAction = 'SELL'; (snapshot as any).requestReason = '模型优势消失';
+        }
+      } else if (!hasOpen && (snapshot.rsi14 ?? 100) < 32) {
+        (snapshot as any).requestedAction = 'BUY'; (snapshot as any).requestedSide = 'LONG';
+        (snapshot as any).requestReason = `RSI14 ${snapshot.rsi14?.toFixed(1)} 超卖`;
+      } else if (hasOpen && ((snapshot.rsi14 ?? 0) > 68 || (snapshot as any).aboveSma === false)) {
+        (snapshot as any).requestedAction = 'SELL'; (snapshot as any).requestReason = (snapshot.rsi14 ?? 0) > 68 ? 'RSI14 超买' : '收盘价低于 SMA10';
+      }
+      if ((snapshot as any).requestedAction) reason = (snapshot as any).requestReason;
+    } else if (aiStatusReason) {
+      reason = aiStatusReason;
+      riskChecks.push({ name: 'ai-trigger-and-quota', passed: false, reason: aiStatusReason });
+    } else if (intent && isChosen) {
+      action = runner.mode === 'ai-review' ? 'REVIEW' : 'NONE';
+      reason = `${intent.action}: ${intent.rationale}${intent.counterEvidence.length ? `；反证：${intent.counterEvidence.join('；')}` : ''}${intent.riskNotes.length ? `；风险：${intent.riskNotes.join('；')}` : ''}`.slice(0, 500);
+      signals.push(`AI 置信度 ${(intent as any).confidence != null ? Math.round((intent as any).confidence * 100) : 0}%`);
+      riskChecks.push({ name: 'model-intent', passed: true });
+      if (runner.mode === 'ai-autonomous-paper' && intent.action !== 'HOLD') {
+        (snapshot as any).requestedAction = intent.action;
+        (snapshot as any).requestedSide = intent.side || (snapshot.market === 'prediction' ? 'YES' : 'LONG');
+        (snapshot as any).requestReason = intent.rationale;
+        action = 'NONE';
+      }
+    } else if (intent && !isChosen) {
+      reason = `AI 选择了冻结范围中的 ${intent.instrument}`;
+    } else {
+      reason = snapshot.reason || '模型未返回可执行建议';
+    }
+    return {
+      id: crypto.randomUUID(), runnerId, idempotencyKey: `${idempotencyKey}:${snapshot.instrument}`,
+      at: now.toISOString(), market: snapshot.market as AiRunnerMarket, instrument: snapshot.instrument,
+      dataStatus: snapshot.dataStatus, source: snapshot.source, dataAt: snapshot.dataAt,
+      evidence: snapshot.evidence, snapshotHash: snapshot.snapshotHash, strategyVersion: runner.strategyVersion,
+      modelVersion, signals: signals.slice(0, 20), riskChecks, action, reason,
+    };
+  });
+  return { runnerId, idempotencyKey, snapshots, records, intent, modelVersion };
+}
+
+function executePreparedRunnerTick(prepared: PreparedAiRunnerTick): { actions: Array<{ id: string; actionZh: string }>; decisions: AiRunnerDecisionRecord[] } {
+  const initialRunner = getAiRunners().find(item => item.id === prepared.runnerId);
+  if (!initialRunner) return { actions: [], decisions: [] };
+  const actions: Array<{ id: string; actionZh: string }> = [];
+  const records = prepared.records.map(record => ({ ...record, riskChecks: [...record.riskChecks] }));
+  for (const snapshot of prepared.snapshots) {
+    updateAiRunnerMarketState(prepared.runnerId, {
+      market: snapshot.market as AiRunnerMarket, status: snapshot.dataStatus,
+      instrument: snapshot.instrument,
+      source: snapshot.source, dataAt: snapshot.dataAt, reason: snapshot.reason,
+      snapshotHash: snapshot.snapshotHash,
+      prices: snapshot.quote && ['live', 'delayed'].includes(snapshot.quote.dataStatus || '') && Number.isFinite(snapshot.quote.price) ? { [snapshot.instrument]: snapshot.quote.price } : {},
+    });
+  }
+  for (let index = 0; index < prepared.snapshots.length; index += 1) {
+    const snapshot = prepared.snapshots[index];
+    const record = records[index];
+    const action = (snapshot as any).requestedAction as 'BUY' | 'SELL' | undefined;
+    if (!action) continue;
+    const runner = getAiRunners().find(item => item.id === prepared.runnerId);
+    if (!runner || runner.status !== 'RUNNING') {
+      record.action = 'REJECTED'; record.reason = '跑单已停止或暂停，未创建模拟订单';
+      record.riskChecks.push({ name: 'runner-active', passed: false, reason: record.reason });
+      continue;
+    }
+    const ref = snapshot.ref;
+    const existing = runner.positions.find(position => position.status === 'OPEN' && (position.instrumentId === runnerLedgerInstrumentId(ref) || position.instrument?.symbolOrMarketId === ref.symbolOrMarketId));
+    const side = (snapshot as any).requestedSide as string | undefined;
+    const quote = predictionOutcomeQuote(snapshot.quote || { market: snapshot.market as AiRunnerMarket, status: 'unavailable', dataStatus: 'unavailable', price: 0 }, action === 'SELL' ? existing?.side : side);
+    if (!snapshot.quote) {
+      record.action = 'REJECTED'; record.reason = snapshot.reason || '没有可执行报价';
+      record.riskChecks.push({ name: 'executable-quote', passed: false, reason: record.reason });
+      continue;
+    }
+    const indicatorEvidenceCheck = record.riskChecks.find(check => check.name === 'strategy-indicator-evidence');
+    if (indicatorEvidenceCheck && !indicatorEvidenceCheck.passed) {
+      record.action = 'REJECTED'; record.reason = indicatorEvidenceCheck.reason || '策略指标证据已过期，订单拒绝';
+      continue;
+    }
+    const fill = resolveRunnerFill(runner.policy, quote, action);
+    if (!fill.allowed || fill.price == null) {
+      record.action = 'REJECTED'; record.reason = fill.reason || '模拟撮合拒绝：报价不满足条件';
+      record.riskChecks.push({ name: 'executable-quote', passed: false, reason: record.reason });
+      continue;
+    }
+    if (action === 'BUY') {
+      if (existing) { record.action = 'REJECTED'; record.reason = '该标的已有未平仓头寸'; continue; }
+      const perInstrumentRemaining = runner.universe?.kind === 'watchlist'
+        ? Math.max(0, (runner.policy.maxPerInstrumentUsd ?? runner.policy.maxTradeUsd) - runner.positions.filter(position => position.status === 'OPEN' && position.instrumentId === runnerLedgerInstrumentId(ref)).reduce((sum, position) => sum + position.entryPrice * position.quantity, 0))
+        : runner.policy.maxTradeUsd;
+      const totalRemaining = runner.universe?.kind === 'watchlist'
+        ? Math.max(0, (runner.policy.maxInvestedUsd ?? runner.policy.maxBudgetUsd) - runner.positions.filter(position => position.status === 'OPEN').reduce((sum, position) => sum + position.entryPrice * position.quantity, 0))
+        : runner.policy.maxTradeUsd;
+      const target = Math.min(runner.cashUsd * 0.95, runner.policy.maxTradeUsd, perInstrumentRemaining, totalRemaining);
+      const costMultiplier = 1 + (Number(runner.policy.feeRateBps) + Number(runner.policy.additionalSlippageBps)) / 10_000;
+      const quantity = Math.floor(target / (fill.price * Math.max(1, costMultiplier)) * 1_000_000) / 1_000_000;
+      if (quantity <= 0) { record.action = 'REJECTED'; record.reason = '可用风险预算不足以形成最小模拟订单'; continue; }
+      const costs = calculateRunnerExecutionCosts(runner.policy, quote, 'BUY', quantity);
+      const notionalAndCosts = fill.price * quantity + costs.feeUsd + costs.slippageUsd;
+      const risk = evaluateRunnerOpen(runner, notionalAndCosts, new Date(), runnerLedgerInstrumentId(ref));
+      record.riskChecks.push({ name: 'budget-and-risk', passed: risk.allowed, reason: risk.reason });
+      if (!risk.allowed) { record.action = 'REJECTED'; record.reason = risk.reason || '风险校验未通过'; continue; }
+      const opened = runnerOpenPosition(runner.id, fill.price, quantity, side || 'LONG', snapshot.requestReason || record.reason, ref, { quote, source: snapshot.source, dataAt: snapshot.dataAt, dataSnapshotId: snapshot.snapshotHash });
+      if (!opened) { record.action = 'REJECTED'; record.reason = '模拟账户更新失败或订单被并发状态拒绝'; continue; }
+      const updated = getAiRunners().find(item => item.id === runner.id);
+      record.action = 'BUY'; record.reason = `${snapshot.requestReason || record.reason}；按卖一价模拟成交`;
+      record.orderId = updated?.trades[0]?.orderId;
+      actions.push({ id: runner.id, actionZh: `BUY ${ref.symbolOrMarketId} ${quantity} @ ${fill.price}` });
+    } else {
+      if (!existing) { record.action = 'REJECTED'; record.reason = '没有该标的未平仓头寸可退出'; continue; }
+      const costs = calculateRunnerExecutionCosts(runner.policy, quote, 'SELL', existing.quantity);
+      const pnl = runnerClosePosition(runner.id, existing.id, fill.price, snapshot.requestReason || record.reason, { quote, source: snapshot.source, dataAt: snapshot.dataAt, dataSnapshotId: snapshot.snapshotHash, ...costs });
+      if (pnl == null) { record.action = 'REJECTED'; record.reason = '模拟平仓未完成，持仓保持不变'; continue; }
+      const updated = getAiRunners().find(item => item.id === runner.id);
+      record.action = 'SELL'; record.reason = `${snapshot.requestReason || record.reason}；按买一价模拟成交，未扣成本净额前盈亏 ${pnl.toFixed(2)}`;
+      record.orderId = updated?.trades[0]?.orderId;
+      actions.push({ id: runner.id, actionZh: `SELL ${ref.symbolOrMarketId} @ ${fill.price} PnL=${pnl.toFixed(2)}` });
+    }
+  }
+  records.forEach(record => appendAiRunnerDecision(record));
+  return { actions, decisions: records };
+}
+
+async function runAiRunnerTick(runnerId: string, idempotencyKey?: string) {
+  if (!config.aiPaperTradingEnabled) return { status: 'disabled' as const };
+  const runner = getAiRunners().find(item => item.id === runnerId);
+  if (!runner) return { status: 'not-found' as const };
+  if (runner.status !== 'RUNNING') return { status: 'inactive' as const };
+  const key = idempotencyKey?.trim().slice(0, 180) || buildAiRunnerTickIdempotencyKey(runnerId);
+  return aiRunnerTickCoordinator.run(runnerId, key,
+    () => prepareAiRunnerTick(runnerId, key),
+    prepared => executePreparedRunnerTick(prepared));
+}
+
 async function tickAllAiRunners(): Promise<Array<{ id: string; actionZh: string }>> {
   if (!config.aiPaperTradingEnabled) return [];
   const results: Array<{ id: string; actionZh: string }> = [];
-  for (const runner of getAiRunners().filter(r => r.status === 'RUNNING')) {
+  for (const runner of getAiRunners().filter(item => item.status === 'RUNNING')) {
     try {
-      if (runner.venue === 'Binance') {
-        const symbol = runner.symbolOrMarketId.toUpperCase();
-        const snapshot = await getRunnerKlineAdapter(symbol).fetch();
-        if (!snapshot.data) continue;
-        const klines = snapshot.data;
-        const closes = klines.map(k => Number(k[4]));
-        if (closes.length < 15) continue;
-
-        // Simple RSI(14)
-        let gains = 0, losses = 0;
-        for (let i = 1; i < 15; i++) {
-          const diff = closes[closes.length - i] - closes[closes.length - i - 1];
-          if (diff > 0) gains += diff; else losses += Math.abs(diff);
-        }
-        const rs = gains / (losses || 1e-9);
-        const rsi = 100 - 100 / (1 + rs);
-        const price = closes[closes.length - 1];
-        const sma10 = closes.slice(-10).reduce((a, b) => a + b, 0) / 10;
-        const aboveSma = price > sma10;
-
-        const openPos = runner.positions.find(p => p.status === 'OPEN');
-        const freshEnough = snapshot.status === 'live' && Date.now() - Date.parse(snapshot.fetchedAt) <= runner.policy.minFreshnessMs;
-        if (!openPos && freshEnough && rsi < 32 && runner.cashUsd > 5) {
-          const qty = Math.floor(runner.cashUsd * 0.95 / price * 1000) / 1000;
-          if (qty > 0) {
-            runnerOpenPosition(runner.id, price, qty, 'LONG', `RSI ${rsi.toFixed(0)} 超卖，价格${aboveSma ? '在' : '低于'}SMA10`);
-            results.push({ id: runner.id, actionZh: `BUY ${qty} @ ${price.toFixed(2)} (RSI=${rsi.toFixed(0)})` });
-          }
-        } else if (openPos && (rsi > 68 || !aboveSma)) {
-          const pnl = runnerClosePosition(runner.id, openPos.id, price,
-            rsi > 68 ? `RSI ${rsi.toFixed(0)} 超买` : '跌破 SMA10 止损');
-          results.push({ id: runner.id, actionZh: `SELL @ ${price.toFixed(2)} PnL=${pnl?.toFixed(2) ?? '?'}` });
-        }
-      } else if (runner.venue === 'Stocks') {
-        const symbol = runner.symbolOrMarketId.replace(/^us/i, '').split('.')[0].toUpperCase();
-        if (!/^[A-Z]{1,6}$/.test(symbol)) continue;
-        const snapshot = await getRunnerStockKlineAdapter(symbol).fetch();
-        if (!snapshot.data) continue;
-        const closes = snapshot.data.map(k => Number(k[2])).filter(Number.isFinite);
-        if (closes.length < 15) continue;
-
-        let gains = 0, losses = 0;
-        for (let i = 1; i < 15; i++) {
-          const diff = closes[closes.length - i] - closes[closes.length - i - 1];
-          if (diff > 0) gains += diff; else losses += Math.abs(diff);
-        }
-        const rs = gains / (losses || 1e-9);
-        const rsi = 100 - 100 / (1 + rs);
-        const price = closes[closes.length - 1];
-        const sma10 = closes.slice(-10).reduce((a, b) => a + b, 0) / 10;
-        const aboveSma = price > sma10;
-        const openPos = runner.positions.find(p => p.status === 'OPEN');
-        const freshEnough = snapshot.status === 'live'
-          && Date.now() - Date.parse(snapshot.fetchedAt) <= runner.policy.minFreshnessMs;
-        if (!freshEnough || !Number.isFinite(price) || price <= 0) continue;
-        if (!openPos && rsi < 32 && runner.cashUsd > 5) {
-          const qty = Math.floor(runner.cashUsd * 0.95 / price * 1000) / 1000;
-          if (qty > 0 && runnerOpenPosition(runner.id, price, qty, 'LONG', `RSI ${rsi.toFixed(0)} 超卖，价格${aboveSma ? '在' : '低于'}SMA10`)) {
-            results.push({ id: runner.id, actionZh: `BUY ${qty} @ ${price.toFixed(2)} (RSI=${rsi.toFixed(0)})` });
-          }
-        } else if (openPos && (rsi > 68 || !aboveSma)) {
-          const pnl = runnerClosePosition(runner.id, openPos.id, price,
-            rsi > 68 ? `RSI ${rsi.toFixed(0)} 超买` : '跌破 SMA10 止损');
-          results.push({ id: runner.id, actionZh: `SELL @ ${price.toFixed(2)} PnL=${pnl?.toFixed(2) ?? '?'}` });
-        }
-      } else if (runner.venue === 'Predict.fun') {
-        const radar = getCachedPredictionRadarSlice('', 240);
-        if (!radar) continue;
-        const market = radar?.markets.find(item => String(item.id) === String(runner.symbolOrMarketId));
-        if (!market) continue;
-
-        const price = Number(market.yesPrice);
-        const modelProbability = Number(market.modelProbability);
-        const edge = modelProbability - price;
-        const freshEnough = Boolean(radar.updatedAt)
-          && Date.now() - Date.parse(radar.updatedAt) <= runner.policy.minFreshnessMs;
-        if (!freshEnough || !Number.isFinite(price) || !Number.isFinite(modelProbability) || price <= 0 || price >= 1) continue;
-
-        const openPos = runner.positions.find(p => p.status === 'OPEN');
-        if (!openPos && edge >= 0.05 && runner.cashUsd > 5) {
-          const qty = Math.floor(runner.cashUsd * 0.95 / price * 1000) / 1000;
-          if (qty > 0 && runnerOpenPosition(runner.id, price, qty, 'YES', `模型概率高于市场价 ${(edge * 100).toFixed(1)}pp`)) {
-            results.push({ id: runner.id, actionZh: `YES ${qty} @ ${price.toFixed(3)} (edge=${(edge * 100).toFixed(1)}pp)` });
-          }
-        } else if (openPos && edge <= 0) {
-          const pnl = runnerClosePosition(runner.id, openPos.id, price, '模型优势消失');
-          results.push({ id: runner.id, actionZh: `SELL YES @ ${price.toFixed(3)} PnL=${pnl?.toFixed(2) ?? '?'}` });
-        }
-      }
-    } catch { /* skip on error */ }
+      const tick = await runAiRunnerTick(runner.id);
+      if (tick.status === 'completed' || tick.status === 'duplicate') results.push(...tick.result.actions);
+    } catch (error) {
+      const now = new Date();
+      appendAiRunnerDecision({
+        id: crypto.randomUUID(), runnerId: runner.id, idempotencyKey: `${buildAiRunnerTickIdempotencyKey(runner.id, now)}:failure`,
+        at: now.toISOString(), market: runner.universe?.market || 'stocks', instrument: runner.symbolOrMarketId,
+        dataStatus: 'failed', source: 'AI paper runner', strategyVersion: runner.strategyVersion,
+        signals: [], riskChecks: [{ name: 'tick-execution', passed: false, reason: error instanceof Error ? error.message : '执行失败' }],
+        action: 'REJECTED', reason: error instanceof Error ? error.message : '跑单执行失败',
+      });
+    }
   }
-
   return results;
 }
 
-app.post('/api/ai-runners/tick', express.json(), async (_req, res) => {
+app.get('/api/ai-runners/:id/history', (req, res) => {
+  if (!adminOnly(req, res)) return;
+  const runner = getAiRunners().find(item => item.id === String(req.params.id));
+  if (!runner) return res.status(404).json({ success: false, error: '未找到跑单' });
+  const page = listAiRunnerHistory(runner.id, typeof req.query.cursor === 'string' ? req.query.cursor : undefined, Number(req.query.limit || 50));
+  res.json({ success: true, data: page.data, nextCursor: page.nextCursor, runnerId: runner.id, dataStatus: page.data.length ? 'historical' : 'empty', reason: page.data.length ? undefined : '暂无跑单决策记录' });
+});
+
+app.post('/api/ai-runners/:id/tick', express.json(), async (req, res) => {
+  if (!adminOnly(req, res)) return;
+  if (!config.aiPaperTradingEnabled) return res.status(403).json({ success: false, error: 'AI 自动纸面交易默认关闭' });
+  let result: Awaited<ReturnType<typeof runAiRunnerTick>>;
+  try {
+    result = await runAiRunnerTick(String(req.params.id), String(req.headers['idempotency-key'] || req.body?.idempotencyKey || ''));
+  } catch (error) {
+    const runner = getAiRunners().find(item => item.id === String(req.params.id));
+    if (runner) appendAiRunnerDecision({
+      id: crypto.randomUUID(), runnerId: runner.id,
+      idempotencyKey: `${String(req.headers['idempotency-key'] || req.body?.idempotencyKey || 'manual')}:failure:${Date.now()}`,
+      at: new Date().toISOString(), market: runner.universe?.market || 'stocks', instrument: runner.symbolOrMarketId,
+      dataStatus: 'failed', source: 'AI paper runner', strategyVersion: runner.strategyVersion,
+      signals: [], riskChecks: [{ name: 'tick-execution', passed: false, reason: error instanceof Error ? error.message : '执行失败' }],
+      action: 'REJECTED', reason: error instanceof Error ? error.message : '跑单执行失败',
+    });
+    return res.status(500).json({ success: false, error: error instanceof Error ? error.message : '跑单执行失败' });
+  }
+  if (result.status === 'disabled') return res.status(403).json({ success: false, error: 'AI 自动纸面交易默认关闭' });
+  if (result.status === 'not-found') return res.status(404).json({ success: false, error: '未找到跑单' });
+  if (result.status === 'inactive') return res.status(409).json({ success: false, error: '跑单已停止或暂停' });
+  if (result.status === 'busy') return res.status(409).json({ success: false, status: 'busy', reason: '该跑单正在由另一个执行器处理' });
+  res.json({ success: true, status: result.status, ...result.result });
+});
+
+app.post('/api/ai-runners/tick', express.json(), async (req, res) => {
+  if (!adminOnly(req, res)) return;
   const results = await tickAllAiRunners();
   res.json({ success: true, actions: results });
 });
@@ -8467,6 +8844,7 @@ async function runAutomationJob(jobId: string): Promise<{ message: string }> {
       return { message: '智能助手报告刷新完成' };
     }
     case 'ai-runners': {
+      if (!config.aiPaperTradingEnabled) return { message: 'AI 模拟跑单未启用；默认安全开关仍为关闭' };
       const actions = await tickAllAiRunners();
       return { message: actions.length ? `AI 模拟跑单完成，产生 ${actions.length} 个动作` : 'AI 模拟跑单完成，无新动作' };
     }
@@ -8477,6 +8855,7 @@ async function runAutomationJob(jobId: string): Promise<{ message: string }> {
 
 app.post('/api/ops/run/:jobId', async (req, res) => {
   const jobId = String(req.params.jobId) as Parameters<typeof saveAutomationRun>[0];
+  if (jobId === 'ai-runners' && !adminOnly(req, res)) return;
   const startedAt = new Date().toISOString();
   try {
     const result = await runAutomationJob(jobId);
@@ -8501,6 +8880,7 @@ function broadcastSse(event: string, data: unknown) {
 }
 
 app.get('/api/stream', (req, res) => {
+  if (!adminOnly(req, res)) return;
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',
     'Cache-Control': 'no-cache',

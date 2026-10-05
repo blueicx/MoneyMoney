@@ -20,6 +20,7 @@
       --purple: #7c3aed;
       --purple-light: rgba(124, 58, 237, 0.12);
       --purple-dark: #5b21b6;
+      --accent-contrast: #fff;
       --green: #10b981;
       --green-light: rgba(16, 185, 129, 0.14);
       --red: #ef4444;
@@ -57,6 +58,7 @@
       --purple: #d4af37;
       --purple-light: rgba(212, 175, 55, 0.15);
       --purple-dark: #b8860b;
+      --accent-contrast: #201507;
       --green: #34d399;
       --green-light: rgba(52, 211, 153, 0.14);
       --red: #f87171;
@@ -618,7 +620,7 @@
       border-radius: 8px;
     }
     .tab:hover { color: var(--text); }
-    .tab.active { background: var(--purple); color: white; }
+    .tab.active { background: var(--purple); color: var(--accent-contrast, #fff); }
     .section-title {
       font-size: 13px;
       font-weight: 600;
@@ -2427,24 +2429,36 @@
         <div class="section-title" style="margin-top:20px;">最近交易</div>
         <div id="paper-trades"></div>
         <div class="section-title" style="margin-top:24px;">🤖 AI 模拟跑单</div>
-        <p id="ai-runner-desc" style="font-size:11.5px;color:var(--text-secondary);margin-bottom:10px;">设定金额，选择币安、预测市场或美股，AI 会自动进行纸面模拟。独立账本，不影响手动模拟盘。</p>
+        <p id="ai-runner-desc" style="font-size:11.5px;color:var(--text-secondary);margin-bottom:10px;">规则跑单、AI 只读评审、受风控约束的 AI 模拟单均使用独立账本。股票仅有日K而无实时盘口时只记录研究决策，不模拟成交；期权数据未达撮合门槛时不可启动。AI 跑单开关默认关闭。</p>
+        <div id="ai-runner-feature-state" class="empty-tip" hidden aria-live="polite" style="margin-bottom:10px;">AI 模拟跑单功能当前由服务端安全开关关闭；此处仅查看历史记录，不会启动或执行跑单。</div>
         <div id="ai-runners-summary" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;margin-bottom:12px;"></div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px;">
           <select id="ai-runner-venue" onchange="syncAiRunnerVenueHint()" style="padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);font-size:12px;">
             <option value="Binance">🏦 币安</option>
             <option value="Predict.fun">🎯 Predict.fun</option>
             <option value="Stocks">📈 美股</option>
+            <option value="Options" disabled title="当前缺少经核验的合约身份、实时双边报价与可用历史">期权（数据能力未达门槛）</option>
           </select>
-          <input id="ai-runner-symbol" placeholder="如 BTCUSDT / 市场ID" style="width:120px;padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);font-size:12px;text-transform:uppercase;">
+          <select id="ai-runner-universe-kind" onchange="syncAiRunnerUniverseHint()" style="padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);font-size:12px;">
+            <option value="single">单标的</option><option value="watchlist">冻结自选组（最多5个）</option>
+          </select>
+          <input id="ai-runner-symbol" placeholder="如 BTCUSDT / 市场ID" aria-label="跑单标的；自选组以逗号分隔" style="width:160px;padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);font-size:12px;text-transform:uppercase;">
+          <select id="ai-runner-mode" onchange="syncAiRunnerModeHint()" aria-label="跑单模式" style="padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);font-size:12px;">
+            <option value="rules">规则策略</option><option value="ai-review">AI 只读评审</option><option value="ai-autonomous-paper">AI 自主模拟单</option>
+          </select>
+          <select id="ai-runner-trigger" aria-label="AI 触发方式" disabled style="padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);font-size:12px;">
+            <option value="scheduled">定时（每小时）</option><option value="signal">候选信号（至少15分钟）</option>
+          </select>
           <input id="ai-runner-budget" type="number" placeholder="预算 $" min="1" step="1" style="width:90px;padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);font-size:12px;">
           <input id="ai-runner-max-trade" type="number" placeholder="单笔上限 $" min="1" step="1" style="width:92px;padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);font-size:12px;">
           <input id="ai-runner-max-positions" type="number" placeholder="最大持仓" min="1" step="1" value="1" style="width:82px;padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);font-size:12px;">
           <input id="ai-runner-daily-loss" type="number" placeholder="日损上限 $" min="1" step="1" style="width:92px;padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);font-size:12px;">
           <input id="ai-runner-max-dd" type="number" placeholder="回撤上限 %" min="1" max="100" step="1" value="20" style="width:88px;padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);font-size:12px;">
           <input id="ai-runner-cooldown" type="number" placeholder="冷却分钟" min="0" step="1" value="15" style="width:82px;padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);font-size:12px;">
-          <button class="tab active" onclick="createAiRunner()" style="padding:7px 16px;font-size:12.5px;">▶ 启动</button>
-          <button class="tab" onclick="tickAiRunners()" style="padding:7px 14px;font-size:12.5px;">⚡ 执行一轮</button>
+          <button id="ai-runner-create-btn" class="tab active" onclick="createAiRunner()" style="padding:7px 16px;font-size:12.5px;">▶ 启动</button>
+          <button id="ai-runner-tick-btn" class="tab" onclick="tickAiRunners()" style="padding:7px 14px;font-size:12.5px;">⚡ 执行一轮</button>
         </div>
+        <div id="ai-runner-hint" aria-live="polite" style="font-size:11px;color:var(--text-secondary);margin:-5px 0 12px;">单标的规则跑单每分钟检查；AI 定时评审最多每小时一次，自选组最多 5 个同市场标的。</div>
         <div id="ai-runners-list"></div>
       </div>
       <!-- Backtest Tab -->
@@ -4130,10 +4144,23 @@ async function loadAiRunners() {
   initAiRunnerStream();
   try {
     const res = await fetch('/api/ai-runners');
-    const { data } = await res.json();
+    const payload = await res.json();
+    const data = payload.data || [];
     const el = document.getElementById('ai-runners-list');
     const summaryEl = document.getElementById('ai-runners-summary');
+    const enabled = payload.enabled === true;
+    const featureState = document.getElementById('ai-runner-feature-state');
+    if (featureState) featureState.hidden = enabled;
+    for (const id of ['ai-runner-create-btn', 'ai-runner-tick-btn']) {
+      const button = document.getElementById(id);
+      if (button) { button.disabled = !enabled; button.title = enabled ? '' : '服务端 AI 跑单安全开关处于关闭状态'; }
+    }
     if (!el) return;
+    if (!res.ok || !payload.success) {
+      if (summaryEl) summaryEl.innerHTML = '';
+      el.innerHTML = `<div style="color:var(--text-secondary);font-size:12.5px;padding:8px;">${safeNewsText(payload.error || '跑单数据不可用；请以管理员身份登录查看。')}</div>`;
+      return;
+    }
     if (summaryEl) {
       const totalBudget = (data || []).reduce((sum, runner) => sum + Number(runner.budgetUsd || 0), 0);
       const totalEquity = (data || []).reduce((sum, runner) => sum + Number(runner.summary?.equityUsd || 0), 0);
@@ -4147,62 +4174,136 @@ async function loadAiRunners() {
         ['策略权益', `$${totalEquity.toFixed(2)}`, 'var(--text)'],
         ['累计盈亏', `${totalPnl >= 0 ? '+' : ''}$${totalPnl.toFixed(2)}`, color],
         ['运行中', `${running} 个`, 'var(--purple)'],
-        ['综合胜率', `${closed ? Math.round(wins / closed * 100) : 0}%`, 'var(--text)'],
+        ['综合胜率', closed >= 20 ? `${Math.round(wins / closed * 100)}%` : `样本不足（${closed}/20）`, 'var(--text)'],
       ].map(([label, value, valueColor]) => `<div style="background:var(--bg-card);border-radius:10px;padding:9px 10px;box-shadow:var(--shadow);"><div style="font-size:10px;color:var(--text-secondary);">${label}</div><div style="font-size:16px;font-weight:800;color:${valueColor};margin-top:3px;">${value}</div></div>`).join('');
     }
     if (!data || !data.length) {
-      el.innerHTML = '<div style="color:var(--text-secondary);font-size:12.5px;padding:8px;">暂无跑单；填好标的和金额后点「启动」。</div>';
+      el.innerHTML = enabled
+        ? '<div style="color:var(--text-secondary);font-size:12.5px;padding:8px;">暂无跑单；填好标的和金额后点「启动」。</div>'
+        : '<div style="color:var(--text-secondary);font-size:12.5px;padding:8px;">暂无历史跑单。服务端安全开关处于关闭状态，暂不接受新跑单。</div>';
       return;
     }
     el.innerHTML = data.map(r => {
       const s = r.summary || {};
       const pnlColor = (s.totalPnlUsd ?? 0) >= 0 ? 'var(--green)' : 'var(--red)';
+      const modeName = ({ rules: '规则策略', 'ai-review': 'AI只读评审', 'ai-autonomous-paper': 'AI自主模拟单' })[r.mode] || '旧跑单';
+      const triggerName = r.trigger === 'signal' ? '候选信号触发' : '定时扫描';
+      const universeName = (r.universe?.instruments || []).map(item => safeNewsText(item.symbolOrMarketId)).join('、') || safeNewsText(r.symbolOrMarketId);
+      const equityRows = (r.equityHistory || []).slice(-60);
+      const equityValues = equityRows.map(point => Number(point.equityUsd)).filter(Number.isFinite);
+      const lowEquity = Math.min(...equityValues, Number(r.budgetUsd || 0));
+      const highEquity = Math.max(...equityValues, Number(r.budgetUsd || 0));
+      const equityPoints = equityRows.map((point, index) => `${equityRows.length < 2 ? 4 : 4 + index * 292 / (equityRows.length - 1)},${56 - ((Number(point.equityUsd) - lowEquity) / Math.max(0.01, highEquity - lowEquity)) * 48}`).join(' ');
+      const equityCurve = equityRows.length ? `<svg viewBox="0 0 300 64" role="img" aria-label="模拟账户权益曲线" style="width:min(100%,300px);height:64px;overflow:visible;"><line x1="0" y1="56" x2="300" y2="56" stroke="var(--border)" stroke-width="1"/><polyline fill="none" stroke="var(--purple)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" points="${equityPoints}"/></svg>` : '<span style="color:var(--text-secondary);font-size:10.5px;">权益曲线将在首次执行后形成</span>';
+      const benchmarkText = s.benchmarkPnlUsd == null ? (s.benchmarkReason || `持有基准积累中 ${s.benchmarkCount || 0}/${s.benchmarkExpectedCount || 1}`) : `首次有效报价以来持有基准 ${s.benchmarkPnlUsd >= 0 ? '+' : ''}$${s.benchmarkPnlUsd.toFixed(2)} (${s.benchmarkReturnPct >= 0 ? '+' : ''}${s.benchmarkReturnPct}%)`;
       return `
       <div style="background:var(--bg-card);border-radius:12px;padding:14px;margin-bottom:10px;box-shadow:var(--shadow);font-size:12.5px;">
         <div style="display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap;">
-          <span style="font-weight:700;">${r.status === 'RUNNING' ? '🟢' : '⏹'} ${safeNewsText(r.title)}</span>
+          <span style="font-weight:700;">${!enabled ? '🔒' : r.status === 'RUNNING' ? '🟢' : '⏹'} ${safeNewsText(r.title)} <span style="color:var(--text-secondary);font-size:10.5px;">${modeName} · ${r.universe?.kind === 'watchlist' ? '冻结自选组' : '单标的'}${!enabled ? ' · 服务端已停用' : ''}</span></span>
           <span style="color:${pnlColor};font-weight:700;">${(s.totalPnlUsd ?? 0) >= 0 ? '+' : ''}$${s.totalPnlUsd?.toFixed(2) ?? '0.00'}</span>
         </div>
         <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:6px;color:var(--text-secondary);font-size:11.5px;">
-          <span>预算 $${r.budgetUsd}</span><span>权益 $${s.equityUsd?.toFixed(2) ?? '—'}</span>
-          <span>已平仓 ${s.closedCount ?? 0}</span><span>胜率 ${s.winRatePct ?? 0}%</span>
+          <span>范围 ${universeName}</span><span>触发 ${triggerName}</span><span>预算 $${r.budgetUsd}</span><span>权益 $${s.equityUsd?.toFixed(2) ?? '—'}</span>
+          <span>已平仓 ${s.closedCount ?? 0}</span><span>胜率 ${s.winRateReliable ? `${s.winRatePct}%` : `样本不足（${s.closedCount || 0}/20）`}</span>
           <span>单笔≤$${r.policy?.maxTradeUsd ?? '—'}</span><span>持仓≤${r.policy?.maxPositions ?? '—'}</span><span>日损≤$${r.policy?.maxDailyLossUsd ?? '—'}</span>
+          <span>费用/额外滑点 $${Number(s.feeSlippageUsd || 0).toFixed(2)}</span><span>点差估算 $${Number(s.spreadCostUsd || 0).toFixed(2)}（成交价已计入）</span><span>估值 ${safeNewsText(s.valuationStatus || r.lastDataStatus || '暂无')}</span>
+          <span>最大回撤 ${Number(s.maxDrawdownPct || 0).toFixed(2)}%</span>
           ${s.unrealizedPct != null ? `<span>浮盈 ${s.unrealizedPct >= 0 ? '+' : ''}${s.unrealizedPct}%</span>` : ''}
         </div>
+        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:8px;padding:8px 0;border-top:1px solid var(--border);border-bottom:1px solid var(--border);">${equityCurve}<span style="color:var(--text-secondary);font-size:10.5px;">${safeNewsText(benchmarkText)}；基准从首次有效报价开始，不追溯启动前数据。</span></div>
+        ${(r.positions || []).filter(position => position.status === 'OPEN').map(position => `<div style="margin-top:6px;color:var(--text-secondary);font-size:11px;">持仓 ${safeNewsText(position.instrument?.symbolOrMarketId || r.symbolOrMarketId)} · ${safeNewsText(position.markStatus || 'unavailable')} · 当前估值 ${Number(position.currentPrice ?? position.entryPrice).toFixed(4)} · MFE +$${Number(position.maxFavorablePnlUsd || 0).toFixed(2)} / MAE $${Number(position.maxAdversePnlUsd || 0).toFixed(2)}${position.markStatus === 'stale' || position.markStatus === 'unavailable' ? ' · 估值可能过期，未用于新订单' : ''}</div>`).join('')}
+        ${r.lastDataReason ? `<div style="margin-top:6px;color:var(--yellow);font-size:11px;">${safeNewsText(r.lastDataReason)}</div>` : ''}
         ${r.circuitBreakerReason ? `<div style="margin-top:7px;color:var(--red);font-size:11px;">🛑 ${safeNewsText(r.circuitBreakerReason)}</div>` : ''}
         ${(r.trades || []).slice(0, 3).map(t => `<div style="margin-top:4px;font-size:11px;color:var(--text-secondary);">${t.action === 'BUY' ? '🟢' : '🔴'} ${t.side || ''} @ ${t.price} — ${safeNewsText(t.reasonZh)}</div>`).join('')}
         <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;">
           ${r.status === 'RUNNING' ? `<button onclick="pauseRunner('${r.id}')" style="padding:4px 12px;border-radius:8px;border:none;background:var(--red-light);color:var(--red);font-size:11px;cursor:pointer;">⏸ 暂停</button>` : `<button onclick="resumeRunner('${r.id}')" style="padding:4px 12px;border-radius:8px;border:none;background:var(--green-light);color:var(--green);font-size:11px;cursor:pointer;">▶ 恢复</button>`}
           ${r.circuitBreakerReason ? `<button onclick="resetRunnerCircuit('${r.id}')" style="padding:4px 12px;border-radius:8px;border:none;background:color-mix(in srgb, var(--yellow) 14%, transparent);color:var(--yellow);font-size:11px;cursor:pointer;">♻ 清除熔断</button>` : ''}
           <button onclick="stopRunner('${r.id}')" style="padding:4px 12px;border-radius:8px;border:none;background:var(--bg-secondary);color:var(--text-secondary);font-size:11px;cursor:pointer;">⏹ 停止</button>
+          <button onclick="loadAiRunnerHistory('${r.id}', this)" style="padding:4px 12px;border-radius:8px;border:1px solid var(--border);background:var(--bg-secondary);color:var(--text);font-size:11px;cursor:pointer;">查看决策时间线</button>
         </div>
+        <div id="ai-runner-history-${r.id}" style="margin-top:8px;"></div>
       </div>`;
     }).join('');
-  } catch (e) {}
+  } catch (e) {
+    const el = document.getElementById('ai-runners-list');
+    if (el) el.innerHTML = `<div style="color:var(--text-secondary);font-size:12.5px;padding:8px;">${safeNewsText(e?.message || '跑单数据请求失败；请稍后重试。')}</div>`;
+  }
+}
+function syncAiRunnerModeHint() {
+  const mode = document.getElementById('ai-runner-mode')?.value || 'rules';
+  const trigger = document.getElementById('ai-runner-trigger');
+  if (trigger) trigger.disabled = mode === 'rules';
+  const hint = document.getElementById('ai-runner-hint');
+  if (!hint) return;
+  hint.textContent = mode === 'rules'
+    ? '规则模式每分钟检查；不会调用 AI。模拟单必须通过新鲜盘口与服务端风险校验。'
+    : mode === 'ai-review'
+      ? 'AI 只输出带证据的建议，不会下单；定时最多每小时一次，信号触发至少间隔15分钟。'
+      : 'AI 只能提交受限模拟意图；每轮再次校验市场、盘口、预算与风控。服务端开关默认关闭，失败时不会回退成规则模式。';
+}
+function syncAiRunnerUniverseHint() {
+  const watchlist = document.getElementById('ai-runner-universe-kind')?.value === 'watchlist';
+  const symbol = document.getElementById('ai-runner-symbol');
+  if (symbol) symbol.placeholder = watchlist ? '同市场代码，以逗号分隔，最多5个' : '如 BTCUSDT / 市场ID';
+  const positions = document.getElementById('ai-runner-max-positions');
+  if (positions) { positions.max = watchlist ? '5' : '1'; positions.value = watchlist ? '5' : '1'; }
+  const hint = document.getElementById('ai-runner-hint');
+  if (hint && watchlist) hint.textContent = '自选组会在启动时冻结标的和哈希；运行期间自选变更不会扩展本跑单范围。最多5个同市场标的，默认单标的20%、总投入80%。';
+  else syncAiRunnerModeHint();
+}
+async function loadAiRunnerHistory(id, button) {
+  const host = document.getElementById(`ai-runner-history-${id}`);
+  if (!host) return;
+  host.innerHTML = '<div style="color:var(--text-secondary);font-size:11px;padding:8px;">正在读取私有决策记录…</div>';
+  try {
+    const res = await fetch(`/api/ai-runners/${encodeURIComponent(id)}/history?limit=30`, { cache: 'no-store' });
+    const payload = await res.json();
+    if (!res.ok || !payload.success) throw new Error(payload.error || '决策历史不可用');
+    const rows = payload.data || [];
+    host.innerHTML = rows.length ? rows.map(item => `
+      <div style="border-top:1px solid var(--border);padding:8px 4px;color:var(--text-secondary);font-size:11px;">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;"><strong style="color:var(--text);">${safeNewsText(item.action)} · ${safeNewsText(item.instrument)}</strong><span>${safeNewsText(item.dataStatus)}${item.source ? ` · ${safeNewsText(item.source)}` : ''}</span><span>${safeNewsText(item.at)}</span></div>
+        <div style="margin-top:4px;color:var(--text);">${safeNewsText(item.reason || '')}</div>
+        <div style="margin-top:3px;">${(item.signals || []).map(safeNewsText).join(' · ') || '无触发信号'}${item.snapshotHash ? ` · 快照 ${safeNewsText(item.snapshotHash.slice(0, 16))}` : ''}${item.orderId ? ` · 订单 ${safeNewsText(item.orderId)}` : ''}</div>
+        ${(item.evidence || []).map(evidence => `<div style="margin-top:3px;">证据 ${safeNewsText(evidence.dataset)} · ${safeNewsText(evidence.status)} · ${safeNewsText(evidence.source)}${evidence.dataAt ? ` · 数据 ${safeNewsText(evidence.dataAt)}` : ''}${evidence.retrievedAt ? ` · 获取 ${safeNewsText(evidence.retrievedAt)}` : ''}${evidence.reason ? ` · ${safeNewsText(evidence.reason)}` : ''}</div>`).join('')}
+        ${(item.riskChecks || []).length ? `<div style="margin-top:3px;">校验：${item.riskChecks.map(check => `${safeNewsText(check.name)} ${check.passed ? '通过' : `拒绝${check.reason ? '（' + safeNewsText(check.reason) + '）' : ''}`}`).join(' · ')}</div>` : ''}
+      </div>`).join('') : '<div style="color:var(--text-secondary);font-size:11px;padding:8px;">暂无跑单决策记录。</div>';
+    if (button) button.setAttribute('aria-expanded', 'true');
+  } catch (error) {
+    host.innerHTML = `<div style="color:var(--yellow);font-size:11px;padding:8px;">${safeNewsText(error?.message || '读取决策失败')}</div>`;
+  }
 }
 async function createAiRunner() {
+  if (document.getElementById('ai-runner-create-btn')?.disabled) { showToast('服务端 AI 跑单安全开关处于关闭状态', 'warning'); return; }
   const venue = document.getElementById('ai-runner-venue').value;
-  const symbolOrMarketId = document.getElementById('ai-runner-symbol').value.trim().toUpperCase();
+  const symbols = document.getElementById('ai-runner-symbol').value.split(',').map(value => value.trim().toUpperCase()).filter(Boolean);
+  const symbolOrMarketId = symbols[0] || '';
+  const universeKind = document.getElementById('ai-runner-universe-kind').value;
+  const mode = document.getElementById('ai-runner-mode').value;
+  const trigger = document.getElementById('ai-runner-trigger').value;
   const budgetUsd = Number(document.getElementById('ai-runner-budget').value);
-  const maxTradeUsd = Number(document.getElementById('ai-runner-max-trade').value) || Math.max(1, budgetUsd * 0.25);
+  const maxTradeUsd = Number(document.getElementById('ai-runner-max-trade').value) || Math.max(1, budgetUsd * (universeKind === 'watchlist' ? 0.2 : 0.25));
   const maxPositions = Number(document.getElementById('ai-runner-max-positions').value) || 1;
   const maxDailyLossUsd = Number(document.getElementById('ai-runner-daily-loss').value) || Math.max(1, budgetUsd * 0.1);
   const maxDrawdownPct = Number(document.getElementById('ai-runner-max-dd').value) || 20;
   const cooldownMinutes = Number(document.getElementById('ai-runner-cooldown').value) || 15;
   if (!symbolOrMarketId) { showToast('请填写标的', 'error'); return; }
+  if (universeKind === 'single' && symbols.length !== 1) { showToast('单标的模式只能填写一个标的', 'error'); return; }
+  if (universeKind === 'watchlist' && (symbols.length < 1 || symbols.length > 5)) { showToast('冻结自选组需填写1至5个同市场标的', 'error'); return; }
   if (!budgetUsd || budgetUsd < 1) { showToast('预算至少 $1', 'error'); return; }
   try {
     const res = await fetch('/api/ai-runners/create', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ venue, symbolOrMarketId, title: `${venue} · ${symbolOrMarketId}`, budgetUsd, policy: { maxTradeUsd, maxPositions, maxDailyLossUsd, maxDrawdownPct, cooldownMinutes } }),
+      body: JSON.stringify({ venue, symbolOrMarketId, title: `${venue} · ${universeKind === 'watchlist' ? '自选组' : symbolOrMarketId}`, budgetUsd, mode, trigger, universe: { kind: universeKind, instruments: symbols.map(symbol => ({ venue, symbolOrMarketId: symbol })) }, policy: { maxTradeUsd, maxPositions, maxDailyLossUsd, maxDrawdownPct, cooldownMinutes } }),
     });
     const body = await res.json();
     if (!body.success) throw new Error(body.error);
-    showToast(`✅ 已启动 ${symbolOrMarketId} 跑单`, 'success');
+    showToast(`✅ 已启动 ${universeKind === 'watchlist' ? symbols.join('、') : symbolOrMarketId} 跑单`, 'success');
     loadAiRunners();
   } catch (e) { showToast((e && e.message) || '创建失败', 'error'); }
 }
 async function tickAiRunners() {
+  if (document.getElementById('ai-runner-tick-btn')?.disabled) { showToast('服务端 AI 跑单安全开关处于关闭状态', 'warning'); return; }
   showToast('⚡ 正在执行一轮...', 'info', 1500);
   try {
     const res = await fetch('/api/ai-runners/tick', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
