@@ -9,6 +9,7 @@
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     :root {
+      color-scheme: light;
       --bg: #f3f6fb;
       --bg-card: rgba(255, 255, 255, 0.68);
       --bg-secondary: rgba(255, 255, 255, 0.42);
@@ -62,6 +63,10 @@
       --red-light: rgba(248, 113, 113, 0.14);
       --shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
     }
+    [data-theme="dark"],
+    [data-theme="money"] {
+      color-scheme: dark;
+    }
     html {
       background: var(--bg);
     }
@@ -77,6 +82,27 @@
       min-height: 100vh;
       isolation: isolate;
     }
+    * {
+      scrollbar-width: thin;
+      scrollbar-color: color-mix(in srgb, var(--text-secondary) 48%, transparent)
+        color-mix(in srgb, var(--bg-secondary) 72%, var(--bg));
+    }
+    *::-webkit-scrollbar { width: 8px; height: 8px; }
+    *::-webkit-scrollbar-track {
+      background: color-mix(in srgb, var(--bg-secondary) 72%, var(--bg));
+      border-radius: 999px;
+    }
+    *::-webkit-scrollbar-thumb {
+      background: color-mix(in srgb, var(--text-secondary) 48%, var(--bg-secondary));
+      border: 2px solid transparent;
+      border-radius: 999px;
+      background-clip: padding-box;
+    }
+    *::-webkit-scrollbar-thumb:hover {
+      background: var(--purple);
+      background-clip: padding-box;
+    }
+    *::-webkit-scrollbar-corner { background: var(--bg); }
     /* Glassmorphism is layered: translucent panels first, then selective
        backdrop blur so dense tables and long lists stay readable/performance. */
     .header,
@@ -112,6 +138,35 @@
       background: color-mix(in srgb, var(--bg-secondary) 78%, var(--bg-card));
       backdrop-filter: blur(12px);
       -webkit-backdrop-filter: blur(12px);
+    }
+    input[type="date"],
+    input[type="datetime-local"],
+    input[type="time"],
+    input[type="month"],
+    input[type="week"] {
+      color-scheme: inherit;
+      min-height: 30px;
+      padding: 5px 8px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: color-mix(in srgb, var(--bg-secondary) 78%, var(--bg-card));
+      color: var(--text);
+      font: inherit;
+      font-size: 12px;
+    }
+    input[type="date"]:focus-visible,
+    input[type="datetime-local"]:focus-visible,
+    input[type="time"]:focus-visible,
+    input[type="month"]:focus-visible,
+    input[type="week"]:focus-visible {
+      border-color: var(--purple);
+      outline: 2px solid color-mix(in srgb, var(--purple) 28%, transparent);
+      outline-offset: 1px;
+    }
+    input[type="date"]::-webkit-calendar-picker-indicator,
+    input[type="datetime-local"]::-webkit-calendar-picker-indicator {
+      cursor: pointer;
+      opacity: .78;
     }
     .header {
       background: var(--bg-card);

@@ -102,6 +102,16 @@ describe('K-Line Upgrade & Advanced Capabilities', () => {
     assert.doesNotMatch(html, /setStockKlineRange\(/);
   });
 
+  it('styles native date controls and scrollbars with the active MoneyMoney theme', () => {
+    const html = fs.readFileSync(path.join(__dirname, '../src/web/public/index.html'), 'utf8');
+    assert.ok(/:root\s*\{[^}]*color-scheme:\s*light;/s.test(html), 'light mode should set a matching native control scheme');
+    assert.ok(/\[data-theme="dark"\]\s*,\s*\[data-theme="money"\]\s*\{[^}]*color-scheme:\s*dark;/s.test(html), 'dark themes should set dark native controls');
+    assert.ok(/input\[type="date"\][\s\S]*?color-scheme:\s*inherit;[\s\S]*?background:[^;]*var\(--bg/.test(html), 'date inputs should inherit the active theme and use theme surfaces');
+    assert.ok(/scrollbar-color:[^;]*var\(--text-secondary\)[^;]*var\(--bg/.test(html), 'standards-based scrollbars should use theme colors');
+    assert.ok(/\*::-webkit-scrollbar\s*\{[^}]*width:\s*8px;[^}]*height:\s*8px;/s.test(html), 'WebKit scrollbars should remain compact');
+    assert.ok(/\*::-webkit-scrollbar-thumb\s*\{[^}]*border-radius:\s*999px;[^}]*background-clip:\s*padding-box;/s.test(html), 'WebKit scrollbar thumb should use a soft rounded treatment');
+  });
+
   it('switching market tabs does not clear the K-line period active state', () => {
     const html = fs.readFileSync(path.join(__dirname, '../src/web/public/index.html'), 'utf8');
     assert.doesNotMatch(html, /document\.querySelectorAll\('\.tab'\)\.forEach\(\(t\) => t\.classList\.remove\('active'\)\)/);
