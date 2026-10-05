@@ -139,6 +139,123 @@
       backdrop-filter: blur(12px);
       -webkit-backdrop-filter: blur(12px);
     }
+    a {
+      color: var(--purple);
+      text-decoration-color: color-mix(in srgb, var(--purple) 58%, transparent);
+      text-underline-offset: .16em;
+      transition: color 140ms ease, text-decoration-color 140ms ease;
+    }
+    a:hover { color: var(--purple-dark); text-decoration-color: currentColor; }
+    a:focus-visible,
+    button:focus-visible,
+    input:focus-visible,
+    select:focus-visible,
+    textarea:focus-visible {
+      outline: 2px solid color-mix(in srgb, var(--purple) 42%, transparent);
+      outline-offset: 2px;
+    }
+    button {
+      appearance: none;
+      -webkit-appearance: none;
+      font: inherit;
+      line-height: 1.35;
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 9px;
+      background: linear-gradient(135deg,
+        color-mix(in srgb, var(--glass-highlight) 72%, var(--bg-card)),
+        color-mix(in srgb, var(--bg-secondary) 78%, var(--bg-card)));
+      cursor: pointer;
+      transition: background 140ms ease, border-color 140ms ease,
+        color 140ms ease, transform 120ms ease;
+    }
+    button:hover {
+      border-color: color-mix(in srgb, var(--purple) 46%, var(--border));
+      background: linear-gradient(135deg,
+        color-mix(in srgb, var(--purple-light) 68%, var(--bg-card)),
+        color-mix(in srgb, var(--bg-secondary) 82%, var(--bg-card)));
+    }
+    button:active:not(:disabled) { transform: scale(.98); }
+    button:disabled { cursor: not-allowed; opacity: .58; }
+    :where(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), select, textarea) {
+      color-scheme: inherit;
+      color: var(--text);
+      border-color: var(--border);
+      border-style: solid;
+      border-radius: 8px;
+      font-family: inherit;
+    }
+    input[type="text"],
+    input[type="search"],
+    input[type="number"],
+    input[type="email"],
+    input[type="password"],
+    input:not([type]),
+    select,
+    textarea {
+      border-width: 1px;
+    }
+    input::placeholder,
+    textarea::placeholder { color: var(--text-secondary); opacity: .82; }
+    select option {
+      color-scheme: inherit;
+      color: var(--text);
+      background: var(--bg-card);
+    }
+    .source-evidence-card {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 6px;
+      margin: 9px 0;
+      padding: 12px 14px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: linear-gradient(135deg, var(--glass-highlight), var(--bg-card));
+      box-shadow: var(--shadow), inset 0 1px 0 rgba(255,255,255,.12);
+      color: var(--text);
+    }
+    .source-evidence-title { font-size: 14px; font-weight: 650; line-height: 1.45; overflow-wrap: anywhere; }
+    .source-evidence-meta { display: flex; flex-wrap: wrap; gap: 3px 7px; color: var(--text-secondary); font-size: 11px; line-height: 1.5; }
+    .source-evidence-link {
+      display: inline-flex;
+      align-items: center;
+      min-height: 28px;
+      padding: 4px 9px;
+      border: 1px solid color-mix(in srgb, var(--purple) 32%, var(--border));
+      border-radius: 7px;
+      background: var(--purple-light);
+      color: var(--purple);
+      font-size: 11px;
+      font-weight: 650;
+      line-height: 1.3;
+      text-decoration: none;
+      transition: color 140ms ease, background-color 140ms ease, border-color 140ms ease;
+    }
+    .source-evidence-link:hover { border-color: var(--purple); background: color-mix(in srgb, var(--purple-light) 72%, var(--bg-card)); color: var(--purple-dark); }
+    .source-evidence-link-disabled { color: var(--text-secondary); border-style: dashed; cursor: default; }
+    .event-research-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+    .event-research-actions .tab { min-height: 30px; padding: 5px 9px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg-secondary); color: var(--text-secondary); font-size: 11px; }
+    .event-research-actions .tab:hover { border-color: var(--purple); background: var(--purple-light); color: var(--purple); }
+    .link-button {
+      appearance: none;
+      -webkit-appearance: none;
+      display: inline;
+      padding: 1px 0;
+      border: 0;
+      border-radius: 4px;
+      background: transparent;
+      color: var(--purple);
+      font: inherit;
+      font-weight: 600;
+      line-height: inherit;
+      text-align: left;
+      text-decoration: underline;
+      text-decoration-color: color-mix(in srgb, var(--purple) 55%, transparent);
+      text-underline-offset: .14em;
+      cursor: pointer;
+    }
+    .link-button:hover { border: 0; background: var(--purple-light); color: var(--purple-dark); }
     input[type="date"],
     input[type="datetime-local"],
     input[type="time"],

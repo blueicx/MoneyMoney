@@ -4,7 +4,9 @@
 .mm-contract-metrics dt {color:var(--text-secondary);font-size:12px}
 .mm-contract-metrics dd {margin:6px 0 0;font-variant-numeric:tabular-nums}
 #mm-contract-library label {display:block;margin:12px 0}
-#mm-contract-library input,#mm-contract-library select {max-width:100%;width:100%;padding:8px}
+#mm-contract-library input,#mm-contract-library select {max-width:100%;width:100%;padding:8px;color:var(--text);border:1px solid var(--border);border-radius:8px;background:color-mix(in srgb,var(--bg-secondary) 78%,var(--bg-card));color-scheme:inherit;font:inherit}
+#mm-contract-library button,#mm-contract-workspace button {min-height:36px;padding:7px 12px;color:var(--text);border:1px solid var(--border);border-radius:8px;background:color-mix(in srgb,var(--bg-secondary) 78%,var(--bg-card));font:inherit}
+#mm-contract-library button:hover,#mm-contract-workspace button:hover {border-color:var(--purple);background:var(--purple-light)}
 #mm-contract-workspace [data-scenario] {width:140px;max-width:100%}
 #mm-return-to-research {position:sticky;top:8px;z-index:5;margin:8px 0;min-height:44px}
 .mm-action-detail nav {display:flex;align-items:center;justify-content:space-between;gap:12px}

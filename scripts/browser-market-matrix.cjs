@@ -25,6 +25,118 @@ async function waitForServer() {
   throw new Error('local browser matrix server did not become healthy');
 }
 
+async function auditThemeControls(page) {
+  const snapshots = await page.evaluate(() => {
+    const root = document.documentElement;
+    const originalTheme = root.getAttribute('data-theme');
+    const noMotion = document.createElement('style');
+    noMotion.textContent = '*,*::before,*::after{transition:none!important}';
+    document.head.append(noMotion);
+    const fixture = document.createElement('div');
+    fixture.dataset.themeControlAudit = 'true';
+    fixture.style.cssText = 'position:fixed;left:12px;top:12px;z-index:2147483647;padding:8px;display:grid;gap:6px;pointer-events:none;';
+    fixture.innerHTML = '<button type="button">主题测试按钮</button><button type="button" class="btn btn-secondary" data-theme-secondary>主题测试次按钮</button><button type="button" class="link-button" data-theme-manager>主题测试 13F 持有人</button><a href="#theme-audit">主题测试链接</a><input aria-label="主题测试输入框" value="测试"><select aria-label="主题测试下拉框"><option>测试选项</option></select><textarea aria-label="主题测试文本区">测试</textarea><div class="event-research-actions"><button type="button" class="tab" data-theme-event-action>定位 K 线</button></div>' + window.formatSourceEvidence({ title: '主题测试新闻证据卡', sourceName: '浏览器测试', sourceUrl: 'https://example.org/evidence', publishedAt: '2026-10-05T00:00:00.000Z' });
+    document.body.append(fixture);
+    const read = (element, pseudo) => {
+      const style = getComputedStyle(element, pseudo);
+      return { color: style.color, background: style.backgroundColor, backgroundImage: style.backgroundImage, border: style.borderColor, borderStyle: style.borderStyle, radius: style.borderRadius, textDecoration: style.textDecorationLine, colorScheme: style.colorScheme };
+    };
+    const result = [];
+    for (const theme of ['light', 'dark', 'money']) {
+      if (theme === 'light') root.removeAttribute('data-theme');
+      else root.setAttribute('data-theme', theme);
+      const query = selector => fixture.querySelector(selector);
+      const holderLink = query('[data-theme-manager]');
+      const contractInput = document.querySelector('#mm-contract-library input');
+      const contractSelect = document.querySelector('#mm-contract-library select');
+      const contractButton = document.querySelector('#mm-contract-library button');
+      result.push({
+        theme,
+        text: getComputedStyle(document.body).color,
+        accent: getComputedStyle(root).getPropertyValue('--purple').trim(),
+        button: read(query('button')),
+        secondaryButton: read(query('[data-theme-secondary]')),
+        eventAction: read(query('[data-theme-event-action]')),
+        anchor: read(query('a')),
+        input: read(query('input')),
+        select: read(query('select')),
+        textarea: read(query('textarea')),
+        evidence: read(query('.source-evidence-card')),
+        evidenceLink: read(query('.source-evidence-link')),
+        holderLink: holderLink ? read(holderLink) : null,
+        contractInput: contractInput ? read(contractInput) : null,
+        contractSelect: contractSelect ? read(contractSelect) : null,
+        contractButton: contractButton ? read(contractButton) : null,
+      });
+    }
+    if (originalTheme == null) root.removeAttribute('data-theme');
+    else root.setAttribute('data-theme', originalTheme);
+    fixture.remove();
+    noMotion.remove();
+    return result;
+  });
+  const accents = new Set(snapshots.map(item => item.accent));
+  assert.equal(accents.size, 3, 'the three themes should retain distinct accent tokens');
+  assert.ok(snapshots.every(item => item.holderLink), 'the SEC manager-name button should be included in the theme audit');
+  assert.ok(snapshots.every(item => item.contractInput && item.contractSelect && item.contractButton), 'the actual crypto contract controls should be present for the theme audit');
+  for (const item of snapshots) {
+    assert.equal(item.button.color, item.text, `${item.theme}: plain button text should follow the theme`);
+    assert.notEqual(item.button.background, 'rgb(239, 239, 239)', `${item.theme}: plain buttons must not use the browser white default`);
+    assert.ok(parseFloat(item.button.radius) >= 6, `${item.theme}: plain buttons need the shared rounded treatment`);
+    assert.equal(item.secondaryButton.color, item.text, `${item.theme}: btn-secondary actions should use theme text`);
+    assert.notEqual(item.secondaryButton.background, 'rgb(239, 239, 239)', `${item.theme}: btn-secondary actions must not retain native white styling`);
+    assert.ok(parseFloat(item.secondaryButton.radius) >= 6, `${item.theme}: btn-secondary actions should use the shared rounded treatment`);
+    assert.equal(item.eventAction.borderStyle, 'solid', `${item.theme}: event action should have a visible themed border`);
+    assert.notEqual(item.eventAction.background, 'rgba(0, 0, 0, 0)', `${item.theme}: event action should be a compact surface, not loose text`);
+    assert.ok(parseFloat(item.eventAction.radius) >= 6, `${item.theme}: event actions should use the same rounded treatment`);
+    assert.notEqual(item.anchor.color, 'rgb(0, 0, 238)', `${item.theme}: links must not fall back to browser blue`);
+    assert.equal(item.anchor.color, item.evidenceLink.color, `${item.theme}: source links should follow the theme accent`);
+    for (const field of ['input', 'select', 'textarea']) {
+      assert.equal(item[field].color, item.text, `${item.theme}: ${field} text should follow the theme`);
+      assert.ok(parseFloat(item[field].radius) >= 6, `${item.theme}: ${field} should use the shared rounded treatment`);
+    }
+    assert.equal(item.select.colorScheme, item.theme === 'light' ? 'light' : 'dark', `${item.theme}: native select popup should follow the active color scheme`);
+    assert.ok(item.evidence.backgroundImage.includes('linear-gradient'), `${item.theme}: event evidence should use the shared card surface`);
+    assert.ok(parseFloat(item.evidence.radius) >= 10, `${item.theme}: event evidence should have a consistent card radius`);
+    assert.equal(item.holderLink.color, item.anchor.color, `${item.theme}: SEC manager links should use the same themed accent as other links`);
+    assert.equal(item.holderLink.background, 'rgba(0, 0, 0, 0)', `${item.theme}: manager names must not have a native button fill`);
+    assert.notEqual(item.holderLink.color, 'rgb(0, 0, 0)', `${item.theme}: manager link text should not fall back to native black`);
+    assert.equal(item.contractInput.color, item.text, `${item.theme}: contract search input should follow the theme`);
+    assert.equal(item.contractSelect.color, item.text, `${item.theme}: contract type selector should follow the theme`);
+    assert.equal(item.contractButton.color, item.text, `${item.theme}: contract action button should follow the theme`);
+    assert.equal(item.contractSelect.colorScheme, item.theme === 'light' ? 'light' : 'dark', `${item.theme}: contract selector popup should follow the active color scheme`);
+    assert.ok(parseFloat(item.contractInput.radius) >= 6, `${item.theme}: contract search input should not use browser-default square styling`);
+    assert.ok(parseFloat(item.contractSelect.radius) >= 6, `${item.theme}: contract selector should not use browser-default square styling`);
+    assert.ok(parseFloat(item.contractButton.radius) >= 6, `${item.theme}: contract action should not use browser-default button styling`);
+  }
+  assert.equal(new Set(snapshots.map(item => item.button.backgroundImage)).size, 3, 'button surfaces should visibly change with all three themes');
+  assert.equal(new Set(snapshots.map(item => item.eventAction.background)).size, 3, 'event action surfaces should visibly change with all three themes');
+  assert.equal(new Set(snapshots.map(item => item.anchor.color)).size, 3, 'link accents should visibly change with all three themes');
+  assert.equal(new Set(snapshots.map(item => item.text)).size, 3, 'control foregrounds should visibly change with all three themes');
+  return snapshots;
+}
+
+async function assertNoNativeControlLeaks(page, context) {
+  const issues = await page.evaluate(() => {
+    const rendered = element => element.getClientRects().length > 0 && getComputedStyle(element).visibility !== 'hidden';
+    const issueRows = [];
+    for (const element of document.querySelectorAll('button,a,input,select,textarea')) {
+      if (!rendered(element)) continue;
+      const style = getComputedStyle(element);
+      const label = element.getAttribute('aria-label') || element.textContent?.trim().slice(0, 32) || element.outerHTML.slice(0, 64);
+      if (element.matches('a[href]') && style.color === 'rgb(0, 0, 238)') issueRows.push({ tag: 'a', label, problem: 'browser-default blue link' });
+      if (element.matches('button') && (style.appearance !== 'none' || style.borderStyle === 'outset' || style.backgroundColor === 'rgb(239, 239, 239)' || parseFloat(style.borderRadius) <= 2)) {
+        issueRows.push({ tag: 'button', label, problem: `native button style (${style.appearance}/${style.borderStyle}/${style.backgroundColor}/${style.borderRadius})` });
+      }
+      if (element.matches('input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),select,textarea') && (style.borderStyle === 'inset' || parseFloat(style.borderRadius) < 6)) {
+        issueRows.push({ tag: element.tagName.toLowerCase(), label, problem: `native form style (${style.borderStyle}/${style.borderRadius})` });
+      }
+    }
+    return issueRows;
+  });
+  assert.deepEqual(issues, [], `${context}: visible controls must not leak browser-native styles`);
+}
+
 async function main() {
   let browser;
   let context;
@@ -222,6 +334,7 @@ async function main() {
     await Promise.all([page.waitForURL(url => url.pathname === '/', { timeout: 15_000 }), page.click('#submitBtn')]);
     await page.waitForFunction(() => window.mm_authReady && window.mm_isLoggedIn === true, null, { timeout: 10_000 });
     await page.waitForSelector('#market-workspace-shell');
+    await auditThemeControls(page);
     await page.evaluate(() => { setMarketScope('prediction'); setMarketScope('stocks'); });
     await page.waitForTimeout(500);
     assert.ok(await page.locator('#workspace-sidebar-content [data-workspace-id="guru-holdings"]').count(), 'a late prediction navigation response must not overwrite the stocks menu');
@@ -232,6 +345,7 @@ async function main() {
       assert.equal(state, market);
       const library = market === 'stocks' ? '#stock-instrument-library' : `[data-market-library="${market}"]`;
       await page.locator(library).waitFor({ state: 'visible', timeout: 10_000 });
+      await assertNoNativeControlLeaks(page, `${market} workspace`);
     }
     await page.evaluate(() => setMarketScope('options'));
     await page.locator('#options-library-quick .stock-library-item').first().click();
@@ -389,6 +503,7 @@ async function main() {
     await page.locator('#guru-holdings-search').fill('AAPL');
     await page.waitForFunction(() => document.querySelector('#guru-holdings-content tbody tr')?.textContent?.includes('Warren Buffett'), null, { timeout: 10_000 });
     assert.match(await page.locator('#guru-holdings-content').innerText(), /股数变化/);
+    await auditThemeControls(page);
     await page.locator('#guru-holdings-content [data-guru-cik="0001067983"]').click();
     await page.waitForFunction(() => document.querySelector('#guru-holdings-content')?.textContent?.includes('申报证券'), null, { timeout: 10_000 });
     await page.evaluate(() => setMarketScope('options'));
@@ -434,7 +549,7 @@ async function main() {
     await page.setViewportSize({ width: 390, height: 844 });
     assert.equal(await page.locator('#center-workspace').isVisible(), true);
     assert.deepEqual(pageErrors, []);
-    console.log('Browser market matrix passed: four scopes, SEC 13F manager/stock views and source links, strict guru market isolation, options quote-quality cells, chart freshness/date drilldown/coverage, synchronized companion and same-market SPY comparison, data-preflight-blocked backtest/candidate freshness/manual rerun, alert retry/ACK/feedback, SLO, prediction evidence, collapse/restore, mobile center, no page errors');
+    console.log('Browser market matrix passed: three-theme controls/news/SEC/contracts audit, four scopes, SEC 13F manager/stock views and source links, strict guru market isolation, options quote-quality cells, chart freshness/date drilldown/coverage, synchronized companion and same-market SPY comparison, data-preflight-blocked backtest/candidate freshness/manual rerun, alert retry/ACK/feedback, SLO, prediction evidence, collapse/restore, mobile center, no page errors');
   } finally {
     if (browser) await browser.close();
     child.kill('SIGINT');
