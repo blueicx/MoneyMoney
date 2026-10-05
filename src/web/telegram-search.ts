@@ -1,3 +1,18 @@
+export {
+  buildTelegramStockSignalUniverse,
+  normalizeTelegramStockSignalIdentity,
+} from '../features/telegram-stock-signal-universe';
+export type {
+  BuildTelegramStockSignalUniverseInput,
+  TelegramMoverSourceStatus,
+  TelegramStockMarket,
+  TelegramStockMover,
+  TelegramStockSignalCandidate,
+  TelegramStockSignalIdentity,
+  TelegramStockSignalSource,
+  TelegramStockSignalUniverse,
+} from '../features/telegram-stock-signal-universe';
+
 export interface TelegramStockSearchItem {
   code: string;
   name?: string;
