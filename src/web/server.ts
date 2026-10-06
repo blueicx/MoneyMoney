@@ -45,7 +45,9 @@ import {
 import { getTelegramMarketButtons, getTelegramMenuEntries, moveTelegramMenuPage, resetTelegramMenuPage } from './telegram-menu';
 import { buildTelegramDeepLink, buildTelegramStockSearchRows, isTelegramWatchableStockId, telegramPublicBaseUrl } from './telegram-search';
 import { handleTelegramStockSignalsCommand, type TelegramStockMoverDiscovery } from '../features/telegram-stock-signal-command';
-import { TelegramStockSignalScanner, selectTelegramStockSignalAlerts, telegramStockSignalNotificationKey } from '../features/telegram-stock-signals';
+import { TelegramStockSignalScanner, selectTelegramStockSignalAlerts, telegramStockSignalNotificationKey, paginateTelegramStockSignals } from '../features/telegram-stock-signals';
+import { StockSignalSchedule, stockExchangeSession, stockQuoteObservationTime, isStockSignalNotificationFresh } from '../features/stock-signal-schedule';
+import { TelegramSignalOutbox } from '../features/telegram-signal-outbox';
 import { priceTracker } from '../features/price-tracker';
 import { kellySizer, backtester, ASSET_BACKTEST_STRATEGY_VERSION } from '../features/kelly-backtest';
 import { pushNotification } from '../features/notifications';
@@ -76,6 +78,10 @@ import { getGlobalMacroSpotSnapshot } from '../features/global-macro-spot';
 import { getCrossAssetCorrelationRadar } from '../features/cross-asset-correlation';
 import { getPerpetualCrowding } from '../features/perpetual-crowding';
 import { ContractResearchService, contractIdentity, contractScenario } from '../features/contract-research';
+import { contractCapacity, compareContractSnapshots } from '../features/contract-comparison';
+import { compareAiRunnerReports } from '../features/ai-runner-comparison';
+import { createAiRunnerComparison, getAiRunnerComparison, validateAiRunnerComparison, buildAiRunnerComparisonSample, saveAiRunnerComparisonSample, listAiRunnerComparisonSamples, replayAiRunnerComparisonSample, type AiRunnerComparisonSample } from '../features/ai-runner-comparison-group';
+import { portfolioAttribution } from '../features/portfolio-attribution';
 import { getFundingCarryRadar } from '../features/funding-carry';
 import { getOrderFlowLiquidityRadar } from '../features/order-flow-liquidity';
 import { getBitcoinOnchainRadar } from '../features/bitcoin-onchain';
@@ -214,6 +220,8 @@ import { parseRssItems } from '../utils/rss';
 
 export const app = express();
 const telegramStockSignalScanner = new TelegramStockSignalScanner({ store: stateStore, concurrency: 4, ttlMs: 15 * 60_000 });
+const stockSignalSchedule = new StockSignalSchedule(stateStore);
+const telegramStockSignalOutbox = new TelegramSignalOutbox(researchRepository,stateStore);
 dataLakeWorker.start();
 const strategyCandidateRegistry = new StrategyCandidateRegistry();
 const eventStudyRepository = new EventStudyRepository(stateStore);
@@ -1781,6 +1789,18 @@ app.get('/api/portfolio/analytics', async (req, res) => {
   }
 });
 
+app.get('/api/portfolio/attribution',(req,res)=>{
+  if(!adminOnly(req,res))return;
+  try {
+    const market=decisionMarket(req.query.market),selection=String(req.query.accountSource || 'paper');
+    if(!['paper','imported','combined'].includes(selection))throw new Error('请选择模拟盘、导入仓位或显式合并');
+    const type=({stocks:'stock',options:'option',crypto:'crypto',prediction:'prediction'} as const)[market],ledger=unifiedPaperLedgerStore.get();
+    const imported=decisionIntelligenceStore.listPortfolio(market),paper:PortfolioRow[]=ledger.positions.filter(row=>row.instrumentType===type).map(row=>({market,instrument:row.instrumentId,quantity:row.quantity,price:row.currentPrice,averageCost:row.averageEntryPrice,currency:row.currency || 'UNKNOWN',accountId:'unified-paper-ledger',accountSource:'paper'}));
+    const rows=selection==='paper' ? paper:selection==='imported' ? imported:[...paper,...imported],orders=selection==='imported' ? []:ledger.orders.filter(order=>order.instrumentType===type);
+    const data=portfolioAttribution(market,rows,orders);
+    res.json(decisionEnvelope({market,data:{...data,accountSource:selection},dataStatus:data.dataStatus as any,source:selection==='paper'?'统一模拟账本':'显式选择的账户与原始记录',reason:data.reason}));
+  }catch(error:any){res.status(400).json({success:false,dataStatus:'unavailable',reason:error.message});}
+});
 app.get('/api/signals/forward', async (req, res) => {
   if (!adminOnly(req, res)) return;
   try {
@@ -1808,7 +1828,7 @@ app.get('/api/signals/quality', (req, res) => {
     const signals = decisionIntelligenceStore.listSignalOutcomes(market, instrument);
     const data = analyzeSignalQuality(signals, {
       minimumSamples: Number(req.query.minimumSamples || 30),
-      benchmarkReturnPct: Number(req.query.benchmarkReturnPct || 0),
+      ...(req.query.benchmarkReturnPct==null ? {} : {benchmarkReturnPct:Number(req.query.benchmarkReturnPct)}),
       ...(req.query.buyHoldReturnPct == null ? {} : { buyHoldReturnPct: Number(req.query.buyHoldReturnPct) }),
       ...(req.query.randomBaselineReturnPct == null ? {} : { randomBaselineReturnPct: Number(req.query.randomBaselineReturnPct) }),
     });
@@ -3049,7 +3069,7 @@ app.get('/api/diagnostics', async (req, res) => {
         recoveryDrill,
         sources: { total: sources.total, online: sources.online, updatedAt: sources.updatedAt, unavailable: sources.items.filter(item => !item.ok).map(item => ({ id: item.id, detail: item.detail })) },
         researchJobs: jobs.reduce<Record<string, number>>((acc, job) => { acc[job.status] = (acc[job.status] || 0) + 1; return acc; }, {}),
-        telegram: { configured: telegram.isConfigured, pollingEnabled: telegramConfig.pollingEnabled, pollingRunning: telegramInteractionBot?.isRunning || false, polling: telegramInteractionBot?.pollingStatus || null, lease: stateStore.getLease('telegram:getUpdates') },
+        telegram: { configured: telegram.isConfigured, pollingEnabled: telegramConfig.pollingEnabled, pollingRunning: telegramInteractionBot?.isRunning || false, polling: telegramInteractionBot?.pollingStatus || null, lease: stateStore.getLease('telegram:getUpdates'), stockScanSchedules:parseChatIds(telegramConfig.allowedChatIds,telegramConfig.chatId).filter(isTelegramAdmin).map(chatId=>({chatId,config:stockSignalSchedule.get(chatId),history:stockSignalSchedule.history(chatId).slice(-5),lease:stateStore.getLease('telegram:stock-signal-schedule-lease:'+chatId)})) },
         realTrading: 'disabled',
       },
     });
@@ -3780,6 +3800,25 @@ app.post('/api/contracts/scenario', express.json(),(req,res)=>{
   if(String(req.body.instrument || '').startsWith('crypto:gateio-delivery:') && (Number(req.body.fundingRate || 0)!==0 || Number(req.body.fundingPeriods || 0)!==0))return res.status(400).json({success:false,dataStatus:'failed',reason:'交割合约不适用永续资金费率，请将资金费率和期数设为零'});
   try {if(req.body.market!=='crypto')throw new Error('合约市场不一致');contractIdentity(String(req.body.instrument || ''));res.json({success:true,market:'crypto',instrument:req.body.instrument,data:contractScenario(req.body),dataStatus:'historical',source:'明确输入的压力情景假设',updatedAt:new Date().toISOString(),reason:'压力测试，不是行情预测或真实订单'});}
   catch(error:any){res.status(400).json({success:false,dataStatus:'failed',reason:error.message});}
+});
+app.get('/api/contracts/compare',async(req,res)=>{
+  try {
+    if(req.query.market!=='crypto')throw new Error('合约市场不一致');
+    const instruments=String(req.query.instruments || '').split(',').filter(Boolean);
+    if(instruments.length<2 || instruments.length>6 || new Set(instruments).size!==instruments.length)throw new Error('请选择2–6个不同合约');
+    const identities=instruments.map(contractIdentity);
+    if(new Set(identities.map(row=>row.contract.replace(/_USDT(?:_\d{8})?$/,''))).size!==1)throw new Error('仅比较同一底层的Gate USDT合约');
+    const rows=await Promise.all(instruments.map(instrument=>contractResearchService.detail(instrument)));
+    res.json({success:true,...compareContractSnapshots(rows),updatedAt:new Date().toISOString()});
+  }catch(error:any){res.status(400).json({success:false,dataStatus:'unavailable',reason:error.message});}
+});
+app.post('/api/contracts/capacity',express.json(),async(req,res)=>{
+  if(!adminOnly(req,res))return;
+  try {
+    if(req.body.market!=='crypto')throw new Error('合约市场不一致');
+    const snapshot=await contractResearchService.detail(String(req.body.instrument || ''));
+    res.json({success:true,...contractCapacity(snapshot,{side:req.body.side,quantity:req.body.quantity})});
+  }catch(error:any){res.status(400).json({success:false,dataStatus:'unavailable',reason:error.message});}
 });
 app.get('/api/perpetual-crowding', async (_req, res) => {
   try {
@@ -5114,6 +5153,39 @@ async function buildTelegramDigest(chatId: string, cadenceLabel = '每日'): Pro
   return lines.join('\n');
 }
 
+async function stockSignalsForChat(chatId: string, args: string[], automatic = false): Promise<string> {
+  const scope=telegramScopeForChat(chatId),isAdmin=isTelegramAdmin(chatId);
+  const text=await handleTelegramStockSignalsCommand({
+    chatId,scope,args,isAdmin,schedule:stockSignalSchedule,
+    telegramWatchlistIds:telegramCommandCenterStore.listWatchlist(chatId),
+    administratorWatchlistIds:isAdmin ? unifiedAlertStore.listWatchlist() : [],
+    scanner:telegramStockSignalScanner,
+    analyze:async candidate=>{
+      if(automatic && !stockExchangeSession(candidate.market==='us' ? 'us':candidate.market==='hk' ? 'hk':'cn',Date.now()).open) return {candidate,status:'unavailable',dataStatus:'unavailable',action:null,source:'交易所常规时段校验',updatedAt:null,reason:'该交易所当前不在常规时段，自动扫描未请求行情'};
+      return analyzeStockSignalCandidate(candidate, automatic ? { maxQuoteAgeMs: 30 * 60000 } : {});
+    },
+    discoverMovers:async()=>{
+      const breadth=await getMarketBreadthSnapshot(),updatedAt=String(breadth.generatedAt || ''),generatedAt=Date.parse(updatedAt);
+      if(!Number.isFinite(generatedAt) || generatedAt>Date.now()+300000) return {movers:[],status:'unavailable',source:breadth.source || 'Nasdaq Public Screener',updatedAt:null,reason:'异动来源更新时间无效'};
+      const movers=[...(breadth.gainers || []),...(breadth.losers || [])].map(row=>({symbol:row.symbol,name:row.name,changePct:row.changePct,volume:row.volume,marketCapUsd:row.marketCapUsd}));
+      const age=Date.now()-generatedAt,freshness=age>7200000 ? 'stale' : age>300000 ? 'cached':'live';
+      return {movers,status:movers.length ? freshness:'empty',source:breadth.source || 'Nasdaq Public Screener',updatedAt,...(freshness==='stale' ? {reason:'异动数据超过两小时，结果可能过期'} : {})};
+    },
+  });
+  // Recording runs after completion; it never creates an order or guesses an old pairing.
+  void telegramStockSignalScanner.wait(chatId).then(snapshot=>{
+    if(!isAdmin || !snapshot)return;
+    for(const row of selectTelegramStockSignalAlerts(snapshot)) {
+      const entry=Number(row.action?.entry),triggeredAt=Date.parse(snapshot.createdAt),id=`stock-scan:${snapshot.id}:${row.candidate.instrumentId}`;
+      if(!Number.isFinite(entry) || entry<=0 || !row.updatedAt || decisionIntelligenceStore.getSignalOutcome(id))continue;
+      const evidence=createEvidenceSnapshot({market:'stocks',workspace:'signals',instrument:row.candidate.instrumentId,dataStatus:row.dataStatus==='cached' ? 'cached':row.dataStatus==='live' ? 'live':'delayed',source:{id:'stock-signal-scan',name:row.source},observedAt:row.updatedAt,fetchedAt:snapshot.updatedAt,fields:{entry,action:row.action?.action,reasons:row.action?.reasons,metrics:row.action?.metrics,scanId:snapshot.id,pools:row.candidate.sources}});
+      decisionIntelligenceStore.saveEvidence(evidence);
+      decisionIntelligenceStore.saveSignalOutcome({id,market:'stocks',instrument:row.candidate.instrumentId,strategyId:'stock-technical-scan',strategyVersion:'technical-v1',timeframe:'1d',source:row.source,triggeredAt,entryPrice:entry,sample:'live',status:'generated',statusReason:'扫描生成；前向观察是标的走势，不代表模拟成交或做空',evidenceRefs:[evidence.id]});
+    }
+  }).catch(error=>telegramCommandCenterStore.recordAudit(chatId,'stock_signal_lineage_error',String(error instanceof Error ? error.message:'信号血缘保存失败').slice(0,160)));
+  return text;
+}
+
 export function getTelegramCommandHandlers(): Record<string, TelegramCommandHandler> {
   const rawHandlers: Record<string, TelegramCommandHandler> = {
     stocks: async ({ chatId }) => {
@@ -5842,41 +5914,17 @@ export function getTelegramCommandHandlers(): Record<string, TelegramCommandHand
     signals: async ({ chatId, args }) => {
       const scope = telegramScopeForChat(chatId);
       if (scope === 'stocks') {
-        const isAdmin = isTelegramAdmin(chatId);
-        return handleTelegramStockSignalsCommand({
-          chatId,
-          scope,
-          args,
-          isAdmin,
-          telegramWatchlistIds: telegramCommandCenterStore.listWatchlist(chatId),
-          administratorWatchlistIds: isAdmin ? unifiedAlertStore.listWatchlist() : [],
-          scanner: telegramStockSignalScanner,
-          analyze: analyzeStockSignalCandidate,
-          discoverMovers: async (): Promise<TelegramStockMoverDiscovery> => {
-            const breadth = await getMarketBreadthSnapshot();
-            const updatedAt = String(breadth.generatedAt || '');
-            const generatedAt = Date.parse(updatedAt);
-            if (!Number.isFinite(generatedAt) || generatedAt > Date.now() + 5 * 60_000) {
-              return { movers: [], status: 'unavailable', source: breadth.source || 'Nasdaq Public Screener', updatedAt: Number.isFinite(generatedAt) ? updatedAt : null, reason: '异动来源更新时间无效' };
-            }
-            const movers = [...(breadth.gainers || []), ...(breadth.losers || [])].map(row => ({
-              symbol: row.symbol,
-              name: row.name,
-              changePct: row.changePct,
-              volume: row.volume,
-              marketCapUsd: row.marketCapUsd,
-            }));
-            const ageMs = Math.max(0, Date.now() - generatedAt);
-            const freshness = ageMs > 2 * 60 * 60_000 ? 'stale' : ageMs > 5 * 60_000 ? 'cached' : 'live';
-            return {
-              movers,
-              status: movers.length ? freshness : 'empty',
-              source: breadth.source || 'Nasdaq Public Screener',
-              updatedAt,
-              ...(freshness === 'stale' ? { reason: '异动数据超过两小时，结果可能过期' } : {}),
-            };
-          },
-        });
+        const text=await stockSignalsForChat(chatId,args),snapshot=telegramStockSignalScanner.get(chatId);
+        if(!snapshot || ['auto','history'].includes(args[0]))return text;
+        const filters=Object.fromEntries(args.filter(arg=>arg.includes('=')).map(arg=>arg.split('=')));
+        let page;try{page=paginateTelegramStockSignals(snapshot,Number(args[0]) || 1,8,filters);}catch{return text;}
+        const button=(label:string,commands:string[])=>({text:label,callback_data:issueTelegramCallback('stock-signal:handle',{scope:'stocks',workspace:'signals',chatId,id:JSON.stringify({args:commands,scanId:snapshot.id})})});
+        const suffix=args.filter(arg=>arg.includes('='));
+        return telegramInlineReply(text,[
+          [button('全部',[]),button('自选',['pool=watchlist']),button('异动',['pool=mover'])],
+          [button('BUY',['direction=BUY']),button('SELL',['direction=SELL']),button('不可用',['status=unavailable'])],
+          [...(page.page>1 ? [button('上一页',[String(page.page-1),...suffix])]:[]),...(page.page<page.pageCount ? [button('下一页',[String(page.page+1),...suffix])]:[]),button(snapshot.status==='partial' ? '继续扫描':'刷新',[snapshot.status==='partial' ? 'continue':'refresh'])],
+        ]);
       }
       if (!lastAdvisorReport) {
         refreshAdvisorReportInBackground();
@@ -6479,6 +6527,13 @@ function startTelegramInteractionBot(): void {
         actionCenterStore.update('admin',item,action==='read' ? {read:true}:action==='pin' ? {pinned:true}:{snoozedUntil:new Date(Date.now()+86400000).toISOString()});
         return telegramReply('✅ 已同步网页处理状态：'+escapeTelegramHtml(item.title));
       }
+      if(data.startsWith('stock-signal:handle:')) {
+        const record=consumeTelegramCallback(data,'stock-signal:handle',ctx.chatId);
+        if(!record || record.workspace!=='signals' || record.scope!=='stocks' || telegramScopeForChat(ctx.chatId)!=='stocks')return telegramReply('股票信号按钮已过期或市场已切换。');
+        let payload;try{payload=JSON.parse(record.id);}catch{return telegramReply('信号按钮无效。');}
+        if(!Array.isArray(payload.args) || payload.args.length>4 || !payload.args.every((arg:unknown)=>typeof arg==='string') || telegramStockSignalScanner.get(ctx.chatId)?.id!==payload.scanId)return telegramReply('扫描结果已更新，请重新发送 /signals。');
+        return commandHandlers.signals({chatId:ctx.chatId,command:'signals',args:payload.args,message:ctx.message,update:ctx.update});
+      }
       if (data.startsWith('task:handle:')) {
         const record = consumeTelegramCallback(data, 'task:handle', ctx.chatId);
         if (!record || record.workspace !== 'research' || record.scope !== telegramScopeForChat(ctx.chatId)) return telegramReply('任务按钮已过期或市场已切换。');
@@ -7073,13 +7128,19 @@ async function monitorTelegramSlowAlerts(): Promise<void> {
     if (notifications.signals && !telegramAlertSuppressed(chatId, 'normal')) {
       const scope = telegramScopeForChat(chatId);
       if (scope === 'stocks') {
+        if(isTelegramAdmin(chatId))await stockSignalSchedule.run(chatId,{market:scope,paused:telegramAlertSuppressed(chatId,'normal')},async()=>{
+          const existing=telegramStockSignalScanner.get(chatId);
+          await stockSignalsForChat(chatId,[existing?.status==='partial' ? 'continue':'refresh'],true);
+          const completed=await telegramStockSignalScanner.wait(chatId);
+          if(!completed || ['discovering','scanning'].includes(completed.status))throw new Error('另一个进程仍在扫描，未将未完成扫描记为成功');
+        });
         const snapshot = telegramStockSignalScanner.get(chatId);
         if (snapshot?.status === 'complete') {
           const key = telegramStockSignalNotificationKey(chatId, snapshot);
           const deliveryStateKey = `telegram:stock-signal-last-delivered:${chatId}`;
           const deliveryLeaseKey = `telegram:stock-signal-delivery:${chatId}`;
           const alreadySent = stateStore.get<string>(deliveryStateKey) === snapshot.id;
-          const actionable = selectTelegramStockSignalAlerts(snapshot).slice(0, 3);
+          const actionable = selectTelegramStockSignalAlerts(snapshot).filter(row=>isStockSignalNotificationFresh(row)).slice(0, 3);
           if (actionable.length && !alreadySent) {
             const owner = `stock-signal:${crypto.randomUUID()}`;
             if (stateStore.acquireLease(deliveryLeaseKey, owner, Date.now(), 30_000)) {
@@ -7088,13 +7149,18 @@ async function monitorTelegramSlowAlerts(): Promise<void> {
                 const latestNotifications = telegramCommandCenterStore.getPreferences(chatId).notifications;
                 if (latest?.id === snapshot.id && telegramScopeForChat(chatId) === 'stocks'
                   && latestNotifications.signals && !telegramAlertSuppressed(chatId, 'normal')) {
-                  await telegramInteractionBot.sendToChat(chatId, telegramReply([
+                  const deliveryId='stock-signal:'+key;
+                  const expiresAt=new Date(Math.min(Date.parse(snapshot.createdAt)+30*60000,...actionable.map(row=>stockQuoteObservationTime(row.updatedAt)!+30*60000))).toISOString();
+                  telegramStockSignalOutbox.enqueue({id:deliveryId,context:{market:'stocks',workspace:'signals'},alertId:snapshot.id,channel:'telegram',status:'queued',expiresAt,payload:{chatId,message:[
                     '<b>📡 股票信号更新</b>',
                     ...actionable.map(row => `· ${escapeTelegramHtml(row.candidate.name || row.candidate.symbol)} · ${escapeTelegramHtml(row.action?.actionZh || row.action?.action || '')} · ${escapeTelegramHtml(row.source)}`),
                     '', '发送 /signals 查看当前聊天可见的完整股票池。',
-                  ].join('\n')));
-                  stateStore.set(deliveryStateKey, snapshot.id, 1);
-                  telegramCommandCenterStore.recordAudit(chatId, 'stock_signal_scan_push', key);
+                  ].join('\n')}});
+                  await telegramStockSignalOutbox.flush(chatId,()=>telegramScopeForChat(chatId)==='stocks' && telegramCommandCenterStore.getPreferences(chatId).notifications.signals && !telegramAlertSuppressed(chatId,'normal'),async text=>{if(!telegramInteractionBot)throw Error('Telegram暂停');await telegramInteractionBot.sendToChat(chatId,telegramReply(text));});
+                  if(['sent','acknowledged'].includes(researchRepository.getAlertDelivery(deliveryId)?.status || '')) {
+                    stateStore.set(deliveryStateKey, snapshot.id, 1);
+                    telegramCommandCenterStore.recordAudit(chatId, 'stock_signal_scan_push', key);
+                  }
                 }
               } finally {
                 stateStore.releaseLease(deliveryLeaseKey, owner);
@@ -7102,6 +7168,7 @@ async function monitorTelegramSlowAlerts(): Promise<void> {
             }
           }
         }
+        await telegramStockSignalOutbox.flush(chatId,()=>telegramScopeForChat(chatId)==='stocks' && telegramCommandCenterStore.getPreferences(chatId).notifications.signals && !telegramAlertSuppressed(chatId,'normal'),async text=>{if(!telegramInteractionBot)throw Error('Telegram暂停');await telegramInteractionBot.sendToChat(chatId,telegramReply(text));});
       } else if (lastAdvisorReport) {
         const signalKey = `${chatId}:${scope}:${lastAdvisorReport.generatedAt}`;
         if (!telegramSignalPushes.has(signalKey)) {
@@ -8323,6 +8390,7 @@ import {
   evaluateAiRunnerTrigger, isAiRunnerCallAllowed, appendAiRunnerDecision, listAiRunnerHistory,
   updateAiRunnerMarketState, recordAiRunnerModelCall, evaluateRunnerIndicatorEvidence,
   normalizeAiRunnerStockKlines,
+  activateAiRunnerComparison,
   type AiRunner, type AiRunnerDecisionRecord, type AiRunnerInstrumentRef, type AiRunnerMarket,
   type AiRunnerQuote, type AiRunnerDataEvidence,
 } from '../features/ai-paper-runner';
@@ -8343,8 +8411,81 @@ const aiRunnerTickCoordinator = new AiRunnerTickCoordinator(stateStore);
 
 app.get('/api/ai-runners', (req, res) => {
   if (!adminOnly(req, res)) return;
-  const runners = getAiRunners().map(r => ({ ...r, summary: summarizeRunner(r) }));
+  if(req.query.market && !MARKET_IDS.includes(String(req.query.market) as MarketId))return res.status(400).json({success:false,reason:'跑单市场无效'});
+  const runners = getAiRunners().filter(r=>!req.query.market || r.universe?.market===req.query.market).map(r => ({ ...r, summary: summarizeRunner(r) }));
   res.json({ success: true, enabled: config.aiPaperTradingEnabled, data: runners });
+});
+app.get('/api/ai-runners/compare',(req,res)=>{
+  if(!adminOnly(req,res))return;
+  try {
+    const ids=String(req.query.ids || '').split(',').filter(Boolean);
+    if(ids.length<2 || ids.length>6 || new Set(ids).size!==ids.length)throw new Error('请选择2–6个不同跑单');
+    const runners=getAiRunners(),selected=ids.map(id=>runners.find(row=>row.id===id));
+    if(selected.some(row=>!row))throw new Error('所选跑单不存在');
+    if(req.query.market && selected.some(row=>row?.universe?.market!==req.query.market))throw new Error('所选跑单不属于当前市场');
+    const histories=Object.fromEntries(ids.map(id=>[id,listAiRunnerHistory(id,undefined,200).data]));
+    const data=compareAiRunnerReports(selected as AiRunner[],histories);
+    res.json({success:true,...data,updatedAt:new Date().toISOString(),source:'独立账户与持久逐轮记录（每个账户最近200轮）',reason:data.reason+'；比较仅覆盖已加载的最近200轮'});
+  }catch(error:any){res.status(400).json({success:false,dataStatus:'unavailable',reason:error.message});}
+});
+
+app.post('/api/ai-runners/comparisons', express.json(), (req,res) => {
+  if (!adminOnly(req,res)) return;
+  if (!config.aiPaperTradingEnabled) return res.status(403).json({success:false,error:'AI跑单开关关闭；未创建对照账户'});
+  try {
+    const {venue,symbolOrMarketId,title,budgetUsd,policy,seed,model,universe}=req.body || {};
+    const data=createAiRunnerComparison(venue,String(symbolOrMarketId || ''),String(title || symbolOrMarketId || ''),budgetUsd,policy || {},{seed,model,universe});
+    stateStore.appendAudit({id:crypto.randomUUID(),action:'ai_comparison_created',detail:data.id+'；三个账户默认暂停'});
+    res.json({success:true,data,reason:'默认暂停；只有明确执行对照轮次才会读取行情及调用已配置模型'});
+  } catch(error:any) {res.status(400).json({success:false,error:error.message});}
+});
+app.get('/api/ai-runners/comparisons/:id', (req,res) => {
+  if (!adminOnly(req,res))return;
+  const group=getAiRunnerComparison(String(req.params.id));
+  if(!group)return res.status(404).json({success:false,reason:'对照实验不存在'});
+  res.json({success:true,data:group,samples:listAiRunnerComparisonSamples(group.id).map(({id,at,hash,results})=>({id,at,hash,completed:!!results}))});
+});
+app.get('/api/ai-runners/comparisons/:id/samples/:sample/replay', (req,res) => {
+  if(!adminOnly(req,res))return;
+  try {res.json({success:true,...replayAiRunnerComparisonSample(String(req.params.id),String(req.params.sample))});}
+  catch(error:any){res.status(404).json({success:false,reason:error.message});}
+});
+app.post('/api/ai-runners/comparisons/:id/tick',express.json(),async(req,res)=>{
+  if(!adminOnly(req,res))return;
+  if(!config.aiPaperTradingEnabled)return res.status(403).json({success:false,reason:'AI跑单开关关闭，未调用模型或创建订单'});
+  let activatedIds: string[] = [];
+  try {
+    const group=getAiRunnerComparison(String(req.params.id));if(!group)throw new Error('对照实验不存在');
+    const key=String(req.headers['idempotency-key'] || req.body?.idempotencyKey || '').trim();
+    if(!key || key.length>160)throw new Error('对照执行必须携带有效幂等键');
+    const validation=validateAiRunnerComparison(group,getAiRunners().filter(row=>group.runnerIds.includes(row.id)));
+    if(!validation.valid)throw new Error(validation.reason);
+    const result=await aiRunnerTickCoordinator.run('comparison:'+group.id,'ai-comparison:'+group.id+':'+key,async()=>{
+      activateAiRunnerComparison(group.id,group.runnerIds);
+      activatedIds=group.runnerIds;
+      try {
+        const primary=getAiRunners().find(row=>row.id===group.runnerIds[0])!;
+        const inputs=[];for(const ref of primary.universe!.instruments)inputs.push(await loadAiRunnerInstrumentSnapshot(primary,ref));
+        const sample=buildAiRunnerComparisonSample(group,key,new Date().toISOString(),inputs);
+        saveAiRunnerComparisonSample(group.id,sample);
+        const prepared=[];for(const id of group.runnerIds)prepared.push(await prepareAiRunnerTick(id,'ai-comparison:'+group.id+':'+key+':'+id,sample));
+        return {sample,prepared};
+      }catch(error){group.runnerIds.forEach(id=>pauseAiRunner(id,'对照准备失败，未提交成交'));throw error;}
+    },({sample,prepared})=>{
+      const current=getAiRunners().filter(row=>group.runnerIds.includes(row.id));
+      if(!validateAiRunnerComparison(group,current).valid || current.some(row=>row.status!=='RUNNING'))throw new Error('对照准备期间有账户被暂停或配置改变，整轮未提交成交');
+      const results=prepared.map(executePreparedRunnerTick);
+      saveAiRunnerComparisonSample(group.id,{...sample,results:results.flatMap(row=>row.decisions)});
+      group.runnerIds.forEach(id=>pauseAiRunner(id,'对照轮次完成；等待下一次人工执行'));
+      stateStore.appendAudit({id:crypto.randomUUID(),action:'ai_comparison_tick',detail:group.id+'；快照 '+sample.hash});
+      return {sampleId:sample.id,snapshotHash:sample.hash,results,reason:validation.reason};
+    });
+    if(result.status==='busy')return res.status(409).json({success:false,reason:'该对照正在执行，未重复下单'});
+    res.json({success:true,...result});
+  }catch(error:any){
+    activatedIds.forEach(id=>pauseAiRunner(id,'对照轮次失败，未自动恢复'));
+    res.status(400).json({success:false,reason:error.message});
+  }
 });
 
 app.post('/api/ai-runners/create', express.json(), (req, res) => {
@@ -8661,14 +8802,20 @@ interface PreparedAiRunnerTick {
   modelVersion?: string;
 }
 
-async function prepareAiRunnerTick(runnerId: string, idempotencyKey: string): Promise<PreparedAiRunnerTick> {
+async function prepareAiRunnerTick(runnerId: string, idempotencyKey: string, sample?: AiRunnerComparisonSample): Promise<PreparedAiRunnerTick> {
   const runner = getAiRunners().find(item => item.id === runnerId);
-  const now = new Date();
+  const now = sample ? new Date(sample.at) : new Date();
   if (!runner) return { runnerId, idempotencyKey, snapshots: [], records: [] };
   if (runner.status !== 'RUNNING') return { runnerId, idempotencyKey, snapshots: [], records: [] };
   const refs = runner.universe?.instruments || [{ venue: runner.venue, symbolOrMarketId: runner.symbolOrMarketId, title: runner.title }];
   const snapshots: AiRunnerInstrumentSnapshot[] = [];
-  for (const ref of refs.slice(0, 5)) snapshots.push(await loadAiRunnerInstrumentSnapshot(runner, ref));
+  if(sample){
+    for(const input of sample.snapshots){
+      const snapshot=structuredClone(input) as unknown as AiRunnerInstrumentSnapshot;
+      snapshot.openPosition=runner.positions.some(position=>position.status==='OPEN' && (position.instrumentId===runnerLedgerInstrumentId(snapshot.ref) || position.instrument?.symbolOrMarketId===snapshot.ref.symbolOrMarketId));
+      snapshots.push(snapshot);
+    }
+  }else for (const ref of refs.slice(0, 5)) snapshots.push(await loadAiRunnerInstrumentSnapshot(runner, ref));
   const candidateSignal = snapshots.some(item => item.candidateSignals?.length && ['live', 'delayed'].includes(item.quote?.dataStatus || ''));
   let intent: PreparedAiRunnerTick['intent'];
   let modelVersion: string | undefined;
@@ -8849,6 +8996,7 @@ async function runAiRunnerTick(runnerId: string, idempotencyKey?: string) {
   const runner = getAiRunners().find(item => item.id === runnerId);
   if (!runner) return { status: 'not-found' as const };
   if (runner.status !== 'RUNNING') return { status: 'inactive' as const };
+  if (runner.comparisonControl) return { status: 'inactive' as const };
   const key = idempotencyKey?.trim().slice(0, 180) || buildAiRunnerTickIdempotencyKey(runnerId);
   return aiRunnerTickCoordinator.run(runnerId, key,
     () => prepareAiRunnerTick(runnerId, key),
@@ -8858,7 +9006,7 @@ async function runAiRunnerTick(runnerId: string, idempotencyKey?: string) {
 async function tickAllAiRunners(): Promise<Array<{ id: string; actionZh: string }>> {
   if (!config.aiPaperTradingEnabled) return [];
   const results: Array<{ id: string; actionZh: string }> = [];
-  for (const runner of getAiRunners().filter(item => item.status === 'RUNNING')) {
+  for (const runner of getAiRunners().filter(item => item.status === 'RUNNING' && !item.comparisonControl)) {
     try {
       const tick = await runAiRunnerTick(runner.id);
       if (tick.status === 'completed' || tick.status === 'duplicate') results.push(...tick.result.actions);

@@ -37,3 +37,18 @@ test('result inbox acknowledgement is terminal and retry requeues only pending o
  store.set(key,{events:{},deliveries:[{id:'pending',event:{title:'A',date:'2026-10-02T13:00:00Z'},text:'',status:'pending',attempts:2,nextAttempt:now+1000},{id:'sent',event:{title:'B',date:'2026-10-02T13:00:00Z'},text:'',status:'sent',attempts:1,nextAttempt:now},{id:'failed',event:{title:'C',date:'2026-10-02T13:00:00Z'},text:'',status:'failed',attempts:7,nextAttempt:now,error:'failed'}]});
  const monitor=new TelegramEventResultMonitor(store,async()=>({actual:null,status:'unavailable'}),()=>now);assert.equal(monitor.update('owner','pending','ack'),false);assert.equal(monitor.update('owner','sent','ack'),true);assert.equal(monitor.history('owner').find(x=>x.id==='sent').status,'acknowledged');assert.equal(monitor.update('owner','sent','retry'),false);assert.equal(monitor.update('owner','failed','retry'),true);const retried=monitor.history('owner').find(x=>x.id==='failed');assert.equal(retried.status,'pending');assert.equal(retried.attempts,0);assert.equal(retried.nextAttempt,now);assert.equal(retried.error,undefined);
 });
+
+test('official corrections are notified once and keep the original result and acknowledgement',async()=>{
+ const {TelegramEventResultMonitor}=require('../src/features/telegram-event-results');const values=new Map(),store={get:k=>structuredClone(values.get(k)||null),set:(k,v)=>values.set(k,structuredClone(v))};let now=Date.parse('2026-10-02T14:00:00Z'),actual='100000';const messages=[];
+ const event={title:'Non-Farm Employment Change',date:'2026-10-02T13:30:00Z',impact:'high',country:'USD',previous:'80000',forecast:'90000'};
+ const monitor=new TelegramEventResultMonitor(store,async()=>({actual,status:'published',source:'BLS',publishedAt:event.date}),()=>now);
+ await monitor.run('owner',[event],async text=>messages.push(text));const original=monitor.history('owner')[0];monitor.update('owner',original.id,'ack');
+ actual='95000';now+=3600001;await monitor.run('owner',[],async text=>messages.push(text));await monitor.run('owner',[],async text=>messages.push(text));
+ assert.equal(messages.length,2);assert.match(messages[1],/修订/);assert.match(messages[1],/100000/);assert.match(messages[1],/95000/);assert.match(messages[1],/80000/);assert.equal(monitor.history('owner')[0].status,'acknowledged');
+});
+test('malformed publication dates and unavailable results never become published actuals',async()=>{
+ const {TelegramEventResultMonitor}=require('../src/features/telegram-event-results');for(const result of [{actual:'1',status:'published',publishedAt:'invalid'},{actual:'1',status:'unavailable'}]){
+ const values=new Map(),store={get:k=>structuredClone(values.get(k)||null),set:(k,v)=>values.set(k,structuredClone(v))},messages=[];const monitor=new TelegramEventResultMonitor(store,async()=>result,()=>Date.parse('2026-10-02T14:00:00Z'));
+ await monitor.run('owner',[{title:'GDP',date:'2026-10-02T13:30:00Z',impact:'high'}],async text=>messages.push(text));assert.match(messages[0],/暂不可用/);assert.doesNotMatch(messages[0],/实际值：1/);
+ }
+});

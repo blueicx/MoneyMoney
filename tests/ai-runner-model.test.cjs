@@ -26,3 +26,12 @@ test('AI runner model request fails closed on missing configuration, timeout, HT
   assert.equal((await requestAiRunnerIntent(runner, runtime, [], async () => ({ ok: false, status: 429, json: async () => ({}) }))).reason, 'AI 接口返回 HTTP 429');
   assert.equal((await requestAiRunnerIntent(runner, runtime, [], async () => ({ ok: true, json: async () => ({ choices: [{ message: { content: '{bad' } }] }) }))).reason, 'AI 意图格式无效');
 });
+
+test('controlled model calls record the shared seed and deterministic sampling configuration', async () => {
+  let sent;
+  const result = await requestAiRunnerIntent({ ...runner, comparisonControl: { seed: 73, temperature: 0 } }, runtime, [], async (_url, init) => {
+    sent = JSON.parse(init.body);
+    return { ok: true, json: async () => ({ choices: [{ message: { content: JSON.stringify(body) } }] }) };
+  });
+  assert.equal(result.ok, true); assert.equal(sent.seed, 73); assert.equal(sent.temperature, 0);
+});

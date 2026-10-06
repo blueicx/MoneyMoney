@@ -9,7 +9,9 @@ import {
   paginateTelegramStockSignals,
   type TelegramStockSignalScanInput,
   type TelegramStockSignalScanner,
+  type TelegramStockSignalFilter,
 } from './telegram-stock-signals';
+import type { StockSignalSchedule } from './stock-signal-schedule';
 import type { StockSignalCandidateAnalysis } from './trade-assistant';
 
 export interface TelegramStockMoverDiscovery {
@@ -31,6 +33,7 @@ export interface TelegramStockSignalCommandInput {
   discoverMovers: () => Promise<TelegramStockMoverDiscovery>;
   analyze: (candidate: TelegramStockSignalCandidate) => Promise<StockSignalCandidateAnalysis>;
   now?: () => number;
+  schedule?: StockSignalSchedule;
 }
 
 function previousMovers(snapshot: ReturnType<TelegramStockSignalScanner['get']>, now: number): TelegramStockMover[] {
@@ -58,8 +61,8 @@ function universeInput(
   });
 }
 
-function pageText(snapshot: NonNullable<ReturnType<TelegramStockSignalScanner['get']>>, page: number): string {
-  return formatTelegramStockSignalPage(paginateTelegramStockSignals(snapshot, page));
+function pageText(snapshot: NonNullable<ReturnType<TelegramStockSignalScanner['get']>>, page: number, filters: TelegramStockSignalFilter): string {
+  return formatTelegramStockSignalPage(paginateTelegramStockSignals(snapshot, page, 8, filters));
 }
 
 /** Run or page the current chat's stock-only scan without sharing watchlist state. */
@@ -67,29 +70,45 @@ export async function handleTelegramStockSignalsCommand(command: TelegramStockSi
   if (command.scope !== 'stocks') return '股票信号仅在股票市场可用，请先 /market stocks。';
 
   const arg = String(command.args[0] || '').trim().toLowerCase();
+  if (arg === 'auto') {
+    if (!command.isAdmin || !command.schedule) return '自动扫描仅管理员可配置。';
+    const verb = command.args[1];
+    if (verb && !['on','off'].includes(verb)) return '用法：/signals auto on|off [15–240分钟]';
+    const config = verb ? command.schedule.configure(command.chatId,{enabled:verb==='on',...(command.args[2] ? {intervalMinutes:Number(command.args[2])}:{})}) : command.schedule.get(command.chatId);
+    return `股票自动扫描：${config.enabled ? '开启':'关闭'} · 每 ${config.intervalMinutes} 分钟 · 按美股常规时段，行情过期/来源失败不生成交易信号。\n手动扫描 /signals refresh；查看运行历史 /signals history。`;
+  }
+  if (arg === 'history') return command.isAdmin && command.schedule ? ['<b>股票扫描运行历史</b>',...command.schedule.history(command.chatId).slice(-10).map(row=>`${row.at} · ${row.status}${row.reason ? ' · '+row.reason.replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;'):''}`)].join('\n') : '仅管理员可查看自动扫描记录。';
+  const filters: TelegramStockSignalFilter = {};
+  for (const argument of command.args) {
+    const [key,value] = argument.split('=');
+    if (key === 'pool') filters.pool=value as TelegramStockSignalFilter['pool'];
+    else if (key === 'direction') filters.direction=value?.toUpperCase() as TelegramStockSignalFilter['direction'];
+    else if (key === 'status') filters.status=value as TelegramStockSignalFilter['status'];
+  }
+  if (filters.pool && !['fixed','mover','watchlist'].includes(filters.pool) || filters.direction && !['BUY','SELL','WAIT'].includes(filters.direction) || filters.status && !['pending','ready','unavailable'].includes(filters.status)) return '筛选无效：pool=fixed|mover|watchlist direction=BUY|SELL|WAIT status=pending|ready|unavailable';
   const refresh = arg === 'refresh';
   const page = /^\d+$/.test(arg) ? Number(arg) : 1;
   const existing = command.scanner.get(command.chatId);
 
-  if (!refresh && existing?.status === 'complete') return pageText(existing, page);
+  if (!refresh && existing?.status === 'complete') return pageText(existing, page, filters);
 
   if (!refresh && existing?.status === 'partial') {
     if (arg === 'continue') {
       const resumed = command.scanner.resume(command.chatId, command.analyze);
-      return pageText(resumed?.snapshot || existing, 1);
+      return pageText(resumed?.snapshot || existing, 1, filters);
     }
-    return pageText(existing, page);
+    return pageText(existing, page, filters);
   }
 
   if (!refresh && existing?.status === 'scanning') {
     const resumed = command.scanner.resume(command.chatId, command.analyze);
     const snapshot = resumed?.snapshot || existing;
-    return pageText(snapshot, page);
+    return pageText(snapshot, page, filters);
   }
 
   if (!refresh && existing?.status === 'discovering' && existing.moverStatus.state !== 'pending') {
     const resumed = command.scanner.resume(command.chatId, command.analyze);
-    if (resumed) return pageText(resumed.snapshot, page);
+    if (resumed) return pageText(resumed.snapshot, page, filters);
   }
 
   const pendingStatus: TelegramMoverSourceStatus = {
@@ -129,5 +148,5 @@ export async function handleTelegramStockSignalsCommand(command: TelegramStockSi
     },
     analyze: command.analyze,
   });
-  return pageText(job.snapshot, page);
+  return pageText(job.snapshot, page, filters);
 }

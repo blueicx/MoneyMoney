@@ -20,7 +20,7 @@ export interface AiRunnerModelSnapshot {
 }
 
 export async function requestAiRunnerIntent(
-  runner: Pick<AiRunner, 'model' | 'universe'>,
+  runner: Pick<AiRunner, 'model' | 'universe' | 'comparisonControl'>,
   runtime: AiRuntimeConfig,
   snapshots: AiRunnerModelSnapshot[],
   fetchImpl: typeof fetch = fetch,
@@ -53,7 +53,8 @@ export async function requestAiRunnerIntent(
     const response = await fetchImpl(runtime.apiUrl, {
       method: 'POST',
       headers: { authorization: `Bearer ${runtime.apiKey}`, 'content-type': 'application/json' },
-      body: JSON.stringify({ model, messages, temperature: 0, max_tokens: 600 }),
+      body: JSON.stringify({ model, messages, temperature: 0, max_tokens: 600,
+        ...(runner.comparisonControl ? { seed: runner.comparisonControl.seed } : {}) }),
       signal: AbortSignal.timeout(15_000),
     });
     if (!response.ok) return { ok: false, reason: `AI 接口返回 HTTP ${response.status}`, model };

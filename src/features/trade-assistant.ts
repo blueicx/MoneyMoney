@@ -46,6 +46,7 @@ import {
 import { notifyHighSuccessResults } from './high-success-notifier';
 import { stockDataService, type StockDataService } from './stock-data-service';
 import type { TelegramStockSignalCandidate } from './telegram-stock-signal-universe';
+import { stockQuoteObservationTime } from './stock-signal-schedule';
 
 export interface OptionStrategySpec {
   kind: 'iron-condor' | 'bull-put-spread' | 'bear-call-spread' | 'protective-put';
@@ -684,6 +685,8 @@ export interface StockSignalAnalysisOptions {
   fetchTencentQuotes?: typeof fetchStockQuotes;
   fetchTencentKlines?: typeof fetchStockKlines;
   now?: () => number;
+  /** Automatic alerts require a fresh provider observation, not just a fresh HTTP cache. */
+  maxQuoteAgeMs?: number;
 }
 
 function isFreshStockSnapshot(snapshot: { status: string; expiresAt: string }, now: number): boolean {
@@ -715,7 +718,7 @@ export async function analyzeStockSignalCandidate(
       service.history(candidate.symbol),
     ]);
     const source = [...new Set([quoteResult.snapshot.source, historyResult.snapshot.source].filter(Boolean))].join(' + ');
-    const updatedAt = quoteResult.quote?.asOf || quoteResult.snapshot.fetchedAt || historyResult.snapshot.fetchedAt || null;
+    let updatedAt = quoteResult.quote?.asOf || quoteResult.snapshot.fetchedAt || historyResult.snapshot.fetchedAt || null;
     const quoteFresh = isFreshStockSnapshot(quoteResult.snapshot, now);
     const historyFresh = isFreshStockSnapshot(historyResult.snapshot, now);
     if (!quoteFresh || !historyFresh || !quoteResult.quote || quoteResult.quote.price <= 0) {
@@ -724,6 +727,15 @@ export async function analyzeStockSignalCandidate(
       const reason = quoteResult.snapshot.error || historyResult.snapshot.error
         || (!quoteResult.quote ? '当前报价不可用' : !historyResult.bars.length ? '历史 K 线不可用' : '行情或历史数据已过期');
       return unavailableStockSignal(candidate, source || 'Nasdaq/公开股票数据', stale ? 'stale' : 'unavailable', updatedAt, reason);
+    }
+    if (options.maxQuoteAgeMs != null) {
+      const observedAt = stockQuoteObservationTime(quoteResult.quote.asOf);
+      if (!Number.isFinite(options.maxQuoteAgeMs) || options.maxQuoteAgeMs <= 0 || observedAt == null
+        || observedAt > now || now - observedAt > options.maxQuoteAgeMs) {
+        return unavailableStockSignal(candidate, source, 'stale', observedAt == null ? null : new Date(observedAt).toISOString(),
+          observedAt == null ? '来源没有可核验的报价时间，未生成自动信号' : '报价时间已过期或位于未来，未生成自动信号');
+      }
+      updatedAt = new Date(observedAt).toISOString();
     }
     const bars: KlineLike[] = historyResult.bars.map(bar => ({ ...bar, volume: bar.volume || 0 }));
     const action = scoreStockTechnicalSnapshot(`us${candidate.symbol}`, {

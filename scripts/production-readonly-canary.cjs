@@ -52,6 +52,35 @@ function explicitLibraryEmptyReason(market, libraryText) {
   return /当前来源暂无可用预测事件|预测事件来源不可用|预测事件来源响应超时/.test(text) ? text : null;
 }
 
+function verifyKlineResponse(body, asOf) {
+  const rows=Array.isArray(body.data) ? body.data:[];
+  if(!rows.length){assert.ok(body.reason,'a missing chart must explain the real failure');return {records:0,dataStatus:body.dataStatus,reason:body.reason};}
+  assert.ok(body.success && body.source && body.updatedAt,'chart data must retain source and time');
+  for(const row of rows){
+    assert.ok([row.time,row.open,row.high,row.low,row.close].every(Number.isFinite),'invalid OHLC/time');
+    assert.ok(row.low>0 && row.low<=Math.min(row.open,row.close) && row.high>=Math.max(row.open,row.close));
+    if(asOf)assert.ok(row.time<=Date.parse(asOf),'historical chart cannot contain future candles');
+  }
+  if(asOf)assert.equal(body.dataStatus,'historical','historical mode must not silently use ordinary quotes');
+  return {records:rows.length,dataStatus:body.dataStatus,source:body.source,updatedAt:body.updatedAt,reason:body.reason || null};
+}
+
+async function checkKlineAliases(page,target) {
+  const asOf='2026-10-05T23:59:59.000Z',historical=[];
+  for(const symbol of ['AAPL','usAAPL','AAPL.OQ']){
+    const response=await page.request.get(target+'/api/stock/kline?'+new URLSearchParams({symbol,period:'1d',asOf}),{timeout:30000});
+    assert.equal(response.status(),200);const body=await response.json();
+    historical.push({symbol,body,summary:verifyKlineResponse(body,asOf)});
+  }
+  for(const entry of historical.slice(1))assert.deepEqual(entry.body.data || [],historical[0].body.data || [],'verified aliases must read identical historical bars');
+  const normal=[];
+  for(const symbol of ['usAAPL','usSNDK']){
+    const response=await page.request.get(target+'/api/stock/kline?'+new URLSearchParams({symbol,period:'1d'}),{timeout:30000});
+    assert.equal(response.status(),200);normal.push({symbol,...verifyKlineResponse(await response.json())});
+  }
+  return {asOf,historical:historical.map(({symbol,summary})=>({symbol,...summary})),normal};
+}
+
 async function enterGuest(page, baseUrl) {
   await page.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: 30_000 });
   if (new URL(page.url()).pathname.startsWith('/login')) {
@@ -146,7 +175,7 @@ async function runProductionCanary({ baseUrl, artifactDir } = {}) {
   const target = validatePublicBaseUrl(baseUrl || process.env.PUBLIC_WEB_BASE_URL);
   const outputDir = artifactDir || process.env.CANARY_ARTIFACT_DIR || path.join(os.tmpdir(), `moneymoney-canary-${Date.now()}`);
   await fs.mkdir(outputDir, { recursive: true });
-  const browser = await chromium.launch({ headless: true });
+  const browser = await chromium.launch({ channel:process.env.MONEYMONEY_SMOKE_BROWSER || 'chrome',headless: true });
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   const page = await context.newPage();
   const pageErrors = [];
@@ -167,6 +196,7 @@ async function runProductionCanary({ baseUrl, artifactDir } = {}) {
     if (expectedCommit) assert.equal(version.commit, expectedCommit, 'production domain commit must match the release being verified');
     report.version = version;
     await enterGuest(page, target);
+    report.kline=await checkKlineAliases(page,target);
     const privateRead = await page.request.get(`${target}/api/decisions?market=stocks`, { timeout: 15_000 });
     assert.ok([401, 403].includes(privateRead.status()), `guest must not read private decision records (HTTP ${privateRead.status()})`);
     report.guestPrivateReadStatus = privateRead.status();
@@ -194,6 +224,7 @@ async function runProductionCanary({ baseUrl, artifactDir } = {}) {
     report.finishedAt = new Date().toISOString();
     report.status = 'passed';
     await context.tracing.stop();
+    await fs.writeFile(path.join(outputDir,'production-canary-report.json'),JSON.stringify(report,null,2),'utf8');
     await browser.close();
     return report;
   } catch (error) {
@@ -218,4 +249,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { validatePublicBaseUrl, containsInstrumentIdentity, explicitLibraryEmptyReason, runProductionCanary };
+module.exports = { validatePublicBaseUrl, containsInstrumentIdentity, explicitLibraryEmptyReason, verifyKlineResponse, runProductionCanary };

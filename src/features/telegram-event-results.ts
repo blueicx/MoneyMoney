@@ -1,10 +1,10 @@
 import { createHash } from 'node:crypto';
 
-interface EventRecord { id?: string; title: string; titleZh?: string; date: string; country?: string; impact?: string; actual?: string | null; forecast?: string | null; source?: string; }
-interface Result { actual: string | null; status: string; reason?: string; source?: string; url?: string; publishedAt?: string; }
-interface Store { get<T>(key: string): T | null; set<T>(key: string, value: T): void; acquireLease?(key: string, owner: string, now: number, ttl: number): boolean; releaseLease?(key: string, owner: string): void; }
-interface Delivery { id: string; event: EventRecord; text: string; status: 'pending' | 'sent' | 'failed' | 'acknowledged'; attempts: number; nextAttempt: number; error?: string; }
-interface State { events: Record<string, EventRecord>; deliveries: Delivery[]; }
+interface EventRecord { id?: string; title: string; titleZh?: string; date: string; country?: string; impact?: string; actual?: string | null; forecast?: string | null; previous?: string | null; source?: string; }
+interface Result { actual: string | null; status: string; reason?: string; source?: string; url?: string; publishedAt?: string; previous?: string | null; }
+interface Store { get<T>(key: string): T | null; set<T>(key: string, value: T): void; acquireLease?(key: string, owner: string, now: number, ttl: number): boolean; refreshLease?(key: string, owner: string, now: number, ttl: number): boolean; releaseLease?(key: string, owner: string): void; }
+interface Delivery { id: string; event: EventRecord; text: string; status: 'pending' | 'sent' | 'failed' | 'acknowledged'; attempts: number; nextAttempt: number; error?: string; actual?: string; publishedAt?: string; kind?: 'result' | 'revision' | 'waiting'; }
+interface State { events: Record<string, EventRecord>; deliveries: Delivery[]; checkedAt?: Record<string,number>; }
 export function hasEventActual(value: unknown): boolean {
   return value !== null && value !== undefined && !/^(?:|n\/a|na|null|unknown|pending|—|-)$/i.test(String(value).trim());
 }
@@ -29,44 +29,55 @@ export class TelegramEventResultMonitor {
     const lease = 'telegram-event-results-monitor:' + chat;
     if (this.store.acquireLease && !this.store.acquireLease(lease, this.owner, this.clock(), 120000)) return;
     this.busy.add(chat);
+    const timer=setInterval(()=>this.store.refreshLease?.(lease,this.owner,this.clock(),120000),30000);timer.unref();
     try {
       const key = 'telegram-event-results:' + chat, now = this.clock();
       const state = this.store.get<State>(key) ?? { events: {}, deliveries: [] };
+      state.checkedAt ||= {};
       for (const event of events) {
         const date = Date.parse(event.date);
         if (event.impact === 'high' && Number.isFinite(date) && (date >= now - 6 * 3600000 || state.events[identity(event)])) state.events[identity(event)] = event;
       }
       for (const [id, event] of Object.entries(state.events)) {
         const age = now - Date.parse(event.date);
-        if (age > 72 * 3600000) { delete state.events[id]; continue; }
+        if (age > 72 * 3600000) { delete state.events[id]; delete state.checkedAt[id]; continue; }
         if (age < 0) continue;
-        // A confirmed release is final for this notification; revisions belong in the evidence history.
-        if (state.deliveries.some(d => d.id.startsWith(id + ':result:'))) continue;
+        const previous = state.deliveries.filter(d => d.id.startsWith(id + ':result:')).at(-1);
+        // Confirmed releases are rechecked hourly, not on every monitor tick.
+        if (previous && now-(state.checkedAt[id] ?? 0)<3600000) continue;
         let result: Result;
-        try { result = hasEventActual(event.actual) ? { actual: event.actual!, status: 'published', source: event.source } : await this.lookup(event); }
+        try { result = !previous && hasEventActual(event.actual) ? { actual: event.actual!, status: 'published', source: event.source, previous:event.previous } : await this.lookup(event); }
         catch { result = { actual: null, status: 'unavailable', reason: '结果来源请求失败，稍后重试' }; }
-        const published = hasEventActual(result.actual) && (!result.publishedAt || Date.parse(result.publishedAt) <= now);
+        state.checkedAt[id]=now;
+        const published = ['published','revised'].includes(result.status) && hasEventActual(result.actual) && (!result.publishedAt || Number.isFinite(Date.parse(result.publishedAt)) && Date.parse(result.publishedAt) >= Date.parse(event.date) && Date.parse(result.publishedAt) <= now);
+        if (previous && !published) continue;
         if (!published && age < 15 * 60000) continue;
         const deliveryId = published ? id + ':result:' + createHash('sha256').update(String(result.actual)).digest('hex') : id + ':waiting';
         if (state.deliveries.some(d => d.id === deliveryId)) continue;
-        const lines = [published ? '📊 <b>事件结果已发布</b>' : '⏳ <b>事件结果暂不可用</b>', escape(event.titleZh || event.title), '事件时间：' + escape(event.date)];
-        if (published) lines.push('实际值：' + escape(result.actual), '预期值：' + escape(event.forecast || '未提供'));
+        const lines = [published ? previous ? '📊 <b>事件结果已修订</b>' : '📊 <b>事件结果已发布</b>' : '⏳ <b>事件结果暂不可用</b>', escape(event.titleZh || event.title), '事件时间：' + escape(event.date)];
+        if (published) lines.push('实际值：' + escape(result.actual), '预期值：' + escape(event.forecast ?? '未提供'),'前值：'+escape(result.previous ?? event.previous ?? '未提供'),...(previous ? ['此前通知值：'+escape(previous.actual ?? '旧记录未保存结构化实际值')] : []),...(result.publishedAt ? ['结果时间：'+escape(result.publishedAt)] : []));
         else lines.push('原因：' + escape(result.reason || '来源尚未提供实际值'), '未编造实际值；取得可靠结果后继续通知。');
         lines.push('来源：' + escape(result.source || event.source || '未知'), '这是数据通知，不构成交易指令。');
         if (result.url?.startsWith('https://www.bls.gov/')) lines.push('<a href="' + escape(result.url) + '">官方原文</a>');
-        state.deliveries.push({ id: deliveryId, event, text: lines.join('\n'), status: 'pending', attempts: 0, nextAttempt: now });
+        state.deliveries.push({ id: deliveryId, event, text: lines.join('\n'), status: 'pending', attempts: 0, nextAttempt: now,kind:published ? previous ? 'revision':'result':'waiting',...(published ? {actual:String(result.actual),publishedAt:result.publishedAt} : {}) });
       }
       state.deliveries = state.deliveries.filter(d => Date.parse(d.event.date) >= now - 30 * 86400000).slice(-600);
-      this.store.set(key, state);
+      const persist=()=>{
+        if(this.store.refreshLease && !this.store.refreshLease(lease,this.owner,this.clock(),120000))throw new Error('事件结果租约已丢失');
+        const acknowledgements=new Set(this.store.get<State>(key)?.deliveries.filter(d=>d.status==='acknowledged').map(d=>d.id));
+        state.deliveries.forEach(d=>{if(acknowledgements.has(d.id))d.status='acknowledged';});
+        this.store.set(key,state);
+      };
+      persist();
       if (!deliveryEnabled) return;
       for (const delivery of state.deliveries) {
         if (delivery.status !== 'pending' || delivery.nextAttempt > now) continue;
         delivery.attempts++;
         try { await send(delivery.text); delivery.status = 'sent'; delete delivery.error; }
         catch { delivery.error = 'Telegram 投递失败'; delivery.nextAttempt = now + Math.min(3600000, 60000 * 2 ** (delivery.attempts - 1)); if (delivery.attempts >= 7) delivery.status = 'failed'; }
-        this.store.set(key, state);
+        persist();
       }
-    } finally { this.busy.delete(chat); this.store.releaseLease?.(lease, this.owner); }
+    } finally { clearInterval(timer);this.busy.delete(chat); this.store.releaseLease?.(lease, this.owner); }
   }
 }
 

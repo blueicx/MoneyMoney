@@ -301,6 +301,7 @@ export interface AlertDelivery {
   lastError?: string;
   lastAttemptAt?: string;
   deliveredAt?: string;
+  expiresAt?: string;
   feedback?: AlertDeliveryFeedback;
 }
 export interface AlertDeliveryFeedback {
@@ -319,6 +320,6 @@ export function createAlertDelivery(input: Partial<AlertDelivery>): AlertDeliver
   return {
     id: input.id, context: assertMarketContext(input.context), alertId: input.alertId, status: input.status,
     channel: input.channel, payload: input.payload, attempts: input.attempts ?? 0,
-    lastError: input.lastError, lastAttemptAt: input.lastAttemptAt, deliveredAt: input.deliveredAt, feedback: input.feedback,
+    lastError: input.lastError, lastAttemptAt: input.lastAttemptAt, deliveredAt: input.deliveredAt, expiresAt:input.expiresAt, feedback: input.feedback,
   };
 }

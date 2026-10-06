@@ -46,3 +46,13 @@ test('production canary accepts an explicit prediction source empty/unavailable 
   assert.equal(explicitLibraryEmptyReason('prediction', ''), null);
   assert.equal(explicitLibraryEmptyReason('stocks', '当前来源暂无可用预测事件。'), null);
 });
+
+test('production Kline checks reject blank errors and any bar after the historical cutoff', () => {
+  const { verifyKlineResponse } = require('../scripts/production-readonly-canary.cjs');
+  const cutoff='2026-10-05T23:59:59Z';
+  const result=verifyKlineResponse({success:true,source:'local partitions',updatedAt:cutoff,dataStatus:'historical',data:[{time:Date.parse('2026-10-05T00:00:00Z'),open:100,high:101,low:99,close:100}]},cutoff);
+  assert.equal(result.records,1);
+  assert.throws(()=>verifyKlineResponse({success:false,data:null}));
+  assert.throws(()=>verifyKlineResponse({success:true,source:'local',updatedAt:cutoff,dataStatus:'historical',data:[{time:Date.parse('2026-10-06T00:00:00Z'),open:100,high:101,low:99,close:100}]},cutoff));
+  assert.equal(verifyKlineResponse({success:false,data:null,dataStatus:'unavailable',reason:'没有当时已发布分区'},cutoff).records,0);
+});

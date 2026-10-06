@@ -72,3 +72,8 @@ test('Hong Kong watchlist stock uses the explicit Tencent market prefix, never t
   assert.equal(result.dataStatus, 'delayed');
   assert.equal(result.source, 'Tencent Finance');
 });
+test('automatic scanning rejects an old observed quote even when the provider just fetched it',async()=>{
+ const now=Date.parse('2026-10-06T14:00:00Z');const result=await analyzeStockSignalCandidate(candidate(),{now:()=>now,maxQuoteAgeMs:1800000,
+ stockData:{quote:async()=>({symbol:'SNDK',quote:{symbol:'SNDK',price:105,currency:'USD',asOf:'10/05/2026 04:00 PM ET'},snapshot:snapshot('Nasdaq',null,'live',new Date(now+60000).toISOString())}),history:async()=>({symbol:'SNDK',bars:bars(),snapshot:snapshot('Nasdaq history',null,'live',new Date(now+60000).toISOString())})}});
+ assert.equal(result.status,'unavailable');assert.equal(result.action,null);assert.match(result.reason,/报价.*过期|时间/);
+});

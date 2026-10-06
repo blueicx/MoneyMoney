@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type { AssistantAction, StockSignalCandidateAnalysis } from './trade-assistant';
 import type {
   TelegramMoverSourceStatus,
@@ -37,11 +38,18 @@ export interface TelegramStockSignalPage {
   pageSize: number;
   totalCount: number;
   items: TelegramStockSignalRow[];
+  indices?: number[];
+  filters?: TelegramStockSignalFilter;
 }
+
+export interface TelegramStockSignalFilter { pool?: 'fixed' | 'mover' | 'watchlist'; direction?: 'BUY' | 'SELL' | 'WAIT'; status?: TelegramStockSignalRowStatus; }
 
 export interface TelegramStockSignalStore {
   get<T>(key: string): T | null;
   set<T>(key: string, value: T): void;
+  acquireLease?(key: string, owner: string, now: number, ttl: number): boolean;
+  refreshLease?(key: string, owner: string, now: number, ttl: number): boolean;
+  releaseLease?(key: string, owner: string): void;
 }
 
 export interface TelegramStockSignalScannerOptions {
@@ -84,7 +92,13 @@ function clone<T>(value: T): T {
 }
 
 function escapeHtml(value: unknown): string {
-  return String(value ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
+  let escaped='';
+  for(const character of String(value ?? '')) {
+    const next=character==='&' ? '&amp;':character==='<' ? '&lt;':character==='>' ? '&gt;':character;
+    if(escaped.length+next.length>80)return escaped+'…';
+    escaped+=next;
+  }
+  return escaped;
 }
 
 function pendingRows(universe: TelegramStockSignalUniverse): TelegramStockSignalRow[] {
@@ -126,9 +140,11 @@ function moverStatusLabel(status: TelegramMoverSourceStatus): string {
   return `${labels[status.state] || status.state}${status.updatedAt ? ` · ${status.updatedAt.slice(0, 16).replace('T', ' ')}` : ''}${status.reason ? ` · ${status.reason}` : ''}`;
 }
 
-export function paginateTelegramStockSignals(snapshot: TelegramStockSignalSnapshot, requestedPage: number, pageSize = PAGE_SIZE): TelegramStockSignalPage {
-  const safePageSize = Number.isInteger(pageSize) && pageSize > 0 ? Math.min(20, pageSize) : PAGE_SIZE;
-  const totalCount = snapshot.candidates.length;
+export function paginateTelegramStockSignals(snapshot: TelegramStockSignalSnapshot, requestedPage: number, pageSize = PAGE_SIZE, filters: TelegramStockSignalFilter = {}): TelegramStockSignalPage {
+  if (filters.pool && !['fixed','mover','watchlist'].includes(filters.pool) || filters.direction && !['BUY','SELL','WAIT'].includes(filters.direction) || filters.status && !['pending','ready','unavailable'].includes(filters.status)) throw new Error('股票信号筛选无效');
+  const safePageSize = Number.isInteger(pageSize) && pageSize > 0 ? Math.min(8, pageSize) : PAGE_SIZE;
+  const matches = snapshot.candidates.map((row,index) => ({row,index:index+1})).filter(({row}) => (!filters.pool || row.candidate.sources.includes(filters.pool)) && (!filters.direction || row.status === 'ready' && row.action?.action === filters.direction) && (!filters.status || row.status === filters.status));
+  const totalCount = matches.length;
   const pageCount = Math.max(1, Math.ceil(totalCount / safePageSize));
   const page = Number.isInteger(requestedPage) && requestedPage >= 1 && requestedPage <= pageCount ? requestedPage : 1;
   const start = (page - 1) * safePageSize;
@@ -138,7 +154,9 @@ export function paginateTelegramStockSignals(snapshot: TelegramStockSignalSnapsh
     pageCount,
     pageSize: safePageSize,
     totalCount,
-    items: snapshot.candidates.slice(start, start + safePageSize),
+    items: matches.slice(start, start + safePageSize).map(item => item.row),
+    indices: matches.slice(start, start + safePageSize).map(item => item.index),
+    filters,
   };
 }
 
@@ -162,7 +180,7 @@ export function formatTelegramStockSignalPage(page: TelegramStockSignalPage): st
   ];
   if (!page.items.length) lines.push('当前没有股票候选。');
   page.items.forEach((row, index) => {
-    const number = (page.page - 1) * page.pageSize + index + 1;
+    const number = page.indices?.[index] ?? (page.page - 1) * page.pageSize + index + 1;
     const candidate = row.candidate;
     const label = candidate.name ? `${candidate.name} (${candidate.symbol})` : candidate.symbol;
     const actionText = row.status === 'pending' ? '等待扫描'
@@ -179,10 +197,13 @@ export function formatTelegramStockSignalPage(page: TelegramStockSignalPage): st
   });
   lines.push('', `状态汇总：可分析 ${readyCount} · 数据不可用 ${unavailableCount} · 待扫描 ${snapshot.candidates.length - readyCount - unavailableCount}`);
   if (snapshot.reason) lines.push(`扫描说明：${escapeHtml(snapshot.reason)}`);
-  if (page.page > 1) lines.push(`上一页：/signals ${page.page - 1}`);
-  if (page.page < page.pageCount) lines.push(`下一页：/signals ${page.page + 1}`);
+  const filterArgs = Object.entries(page.filters || {}).map(([key,value]) => `${key}=${value}`).join(' ');
+  if (filterArgs) lines.push(`筛选：${escapeHtml(filterArgs)} · 全池 ${snapshot.candidates.length} · 命中 ${page.totalCount}`);
+  if (page.page > 1) lines.push(`上一页：/signals ${page.page - 1} ${filterArgs}`.trim());
+  if (page.page < page.pageCount) lines.push(`下一页：/signals ${page.page + 1} ${filterArgs}`.trim());
   if (snapshot.status === 'partial') lines.push('继续扫描下一批：/signals continue');
   if (snapshot.status === 'complete') lines.push('刷新扫描：/signals refresh');
+  lines.push('筛选：/signals pool=watchlist direction=BUY；自动扫描：/signals auto on|off [30]');
   lines.push('信号仅作研究信息，不构成投资建议，也不会自动下单。');
   return lines.join('\n');
 }
@@ -194,6 +215,7 @@ export class TelegramStockSignalScanner {
   private readonly ttlMs: number;
   private readonly now: () => number;
   private readonly inFlight = new Map<string, Promise<TelegramStockSignalSnapshot>>();
+  private readonly leases = new Map<string, string>();
   private activeAnalyses = 0;
   private readonly permitWaiters: Array<() => void> = [];
 
@@ -208,6 +230,8 @@ export class TelegramStockSignalScanner {
   storageKey(chatId: string): string {
     return `${STATE_PREFIX}${encodeURIComponent(String(chatId))}`;
   }
+
+  wait(chatId: string): Promise<TelegramStockSignalSnapshot | null> { return this.inFlight.get(String(chatId)) || Promise.resolve(this.get(chatId)); }
 
   get(chatId: string): TelegramStockSignalSnapshot | null {
     const snapshot = this.peek(chatId);
@@ -229,6 +253,11 @@ export class TelegramStockSignalScanner {
       const snapshot = this.get(chatId) || this.peek(chatId);
       if (snapshot) return { snapshot, completion: active };
     }
+    if (!this.claim(chatId)) {
+      const snapshot = this.peek(chatId);
+      if (!snapshot) throw new Error('其他进程正在建立该聊天的扫描，请稍后重试');
+      return { snapshot, completion: Promise.resolve(snapshot) };
+    }
     const nowIso = new Date(this.now()).toISOString();
     const snapshot: TelegramStockSignalSnapshot = {
       chatId,
@@ -241,7 +270,7 @@ export class TelegramStockSignalScanner {
       moverStatus: input.initialUniverse.moverStatus,
     };
     this.save(snapshot);
-    const completion = this.run(snapshot, input);
+    const completion = this.runLeased(snapshot, input);
     this.inFlight.set(chatId, completion);
     void completion.finally(() => {
       if (this.inFlight.get(chatId) === completion) this.inFlight.delete(chatId);
@@ -261,6 +290,7 @@ export class TelegramStockSignalScanner {
     }
     const snapshot = this.get(chatId);
     if (!snapshot || snapshot.status === 'complete' || !snapshot.candidates.some(row => row.status === 'pending')) return null;
+    if (!this.claim(chatId)) return {snapshot,completion:Promise.resolve(snapshot)};
     const universe: TelegramStockSignalUniverse = {
       candidates: snapshot.candidates.map(row => row.candidate),
       moverStatus: snapshot.moverStatus,
@@ -270,7 +300,7 @@ export class TelegramStockSignalScanner {
       loadUniverse: async () => universe,
       analyze,
     };
-    const completion = this.run(snapshot, input);
+    const completion = this.runLeased(snapshot, input);
     this.inFlight.set(chatId, completion);
     void completion.finally(() => {
       if (this.inFlight.get(chatId) === completion) this.inFlight.delete(chatId);
@@ -279,8 +309,25 @@ export class TelegramStockSignalScanner {
   }
 
   private save(snapshot: TelegramStockSignalSnapshot): void {
+    const owner = this.leases.get(snapshot.chatId);
+    if(this.store.acquireLease && !owner)throw new Error('未持有扫描租约，未写入迟到结果');
+    if (owner && this.store.refreshLease && !this.store.refreshLease(this.storageKey(snapshot.chatId)+':lease',owner,this.now(),120000)) throw new Error('扫描租约已丢失，未覆盖其他进程结果');
     snapshot.updatedAt = new Date(this.now()).toISOString();
     this.store.set(this.storageKey(snapshot.chatId), clone(snapshot));
+  }
+
+  private claim(chat: string): boolean {
+    if (!this.store.acquireLease) return true;
+    const owner=randomUUID();
+    if (!this.store.acquireLease(this.storageKey(chat)+':lease',owner,this.now(),120000)) return false;
+    this.leases.set(chat,owner);return true;
+  }
+
+  private async runLeased(snapshot: TelegramStockSignalSnapshot, input: TelegramStockSignalScanInput) {
+    const owner=this.leases.get(snapshot.chatId),key=this.storageKey(snapshot.chatId)+':lease';
+    const timer=owner ? setInterval(()=>this.store.refreshLease?.(key,owner,this.now(),120000),30000) : null;timer?.unref();
+    try { return await this.run(snapshot,input); }
+    finally { if(timer)clearInterval(timer);if(owner)this.store.releaseLease?.(key,owner);this.leases.delete(snapshot.chatId); }
   }
 
   private async withPermit<T>(operation: () => Promise<T>): Promise<T> {
@@ -317,7 +364,7 @@ export class TelegramStockSignalScanner {
     let nextIndex = 0;
     let scheduled = 0;
     const workerCount = Math.min(this.concurrency, this.candidateBudget, snapshot.candidates.length);
-    await Promise.all(Array.from({ length: workerCount }, async () => {
+    const outcomes=await Promise.allSettled(Array.from({ length: workerCount }, async () => {
       while (nextIndex < snapshot.candidates.length) {
         const index = nextIndex++;
         const row = snapshot.candidates[index];
@@ -347,6 +394,8 @@ export class TelegramStockSignalScanner {
         this.save(snapshot);
       }
     }));
+    const failed=outcomes.find((outcome):outcome is PromiseRejectedResult=>outcome.status==='rejected');
+    if(failed)throw failed.reason;
     const hasPending = snapshot.candidates.some(row => row.status === 'pending');
     snapshot.status = hasPending ? 'partial' : 'complete';
     snapshot.reason = hasPending

@@ -190,6 +190,7 @@ export interface AiRunner {
   lastSnapshotHash?: string;
   equityHistory?: AiRunnerEquityPoint[];
   benchmarks?: Record<string, AiRunnerBenchmark>;
+  comparisonControl?: { groupId: string; seed: number; temperature: 0; configHash: string };
 }
 
 interface CreateAiRunnerOptions {
@@ -197,6 +198,9 @@ interface CreateAiRunnerOptions {
   trigger?: AiRunnerTrigger;
   universe?: { kind?: 'single' | 'watchlist'; instruments?: AiRunnerInstrumentRef[]; sourceWatchlistId?: string };
   model?: string;
+  comparisonControl?: AiRunner['comparisonControl'];
+  createdAt?: string;
+  startPaused?: boolean;
 }
 
 export interface AiRunnerQuote {
@@ -609,8 +613,8 @@ export function createAiRunner(
     title: primary.title || primary.symbolOrMarketId,
     budgetUsd,
     cashUsd: budgetUsd,
-    status: 'RUNNING',
-    createdAt: new Date().toISOString(),
+    status: options.startPaused ? 'STOPPED' : 'RUNNING',
+    createdAt: options.createdAt || new Date().toISOString(),
     positions: [],
     trades: [],
     policy: normalizeRunnerPolicy(
@@ -624,6 +628,7 @@ export function createAiRunner(
     universe: frozenUniverse,
     executionState: 'ready',
     ...(options.model ? { model: options.model } : {}),
+    ...(options.comparisonControl ? { comparisonControl: options.comparisonControl } : {}),
   };
   stateStore.transaction(() => {
     runners.unshift(runner);
@@ -966,12 +971,14 @@ export function pauseAiRunner(id: string, reason = '手动暂停'): AiRunner | n
 
 export function updateAiRunnerPolicy(id: string, patch: Partial<AiRunnerPolicy>): AiRunner | null {
   return updateRunner(id, runner => {
+    if (runner.comparisonControl) throw new Error('受控对照风险与成本配置固定；请创建新的对照实验');
     const universe = runner.universe || freezeAiRunnerUniverse([{ venue: runner.venue, symbolOrMarketId: runner.symbolOrMarketId }]);
     runner.policy = normalizeRunnerPolicy(runner.policy, patch, runner.budgetUsd, universe);
   });
 }
 
 export function resumeAiRunner(id: string): AiRunner | null {
+  if (getAiRunners().find(row => row.id === id)?.comparisonControl) return null;
   return updateRunner(id, runner => {
     const wasManualPaused = runner.manualPaused;
     if (wasManualPaused || !runner.circuitBreakerReason) {
@@ -1013,6 +1020,18 @@ export interface AiRunnerSummary {
   benchmarkExpectedCount: number;
   benchmarkReason?: string;
   maxDrawdownPct: number;
+}
+
+/** Only the group coordinator may enable all arms for an explicit sampled round. */
+export function activateAiRunnerComparison(groupId: string, ids: string[]): void {
+  stateStore.transaction(() => {
+    const runners = loadRunners().map(normalizeRunner);
+    const selected = ids.map(id => runners.find(row => row.id === id));
+    if (selected.length !== 3 || selected.some(row => !row || row.comparisonControl?.groupId !== groupId
+      || row.executionState !== 'ready' || (!!row.circuitBreakerReason && !row.manualPaused))) throw new Error('对照账户缺失、未核验或处于熔断状态');
+    selected.forEach(row => { if(row!.manualPaused)row!.circuitBreakerReason=undefined;row!.status = 'RUNNING'; row!.stoppedAt = undefined; row!.manualPaused = false; });
+    saveRunners(runners);
+  });
 }
 
 export function summarizeRunner(runner: AiRunner, currentPrice?: number): AiRunnerSummary {

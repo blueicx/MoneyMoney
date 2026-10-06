@@ -73,10 +73,12 @@ test('stock /signals uses per-chat watchlists and stock monitor alerts instead o
   const handlerEnd = serverSource.indexOf('\n    paper:', handlerStart);
   const handler = serverSource.slice(handlerStart, handlerEnd);
   assert.match(handler, /if \(scope === 'stocks'\)/);
-  assert.match(handler, /handleTelegramStockSignalsCommand/);
-  assert.match(handler, /telegramCommandCenterStore\.listWatchlist\(chatId\)/);
-  assert.match(handler, /administratorWatchlistIds: isAdmin \? unifiedAlertStore\.listWatchlist\(\) : \[\]/);
-  assert.match(handler, /analyze: analyzeStockSignalCandidate/);
+  assert.match(handler, /stockSignalsForChat\(chatId,args\)/);
+  const shared = serverSource.slice(serverSource.indexOf('async function stockSignalsForChat'), serverSource.indexOf('export function getTelegramCommandHandlers'));
+  assert.match(shared, /handleTelegramStockSignalsCommand/);
+  assert.match(shared, /telegramCommandCenterStore\.listWatchlist\(chatId\)/);
+  assert.match(shared, /administratorWatchlistIds:isAdmin \? unifiedAlertStore\.listWatchlist\(\) : \[\]/);
+  assert.match(shared, /analyzeStockSignalCandidate\(candidate, automatic \? \{ maxQuoteAgeMs:/);
 
   const monitorStart = serverSource.indexOf('async function monitorTelegramSlowAlerts');
   const monitorEnd = serverSource.indexOf('\nfunction startTelegramCommandCenterMonitor', monitorStart);
