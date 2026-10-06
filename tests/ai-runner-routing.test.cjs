@@ -51,3 +51,17 @@ test('runner card exposes routing policies and selected provider rather than imp
   assert.match(html,/r\.quoteSelection === 'random-valid'/);
   assert.match(html,/safeNewsText\(r\.lastDataSource/);
 });
+test('decision clock is captured after asynchronous quotes so a completed new-minute candle is not misclassified as future',()=>{
+  const source=fs.readFileSync(path.join(__dirname,'../src/web/server.ts'),'utf8');
+  const prepare=source.slice(source.indexOf('async function prepareAiRunnerTick('),source.indexOf('const records = snapshots.map',source.indexOf('async function prepareAiRunnerTick(')));
+  assert.match(prepare,/loadAiRunnerInstrumentSnapshot\(runner, ref\)[\s\S]*if \(!sample\) now = new Date\(\)/);
+  const {evaluateRunnerIndicatorEvidence}=require('../dist/features/ai-paper-runner');
+  const evidence={status:'delayed',dataAt:'2026-10-06T15:36:00Z',retrievedAt:'2026-10-06T15:36:01Z'};
+  assert.equal(evaluateRunnerIndicatorEvidence(evidence,120000,new Date('2026-10-06T15:35:59Z')).allowed,false);
+  assert.equal(evaluateRunnerIndicatorEvidence(evidence,120000,new Date('2026-10-06T15:36:02Z')).allowed,true);
+});
+test('fetching old candles now does not make their indicators fresh',()=>{
+  const {evaluateRunnerIndicatorEvidence}=require('../dist/features/ai-paper-runner');
+  const result=evaluateRunnerIndicatorEvidence({status:'delayed',dataAt:'2026-10-06T14:00:00Z',retrievedAt:'2026-10-06T15:36:01Z'},120000,new Date('2026-10-06T15:36:02Z'));
+  assert.equal(result.allowed,false);assert.match(result.reason,/过期/);
+});

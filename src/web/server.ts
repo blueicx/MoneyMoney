@@ -8843,7 +8843,7 @@ interface PreparedAiRunnerTick {
 
 async function prepareAiRunnerTick(runnerId: string, idempotencyKey: string, sample?: AiRunnerComparisonSample): Promise<PreparedAiRunnerTick> {
   const runner = getAiRunners().find(item => item.id === runnerId);
-  const now = sample ? new Date(sample.at) : new Date();
+  let now = sample ? new Date(sample.at) : new Date();
   if (!runner) return { runnerId, idempotencyKey, snapshots: [], records: [] };
   if (runner.status !== 'RUNNING') return { runnerId, idempotencyKey, snapshots: [], records: [] };
   const refs = runner.universe?.instruments || [{ venue: runner.venue, symbolOrMarketId: runner.symbolOrMarketId, title: runner.title }];
@@ -8855,6 +8855,7 @@ async function prepareAiRunnerTick(runnerId: string, idempotencyKey: string, sam
       snapshots.push(snapshot);
     }
   }else for (const ref of refs.slice(0, 5)) snapshots.push(await loadAiRunnerInstrumentSnapshot(runner, ref));
+  if (!sample) now = new Date();
   const candidateSignal = snapshots.some(item => item.candidateSignals?.length && ['live', 'delayed'].includes(item.quote?.dataStatus || ''));
   let intent: PreparedAiRunnerTick['intent'];
   let modelVersion: string | undefined;

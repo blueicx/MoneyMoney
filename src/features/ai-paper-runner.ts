@@ -256,7 +256,7 @@ export function evaluateRunnerIndicatorEvidence(
   const retrievedAt = Date.parse(String(evidence.retrievedAt || ''));
   if (!Number.isFinite(dataAt) || !Number.isFinite(retrievedAt)) return { allowed: false, reason: '指标数据缺少可验证时间' };
   if (dataAt > now.getTime() || retrievedAt > now.getTime()) return { allowed: false, reason: '指标数据时间晚于当前决策时间' };
-  const ageMs = now.getTime() - retrievedAt;
+  const ageMs = Math.max(now.getTime() - retrievedAt, now.getTime() - dataAt);
   if (ageMs > Math.max(1_000, maxAgeMs)) return { allowed: false, reason: '指标数据已过期' };
   return { allowed: true, ageMs };
 }
