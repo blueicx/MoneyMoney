@@ -3,6 +3,17 @@ const fs = require('node:fs');
 const test = require('node:test');
 const { validatePublicBaseUrl, containsInstrumentIdentity, explicitLibraryEmptyReason } = require('../scripts/production-readonly-canary.cjs');
 
+test('production canary matches long prediction event titles without accepting a different candidate',()=>{
+  const name='Will Luiz Inácio Lula da Silva win the 2026 Brazilian presidential election?';
+  assert.equal(containsInstrumentIdentity(name+' YES 15.5% 来源 Polymarket',name),true);
+  assert.equal(containsInstrumentIdentity('Will Flávio Bolsonaro win the 2026 Brazilian presidential election?',name),false);
+});
+test('guest navigation waits for DOM and working market controls, not every external resource load',()=>{
+  const source=fs.readFileSync(require('node:path').join(__dirname,'../scripts/production-readonly-canary.cjs'),'utf8');
+  assert.match(source,/waitForURL[\s\S]*waitUntil: 'domcontentloaded'/);
+  assert.match(source,/typeof window\.setMarketScope === 'function'/);
+});
+
 test('production canary accepts only public HTTPS targets', () => {
   assert.equal(validatePublicBaseUrl('https://54.211.146.2/'), 'https://54.211.146.2');
   assert.equal(validatePublicBaseUrl('https://example.org/app/'), 'https://example.org/app');

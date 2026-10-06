@@ -37,7 +37,7 @@ function containsInstrumentIdentity(centerText, symbol) {
   if (!target) return false;
   return tokens.some(token => token === target) || tokens.some((_, start) => {
     let combined = '';
-    for (let end = start; end < Math.min(tokens.length, start + 4); end += 1) {
+    for (let end = start; end < Math.min(tokens.length, start + target.length); end += 1) {
       combined += tokens[end];
       if (combined === target) return true;
       if (!target.startsWith(combined)) break;
@@ -85,9 +85,10 @@ async function enterGuest(page, baseUrl) {
   await page.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: 30_000 });
   if (new URL(page.url()).pathname.startsWith('/login')) {
     await page.locator('#guestBtn').click({ timeout: 15_000 });
-    await page.waitForURL(url => !url.pathname.startsWith('/login'), { timeout: 15_000 });
+    await page.waitForURL(url => !url.pathname.startsWith('/login'), { timeout: 30_000, waitUntil: 'domcontentloaded' });
   }
   await page.locator('#market-workspace-shell').waitFor({ state: 'visible', timeout: 20_000 });
+  await page.waitForFunction(() => typeof window.setMarketScope === 'function', null, { timeout: 30_000 });
 }
 
 async function selectMarket(page, market) {
