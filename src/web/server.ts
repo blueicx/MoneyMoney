@@ -6257,7 +6257,7 @@ export function getTelegramCommandHandlers(): Record<string, TelegramCommandHand
         return runner ? `✅ 已清除策略熔断标记，当前保持停止：${escapeTelegramHtml(runner.title)}` : '未找到策略。';
       }
       if (action === 'start') {
-        if (!config.aiPaperTradingEnabled) return 'AI 自动纸面交易默认关闭，请先设置 AI_PAPER_TRADING_ENABLED=true。';
+        if (!config.aiPaperTradingEnabled) return 'AI 自动纸面交易当前关闭，可设置 AI_PAPER_TRADING_ENABLED=true 启用模拟能力。';
         const venue = String(args[1] || '') as 'Binance' | 'Predict.fun' | 'Stocks';
         const symbol = String(args[2] || '');
         const budget = Number(args[3]);
@@ -8490,7 +8490,7 @@ app.post('/api/ai-runners/comparisons/:id/tick',express.json(),async(req,res)=>{
 
 app.post('/api/ai-runners/create', express.json(), (req, res) => {
   if (!adminOnly(req, res)) return;
-  if (!config.aiPaperTradingEnabled) return res.status(403).json({ success: false, error: 'AI 自动纸面交易默认关闭，请先设置 AI_PAPER_TRADING_ENABLED=true' });
+  if (!config.aiPaperTradingEnabled) return res.status(403).json({ success: false, error: 'AI 自动纸面交易当前关闭，可设置 AI_PAPER_TRADING_ENABLED=true 启用模拟能力' });
   const { venue, symbolOrMarketId, title, budgetUsd, mode, trigger, universe, model } = req.body ?? {};
   if (!venue || !symbolOrMarketId || !budgetUsd || typeof budgetUsd !== 'number' || budgetUsd < 1) {
     return res.status(400).json({ success: false, error: '请填写平台、标的和金额（≥$1）' });
@@ -9034,7 +9034,7 @@ app.get('/api/ai-runners/:id/history', (req, res) => {
 
 app.post('/api/ai-runners/:id/tick', express.json(), async (req, res) => {
   if (!adminOnly(req, res)) return;
-  if (!config.aiPaperTradingEnabled) return res.status(403).json({ success: false, error: 'AI 自动纸面交易默认关闭' });
+  if (!config.aiPaperTradingEnabled) return res.status(403).json({ success: false, error: 'AI 自动纸面交易当前关闭' });
   let result: Awaited<ReturnType<typeof runAiRunnerTick>>;
   try {
     result = await runAiRunnerTick(String(req.params.id), String(req.headers['idempotency-key'] || req.body?.idempotencyKey || ''));
@@ -9083,7 +9083,7 @@ async function runAutomationJob(jobId: string): Promise<{ message: string }> {
       return { message: '智能助手报告刷新完成' };
     }
     case 'ai-runners': {
-      if (!config.aiPaperTradingEnabled) return { message: 'AI 模拟跑单未启用；默认安全开关仍为关闭' };
+      if (!config.aiPaperTradingEnabled) return { message: 'AI 模拟跑单已由配置关闭，未调用模型或创建模拟订单' };
       const actions = await tickAllAiRunners();
       return { message: actions.length ? `AI 模拟跑单完成，产生 ${actions.length} 个动作` : 'AI 模拟跑单完成，无新动作' };
     }
