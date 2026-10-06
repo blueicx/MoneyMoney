@@ -8385,7 +8385,7 @@ app.get('/api/paper/trades', (req, res) => {
 import {
   createAiRunner, stopAiRunner, getAiRunners,
   runnerOpenPosition, runnerClosePosition,
-  summarizeRunner, updateAiRunnerPolicy, pauseAiRunner, resumeAiRunner, resetAiRunnerCircuit,
+  summarizeRunner, updateAiRunnerPolicy, updateAiRunnerRouting, selectRunnerStockQuote, pauseAiRunner, resumeAiRunner, resetAiRunnerCircuit,
   evaluateRunnerOpen, resolveRunnerFill, evaluateRunnerQuoteGate, calculateRunnerExecutionCosts,
   evaluateAiRunnerTrigger, isAiRunnerCallAllowed, appendAiRunnerDecision, listAiRunnerHistory,
   updateAiRunnerMarketState, recordAiRunnerModelCall, evaluateRunnerIndicatorEvidence,
@@ -8398,6 +8398,8 @@ import { ResilientDataSourceAdapter } from '../data/source-adapter';
 import { AiRunnerTickCoordinator, buildAiRunnerTickIdempotencyKey } from '../features/ai-runner-coordinator';
 import { requestAiRunnerIntent, type AiRunnerModelSnapshot } from '../features/ai-runner-model';
 import { getAiRuntimeConfig } from '../features/ai-runtime-config';
+import { createNasdaqStockAdapters } from '../features/nasdaq-stock-source';
+import { createYahooStockAdapter } from '../data/yahoo-adapter';
 
 app.post('/api/kelly', (req, res) => {
   const { probability, price, bankroll, fraction } = req.body;
@@ -8408,6 +8410,18 @@ app.post('/api/kelly', (req, res) => {
 // --- AI Paper Runner ---
 
 const aiRunnerTickCoordinator = new AiRunnerTickCoordinator(stateStore);
+const runnerStockQuotes = createNasdaqStockAdapters(fetch, { quoteTtlMs:30_000, timeoutMs:4_000, retries:0 });
+const runnerYahooQuotes = new Map<string, ReturnType<typeof createYahooStockAdapter>>();
+
+app.post('/api/ai-runners/:id/routing', express.json(), (req,res) => {
+  if (!adminOnly(req,res)) return;
+  try {
+    const data = updateAiRunnerRouting(String(req.params.id), req.body || {});
+    if (!data) return res.status(404).json({success:false,reason:'跑单不存在'});
+    stateStore.appendAudit({id:crypto.randomUUID(),action:'ai_runner_routing_updated',detail:`${data.id}: ${data.modelSelection}/${data.quoteSelection}`});
+    res.json({success:true,data});
+  } catch(error:any) { res.status(400).json({success:false,reason:error.message}); }
+});
 
 app.get('/api/ai-runners', (req, res) => {
   if (!adminOnly(req, res)) return;
@@ -8711,8 +8725,32 @@ async function loadAiRunnerInstrumentSnapshot(runner: AiRunner, ref: AiRunnerIns
       };
       (row as any).aboveSma = aboveSma;
     } else if (ref.venue === 'Stocks') {
-      const symbol = instrument.replace(/^US/i, '').split('.')[0];
+      const symbol = instrument.replace(/^US(?=[A-Z])/, '').replace(/\.(OQ|N)$/i,'');
       if (!/^[A-Z][A-Z0-9.:-]{0,19}$/.test(symbol)) throw new Error('股票代码格式无效');
+      if (runner.quoteSelection === 'random-valid' && !runner.comparisonControl) {
+        let yahoo = runnerYahooQuotes.get(symbol);
+        if (!yahoo) { yahoo=createYahooStockAdapter();runnerYahooQuotes.set(symbol,yahoo);if(runnerYahooQuotes.size>100)runnerYahooQuotes.delete(runnerYahooQuotes.keys().next().value!); }
+        const [nasdaq,yahooQuote,intraday] = await Promise.all([
+          runnerStockQuotes.quote.fetch({symbol}), yahoo.fetch({symbol}), getStockKlineAdapter('1m',symbol).fetch({symbol,period:'1m'}),
+        ]);
+        const observedNow=Date.now();
+        const candidates=[{source:'Nasdaq 公共双边报价',status:nasdaq.status,quote:nasdaq.data},{source:'Yahoo 股票双边报价',status:yahooQuote.status,quote:yahooQuote.data}];
+        const chosen=selectRunnerStockQuote(symbol,candidates,runner.policy.minFreshnessMs,observedNow);
+        // Only completed one-minute candles; source time is never replaced by fetch time.
+        const completed=(intraday.data || []).filter(bar=>bar.time+60_000<=observedNow);
+        const metrics=runnerIndicators(completed.map(bar=>[bar.time,bar.open,bar.high,bar.low,bar.close,bar.volume]));
+        const indicatorDataAt=completed.length ? new Date(completed[completed.length-1].time+60_000).toISOString() : undefined;
+        const indicatorStatus=metrics.rsi14!=null && !['stale','unavailable'].includes(intraday.status) ? 'delayed' : 'unavailable';
+        const indicatorGate=evaluateRunnerIndicatorEvidence({status:indicatorStatus,dataAt:indicatorDataAt,retrievedAt:intraday.fetchedAt},runner.policy.minFreshnessMs);
+        row={...row, source:chosen?.source || '股票双边报价池',dataStatus:chosen?'live':'unavailable',dataAt:chosen?.quote.updatedAt,
+          price:chosen?.quote.price,quote:chosen?.quote,indicatorDataStatus:indicatorStatus,indicatorDataAt,indicatorRetrievedAt:intraday.fetchedAt,
+          rsi14:metrics.rsi14,sma10:metrics.sma10,candidateSignals:[],
+          evidence:[...candidates.map(candidate=>({dataset:'quote' as const,source:candidate.source,status:candidate.status,dataAt:candidate.quote?.asOf || undefined,retrievedAt:candidate===candidates[0]?nasdaq.fetchedAt:yahooQuote.fetchedAt,
+            reason:candidate.quote ? '仅符合身份、时间、实时标记及双边价格校验的来源可被随机选中' : (candidate===candidates[0]?nasdaq.error:yahooQuote.error)})),
+            {dataset:'bars',source:'Yahoo 完成的1分钟K线',status:indicatorStatus,dataAt:indicatorDataAt,retrievedAt:intraday.fetchedAt,reason:indicatorGate.reason || intraday.error}],
+          reason:!chosen?'没有未过期的有效实时双边报价；不使用历史收盘价替代':!indicatorGate.allowed?indicatorGate.reason:undefined};
+        (row as any).aboveSma=chosen && metrics.sma10!=null ? chosen.quote.price>metrics.sma10 : undefined;
+      } else {
       const history = await getRunnerStockKlineAdapter(symbol).fetch();
       const bars = history.data || [];
       const metrics = runnerIndicators(bars);
@@ -8731,6 +8769,7 @@ async function loadAiRunnerInstrumentSnapshot(runner: AiRunner, ref: AiRunnerIns
         reason: bars.length ? '当前来源仅提供历史日K，缺少可验证的实时买卖盘口，不能模拟成交' : history.error || '暂无股票历史K线',
       };
       (row as any).aboveSma = metrics.price != null && metrics.sma10 != null && metrics.price > metrics.sma10;
+      }
     } else if (ref.venue === 'Predict.fun') {
       if (!/^\d+$/.test(instrument)) {
         row = { ...row, dataStatus: 'unsupported', source: 'Predict.fun 官方 API', reason: '事件 ID 不是当前 Predict.fun 接口支持的数字 ID' };
@@ -8833,8 +8872,11 @@ async function prepareAiRunnerTick(runnerId: string, idempotencyKey: string, sam
       else {
         const decisionId = `${idempotencyKey}:model`;
         try {
-          recordAiRunnerModelCall(runner.id, { at: now.toISOString(), model: runner.model || runtime.model, decisionId });
-          const result = await requestAiRunnerIntent(runner, runtime, snapshots);
+          const result = await requestAiRunnerIntent(runner, runtime, snapshots, fetch, (model,attempt) => {
+            const current=getAiRunners().find(item=>item.id===runner.id);
+            if (!current || current.status!=='RUNNING') throw new Error('跑单已暂停或停止');
+            recordAiRunnerModelCall(runner.id, { at:new Date().toISOString(),model,decisionId:`${decisionId}:attempt:${attempt}` });
+          });
           if (result.ok) { intent = result.intent; modelVersion = result.model; }
           else { aiStatusReason = result.reason; modelVersion = result.model; }
         } catch (error) { aiStatusReason = error instanceof Error ? error.message : 'AI 调用失败'; }

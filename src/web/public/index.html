@@ -4218,10 +4218,13 @@ async function loadAiRunners() {
         </div>
         <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:6px;color:var(--text-secondary);font-size:11.5px;">
           <span>范围 ${universeName}</span><span>触发 ${triggerName}</span><span>预算 $${r.budgetUsd}</span><span>权益 $${s.equityUsd?.toFixed(2) ?? '—'}</span>
+          <span>模型 ${r.modelSelection === 'available-free' ? '免费模型自动切换（每轮最多3次）' : safeNewsText(r.model || '已配置模型')}</span>
+          <span>报价 ${r.quoteSelection === 'random-valid' ? '有效来源随机选择' : '固定来源'} · ${safeNewsText(r.lastDataSource || '等待首次报价')}</span>
           <span>已平仓 ${s.closedCount ?? 0}</span><span>胜率 ${s.winRateReliable ? `${s.winRatePct}%` : `样本不足（${s.closedCount || 0}/20）`}</span>
           <span>单笔≤$${r.policy?.maxTradeUsd ?? '—'}</span><span>持仓≤${r.policy?.maxPositions ?? '—'}</span><span>日损≤$${r.policy?.maxDailyLossUsd ?? '—'}</span>
           <span>费用/额外滑点 $${Number(s.feeSlippageUsd || 0).toFixed(2)}</span><span>点差估算 $${Number(s.spreadCostUsd || 0).toFixed(2)}（成交价已计入）</span><span>估值 ${safeNewsText(s.valuationStatus || r.lastDataStatus || '暂无')}</span>
           <span>最大回撤 ${Number(s.maxDrawdownPct || 0).toFixed(2)}%</span>
+          <span>今日模型调用 ${(r.aiCalls || []).filter(call => String(call.at || '').slice(0,10) === new Date().toISOString().slice(0,10)).length}/24（UTC）</span>
           ${s.unrealizedPct != null ? `<span>浮盈 ${s.unrealizedPct >= 0 ? '+' : ''}${s.unrealizedPct}%</span>` : ''}
         </div>
         <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:8px;padding:8px 0;border-top:1px solid var(--border);border-bottom:1px solid var(--border);">${equityCurve}<span style="color:var(--text-secondary);font-size:10.5px;">${safeNewsText(benchmarkText)}；基准从首次有效报价开始，不追溯启动前数据。</span></div>

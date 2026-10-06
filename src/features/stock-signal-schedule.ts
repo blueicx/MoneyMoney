@@ -7,7 +7,12 @@ interface Run { at: string; status: string; reason?: string; }
 /** Parse provider observation time, never the time at which we fetched the quote. */
 export function stockQuoteObservationTime(raw: string | null | undefined): number | null {
   if (!raw) return null;
-  const text = raw.trim();
+  let text = raw.trim();
+  const named = /^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2}),\s+(\d{4})\s+(\d{1,2}:\d{2}(?::\d{2})?\s+(?:AM|PM))\s+ET$/i.exec(text);
+  if (named) {
+    const month = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'].indexOf(named[1].toLowerCase()) + 1;
+    text = `${month}/${named[2]}/${named[3]} ${named[4]} ET`;
+  }
   const iso = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.\d{1,3})?)?(Z|[+-]\d{2}:\d{2})$/i.exec(text);
   if (iso) {
     const [, year, month, day, hour, minute, second = '0'] = iso;

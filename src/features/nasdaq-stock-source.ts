@@ -47,6 +47,7 @@ function keyedAdapter<T>(
 export function parseNasdaqQuotePayload(symbolInput: string, payload: NasdaqPayload): StockQuote {
   const symbol = text(symbolInput).toUpperCase();
   const primary = payload?.data?.primaryData;
+  if (payload?.data?.symbol && text(payload.data.symbol).toUpperCase() !== symbol) throw new Error('Nasdaq quote identity mismatch');
   const price = numeric(primary?.lastSalePrice);
   if (!symbol || price == null || price < 0) throw new Error('Nasdaq quote payload is invalid');
   return {
@@ -55,6 +56,9 @@ export function parseNasdaqQuotePayload(symbolInput: string, payload: NasdaqPayl
     changePct: numeric(primary?.percentageChange),
     currency: 'USD',
     asOf: text(primary?.lastTradeTimestamp) || null,
+    ...(Number(numeric(primary?.bidPrice)) > 0 ? { bestBid: numeric(primary.bidPrice)! } : {}),
+    ...(Number(numeric(primary?.askPrice)) > 0 ? { bestAsk: numeric(primary.askPrice)! } : {}),
+    ...(typeof primary?.isRealTime === 'boolean' ? { isRealTime: primary.isRealTime } : {}),
   };
 }
 

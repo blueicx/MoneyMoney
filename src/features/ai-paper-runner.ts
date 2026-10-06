@@ -13,6 +13,8 @@ import { createHash, randomUUID } from 'node:crypto';
 import { DATA_ROOT, ensureDir } from '../utils/paths';
 import { stateStore } from '../storage/sqlite-state';
 import { unifiedPaperLedgerStore, type UnifiedPaperInstrumentType } from './unified-paper-trading';
+import type { StockQuote } from './stock-data-contracts';
+import { stockQuoteObservationTime } from './stock-signal-schedule';
 
 export type AiRunnerVenue = 'Binance' | 'Predict.fun' | 'Stocks' | 'Options';
 export type AiRunnerStatus = 'RUNNING' | 'STOPPED';
@@ -177,6 +179,8 @@ export interface AiRunner {
   strategyVersion?: string;
   model?: string;
   mode?: AiRunnerMode;
+  modelSelection?: 'fixed' | 'available-free';
+  quoteSelection?: 'fixed' | 'random-valid';
   trigger?: AiRunnerTrigger;
   universe?: AiRunnerUniverse;
   accountId?: string;
@@ -214,6 +218,21 @@ export interface AiRunnerQuote {
   reason?: string;
   bestBid?: number;
   bestAsk?: number;
+}
+
+export function selectRunnerStockQuote(symbol: string, candidates: Array<{ source: string; status?: string; quote: StockQuote | null }>, maxAgeMs: number, now = Date.now(), random = Math.random): { source: string; quote: AiRunnerQuote } | null {
+  const valid = candidates.filter(row => {
+    const q = row.quote;
+    if (!q || q.symbol.toUpperCase() !== symbol.toUpperCase() || q.currency !== 'USD' || q.isRealTime !== true || ['stale','unavailable','degraded'].includes(row.status || '')) return false;
+    const at = stockQuoteObservationTime(q.asOf);
+    return at != null && at <= now && now - at <= maxAgeMs && q.price > 0 && Number.isFinite(q.price)
+      && Number.isFinite(q.bestBid) && Number(q.bestBid) > 0 && Number.isFinite(q.bestAsk) && Number(q.bestAsk) >= Number(q.bestBid);
+  });
+  if (!valid.length) return null;
+  const selected = valid[Math.min(valid.length - 1, Math.max(0, Math.floor(random() * valid.length)))];
+  const at = new Date(stockQuoteObservationTime(selected.quote!.asOf)!).toISOString();
+  return { source: selected.source, quote: { market:'stocks', status:'live', dataStatus:'live', source:selected.source,
+    price:selected.quote!.price, bestBid:selected.quote!.bestBid, bestAsk:selected.quote!.bestAsk, updatedAt:at, fetchedAt:at } };
 }
 
 export interface AiRunnerMarketState {
@@ -801,6 +820,15 @@ function updateRunner(id: string, fn: (r: AiRunner) => void): AiRunner | null {
     fn(runner);
     saveRunners(runners);
     return runner;
+  });
+}
+
+export function updateAiRunnerRouting(id: string, patch: { modelSelection: 'fixed' | 'available-free'; quoteSelection: 'fixed' | 'random-valid' }): AiRunner | null {
+  if (!['fixed', 'available-free'].includes(patch.modelSelection) || !['fixed', 'random-valid'].includes(patch.quoteSelection)) throw new Error('模型或报价选择模式无效');
+  return updateRunner(id, runner => {
+    if (runner.comparisonControl) throw new Error('对照实验必须保留固定模型和共享行情');
+    runner.modelSelection = patch.modelSelection;
+    runner.quoteSelection = patch.quoteSelection;
   });
 }
 

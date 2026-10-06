@@ -20,12 +20,42 @@ export interface AiRunnerModelSnapshot {
 }
 
 export async function requestAiRunnerIntent(
-  runner: Pick<AiRunner, 'model' | 'universe' | 'comparisonControl'>,
+  runner: Pick<AiRunner, 'model' | 'universe' | 'comparisonControl' | 'modelSelection'>,
   runtime: AiRuntimeConfig,
   snapshots: AiRunnerModelSnapshot[],
   fetchImpl: typeof fetch = fetch,
+  beforeAttempt?: (model: string, attempt: number) => void,
 ): Promise<{ ok: true; intent: AiRunnerModelIntent; model: string } | { ok: false; reason: string; model?: string }> {
   if (!runtime.configured || !runtime.apiKey) return { ok: false, reason: '未配置 OpenRouter，AI 跑单不可用' };
+  if (runner.modelSelection === 'available-free' && !runner.comparisonControl) {
+    if (runtime.apiUrl !== 'https://openrouter.ai/api/v1/chat/completions') return { ok: false, reason: '免费自动切换仅支持 OpenRouter 官方接口' };
+    const models = ['openrouter/free'];
+    const failures: string[] = [];
+    for (let attempt = 0; attempt < models.length && attempt < 3; attempt++) {
+      const selected = models[attempt];
+      try { beforeAttempt?.(selected, attempt); }
+      catch (error) { return { ok: false, model: selected, reason: error instanceof Error ? error.message : 'AI 调用额度不足' }; }
+      const result = await requestAiRunnerIntent({ ...runner, modelSelection: 'fixed', model: selected }, runtime, snapshots, fetchImpl);
+      if (result.ok) return result;
+      failures.push(`${selected}: ${result.reason}`);
+      // Account/auth/rate failures apply to the service, not one model. Never spin.
+      if (/HTTP (401|402|403|429)/.test(result.reason)) return result;
+      if (attempt === 0) {
+        try {
+          const response = await fetchImpl('https://openrouter.ai/api/v1/models', { signal: AbortSignal.timeout(5_000) });
+          if (response.ok) {
+            const catalog = await response.json() as { data?: Array<{ id?: string; pricing?: Record<string, string>; architecture?: { output_modalities?: string[] } }> };
+            for (const row of catalog.data || []) {
+              if (models.length >= 3) break;
+              if (row.id?.endsWith(':free') && row.id.length <= 160 && row.pricing?.prompt === '0' && row.pricing?.completion === '0'
+                && Object.values(row.pricing).every(value => Number(value) === 0) && row.architecture?.output_modalities?.includes('text') && !models.includes(row.id)) models.push(row.id);
+            }
+          }
+        } catch { failures.push('免费模型目录暂不可用'); }
+      }
+    }
+    return { ok: false, model: models[models.length - 1], reason: failures.join('；').slice(0, 600) };
+  }
   const model = String(runner.model || runtime.model || '').trim();
   if (!model || model.length > 160) return { ok: false, reason: 'OpenRouter 模型配置无效' };
   const safeSnapshots = snapshots.slice(0, 5).map(item => ({
@@ -49,6 +79,8 @@ export async function requestAiRunnerIntent(
     },
     { role: 'user', content: JSON.stringify({ market: runner.universe?.market, allowedInstruments: runner.universe?.instruments.map(item => item.symbolOrMarketId), snapshots: safeSnapshots }) },
   ];
+  try { beforeAttempt?.(model, 0); }
+  catch (error) { return { ok: false, model, reason: error instanceof Error ? error.message : 'AI 调用额度不足' }; }
   try {
     const response = await fetchImpl(runtime.apiUrl, {
       method: 'POST',
@@ -58,12 +90,12 @@ export async function requestAiRunnerIntent(
       signal: AbortSignal.timeout(15_000),
     });
     if (!response.ok) return { ok: false, reason: `AI 接口返回 HTTP ${response.status}`, model };
-    const payload = await response.json() as { choices?: Array<{ message?: { content?: unknown } }> };
+    const payload = await response.json() as { model?: string; choices?: Array<{ message?: { content?: unknown } }> };
     const content = payload.choices?.[0]?.message?.content;
     const validated = validateAiRunnerModelIntent(content, runner);
     if (!validated.ok) return { ok: false, reason: validated.reason, model };
     if (validated.intent.market && validated.intent.market !== runner.universe?.market) return { ok: false, reason: 'AI 意图市场与冻结范围不一致', model };
-    return { ok: true, intent: validated.intent, model };
+    return { ok: true, intent: validated.intent, model: String(payload.model || model).slice(0, 160) };
   } catch {
     return { ok: false, reason: 'AI 请求失败或超时', model };
   }
