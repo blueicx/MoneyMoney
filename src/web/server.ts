@@ -4842,7 +4842,7 @@ function telegramScopeForWatchId(id: string): MarketScope | null {
 }
 
 function telegramScopedWatchIds(chatId: string, scope: MarketScope): string[] {
-  const ids = [...new Set([...unifiedAlertStore.listWatchlist(), ...telegramCommandCenterStore.listWatchlist(chatId)])];
+  const ids = [...new Set(telegramCommandCenterStore.listWatchlist(chatId))];
   if (scope === 'overview' || scope === 'watchlist') return ids;
   return ids.filter(id => telegramScopeForWatchId(id) === scope);
 }
@@ -4883,6 +4883,15 @@ function isTelegramAdmin(chatId: string): boolean {
   return configured.size === 0 || configured.has(String(chatId));
 }
 
+telegramCommandCenterStore.bindOwnerWatchlist({
+  isOwnerChat:chatId=>telegramAdminChatIds().has(chatId),
+  normalize:id=>canonicalDigestWatchlist([/^\d+$/.test(id) ? `prediction:predictfun:${id}` : id])[0]?.instrument || null,
+  list:()=>unifiedAlertStore.listWatchlist(),
+  add:id=>unifiedAlertStore.addWatchlist(id),
+  remove:id=>unifiedAlertStore.removeWatchlist(id),
+});
+for(const chatId of telegramAdminChatIds()) telegramCommandCenterStore.listWatchlist(chatId);
+
 function localDashboardUrl(): string {
   if (config.appHost !== '0.0.0.0') return `http://localhost:${config.appPort}`;
   const interfaces = os.networkInterfaces();
@@ -4919,12 +4928,14 @@ function telegramRadarMarkets() {
 }
 
 function telegramFindMarket(marketId: string) {
-  return telegramRadarMarkets().find(item => String(item.id) === String(marketId));
+  return telegramRadarMarkets().find(item => String(item.id) === String(marketId).replace(/^prediction:predictfun:/,''));
 }
 
 function telegramWatchLabel(marketId: string, market?: any): string {
   if (market) return String(market.titleZh || market.title || marketId);
   const normalized = String(marketId || '');
+  const ref=telegramRefFromId(normalized);
+  if(ref)return String(ref.symbol);
   return isTelegramWatchableStockId(normalized)
     ? normalized.replace(/^(us|hk|sh|sz|bj)/i, '').toUpperCase()
     : normalized;
@@ -4936,7 +4947,7 @@ function formatTelegramWatchlist(chatId: string, scope: MarketScope = 'watchlist
   const lines = ids.map((id, index) => {
     const market = telegramFindMarket(id);
     if (!market) {
-      return isTelegramWatchableStockId(id)
+      return telegramScopeForWatchId(id)==='stocks'
         ? (index + 1) + '. 股票 ' + escapeTelegramHtml(telegramWatchLabel(id)) + ' · ' + escapeTelegramHtml(id)
         : (index + 1) + '. 市场 ' + escapeTelegramHtml(id) + ' · 当前快照未找到';
     }
@@ -5559,7 +5570,7 @@ export function getTelegramCommandHandlers(): Record<string, TelegramCommandHand
       if (!parsed) return '用法：/watch add &lt;市场ID&gt; 或 /watch remove &lt;市场ID&gt;；查看：/watchlist';
       if (parsed.action === 'list') return formatTelegramWatchlist(chatId, scope);
       const market = telegramFindMarket(parsed.marketId || '');
-      if (parsed.action === 'add' && !market && !isTelegramWatchableStockId(parsed.marketId || '')) return '未找到该市场。请先用 /search &lt;关键词&gt; 确认市场 ID。';
+      if (parsed.action === 'add' && !market && !isTelegramWatchableStockId(parsed.marketId || '') && !telegramRefFromId(parsed.marketId || '')) return '未找到该市场。请先用 /search &lt;关键词&gt; 确认市场 ID。';
       const itemScope = telegramScopeForWatchId(parsed.marketId || '');
       if (itemScope && scope !== 'overview' && scope !== 'watchlist' && itemScope !== scope) {
         return `当前为${TELEGRAM_SCOPE_LABELS[scope]}市场，不能操作${TELEGRAM_SCOPE_LABELS[itemScope]}标的。请先切换市场后重试。`;
@@ -6609,7 +6620,6 @@ function startTelegramInteractionBot(): void {
         telegramCommandCenterStore.setActiveMarketScope(ctx.chatId, parsed.scope);
         telegramCommandCenterStore.updateSession(ctx.chatId, { marketScope: parsed.scope, workspace: parsed.workspace, instrumentId: parsed.ref.id, timeframe: parsed.timeframe });
         const changed = telegramCommandCenterStore.addWatchlistMarket(ctx.chatId, parsed.id);
-        unifiedAlertStore.addWatchlist(parsed.id);
         telegramCommandCenterStore.recordAudit(ctx.chatId, 'watchlist_update', 'add:' + parsed.id);
         return telegramReply(changed ? `✅ 已加入${escapeTelegramHtml(TELEGRAM_SCOPE_LABELS[parsed.scope])}自选：${escapeTelegramHtml(parsed.ref.title || parsed.ref.symbol)}` : '该标的已在自选中。');
       }
@@ -6729,18 +6739,14 @@ ${escapeTelegramHtml(position.marketTitle)} · ${escapeTelegramHtml(position.out
         const itemScope = telegramScopeForWatchId(mid);
         if (itemScope && currentScope !== 'overview' && currentScope !== 'watchlist' && itemScope !== currentScope) return telegramReply(`当前为${TELEGRAM_SCOPE_LABELS[currentScope]}市场，不能把${TELEGRAM_SCOPE_LABELS[itemScope]}标的加入此处自选。`);
         const m = telegramFindMarket(mid);
-        const canonical = mid.includes(':') ? mid : (isTelegramWatchableStockId(mid) ? `stock:us:${mid.replace(/^us/i, '')}` : `prediction:predictfun:${mid}`);
-        if (!m && !isTelegramWatchableStockId(mid) && !/^(stock|crypto|prediction):/i.test(mid)) return telegramReply('未找到该市场');
+        if (!m && !isTelegramWatchableStockId(mid) && !/^(stock|option|crypto|prediction):/i.test(mid)) return telegramReply('未找到该市场');
         const changed = telegramCommandCenterStore.addWatchlistMarket(ctx.chatId, mid);
-        unifiedAlertStore.addWatchlist(canonical);
         telegramCommandCenterStore.recordAudit(ctx.chatId, 'watchlist_update', 'add:'+mid);
         return telegramReply(changed ? `✅ 已加入自选：${escapeTelegramHtml(telegramWatchLabel(mid, m))}` : '该市场已在自选中');
       }
       if (data.startsWith('watch:remove:')) {
         const mid = data.slice('watch:remove:'.length);
         const changed = telegramCommandCenterStore.removeWatchlistMarket(ctx.chatId, mid);
-        const canonical = mid.includes(':') ? mid : (isTelegramWatchableStockId(mid) ? `stock:us:${mid.replace(/^us/i, '')}` : `prediction:predictfun:${mid}`);
-        unifiedAlertStore.removeWatchlist(canonical);
         telegramCommandCenterStore.recordAudit(ctx.chatId, 'watchlist_update', 'remove:'+mid);
         return telegramReply(changed ? `✅ 已移出自选：${escapeTelegramHtml(mid)}` : '该市场不在自选中');
       }

@@ -1,5 +1,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs=require('node:fs'),os=require('node:os'),path=require('node:path');
+const root=fs.mkdtempSync(path.join(os.tmpdir(),'telegram-watchlist-actions-'));
+process.env.MONEYMONEY_DATA_DIR=root;
 const { getTelegramCommandHandlers } = require('../dist/web/server.js');
 const { telegramCommandCenterStore } = require('../dist/features/telegram-command-center.js');
 const { unifiedAlertStore } = require('../dist/features/unified-alerts.js');
@@ -8,13 +11,14 @@ test('telegram watchlist detail actions generation', async () => {
   const handlers = getTelegramCommandHandlers();
   const watchlistHandler = handlers['watchlist'];
 
-  telegramCommandCenterStore.listWatchlist = () => ['1234', 'usAAPL'];
-  unifiedAlertStore.listWatchlist = () => ['stock:us:MSFT', 'crypto:binance:BTCUSDT', 'prediction:predictfun:5678'];
+  telegramCommandCenterStore.listWatchlist = () => ['1234', 'usAAPL', 'stock:us:MSFT', 'crypto:binance:BTCUSDT', 'prediction:predictfun:5678'];
+  unifiedAlertStore.listWatchlist = () => ['stock:us:NVDA'];
 
   const response = await watchlistHandler({ chatId: 'test_chat' });
 
   const kb = response.replyMarkup.inline_keyboard;
   assert.equal(kb.length, 5);
+  assert.ok(!kb.some(row=>row.some(btn=>String(btn.callback_data).includes('NVDA'))), 'private web watch must not leak into an unrelated chat');
 
   // 'stock:us:MSFT' should have '查看详情' and 'unified:show:stock:us:MSFT'
   const msftRow = kb.find(row => row.some(btn => btn.callback_data === 'watch:remove:stock:us:MSFT'));
