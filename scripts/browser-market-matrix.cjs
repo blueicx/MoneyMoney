@@ -33,6 +33,9 @@ async function waitForServer() {
 }
 
 async function auditThemeControls(page) {
+  // This module is intentionally absent from the stock first screen. Load it
+  // for its actual-control theme audit, not as part of normal chart startup.
+  await page.evaluate(() => window.MoneyWorkspaceModules.ensure('contracts'));
   const snapshots = await page.evaluate(() => {
     const root = document.documentElement;
     const originalTheme = root.getAttribute('data-theme');

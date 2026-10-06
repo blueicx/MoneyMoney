@@ -3,7 +3,11 @@ test('metric composer remains inside alerts, binds current instrument and render
  const dom=new JSDOM('<main id="market-workspace-shell" data-market-scope="stocks" data-workspace="guru-holdings" data-instrument="stock:us:SNDK"><section id="alerts-tab"></section><section id="market-change-digest"></section></main>',{url:'https://test.invalid',runScripts:'outside-only'});
  const win=dom.window;win.mm_isLoggedIn=true;win.mm_isGuest=false;win.fetch=async()=>({ok:true,json:async()=>({success:true,fields:['price','rsi'],data:[]})});win.openWorkspace=()=>{};
  win.eval(fs.readFileSync('src/web/public/practical-experience.js','utf8'));win.document.dispatchEvent(new win.Event('DOMContentLoaded'));await new Promise(resolve=>setTimeout(resolve,20));
- assert.equal(win.document.querySelector('#mm-metric-composer').closest('#alerts-tab')?.id,'alerts-tab');assert.equal(win.document.querySelector('[data-metric-instrument]').textContent,'stock:us:SNDK');assert.equal(win.document.querySelectorAll('[data-metric-field] option').length,2);
+ assert.equal(win.document.querySelector('#mm-metric-composer').closest('#alerts-tab')?.id,'alerts-tab');
+ assert.equal(win.document.querySelectorAll('[data-metric-field] option').length,0,'hidden alerts do not fetch capabilities');
+ win.document.getElementById('market-workspace-shell').dataset.workspace='alerts';
+ win.dispatchEvent(new win.Event('mm-workspace-context'));await new Promise(resolve=>setTimeout(resolve,20));
+ assert.equal(win.document.querySelector('[data-metric-instrument]').textContent,'stock:us:SNDK');assert.equal(win.document.querySelectorAll('[data-metric-field] option').length,2);
  win.mm_isGuest=true;win.dispatchEvent(new win.Event('mm-workspace-context'));assert.equal(win.document.querySelector('#mm-metric-composer').hidden,true);dom.window.close();
 });
 test('history chart preserves gaps, supports keyboard inspection and safe export',()=>{

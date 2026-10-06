@@ -2809,6 +2809,11 @@
                 <span id="stock-chart-replay-status" class="stock-chart-replay-status" aria-live="polite"></span>
               </div>
               <div id="stock-chart-ma-values" class="chart-ma-values" aria-live="polite"></div>
+              <div id="stock-chart-empty" class="empty-tip" role="status" aria-live="polite" hidden>
+                <div data-kline-empty-reason></div>
+                <button class="tab" type="button" data-kline-retry onclick="loadStockKline()">重试K线</button>
+                <button class="tab" type="button" data-kline-exit-asof onclick="clearStockKlineAsOf()">退出时点，查看普通行情</button>
+              </div>
               <div class="stock-chart-stage" style="position:relative;">
                 <canvas id="stock-kline" width="640" height="360" style="width:100%;height:340px;display:block;"></canvas>
                 <div id="stock-chart-patterns" style="position:absolute; inset:0; pointer-events:none; overflow:visible;"></div>
@@ -6914,12 +6919,7 @@ function selectStockSymbol(symbol, name, apiSymbol, options = {}) {
     loadStockKline(legacySymbol, displayName, apiSymbol);
   }
   if (options.refreshRelated === false) return;
-  loadInsiderRadar(normalized, displayName);
-  loadFundamentalQuality(normalized, displayName);
-  loadShortInterest(normalized, displayName);
-  loadInstitutionalOwnership(normalized, displayName);
-  loadAnalystConsensus(normalized, displayName);
-  document.getElementById('stock-chart-title')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  if (activeWorkspaceId === 'stock-quotes') document.getElementById('stock-chart-title')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
 async function loadStockIndices(signal) {
   const el = document.getElementById('stock-indices');
@@ -6952,45 +6952,18 @@ async function loadStockQuotes() {
     if (currentStockDashboardController === controller) currentStockDashboardController = null;
   }
 }
-async function loadUnifiedStockData(symbol) {
-  const el = document.querySelector('#stock-chart-data-status [data-stock-coverage]') || document.getElementById('stock-chart-data-status');
-  if (!['stocks', 'overview', 'watchlist'].includes(activeMarketScope)) return null;
+async function loadUnifiedStockData(symbol, payload = null) {
+  const el = document.querySelector('#stock-chart-data-status [data-stock-coverage]');
+  if (!el || !['stocks', 'overview', 'watchlist'].includes(activeMarketScope)) return null;
   const normalized = String(symbol || '').replace(/^us/i, '').toUpperCase();
-  if (!/^[A-Z][A-Z0-9.-]{0,9}$/.test(normalized)) return null;
-  const requestToken = (window._stockDataRequestToken || 0) + 1;
-  window._stockDataRequestToken = requestToken;
-  if (el) el.textContent = '正在读取股票免费数据源…';
-  try {
-    const [overviewResponse, coverageResponse] = await Promise.all([
-      fetch('/api/stocks/' + encodeURIComponent(normalized) + '/overview', { cache: 'no-store' }),
-      fetch('/api/stocks/' + encodeURIComponent(normalized) + '/coverage', { cache: 'no-store' }),
-    ]);
-    const payload = await overviewResponse.json();
-    const coveragePayload = await coverageResponse.json();
-    if (requestToken !== window._stockDataRequestToken || !['stocks', 'overview', 'watchlist'].includes(activeMarketScope)) return null;
-    if (!payload.success || !payload.data) throw new Error(payload.error || '股票数据暂不可用');
-    const sources = (payload.data.sources || []).map(source => {
-      const label = ({ 'nasdaq-public-quote': 'Nasdaq报价', 'nasdaq-public-history': 'Nasdaq历史', 'sec-edgar-submissions': 'SEC申报', 'sec-edgar-companyfacts': 'SEC公司事实' })[source.source] || source.source;
-      const status = source.status === 'live' ? '正常' : source.status === 'fallback' ? '降级源' : source.status === 'stale' ? '旧缓存' : source.status === 'unconfigured' ? '未配置' : '不可用';
-      return label + '：' + status + '（' + new Date(source.fetchedAt).toLocaleString() + '）';
-    });
-    if (el) el.textContent = normalized + ' · 来源状态：' + (sources.join('　') || '暂无');
-    const coverage = coveragePayload?.data?.data || coveragePayload?.data;
-    if (coverage?.capabilities && el) {
-      const labels = { quote: '报价', bars: 'K线', filings: 'SEC申报', fundamentals: '基本面', news: '新闻', insider: '内部人' };
-      const statusLabel = { live: '有数据', cached: '缓存', partial: '部分', empty: '暂无', unavailable: '不可用' };
-      const cells = Object.entries(coverage.capabilities).map(([key, item]) => {
-        const date = item.coverage?.from && item.coverage?.to ? ` · ${item.coverage.from} 至 ${item.coverage.to}` : '';
-        const detail = item.reason || `${item.count ?? 0} 条${date}`;
-        return `<span title="${stockEscapeHtml(item.source || '')}: ${stockEscapeHtml(detail)}" style="display:inline-block;margin:3px 4px 0 0;padding:3px 7px;border:1px solid var(--border);border-radius:999px;color:var(--text-secondary);font-size:10px;">${labels[key] || key}：${statusLabel[item.status] || item.status}</span>`;
-      }).join('');
-      el.innerHTML += `<div style="margin-top:5px;line-height:1.5;">${cells}</div>`;
-    }
-    return payload.data;
-  } catch (error) {
-    if (requestToken === window._stockDataRequestToken && el) el.textContent = normalized + ' · 股票免费数据源暂时不可用，其他卡片仍可查看。';
-    return null;
-  }
+  const mode = stockChartAsOf ? '历史时点' : '普通行情';
+  if (!payload) { el.textContent = normalized + ' · ' + currentStockKlinePeriod + ' · ' + mode + ' · 等待当前K线覆盖信息'; return null; }
+  const bars = Array.isArray(payload.data) ? payload.data : [];
+  const labels = { live:'实时', delayed:'延迟', cached:'缓存', partial:'部分成功', historical:'历史数据', empty:'暂无数据', unavailable:'来源不可用', unsupported:'当前市场不支持', failed:'请求失败' };
+  const status = labels[payload.dataStatus] || '状态未知';
+  el.textContent = normalized + ' · ' + currentStockKlinePeriod + ' · ' + mode + ' · K线：' + status + ' · ' + bars.length + ' 根' + (payload.reason ? ' · ' + payload.reason : '');
+  el.title = [payload.source, payload.updatedAt, payload.coverage?.from, payload.coverage?.to].filter(Boolean).join(' · ');
+  return payload;
 }
 async function loadStockMarket() { loadStockQuotes(); loadGlobalMetrics(); loadMacroCalendar(); }
 async function loadStockSearch() {
@@ -8865,6 +8838,7 @@ let stockChartDailyContext = null;
 let stockChartIntradaySession = null;
 let stockChartExchangeTimezone = 'America/New_York';
 let stockKlineRequestRevision = 0;
+let stockKlineController = null;
 let stockChartCompanionOpen = false;
 let stockChartCompanionMode = 'same-symbol';
 let stockChartCompanionPeriod = '1h';
@@ -9495,9 +9469,48 @@ function setStockKlineStatus(message) {
   const status = document.querySelector('#stock-chart-data-status [data-kline-status]') || document.getElementById('stock-chart-data-status');
   if (status) status.textContent = String(message || '');
 }
+function setStockKlineViewState(state, reason = '') {
+  const card = document.getElementById('stock-chart-card');
+  if (card) card.dataset.klineState = state;
+  const canvas = document.getElementById('stock-kline');
+  const ready = state === 'ready';
+  if (canvas) { canvas.hidden = !ready; canvas.style.display = ready ? 'block' : 'none'; }
+  const empty = document.getElementById('stock-chart-empty');
+  if (empty) {
+    empty.hidden = ready;
+    const message = empty.querySelector('[data-kline-empty-reason]');
+    if (message) message.textContent = reason;
+    const retry = empty.querySelector('[data-kline-retry]');
+    if (retry) retry.disabled = state === 'loading';
+    const exit = empty.querySelector('[data-kline-exit-asof]');
+    if (exit) exit.hidden = !stockChartAsOf;
+  }
+  document.querySelectorAll('#stock-chart-overlays input, #stock-chart-card [data-chart-replay]').forEach(control => { control.disabled = !ready; });
+  for (const id of ['stock-chart-patterns', 'stock-chart-pattern-list', 'stock-chart-signals', 'stock-chart-structure-list', 'stock-chart-ma-values']) {
+    const element = document.getElementById(id);
+    if (element) { element.hidden = !ready; if (!ready) element.innerHTML = ''; }
+  }
+  if (!ready) {
+    stockChartKlines = [];
+    stockChartIntradaySession = null;
+    stockChartReplayIndex = -1;
+    stockChartFocusIndex = null;
+    stockChartFocusEnabled = false;
+    updateStockKlineFocusControl();
+    renderChartPatternMarkers('stock-chart-patterns', [], () => null);
+    renderChartPatternList('stock-chart-pattern-list', [], '');
+    renderChartSignalList('stock-chart-signals', [], '');
+    renderChartStructureList('stock-chart-structure-list', [], null, '');
+    renderMovingAverageValues('stock-chart-ma-values', [], [5, 10, 20]);
+    const replay = document.getElementById('stock-chart-replay-status');
+    if (replay) replay.textContent = state === 'loading' ? '加载中' : '暂无K线';
+  }
+}
 async function loadStockKline(symbol, name, apiSymbol) {
   const requestRevision = ++stockKlineRequestRevision;
-  const asOfRevision = stockChartAsOfRevision;
+  if (stockKlineController) stockKlineController.abort();
+  const controller = new AbortController();
+  stockKlineController = controller;
   bindStockKlineSelection();
   if (!window.stockMoneyKLine) {
       const canvas = document.getElementById('stock-kline');
@@ -9514,16 +9527,14 @@ async function loadStockKline(symbol, name, apiSymbol) {
     stockChartIntradaySession = null;
     stockChartDailyContext = null;
     stockChartCompanionKey = '';
+    currentStockApiSymbol = '';
+    stockChartAsOf = '';
+    stockChartAsOfRevision++;
+    try { stockChartAsOf = localStorage.getItem(`moneymoney:kline-as-of:${symbol}`) || ''; } catch (e) {}
   }
   if (symbol) currentStockSymbol = symbol;
   if (name) currentStockName = name;
   if (apiSymbol !== undefined) currentStockApiSymbol = apiSymbol || '';
-  if (asOfRevision === stockChartAsOfRevision) {
-    try {
-      const storedAsOf = localStorage.getItem(stockKlineAsOfStorageKey()) || '';
-      if (storedAsOf || !stockChartAsOf) stockChartAsOf = storedAsOf;
-    } catch (e) {}
-  }
   syncStockKlineAsOfControl();
   stockChartFocusIndex = null;
   stockChartFocusEnabled = false;
@@ -9538,14 +9549,17 @@ async function loadStockKline(symbol, name, apiSymbol) {
     const chartCard = document.getElementById('stock-chart-card');
     chartCard?.setAttribute('aria-busy', 'true');
     setStockKlineStatus(`正在加载 ${stockChartIntradayDate ? `${stockChartIntradayDate} ${currentStockKlinePeriod}` : currentStockKlinePeriod}；旧周期图形暂时隐藏…`);
+    setStockKlineViewState('loading', `正在加载 ${currentStockName} · ${currentStockKlinePeriod}${stockChartAsOf ? ' · 历史时点' : ''}…`);
     const asOfQuery = stockChartAsOf ? '&asOf=' + encodeURIComponent(stockChartAsOf) : '';
     const dateQuery = stockChartIntradayDate ? '&date=' + encodeURIComponent(stockChartIntradayDate) + '&intradayPeriod=' + encodeURIComponent(stockChartIntradayPeriod) : '';
-    const res = await fetch('/api/stock/kline?symbol=' + encodeURIComponent(currentStockSymbol) + '&period=' + encodeURIComponent(currentStockKlinePeriod) + '&interval=' + encodeURIComponent(currentStockKlinePeriod) + asOfQuery + dateQuery + (currentStockApiSymbol ? '&api=' + encodeURIComponent(currentStockApiSymbol) : ''));
+    const res = await fetch('/api/stock/kline?symbol=' + encodeURIComponent(currentStockSymbol) + '&period=' + encodeURIComponent(currentStockKlinePeriod) + '&interval=' + encodeURIComponent(currentStockKlinePeriod) + asOfQuery + dateQuery + (currentStockApiSymbol ? '&api=' + encodeURIComponent(currentStockApiSymbol) : ''), { signal: controller.signal });
     const d = await res.json();
     if (requestRevision !== stockKlineRequestRevision) return;
+    loadUnifiedStockData(currentStockSymbol, d);
     if (!d.success || !d.data || !d.data.length) {
       currentStockKlineReason = d.reason || d.error || '暂无数据';
       setStockKlineStatus(currentStockKlineReason);
+      setStockKlineViewState(d.dataStatus === 'failed' ? 'failed' : 'empty', currentStockKlineReason);
       const context = canvas.getContext('2d');
       context.setTransform(1, 0, 0, 1, 0, 0);
       context.clearRect(0, 0, canvas.width, canvas.height);
@@ -9557,7 +9571,7 @@ async function loadStockKline(symbol, name, apiSymbol) {
       updateStockKlineFocusControl();
       renderChartPatternMarkers('stock-chart-patterns', [], () => null);
       renderChartPatternList('stock-chart-pattern-list', [], currentStockKlineReason);
-      renderChartSignalList('stock-chart-signals', [], '当前周期未触发所选策略信号');
+      renderChartSignalList('stock-chart-signals', [], '');
       return;
     }
     currentStockKlineReason = '';
@@ -9569,6 +9583,7 @@ async function loadStockKline(symbol, name, apiSymbol) {
     setStockKlineStatus(`${freshness}${stockChartIntradayDate ? ` · ${stockChartIntradayDate} · ${currentStockKlinePeriod} · ${stockChartExchangeTimezone}` : ''}${actualCoverage} · K线时间 ${latestBarTime || '来源未提供'} · ${d.source || '股票行情'} · 抓取 ${d.updatedAt ? formatChartTime(d.updatedAt) : '时间未知'}${d.reason ? ` · ${d.reason}` : ''}`);
     stockChartKlines = d.data;
     stockChartReplayIndex = stockChartKlines.length - 1;
+    setStockKlineViewState('ready');
     loadStockChartOverlayConfig();
     if (window.stockMoneyKLine?.update) window.stockMoneyKLine.update(stockChartKlines, { resetReplay: true });
     else drawStockKline(canvas, stockChartKlines);
@@ -9576,8 +9591,10 @@ async function loadStockKline(symbol, name, apiSymbol) {
     if (!document.getElementById('mm-stock-multi-chart')?.hidden) window.MoneyMoneyExperience?.loadMultiChart?.();
     canvas.style.visibility = 'visible';
   } catch(e) {
+    if (requestRevision !== stockKlineRequestRevision || controller.signal.aborted) return;
     currentStockKlineReason = '股票K线来源不可用，请稍后重试';
     setStockKlineStatus(currentStockKlineReason);
+    setStockKlineViewState('failed', currentStockKlineReason);
   } finally {
     if (requestRevision === stockKlineRequestRevision) document.getElementById('stock-chart-card')?.removeAttribute('aria-busy');
   }
@@ -10938,7 +10955,7 @@ async function markAllRead() {
 }
 // Poll notifications every 60s
 setInterval(() => {
-  if (!notifPanelOpen) loadNotifications();
+  if (!document.hidden && !window.mm_isGuest && window.mm_isLoggedIn && notifPanelOpen) loadNotifications();
 }, 60000);
 // Close panel on outside click
 document.addEventListener('click', (e) => {
@@ -12168,7 +12185,7 @@ function scopedStockLoaders(key) {
       : key === 'stocks-macro' ? [loadMacroIndicators, loadStablecoinLiquidity, loadEconomicIndicators, loadTreasuryYields]
         : key === 'stocks-calendar' ? [loadEarningsCalendar, loadMacroCalendar, loadMarketSentiment, loadCotRadar] : [];
   }
-  if (key === 'stocks-market') return activeMarketScope === 'overview' ? [loadStockQuotes, loadGlobalMetrics, loadMacroCalendar, loadStockKline] : activeMarketScope === 'stocks' ? [loadStockQuotes, loadMacroCalendar, loadStockKline] : [];
+  if (key === 'stocks-market') return activeMarketScope === 'overview' ? [loadStockQuotes, loadGlobalMetrics, loadMacroCalendar] : activeMarketScope === 'stocks' ? [loadStockQuotes] : [];
   if (key === 'stocks-macro') return activeMarketScope === 'crypto' ? [loadMacroIndicators, loadStablecoinLiquidity] : activeMarketScope === 'overview' ? [loadMacroIndicators, loadStablecoinLiquidity, loadEconomicIndicators, loadTreasuryYields] : ['stocks', 'options'].includes(activeMarketScope) ? [loadMacroIndicators, loadEconomicIndicators, loadTreasuryYields] : [];
   if (key === 'stocks-calendar') return activeMarketScope === 'crypto' ? [loadMarketSentiment] : ['stocks', 'options'].includes(activeMarketScope) ? [loadEarningsCalendar, loadMacroCalendar, loadCotRadar] : activeMarketScope === 'overview' ? [loadEarningsCalendar, loadMacroCalendar, loadMarketSentiment, loadCotRadar] : [];
   if (key === 'stocks-defi') return ['crypto', 'overview'].includes(activeMarketScope) ? STOCK_SECTION_LOADERS[key] : [];
@@ -12666,6 +12683,7 @@ function openDashboardWorkspace(scope, workspace, instrument = '') {
 }
 
 function loadWorkspaceDashboardCards() {
+  if (activeWorkspaceId !== 'overview') return;
   const scope = activeMarketScope;
   loadMarketChangeDigest();
   const fallback = (WORKSPACE_DASHBOARD_FALLBACK[scope] || []).map(([id, title, source, workspace]) => ({ id, title, source, workspace, market: scope, status: 'unavailable', reason: '正在读取该市场的数据；失败时会显示具体原因。', metrics: [] }));
@@ -15050,13 +15068,11 @@ async function startDashboard() {
   await restoreSharedWorkspaceFromUrl();
   restoreLastDashboardTab();
   if (currentInstrumentId) loadActiveWorkspaceInstrument();
-  loadAll();
-  loadCommandCenter();
-  loadNewsTicker();
-  loadMarketTimeline();
   renderChartPatternControls();
-  loadMarketOverview();
-  loadResearchBriefing();
+  if (activeWorkspaceId === 'overview') {
+    loadNewsTicker();
+    if (activeMarketScope === 'overview') { loadMarketOverview(); loadResearchBriefing(); }
+  }
 }
 startDashboard();
 </script>
@@ -15139,7 +15155,7 @@ function mobileTab(tab) {
         banner.querySelector('[data-pwa-update-dismiss]')?.addEventListener('click', () => banner.remove());
         document.body.appendChild(banner);
       };
-      navigator.serviceWorker.register('/sw.js?v=61').then((registration) => {
+      navigator.serviceWorker.register('/sw.js?v=62').then((registration) => {
         showPwaUpdate(registration);
         registration.addEventListener('updatefound', () => {
           const installing = registration.installing;

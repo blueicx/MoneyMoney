@@ -157,6 +157,7 @@ import { riskPatrol } from '../features/risk-patrol';
 import { createAccessMiddleware, validateAccessConfiguration } from './access-control';
 import { verifyLoginToken, extractAuthToken } from './auth';
 import { registerApiAuthProtection, registerAuthRoutes } from './auth-routes';
+import { registerBuiltAssets, sendBuiltPage } from './static-assets';
 import { stateStore, getStorageHealth } from '../storage/sqlite-state';
 import { TelegramEventResultMonitor, lookupOfficialEventResult } from '../features/telegram-event-results';
 import { renderTelegramKline } from '../features/telegram-kline-image';
@@ -328,13 +329,7 @@ app.get('/', (req, res) => {
     res.redirect('/login?next=' + encodeURIComponent(req.originalUrl || '/'));
     return;
   }
-  res.setHeader('Cache-Control', 'no-cache');
-  fs.promises.readFile(path.join(__dirname, 'public', 'index.html'))
-    .then(html => {
-      res.type('html');
-      res.send(html);
-    })
-    .catch(() => res.status(500).send('Dashboard assets missing'));
+  sendBuiltPage(req, res, path.join(__dirname, 'public'), 'index.html');
 });
 // --- MoneyMoney 登录鉴权（与 LAN token 共存） ---
 app.get('/login', (req, res) => {
@@ -346,15 +341,14 @@ app.get('/login', (req, res) => {
       return;
     }
   } catch {}
-  fs.promises.readFile(path.join(__dirname, 'public', 'login.html'))
-    .then(html => { res.type('html'); res.send(html); })
-    .catch(() => res.status(500).send('Login page missing'));
+  sendBuiltPage(req, res, path.join(__dirname, 'public'), 'login.html');
 });
 registerAuthRoutes(app);
 registerApiAuthProtection(app);
 
+registerBuiltAssets(app, path.join(__dirname, 'public'));
 app.use(express.static(path.join(__dirname, 'public'), {
-  setHeaders: (res) => res.setHeader('Cache-Control', 'no-store'),
+  setHeaders: (res) => res.setHeader('Cache-Control', 'no-cache'),
 }));
 
 

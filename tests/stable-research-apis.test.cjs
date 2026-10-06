@@ -113,5 +113,5 @@ test('stock K-line time machine protects a newer date from stale loads', () => {
   assert.match(html, /stockKlineRequestRevision/);
   assert.match(html, /requestRevision !== stockKlineRequestRevision/);
   assert.match(html, /stockChartAsOfRevision\+\+/);
-  assert.match(html, /storedAsOf \|\| !stockChartAsOf/);
+  assert.match(html, /stockChartAsOf = ''/);
 });

@@ -513,6 +513,7 @@
 
   let screenerMonitorScope = '';
   async function refreshScreenerMonitor(force = false) {
+    if (document.getElementById('market-workspace-shell')?.dataset.workspace !== 'screener') return;
     const market = marketScope();
     const results = document.getElementById('market-screener-results');
     const card = document.getElementById('market-screener');
@@ -803,13 +804,13 @@
     installWatchlistToolbar(); installDigestWorkflow(); installAlertHistoryPreview(); installGuruHoldingsMatrix(); installMultiChartToggle();
     refreshScreenerMonitor();
     const shell = document.getElementById('market-workspace-shell');
-    if (shell) new MutationObserver(() => refreshScreenerMonitor()).observe(shell, { attributes: true, attributeFilter: ['data-market-scope'] });
+    if (shell) new MutationObserver(() => refreshScreenerMonitor()).observe(shell, { attributes: true, attributeFilter: ['data-market-scope', 'data-workspace'] });
   }, { once: true });
   else {
     installLayoutControls(); installCommandPaletteActions(); installMobileLibraryDrawer(); installOfflineBanner();
     installWatchlistToolbar(); installDigestWorkflow(); installAlertHistoryPreview(); installGuruHoldingsMatrix(); installMultiChartToggle();
     refreshScreenerMonitor();
     const shell = document.getElementById('market-workspace-shell');
-    if (shell) new MutationObserver(() => refreshScreenerMonitor()).observe(shell, { attributes: true, attributeFilter: ['data-market-scope'] });
+    if (shell) new MutationObserver(() => refreshScreenerMonitor()).observe(shell, { attributes: true, attributeFilter: ['data-market-scope', 'data-workspace'] });
   }
 })();

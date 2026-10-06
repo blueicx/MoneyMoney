@@ -23,16 +23,16 @@ test('source health exposes stock source groups without prediction-only items', 
 });
 
 const html = fs.readFileSync('src/web/public/index.html', 'utf8');
-test('stock UI requests unified stock data and renders source freshness', () => {
-  assert.match(html, /\/api\/stocks\//);
-  assert.match(html, /数据来源|来源状态/);
-  assert.match(html, /nasdaq-public|sec-edgar/);
+test('stock chart renders freshness and coverage from the same current-request envelope', () => {
+  assert.match(html, /loadUnifiedStockData\(currentStockSymbol, d\)/);
+  assert.match(html, /payload\.dataStatus|数据来源/);
+  assert.match(html, /payload\.source/);
   assert.match(html, /activeMarketScope.*stocks|data-market-scopes="stocks/);
 });
 
 test('stock source status treats live and fallback data as usable', () => {
   assert.match(sourceHealth, /snapshot\.status === 'live'[\s\S]*snapshot\.status === 'fallback'/);
-  assert.match(html, /source\.status === 'live'[\s\S]*source\.status === 'fallback'/);
+  assert.match(html, /live:'实时', delayed:'延迟', cached:'缓存', partial:'部分成功', historical:'历史数据'/);
 });
 
 test('common US ticker searches have a local fast path before remote sources', () => {

@@ -140,8 +140,8 @@ test('stock library does not request private paper positions for guests', () => 
 test('dashboard bootstrap waits for auth before loading private widgets', () => {
   const bootstrap = indexHtml.slice(indexHtml.indexOf('async function startDashboard'), indexHtml.indexOf('// Restore last visited tab'));
   assert.match(bootstrap, /authReady|waitForDashboardAuthState/);
-  assert.match(bootstrap, /loadAll\(\)/);
-  assert.match(bootstrap, /loadCommandCenter\(\)/);
+  assert.doesNotMatch(bootstrap, /loadAll\(\)|loadCommandCenter\(\)/);
+  assert.match(bootstrap, /restoreLastDashboardTab\(\)/);
 });
 
 test('guest dashboard does not request private briefing or wallet balance', () => {

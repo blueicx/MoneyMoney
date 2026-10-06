@@ -65,8 +65,9 @@ async function main() {
       return response.status;
     });
     assert.equal(streamResponse, 200, 'admin should be able to receive private runner updates');
-    const html = await page.content();
-    assert.ok(html.includes('手动发送测试消息'), 'settings expose an explicit Telegram test action');
+    await page.evaluate(() => showTab('settings'));
+    await page.waitForFunction(() => document.getElementById('settings-tab')?.textContent?.includes('手动发送测试消息'));
+    assert.ok((await page.locator('#settings-tab').innerText()).includes('手动发送测试消息'), 'loaded settings expose an explicit Telegram test action');
     const telegramStatus = await page.evaluate(() => fetch('/api/telegram/status').then(async response => ({ status: response.status, body: await response.json() })));
     assert.equal(telegramStatus.status, 200);
     assert.ok(Array.isArray(telegramStatus.body.data.testDeliveryHistory));
