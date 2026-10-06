@@ -1,3 +1,35 @@
+export {
+  buildTelegramStockSignalUniverse,
+  normalizeTelegramStockSignalIdentity,
+} from '../features/telegram-stock-signal-universe';
+export type {
+  BuildTelegramStockSignalUniverseInput,
+  TelegramMoverSourceStatus,
+  TelegramStockMarket,
+  TelegramStockMover,
+  TelegramStockSignalCandidate,
+  TelegramStockSignalIdentity,
+  TelegramStockSignalSource,
+  TelegramStockSignalUniverse,
+} from '../features/telegram-stock-signal-universe';
+export {
+  formatTelegramStockSignalPage,
+  paginateTelegramStockSignals,
+  selectTelegramStockSignalAlerts,
+  telegramStockSignalNotificationKey,
+  TelegramStockSignalScanner,
+} from '../features/telegram-stock-signals';
+export type {
+  TelegramStockSignalPage,
+  TelegramStockSignalRow,
+  TelegramStockSignalRowStatus,
+  TelegramStockSignalScanInput,
+  TelegramStockSignalScanJob,
+  TelegramStockSignalScanStatus,
+  TelegramStockSignalSnapshot,
+  TelegramStockSignalStore,
+} from '../features/telegram-stock-signals';
+
 export interface TelegramStockSearchItem {
   code: string;
   name?: string;

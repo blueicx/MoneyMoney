@@ -6,7 +6,7 @@ export function buildDecisionMobileSummary(input: {
   market: MarketId;
   evidence: Array<{ dataStatus?: string }>;
   openDecisions: number;
-  signalQuality: { total: number; hitRate: number; warnings?: string[] };
+  signalQuality: { total: number; hitRate: number|null; warnings?: string[] };
   outages: number;
   deepLink?: string | null;
 }): string {
@@ -17,7 +17,7 @@ export function buildDecisionMobileSummary(input: {
     `<b>◇ ${LABELS[input.market]}可信决策</b>`,
     `证据：实时 ${live} · 缓存 ${cached} · 来源故障 ${input.outages}`,
     `决策：${input.openDecisions} 条待复盘`,
-    `信号：${input.signalQuality.total} 个样本 · 命中率 ${(Number(input.signalQuality.hitRate || 0) * 100).toFixed(1)}%`,
+    `信号：${input.signalQuality.total} 个样本 · 命中率 ${input.signalQuality.hitRate==null ? '暂无完成样本':(input.signalQuality.hitRate * 100).toFixed(1)+'%'}`,
     `提示：${warning}`,
     input.deepLink ? `工作台：${input.deepLink}` : '工作台：尚未配置安全公网地址',
   ].join('\n');

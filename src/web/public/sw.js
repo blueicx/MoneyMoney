@@ -1,4 +1,4 @@
-const CACHE_NAME = "moneymoney-v61-private-action-research";
+const CACHE_NAME = "moneymoney-v62-hashed-workspaces";
 const STATIC_ASSETS = ["/", "/manifest.json"];
 const OFFLINE_SAFE_API_PATHS = ["/api/evidence/source-health/history"];
 const OFFLINE_SAFE_API_PREFIXES = ["/api/workspaces/shared/"];
@@ -34,6 +34,17 @@ self.addEventListener("activate", (event) => {
 
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
+  const resourceUrl = new URL(event.request.url);
+  if (resourceUrl.origin === self.location.origin && /^\/assets\/[a-zA-Z0-9_-]+\.[a-f0-9]{16}\.(js|css)$/.test(resourceUrl.pathname)) {
+    event.respondWith((async () => {
+      const cached = await caches.match(event.request);
+      if (cached) return cached;
+      const response = await fetch(event.request);
+      if (response.ok) (await caches.open(CACHE_NAME)).put(event.request, response.clone());
+      return response;
+    })());
+    return;
+  }
 
   if (event.request.mode === "navigate") {
     event.respondWith(

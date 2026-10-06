@@ -47,6 +47,39 @@ test('quote-only path does not wait for history or SEC sources', async () => {
   assert.equal(detailCalls, 0);
 });
 
+test('stock service exposes a history-only path for signal scans', () => {
+  assert.equal(typeof StockDataService.prototype.history, 'function');
+});
+
+test('history-only path returns source evidence, caches bars, and never calls SEC sources', { skip: typeof StockDataService.prototype.history !== 'function' }, async () => {
+  let barCalls = 0;
+  let secCalls = 0;
+  const bars = [{ time: 1, open: 10, high: 11, low: 9, close: 10.5, volume: 100 }];
+  const service = new StockDataService({
+    quote: { fetch: async () => snapshot('nasdaq-public-quote', null) },
+    bars: { fetch: async () => { barCalls += 1; return snapshot('nasdaq-public-history', bars); } },
+    filings: { fetch: async () => { secCalls += 1; return snapshot('sec-edgar-submissions', []); } },
+    fundamentals: { fetch: async () => { secCalls += 1; return snapshot('sec-edgar-companyfacts', null); } },
+  }, { cacheTtlMs: 60_000 });
+
+  const first = await service.history('SNDK');
+  const second = await service.history('SNDK');
+  assert.equal(first.symbol, 'SNDK');
+  assert.deepEqual(first.bars, bars);
+  assert.equal(first.snapshot.source, 'nasdaq-public-history');
+  assert.equal(second.snapshot, first.snapshot);
+  assert.equal(barCalls, 1);
+  assert.equal(secCalls, 0);
+});
+
+test('history-only path preserves provider failure instead of pretending there are no bars', { skip: typeof StockDataService.prototype.history !== 'function' }, async () => {
+  const service = new StockDataService({ bars: { fetch: async () => { throw new Error('Nasdaq history timeout'); } } });
+  const result = await service.history('SNDK');
+  assert.deepEqual(result.bars, []);
+  assert.equal(result.snapshot.status, 'unavailable');
+  assert.match(result.snapshot.error, /Nasdaq history timeout/);
+});
+
 test('non-stock symbols are rejected before any network adapter runs', async () => {
   const service = new StockDataService({ quote: { fetch: async () => { throw new Error('must not run'); } } });
   await assert.rejects(() => service.overview('crypto:binance:BTCUSDT'), /股票代码无效/);

@@ -68,6 +68,34 @@ test('server wires the chat scope into the menu and filters Telegram search resu
   assert.match(serverSource, /parseScopedTelegramCallback\(data, 'unified:show'/);
 });
 
+test('stock /signals uses per-chat watchlists and stock monitor alerts instead of overview recommendations', () => {
+  const handlerStart = serverSource.indexOf('signals: async ({ chatId, args }) => {');
+  const handlerEnd = serverSource.indexOf('\n    paper:', handlerStart);
+  const handler = serverSource.slice(handlerStart, handlerEnd);
+  assert.match(handler, /if \(scope === 'stocks'\)/);
+  assert.match(handler, /stockSignalsForChat\(chatId,args\)/);
+  const shared = serverSource.slice(serverSource.indexOf('async function stockSignalsForChat'), serverSource.indexOf('export function getTelegramCommandHandlers'));
+  assert.match(shared, /handleTelegramStockSignalsCommand/);
+  assert.match(shared, /telegramCommandCenterStore\.listWatchlist\(chatId\)/);
+  assert.match(shared, /administratorWatchlistIds:isAdmin \? unifiedAlertStore\.listWatchlist\(\) : \[\]/);
+  assert.match(shared, /analyzeStockSignalCandidate\(candidate, automatic \? \{ maxQuoteAgeMs:/);
+
+  const monitorStart = serverSource.indexOf('async function monitorTelegramSlowAlerts');
+  const monitorEnd = serverSource.indexOf('\nfunction startTelegramCommandCenterMonitor', monitorStart);
+  const monitor = serverSource.slice(monitorStart, monitorEnd);
+  assert.match(monitor, /const scope = telegramScopeForChat\(chatId\)/);
+  assert.match(monitor, /selectTelegramStockSignalAlerts\(snapshot\)/);
+  assert.match(monitor, /telegramStockSignalNotificationKey\(chatId, snapshot\)/);
+  assert.match(monitor, /stateStore\.get<string>\(deliveryStateKey\)/);
+  assert.match(monitor, /stateStore\.acquireLease\(deliveryLeaseKey, owner/);
+  assert.match(monitor, /stateStore\.set\(deliveryStateKey, snapshot\.id/);
+  assert.match(monitor, /stateStore\.releaseLease\(deliveryLeaseKey, owner\)/);
+  assert.match(monitor, /telegramCommandCenterStore\.recordAudit\(chatId, 'stock_signal_scan_push', key\)/);
+  assert.match(monitor, /notifications\.signals && !telegramAlertSuppressed\(chatId, 'normal'\)/);
+  assert.match(monitor, /telegramActions\(scope\)/);
+  assert.doesNotMatch(monitor, /telegramActions\(\)\.filter/);
+});
+
 test('Telegram digest never guesses an unknown saved instrument is a stock', () => {
   const digest = serverSource.slice(serverSource.indexOf('async function buildTelegramDigest'), serverSource.indexOf('async function monitorTelegramSourceRecovery'));
   assert.match(digest, /const scope: MarketId \| null = ref \? .* : null/);

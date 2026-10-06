@@ -27,6 +27,7 @@
     "smoke:actions": "node scripts/action-research-smoke.cjs",
     "smoke:practical": "node scripts/practical-experience-smoke.cjs",
     "smoke:contracts": "node scripts/contracts-workflow-smoke.cjs",
+    "smoke:expansion": "node scripts/research-closure-expansion-smoke.cjs",
     "smoke:guru": "node scripts/guru-consensus-selection-smoke.cjs",
     "smoke:prediction-library": "node scripts/prediction-library-timeout-smoke.cjs",
     "smoke:production": "node scripts/production-readonly-canary.cjs",

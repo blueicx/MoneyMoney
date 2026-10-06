@@ -59,7 +59,7 @@ const get = pathname => request('GET', pathname);
     const authedGet = pathname => request('GET', pathname, null, authHeaders);
     const authedRequest = (method, pathname, payload) => request(method, pathname, payload, authHeaders);
     const home = await authedGet('/');
-    if (home.status !== 200 || !home.body.includes('AI 模型接口') || !home.body.includes('testAiProvider')) throw new Error(`AI settings UI missing: ${home.status}`);
+    if (home.status !== 200 || !home.body.includes('id="settings-tab"') || !home.body.includes('/assets/auth-client.')) throw new Error(`authenticated dashboard shell missing: ${home.status}`);
     const settings = await authedGet('/api/settings');
     const settingsBody = JSON.parse(settings.body);
     if (settings.status !== 200 || !settingsBody.ai?.openrouter || !settingsBody.ai?.groq) throw new Error(`AI settings status failed: ${settings.status} ${settings.body}`);

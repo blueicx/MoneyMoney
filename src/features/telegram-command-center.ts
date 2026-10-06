@@ -275,6 +275,21 @@ export class TelegramCommandCenterStore {
   private state: TelegramCommandCenterState;
   private readonly useSqlite: boolean;
   private readonly stateFile: string;
+  private ownerWatchlist?: { isOwnerChat: (chatId:string)=>boolean; normalize:(id:string)=>string|null; list:()=>string[]; add:(id:string)=>unknown; remove:(id:string)=>unknown };
+
+  bindOwnerWatchlist(binding: NonNullable<TelegramCommandCenterStore['ownerWatchlist']>): void { this.ownerWatchlist=binding; }
+
+  private sharedWatchlist(chatId:string): typeof this.ownerWatchlist {
+    const shared=this.ownerWatchlist;
+    if (!shared || !/^\d+$/.test(chatId) || !shared.isOwnerChat(chatId)) return undefined;
+    const marker=`telegram-owner-watchlist-migrated:${chatId}`;
+    stateStore.transaction(()=>{
+      if(stateStore.get<boolean>(marker))return;
+      for(const raw of this.state.watchlists[chatId] || []) { const id=shared.normalize(raw);if(id)shared.add(id); }
+      stateStore.set(marker,true,1);
+    });
+    return shared;
+  }
 
   constructor(stateFile?: string) {
     this.useSqlite = !stateFile;
@@ -427,6 +442,8 @@ export class TelegramCommandCenterStore {
   }
 
   addWatchlistMarket(chatId: string, marketId: string): boolean {
+    const shared=this.sharedWatchlist(String(chatId));
+    if(shared){const id=shared.normalize(marketId);if(!id || shared.list().includes(id))return false;shared.add(id);return true;}
     const id = normalizeMarketId(marketId);
     if (!id) return false;
     const key = String(chatId);
@@ -438,6 +455,8 @@ export class TelegramCommandCenterStore {
   }
 
   removeWatchlistMarket(chatId: string, marketId: string): boolean {
+    const shared=this.sharedWatchlist(String(chatId));
+    if(shared){const id=shared.normalize(marketId);if(!id || !shared.list().includes(id))return false;shared.remove(id);return true;}
     const key = String(chatId);
     const id = normalizeMarketId(marketId);
     const list = this.state.watchlists[key] || [];
@@ -449,6 +468,8 @@ export class TelegramCommandCenterStore {
   }
 
   listWatchlist(chatId: string): string[] {
+    const shared=this.sharedWatchlist(String(chatId));
+    if(shared)return [...new Set(shared.list().map(shared.normalize).filter((id):id is string=>!!id))];
     return [...(this.state.watchlists[String(chatId)] || [])];
   }
 

@@ -167,7 +167,7 @@ test('frontend assets contain new hardening markers', () => {
   assert.ok(!loginHtml.includes('admin123'), 'login must not advertise legacy credentials');
   assert.match(loginHtml, /Retry-After|429/);
   const indexHtml = fs.readFileSync(path.join(__dirname, '..', 'dist', 'web', 'public', 'index.html'), 'utf8');
-  assert.ok(indexHtml.includes('/modules/auth-client.js'), 'auth client should be an external module');
+  assert.match(indexHtml, /<script type="module" src="\/assets\/auth-client\.[a-f0-9]{16}\.js"/, 'auth client remains an external versioned module');
   assert.ok(!indexHtml.includes('admin123'), 'dashboard must not advertise legacy credentials');
   assert.ok(indexHtml.includes('quick') || indexHtml.includes('快捷'), 'index radar should have quick trade linkage');
 });

@@ -54,7 +54,9 @@ export const config = {
   loginPass: process.env.MONEYMONEY_LOGIN_PASS || '',
   jwtSecret: (()=>{ const s=process.env.MONEYMONEY_JWT_SECRET; if(s && s!== 'moneymoney-dev-secret-change-me') return s; try{ const g=crypto.randomBytes(32).toString('hex'); if(!process.env.MONEYMONEY_JWT_SECRET) console.warn('\n  ⚠️ MONEYMONEY_JWT_SECRET 未设置，已临时生成随机密钥（重启后失效，请写入 .env）'); return g; }catch{return 'moneymoney-dev-secret-change-me'; } })(),
   loginTokenExpiryMs: parseInt(process.env.MONEYMONEY_LOGIN_EXPIRY_MS || '43200000'),
-  aiPaperTradingEnabled: process.env.AI_PAPER_TRADING_ENABLED === 'true',
+  // Paper-only capability defaults on; explicit false/invalid values stay off.
+  // This does not create runners or resume paused accounts.
+  aiPaperTradingEnabled: (process.env.AI_PAPER_TRADING_ENABLED ?? 'true') === 'true',
 
   // Trading Settings
   defaultSlippageBps: parseInt(process.env.DEFAULT_SLIPPAGE_BPS || '200'),

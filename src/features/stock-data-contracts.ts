@@ -24,6 +24,9 @@ export function normalizeDataStatus(input: Partial<DataStatus>): DataStatus {
 }
 
 export interface StockQuote {
+  bestBid?: number;
+  bestAsk?: number;
+  isRealTime?: boolean;
   symbol: string;
   price: number;
   changePct: number | null;

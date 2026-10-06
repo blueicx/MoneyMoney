@@ -110,7 +110,10 @@ export function createYahooStockAdapter(): DataSourceAdapter<StockQuote> {
         price: quote.regularMarketPrice,
         changePct: quote.regularMarketChangePercent ?? null,
         currency: quote.currency || 'USD',
-        asOf: quote.regularMarketTime ? new Date(quote.regularMarketTime * 1000).toISOString() : new Date().toISOString(),
+        asOf: quote.regularMarketTime ? new Date(quote.regularMarketTime * 1000).toISOString() : null,
+        bestBid: quote.bid,
+        bestAsk: quote.ask,
+        isRealTime: quote.exchangeDataDelayedBy === 0,
       };
     },
   });

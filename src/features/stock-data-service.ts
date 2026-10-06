@@ -23,6 +23,12 @@ export interface StockQuoteResult {
   snapshot: SourceSnapshot<StockQuote>;
 }
 
+export interface StockHistoryResult {
+  symbol: string;
+  bars: StockBar[];
+  snapshot: SourceSnapshot<StockBar[]>;
+}
+
 function validSymbol(value: string): string {
   const symbol = String(value || '').trim().toUpperCase().replace(/^US(?=[A-Z])/, '');
   if (!/^[A-Z][A-Z0-9.-]{0,9}$/.test(symbol) || symbol.includes('..')) throw new Error('股票代码无效');
@@ -82,6 +88,7 @@ export class StockDataService {
   private readonly cacheTtlMs: number;
   private readonly cache = new Map<string, { at: number; value: StockDataBundle }>();
   private readonly quoteCache = new Map<string, { at: number; value: StockQuoteResult }>();
+  private readonly historyCache = new Map<string, { at: number; value: StockHistoryResult }>();
 
   constructor(dependencies: Partial<StockDataDependencies> = {}, options: StockDataServiceOptions = {}) {
     const defaults = createDefaultStockDataDependencies();
@@ -97,6 +104,21 @@ export class StockDataService {
     const value: StockQuoteResult = { symbol, quote: snapshot.data, snapshot };
     this.quoteCache.set(symbol, { at: Date.now(), value });
     if (this.quoteCache.size > 100) this.quoteCache.delete(this.quoteCache.keys().next().value as string);
+    return value;
+  }
+
+  async history(symbolInput: string): Promise<StockHistoryResult> {
+    const symbol = validSymbol(symbolInput);
+    const hit = this.historyCache.get(symbol);
+    if (hit && Date.now() - hit.at <= this.cacheTtlMs) return hit.value;
+    const snapshot = await this.read(this.dependencies.bars, { symbol }, 'nasdaq-public-history');
+    const value: StockHistoryResult = {
+      symbol,
+      bars: snapshot.data || [],
+      snapshot,
+    };
+    this.historyCache.set(symbol, { at: Date.now(), value });
+    if (this.historyCache.size > 100) this.historyCache.delete(this.historyCache.keys().next().value as string);
     return value;
   }
 

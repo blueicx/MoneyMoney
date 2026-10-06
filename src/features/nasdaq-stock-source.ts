@@ -1,5 +1,5 @@
-import { ResilientDataSourceAdapter } from '../data/source-adapter';
 import type { StockBar, StockQuote } from './stock-data-contracts';
+import { ResilientDataSourceAdapter, type DataSourceAdapter } from '../data/source-adapter';
 
 type NasdaqPayload = { data?: any };
 type NasdaqFetch = (input: string, init?: RequestInit) => Promise<Response>;
@@ -20,9 +20,34 @@ function parseUsDate(value: unknown): number | null {
   return Number.isFinite(time) ? time : null;
 }
 
+function keyedAdapter<T>(
+  id: string,
+  group: string,
+  keyFor: (input: unknown) => string,
+  create: () => ResilientDataSourceAdapter<T>,
+): DataSourceAdapter<T> {
+  const adapters = new Map<string, ResilientDataSourceAdapter<T>>();
+  return {
+    id,
+    group,
+    fetch(input?: unknown) {
+      const key = keyFor(input);
+      if (!key) throw new Error(`${id} requires an instrument key`);
+      let adapter = adapters.get(key);
+      if (!adapter) {
+        adapter = create();
+        adapters.set(key, adapter);
+        if (adapters.size > 500) adapters.delete(adapters.keys().next().value as string);
+      }
+      return adapter.fetch(input);
+    },
+  };
+}
+
 export function parseNasdaqQuotePayload(symbolInput: string, payload: NasdaqPayload): StockQuote {
   const symbol = text(symbolInput).toUpperCase();
   const primary = payload?.data?.primaryData;
+  if (payload?.data?.symbol && text(payload.data.symbol).toUpperCase() !== symbol) throw new Error('Nasdaq quote identity mismatch');
   const price = numeric(primary?.lastSalePrice);
   if (!symbol || price == null || price < 0) throw new Error('Nasdaq quote payload is invalid');
   return {
@@ -31,6 +56,9 @@ export function parseNasdaqQuotePayload(symbolInput: string, payload: NasdaqPayl
     changePct: numeric(primary?.percentageChange),
     currency: 'USD',
     asOf: text(primary?.lastTradeTimestamp) || null,
+    ...(Number(numeric(primary?.bidPrice)) > 0 ? { bestBid: numeric(primary.bidPrice)! } : {}),
+    ...(Number(numeric(primary?.askPrice)) > 0 ? { bestAsk: numeric(primary.askPrice)! } : {}),
+    ...(typeof primary?.isRealTime === 'boolean' ? { isRealTime: primary.isRealTime } : {}),
   };
 }
 
@@ -68,8 +96,11 @@ export function createNasdaqStockAdapters(fetchImpl: NasdaqFetch = fetch, option
     retries: options.retries ?? 2,
     backoffMs: options.backoffMs ?? 250,
   };
-  return {
-    quote: new ResilientDataSourceAdapter<StockQuote>({
+  const quote = keyedAdapter<StockQuote>(
+    'nasdaq-public-quote',
+    '股票行情',
+    input => text((input as { symbol?: string })?.symbol).toUpperCase(),
+    () => new ResilientDataSourceAdapter<StockQuote>({
       id: 'nasdaq-public-quote',
       group: '股票行情',
       ttlMs: options.quoteTtlMs ?? 10 * 60_000,
@@ -81,7 +112,17 @@ export function createNasdaqStockAdapters(fetchImpl: NasdaqFetch = fetch, option
         return parseNasdaqQuotePayload(symbol, await response.json() as NasdaqPayload);
       },
     }),
-    bars: new ResilientDataSourceAdapter<StockBar[]>({
+  );
+  const bars = keyedAdapter<StockBar[]>(
+    'nasdaq-public-history',
+    '股票行情',
+    input => {
+      const value = input as { symbol?: string; from?: string };
+      const symbol = text(value?.symbol).toUpperCase();
+      const from = text(value?.from) || new Date(Date.now() - 100 * 86_400_000).toISOString().slice(0, 10);
+      return symbol ? `${symbol}:${from}` : '';
+    },
+    () => new ResilientDataSourceAdapter<StockBar[]>({
       id: 'nasdaq-public-history',
       group: '股票行情',
       ttlMs: options.barsTtlMs ?? 15 * 60_000,
@@ -95,5 +136,6 @@ export function createNasdaqStockAdapters(fetchImpl: NasdaqFetch = fetch, option
         return parseNasdaqHistoricalPayload(await response.json() as NasdaqPayload);
       },
     }),
-  };
+  );
+  return { quote, bars };
 }

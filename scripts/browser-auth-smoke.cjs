@@ -49,8 +49,25 @@ async function main() {
     assert.equal(status.data.loggedIn, true);
     assert.equal(status.data.role, 'admin');
     assert.ok(status.data.csrfToken);
-    const html = await page.content();
-    assert.ok(html.includes('手动发送测试消息'), 'settings expose an explicit Telegram test action');
+    const runnerState = await page.evaluate(async () => {
+      await loadAiRunners();
+      const response = await fetch('/api/ai-runners');
+      return { response: await response.json(), createDisabled: document.querySelector('#ai-runner-create-btn')?.disabled, tickDisabled: document.querySelector('#ai-runner-tick-btn')?.disabled, disabledNoticeVisible: !document.querySelector('#ai-runner-feature-state')?.hidden };
+    });
+    assert.equal(runnerState.response.enabled, false, 'the AI paper-trading feature flag remains off in smoke environment');
+    assert.equal(runnerState.createDisabled, true, 'UI must not offer a start action while the server feature flag is off');
+    assert.equal(runnerState.tickDisabled, true, 'UI must not offer a manual tick while the server feature flag is off');
+    assert.equal(runnerState.disabledNoticeVisible, true, 'UI must explain why the runner is disabled');
+    const streamResponse = await page.evaluate(async () => {
+      const controller = new AbortController();
+      const response = await fetch('/api/stream', { signal: controller.signal });
+      controller.abort();
+      return response.status;
+    });
+    assert.equal(streamResponse, 200, 'admin should be able to receive private runner updates');
+    await page.evaluate(() => showTab('settings'));
+    await page.waitForFunction(() => document.getElementById('settings-tab')?.textContent?.includes('手动发送测试消息'));
+    assert.ok((await page.locator('#settings-tab').innerText()).includes('手动发送测试消息'), 'loaded settings expose an explicit Telegram test action');
     const telegramStatus = await page.evaluate(() => fetch('/api/telegram/status').then(async response => ({ status: response.status, body: await response.json() })));
     assert.equal(telegramStatus.status, 200);
     assert.ok(Array.isArray(telegramStatus.body.data.testDeliveryHistory));
@@ -79,10 +96,22 @@ async function main() {
     assert.equal(guestWrite.body.code, 'GUEST_READ_ONLY');
     const guestTelegramStatus = await page.evaluate(() => fetch('/api/telegram/status').then(async response => ({ status: response.status, body: await response.json() })));
     assert.equal(guestTelegramStatus.status, 403, JSON.stringify(guestTelegramStatus.body));
+    const guestRunnerList = await page.evaluate(() => fetch('/api/ai-runners').then(async response => ({ status: response.status, body: await response.json() })));
+    assert.equal(guestRunnerList.status, 403, JSON.stringify(guestRunnerList.body));
+    assert.equal(guestRunnerList.body.code, 'GUEST_READ_ONLY');
+    const guestRunnerHistory = await page.evaluate(() => fetch('/api/ai-runners/private-runner/history').then(async response => ({ status: response.status, body: await response.json() })));
+    assert.equal(guestRunnerHistory.status, 403, JSON.stringify(guestRunnerHistory.body));
+    assert.equal(guestRunnerHistory.body.code, 'GUEST_READ_ONLY');
+    const guestRunnerStream = await page.evaluate(async () => {
+      const response = await fetch('/api/stream');
+      return { status: response.status, body: await response.json() };
+    });
+    assert.equal(guestRunnerStream.status, 403, JSON.stringify(guestRunnerStream.body));
+    assert.equal(guestRunnerStream.body.code, 'GUEST_READ_ONLY');
     const guestTelegramSend = await page.evaluate(() => fetch('/api/telegram/test-delivery', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ idempotencyKey: 'guest-forbidden-0001' }) }).then(async response => ({ status: response.status, body: await response.json() })));
     assert.equal(guestTelegramSend.status, 403);
     assert.deepEqual(pageErrors, []);
-    console.log('Browser auth smoke passed: admin cookie, CSRF, Telegram private delivery guard, logout, guest read-only, SLO');
+    console.log('Browser auth smoke passed: admin cookie, CSRF, Telegram and AI runner private guards, logout, guest read-only, SLO');
   } finally {
     if (browser) await browser.close();
     if (child) {

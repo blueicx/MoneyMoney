@@ -60,7 +60,7 @@ test('ticker loads after scope initialization and uses market-specific data', ()
   assert.match(html, /data-market-scopes="overview stocks options crypto prediction watchlist"/);
   assert.match(html, /id="market-overview"[^>]*data-market-scopes="overview stocks options crypto prediction watchlist"/);
   assert.match(html, /function loadAll\([\s\S]*\['overview', 'prediction', 'watchlist'\]\.includes\(activeMarketScope\)/);
-  assert.match(html, /activeMarketScope = readInitialMarketScope\(\);[\s\S]*loadAll\(\)/);
+  assert.match(html, /activeMarketScope = readInitialMarketScope\(\);[\s\S]*if \(activeWorkspaceId === 'overview'\)[\s\S]*loadNewsTicker\(\)/);
   assert.match(server, /app\.get\('\/api\/market-ticker'/);
   assert.match(server, /if \(scope === 'stocks'\)/);
   assert.match(server, /fetchTencentText\(`https:\/\/qt\.gtimg\.cn\/q=/);

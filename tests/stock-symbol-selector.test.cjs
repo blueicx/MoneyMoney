@@ -49,8 +49,8 @@ test('market radar keeps the current market main panel visible', () => {
 });
 
 test('layout changes invalidate the cached service worker shell', () => {
-  assert.match(serviceWorker, /const CACHE_NAME = "moneymoney-v61-private-action-research"/);
-  assert.match(html, /serviceWorker\.register\('\/sw\.js\?v=61'\)/);
+  assert.match(serviceWorker, /const CACHE_NAME = "moneymoney-v62-hashed-workspaces"/);
+  assert.match(html, /serviceWorker\.register\('\/sw\.js\?v=62'\)/);
 });
 
 test('first service-worker claim does not reload an already-current page', () => {

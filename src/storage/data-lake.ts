@@ -181,7 +181,17 @@ export class DataLakeCatalog {
   resolveInstrument(market: MarketId | undefined, query: string): InstrumentRef | null {
     if (!market) throw new Error('market is required to resolve an instrument');
     const value = String(query || '').trim().toUpperCase();
-    const rows = this.db.prepare('SELECT id,market,venue,symbol,title,aliases FROM instrument_registry WHERE market = ? AND (UPPER(id) = ? OR UPPER(symbol) = ?) ORDER BY id').all(market, value, value) as Array<Record<string, string>>;
+    const lookup = this.db.prepare('SELECT id,market,venue,symbol,title,aliases FROM instrument_registry WHERE market = ? AND (UPPER(id) = ? OR UPPER(symbol) = ? OR EXISTS (SELECT 1 FROM json_each(instrument_registry.aliases) WHERE UPPER(value) = ?)) ORDER BY id');
+    let rows = lookup.all(market, value, value, value) as Array<Record<string, string>>;
+    // Explicit legacy US chart IDs and known provider suffixes refer to an
+    // already registered US security. Exact identities win; never infer a
+    // crypto/options identity or collapse different venues by bare ticker.
+    if (!rows.length && market === 'stocks') {
+      const legacy = value.match(/^US([A-Z][A-Z0-9.-]*)$/);
+      const provider = value.match(/^([A-Z][A-Z0-9.-]*)\.(?:OQ|N|A|NY|NASDAQ)$/);
+      const symbol = legacy?.[1] || provider?.[1];
+      if (symbol) rows = lookup.all(market, `STOCK:US:${symbol}`, `STOCK:US:${symbol}`, `STOCK:US:${symbol}`) as Array<Record<string, string>>;
+    }
     if (rows.length > 1) throw new Error('ambiguous instrument: specify market and venue');
     const row = rows[0];
     if (!row) return null;
@@ -285,12 +295,14 @@ export class DataLakeCatalog {
         (input.market === 'crypto' && /binance/i.test(input.source))) {
       const type = input.market === 'stocks' ? 'stock' : 'crypto';
       const venue = input.market === 'stocks' ? 'us' : 'binance';
-      this.registerInstrument({ type, venue, symbol: input.instrument, title: input.instrument, aliases: [] });
+      if (!this.resolveInstrument(input.market, input.instrument)) this.registerInstrument({ type, venue, symbol: input.instrument, title: input.instrument, aliases: [] });
     }
     return { ...partition, quality };
   }
 
   async queryBarsAsOf(input: { market: MarketId; instrument: string; timeframe: string; asOf: string }): Promise<{ rows: Array<Record<string, unknown>>; dataStatus: 'historical' | 'unavailable'; source: string | null; adjustment?: string; updatedAt: string | null; reason?: string; snapshot?: PointInTimeSnapshot }> {
+    const registered = this.resolveInstrument(input.market, input.instrument);
+    input = { ...input, instrument: registered?.symbol || input.instrument };
     validateInstrument(input.market, input.instrument);
     if (this.listInstrumentQuarantine(input.market).some(item => item.instrument === input.instrument)) return { rows: [], dataStatus: 'unavailable', source: null, updatedAt: null, reason: '标的身份未确认，旧分区已隔离' };
     const asOf = Date.parse(input.asOf);

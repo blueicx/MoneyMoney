@@ -505,19 +505,19 @@ export function analyzeSignalQuality(signals: SignalOutcome[], options: { minimu
   const wins = resolved.filter(value => value > 0).length;
   const sampleBreakdown = signals.reduce<Record<string, number>>((acc, signal) => { acc[signal.sample] = (acc[signal.sample] || 0) + 1; return acc; }, { 'in-sample': 0, oos: 0, paper: 0, live: 0 });
   const warnings: string[] = [];
-  if (signals.length < (options.minimumSamples ?? 30)) warnings.push(`样本量不足：${signals.length}`);
+  if (resolved.length < (options.minimumSamples ?? 30)) warnings.push(`样本量不足：已完成 ${resolved.length}/${signals.length}`);
   if (signals.some(signal => signal.dataGap)) warnings.push('部分信号存在数据缺口');
   if (signals.some(signal => signal.futureDataRisk)) warnings.push('检测到未来数据风险');
-  const average = (values: number[]) => values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : 0;
-  type CohortAccumulator = { count: number; resolved: number; hitRate: number; averageReturnPct: number; _wins: number; _sum: number };
-  const cohort = (key: keyof Pick<SignalOutcome, 'strategyId' | 'pattern' | 'timeframe' | 'source'>) => signals.reduce<Record<string, CohortAccumulator>>((acc, signal, index) => {
-    const name = String(signal[key] || '未分类');
+  const average = (values: number[]) => values.length ? Number((values.reduce((sum, value) => sum + value, 0) / values.length).toFixed(4)) : null;
+  type CohortAccumulator = { count: number; resolved: number; hitRate: number|null; averageReturnPct: number|null; _wins: number; _sum: number };
+  const cohort = (key: keyof Pick<SignalOutcome, 'strategyId' | 'strategyVersion' | 'pattern' | 'timeframe' | 'source'>) => signals.reduce<Record<string, CohortAccumulator>>((acc, signal, index) => {
+    const name = key==='strategyVersion' ? signal.strategyId+'@'+(signal.strategyVersion || '未关联') : String(signal[key] || '未分类');
     const item = acc[name] || { count: 0, resolved: 0, hitRate: 0, averageReturnPct: 0, _wins: 0, _sum: 0 };
     item.count += 1;
     const value = returns[index];
     if (value != null && Number.isFinite(value)) { item.resolved += 1; item._wins += value > 0 ? 1 : 0; item._sum += value; }
-    item.hitRate = item.resolved ? Number((item._wins / item.resolved).toFixed(4)) : 0;
-    item.averageReturnPct = item.resolved ? Number((item._sum / item.resolved).toFixed(4)) : 0;
+    item.hitRate = item.resolved ? Number((item._wins / item.resolved).toFixed(4)) : null;
+    item.averageReturnPct = item.resolved ? Number((item._sum / item.resolved).toFixed(4)) : null;
     acc[name] = item;
     return acc;
   }, {});
@@ -527,15 +527,17 @@ export function analyzeSignalQuality(signals: SignalOutcome[], options: { minimu
   return {
     total: signals.length,
     resolved: resolved.length,
-    hitRate: resolved.length ? Number((wins / resolved.length).toFixed(4)) : 0,
-    averageReturnPct: Number(average(resolved).toFixed(4)),
-    benchmarkReturnPct: Number(options.benchmarkReturnPct || 0),
-    averageMfePct: Number(average(signals.map(item => Number(item.mfePct)).filter(Number.isFinite)).toFixed(4)),
-    averageMaePct: Number(average(signals.map(item => Number(item.maePct)).filter(Number.isFinite)).toFixed(4)),
-    averageConfirmationDelayMs: Number(average(signals.map(item => Number(item.confirmationDelayMs)).filter(Number.isFinite)).toFixed(2)),
+    hitRate: resolved.length ? Number((wins / resolved.length).toFixed(4)) : null,
+    hitRateReliable:resolved.length>=(options.minimumSamples ?? 30),
+    averageReturnPct: average(resolved),
+    benchmarkReturnPct: options.benchmarkReturnPct!=null && Number.isFinite(options.benchmarkReturnPct) ? options.benchmarkReturnPct:null,
+    averageMfePct: average(signals.map(item => item.mfePct).filter((value):value is number=>typeof value==='number' && Number.isFinite(value))),
+    averageMaePct: average(signals.map(item => item.maePct).filter((value):value is number=>typeof value==='number' && Number.isFinite(value))),
+    averageConfirmationDelayMs: average(signals.map(item => item.confirmationDelayMs).filter((value):value is number=>typeof value==='number' && Number.isFinite(value))),
     sampleBreakdown,
     invalidationReasons: signals.reduce<Record<string, number>>((acc, signal) => { if (signal.invalidationReason) acc[signal.invalidationReason] = (acc[signal.invalidationReason] || 0) + 1; return acc; }, {}),
     byStrategy: cleanCohort(cohort('strategyId')),
+    byStrategyVersion: cleanCohort(cohort('strategyVersion')),
     byPattern: cleanCohort(cohort('pattern')),
     byTimeframe: cleanCohort(cohort('timeframe')),
     bySource: cleanCohort(cohort('source')),

@@ -14,6 +14,13 @@ const child = spawn(process.execPath, [path.join(__dirname, '../dist/web/server.
   stdio: 'ignore',
 });
 
+function colorToRgb(value) {
+  const normalized = String(value).trim().replace(/^#/, '');
+  const hex = normalized.length === 3 ? normalized.split('').map(part => part + part).join('') : normalized;
+  assert.match(hex, /^[0-9a-f]{6}$/i, `expected a hex CSS color, received ${value}`);
+  return `rgb(${parseInt(hex.slice(0, 2), 16)}, ${parseInt(hex.slice(2, 4), 16)}, ${parseInt(hex.slice(4, 6), 16)})`;
+}
+
 async function waitForServer() {
   for (let index = 0; index < 50; index += 1) {
     try {
@@ -26,6 +33,9 @@ async function waitForServer() {
 }
 
 async function auditThemeControls(page) {
+  // This module is intentionally absent from the stock first screen. Load it
+  // for its actual-control theme audit, not as part of normal chart startup.
+  await page.evaluate(() => window.MoneyWorkspaceModules.ensure('contracts'));
   const snapshots = await page.evaluate(() => {
     const root = document.documentElement;
     const originalTheme = root.getAttribute('data-theme');
@@ -50,10 +60,15 @@ async function auditThemeControls(page) {
       const contractInput = document.querySelector('#mm-contract-library input');
       const contractSelect = document.querySelector('#mm-contract-library select');
       const contractButton = document.querySelector('#mm-contract-library button');
+      const runnerSymbol = document.querySelector('#ai-runner-symbol');
+      const runnerMode = document.querySelector('#ai-runner-mode');
+      const runnerTrigger = document.querySelector('#ai-runner-trigger');
+      const runnerCreate = document.querySelector('#ai-runner-create-btn');
       result.push({
         theme,
         text: getComputedStyle(document.body).color,
         accent: getComputedStyle(root).getPropertyValue('--purple').trim(),
+        accentContrast: getComputedStyle(root).getPropertyValue('--accent-contrast').trim(),
         button: read(query('button')),
         secondaryButton: read(query('[data-theme-secondary]')),
         eventAction: read(query('[data-theme-event-action]')),
@@ -67,6 +82,10 @@ async function auditThemeControls(page) {
         contractInput: contractInput ? read(contractInput) : null,
         contractSelect: contractSelect ? read(contractSelect) : null,
         contractButton: contractButton ? read(contractButton) : null,
+        runnerSymbol: runnerSymbol ? read(runnerSymbol) : null,
+        runnerMode: runnerMode ? read(runnerMode) : null,
+        runnerTrigger: runnerTrigger ? read(runnerTrigger) : null,
+        runnerCreate: runnerCreate ? read(runnerCreate) : null,
       });
     }
     if (originalTheme == null) root.removeAttribute('data-theme');
@@ -79,6 +98,7 @@ async function auditThemeControls(page) {
   assert.equal(accents.size, 3, 'the three themes should retain distinct accent tokens');
   assert.ok(snapshots.every(item => item.holderLink), 'the SEC manager-name button should be included in the theme audit');
   assert.ok(snapshots.every(item => item.contractInput && item.contractSelect && item.contractButton), 'the actual crypto contract controls should be present for the theme audit');
+  assert.ok(snapshots.every(item => item.runnerSymbol && item.runnerMode && item.runnerTrigger && item.runnerCreate), 'the actual AI runner controls should be included in the theme audit');
   for (const item of snapshots) {
     assert.equal(item.button.color, item.text, `${item.theme}: plain button text should follow the theme`);
     assert.notEqual(item.button.background, 'rgb(239, 239, 239)', `${item.theme}: plain buttons must not use the browser white default`);
@@ -108,11 +128,23 @@ async function auditThemeControls(page) {
     assert.ok(parseFloat(item.contractInput.radius) >= 6, `${item.theme}: contract search input should not use browser-default square styling`);
     assert.ok(parseFloat(item.contractSelect.radius) >= 6, `${item.theme}: contract selector should not use browser-default square styling`);
     assert.ok(parseFloat(item.contractButton.radius) >= 6, `${item.theme}: contract action should not use browser-default button styling`);
+    assert.equal(item.runnerSymbol.color, item.text, `${item.theme}: runner symbol input should follow theme text`);
+    assert.equal(item.runnerMode.color, item.text, `${item.theme}: runner mode selector should follow theme text`);
+    assert.equal(item.runnerTrigger.color, item.text, `${item.theme}: runner trigger selector should follow theme text`);
+    assert.equal(item.runnerCreate.color, colorToRgb(item.accentContrast), `${item.theme}: runner create action should use the readable accent contrast color`);
+    assert.equal(item.runnerMode.colorScheme, item.theme === 'light' ? 'light' : 'dark', `${item.theme}: runner mode popup should follow the active color scheme`);
+    assert.equal(item.runnerTrigger.colorScheme, item.theme === 'light' ? 'light' : 'dark', `${item.theme}: runner trigger popup should follow the active color scheme`);
+    assert.ok(parseFloat(item.runnerSymbol.radius) >= 6, `${item.theme}: runner symbol input should use the shared rounded treatment`);
+    assert.ok(parseFloat(item.runnerMode.radius) >= 6, `${item.theme}: runner mode selector should use the shared rounded treatment`);
+    assert.ok(parseFloat(item.runnerTrigger.radius) >= 6, `${item.theme}: runner trigger selector should use the shared rounded treatment`);
+    assert.ok(parseFloat(item.runnerCreate.radius) >= 6, `${item.theme}: runner create action should use the shared rounded treatment`);
   }
   assert.equal(new Set(snapshots.map(item => item.button.backgroundImage)).size, 3, 'button surfaces should visibly change with all three themes');
   assert.equal(new Set(snapshots.map(item => item.eventAction.background)).size, 3, 'event action surfaces should visibly change with all three themes');
   assert.equal(new Set(snapshots.map(item => item.anchor.color)).size, 3, 'link accents should visibly change with all three themes');
   assert.equal(new Set(snapshots.map(item => item.text)).size, 3, 'control foregrounds should visibly change with all three themes');
+  assert.equal(new Set(snapshots.map(item => item.runnerSymbol.background)).size, 3, 'runner inputs should visibly follow all three theme surfaces');
+  assert.equal(new Set(snapshots.map(item => item.runnerCreate.background)).size, 3, 'runner actions should visibly follow all three theme accents');
   return snapshots;
 }
 

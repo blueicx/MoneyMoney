@@ -44,6 +44,10 @@ import {
 } from '../features/telegram-bot';
 import { getTelegramMarketButtons, getTelegramMenuEntries, moveTelegramMenuPage, resetTelegramMenuPage } from './telegram-menu';
 import { buildTelegramDeepLink, buildTelegramStockSearchRows, isTelegramWatchableStockId, telegramPublicBaseUrl } from './telegram-search';
+import { handleTelegramStockSignalsCommand, type TelegramStockMoverDiscovery } from '../features/telegram-stock-signal-command';
+import { TelegramStockSignalScanner, selectTelegramStockSignalAlerts, telegramStockSignalNotificationKey, paginateTelegramStockSignals } from '../features/telegram-stock-signals';
+import { StockSignalSchedule, stockExchangeSession, stockQuoteObservationTime, isStockSignalNotificationFresh } from '../features/stock-signal-schedule';
+import { TelegramSignalOutbox } from '../features/telegram-signal-outbox';
 import { priceTracker } from '../features/price-tracker';
 import { kellySizer, backtester, ASSET_BACKTEST_STRATEGY_VERSION } from '../features/kelly-backtest';
 import { pushNotification } from '../features/notifications';
@@ -74,6 +78,10 @@ import { getGlobalMacroSpotSnapshot } from '../features/global-macro-spot';
 import { getCrossAssetCorrelationRadar } from '../features/cross-asset-correlation';
 import { getPerpetualCrowding } from '../features/perpetual-crowding';
 import { ContractResearchService, contractIdentity, contractScenario } from '../features/contract-research';
+import { contractCapacity, compareContractSnapshots } from '../features/contract-comparison';
+import { compareAiRunnerReports } from '../features/ai-runner-comparison';
+import { createAiRunnerComparison, getAiRunnerComparison, validateAiRunnerComparison, buildAiRunnerComparisonSample, saveAiRunnerComparisonSample, listAiRunnerComparisonSamples, replayAiRunnerComparisonSample, type AiRunnerComparisonSample } from '../features/ai-runner-comparison-group';
+import { portfolioAttribution } from '../features/portfolio-attribution';
 import { getFundingCarryRadar } from '../features/funding-carry';
 import { getOrderFlowLiquidityRadar } from '../features/order-flow-liquidity';
 import { getBitcoinOnchainRadar } from '../features/bitcoin-onchain';
@@ -111,7 +119,7 @@ import { getRiskHistory, recordRiskHistory } from '../features/risk-history';
 import { buildDailyResearchBriefing } from '../features/research-briefing';
 import { getAssistantCalibration, getAssistantJournalTrades, saveTradeNote } from '../features/assistant-journal';
 import { exportJournalCsv, exportPaperCsv, exportCalibrationCsv, exportForecastLabCsv } from '../features/data-export';
-import { generateAssistantReport } from '../features/trade-assistant';
+import { analyzeStockSignalCandidate, generateAssistantReport } from '../features/trade-assistant';
 import { getSourceHealth, refreshSourceHealth } from '../features/source-health';
 import { summarizeSourceSlo } from '../features/source-health-slo';
 import { zonedDigestClock } from '../features/digest-clock';
@@ -155,6 +163,7 @@ import { riskPatrol } from '../features/risk-patrol';
 import { createAccessMiddleware, validateAccessConfiguration } from './access-control';
 import { verifyLoginToken, extractAuthToken } from './auth';
 import { registerApiAuthProtection, registerAuthRoutes } from './auth-routes';
+import { registerBuiltAssets, sendBuiltPage } from './static-assets';
 import { stateStore, getStorageHealth } from '../storage/sqlite-state';
 import { TelegramEventResultMonitor, lookupOfficialEventResult } from '../features/telegram-event-results';
 import { renderTelegramKline } from '../features/telegram-kline-image';
@@ -210,6 +219,9 @@ import os from 'os';
 import { parseRssItems } from '../utils/rss';
 
 export const app = express();
+const telegramStockSignalScanner = new TelegramStockSignalScanner({ store: stateStore, concurrency: 4, ttlMs: 15 * 60_000 });
+const stockSignalSchedule = new StockSignalSchedule(stateStore);
+const telegramStockSignalOutbox = new TelegramSignalOutbox(researchRepository,stateStore);
 dataLakeWorker.start();
 const strategyCandidateRegistry = new StrategyCandidateRegistry();
 const eventStudyRepository = new EventStudyRepository(stateStore);
@@ -325,13 +337,7 @@ app.get('/', (req, res) => {
     res.redirect('/login?next=' + encodeURIComponent(req.originalUrl || '/'));
     return;
   }
-  res.setHeader('Cache-Control', 'no-cache');
-  fs.promises.readFile(path.join(__dirname, 'public', 'index.html'))
-    .then(html => {
-      res.type('html');
-      res.send(html);
-    })
-    .catch(() => res.status(500).send('Dashboard assets missing'));
+  sendBuiltPage(req, res, path.join(__dirname, 'public'), 'index.html');
 });
 // --- MoneyMoney 登录鉴权（与 LAN token 共存） ---
 app.get('/login', (req, res) => {
@@ -343,15 +349,14 @@ app.get('/login', (req, res) => {
       return;
     }
   } catch {}
-  fs.promises.readFile(path.join(__dirname, 'public', 'login.html'))
-    .then(html => { res.type('html'); res.send(html); })
-    .catch(() => res.status(500).send('Login page missing'));
+  sendBuiltPage(req, res, path.join(__dirname, 'public'), 'login.html');
 });
 registerAuthRoutes(app);
 registerApiAuthProtection(app);
 
+registerBuiltAssets(app, path.join(__dirname, 'public'));
 app.use(express.static(path.join(__dirname, 'public'), {
-  setHeaders: (res) => res.setHeader('Cache-Control', 'no-store'),
+  setHeaders: (res) => res.setHeader('Cache-Control', 'no-cache'),
 }));
 
 
@@ -1784,6 +1789,18 @@ app.get('/api/portfolio/analytics', async (req, res) => {
   }
 });
 
+app.get('/api/portfolio/attribution',(req,res)=>{
+  if(!adminOnly(req,res))return;
+  try {
+    const market=decisionMarket(req.query.market),selection=String(req.query.accountSource || 'paper');
+    if(!['paper','imported','combined'].includes(selection))throw new Error('请选择模拟盘、导入仓位或显式合并');
+    const type=({stocks:'stock',options:'option',crypto:'crypto',prediction:'prediction'} as const)[market],ledger=unifiedPaperLedgerStore.get();
+    const imported=decisionIntelligenceStore.listPortfolio(market),paper:PortfolioRow[]=ledger.positions.filter(row=>row.instrumentType===type).map(row=>({market,instrument:row.instrumentId,quantity:row.quantity,price:row.currentPrice,averageCost:row.averageEntryPrice,currency:row.currency || 'UNKNOWN',accountId:'unified-paper-ledger',accountSource:'paper'}));
+    const rows=selection==='paper' ? paper:selection==='imported' ? imported:[...paper,...imported],orders=selection==='imported' ? []:ledger.orders.filter(order=>order.instrumentType===type);
+    const data=portfolioAttribution(market,rows,orders);
+    res.json(decisionEnvelope({market,data:{...data,accountSource:selection},dataStatus:data.dataStatus as any,source:selection==='paper'?'统一模拟账本':'显式选择的账户与原始记录',reason:data.reason}));
+  }catch(error:any){res.status(400).json({success:false,dataStatus:'unavailable',reason:error.message});}
+});
 app.get('/api/signals/forward', async (req, res) => {
   if (!adminOnly(req, res)) return;
   try {
@@ -1811,7 +1828,7 @@ app.get('/api/signals/quality', (req, res) => {
     const signals = decisionIntelligenceStore.listSignalOutcomes(market, instrument);
     const data = analyzeSignalQuality(signals, {
       minimumSamples: Number(req.query.minimumSamples || 30),
-      benchmarkReturnPct: Number(req.query.benchmarkReturnPct || 0),
+      ...(req.query.benchmarkReturnPct==null ? {} : {benchmarkReturnPct:Number(req.query.benchmarkReturnPct)}),
       ...(req.query.buyHoldReturnPct == null ? {} : { buyHoldReturnPct: Number(req.query.buyHoldReturnPct) }),
       ...(req.query.randomBaselineReturnPct == null ? {} : { randomBaselineReturnPct: Number(req.query.randomBaselineReturnPct) }),
     });
@@ -3052,7 +3069,7 @@ app.get('/api/diagnostics', async (req, res) => {
         recoveryDrill,
         sources: { total: sources.total, online: sources.online, updatedAt: sources.updatedAt, unavailable: sources.items.filter(item => !item.ok).map(item => ({ id: item.id, detail: item.detail })) },
         researchJobs: jobs.reduce<Record<string, number>>((acc, job) => { acc[job.status] = (acc[job.status] || 0) + 1; return acc; }, {}),
-        telegram: { configured: telegram.isConfigured, pollingEnabled: telegramConfig.pollingEnabled, pollingRunning: telegramInteractionBot?.isRunning || false, polling: telegramInteractionBot?.pollingStatus || null, lease: stateStore.getLease('telegram:getUpdates') },
+        telegram: { configured: telegram.isConfigured, pollingEnabled: telegramConfig.pollingEnabled, pollingRunning: telegramInteractionBot?.isRunning || false, polling: telegramInteractionBot?.pollingStatus || null, lease: stateStore.getLease('telegram:getUpdates'), stockScanSchedules:parseChatIds(telegramConfig.allowedChatIds,telegramConfig.chatId).filter(isTelegramAdmin).map(chatId=>({chatId,config:stockSignalSchedule.get(chatId),history:stockSignalSchedule.history(chatId).slice(-5),lease:stateStore.getLease('telegram:stock-signal-schedule-lease:'+chatId)})) },
         realTrading: 'disabled',
       },
     });
@@ -3784,6 +3801,25 @@ app.post('/api/contracts/scenario', express.json(),(req,res)=>{
   try {if(req.body.market!=='crypto')throw new Error('合约市场不一致');contractIdentity(String(req.body.instrument || ''));res.json({success:true,market:'crypto',instrument:req.body.instrument,data:contractScenario(req.body),dataStatus:'historical',source:'明确输入的压力情景假设',updatedAt:new Date().toISOString(),reason:'压力测试，不是行情预测或真实订单'});}
   catch(error:any){res.status(400).json({success:false,dataStatus:'failed',reason:error.message});}
 });
+app.get('/api/contracts/compare',async(req,res)=>{
+  try {
+    if(req.query.market!=='crypto')throw new Error('合约市场不一致');
+    const instruments=String(req.query.instruments || '').split(',').filter(Boolean);
+    if(instruments.length<2 || instruments.length>6 || new Set(instruments).size!==instruments.length)throw new Error('请选择2–6个不同合约');
+    const identities=instruments.map(contractIdentity);
+    if(new Set(identities.map(row=>row.contract.replace(/_USDT(?:_\d{8})?$/,''))).size!==1)throw new Error('仅比较同一底层的Gate USDT合约');
+    const rows=await Promise.all(instruments.map(instrument=>contractResearchService.detail(instrument)));
+    res.json({success:true,...compareContractSnapshots(rows),updatedAt:new Date().toISOString()});
+  }catch(error:any){res.status(400).json({success:false,dataStatus:'unavailable',reason:error.message});}
+});
+app.post('/api/contracts/capacity',express.json(),async(req,res)=>{
+  if(!adminOnly(req,res))return;
+  try {
+    if(req.body.market!=='crypto')throw new Error('合约市场不一致');
+    const snapshot=await contractResearchService.detail(String(req.body.instrument || ''));
+    res.json({success:true,...contractCapacity(snapshot,{side:req.body.side,quantity:req.body.quantity})});
+  }catch(error:any){res.status(400).json({success:false,dataStatus:'unavailable',reason:error.message});}
+});
 app.get('/api/perpetual-crowding', async (_req, res) => {
   try {
     res.json({ success: true, data: await getPerpetualCrowding() });
@@ -4453,7 +4489,7 @@ const TELEGRAM_HELP = [
   '/today   今日总览（行情、风险、事件）',
   '/status  查看服务与配置状态',
   '/risk    查看模拟盘风险摘要',
-  '/signals 查看最近一份助手信号',
+  '/signals 扫描固定热门、美股异动和当前聊天股票自选；/signals 2 翻页，/signals continue 续扫，/signals refresh 刷新',
   '/signal  查看单条信号详情，例如 /signal 1',
   '/search  同时搜索预测市场和股票，例如 /search AAPL 或 election',
   '/q       快速查询代码，例如直接发送 SNDK、AAPL、BTC 或 /q SNDK',
@@ -4806,7 +4842,7 @@ function telegramScopeForWatchId(id: string): MarketScope | null {
 }
 
 function telegramScopedWatchIds(chatId: string, scope: MarketScope): string[] {
-  const ids = [...new Set([...unifiedAlertStore.listWatchlist(), ...telegramCommandCenterStore.listWatchlist(chatId)])];
+  const ids = [...new Set(telegramCommandCenterStore.listWatchlist(chatId))];
   if (scope === 'overview' || scope === 'watchlist') return ids;
   return ids.filter(id => telegramScopeForWatchId(id) === scope);
 }
@@ -4847,6 +4883,15 @@ function isTelegramAdmin(chatId: string): boolean {
   return configured.size === 0 || configured.has(String(chatId));
 }
 
+telegramCommandCenterStore.bindOwnerWatchlist({
+  isOwnerChat:chatId=>telegramAdminChatIds().has(chatId),
+  normalize:id=>canonicalDigestWatchlist([/^\d+$/.test(id) ? `prediction:predictfun:${id}` : id])[0]?.instrument || null,
+  list:()=>unifiedAlertStore.listWatchlist(),
+  add:id=>unifiedAlertStore.addWatchlist(id),
+  remove:id=>unifiedAlertStore.removeWatchlist(id),
+});
+for(const chatId of telegramAdminChatIds()) telegramCommandCenterStore.listWatchlist(chatId);
+
 function localDashboardUrl(): string {
   if (config.appHost !== '0.0.0.0') return `http://localhost:${config.appPort}`;
   const interfaces = os.networkInterfaces();
@@ -4883,12 +4928,14 @@ function telegramRadarMarkets() {
 }
 
 function telegramFindMarket(marketId: string) {
-  return telegramRadarMarkets().find(item => String(item.id) === String(marketId));
+  return telegramRadarMarkets().find(item => String(item.id) === String(marketId).replace(/^prediction:predictfun:/,''));
 }
 
 function telegramWatchLabel(marketId: string, market?: any): string {
   if (market) return String(market.titleZh || market.title || marketId);
   const normalized = String(marketId || '');
+  const ref=telegramRefFromId(normalized);
+  if(ref)return String(ref.symbol);
   return isTelegramWatchableStockId(normalized)
     ? normalized.replace(/^(us|hk|sh|sz|bj)/i, '').toUpperCase()
     : normalized;
@@ -4900,7 +4947,7 @@ function formatTelegramWatchlist(chatId: string, scope: MarketScope = 'watchlist
   const lines = ids.map((id, index) => {
     const market = telegramFindMarket(id);
     if (!market) {
-      return isTelegramWatchableStockId(id)
+      return telegramScopeForWatchId(id)==='stocks'
         ? (index + 1) + '. 股票 ' + escapeTelegramHtml(telegramWatchLabel(id)) + ' · ' + escapeTelegramHtml(id)
         : (index + 1) + '. 市场 ' + escapeTelegramHtml(id) + ' · 当前快照未找到';
     }
@@ -5115,6 +5162,39 @@ async function buildTelegramDigest(chatId: string, cadenceLabel = '每日'): Pro
     ...(decisionSummary ? ['', decisionSummary] : []),
   ];
   return lines.join('\n');
+}
+
+async function stockSignalsForChat(chatId: string, args: string[], automatic = false): Promise<string> {
+  const scope=telegramScopeForChat(chatId),isAdmin=isTelegramAdmin(chatId);
+  const text=await handleTelegramStockSignalsCommand({
+    chatId,scope,args,isAdmin,schedule:stockSignalSchedule,
+    telegramWatchlistIds:telegramCommandCenterStore.listWatchlist(chatId),
+    administratorWatchlistIds:isAdmin ? unifiedAlertStore.listWatchlist() : [],
+    scanner:telegramStockSignalScanner,
+    analyze:async candidate=>{
+      if(automatic && !stockExchangeSession(candidate.market==='us' ? 'us':candidate.market==='hk' ? 'hk':'cn',Date.now()).open) return {candidate,status:'unavailable',dataStatus:'unavailable',action:null,source:'交易所常规时段校验',updatedAt:null,reason:'该交易所当前不在常规时段，自动扫描未请求行情'};
+      return analyzeStockSignalCandidate(candidate, automatic ? { maxQuoteAgeMs: 30 * 60000 } : {});
+    },
+    discoverMovers:async()=>{
+      const breadth=await getMarketBreadthSnapshot(),updatedAt=String(breadth.generatedAt || ''),generatedAt=Date.parse(updatedAt);
+      if(!Number.isFinite(generatedAt) || generatedAt>Date.now()+300000) return {movers:[],status:'unavailable',source:breadth.source || 'Nasdaq Public Screener',updatedAt:null,reason:'异动来源更新时间无效'};
+      const movers=[...(breadth.gainers || []),...(breadth.losers || [])].map(row=>({symbol:row.symbol,name:row.name,changePct:row.changePct,volume:row.volume,marketCapUsd:row.marketCapUsd}));
+      const age=Date.now()-generatedAt,freshness=age>7200000 ? 'stale' : age>300000 ? 'cached':'live';
+      return {movers,status:movers.length ? freshness:'empty',source:breadth.source || 'Nasdaq Public Screener',updatedAt,...(freshness==='stale' ? {reason:'异动数据超过两小时，结果可能过期'} : {})};
+    },
+  });
+  // Recording runs after completion; it never creates an order or guesses an old pairing.
+  void telegramStockSignalScanner.wait(chatId).then(snapshot=>{
+    if(!isAdmin || !snapshot)return;
+    for(const row of selectTelegramStockSignalAlerts(snapshot)) {
+      const entry=Number(row.action?.entry),triggeredAt=Date.parse(snapshot.createdAt),id=`stock-scan:${snapshot.id}:${row.candidate.instrumentId}`;
+      if(!Number.isFinite(entry) || entry<=0 || !row.updatedAt || decisionIntelligenceStore.getSignalOutcome(id))continue;
+      const evidence=createEvidenceSnapshot({market:'stocks',workspace:'signals',instrument:row.candidate.instrumentId,dataStatus:row.dataStatus==='cached' ? 'cached':row.dataStatus==='live' ? 'live':'delayed',source:{id:'stock-signal-scan',name:row.source},observedAt:row.updatedAt,fetchedAt:snapshot.updatedAt,fields:{entry,action:row.action?.action,reasons:row.action?.reasons,metrics:row.action?.metrics,scanId:snapshot.id,pools:row.candidate.sources}});
+      decisionIntelligenceStore.saveEvidence(evidence);
+      decisionIntelligenceStore.saveSignalOutcome({id,market:'stocks',instrument:row.candidate.instrumentId,strategyId:'stock-technical-scan',strategyVersion:'technical-v1',timeframe:'1d',source:row.source,triggeredAt,entryPrice:entry,sample:'live',status:'generated',statusReason:'扫描生成；前向观察是标的走势，不代表模拟成交或做空',evidenceRefs:[evidence.id]});
+    }
+  }).catch(error=>telegramCommandCenterStore.recordAudit(chatId,'stock_signal_lineage_error',String(error instanceof Error ? error.message:'信号血缘保存失败').slice(0,160)));
+  return text;
 }
 
 export function getTelegramCommandHandlers(): Record<string, TelegramCommandHandler> {
@@ -5490,7 +5570,7 @@ export function getTelegramCommandHandlers(): Record<string, TelegramCommandHand
       if (!parsed) return '用法：/watch add &lt;市场ID&gt; 或 /watch remove &lt;市场ID&gt;；查看：/watchlist';
       if (parsed.action === 'list') return formatTelegramWatchlist(chatId, scope);
       const market = telegramFindMarket(parsed.marketId || '');
-      if (parsed.action === 'add' && !market && !isTelegramWatchableStockId(parsed.marketId || '')) return '未找到该市场。请先用 /search &lt;关键词&gt; 确认市场 ID。';
+      if (parsed.action === 'add' && !market && !isTelegramWatchableStockId(parsed.marketId || '') && !telegramRefFromId(parsed.marketId || '')) return '未找到该市场。请先用 /search &lt;关键词&gt; 确认市场 ID。';
       const itemScope = telegramScopeForWatchId(parsed.marketId || '');
       if (itemScope && scope !== 'overview' && scope !== 'watchlist' && itemScope !== scope) {
         return `当前为${TELEGRAM_SCOPE_LABELS[scope]}市场，不能操作${TELEGRAM_SCOPE_LABELS[itemScope]}标的。请先切换市场后重试。`;
@@ -5691,6 +5771,28 @@ export function getTelegramCommandHandlers(): Record<string, TelegramCommandHand
     },
     signal: ({ chatId, args }) => {
       const scope = telegramScopeForChat(chatId);
+      if (scope === 'stocks') {
+        const snapshot = telegramStockSignalScanner.get(chatId);
+        if (!snapshot) return '股票扫描尚无可用快照。请发送 /signals 启动扫描。';
+        const parsed = Number.parseInt(String(args[0] || '1'), 10);
+        const index = Number.isFinite(parsed) && parsed > 0 ? parsed - 1 : 0;
+        const row = snapshot.candidates[index];
+        if (!row) return `未找到第 ${index + 1} 个股票候选，共 ${snapshot.candidates.length} 个。发送 /signals 查看列表。`;
+        const candidate = row.candidate;
+        const state = row.status === 'pending' ? '等待扫描' : row.status === 'unavailable' ? '数据不可用' : row.action?.actionZh || row.action?.action || 'WAIT';
+        const sourceNames: Record<string, string> = { fixed: '固定热门', mover: '美股异动', watchlist: '自选' };
+        return [
+          `<b>股票信号详情 #${index + 1}</b>`,
+          `${escapeTelegramHtml(candidate.name || candidate.symbol)} · ${escapeTelegramHtml(candidate.instrumentId)}`,
+          `状态：${escapeTelegramHtml(state)} · 来源池：${candidate.sources.map(item => sourceNames[item] || item).join('＋')}`,
+          row.dataStatus ? `数据状态：${escapeTelegramHtml(row.dataStatus)}` : '',
+          row.source ? `行情源：${escapeTelegramHtml(row.source)}` : '',
+          row.updatedAt ? `数据时间：${escapeTelegramHtml(row.updatedAt)}` : '',
+          row.reason ? `原因：${escapeTelegramHtml(row.reason)}` : '',
+          ...(row.action?.reasons || []).slice(0, 6).map(reason => `· ${escapeTelegramHtml(reason)}`),
+          '', '仅作研究信息，不构成投资建议，不会自动下单。',
+        ].filter(Boolean).join('\n');
+      }
       if (!lastAdvisorReport) {
         refreshAdvisorReportInBackground();
         return '助手报告尚未准备好，已在后台刷新。稍后再次发送 /signal 1。';
@@ -5820,8 +5922,21 @@ export function getTelegramCommandHandlers(): Record<string, TelegramCommandHand
         '统计仅针对本地模拟盘，历史结果不代表未来表现。',
       ].join('\n');
     },
-    signals: ({ chatId }) => {
+    signals: async ({ chatId, args }) => {
       const scope = telegramScopeForChat(chatId);
+      if (scope === 'stocks') {
+        const text=await stockSignalsForChat(chatId,args),snapshot=telegramStockSignalScanner.get(chatId);
+        if(!snapshot || ['auto','history'].includes(args[0]))return text;
+        const filters=Object.fromEntries(args.filter(arg=>arg.includes('=')).map(arg=>arg.split('=')));
+        let page;try{page=paginateTelegramStockSignals(snapshot,Number(args[0]) || 1,8,filters);}catch{return text;}
+        const button=(label:string,commands:string[])=>({text:label,callback_data:issueTelegramCallback('stock-signal:handle',{scope:'stocks',workspace:'signals',chatId,id:JSON.stringify({args:commands,scanId:snapshot.id})})});
+        const suffix=args.filter(arg=>arg.includes('='));
+        return telegramInlineReply(text,[
+          [button('全部',[]),button('自选',['pool=watchlist']),button('异动',['pool=mover'])],
+          [button('BUY',['direction=BUY']),button('SELL',['direction=SELL']),button('不可用',['status=unavailable'])],
+          [...(page.page>1 ? [button('上一页',[String(page.page-1),...suffix])]:[]),...(page.page<page.pageCount ? [button('下一页',[String(page.page+1),...suffix])]:[]),button(snapshot.status==='partial' ? '继续扫描':'刷新',[snapshot.status==='partial' ? 'continue':'refresh'])],
+        ]);
+      }
       if (!lastAdvisorReport) {
         refreshAdvisorReportInBackground();
         return '助手报告尚未准备好，已在后台刷新。稍后再次发送 /signals。';
@@ -6153,7 +6268,7 @@ export function getTelegramCommandHandlers(): Record<string, TelegramCommandHand
         return runner ? `✅ 已清除策略熔断标记，当前保持停止：${escapeTelegramHtml(runner.title)}` : '未找到策略。';
       }
       if (action === 'start') {
-        if (!config.aiPaperTradingEnabled) return 'AI 自动纸面交易默认关闭，请先设置 AI_PAPER_TRADING_ENABLED=true。';
+        if (!config.aiPaperTradingEnabled) return 'AI 自动纸面交易当前关闭，可设置 AI_PAPER_TRADING_ENABLED=true 启用模拟能力。';
         const venue = String(args[1] || '') as 'Binance' | 'Predict.fun' | 'Stocks';
         const symbol = String(args[2] || '');
         const budget = Number(args[3]);
@@ -6423,6 +6538,13 @@ function startTelegramInteractionBot(): void {
         actionCenterStore.update('admin',item,action==='read' ? {read:true}:action==='pin' ? {pinned:true}:{snoozedUntil:new Date(Date.now()+86400000).toISOString()});
         return telegramReply('✅ 已同步网页处理状态：'+escapeTelegramHtml(item.title));
       }
+      if(data.startsWith('stock-signal:handle:')) {
+        const record=consumeTelegramCallback(data,'stock-signal:handle',ctx.chatId);
+        if(!record || record.workspace!=='signals' || record.scope!=='stocks' || telegramScopeForChat(ctx.chatId)!=='stocks')return telegramReply('股票信号按钮已过期或市场已切换。');
+        let payload;try{payload=JSON.parse(record.id);}catch{return telegramReply('信号按钮无效。');}
+        if(!Array.isArray(payload.args) || payload.args.length>4 || !payload.args.every((arg:unknown)=>typeof arg==='string') || telegramStockSignalScanner.get(ctx.chatId)?.id!==payload.scanId)return telegramReply('扫描结果已更新，请重新发送 /signals。');
+        return commandHandlers.signals({chatId:ctx.chatId,command:'signals',args:payload.args,message:ctx.message,update:ctx.update});
+      }
       if (data.startsWith('task:handle:')) {
         const record = consumeTelegramCallback(data, 'task:handle', ctx.chatId);
         if (!record || record.workspace !== 'research' || record.scope !== telegramScopeForChat(ctx.chatId)) return telegramReply('任务按钮已过期或市场已切换。');
@@ -6498,7 +6620,6 @@ function startTelegramInteractionBot(): void {
         telegramCommandCenterStore.setActiveMarketScope(ctx.chatId, parsed.scope);
         telegramCommandCenterStore.updateSession(ctx.chatId, { marketScope: parsed.scope, workspace: parsed.workspace, instrumentId: parsed.ref.id, timeframe: parsed.timeframe });
         const changed = telegramCommandCenterStore.addWatchlistMarket(ctx.chatId, parsed.id);
-        unifiedAlertStore.addWatchlist(parsed.id);
         telegramCommandCenterStore.recordAudit(ctx.chatId, 'watchlist_update', 'add:' + parsed.id);
         return telegramReply(changed ? `✅ 已加入${escapeTelegramHtml(TELEGRAM_SCOPE_LABELS[parsed.scope])}自选：${escapeTelegramHtml(parsed.ref.title || parsed.ref.symbol)}` : '该标的已在自选中。');
       }
@@ -6618,18 +6739,14 @@ ${escapeTelegramHtml(position.marketTitle)} · ${escapeTelegramHtml(position.out
         const itemScope = telegramScopeForWatchId(mid);
         if (itemScope && currentScope !== 'overview' && currentScope !== 'watchlist' && itemScope !== currentScope) return telegramReply(`当前为${TELEGRAM_SCOPE_LABELS[currentScope]}市场，不能把${TELEGRAM_SCOPE_LABELS[itemScope]}标的加入此处自选。`);
         const m = telegramFindMarket(mid);
-        const canonical = mid.includes(':') ? mid : (isTelegramWatchableStockId(mid) ? `stock:us:${mid.replace(/^us/i, '')}` : `prediction:predictfun:${mid}`);
-        if (!m && !isTelegramWatchableStockId(mid) && !/^(stock|crypto|prediction):/i.test(mid)) return telegramReply('未找到该市场');
+        if (!m && !isTelegramWatchableStockId(mid) && !/^(stock|option|crypto|prediction):/i.test(mid)) return telegramReply('未找到该市场');
         const changed = telegramCommandCenterStore.addWatchlistMarket(ctx.chatId, mid);
-        unifiedAlertStore.addWatchlist(canonical);
         telegramCommandCenterStore.recordAudit(ctx.chatId, 'watchlist_update', 'add:'+mid);
         return telegramReply(changed ? `✅ 已加入自选：${escapeTelegramHtml(telegramWatchLabel(mid, m))}` : '该市场已在自选中');
       }
       if (data.startsWith('watch:remove:')) {
         const mid = data.slice('watch:remove:'.length);
         const changed = telegramCommandCenterStore.removeWatchlistMarket(ctx.chatId, mid);
-        const canonical = mid.includes(':') ? mid : (isTelegramWatchableStockId(mid) ? `stock:us:${mid.replace(/^us/i, '')}` : `prediction:predictfun:${mid}`);
-        unifiedAlertStore.removeWatchlist(canonical);
         telegramCommandCenterStore.recordAudit(ctx.chatId, 'watchlist_update', 'remove:'+mid);
         return telegramReply(changed ? `✅ 已移出自选：${escapeTelegramHtml(mid)}` : '该市场不在自选中');
       }
@@ -7014,16 +7131,63 @@ async function monitorTelegramSlowAlerts(): Promise<void> {
         await telegramInteractionBot.sendToChat(chatId, telegramReply(`⚠️ <b>模拟盘风险预警</b>\n最大回撤已达 ${formatTelegramNumber(portfolio.maxDrawdownPct, 1)}%，VaR95 $${formatTelegramNumber(metrics.var95Usd)}。建议先检查集中度和临近截止仓位。`));
       }
     }
-    const signalKey = `${chatId}:${lastAdvisorReport?.generatedAt || ''}`;
-    if (notifications.signals && lastAdvisorReport && !telegramSignalPushes.has(signalKey)) {
-      const actionable = telegramActions().filter(item => item.action !== 'WAIT').slice(0, 3);
-      if (actionable.length) {
-        await telegramInteractionBot.sendToChat(chatId, telegramReply([
-          '<b>📡 新助手信号</b>',
-          ...actionable.map(item => `· ${escapeTelegramHtml(item.title || item.symbol)} · ${escapeTelegramHtml(item.actionZh)} · ${formatTelegramNumber(item.confidencePct, 0)}%`),
-          '', '发送 /signals 查看完整列表。',
-        ].join('\n')));
-        telegramSignalPushes.add(signalKey);
+    if (notifications.signals && !telegramAlertSuppressed(chatId, 'normal')) {
+      const scope = telegramScopeForChat(chatId);
+      if (scope === 'stocks') {
+        if(isTelegramAdmin(chatId))await stockSignalSchedule.run(chatId,{market:scope,paused:telegramAlertSuppressed(chatId,'normal')},async()=>{
+          const existing=telegramStockSignalScanner.get(chatId);
+          await stockSignalsForChat(chatId,[existing?.status==='partial' ? 'continue':'refresh'],true);
+          const completed=await telegramStockSignalScanner.wait(chatId);
+          if(!completed || ['discovering','scanning'].includes(completed.status))throw new Error('另一个进程仍在扫描，未将未完成扫描记为成功');
+        });
+        const snapshot = telegramStockSignalScanner.get(chatId);
+        if (snapshot?.status === 'complete') {
+          const key = telegramStockSignalNotificationKey(chatId, snapshot);
+          const deliveryStateKey = `telegram:stock-signal-last-delivered:${chatId}`;
+          const deliveryLeaseKey = `telegram:stock-signal-delivery:${chatId}`;
+          const alreadySent = stateStore.get<string>(deliveryStateKey) === snapshot.id;
+          const actionable = selectTelegramStockSignalAlerts(snapshot).filter(row=>isStockSignalNotificationFresh(row)).slice(0, 3);
+          if (actionable.length && !alreadySent) {
+            const owner = `stock-signal:${crypto.randomUUID()}`;
+            if (stateStore.acquireLease(deliveryLeaseKey, owner, Date.now(), 30_000)) {
+              try {
+                const latest = telegramStockSignalScanner.get(chatId);
+                const latestNotifications = telegramCommandCenterStore.getPreferences(chatId).notifications;
+                if (latest?.id === snapshot.id && telegramScopeForChat(chatId) === 'stocks'
+                  && latestNotifications.signals && !telegramAlertSuppressed(chatId, 'normal')) {
+                  const deliveryId='stock-signal:'+key;
+                  const expiresAt=new Date(Math.min(Date.parse(snapshot.createdAt)+30*60000,...actionable.map(row=>stockQuoteObservationTime(row.updatedAt)!+30*60000))).toISOString();
+                  telegramStockSignalOutbox.enqueue({id:deliveryId,context:{market:'stocks',workspace:'signals'},alertId:snapshot.id,channel:'telegram',status:'queued',expiresAt,payload:{chatId,message:[
+                    '<b>📡 股票信号更新</b>',
+                    ...actionable.map(row => `· ${escapeTelegramHtml(row.candidate.name || row.candidate.symbol)} · ${escapeTelegramHtml(row.action?.actionZh || row.action?.action || '')} · ${escapeTelegramHtml(row.source)}`),
+                    '', '发送 /signals 查看当前聊天可见的完整股票池。',
+                  ].join('\n')}});
+                  await telegramStockSignalOutbox.flush(chatId,()=>telegramScopeForChat(chatId)==='stocks' && telegramCommandCenterStore.getPreferences(chatId).notifications.signals && !telegramAlertSuppressed(chatId,'normal'),async text=>{if(!telegramInteractionBot)throw Error('Telegram暂停');await telegramInteractionBot.sendToChat(chatId,telegramReply(text));});
+                  if(['sent','acknowledged'].includes(researchRepository.getAlertDelivery(deliveryId)?.status || '')) {
+                    stateStore.set(deliveryStateKey, snapshot.id, 1);
+                    telegramCommandCenterStore.recordAudit(chatId, 'stock_signal_scan_push', key);
+                  }
+                }
+              } finally {
+                stateStore.releaseLease(deliveryLeaseKey, owner);
+              }
+            }
+          }
+        }
+        await telegramStockSignalOutbox.flush(chatId,()=>telegramScopeForChat(chatId)==='stocks' && telegramCommandCenterStore.getPreferences(chatId).notifications.signals && !telegramAlertSuppressed(chatId,'normal'),async text=>{if(!telegramInteractionBot)throw Error('Telegram暂停');await telegramInteractionBot.sendToChat(chatId,telegramReply(text));});
+      } else if (lastAdvisorReport) {
+        const signalKey = `${chatId}:${scope}:${lastAdvisorReport.generatedAt}`;
+        if (!telegramSignalPushes.has(signalKey)) {
+          const actionable = telegramActions(scope).filter(item => item.action !== 'WAIT').slice(0, 3);
+          if (actionable.length) {
+            await telegramInteractionBot.sendToChat(chatId, telegramReply([
+              `<b>📡 ${escapeTelegramHtml(TELEGRAM_SCOPE_LABELS[scope])}市场新助手信号</b>`,
+              ...actionable.map(item => `· ${escapeTelegramHtml(item.title || item.symbol)} · ${escapeTelegramHtml(item.actionZh)} · ${formatTelegramNumber(item.confidencePct, 0)}%`),
+              '', '发送 /signals 查看完整列表。',
+            ].join('\n')));
+            telegramSignalPushes.add(signalKey);
+          }
+        }
       }
     }
   }
@@ -8227,9 +8391,21 @@ app.get('/api/paper/trades', (req, res) => {
 import {
   createAiRunner, stopAiRunner, getAiRunners,
   runnerOpenPosition, runnerClosePosition,
-  summarizeRunner, updateAiRunnerPolicy, pauseAiRunner, resumeAiRunner, resetAiRunnerCircuit,
+  summarizeRunner, updateAiRunnerPolicy, updateAiRunnerRouting, selectRunnerStockQuote, pauseAiRunner, resumeAiRunner, resetAiRunnerCircuit,
+  evaluateRunnerOpen, resolveRunnerFill, evaluateRunnerQuoteGate, calculateRunnerExecutionCosts,
+  evaluateAiRunnerTrigger, isAiRunnerCallAllowed, appendAiRunnerDecision, listAiRunnerHistory,
+  updateAiRunnerMarketState, recordAiRunnerModelCall, evaluateRunnerIndicatorEvidence,
+  normalizeAiRunnerStockKlines,
+  activateAiRunnerComparison,
+  type AiRunner, type AiRunnerDecisionRecord, type AiRunnerInstrumentRef, type AiRunnerMarket,
+  type AiRunnerQuote, type AiRunnerDataEvidence,
 } from '../features/ai-paper-runner';
 import { ResilientDataSourceAdapter } from '../data/source-adapter';
+import { AiRunnerTickCoordinator, buildAiRunnerTickIdempotencyKey } from '../features/ai-runner-coordinator';
+import { requestAiRunnerIntent, type AiRunnerModelSnapshot } from '../features/ai-runner-model';
+import { getAiRuntimeConfig } from '../features/ai-runtime-config';
+import { createNasdaqStockAdapters } from '../features/nasdaq-stock-source';
+import { createYahooStockAdapter } from '../data/yahoo-adapter';
 
 app.post('/api/kelly', (req, res) => {
   const { probability, price, bankroll, fraction } = req.body;
@@ -8239,31 +8415,127 @@ app.post('/api/kelly', (req, res) => {
 
 // --- AI Paper Runner ---
 
-app.get('/api/ai-runners', (_req, res) => {
-  const runners = getAiRunners().map(r => ({ ...r, summary: summarizeRunner(r) }));
-  res.json({ success: true, data: runners });
+const aiRunnerTickCoordinator = new AiRunnerTickCoordinator(stateStore);
+const runnerStockQuotes = createNasdaqStockAdapters(fetch, { quoteTtlMs:30_000, timeoutMs:4_000, retries:0 });
+const runnerYahooQuotes = new Map<string, ReturnType<typeof createYahooStockAdapter>>();
+
+app.post('/api/ai-runners/:id/routing', express.json(), (req,res) => {
+  if (!adminOnly(req,res)) return;
+  try {
+    const data = updateAiRunnerRouting(String(req.params.id), req.body || {});
+    if (!data) return res.status(404).json({success:false,reason:'跑单不存在'});
+    stateStore.appendAudit({id:crypto.randomUUID(),action:'ai_runner_routing_updated',detail:`${data.id}: ${data.modelSelection}/${data.quoteSelection}`});
+    res.json({success:true,data});
+  } catch(error:any) { res.status(400).json({success:false,reason:error.message}); }
+});
+
+app.get('/api/ai-runners', (req, res) => {
+  if (!adminOnly(req, res)) return;
+  if(req.query.market && !MARKET_IDS.includes(String(req.query.market) as MarketId))return res.status(400).json({success:false,reason:'跑单市场无效'});
+  const runners = getAiRunners().filter(r=>!req.query.market || r.universe?.market===req.query.market).map(r => ({ ...r, summary: summarizeRunner(r) }));
+  res.json({ success: true, enabled: config.aiPaperTradingEnabled, data: runners });
+});
+app.get('/api/ai-runners/compare',(req,res)=>{
+  if(!adminOnly(req,res))return;
+  try {
+    const ids=String(req.query.ids || '').split(',').filter(Boolean);
+    if(ids.length<2 || ids.length>6 || new Set(ids).size!==ids.length)throw new Error('请选择2–6个不同跑单');
+    const runners=getAiRunners(),selected=ids.map(id=>runners.find(row=>row.id===id));
+    if(selected.some(row=>!row))throw new Error('所选跑单不存在');
+    if(req.query.market && selected.some(row=>row?.universe?.market!==req.query.market))throw new Error('所选跑单不属于当前市场');
+    const histories=Object.fromEntries(ids.map(id=>[id,listAiRunnerHistory(id,undefined,200).data]));
+    const data=compareAiRunnerReports(selected as AiRunner[],histories);
+    res.json({success:true,...data,updatedAt:new Date().toISOString(),source:'独立账户与持久逐轮记录（每个账户最近200轮）',reason:data.reason+'；比较仅覆盖已加载的最近200轮'});
+  }catch(error:any){res.status(400).json({success:false,dataStatus:'unavailable',reason:error.message});}
+});
+
+app.post('/api/ai-runners/comparisons', express.json(), (req,res) => {
+  if (!adminOnly(req,res)) return;
+  if (!config.aiPaperTradingEnabled) return res.status(403).json({success:false,error:'AI跑单开关关闭；未创建对照账户'});
+  try {
+    const {venue,symbolOrMarketId,title,budgetUsd,policy,seed,model,universe}=req.body || {};
+    const data=createAiRunnerComparison(venue,String(symbolOrMarketId || ''),String(title || symbolOrMarketId || ''),budgetUsd,policy || {},{seed,model,universe});
+    stateStore.appendAudit({id:crypto.randomUUID(),action:'ai_comparison_created',detail:data.id+'；三个账户默认暂停'});
+    res.json({success:true,data,reason:'默认暂停；只有明确执行对照轮次才会读取行情及调用已配置模型'});
+  } catch(error:any) {res.status(400).json({success:false,error:error.message});}
+});
+app.get('/api/ai-runners/comparisons/:id', (req,res) => {
+  if (!adminOnly(req,res))return;
+  const group=getAiRunnerComparison(String(req.params.id));
+  if(!group)return res.status(404).json({success:false,reason:'对照实验不存在'});
+  res.json({success:true,data:group,samples:listAiRunnerComparisonSamples(group.id).map(({id,at,hash,results})=>({id,at,hash,completed:!!results}))});
+});
+app.get('/api/ai-runners/comparisons/:id/samples/:sample/replay', (req,res) => {
+  if(!adminOnly(req,res))return;
+  try {res.json({success:true,...replayAiRunnerComparisonSample(String(req.params.id),String(req.params.sample))});}
+  catch(error:any){res.status(404).json({success:false,reason:error.message});}
+});
+app.post('/api/ai-runners/comparisons/:id/tick',express.json(),async(req,res)=>{
+  if(!adminOnly(req,res))return;
+  if(!config.aiPaperTradingEnabled)return res.status(403).json({success:false,reason:'AI跑单开关关闭，未调用模型或创建订单'});
+  let activatedIds: string[] = [];
+  try {
+    const group=getAiRunnerComparison(String(req.params.id));if(!group)throw new Error('对照实验不存在');
+    const key=String(req.headers['idempotency-key'] || req.body?.idempotencyKey || '').trim();
+    if(!key || key.length>160)throw new Error('对照执行必须携带有效幂等键');
+    const validation=validateAiRunnerComparison(group,getAiRunners().filter(row=>group.runnerIds.includes(row.id)));
+    if(!validation.valid)throw new Error(validation.reason);
+    const result=await aiRunnerTickCoordinator.run('comparison:'+group.id,'ai-comparison:'+group.id+':'+key,async()=>{
+      activateAiRunnerComparison(group.id,group.runnerIds);
+      activatedIds=group.runnerIds;
+      try {
+        const primary=getAiRunners().find(row=>row.id===group.runnerIds[0])!;
+        const inputs=[];for(const ref of primary.universe!.instruments)inputs.push(await loadAiRunnerInstrumentSnapshot(primary,ref));
+        const sample=buildAiRunnerComparisonSample(group,key,new Date().toISOString(),inputs);
+        saveAiRunnerComparisonSample(group.id,sample);
+        const prepared=[];for(const id of group.runnerIds)prepared.push(await prepareAiRunnerTick(id,'ai-comparison:'+group.id+':'+key+':'+id,sample));
+        return {sample,prepared};
+      }catch(error){group.runnerIds.forEach(id=>pauseAiRunner(id,'对照准备失败，未提交成交'));throw error;}
+    },({sample,prepared})=>{
+      const current=getAiRunners().filter(row=>group.runnerIds.includes(row.id));
+      if(!validateAiRunnerComparison(group,current).valid || current.some(row=>row.status!=='RUNNING'))throw new Error('对照准备期间有账户被暂停或配置改变，整轮未提交成交');
+      const results=prepared.map(executePreparedRunnerTick);
+      saveAiRunnerComparisonSample(group.id,{...sample,results:results.flatMap(row=>row.decisions)});
+      group.runnerIds.forEach(id=>pauseAiRunner(id,'对照轮次完成；等待下一次人工执行'));
+      stateStore.appendAudit({id:crypto.randomUUID(),action:'ai_comparison_tick',detail:group.id+'；快照 '+sample.hash});
+      return {sampleId:sample.id,snapshotHash:sample.hash,results,reason:validation.reason};
+    });
+    if(result.status==='busy')return res.status(409).json({success:false,reason:'该对照正在执行，未重复下单'});
+    res.json({success:true,...result});
+  }catch(error:any){
+    activatedIds.forEach(id=>pauseAiRunner(id,'对照轮次失败，未自动恢复'));
+    res.status(400).json({success:false,reason:error.message});
+  }
 });
 
 app.post('/api/ai-runners/create', express.json(), (req, res) => {
-  if (!config.aiPaperTradingEnabled) return res.status(403).json({ success: false, error: 'AI 自动纸面交易默认关闭，请先设置 AI_PAPER_TRADING_ENABLED=true' });
-  const { venue, symbolOrMarketId, title, budgetUsd } = req.body ?? {};
+  if (!adminOnly(req, res)) return;
+  if (!config.aiPaperTradingEnabled) return res.status(403).json({ success: false, error: 'AI 自动纸面交易当前关闭，可设置 AI_PAPER_TRADING_ENABLED=true 启用模拟能力' });
+  const { venue, symbolOrMarketId, title, budgetUsd, mode, trigger, universe, model } = req.body ?? {};
   if (!venue || !symbolOrMarketId || !budgetUsd || typeof budgetUsd !== 'number' || budgetUsd < 1) {
     return res.status(400).json({ success: false, error: '请填写平台、标的和金额（≥$1）' });
   }
+  if (mode != null && !['rules', 'ai-review', 'ai-autonomous-paper'].includes(String(mode))) return res.status(400).json({ success: false, error: '跑单模式无效' });
+  if (trigger != null && !['scheduled', 'signal'].includes(String(trigger))) return res.status(400).json({ success: false, error: 'AI 触发方式无效' });
+  if (model != null && (typeof model !== 'string' || model.length > 160)) return res.status(400).json({ success: false, error: '模型标识无效' });
   try {
-    const runner = createAiRunner(venue, String(symbolOrMarketId), String(title || symbolOrMarketId), budgetUsd, req.body?.policy);
+    const runner = createAiRunner(venue, String(symbolOrMarketId), String(title || symbolOrMarketId), budgetUsd, req.body?.policy, { mode, trigger, universe, model });
     res.json({ success: true, data: runner });
   } catch (e: any) { res.status(400).json({ success: false, error: e.message }); }
 });
 
 app.post('/api/ai-runners/policy', express.json(), (req, res) => {
+  if (!adminOnly(req, res)) return;
   const { id, policy } = req.body ?? {};
-  const runner = id && policy ? updateAiRunnerPolicy(String(id), policy) : null;
+  let runner;
+  try { runner = id && policy ? updateAiRunnerPolicy(String(id), policy) : null; }
+  catch (error) { return res.status(400).json({ success: false, error: error instanceof Error ? error.message : '策略风控参数无效' }); }
   if (!runner) return res.status(404).json({ success: false, error: '未找到策略' });
   res.json({ success: true, data: runner });
 });
 
 app.post('/api/ai-runners/pause', express.json(), (req, res) => {
+  if (!adminOnly(req, res)) return;
   const { id, reason } = req.body ?? {};
   const runner = id ? pauseAiRunner(String(id), String(reason || '手动暂停')) : null;
   if (!runner) return res.status(404).json({ success: false, error: '未找到策略' });
@@ -8271,6 +8543,7 @@ app.post('/api/ai-runners/pause', express.json(), (req, res) => {
 });
 
 app.post('/api/ai-runners/resume', express.json(), (req, res) => {
+  if (!adminOnly(req, res)) return;
   const { id } = req.body ?? {};
   const runner = id ? resumeAiRunner(String(id)) : null;
   if (!runner) return res.status(404).json({ success: false, error: '未找到策略或仍处于熔断状态' });
@@ -8278,6 +8551,7 @@ app.post('/api/ai-runners/resume', express.json(), (req, res) => {
 });
 
 app.post('/api/ai-runners/reset-circuit', express.json(), (req, res) => {
+  if (!adminOnly(req, res)) return;
   const { id } = req.body ?? {};
   const runner = id ? resetAiRunnerCircuit(String(id)) : null;
   if (!runner) return res.status(404).json({ success: false, error: '未找到策略' });
@@ -8324,10 +8598,7 @@ function getRunnerStockKlineAdapter(symbol: string): ResilientDataSourceAdapter<
         const dataKey = Object.keys(payload.data || {})[0];
         const rows = dataKey ? (payload.data[dataKey].qfqday || payload.data[dataKey].day) : null;
         if (!Array.isArray(rows) || !rows.length) throw new Error('股票 K 线为空');
-        return rows.map((row: unknown[]) => [
-          new Date(String(row[0])).getTime(),
-          Number(row[1]), Number(row[2]), Number(row[3]), Number(row[4]), Number(row[5]),
-        ]);
+        return normalizeAiRunnerStockKlines(rows as unknown[][]);
       },
     });
     runnerStockKlineAdapters.set(key, adapter);
@@ -8336,113 +8607,507 @@ function getRunnerStockKlineAdapter(symbol: string): ResilientDataSourceAdapter<
 }
 
 app.post('/api/ai-runners/stop', express.json(), (req, res) => {
+  if (!adminOnly(req, res)) return;
   const { id } = req.body ?? {};
   const runner = id ? stopAiRunner(String(id)) : null;
   if (!runner) return res.status(404).json({ success: false, error: '未找到跑单或已停止' });
   res.json({ success: true, data: runner });
 });
 
+interface AiRunnerInstrumentSnapshot extends AiRunnerModelSnapshot {
+  ref: AiRunnerInstrumentRef;
+  dataStatus: string;
+  source?: string;
+  dataAt?: string;
+  reason?: string;
+  snapshotHash: string;
+  evidence?: AiRunnerDataEvidence[];
+  quote?: AiRunnerQuote;
+  indicatorDataStatus?: string;
+  indicatorDataAt?: string;
+  indicatorRetrievedAt?: string;
+  modelProbability?: number;
+  requestedAction?: 'BUY' | 'SELL';
+  requestedSide?: 'YES' | 'NO' | 'LONG';
+  requestReason?: string;
+}
+
+function runnerLedgerInstrumentId(instrument: AiRunnerInstrumentRef): string {
+  const symbol = instrument.symbolOrMarketId.toUpperCase();
+  if (instrument.venue === 'Stocks') return `stock:us:${symbol}`;
+  if (instrument.venue === 'Options') return `option:us:${symbol}`;
+  if (instrument.venue === 'Predict.fun') return `prediction:predictfun:${symbol}`;
+  return `crypto:binance:${symbol}`;
+}
+
+function runnerBookStatus(timestamp: number, maxAgeMs: number, now = Date.now()): 'live' | 'delayed' | 'stale' | 'unavailable' {
+  if (!Number.isFinite(timestamp) || timestamp <= 0) return 'unavailable';
+  const age = now - timestamp;
+  if (age < 0) return 'unavailable';
+  if (age <= 15_000) return 'live';
+  if (age <= maxAgeMs) return 'delayed';
+  return 'stale';
+}
+
+function runnerIndicators(rows: unknown[][]): { closes: number[]; price?: number; rsi14?: number; sma10?: number } {
+  const closes = rows.map(row => Number(row[4])).filter(value => Number.isFinite(value) && value > 0);
+  if (closes.length < 15) return { closes };
+  let gains = 0;
+  let losses = 0;
+  for (let index = closes.length - 14; index < closes.length; index += 1) {
+    const change = closes[index] - closes[index - 1];
+    if (change > 0) gains += change;
+    else losses += Math.abs(change);
+  }
+  const rs = gains / (losses || 1e-9);
+  return {
+    closes,
+    price: closes[closes.length - 1],
+    rsi14: 100 - 100 / (1 + rs),
+    sma10: closes.slice(-10).reduce((sum, value) => sum + value, 0) / 10,
+  };
+}
+
+function runnerSnapshotHash(snapshot: Omit<AiRunnerInstrumentSnapshot, 'snapshotHash'>): string {
+  return crypto.createHash('sha256').update(JSON.stringify({
+    market: snapshot.market, instrument: snapshot.instrument, status: snapshot.dataStatus,
+    source: snapshot.source, dataAt: snapshot.dataAt, price: snapshot.price,
+    rsi14: snapshot.rsi14, sma10: snapshot.sma10, quote: snapshot.quote,
+    indicatorDataStatus: snapshot.indicatorDataStatus, indicatorDataAt: snapshot.indicatorDataAt,
+    indicatorRetrievedAt: snapshot.indicatorRetrievedAt, evidence: snapshot.evidence,
+    modelProbability: snapshot.modelProbability, candidateSignals: snapshot.candidateSignals,
+  })).digest('hex');
+}
+
+async function loadAiRunnerInstrumentSnapshot(runner: AiRunner, ref: AiRunnerInstrumentRef): Promise<AiRunnerInstrumentSnapshot> {
+  const market = runner.universe?.market || (ref.venue === 'Stocks' ? 'stocks' : ref.venue === 'Options' ? 'options' : ref.venue === 'Predict.fun' ? 'prediction' : 'crypto');
+  const instrument = ref.symbolOrMarketId.toUpperCase();
+  let row: Omit<AiRunnerInstrumentSnapshot, 'snapshotHash'> = {
+    ref, market, instrument, dataStatus: 'unavailable', reason: '当前标的来源不可用', candidateSignals: [], evidence: [],
+  };
+  try {
+    if (ref.venue === 'Options') {
+      row = { ...row, dataStatus: 'unsupported', reason: '期权合约身份或可靠买卖价不足，当前跑单不支持' };
+    } else if (ref.venue === 'Binance') {
+      const [barsResult, depth] = await Promise.all([
+        getRunnerKlineAdapter(instrument).fetch(),
+        binanceFeed.getDepth(instrument, 5),
+      ]);
+      const bars = barsResult.data || [];
+      const metrics = runnerIndicators(bars);
+      const indicatorDataAtMs = bars.length ? Number(bars[bars.length - 1][0]) : Number.NaN;
+      const indicatorDataAt = Number.isFinite(indicatorDataAtMs) ? new Date(indicatorDataAtMs).toISOString() : undefined;
+      const indicatorGate = evaluateRunnerIndicatorEvidence({ status: barsResult.status, dataAt: indicatorDataAt, retrievedAt: barsResult.fetchedAt }, runner.policy.minFreshnessMs);
+      const bookAt = Number(depth?.freshness);
+      const bookStatus = depth?.sourceStatus === 'ok' ? runnerBookStatus(bookAt, runner.policy.minFreshnessMs) : 'unavailable';
+      const bid = Number(depth?.bids?.[0]?.[0]);
+      const ask = Number(depth?.asks?.[0]?.[0]);
+      const validBook = Number.isFinite(bid) && bid > 0 && Number.isFinite(ask) && ask >= bid;
+      const dataStatus = !bars.length ? (barsResult.status === 'stale' ? 'stale' : 'unavailable') : validBook ? bookStatus : 'unavailable';
+      const dataAt = Number.isFinite(bookAt) && bookAt > 0 ? new Date(bookAt).toISOString() : bars.length ? new Date(Number(bars[bars.length - 1][0])).toISOString() : undefined;
+      const mid = validBook ? (bid + ask) / 2 : metrics.price;
+      const quote: AiRunnerQuote = {
+        market: 'crypto', status: dataStatus, dataStatus, price: Number(mid), fetchedAt: dataAt,
+        source: 'Binance 公共盘口', bestBid: validBook ? bid : undefined, bestAsk: validBook ? ask : undefined,
+        reason: !bars.length ? barsResult.error || '暂无K线历史' : !validBook ? '盘口没有有效双边报价' : dataStatus === 'stale' ? '盘口报价过期' : undefined,
+      };
+      const candidateSignals: string[] = [];
+      if (indicatorGate.allowed && metrics.rsi14 != null && metrics.rsi14 < 32) candidateSignals.push(`RSI14=${metrics.rsi14.toFixed(1)} 超卖`);
+      const aboveSma = metrics.price != null && metrics.sma10 != null && metrics.price > metrics.sma10;
+      if (indicatorGate.allowed && metrics.rsi14 != null && metrics.rsi14 > 68) candidateSignals.push(`RSI14=${metrics.rsi14.toFixed(1)} 超买`);
+      row = {
+        ...row, dataStatus, source: 'Binance K线 + 公共盘口', dataAt,
+        indicatorDataStatus: bars.length ? barsResult.status : 'unavailable', indicatorDataAt, indicatorRetrievedAt: barsResult.fetchedAt,
+        evidence: [
+          { dataset: 'bars', source: 'Binance 1h K线', status: bars.length ? barsResult.status : 'unavailable', dataAt: indicatorDataAt, retrievedAt: barsResult.fetchedAt, reason: indicatorGate.reason || barsResult.error },
+          { dataset: 'quote', source: 'Binance 公共盘口', status: bookStatus, dataAt: dataAt, retrievedAt: dataAt, reason: quote.reason },
+        ],
+        ...(!indicatorGate.allowed ? { reason: indicatorGate.reason } : {}),
+        ...(metrics.price != null ? { price: Number(mid) || metrics.price } : {}),
+        ...(metrics.rsi14 != null ? { rsi14: metrics.rsi14 } : {}),
+        ...(metrics.sma10 != null ? { sma10: metrics.sma10 } : {}),
+        candidateSignals, quote,
+        reason: dataStatus === 'unavailable' ? quote.reason || barsResult.error || '行情或盘口不可用' : dataStatus === 'stale' ? '报价已过期，禁止触发新订单' : undefined,
+      };
+      (row as any).aboveSma = aboveSma;
+    } else if (ref.venue === 'Stocks') {
+      const symbol = instrument.replace(/^US(?=[A-Z])/, '').replace(/\.(OQ|N)$/i,'');
+      if (!/^[A-Z][A-Z0-9.:-]{0,19}$/.test(symbol)) throw new Error('股票代码格式无效');
+      if (runner.quoteSelection === 'random-valid' && !runner.comparisonControl) {
+        let yahoo = runnerYahooQuotes.get(symbol);
+        if (!yahoo) { yahoo=createYahooStockAdapter();runnerYahooQuotes.set(symbol,yahoo);if(runnerYahooQuotes.size>100)runnerYahooQuotes.delete(runnerYahooQuotes.keys().next().value!); }
+        const [nasdaq,yahooQuote,intraday] = await Promise.all([
+          runnerStockQuotes.quote.fetch({symbol}), yahoo.fetch({symbol}), getStockKlineAdapter('1m',symbol).fetch({symbol,period:'1m'}),
+        ]);
+        const observedNow=Date.now();
+        const candidates=[{source:'Nasdaq 公共双边报价',status:nasdaq.status,quote:nasdaq.data},{source:'Yahoo 股票双边报价',status:yahooQuote.status,quote:yahooQuote.data}];
+        const chosen=selectRunnerStockQuote(symbol,candidates,runner.policy.minFreshnessMs,observedNow);
+        // Only completed one-minute candles; source time is never replaced by fetch time.
+        const completed=(intraday.data || []).filter(bar=>bar.time+60_000<=observedNow);
+        const metrics=runnerIndicators(completed.map(bar=>[bar.time,bar.open,bar.high,bar.low,bar.close,bar.volume]));
+        const indicatorDataAt=completed.length ? new Date(completed[completed.length-1].time+60_000).toISOString() : undefined;
+        const indicatorStatus=metrics.rsi14!=null && !['stale','unavailable'].includes(intraday.status) ? 'delayed' : 'unavailable';
+        const indicatorGate=evaluateRunnerIndicatorEvidence({status:indicatorStatus,dataAt:indicatorDataAt,retrievedAt:intraday.fetchedAt},runner.policy.minFreshnessMs);
+        row={...row, source:chosen?.source || '股票双边报价池',dataStatus:chosen?'live':'unavailable',dataAt:chosen?.quote.updatedAt,
+          price:chosen?.quote.price,quote:chosen?.quote,indicatorDataStatus:indicatorStatus,indicatorDataAt,indicatorRetrievedAt:intraday.fetchedAt,
+          rsi14:metrics.rsi14,sma10:metrics.sma10,candidateSignals:[],
+          evidence:[...candidates.map(candidate=>({dataset:'quote' as const,source:candidate.source,status:candidate.status,dataAt:candidate.quote?.asOf || undefined,retrievedAt:candidate===candidates[0]?nasdaq.fetchedAt:yahooQuote.fetchedAt,
+            reason:candidate.quote ? '仅符合身份、时间、实时标记及双边价格校验的来源可被随机选中' : (candidate===candidates[0]?nasdaq.error:yahooQuote.error)})),
+            {dataset:'bars',source:'Yahoo 完成的1分钟K线',status:indicatorStatus,dataAt:indicatorDataAt,retrievedAt:intraday.fetchedAt,reason:indicatorGate.reason || intraday.error}],
+          reason:!chosen?'没有未过期的有效实时双边报价；不使用历史收盘价替代':!indicatorGate.allowed?indicatorGate.reason:undefined};
+        (row as any).aboveSma=chosen && metrics.sma10!=null ? chosen.quote.price>metrics.sma10 : undefined;
+      } else {
+      const history = await getRunnerStockKlineAdapter(symbol).fetch();
+      const bars = history.data || [];
+      const metrics = runnerIndicators(bars);
+      const dataAtMs = bars.length ? Number(bars[bars.length - 1][0]) : Number.NaN;
+      const dataAt = Number.isFinite(dataAtMs) ? new Date(dataAtMs).toISOString() : undefined;
+      const candidateSignals: string[] = [];
+      if (metrics.rsi14 != null && metrics.rsi14 < 32) candidateSignals.push(`RSI14=${metrics.rsi14.toFixed(1)} 超卖`);
+      if (metrics.rsi14 != null && metrics.rsi14 > 68) candidateSignals.push(`RSI14=${metrics.rsi14.toFixed(1)} 超买`);
+      row = {
+        ...row, dataStatus: bars.length ? 'historical' : history.status === 'stale' ? 'stale' : 'unavailable',
+        source: '腾讯证券日K历史', dataAt, ...(metrics.price != null ? { price: metrics.price } : {}),
+        indicatorDataStatus: bars.length ? 'historical' : history.status, indicatorDataAt: dataAt, indicatorRetrievedAt: history.fetchedAt,
+        evidence: [{ dataset: 'bars', source: '腾讯证券日K历史', status: bars.length ? 'historical' : history.status, dataAt, retrievedAt: history.fetchedAt, reason: bars.length ? '历史日K无可验证实时盘口，只用于研究' : history.error }],
+        ...(metrics.rsi14 != null ? { rsi14: metrics.rsi14 } : {}), ...(metrics.sma10 != null ? { sma10: metrics.sma10 } : {}),
+        candidateSignals, quote: { market: 'stocks', status: 'historical', dataStatus: 'historical', price: metrics.price || 0, fetchedAt: dataAt, source: '腾讯证券日K历史', reason: '当前来源仅提供历史日K，缺少可验证的实时买卖盘口，不能模拟成交' },
+        reason: bars.length ? '当前来源仅提供历史日K，缺少可验证的实时买卖盘口，不能模拟成交' : history.error || '暂无股票历史K线',
+      };
+      (row as any).aboveSma = metrics.price != null && metrics.sma10 != null && metrics.price > metrics.sma10;
+      }
+    } else if (ref.venue === 'Predict.fun') {
+      if (!/^\d+$/.test(instrument)) {
+        row = { ...row, dataStatus: 'unsupported', source: 'Predict.fun 官方 API', reason: '事件 ID 不是当前 Predict.fun 接口支持的数字 ID' };
+      } else {
+        const [marketResponse, bookResponse] = await Promise.all([api.getMarketById(Number(instrument)), api.getOrderbook(Number(instrument))]);
+        const marketItem = marketResponse.success ? marketResponse.data : null;
+        const outcomeNames = marketItem?.outcomes?.map(item => String(item.name).trim().toUpperCase()) || [];
+        if (!marketItem) {
+          row = { ...row, dataStatus: 'unavailable', source: 'Predict.fun 官方 API', reason: 'Predict.fun 事件详情不可用' };
+        } else if (!((outcomeNames.includes('YES') && outcomeNames.includes('NO')) || (outcomeNames.includes('是') && outcomeNames.includes('否')))) {
+          row = { ...row, dataStatus: 'unsupported', source: 'Predict.fun 官方 API', reason: '该事件不是经核验的 YES/NO 二元合约，当前跑单不估算合约价格' };
+        } else {
+          const book = bookResponse.success ? bookResponse.data : null;
+          const bookAt = Number(book?.updateTimestampMs);
+          const bookStatus = book ? runnerBookStatus(bookAt, runner.policy.minFreshnessMs) : 'unavailable';
+          const bid = Number(book?.bids?.[0]?.[0]);
+          const ask = Number(book?.asks?.[0]?.[0]);
+          const validBook = Number.isFinite(bid) && bid > 0 && Number.isFinite(ask) && ask >= bid && ask < 1;
+          const status = !validBook ? 'unavailable' : bookStatus;
+          const dataAt = Number.isFinite(bookAt) ? new Date(bookAt).toISOString() : undefined;
+          const midpoint = validBook ? (bid + ask) / 2 : 0;
+          const quote: AiRunnerQuote = { market: 'prediction', status, dataStatus: status, price: midpoint, fetchedAt: dataAt, source: 'Predict.fun 官方事件订单簿', bestBid: validBook ? bid : undefined, bestAsk: validBook ? ask : undefined, reason: !validBook ? '订单簿缺少有效双边 YES/NO 报价' : status === 'stale' ? '订单簿报价过期' : undefined };
+          row = {
+            ...row, dataStatus: status, source: 'Predict.fun 官方事件详情 + 订单簿', dataAt, price: midpoint,
+            evidence: [
+              { dataset: 'market', source: 'Predict.fun 官方事件详情', status: marketResponse.success ? 'live' : 'unavailable', retrievedAt: new Date().toISOString(), reason: marketResponse.success ? undefined : '官方事件详情不可用' },
+              { dataset: 'quote', source: 'Predict.fun 官方 YES/NO 订单簿', status: bookStatus, dataAt, retrievedAt: dataAt, reason: quote.reason },
+            ],
+            candidateSignals: [], quote,
+            reason: quote.reason || '仅取得当前订单簿；缺少独立校准概率，因此规则模式不会推断交易优势',
+          };
+        }
+      }
+    }
+  } catch (error) {
+    const failureReason = error instanceof Error ? error.message.slice(0, 240) : '数据请求失败';
+    const failureSource = row.source || (ref.venue === 'Binance' ? 'Binance 公共行情接口' : ref.venue === 'Stocks' ? '腾讯证券行情接口' : ref.venue === 'Predict.fun' ? 'Predict.fun 官方 API' : '当前市场数据源');
+    row = {
+      ...row, dataStatus: 'unavailable', source: failureSource, reason: failureReason,
+      evidence: [...(row.evidence || []), { dataset: 'market', source: failureSource, status: 'unavailable', retrievedAt: new Date().toISOString(), reason: failureReason }],
+    };
+  }
+  const openPosition = runner.positions.some(position => position.status === 'OPEN' && (position.instrumentId === runnerLedgerInstrumentId(ref) || position.instrument?.symbolOrMarketId === ref.symbolOrMarketId));
+  row.openPosition = openPosition;
+  const indicatorsUsable = !row.indicatorDataStatus || evaluateRunnerIndicatorEvidence({
+    status: row.indicatorDataStatus, dataAt: row.indicatorDataAt, retrievedAt: row.indicatorRetrievedAt,
+  }, runner.policy.minFreshnessMs).allowed;
+  if (row.quote?.status && ['live', 'delayed'].includes(row.quote.status) && indicatorsUsable && row.rsi14 != null && row.price != null) {
+    if (ref.venue !== 'Predict.fun' && !openPosition && row.rsi14 < 32) row.candidateSignals = [...(row.candidateSignals || []), '规则策略候选买入'];
+    if (ref.venue !== 'Predict.fun' && openPosition && (row.rsi14 > 68 || (row as any).aboveSma === false)) row.candidateSignals = [...(row.candidateSignals || []), '规则策略候选退出'];
+  }
+  return { ...row, snapshotHash: runnerSnapshotHash(row) };
+}
+
+function predictionOutcomeQuote(quote: AiRunnerQuote, side: string | undefined): AiRunnerQuote {
+  if (quote.market !== 'prediction' || side !== 'NO') return quote;
+  const yesBid = Number(quote.bestBid);
+  const yesAsk = Number(quote.bestAsk);
+  if (!Number.isFinite(yesBid) || !Number.isFinite(yesAsk)) return { ...quote, bestBid: undefined, bestAsk: undefined };
+  return { ...quote, price: 1 - (yesBid + yesAsk) / 2, bestBid: 1 - yesAsk, bestAsk: 1 - yesBid };
+}
+
+interface PreparedAiRunnerTick {
+  runnerId: string;
+  idempotencyKey: string;
+  snapshots: AiRunnerInstrumentSnapshot[];
+  records: AiRunnerDecisionRecord[];
+  intent?: { action: 'BUY' | 'SELL' | 'HOLD'; instrument: string; side?: 'YES' | 'NO' | 'LONG'; rationale: string; counterEvidence: string[]; riskNotes: string[] };
+  modelVersion?: string;
+}
+
+async function prepareAiRunnerTick(runnerId: string, idempotencyKey: string, sample?: AiRunnerComparisonSample): Promise<PreparedAiRunnerTick> {
+  const runner = getAiRunners().find(item => item.id === runnerId);
+  let now = sample ? new Date(sample.at) : new Date();
+  if (!runner) return { runnerId, idempotencyKey, snapshots: [], records: [] };
+  if (runner.status !== 'RUNNING') return { runnerId, idempotencyKey, snapshots: [], records: [] };
+  const refs = runner.universe?.instruments || [{ venue: runner.venue, symbolOrMarketId: runner.symbolOrMarketId, title: runner.title }];
+  const snapshots: AiRunnerInstrumentSnapshot[] = [];
+  if(sample){
+    for(const input of sample.snapshots){
+      const snapshot=structuredClone(input) as unknown as AiRunnerInstrumentSnapshot;
+      snapshot.openPosition=runner.positions.some(position=>position.status==='OPEN' && (position.instrumentId===runnerLedgerInstrumentId(snapshot.ref) || position.instrument?.symbolOrMarketId===snapshot.ref.symbolOrMarketId));
+      snapshots.push(snapshot);
+    }
+  }else for (const ref of refs.slice(0, 5)) snapshots.push(await loadAiRunnerInstrumentSnapshot(runner, ref));
+  if (!sample) now = new Date();
+  const candidateSignal = snapshots.some(item => item.candidateSignals?.length && ['live', 'delayed'].includes(item.quote?.dataStatus || ''));
+  let intent: PreparedAiRunnerTick['intent'];
+  let modelVersion: string | undefined;
+  let aiStatusReason: string | undefined;
+  if (runner.executionState === 'legacy-readonly') aiStatusReason = '旧跑单没有可核验的统一账本关联，仅保留只读历史';
+  if (runner.mode !== 'rules') {
+    const latestRunner = getAiRunners().find(item => item.id === runnerId);
+    if (!aiStatusReason && (!latestRunner || latestRunner.status !== 'RUNNING')) aiStatusReason = '跑单已停止或暂停，本轮未调用模型';
+    const trigger = aiStatusReason ? { allowed: false, reason: aiStatusReason } : evaluateAiRunnerTrigger(latestRunner || runner, candidateSignal, now);
+    if (!trigger.allowed) aiStatusReason = trigger.reason;
+    else {
+      const runtime = getAiRuntimeConfig('openrouter');
+      const allowance = isAiRunnerCallAllowed(runner, runtime.configured, now);
+      if (!allowance.allowed) aiStatusReason = allowance.reason;
+      else {
+        const decisionId = `${idempotencyKey}:model`;
+        try {
+          const result = await requestAiRunnerIntent(runner, runtime, snapshots, fetch, (model,attempt) => {
+            const current=getAiRunners().find(item=>item.id===runner.id);
+            if (!current || current.status!=='RUNNING') throw new Error('跑单已暂停或停止');
+            recordAiRunnerModelCall(runner.id, { at:new Date().toISOString(),model,decisionId:`${decisionId}:attempt:${attempt}` });
+          });
+          if (result.ok) { intent = result.intent; modelVersion = result.model; }
+          else { aiStatusReason = result.reason; modelVersion = result.model; }
+        } catch (error) { aiStatusReason = error instanceof Error ? error.message : 'AI 调用失败'; }
+      }
+    }
+  }
+  const records = snapshots.map(snapshot => {
+    const isChosen = intent?.instrument === snapshot.instrument;
+    let action: AiRunnerDecisionRecord['action'] = 'NONE';
+    let reason = snapshot.reason || '本轮规则条件未触发';
+    const signals = [...(snapshot.candidateSignals || [])];
+    const quoteGate = snapshot.quote ? evaluateRunnerQuoteGate(runner.policy, snapshot.quote, now) : { allowed: false, reason: '没有可验证报价' };
+    const indicatorGate = snapshot.indicatorDataStatus
+      ? evaluateRunnerIndicatorEvidence({ status: snapshot.indicatorDataStatus, dataAt: snapshot.indicatorDataAt, retrievedAt: snapshot.indicatorRetrievedAt }, runner.policy.minFreshnessMs, now)
+      : { allowed: true as const };
+    const riskChecks: AiRunnerDecisionRecord['riskChecks'] = [
+      { name: 'market-scope', passed: snapshot.market === runner.universe?.market, reason: snapshot.market === runner.universe?.market ? undefined : '跨市场数据已拒绝' },
+      { name: 'quote-freshness', passed: quoteGate.allowed, reason: quoteGate.reason },
+      { name: 'strategy-indicator-evidence', passed: indicatorGate.allowed, reason: indicatorGate.reason },
+    ];
+    if (runner.executionState === 'legacy-readonly') {
+      action = 'REJECTED'; reason = '旧跑单没有可核验的统一账本关联，仅保留只读历史';
+      riskChecks.push({ name: 'ledger-isolation', passed: false, reason });
+    } else if (runner.mode === 'rules') {
+      const hasOpen = snapshot.openPosition === true;
+      if (!quoteGate.allowed) {
+        reason = quoteGate.reason || snapshot.reason || '没有可执行的新鲜盘口';
+      } else if (!indicatorGate.allowed) {
+        reason = indicatorGate.reason || '策略指标证据不可用';
+      } else if (snapshot.market === 'prediction') {
+        if (!hasOpen && snapshot.modelProbability != null && snapshot.quote?.price && snapshot.modelProbability - snapshot.quote.price >= 0.05) {
+          (snapshot as any).requestedAction = 'BUY'; (snapshot as any).requestedSide = 'YES';
+          (snapshot as any).requestReason = `概率差 ${(snapshot.modelProbability - snapshot.quote.price) * 100}pp`;
+        } else if (hasOpen && snapshot.modelProbability != null && snapshot.quote?.price && snapshot.modelProbability <= snapshot.quote.price) {
+          (snapshot as any).requestedAction = 'SELL'; (snapshot as any).requestReason = '模型优势消失';
+        }
+      } else if (!hasOpen && (snapshot.rsi14 ?? 100) < 32) {
+        (snapshot as any).requestedAction = 'BUY'; (snapshot as any).requestedSide = 'LONG';
+        (snapshot as any).requestReason = `RSI14 ${snapshot.rsi14?.toFixed(1)} 超卖`;
+      } else if (hasOpen && ((snapshot.rsi14 ?? 0) > 68 || (snapshot as any).aboveSma === false)) {
+        (snapshot as any).requestedAction = 'SELL'; (snapshot as any).requestReason = (snapshot.rsi14 ?? 0) > 68 ? 'RSI14 超买' : '收盘价低于 SMA10';
+      }
+      if ((snapshot as any).requestedAction) reason = (snapshot as any).requestReason;
+    } else if (aiStatusReason) {
+      reason = aiStatusReason;
+      riskChecks.push({ name: 'ai-trigger-and-quota', passed: false, reason: aiStatusReason });
+    } else if (intent && isChosen) {
+      action = runner.mode === 'ai-review' ? 'REVIEW' : 'NONE';
+      reason = `${intent.action}: ${intent.rationale}${intent.counterEvidence.length ? `；反证：${intent.counterEvidence.join('；')}` : ''}${intent.riskNotes.length ? `；风险：${intent.riskNotes.join('；')}` : ''}`.slice(0, 500);
+      signals.push(`AI 置信度 ${(intent as any).confidence != null ? Math.round((intent as any).confidence * 100) : 0}%`);
+      riskChecks.push({ name: 'model-intent', passed: true });
+      if (runner.mode === 'ai-autonomous-paper' && intent.action !== 'HOLD') {
+        (snapshot as any).requestedAction = intent.action;
+        (snapshot as any).requestedSide = intent.side || (snapshot.market === 'prediction' ? 'YES' : 'LONG');
+        (snapshot as any).requestReason = intent.rationale;
+        action = 'NONE';
+      }
+    } else if (intent && !isChosen) {
+      reason = `AI 选择了冻结范围中的 ${intent.instrument}`;
+    } else {
+      reason = snapshot.reason || '模型未返回可执行建议';
+    }
+    return {
+      id: crypto.randomUUID(), runnerId, idempotencyKey: `${idempotencyKey}:${snapshot.instrument}`,
+      at: now.toISOString(), market: snapshot.market as AiRunnerMarket, instrument: snapshot.instrument,
+      dataStatus: snapshot.dataStatus, source: snapshot.source, dataAt: snapshot.dataAt,
+      evidence: snapshot.evidence, snapshotHash: snapshot.snapshotHash, strategyVersion: runner.strategyVersion,
+      modelVersion, signals: signals.slice(0, 20), riskChecks, action, reason,
+    };
+  });
+  return { runnerId, idempotencyKey, snapshots, records, intent, modelVersion };
+}
+
+function executePreparedRunnerTick(prepared: PreparedAiRunnerTick): { actions: Array<{ id: string; actionZh: string }>; decisions: AiRunnerDecisionRecord[] } {
+  const initialRunner = getAiRunners().find(item => item.id === prepared.runnerId);
+  if (!initialRunner) return { actions: [], decisions: [] };
+  const actions: Array<{ id: string; actionZh: string }> = [];
+  const records = prepared.records.map(record => ({ ...record, riskChecks: [...record.riskChecks] }));
+  for (const snapshot of prepared.snapshots) {
+    updateAiRunnerMarketState(prepared.runnerId, {
+      market: snapshot.market as AiRunnerMarket, status: snapshot.dataStatus,
+      instrument: snapshot.instrument,
+      source: snapshot.source, dataAt: snapshot.dataAt, reason: snapshot.reason,
+      snapshotHash: snapshot.snapshotHash,
+      prices: snapshot.quote && ['live', 'delayed'].includes(snapshot.quote.dataStatus || '') && Number.isFinite(snapshot.quote.price) ? { [snapshot.instrument]: snapshot.quote.price } : {},
+    });
+  }
+  for (let index = 0; index < prepared.snapshots.length; index += 1) {
+    const snapshot = prepared.snapshots[index];
+    const record = records[index];
+    const action = (snapshot as any).requestedAction as 'BUY' | 'SELL' | undefined;
+    if (!action) continue;
+    const runner = getAiRunners().find(item => item.id === prepared.runnerId);
+    if (!runner || runner.status !== 'RUNNING') {
+      record.action = 'REJECTED'; record.reason = '跑单已停止或暂停，未创建模拟订单';
+      record.riskChecks.push({ name: 'runner-active', passed: false, reason: record.reason });
+      continue;
+    }
+    const ref = snapshot.ref;
+    const existing = runner.positions.find(position => position.status === 'OPEN' && (position.instrumentId === runnerLedgerInstrumentId(ref) || position.instrument?.symbolOrMarketId === ref.symbolOrMarketId));
+    const side = (snapshot as any).requestedSide as string | undefined;
+    const quote = predictionOutcomeQuote(snapshot.quote || { market: snapshot.market as AiRunnerMarket, status: 'unavailable', dataStatus: 'unavailable', price: 0 }, action === 'SELL' ? existing?.side : side);
+    if (!snapshot.quote) {
+      record.action = 'REJECTED'; record.reason = snapshot.reason || '没有可执行报价';
+      record.riskChecks.push({ name: 'executable-quote', passed: false, reason: record.reason });
+      continue;
+    }
+    const indicatorEvidenceCheck = record.riskChecks.find(check => check.name === 'strategy-indicator-evidence');
+    if (indicatorEvidenceCheck && !indicatorEvidenceCheck.passed) {
+      record.action = 'REJECTED'; record.reason = indicatorEvidenceCheck.reason || '策略指标证据已过期，订单拒绝';
+      continue;
+    }
+    const fill = resolveRunnerFill(runner.policy, quote, action);
+    if (!fill.allowed || fill.price == null) {
+      record.action = 'REJECTED'; record.reason = fill.reason || '模拟撮合拒绝：报价不满足条件';
+      record.riskChecks.push({ name: 'executable-quote', passed: false, reason: record.reason });
+      continue;
+    }
+    if (action === 'BUY') {
+      if (existing) { record.action = 'REJECTED'; record.reason = '该标的已有未平仓头寸'; continue; }
+      const perInstrumentRemaining = runner.universe?.kind === 'watchlist'
+        ? Math.max(0, (runner.policy.maxPerInstrumentUsd ?? runner.policy.maxTradeUsd) - runner.positions.filter(position => position.status === 'OPEN' && position.instrumentId === runnerLedgerInstrumentId(ref)).reduce((sum, position) => sum + position.entryPrice * position.quantity, 0))
+        : runner.policy.maxTradeUsd;
+      const totalRemaining = runner.universe?.kind === 'watchlist'
+        ? Math.max(0, (runner.policy.maxInvestedUsd ?? runner.policy.maxBudgetUsd) - runner.positions.filter(position => position.status === 'OPEN').reduce((sum, position) => sum + position.entryPrice * position.quantity, 0))
+        : runner.policy.maxTradeUsd;
+      const target = Math.min(runner.cashUsd * 0.95, runner.policy.maxTradeUsd, perInstrumentRemaining, totalRemaining);
+      const costMultiplier = 1 + (Number(runner.policy.feeRateBps) + Number(runner.policy.additionalSlippageBps)) / 10_000;
+      const quantity = Math.floor(target / (fill.price * Math.max(1, costMultiplier)) * 1_000_000) / 1_000_000;
+      if (quantity <= 0) { record.action = 'REJECTED'; record.reason = '可用风险预算不足以形成最小模拟订单'; continue; }
+      const costs = calculateRunnerExecutionCosts(runner.policy, quote, 'BUY', quantity);
+      const notionalAndCosts = fill.price * quantity + costs.feeUsd + costs.slippageUsd;
+      const risk = evaluateRunnerOpen(runner, notionalAndCosts, new Date(), runnerLedgerInstrumentId(ref));
+      record.riskChecks.push({ name: 'budget-and-risk', passed: risk.allowed, reason: risk.reason });
+      if (!risk.allowed) { record.action = 'REJECTED'; record.reason = risk.reason || '风险校验未通过'; continue; }
+      const opened = runnerOpenPosition(runner.id, fill.price, quantity, side || 'LONG', snapshot.requestReason || record.reason, ref, { quote, source: snapshot.source, dataAt: snapshot.dataAt, dataSnapshotId: snapshot.snapshotHash });
+      if (!opened) { record.action = 'REJECTED'; record.reason = '模拟账户更新失败或订单被并发状态拒绝'; continue; }
+      const updated = getAiRunners().find(item => item.id === runner.id);
+      record.action = 'BUY'; record.reason = `${snapshot.requestReason || record.reason}；按卖一价模拟成交`;
+      record.orderId = updated?.trades[0]?.orderId;
+      actions.push({ id: runner.id, actionZh: `BUY ${ref.symbolOrMarketId} ${quantity} @ ${fill.price}` });
+    } else {
+      if (!existing) { record.action = 'REJECTED'; record.reason = '没有该标的未平仓头寸可退出'; continue; }
+      const costs = calculateRunnerExecutionCosts(runner.policy, quote, 'SELL', existing.quantity);
+      const pnl = runnerClosePosition(runner.id, existing.id, fill.price, snapshot.requestReason || record.reason, { quote, source: snapshot.source, dataAt: snapshot.dataAt, dataSnapshotId: snapshot.snapshotHash, ...costs });
+      if (pnl == null) { record.action = 'REJECTED'; record.reason = '模拟平仓未完成，持仓保持不变'; continue; }
+      const updated = getAiRunners().find(item => item.id === runner.id);
+      record.action = 'SELL'; record.reason = `${snapshot.requestReason || record.reason}；按买一价模拟成交，未扣成本净额前盈亏 ${pnl.toFixed(2)}`;
+      record.orderId = updated?.trades[0]?.orderId;
+      actions.push({ id: runner.id, actionZh: `SELL ${ref.symbolOrMarketId} @ ${fill.price} PnL=${pnl.toFixed(2)}` });
+    }
+  }
+  records.forEach(record => appendAiRunnerDecision(record));
+  return { actions, decisions: records };
+}
+
+async function runAiRunnerTick(runnerId: string, idempotencyKey?: string) {
+  if (!config.aiPaperTradingEnabled) return { status: 'disabled' as const };
+  const runner = getAiRunners().find(item => item.id === runnerId);
+  if (!runner) return { status: 'not-found' as const };
+  if (runner.status !== 'RUNNING') return { status: 'inactive' as const };
+  if (runner.comparisonControl) return { status: 'inactive' as const };
+  const key = idempotencyKey?.trim().slice(0, 180) || buildAiRunnerTickIdempotencyKey(runnerId);
+  return aiRunnerTickCoordinator.run(runnerId, key,
+    () => prepareAiRunnerTick(runnerId, key),
+    prepared => executePreparedRunnerTick(prepared));
+}
+
 async function tickAllAiRunners(): Promise<Array<{ id: string; actionZh: string }>> {
   if (!config.aiPaperTradingEnabled) return [];
   const results: Array<{ id: string; actionZh: string }> = [];
-  for (const runner of getAiRunners().filter(r => r.status === 'RUNNING')) {
+  for (const runner of getAiRunners().filter(item => item.status === 'RUNNING' && !item.comparisonControl)) {
     try {
-      if (runner.venue === 'Binance') {
-        const symbol = runner.symbolOrMarketId.toUpperCase();
-        const snapshot = await getRunnerKlineAdapter(symbol).fetch();
-        if (!snapshot.data) continue;
-        const klines = snapshot.data;
-        const closes = klines.map(k => Number(k[4]));
-        if (closes.length < 15) continue;
-
-        // Simple RSI(14)
-        let gains = 0, losses = 0;
-        for (let i = 1; i < 15; i++) {
-          const diff = closes[closes.length - i] - closes[closes.length - i - 1];
-          if (diff > 0) gains += diff; else losses += Math.abs(diff);
-        }
-        const rs = gains / (losses || 1e-9);
-        const rsi = 100 - 100 / (1 + rs);
-        const price = closes[closes.length - 1];
-        const sma10 = closes.slice(-10).reduce((a, b) => a + b, 0) / 10;
-        const aboveSma = price > sma10;
-
-        const openPos = runner.positions.find(p => p.status === 'OPEN');
-        const freshEnough = snapshot.status === 'live' && Date.now() - Date.parse(snapshot.fetchedAt) <= runner.policy.minFreshnessMs;
-        if (!openPos && freshEnough && rsi < 32 && runner.cashUsd > 5) {
-          const qty = Math.floor(runner.cashUsd * 0.95 / price * 1000) / 1000;
-          if (qty > 0) {
-            runnerOpenPosition(runner.id, price, qty, 'LONG', `RSI ${rsi.toFixed(0)} 超卖，价格${aboveSma ? '在' : '低于'}SMA10`);
-            results.push({ id: runner.id, actionZh: `BUY ${qty} @ ${price.toFixed(2)} (RSI=${rsi.toFixed(0)})` });
-          }
-        } else if (openPos && (rsi > 68 || !aboveSma)) {
-          const pnl = runnerClosePosition(runner.id, openPos.id, price,
-            rsi > 68 ? `RSI ${rsi.toFixed(0)} 超买` : '跌破 SMA10 止损');
-          results.push({ id: runner.id, actionZh: `SELL @ ${price.toFixed(2)} PnL=${pnl?.toFixed(2) ?? '?'}` });
-        }
-      } else if (runner.venue === 'Stocks') {
-        const symbol = runner.symbolOrMarketId.replace(/^us/i, '').split('.')[0].toUpperCase();
-        if (!/^[A-Z]{1,6}$/.test(symbol)) continue;
-        const snapshot = await getRunnerStockKlineAdapter(symbol).fetch();
-        if (!snapshot.data) continue;
-        const closes = snapshot.data.map(k => Number(k[2])).filter(Number.isFinite);
-        if (closes.length < 15) continue;
-
-        let gains = 0, losses = 0;
-        for (let i = 1; i < 15; i++) {
-          const diff = closes[closes.length - i] - closes[closes.length - i - 1];
-          if (diff > 0) gains += diff; else losses += Math.abs(diff);
-        }
-        const rs = gains / (losses || 1e-9);
-        const rsi = 100 - 100 / (1 + rs);
-        const price = closes[closes.length - 1];
-        const sma10 = closes.slice(-10).reduce((a, b) => a + b, 0) / 10;
-        const aboveSma = price > sma10;
-        const openPos = runner.positions.find(p => p.status === 'OPEN');
-        const freshEnough = snapshot.status === 'live'
-          && Date.now() - Date.parse(snapshot.fetchedAt) <= runner.policy.minFreshnessMs;
-        if (!freshEnough || !Number.isFinite(price) || price <= 0) continue;
-        if (!openPos && rsi < 32 && runner.cashUsd > 5) {
-          const qty = Math.floor(runner.cashUsd * 0.95 / price * 1000) / 1000;
-          if (qty > 0 && runnerOpenPosition(runner.id, price, qty, 'LONG', `RSI ${rsi.toFixed(0)} 超卖，价格${aboveSma ? '在' : '低于'}SMA10`)) {
-            results.push({ id: runner.id, actionZh: `BUY ${qty} @ ${price.toFixed(2)} (RSI=${rsi.toFixed(0)})` });
-          }
-        } else if (openPos && (rsi > 68 || !aboveSma)) {
-          const pnl = runnerClosePosition(runner.id, openPos.id, price,
-            rsi > 68 ? `RSI ${rsi.toFixed(0)} 超买` : '跌破 SMA10 止损');
-          results.push({ id: runner.id, actionZh: `SELL @ ${price.toFixed(2)} PnL=${pnl?.toFixed(2) ?? '?'}` });
-        }
-      } else if (runner.venue === 'Predict.fun') {
-        const radar = getCachedPredictionRadarSlice('', 240);
-        if (!radar) continue;
-        const market = radar?.markets.find(item => String(item.id) === String(runner.symbolOrMarketId));
-        if (!market) continue;
-
-        const price = Number(market.yesPrice);
-        const modelProbability = Number(market.modelProbability);
-        const edge = modelProbability - price;
-        const freshEnough = Boolean(radar.updatedAt)
-          && Date.now() - Date.parse(radar.updatedAt) <= runner.policy.minFreshnessMs;
-        if (!freshEnough || !Number.isFinite(price) || !Number.isFinite(modelProbability) || price <= 0 || price >= 1) continue;
-
-        const openPos = runner.positions.find(p => p.status === 'OPEN');
-        if (!openPos && edge >= 0.05 && runner.cashUsd > 5) {
-          const qty = Math.floor(runner.cashUsd * 0.95 / price * 1000) / 1000;
-          if (qty > 0 && runnerOpenPosition(runner.id, price, qty, 'YES', `模型概率高于市场价 ${(edge * 100).toFixed(1)}pp`)) {
-            results.push({ id: runner.id, actionZh: `YES ${qty} @ ${price.toFixed(3)} (edge=${(edge * 100).toFixed(1)}pp)` });
-          }
-        } else if (openPos && edge <= 0) {
-          const pnl = runnerClosePosition(runner.id, openPos.id, price, '模型优势消失');
-          results.push({ id: runner.id, actionZh: `SELL YES @ ${price.toFixed(3)} PnL=${pnl?.toFixed(2) ?? '?'}` });
-        }
-      }
-    } catch { /* skip on error */ }
+      const tick = await runAiRunnerTick(runner.id);
+      if (tick.status === 'completed' || tick.status === 'duplicate') results.push(...tick.result.actions);
+    } catch (error) {
+      const now = new Date();
+      appendAiRunnerDecision({
+        id: crypto.randomUUID(), runnerId: runner.id, idempotencyKey: `${buildAiRunnerTickIdempotencyKey(runner.id, now)}:failure`,
+        at: now.toISOString(), market: runner.universe?.market || 'stocks', instrument: runner.symbolOrMarketId,
+        dataStatus: 'failed', source: 'AI paper runner', strategyVersion: runner.strategyVersion,
+        signals: [], riskChecks: [{ name: 'tick-execution', passed: false, reason: error instanceof Error ? error.message : '执行失败' }],
+        action: 'REJECTED', reason: error instanceof Error ? error.message : '跑单执行失败',
+      });
+    }
   }
-
   return results;
 }
 
-app.post('/api/ai-runners/tick', express.json(), async (_req, res) => {
+app.get('/api/ai-runners/:id/history', (req, res) => {
+  if (!adminOnly(req, res)) return;
+  const runner = getAiRunners().find(item => item.id === String(req.params.id));
+  if (!runner) return res.status(404).json({ success: false, error: '未找到跑单' });
+  const page = listAiRunnerHistory(runner.id, typeof req.query.cursor === 'string' ? req.query.cursor : undefined, Number(req.query.limit || 50));
+  res.json({ success: true, data: page.data, nextCursor: page.nextCursor, runnerId: runner.id, dataStatus: page.data.length ? 'historical' : 'empty', reason: page.data.length ? undefined : '暂无跑单决策记录' });
+});
+
+app.post('/api/ai-runners/:id/tick', express.json(), async (req, res) => {
+  if (!adminOnly(req, res)) return;
+  if (!config.aiPaperTradingEnabled) return res.status(403).json({ success: false, error: 'AI 自动纸面交易当前关闭' });
+  let result: Awaited<ReturnType<typeof runAiRunnerTick>>;
+  try {
+    result = await runAiRunnerTick(String(req.params.id), String(req.headers['idempotency-key'] || req.body?.idempotencyKey || ''));
+  } catch (error) {
+    const runner = getAiRunners().find(item => item.id === String(req.params.id));
+    if (runner) appendAiRunnerDecision({
+      id: crypto.randomUUID(), runnerId: runner.id,
+      idempotencyKey: `${String(req.headers['idempotency-key'] || req.body?.idempotencyKey || 'manual')}:failure:${Date.now()}`,
+      at: new Date().toISOString(), market: runner.universe?.market || 'stocks', instrument: runner.symbolOrMarketId,
+      dataStatus: 'failed', source: 'AI paper runner', strategyVersion: runner.strategyVersion,
+      signals: [], riskChecks: [{ name: 'tick-execution', passed: false, reason: error instanceof Error ? error.message : '执行失败' }],
+      action: 'REJECTED', reason: error instanceof Error ? error.message : '跑单执行失败',
+    });
+    return res.status(500).json({ success: false, error: error instanceof Error ? error.message : '跑单执行失败' });
+  }
+  if (result.status === 'disabled') return res.status(403).json({ success: false, error: 'AI 自动纸面交易默认关闭' });
+  if (result.status === 'not-found') return res.status(404).json({ success: false, error: '未找到跑单' });
+  if (result.status === 'inactive') return res.status(409).json({ success: false, error: '跑单已停止或暂停' });
+  if (result.status === 'busy') return res.status(409).json({ success: false, status: 'busy', reason: '该跑单正在由另一个执行器处理' });
+  res.json({ success: true, status: result.status, ...result.result });
+});
+
+app.post('/api/ai-runners/tick', express.json(), async (req, res) => {
+  if (!adminOnly(req, res)) return;
   const results = await tickAllAiRunners();
   res.json({ success: true, actions: results });
 });
@@ -8467,6 +9132,7 @@ async function runAutomationJob(jobId: string): Promise<{ message: string }> {
       return { message: '智能助手报告刷新完成' };
     }
     case 'ai-runners': {
+      if (!config.aiPaperTradingEnabled) return { message: 'AI 模拟跑单已由配置关闭，未调用模型或创建模拟订单' };
       const actions = await tickAllAiRunners();
       return { message: actions.length ? `AI 模拟跑单完成，产生 ${actions.length} 个动作` : 'AI 模拟跑单完成，无新动作' };
     }
@@ -8477,6 +9143,7 @@ async function runAutomationJob(jobId: string): Promise<{ message: string }> {
 
 app.post('/api/ops/run/:jobId', async (req, res) => {
   const jobId = String(req.params.jobId) as Parameters<typeof saveAutomationRun>[0];
+  if (jobId === 'ai-runners' && !adminOnly(req, res)) return;
   const startedAt = new Date().toISOString();
   try {
     const result = await runAutomationJob(jobId);
@@ -8501,6 +9168,7 @@ function broadcastSse(event: string, data: unknown) {
 }
 
 app.get('/api/stream', (req, res) => {
+  if (!adminOnly(req, res)) return;
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',
     'Cache-Control': 'no-cache',
