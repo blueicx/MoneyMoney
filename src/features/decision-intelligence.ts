@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { portfolioTailRisk } from './portfolio-tail-risk';
 import { assertMarketContext, type DataStatus, type MarketId } from './research-contracts';
 
 export interface EvidenceQualityDimensions {
@@ -445,6 +446,7 @@ export function analyzePortfolio(rows: PortfolioRow[], input: { benchmarkReturnP
     byMarket: comparableCurrency ? byMarket : {},
     bySector: comparableCurrency ? bySector : {},
     byFactor: comparableCurrency ? byFactor : {},
+    tailRisk: portfolioTailRisk(rows),
     riskContributions: covarianceRisk,
     volatilityExposure: comparableCurrency ? riskContributions : [],
     riskContributionReason: covarianceRisk.length ? null : '缺少同币种、日期对齐的股票/虚拟币收益序列，无法计算协方差风险贡献',

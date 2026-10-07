@@ -46,7 +46,7 @@ function escapeHtml(value: string): string {
 export async function notifyHighSuccessResults(report: AssistantReport): Promise<void> {
   const configured = notificationChannelsConfigured();
   if (!settingsManager.get().telegramEnabled
-    || (!configured.telegram && !configured.wecom && !configured.bark)) return;
+    || !Object.values(configured).some(Boolean)) return;
 
   const confidenceThreshold = Math.round(settingsManager.get().confidenceThreshold * 100);
   const candidates = [

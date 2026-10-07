@@ -11318,6 +11318,7 @@ function renderDecisionPortfolio(data, reason) {
     <p>日期对齐相关性：${(data.correlations || []).map(item => safeNewsText(item.left) + '/' + safeNewsText(item.right) + ' ' + item.correlation + '（' + item.samples + '日）').join(' · ') || safeNewsText(data.correlationReason)}</p>
     <table class="workspace-watchlist-table"><thead><tr><th>标的</th><th>数量</th><th>币种</th><th>成本</th><th>来源</th></tr></thead><tbody>${positions.map(row => `<tr><td>${safeNewsText(row.instrument)}</td><td>${row.quantity}</td><td>${safeNewsText(row.currency)}</td><td>${metric(row.averageCost)}</td><td>${safeNewsText(row.accountSource || '导入')}</td></tr>`).join('')}</tbody></table>`);
   const select = host.querySelector('#decision-portfolio-source'); select.value = selection;
+  window.MoneyMoneyProfessionalResearch?.renderTailRisk(host, data?.tailRisk);
   const attribution=document.createElement('section');attribution.innerHTML='<button type="button" onclick="loadDecisionPortfolioAttribution()">查看账户 / 币种 / 策略归因</button><div id="decision-portfolio-attribution" aria-live="polite"></div>';host.append(attribution);
   if (data?.history) {
     const section=document.createElement('section');section.innerHTML='<p>'+safeNewsText(data.historyReason)+'</p><div data-portfolio-history></div><p>历史状态：'+safeNewsText(data.history.reason || data.history.dataStatus)+'</p><h4>成本与现金流口径</h4>'+(data.costCoverage || []).map(row=>'<p>'+safeNewsText(row.instrument)+' · '+safeNewsText(row.currency)+' · 未实现盈亏 '+metric(row.unrealizedPnl)+' · '+safeNewsText(row.reason || '')+'</p>').join('')+'<p>已记录现金流 '+(data.cashFlows || []).length+' 项；缺少历史仓位或汇率时不生成账户回报。</p>';host.append(section);
@@ -15434,6 +15435,7 @@ window.MoneyMoneyChartBridge = {
 <script src="/workflow-polish.js?v=20261002-contracts1" defer></script>
 <script src="/action-research-workspace.js?v=20261002-contracts1" defer></script>
 <script src="/practical-experience.js?v=20261002-contracts1" defer></script>
+<script src="/professional-research.js?v=20261007" defer></script>
 <script src="/contracts-workspace.js?v=20261002-contracts1" defer></script>
 <link rel="stylesheet" href="/contracts-workspace.css?v=20261002-contracts1">
       <div class="drawer density-compact density-comfortable"></div>

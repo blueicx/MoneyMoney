@@ -1,5 +1,6 @@
 import { settingsManager } from './news-settings';
 import { telegram } from './telegram';
+import { extraChannelsConfigured, sendExtraNotifications } from './extra-notification-channels';
 
 const WECOM_WEBHOOK_URL = process.env.WECOM_WEBHOOK_URL || '';
 const BARK_DEVICE_KEY = (process.env.BARK_DEVICE_KEY || '').trim();
@@ -8,11 +9,12 @@ export function wecomConfigured(): boolean {
   return /^https:\/\/qyapi\.weixin\.qq\.com\/cgi-bin\/webhook\/send\?key=/.test(WECOM_WEBHOOK_URL);
 }
 
-export function notificationChannelsConfigured(): { telegram: boolean; wecom: boolean; bark: boolean } {
+export function notificationChannelsConfigured() {
   return {
     telegram: telegram.isConfigured,
     wecom: wecomConfigured(),
     bark: !!BARK_DEVICE_KEY,
+    ...extraChannelsConfigured(),
   };
 }
 
@@ -89,30 +91,35 @@ export async function sendNotificationChannels(options: {
   telegramHtml: string;
   wecomMarkdown: string;
   barkTitle?: string;
-}): Promise<{ telegram: boolean; wecom: boolean; bark: boolean; any: boolean }> {
+}): Promise<{ telegram: boolean; wecom: boolean; bark: boolean; discord: boolean; lark: boolean; webhook: boolean; any: boolean }> {
   const enabled = settingsManager.get().telegramEnabled;
   const configured = notificationChannelsConfigured();
-  if (!enabled || (!configured.telegram && !configured.wecom && !configured.bark)) {
-    return { telegram: false, wecom: false, bark: false, any: false };
+  if (!enabled || !Object.values(configured).some(Boolean)) {
+    return { telegram: false, wecom: false, bark: false, discord:false,lark:false,webhook:false, any: false };
   }
 
-  const [telegramResult, wecomResult, barkResult] = await Promise.allSettled([
+  const [telegramResult, wecomResult, barkResult, extraResult] = await Promise.allSettled([
     configured.telegram ? telegram.send(options.telegramHtml) : Promise.resolve(false),
     configured.wecom ? sendWeComMarkdown(options.wecomMarkdown) : Promise.resolve(false),
     configured.bark
       ? sendBarkNotification(options.barkTitle || 'MoneyMoney 高成功率信号', options.wecomMarkdown)
       : Promise.resolve(false),
+    sendExtraNotifications({title:options.barkTitle || 'MoneyMoney 研究信号',body:options.wecomMarkdown}),
   ]);
   const telegramOk = telegramResult.status === 'fulfilled' && telegramResult.value;
   const wecomOk = wecomResult.status === 'fulfilled' && wecomResult.value;
   const barkOk = barkResult.status === 'fulfilled' && barkResult.value;
-  return { telegram: telegramOk, wecom: wecomOk, bark: barkOk, any: telegramOk || wecomOk || barkOk };
+  const extra=extraResult.status==='fulfilled' ? extraResult.value : {discord:false,lark:false,webhook:false};
+  return { telegram: telegramOk, wecom: wecomOk, bark: barkOk,...extra, any: telegramOk || wecomOk || barkOk || Object.values(extra).some(Boolean) };
 }
 
 export async function testNotificationChannels(): Promise<{
   telegram: { configured: boolean; sent: boolean };
   wecom: { configured: boolean; sent: boolean };
   bark: { configured: boolean; sent: boolean };
+  discord: { configured: boolean; sent: boolean };
+  lark: { configured: boolean; sent: boolean };
+  webhook: { configured: boolean; sent: boolean };
   any: boolean;
 }> {
   const result = await sendNotificationChannels({
@@ -125,6 +132,9 @@ export async function testNotificationChannels(): Promise<{
     telegram: { configured: configured.telegram, sent: result.telegram },
     wecom: { configured: configured.wecom, sent: result.wecom },
     bark: { configured: configured.bark, sent: result.bark },
+    discord: { configured: configured.discord, sent: result.discord },
+    lark: { configured: configured.lark, sent: result.lark },
+    webhook: { configured: configured.webhook, sent: result.webhook },
     any: result.any,
   };
 }

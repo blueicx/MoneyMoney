@@ -1,0 +1,38 @@
+services:
+  moneymoney:
+    build:
+      context: .
+      args:
+        MONEYMONEY_BUILD_ID: ${MONEYMONEY_BUILD_ID:?Set the source git commit before building}
+    restart: unless-stopped
+    init: true
+    # Linux VPS/NAS template: keep the existing loopback + host reverse-proxy contract.
+    # Do not start beside an existing MoneyMoney service using the same APP_PORT.
+    network_mode: host
+    environment:
+      APP_HOST: 127.0.0.1
+      APP_PORT: ${MONEYMONEY_CONTAINER_PORT:-3000}
+      MONEYMONEY_DATA_DIR: /app/data
+      MONEYMONEY_LOGIN_USER: ${MONEYMONEY_LOGIN_USER:?Set the owner login user}
+      MONEYMONEY_LOGIN_PASS: ${MONEYMONEY_LOGIN_PASS:?Set an owner password of at least eight characters}
+      MONEYMONEY_JWT_SECRET: ${MONEYMONEY_JWT_SECRET:?Set a unique random session secret}
+      PUBLIC_WEB_BASE_URL: ${PUBLIC_WEB_BASE_URL:-}
+      AI_PAPER_TRADING_ENABLED: "false"
+      TELEGRAM_NETWORK_ENABLED: "false"
+      TELEGRAM_POLLING_ENABLED: "false"
+    volumes:
+      - moneymoney-data:/app/data
+    mem_limit: 1536m
+    cpus: 1.0
+    pids_limit: 128
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+volumes:
+  moneymoney-data:

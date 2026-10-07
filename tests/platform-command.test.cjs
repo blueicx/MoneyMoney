@@ -20,7 +20,7 @@ test('external curl fallbacks do not hard-code the Windows executable', () => {
     const source = fs.readFileSync(path.join(projectRoot, relativePath), 'utf8');
     assert.doesNotMatch(
       source,
-      /(?:execFileAsync|execFile)\(\s*['"]curl\.exe['"]/, 
+      /(?:execFileAsync|execFile)\(\s*['"]curl\.exe['"]/,
       `${relativePath} must select curl by platform`,
     );
   }

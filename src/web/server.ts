@@ -20,6 +20,8 @@ import { promisify } from 'util';
 import { config, isJwtSecretDefault, validateLoginConfiguration } from '../config';
 import { buildEventEvidence, filterTimelineItems, type EventEvidence } from '../features/event-evidence';
 import { assembleHistory } from '../features/portfolio-history';
+import { FinancialTextIndex } from '../storage/financial-text-index';
+import { createFinancialResearchRouter } from './financial-research-routes';
 
 import { getRuntimeTelegramConfig, parseChatIds, runtimeSecrets } from '../config/runtime-secrets';
 import { api } from '../api';
@@ -353,6 +355,10 @@ app.get('/login', (req, res) => {
 });
 registerAuthRoutes(app);
 registerApiAuthProtection(app);
+let financialTextIndex: FinancialTextIndex | null = null;
+app.use('/api/research/filings', createFinancialResearchRouter({
+  index: () => financialTextIndex || (financialTextIndex = new FinancialTextIndex(stateStore.health.databasePath)),
+}));
 
 registerBuiltAssets(app, path.join(__dirname, 'public'));
 app.use(express.static(path.join(__dirname, 'public'), {
@@ -1768,7 +1774,7 @@ app.get('/api/portfolio/analytics', async (req, res) => {
     const paper: PortfolioRow[] = unifiedPaperLedgerStore.get().positions.filter(item => item.instrumentType === typeByMarket[market]).map(item => ({ instrument: item.instrumentId, market, quantity: item.quantity, price: item.currentPrice, currency: item.currency || 'UNKNOWN', averageCost: item.averageEntryPrice, accountSource: 'paper', accountId: 'unified-paper-ledger' }));
     const selection = String(req.query.accountSource || 'paper');
     if (!['paper', 'imported', 'combined'].includes(selection)) throw new Error('请选择模拟盘、导入仓位或显式合并');
-    const rows = (selection === 'combined' ? [...imported, ...paper] : selection === 'imported' ? imported : paper).map(row=>({...row}));
+    const rows = (selection === 'combined' ? [...imported, ...paper] : selection === 'imported' ? imported : paper).map(row=>({...row, datedReturns: undefined as PortfolioRow['datedReturns']}));
     let history: Awaited<ReturnType<typeof assembleHistory>> | null = null;
     if (req.query.history === '1' && rows.length && rows.length <= 20) {
       history=await assembleHistory(dataLakeCatalog,market,[...new Set(rows.map(row=>row.instrument))],new Date().toISOString(),Number(req.query.days || 365));
@@ -1781,6 +1787,12 @@ app.get('/api/portfolio/analytics', async (req, res) => {
       ...(req.query.benchmarkReturnPct == null ? {} : { benchmarkReturnPct: Number(req.query.benchmarkReturnPct) }),
       ...(req.query.portfolioReturnPct == null ? {} : { portfolioReturnPct: Number(req.query.portfolioReturnPct) }),
     });
+    const tailRisk = { ...data.tailRisk,
+      source: history ? '已发布本地日线分区与当前仓位' : '尚未装配已核验的历史收益',
+      evidenceRefs: history?.evidenceRefs || [],
+    };
+    if (!history) tailRisk.reason = '请读取本地历史与风险序列；用户导入的收益数组不冒充已核验日线';
+    data.tailRisk = tailRisk;
     const cashFlows=rows.flatMap(row=>(row.cashFlows || []).map(flow=>({...flow,instrument:row.instrument,accountId:row.accountId || null})));
     const costCoverage=rows.map(row=>({instrument:row.instrument,currency:row.currency,averageCost:row.averageCost ?? null,unrealizedPnl:row.averageCost == null ? null : (row.price-row.averageCost)*row.quantity,reason:row.averageCost == null ? '旧记录未关联成本，未推算盈亏':null}));
     res.json(decisionEnvelope({ market, data: { ...data, positions: rows, accounts: { imported, paper }, accountSource: selection,history,cashFlows,costCoverage,historyReason:history ? '历史曲线用于当前持仓的风险研究；缺少完整历史仓位、现金流或汇率时，不作为实际账户收益。' : '可读取本地历史装配风险序列' }, dataStatus: rows.length ? data.currencyReason || history?.dataStatus === 'partial' || history?.dataStatus === 'unavailable' ? 'partial' : 'cached' : 'empty', source: selection === 'paper' ? '统一模拟账本' : selection === 'imported' ? '校验后的导入仓位' : '用户显式选择合并', reason: rows.length ? data.currencyReason || data.returnReason : '所选账户当前市场暂无仓位' }));
