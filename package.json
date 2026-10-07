@@ -33,6 +33,7 @@
     "smoke:production": "node scripts/production-readonly-canary.cjs",
     "smoke:auth": "node scripts/browser-auth-smoke.cjs",
     "smoke:professional": "node scripts/professional-research-smoke.cjs",
+    "smoke:live-kline": "node scripts/live-kline-smoke.cjs",
     "state:backup": "node scripts/state-backup.cjs",
     "state:restore": "node scripts/state-backup.cjs restore"
   },

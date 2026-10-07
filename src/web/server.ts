@@ -24,6 +24,8 @@ import { FinancialTextIndex } from '../storage/financial-text-index';
 import { createFinancialResearchRouter } from './financial-research-routes';
 import { ResearchCommittee } from '../features/research-committee';
 import { createResearchCommitteeRouter } from './research-committee-routes';
+import { LiveKlineHub, liveKlineScope } from '../features/live-kline-stream';
+import { createLiveKlineRouter } from './live-kline-routes';
 
 import { getRuntimeTelegramConfig, parseChatIds, runtimeSecrets } from '../config/runtime-secrets';
 import { api } from '../api';
@@ -357,6 +359,8 @@ app.get('/login', (req, res) => {
 });
 registerAuthRoutes(app);
 registerApiAuthProtection(app);
+const liveKlineHub = new LiveKlineHub({ enabled: process.env.MONEYMONEY_KLINE_STREAM_ENABLED !== 'false' });
+app.use('/api/kline-stream', createLiveKlineRouter(liveKlineHub));
 app.use('/api/research/committee', createResearchCommitteeRouter(new ResearchCommittee({
   store: stateStore, evidence: id => decisionIntelligenceStore.getEvidence(id), runtime: () => getAiRuntimeConfig('openrouter'),
   resolve: (market, instrument) => dataLakeCatalog.resolveInstrument(market, instrument),
@@ -2212,11 +2216,15 @@ app.get('/api/markets/:id/orderbook', async (req, res) => {
 
 app.get('/api/binance/klines', async (req, res) => {
   try {
-    const symbol = String(req.query.symbol || 'BTCUSDT');
+    const symbol = String(req.query.symbol || 'BTCUSDT').toUpperCase();
     const interval = String(req.query.interval || '1h');
-    const limit = parseInt(String(req.query.limit || '100'));
+    const limit = Number(req.query.limit || '100');
+    liveKlineScope('crypto', symbol, interval);
+    if (!Number.isInteger(limit) || limit < 1 || limit > 1000) throw Error('K线数量须为 1–1000');
+    const previous = binanceFeed.cachedAt('kline:' + symbol + ':' + interval);
     const klines = await binanceFeed.getKlines(symbol, interval, limit);
-    res.json({ success: true, data: klines });
+    const updatedAt = binanceFeed.cachedAt('kline:' + symbol + ':' + interval);
+    res.json({ success: !!klines.length, market: 'crypto', instrument: 'crypto:binance:' + symbol, timeframe: interval, data: klines, source: 'Binance Public Klines', updatedAt, dataStatus: !klines.length ? 'unavailable' : previous === updatedAt ? 'cached' : 'delayed', reason: klines.length ? 'REST 快照，不代表交易所实时推流' : 'Binance K线来源未返回有效记录' });
   } catch (e: any) { res.json({ success: false, error: e.message }); }
 });
 
@@ -9979,6 +9987,7 @@ async function main() {
     if (shuttingDown) return;
     shuttingDown = true;
     console.log('\n  Shutting down...');
+    liveKlineHub.close();
     stopTelegramCommandCenterMonitor();
     stopUnifiedAlertMonitor();
     stopCoverageCanaryMonitor();

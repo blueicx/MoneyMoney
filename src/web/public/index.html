@@ -2170,6 +2170,7 @@
     </style>
 <link rel="stylesheet" href="/experience-enhancements.css?v=20261001">
 <script src="/chart-analysis.js"></script>
+<script defer src="/live-kline.js"></script>
 <script>
   window.selectInstrument = function selectInstrument(market, symbol) {
     const centerTitle = document.getElementById('center-title');
@@ -6011,7 +6012,16 @@ function calcBollinger(data, period = 20, multiplier = 2) {
     ctx.fillText(lbl, x - 14, H - 25);
   });
 }
-async function loadBinanceKlines() {
+let bnKlineController = null;
+let bnKlineRequestRevision = 0;
+async function loadBinanceKlines(options = {}) {
+  const live = options.live === true;
+  const initialRows = bnKlineData;
+  if (!live) window.MoneyLiveKline?.stop();
+  if (bnKlineController) bnKlineController.abort();
+  const controller = new AbortController(); bnKlineController = controller;
+  if (options.signal) { if (options.signal.aborted) return; options.signal.addEventListener('abort', () => controller.abort(), { once: true }); }
+  const revision = ++bnKlineRequestRevision, symbol = bnCurrentSymbol, interval = bnCurrentInterval;
   const titleEl = document.getElementById('bn-chart-title');
   const canvas = document.getElementById('bn-candlestick');
   if (!canvas) return;
@@ -6019,14 +6029,17 @@ async function loadBinanceKlines() {
       titleEl.textContent = bnCurrentSymbol.replace('USDT','/USDT') + ' · ' + bnCurrentInterval.toUpperCase();
     }
   try {
-    const res = await fetch('/api/binance/klines?symbol=' + bnCurrentSymbol + '&interval=' + bnCurrentInterval + '&limit=80');
+    const res = await fetch('/api/binance/klines?symbol=' + symbol + '&interval=' + interval + '&limit=80', { signal: controller.signal });
     const data = await res.json();
-    if (!data.success) {
-      const ctx = canvas.getContext('2d');
-      ctx.clearRect(0,0,canvas.width,canvas.height);
+    if (controller.signal.aborted || revision !== bnKlineRequestRevision || symbol !== bnCurrentSymbol || interval !== bnCurrentInterval) return;
+    if (live && bnKlineData !== initialRows) return; // A newer push supersedes an in-flight REST snapshot.
+    if (!data.success || !data.data?.length) {
+      window.MoneyLiveKline?.note('crypto', (data.reason || '来源不可用') + (live ? ' · 保留最后快照（缓存）' : ' · 暂无K线'));
+      if (!live) { bnKlineData = []; const ctx = canvas.getContext('2d'); ctx.clearRect(0,0,canvas.width,canvas.height); }
       return;
     }
     bnKlineData = data.data;
+    if (live) window.MoneyLiveKline?.note('crypto', 'REST 降级快照 · ' + (data.dataStatus || '状态未知') + ' · 来源时间 ' + (data.updatedAt ? formatChartTime(data.updatedAt) : '未知'));
     drawCandles(canvas, bnKlineData);
     const rsiCanvas = document.getElementById('bn-rsi');
     if (rsiCanvas) {
@@ -6035,8 +6048,9 @@ async function loadBinanceKlines() {
       const macdCanvas = document.getElementById('bn-macd');
       if (macdCanvas) drawMACD(macdCanvas, bnKlineData);
     }
-    loadAlertsForChart().then(() => drawCandles(canvas, bnKlineData));
-  } catch(e) {}
+    if (!live) loadAlertsForChart().then(() => { if (revision === bnKlineRequestRevision) drawCandles(canvas, bnKlineData); });
+  } catch(e) { if (!controller.signal.aborted) window.MoneyLiveKline?.note('crypto', '来源请求失败 · 保留最后可用快照'); }
+  finally { if (!live) window.MoneyLiveKline?.sync(); }
 }
 async function loadBinanceDepth() {
   const el = document.getElementById('bn-depth');
@@ -9134,6 +9148,7 @@ function stepStockChartReplay(action) {
   if (window.stockMoneyKLine?.setReplayCursor) window.stockMoneyKLine.setReplayCursor(stockChartReplayIndex);
   else if (window.stockMoneyKLine) window.stockMoneyKLine.create(stockChartKlines);
   else drawStockKline(document.getElementById('stock-kline'), stockChartKlines);
+  window.MoneyLiveKline?.sync();
 }
 function getStockKlineIndexFromPointer(clientX, rect, count, padLeft = 58, padRight = 14) {
   const total = Math.floor(Number(count));
@@ -9558,10 +9573,14 @@ function setStockKlineViewState(state, reason = '') {
     if (replay) replay.textContent = state === 'loading' ? '加载中' : '暂无K线';
   }
 }
-async function loadStockKline(symbol, name, apiSymbol) {
+async function loadStockKline(symbol, name, apiSymbol, options = {}) {
+  const live = options.live === true;
+  if (live && (stockChartAsOf || stockChartIntradayDate || stockChartReplayIndex < stockChartKlines.length - 1 || window.stockMoneyKLine?.timer)) return;
+  if (!live) window.MoneyLiveKline?.stop();
   const requestRevision = ++stockKlineRequestRevision;
   if (stockKlineController) stockKlineController.abort();
   const controller = new AbortController();
+  if (options.signal) { if (options.signal.aborted) return; options.signal.addEventListener('abort', () => controller.abort(), { once: true }); }
   stockKlineController = controller;
   bindStockKlineSelection();
   if (!window.stockMoneyKLine) {
@@ -9588,27 +9607,33 @@ async function loadStockKline(symbol, name, apiSymbol) {
   if (name) currentStockName = name;
   if (apiSymbol !== undefined) currentStockApiSymbol = apiSymbol || '';
   syncStockKlineAsOfControl();
-  stockChartFocusIndex = null;
-  stockChartFocusEnabled = false;
-  stockChartRenderedStartIndex = 0;
+  if (!live) {
+    stockChartFocusIndex = null;
+    stockChartFocusEnabled = false;
+    stockChartRenderedStartIndex = 0;
+  }
   updateStockKlineFocusControl();
   const canvas = document.getElementById('stock-kline');
   const title = document.getElementById('stock-chart-title');
   if (title) title.textContent = currentStockName + ' · ' + currentStockSymbol;
   if (!canvas) return;
   try {
-    canvas.style.visibility = 'hidden';
+    if (!live) canvas.style.visibility = 'hidden';
     const chartCard = document.getElementById('stock-chart-card');
     chartCard?.setAttribute('aria-busy', 'true');
-    setStockKlineStatus(`正在加载 ${stockChartIntradayDate ? `${stockChartIntradayDate} ${currentStockKlinePeriod}` : currentStockKlinePeriod}；旧周期图形暂时隐藏…`);
-    setStockKlineViewState('loading', `正在加载 ${currentStockName} · ${currentStockKlinePeriod}${stockChartAsOf ? ' · 历史时点' : ''}…`);
+    if (!live) {
+      setStockKlineStatus(`正在加载 ${stockChartIntradayDate ? `${stockChartIntradayDate} ${currentStockKlinePeriod}` : currentStockKlinePeriod}；旧周期图形暂时隐藏…`);
+      setStockKlineViewState('loading', `正在加载 ${currentStockName} · ${currentStockKlinePeriod}${stockChartAsOf ? ' · 历史时点' : ''}…`);
+    }
     const asOfQuery = stockChartAsOf ? '&asOf=' + encodeURIComponent(stockChartAsOf) : '';
     const dateQuery = stockChartIntradayDate ? '&date=' + encodeURIComponent(stockChartIntradayDate) + '&intradayPeriod=' + encodeURIComponent(stockChartIntradayPeriod) : '';
     const res = await fetch('/api/stock/kline?symbol=' + encodeURIComponent(currentStockSymbol) + '&period=' + encodeURIComponent(currentStockKlinePeriod) + '&interval=' + encodeURIComponent(currentStockKlinePeriod) + asOfQuery + dateQuery + (currentStockApiSymbol ? '&api=' + encodeURIComponent(currentStockApiSymbol) : ''), { signal: controller.signal });
     const d = await res.json();
     if (requestRevision !== stockKlineRequestRevision) return;
-    loadUnifiedStockData(currentStockSymbol, d);
+    if (live && (controller.signal.aborted || stockChartAsOf || stockChartIntradayDate || stockChartReplayIndex < stockChartKlines.length - 1 || window.stockMoneyKLine?.timer)) return;
+    if (!live) loadUnifiedStockData(currentStockSymbol, d);
     if (!d.success || !d.data || !d.data.length) {
+      if (live) { window.MoneyLiveKline?.note('stocks', '刷新失败：' + (d.reason || d.error || '暂无数据') + ' · 保留最后快照'); return; }
       currentStockKlineReason = d.reason || d.error || '暂无数据';
       setStockKlineStatus(currentStockKlineReason);
       setStockKlineViewState(d.dataStatus === 'failed' ? 'failed' : 'empty', currentStockKlineReason);
@@ -9633,22 +9658,27 @@ async function loadStockKline(symbol, name, apiSymbol) {
     const latestBarTime = stockChartKlinesTime(d.data[d.data.length - 1]);
     const actualCoverage = d.session?.dataWindow ? ` · 来源覆盖 ${d.session.dataWindow.firstBarLocalTime}–${d.session.dataWindow.lastBarLocalTime}（${d.session.dataWindow.bars}根；不代表完整交易时段）` : '';
     setStockKlineStatus(`${freshness}${stockChartIntradayDate ? ` · ${stockChartIntradayDate} · ${currentStockKlinePeriod} · ${stockChartExchangeTimezone}` : ''}${actualCoverage} · K线时间 ${latestBarTime || '来源未提供'} · ${d.source || '股票行情'} · 抓取 ${d.updatedAt ? formatChartTime(d.updatedAt) : '时间未知'}${d.reason ? ` · ${d.reason}` : ''}`);
+    const focusedTime = stockChartFocusIndex == null ? null : stockChartKlines[stockChartFocusIndex]?.time;
     stockChartKlines = d.data;
+    if (live && focusedTime != null) { const index = stockChartKlines.findIndex(bar => bar.time === focusedTime); stockChartFocusIndex = index < 0 ? null : index; if (index < 0) stockChartFocusEnabled = false; }
     stockChartReplayIndex = stockChartKlines.length - 1;
     setStockKlineViewState('ready');
-    loadStockChartOverlayConfig();
+    if (!live) loadStockChartOverlayConfig();
     if (window.stockMoneyKLine?.update) window.stockMoneyKLine.update(stockChartKlines, { resetReplay: true });
     else drawStockKline(canvas, stockChartKlines);
-    if (stockChartCompanionOpen) loadStockChartCompanion();
-    if (!document.getElementById('mm-stock-multi-chart')?.hidden) window.MoneyMoneyExperience?.loadMultiChart?.();
+    if (!live && stockChartCompanionOpen) loadStockChartCompanion();
+    if (!live && !document.getElementById('mm-stock-multi-chart')?.hidden) window.MoneyMoneyExperience?.loadMultiChart?.();
     canvas.style.visibility = 'visible';
+    if (live) window.MoneyLiveKline?.note('stocks', '每 30 秒读取来源快照 · ' + freshness + ' · 不代表交易所实时');
   } catch(e) {
     if (requestRevision !== stockKlineRequestRevision || controller.signal.aborted) return;
+    if (live) { window.MoneyLiveKline?.note('stocks', '来源不可用 · 保留最后快照（缓存）'); return; }
     currentStockKlineReason = '股票K线来源不可用，请稍后重试';
     setStockKlineStatus(currentStockKlineReason);
     setStockKlineViewState('failed', currentStockKlineReason);
   } finally {
     if (requestRevision === stockKlineRequestRevision) document.getElementById('stock-chart-card')?.removeAttribute('aria-busy');
+    if (!live) window.MoneyLiveKline?.sync();
   }
 }
 function stockChartKlinesTime(bar) {
