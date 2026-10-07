@@ -74,6 +74,7 @@ export type TelegramReplyMarkup = TelegramInlineKeyboardMarkup | TelegramReplyKe
 
 export interface TelegramReply {
   text: string;
+  replyToMessageId?: number;
   photo?: Buffer;
   document?: { data: Buffer; filename: string };
   replyMarkup?: TelegramReplyMarkup;
@@ -94,7 +95,7 @@ export type TelegramCallbackHandler = (context: TelegramCallbackContext) => Tele
 
 export interface TelegramTransport {
   getUpdates(offset: number, timeoutSeconds: number, signal?: AbortSignal): Promise<TelegramUpdate[]>;
-  sendMessage(chatId: string, text: string, replyMarkup?: TelegramReplyMarkup): Promise<void>;
+  sendMessage(chatId: string, text: string, replyMarkup?: TelegramReplyMarkup,replyToMessageId?:number): Promise<void | number>;
   sendPhoto?(chatId: string, photo: Buffer): Promise<void>;
   sendDocument?(chatId: string, document: Buffer, filename: string): Promise<void>;
   answerCallbackQuery(callbackQueryId: string, text?: string): Promise<void>;
@@ -197,13 +198,15 @@ export class TelegramApiTransport implements TelegramTransport {
     return response.result || [];
   }
 
-  async sendMessage(chatId: string, text: string, replyMarkup?: TelegramReplyMarkup): Promise<void> {
-    await this.callApi('sendMessage', {
+  async sendMessage(chatId: string, text: string, replyMarkup?: TelegramReplyMarkup,replyToMessageId?:number): Promise<void | number> {
+    const response=await this.callApi<{message_id?:number}>('sendMessage', {
       chat_id: chatId,
       text,
       parse_mode: 'HTML',
       ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
+      ...(Number.isSafeInteger(replyToMessageId)&&replyToMessageId!>0?{reply_parameters:{message_id:replyToMessageId,allow_sending_without_reply:false}}:{}),
     }, 15_000);
+    const id=response.result?.message_id;if(Number.isSafeInteger(id)&&id!>0)return id;
   }
 
   async answerCallbackQuery(callbackQueryId: string, text?: string): Promise<void> {
@@ -429,9 +432,9 @@ export class TelegramInteractionBot {
   }
 
   /** Send a direct interactive reply without exposing the transport to callers. */
-  async sendToChat(chatId: string, reply: TelegramCommandResult): Promise<void> {
+  async sendToChat(chatId: string, reply: TelegramCommandResult): Promise<void | number> {
     if (!this.allowedChatIds.has(String(chatId))) return;
-    await this.sendReply(String(chatId), reply);
+    return this.sendReply(String(chatId), reply);
   }
 
   async handleUpdate(update: TelegramUpdate): Promise<{ handled: boolean; reason: string }> {
@@ -483,7 +486,7 @@ export class TelegramInteractionBot {
     return { handled: true, reason: 'replied' };
   }
 
-  private async sendReply(chatId: string, reply: TelegramCommandResult): Promise<void> {
+  private async sendReply(chatId: string, reply: TelegramCommandResult): Promise<void | number> {
     if (reply === undefined || reply === '') return;
     const normalized = typeof reply === 'string' ? { text: reply } : reply;
     if (normalized.photo) {
@@ -500,9 +503,12 @@ export class TelegramInteractionBot {
       ? buildTelegramBottomMenu(chatId, this.menuScope(chatId))
       : normalized.replyMarkup;
     const parts = splitTelegramMessage(normalized.text);
+    let firstMessageId: number | void = undefined;
     for (const part of parts) {
-      await this.transport.sendMessage(chatId, part, replyMarkup);
+      const messageId=await this.transport.sendMessage(chatId, part, replyMarkup,normalized.replyToMessageId);
+      if(firstMessageId===undefined&&typeof messageId==='number')firstMessageId=messageId;
     }
+    return firstMessageId;
   }
 
   private async pollLoop(): Promise<void> {

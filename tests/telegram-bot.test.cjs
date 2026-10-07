@@ -32,6 +32,11 @@ test('splits messages at Telegram safe length', () => {
   assert.ok(parts.every((part) => part.length <= 4096));
   assert.equal(parts.join(''), 'x'.repeat(9000));
 });
+test('private result replies forward the original message reference and return a verifiable receipt',async()=>{
+  const calls=[],bot=new TelegramInteractionBot({allowedChatIds:['owner'],stateFile:path.join(fs.mkdtempSync(path.join(os.tmpdir(),'telegram-receipt-')),'state.json'),transport:{async getUpdates(){return[];},async answerCallbackQuery(){},async sendMessage(chat,text,markup,replyTo){calls.push({chat,text,replyTo});return 88;}}});
+  assert.equal(await bot.sendToChat('owner',{text:'Actual result',replyToMessageId:77}),88);assert.equal(calls[0].replyTo,77);
+  assert.equal(await bot.sendToChat('visitor',{text:'private',replyToMessageId:77}),undefined);assert.equal(calls.length,1);
+});
 
 test('ignores unauthorized chats without sending a reply', async () => {
   const sent = [];

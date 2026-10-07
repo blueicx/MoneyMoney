@@ -5746,6 +5746,7 @@ function buildCryptoStrategySignals(bars) {
   return window.MoneyChartAnalysis?.detectStrategySignals(bars, cryptoChartStrategyConfig) || [];
 }
 function drawCandles(canvas, klines) {
+  if (document.hidden) return;
   const tradingFull = klines;
   const tradingWindow = window.MoneyTradingChart?.select(canvas, klines, bnCurrentSymbol+'|'+bnCurrentInterval);
   if (tradingWindow) klines = tradingWindow.rows;
@@ -5781,7 +5782,7 @@ function drawCandles(canvas, klines) {
     : [];
   renderMovingAverageValues('bn-chart-ma-values', klines, [7, 25]);
   const highs = klines.map(k => k.high), lows = klines.map(k => k.low);
-  const maxP = Math.max(...highs), minP = Math.min(...lows);
+  const {maxP,minP} = window.MoneyTradingChart?.priceRange(tradingWindow?.state,Math.min(...lows),Math.max(...highs)) || {maxP:Math.max(...highs),minP:Math.min(...lows)};
   const range = maxP - minP || 1;
   const maxV = Math.max(...klines.map(k => k.volume)) || 1;
   const cw = (W - padL - padR) / klines.length;
@@ -6016,7 +6017,7 @@ function calcBollinger(data, period = 20, multiplier = 2) {
     const x = padL + idx * cw + cw / 2;
     ctx.fillText(lbl, x - 14, H - 25);
   });
-  window.MoneyTradingChart?.decorate(canvas, {canvas,full:tradingFull,rows:klines,interval:bnCurrentInterval,ma:[7,25],volumeUnit:'基础币',interactive:true,geometry:{W,H,padL,padR,padT,priceH:chartH,minP,maxP},redraw:()=>drawCandles(canvas,bnKlineData)});
+  window.MoneyTradingChart?.decorate(canvas, {...canvas.moneySourceMetadata,identity:bnCurrentSymbol+'|'+bnCurrentInterval,canvas,full:tradingFull,rows:klines,interval:bnCurrentInterval,exchangeTimeZone:'UTC',ma:[7,25],volumeUnit:'基础币',interactive:!window.cryptoMoneyKLine?.timer,geometry:{W,H,padL,padR,padT,priceH:chartH,minP,maxP},redraw:()=>drawCandles(canvas,bnKlineData)});
 }
 let bnKlineController = null;
 let bnKlineRequestRevision = 0;
@@ -6045,6 +6046,7 @@ async function loadBinanceKlines(options = {}) {
       return;
     }
     bnKlineData = data.data;
+    canvas.moneySourceMetadata={connection:'snapshot',sourceTime:data.sourceTime?Date.parse(data.sourceTime):null};
     if (live) window.MoneyLiveKline?.note('crypto', 'REST 降级快照 · ' + (data.dataStatus || '状态未知') + ' · 来源时间 ' + (data.updatedAt ? formatChartTime(data.updatedAt) : '未知'));
     drawCandles(canvas, bnKlineData);
     const rsiCanvas = document.getElementById('bn-rsi');
@@ -9661,6 +9663,7 @@ async function loadStockKline(symbol, name, apiSymbol, options = {}) {
     currentStockKlineReason = '';
     const freshness = window.MoneyChartAnalysis?.chartDataStatusLabel?.(d) || '数据状态未知';
     stockChartExchangeTimezone = d.timezone || stockChartExchangeTimezone;
+    document.getElementById('stock-kline').moneySourceMetadata={connection:'snapshot',sourceTime:d.sourceTime?Date.parse(d.sourceTime):null};
     stockChartIntradaySession = d.session || null;
     const latestBarTime = stockChartKlinesTime(d.data[d.data.length - 1]);
     const actualCoverage = d.session?.dataWindow ? ` · 来源覆盖 ${d.session.dataWindow.firstBarLocalTime}–${d.session.dataWindow.lastBarLocalTime}（${d.session.dataWindow.bars}根；不代表完整交易时段）` : '';
@@ -9694,6 +9697,7 @@ function stockChartKlinesTime(bar) {
   return formatStockKlineTime(value);
 }
 function drawStockKline(canvas, klines) {
+  if (document.hidden) return;
   if (!canvas || !window.MoneyChartAnalysis) return;
   const fullKlines = Array.isArray(klines) ? klines : [];
   const visibleCount = stockChartReplayIndex >= 0 ? Math.min(fullKlines.length, stockChartReplayIndex + 1) : fullKlines.length;
@@ -9739,7 +9743,7 @@ function drawStockKline(canvas, klines) {
   const plotW = W - padL - padR;
   const cw = plotW / klines.length;
   const highs = klines.map(k => k.high), lows = klines.map(k => k.low), volumes = klines.map(k => k.volume || 0);
-  const maxP = Math.max(...highs), minP = Math.min(...lows);
+  const {maxP,minP} = window.MoneyTradingChart?.priceRange(tradingWindow?.state,Math.min(...lows),Math.max(...highs)) || {maxP:Math.max(...highs),minP:Math.min(...lows)};
   const range = maxP - minP || 1;
   const maxV = Math.max(...volumes) || 1;
   const green = '#22c55e', red = '#ef4444';
@@ -9879,7 +9883,7 @@ function drawStockKline(canvas, klines) {
   renderChartSignalList('stock-chart-signals', overlays.signals, '当前周期未触发所选策略信号');
   renderChartPatternList('stock-chart-pattern-list', overlays.patterns, '当前周期未识别到所选蜡烛形态');
   renderChartStructureList('stock-chart-structure-list', overlays.structures, overlays.chan, '当前周期未识别到结构标记');
-  window.MoneyTradingChart?.decorate(canvas,{canvas,full:replayKlines,rows:klines,interval:currentStockKlinePeriod,ma:[5,10,20],volumeUnit:'股',interactive:tradingActive,geometry:{W,H,padL,padR,padT,priceH,minP,maxP},redraw:()=>drawStockKline(canvas,stockChartKlines)});
+  window.MoneyTradingChart?.decorate(canvas,{...canvas.moneySourceMetadata,identity:currentStockSymbol+'|'+currentStockKlinePeriod,canvas,full:replayKlines,rows:klines,interval:currentStockKlinePeriod,exchangeTimeZone:stockChartExchangeTimezone,ma:[5,10,20],volumeUnit:'股',interactive:tradingActive,geometry:{W,H,padL,padR,padT,priceH,minP,maxP},redraw:()=>drawStockKline(canvas,stockChartKlines)});
 }
 // --- DeFi Data ---
 async function loadDefiData() {

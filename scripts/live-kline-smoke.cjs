@@ -65,6 +65,36 @@ async function main() {
       await pending; return bnKlineData.at(-1).close;
     }, start);
     assert.equal(preserved, 108, 'a delayed REST response must not overwrite newer stream data');
+    const performance = await page.evaluate(async () => {
+      const host=document.querySelector('#crypto-chart-card .mm-trading-chart'),readout=host.querySelector('.mm-trading-readout');
+      let mutations=0,paints=0;const observer=new MutationObserver(list=>mutations+=list.length);observer.observe(readout,{childList:true,subtree:true,characterData:true});
+      const original=CanvasRenderingContext2D.prototype.stroke;CanvasRenderingContext2D.prototype.stroke=function(...args){if(this.canvas.classList.contains('mm-trading-crosshair'))paints++;return original.apply(this,args);};
+      await new Promise(resolve=>setTimeout(resolve,1200));const timerMutations=mutations,timerPaints=paints;
+      const layer=host.querySelector('.mm-trading-crosshair'),box=layer.getBoundingClientRect();
+      for(let n=0;n<30;n++)layer.dispatchEvent(new PointerEvent('pointermove',{clientX:box.left+100+n,clientY:box.top+100,pointerId:1}));
+      await new Promise(requestAnimationFrame);await new Promise(requestAnimationFrame);const pointerPaints=paints-timerPaints;
+      Object.defineProperty(document,'hidden',{configurable:true,get:()=>true});const before=paints;
+      MoneyTradingChart.redraw(document.getElementById('bn-candlestick'));layer.dispatchEvent(new PointerEvent('pointermove',{clientX:box.left+140,clientY:box.top+120,pointerId:1}));
+      await new Promise(resolve=>setTimeout(resolve,1200));const hiddenPaints=paints-before;
+      delete document.hidden;observer.disconnect();CanvasRenderingContext2D.prototype.stroke=original;
+      return {timerMutations,timerPaints,pointerPaints,hiddenPaints};
+    });
+    assert.equal(performance.timerMutations,0,'countdown must not rebuild OHLC/MA DOM');assert.equal(performance.timerPaints,0,'countdown must not redraw canvas');assert.ok(performance.pointerPaints<=2,'pointer burst must coalesce into one frame');assert.equal(performance.hiddenPaints,0,'hidden document must not draw');
+    const gestures=await page.evaluate(async()=>{
+      const canvas=document.getElementById('bn-candlestick'),layer=canvas.parentElement.querySelector('.mm-trading-crosshair'),box=layer.getBoundingClientRect(),key=bnCurrentSymbol+'|'+bnCurrentInterval;
+      const event=(type,id,x,y)=>layer.dispatchEvent(new PointerEvent(type,{pointerId:id,pointerType:'touch',clientX:box.left+x,clientY:box.top+y}));
+      // Synthetic touch ids cannot be captured by Chromium: use the same DOM listener, bypass only capture.
+      const capture=layer.setPointerCapture;layer.setPointerCapture=()=>{};
+      const initial=MoneyTradingChart.select(canvas,bnKlineData,key).state.count;
+      event('pointerdown',41,100,80);event('pointerdown',42,200,80);event('pointermove',42,280,80);event('pointerup',42,280,80);event('pointerup',41,100,80);
+      await new Promise(requestAnimationFrame);await new Promise(requestAnimationFrame);const zoomed=MoneyTradingChart.select(canvas,bnKlineData,key).state.count;
+      event('pointerdown',43,box.width-10,70);event('pointermove',43,box.width-10,120);event('pointerup',43,box.width-10,120);
+      await new Promise(requestAnimationFrame);await new Promise(requestAnimationFrame);const scale=MoneyTradingChart.select(canvas,bnKlineData,key).state.priceScale;
+      canvas.parentElement.querySelectorAll('.mm-trading-zone')[1].click();await new Promise(requestAnimationFrame);await new Promise(requestAnimationFrame);
+      const restored=MoneyTradingChart.select(canvas,bnKlineData,key).state.priceScale;layer.setPointerCapture=capture;
+      return {initial,zoomed,scale,restored:restored??null};
+    });
+    assert.ok(gestures.zoomed<gestures.initial);assert.ok(gestures.scale>1);assert.equal(gestures.restored,null);
     await page.locator('#crypto-chart-card').locator('button', { hasText: '暂停自动更新' }).click();
     assert.equal(await page.evaluate(() => window.__fixtureStreams.every(s => s.closed)), true);
     await page.locator('#crypto-chart-card').locator('button', { hasText: '开启自动更新' }).click();
@@ -91,7 +121,7 @@ async function main() {
     await page.evaluate(() => { setMarketScope('options'); MoneyLiveKline.sync(); }); assert.equal(await page.evaluate(() => window.__fixtureStreams.every(s => s.closed)), true);
     const guest = await browser.newPage(); await guest.goto(base + '/login'); await Promise.all([guest.waitForURL(url => url.pathname === '/'), guest.click('#guestBtn')]);
     assert.equal(await guest.evaluate(() => fetch('/api/kline-stream?market=crypto&instrument=BTCUSDT&interval=5m').then(r => r.status)), 403);
-    assert.deepEqual(errors, []); console.log(JSON.stringify({ ok: true, transportFixtureOnly: true, focus, push, themes, dataDirectory: data }));
+    assert.deepEqual(errors, []); console.log(JSON.stringify({ ok: true, transportFixtureOnly: true, focus, push, performance, themes, dataDirectory: data }));
   } finally { await browser?.close(); child.kill(); }
 }
 main().catch(e => { console.error(e); process.exitCode = 1; });

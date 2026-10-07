@@ -6590,7 +6590,7 @@ function startTelegramInteractionBot(): void {
         if (!['ack','retry'].includes(action) || !telegramEventResults.update(ctx.chatId,id,action as 'ack'|'retry')) return telegramReply('该结果当前不能确认或重试；请刷新 /eventresults。');
         if (action === 'ack') return telegramReply('✅ 已确认这条事件结果通知。');
         const history=telegramEventResults.history(ctx.chatId);
-        await telegramEventResults.run(ctx.chatId,history.map(row=>row.event),async text=>{if(!telegramInteractionBot)throw new Error('Telegram 暂不可用');await telegramInteractionBot.sendToChat(ctx.chatId,telegramReply(text));});
+        await telegramEventResults.run(ctx.chatId,history.map(row=>row.event),async (text,originalMessageId)=>{if(!telegramInteractionBot)throw new Error('Telegram 暂不可用');return telegramInteractionBot.sendToChat(ctx.chatId,{...telegramReply(text),replyToMessageId:originalMessageId});});
         const current=telegramEventResults.history(ctx.chatId).find(row=>row.id===id);
         return telegramReply(current?.status==='sent' ? '✅ 事件结果已重新发送。' : '已加入事件结果重试队列；来源暂不可用时不会编造结果。');
       }
@@ -7010,9 +7010,10 @@ async function monitorTelegramEventAlerts(): Promise<void> {
         telegramEventReminderStages.set(key, reminder.stage);
       } else if (reminder.shouldSend && reminder.stage !== null && !suppressed) {
         try {
-          await telegramInteractionBot.sendToChat(chatId, telegramReply(
+          const messageId=await telegramInteractionBot.sendToChat(chatId, telegramReply(
             `📅 <b>高影响事件提醒</b>\n${formatEventLineZh(event)}\n提醒节点：提前 ${eventReminderThresholdLabel(reminder.stage)}\n距离：${eventCountdownLabel(minutesUntil)}`,
           ));
+          if(typeof messageId==='number')telegramEventResults.registerReminder(chatId,event,messageId);
           telegramEventReminderStages.set(key, reminder.stage);
         } catch {}
       } else if (reminder.stage !== previousStage && reminder.stage !== null && !reminder.shouldSend) {
@@ -7022,9 +7023,9 @@ async function monitorTelegramEventAlerts(): Promise<void> {
       }
 
     }
-    await telegramEventResults.run(chatId, highImpactEvents, async text => {
+    await telegramEventResults.run(chatId, highImpactEvents, async (text,originalMessageId) => {
       if (!telegramInteractionBot) throw new Error('Bot unavailable');
-      await telegramInteractionBot.sendToChat(chatId, telegramReply(text));
+      return telegramInteractionBot.sendToChat(chatId, {...telegramReply(text),replyToMessageId:originalMessageId});
     }, !suppressed);
   }
 }
@@ -8466,6 +8467,12 @@ app.get('/api/ai-runners', (req, res) => {
   const runners = getAiRunners().filter(r=>!req.query.market || r.universe?.market===req.query.market).map(r => ({ ...r, summary: summarizeRunner(r) }));
   res.json({ success: true, enabled: config.aiPaperTradingEnabled, data: runners });
 });
+import {ComparisonModelBudget} from '../features/ai-comparison-budget';
+const comparisonModelBudget=new ComparisonModelBudget(stateStore);
+app.get('/api/ai-runners/comparisons/budget',(req,res)=>{
+  if(!adminOnly(req,res))return;
+  try{res.json({success:true,data:comparisonModelBudget.summary()});}catch(error:any){res.status(503).json({success:false,reason:error.message});}
+});
 app.get('/api/ai-runners/compare',(req,res)=>{
   if(!adminOnly(req,res))return;
   try {
@@ -8512,6 +8519,10 @@ app.post('/api/ai-runners/comparisons/:id/tick',express.json(),async(req,res)=>{
     const validation=validateAiRunnerComparison(group,getAiRunners().filter(row=>group.runnerIds.includes(row.id)));
     if(!validation.valid)throw new Error(validation.reason);
     const result=await aiRunnerTickCoordinator.run('comparison:'+group.id,'ai-comparison:'+group.id+':'+key,async()=>{
+      const roundKey='ai-comparison:'+group.id+':'+key;
+      // Both AI arms each make one model request for their shared frozen snapshots.
+      // Reserve the WHOLE round before activation; insufficient quota cannot run rules alone.
+      comparisonModelBudget.reserve(roundKey,2);
       activateAiRunnerComparison(group.id,group.runnerIds);
       activatedIds=group.runnerIds;
       try {
@@ -8519,7 +8530,7 @@ app.post('/api/ai-runners/comparisons/:id/tick',express.json(),async(req,res)=>{
         const inputs=[];for(const ref of primary.universe!.instruments)inputs.push(await loadAiRunnerInstrumentSnapshot(primary,ref));
         const sample=buildAiRunnerComparisonSample(group,key,new Date().toISOString(),inputs);
         saveAiRunnerComparisonSample(group.id,sample);
-        const prepared=[];for(const id of group.runnerIds)prepared.push(await prepareAiRunnerTick(id,'ai-comparison:'+group.id+':'+key+':'+id,sample));
+        const prepared=[];for(const id of group.runnerIds)prepared.push(await prepareAiRunnerTick(id,'ai-comparison:'+group.id+':'+key+':'+id,sample,roundKey));
         return {sample,prepared};
       }catch(error){group.runnerIds.forEach(id=>pauseAiRunner(id,'对照准备失败，未提交成交'));throw error;}
     },({sample,prepared})=>{
@@ -8878,7 +8889,7 @@ interface PreparedAiRunnerTick {
   modelVersion?: string;
 }
 
-async function prepareAiRunnerTick(runnerId: string, idempotencyKey: string, sample?: AiRunnerComparisonSample): Promise<PreparedAiRunnerTick> {
+async function prepareAiRunnerTick(runnerId: string, idempotencyKey: string, sample?: AiRunnerComparisonSample,comparisonRoundKey?:string): Promise<PreparedAiRunnerTick> {
   const runner = getAiRunners().find(item => item.id === runnerId);
   let now = sample ? new Date(sample.at) : new Date();
   if (!runner) return { runnerId, idempotencyKey, snapshots: [], records: [] };
@@ -8897,6 +8908,7 @@ async function prepareAiRunnerTick(runnerId: string, idempotencyKey: string, sam
   let intent: PreparedAiRunnerTick['intent'];
   let modelVersion: string | undefined;
   let aiStatusReason: string | undefined;
+  if(runner.comparisonControl&&snapshots.some(snapshot=>snapshot.market!==runner.universe?.market||!snapshot.quote||!evaluateRunnerQuoteGate(runner.policy,snapshot.quote,now).allowed))aiStatusReason='共享行情未通过市场身份或新鲜报价门槛，对照不调用模型';
   if (runner.executionState === 'legacy-readonly') aiStatusReason = '旧跑单没有可核验的统一账本关联，仅保留只读历史';
   if (runner.mode !== 'rules') {
     const latestRunner = getAiRunners().find(item => item.id === runnerId);
@@ -8909,15 +8921,18 @@ async function prepareAiRunnerTick(runnerId: string, idempotencyKey: string, sam
       if (!allowance.allowed) aiStatusReason = allowance.reason;
       else {
         const decisionId = `${idempotencyKey}:model`;
+        let comparisonQuotaDenied=false;
         try {
           const result = await requestAiRunnerIntent(runner, runtime, snapshots, fetch, (model,attempt) => {
             const current=getAiRunners().find(item=>item.id===runner.id);
             if (!current || current.status!=='RUNNING') throw new Error('跑单已暂停或停止');
+            if(current.comparisonControl&&(!comparisonRoundKey||!comparisonModelBudget.consume(comparisonRoundKey,`${runner.id}:${attempt}`))){comparisonQuotaDenied=true;throw new Error('对照请求缺少有效整轮额度或已消费，整轮等待');}
             recordAiRunnerModelCall(runner.id, { at:new Date().toISOString(),model,decisionId:`${decisionId}:attempt:${attempt}` });
           });
+          if(comparisonQuotaDenied)throw new Error('对照额度不再有效，整轮等待，未提交规则或AI订单');
           if (result.ok) { intent = result.intent; modelVersion = result.model; }
           else { aiStatusReason = result.reason; modelVersion = result.model; }
-        } catch (error) { aiStatusReason = error instanceof Error ? error.message : 'AI 调用失败'; }
+        } catch (error) { if(comparisonQuotaDenied)throw error;aiStatusReason = error instanceof Error ? error.message : 'AI 调用失败'; }
       }
     }
   }
@@ -9861,7 +9876,7 @@ app.post('/api/telegram/test-delivery', express.json(), async (req, res) => {
     allowedChatIds: allowedChats,
     botConfigured: Boolean(telegramConfig.botToken),
     idempotencyKey: String(req.body?.idempotencyKey || ''),
-    sendMessage: (chatId, text) => new TelegramApiTransport(telegramConfig.botToken, telegramConfig.proxyUrl).sendMessage(chatId, text),
+    sendMessage: async (chatId, text) => { await new TelegramApiTransport(telegramConfig.botToken, telegramConfig.proxyUrl).sendMessage(chatId, text); },
   });
   const deliveryStatus = result.status === 'duplicate' ? result.record?.status : result.status;
   const statusCode = deliveryStatus === 'sent' ? 200 : deliveryStatus === 'sending' ? 202 : deliveryStatus === 'rejected' ? 403 : deliveryStatus === 'suppressed' ? 429 : deliveryStatus === 'failed' ? 502 : 503;

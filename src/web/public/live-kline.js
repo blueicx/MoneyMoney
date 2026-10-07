@@ -41,7 +41,7 @@
     source = new EventSource('/api/kline-stream?market=crypto&instrument=' + encodeURIComponent('crypto:binance:' + c.symbol) + '&interval=' + encodeURIComponent(c.interval));
     source.addEventListener('state', event => {
       if (version !== generation) return;
-      try { const data = JSON.parse(event.data); note(c.market, data.reason || data.connection); } catch { /* Ignore malformed transport frames. */ }
+      try { const data = JSON.parse(event.data); note(c.market, data.reason || data.connection); const canvas=document.getElementById('bn-candlestick'); if(canvas){canvas.moneySourceMetadata={...canvas.moneySourceMetadata,connection:data.connection,sourceTime:data.updatedAt?Date.parse(data.updatedAt):canvas.moneySourceMetadata?.sourceTime};window.MoneyTradingChart?.redraw(canvas);} } catch { /* Ignore malformed transport frames. */ }
     });
     source.addEventListener('kline', event => {
       if (version !== generation || !canUpdate(context())) return;
@@ -53,6 +53,7 @@
         if (!old || bar.time - old.time > minutes * 60000) { note(c.market, '历史缺口：等待预算内 REST 同步，未补造蜡烛'); return; }
         const rows = mergeBar(bnKlineData, bar); if (!rows) return;
         bnKlineData = rows; lastPush = Date.now();
+        document.getElementById('bn-candlestick').moneySourceMetadata={connection:'live',sourceTime:Number.isFinite(data.eventTime)?data.eventTime:null};
         drawCandles(document.getElementById('bn-candlestick'), rows);
         const rsi = document.getElementById('bn-rsi'), macd = document.getElementById('bn-macd');
         if (rsi) drawRSI(rsi, rows); if (macd) drawMACD(macd, rows);

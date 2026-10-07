@@ -1,4 +1,27 @@
 const test=require('node:test');const assert=require('node:assert/strict');require('ts-node/register/transpile-only');
+test('results and corrections reply to the original reminder and retain message lineage after restart',async()=>{
+ const {TelegramEventResultMonitor}=require('../src/features/telegram-event-results');const values=new Map(),store={get:k=>structuredClone(values.get(k)||null),set:(k,v)=>values.set(k,structuredClone(v))};let now=Date.parse('2026-10-02T13:20:00Z'),actual='100000';const sent=[];
+ const event={title:'Non-Farm Employment Change',date:'2026-10-02T13:30:00Z',impact:'high',country:'USD'};
+ let monitor=new TelegramEventResultMonitor(store,async()=>({actual,status:'published',source:'BLS',publishedAt:event.date}),()=>now);
+ monitor.registerReminder('owner',event,77);now+=20*60000;
+ monitor=new TelegramEventResultMonitor(store,async()=>({actual,status:'published',source:'BLS',publishedAt:event.date}),()=>now);
+ await monitor.run('owner',[],async(text,reply)=>{sent.push({text,reply});return 88;});assert.equal(sent[0].reply,77);assert.equal(monitor.history('owner')[0].messageId,88);assert.equal(monitor.history('owner')[0].originalMessageId,77);
+ actual='95000';now+=3600001;await monitor.run('owner',[],async(text,reply)=>{sent.push({text,reply});return 89;});assert.equal(sent[1].reply,77);assert.equal(monitor.history('owner')[1].resultStatus,'revised');
+});
+test('unverified tracking expires with an explicit terminal notice, not a silent deletion',async()=>{
+ const {TelegramEventResultMonitor}=require('../src/features/telegram-event-results');const values=new Map(),store={get:k=>structuredClone(values.get(k)||null),set:(k,v)=>values.set(k,structuredClone(v))};let now=Date.parse('2026-10-02T13:20:00Z');const event={title:'GDP',date:'2026-10-02T13:30:00Z',impact:'high',country:'USD'};
+ const messages=[],monitor=new TelegramEventResultMonitor(store,async()=>({actual:null,status:'unsupported',reason:'没有结果来源'}),()=>now);
+ monitor.registerReminder('owner',event,77);now+=73*3600000;await monitor.run('owner',[],async(text,reply)=>{messages.push({text,reply});return 90;});
+ assert.equal(messages.length,1);assert.match(messages[0].text,/无法核验.*结束|结束.*无法核验/);assert.equal(messages[0].reply,77);assert.equal(monitor.history('owner')[0].resultStatus,'unverifiable');
+ await monitor.run('owner',[],async()=>assert.fail('terminal notice repeated'));
+});
+test('registering another reminder during an in-flight lookup is not overwritten by monitor persistence',async()=>{
+ const {TelegramEventResultMonitor}=require('../src/features/telegram-event-results');const values=new Map(),store={get:k=>structuredClone(values.get(k)||null),set:(k,v)=>values.set(k,structuredClone(v))};const now=Date.parse('2026-10-02T14:00:00Z');
+ const first={title:'first',date:'2026-10-02T13:30:00Z',impact:'high',country:'USD'},second={title:'second',date:'2026-10-02T13:31:00Z',impact:'high',country:'USD'};let monitor;
+ monitor=new TelegramEventResultMonitor(store,async event=>{if(event.title==='first')monitor.registerReminder('owner',second,55);return{actual:'1',status:'published'};},()=>now);
+ monitor.registerReminder('owner',first,44);await monitor.run('owner',[],async()=>66);await monitor.run('owner',[],async()=>77);
+ assert.equal(monitor.history('owner').find(row=>row.event.title==='second').originalMessageId,55);
+});
 test('an event with a result on first observation is delivered, persisted and deduplicated after restart',async()=>{
  const {TelegramEventResultMonitor}=require('../src/features/telegram-event-results');const values=new Map(),store={get:k=>values.get(k)||null,set:(k,v)=>values.set(k,structuredClone(v))};let now=Date.parse('2026-10-02T13:40:00Z');const messages=[];
  const event={id:'jobs',title:'Non-Farm Employment Change',titleZh:'非农就业',date:'2026-10-02T13:30:00Z',impact:'high',country:'USD',actual:'100K',forecast:'90K',previous:'80K',source:'fixture'};

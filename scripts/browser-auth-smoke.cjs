@@ -58,6 +58,8 @@ async function main() {
     assert.equal(runnerState.createDisabled, true, 'UI must not offer a start action while the server feature flag is off');
     assert.equal(runnerState.tickDisabled, true, 'UI must not offer a manual tick while the server feature flag is off');
     assert.equal(runnerState.disabledNoticeVisible, true, 'UI must explain why the runner is disabled');
+    const budget=await page.evaluate(()=>fetch('/api/ai-runners/comparisons/budget').then(r=>r.json()));
+    assert.equal(budget.success,true);assert.equal(budget.data.limit,24);assert.equal(budget.data.issued,0);
     const streamResponse = await page.evaluate(async () => {
       const controller = new AbortController();
       const response = await fetch('/api/stream', { signal: controller.signal });
@@ -99,6 +101,7 @@ async function main() {
     const guestRunnerList = await page.evaluate(() => fetch('/api/ai-runners').then(async response => ({ status: response.status, body: await response.json() })));
     assert.equal(guestRunnerList.status, 403, JSON.stringify(guestRunnerList.body));
     assert.equal(guestRunnerList.body.code, 'GUEST_READ_ONLY');
+    assert.equal(await page.evaluate(()=>fetch('/api/ai-runners/comparisons/budget').then(r=>r.status)),403,'comparison quota remains private');
     const guestRunnerHistory = await page.evaluate(() => fetch('/api/ai-runners/private-runner/history').then(async response => ({ status: response.status, body: await response.json() })));
     assert.equal(guestRunnerHistory.status, 403, JSON.stringify(guestRunnerHistory.body));
     assert.equal(guestRunnerHistory.body.code, 'GUEST_READ_ONLY');
