@@ -15,7 +15,7 @@
 - [x] `src/web/public/index.html`：5m 默认、保留原图层与历史 Replay 路径，接入可见窗口和装饰器；不把最新图窗口计算当成全历史回测数据。
 - [x] `src/features/contract-research.ts`、`src/web/server.ts`、`src/web/public/contracts-workspace.js`：合约 OHLC API/显示/生命周期，不改订单、预算、AI跑单或现货通道。
 - [x] 隔离 Chromium：三市场视图、默认周期、拖拽/缩放/恢复、OHLC、价格和倒计时、市场切换、三个主题、手机和历史路径。
-- [ ] 完整测试、构建、Web/认证/浏览器/实时图表、安全扫描、diff 检查，再提交推送；dist 备份部署，仅操作 moneymoney.service，验证正式域名、Hash、健康、已有模拟跑单不变。
+- [x] 完整测试、构建、Web/认证/浏览器/实时图表、安全扫描、diff 检查，再提交推送；dist 备份部署，仅操作 moneymoney.service，验证正式域名、Hash、健康、已有模拟跑单不变。发布证据见 `docs/handover-2026-10-08-trading-chart.md`。
 
 ## 当前验收证据
 
