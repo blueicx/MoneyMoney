@@ -19,7 +19,7 @@ export function compareExperiments(input: ResearchExperimentResult[]) {
       const equityCurve = row.backtest.equityCurve;
       return { ...row.experiment, metrics: row.backtest.metrics, equityCurve,
         drawdownCurve: equityCurve.map(value => { peak = Math.max(peak, value); return peak > 0 ? Number(((value / peak - 1) * 100).toFixed(6)) : null; }),
-        trades: row.backtest.trades, totalFees: row.backtest.totalFees ?? null, totalSlippage: row.backtest.totalSlippage ?? null,
+        trades: row.backtest.trades, totalFees: row.backtest.totalFees ?? null, totalSlippage: row.backtest.totalSlippage ?? null, costStress: row.costStress || null,
         outOfSample: row.evidence.outOfSample, folds: row.folds,
         freshnessReason: row.experiment.dataTo ? '历史实验；数据时间不代表当前行情' : '未声明数据截止时间' };
     }), differences, ranking: null,

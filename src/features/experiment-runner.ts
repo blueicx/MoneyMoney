@@ -1,5 +1,6 @@
 import { calculateBacktestMetrics, createWalkForwardFolds, type BacktestMetrics, type WalkForwardFold } from './backtest-analysis';
 import { BacktestEngine, type BacktestResult, type BacktestSignal } from './backtest-engine';
+import { backtestCostStress } from './backtest-cost-stress';
 import { assertMarketContext, createExperimentRecord, type ExperimentRecord, type MarketContext } from './research-contracts';
 
 export interface ExperimentPromotionRules {
@@ -34,6 +35,7 @@ export interface PromotionGate {
 }
 
 export interface ResearchExperimentResult {
+  costStress?: ReturnType<typeof backtestCostStress>;
   experiment: ExperimentRecord;
   backtest: BacktestResult;
   folds: WalkForwardFold[];
@@ -96,7 +98,7 @@ export function runResearchExperiment(input: ResearchExperimentInput): ResearchE
   if (oos.totalReturnPct < Number(rules.minOutOfSampleReturnPct ?? -Infinity)) reasons.push('样本外收益未达到门槛');
   if ((oos.tradesCount || 0) < Number(rules.minTrades ?? 0)) reasons.push('样本外交易数未达到门槛');
   const passed = reasons.length === 0;
-  return { experiment, backtest: result, folds, evidence, gate: { passed, status: passed ? 'candidate' : 'draft', monitoringAllowed: false, reasons } };
+  return { experiment, backtest: result, folds, evidence, costStress: backtestCostStress(input), gate: { passed, status: passed ? 'candidate' : 'draft', monitoringAllowed: false, reasons } };
 }
 
 import { createArtifactManifest, type ArtifactManifest } from './research-contracts';

@@ -18,7 +18,33 @@
       '<p role="note">' + (risk.warnings || []).map(esc).join(' ') + '</p><p>来源：' + esc(risk.source || '调用者提供的研究序列，未核验数据来源') + '；数据时点 ' + esc(risk.asOf) + '。不自动创建订单。</p><p>证据引用：' + (risk.evidenceRefs || []).map(esc).join('、') + '</p>';
     host.append(section);
   }
-  window.MoneyMoneyProfessionalResearch = { renderTailRisk };
+  let committeeController=new AbortController();
+  function renderCommittee(host,items) {
+    committeeController.abort();committeeController=new AbortController();
+    if(!host || window.mm_isGuest || !window.mm_isLoggedIn)return;
+    const current=context(),instrument=window.decisionScopeInstrument?.() || current.instrument;
+    if(current.workspace!=='decision-intelligence' || !instrument)return;
+    const section=document.createElement('section');section.className='mm-action-center';section.dataset.committee='true';
+    const evidence=(items || []).filter(row=>row.persisted===true && row.market===current.market && row.instrument===instrument).slice(0,8);
+    section.innerHTML='<h4>多空 / 风控研究审议</h4><p>只读、最多 3 次免费模型调用；UTC 日上限 24 次，与跑单额度分开。不会改变策略或创建订单。请选择当前标的证据。</p><div data-committee-evidence>'+evidence.map(row=>'<label><input type="checkbox" value="'+esc(row.id)+'"> '+esc(row.source?.name)+' · '+esc(row.dataStatus)+' · '+esc(row.observedAt)+'</label>').join('<br>')+'</div><p><button type="button" data-committee-run>手动审议所选证据</button> <button type="button" data-committee-history>查看审议历史</button></p><p role="status" data-committee-status></p><div data-committee-results></div>';
+    host.append(section);const status=section.querySelector('[data-committee-status]'),results=section.querySelector('[data-committee-results]'),signal=committeeController.signal;
+    if(!evidence.length)status.textContent='当前标的没有已存档证据。请先保存真实来源快照；不会生成替代数据。';
+    const draw=rows=>{results.innerHTML=rows.map(row=>'<article><h5>'+esc(row.status)+' · '+esc(row.createdAt)+'</h5><p>'+esc(row.reason)+'</p><p>输入 Hash '+esc(row.inputHash)+' · 实际调用 '+esc(row.calls)+'</p>'+row.reviews.map(review=>'<details open><summary>'+esc({bull:'多头',bear:'空头',risk:'风控'}[review.role])+' · '+esc(review.stance)+'</summary><p>'+esc(review.summary)+'</p><p>反证 / 风险：'+review.risks.map(esc).join('；')+'</p><p>引用：'+review.citations.map(esc).join('、')+' · 模型 '+esc(review.model)+'</p></details>').join('')+'<p>'+esc(row.disclaimer)+'</p></article>').join('');};
+    const request=async(options)=>{const cookie=document.cookie.split(';').map(s=>s.trim()).find(s=>s.startsWith('mm_csrf='));const response=await fetch('/api/research/committee'+(options?'':'?'+new URLSearchParams({market:current.market,instrument})),{...options,signal,cache:'no-store',headers:{'Content-Type':'application/json',...(cookie?{'x-csrf-token':decodeURIComponent(cookie.slice(8))}:{})}});const body=await response.json();signal.throwIfAborted();if(!response.ok)throw Error(body.reason || '审议不可用');return body;};
+    section.querySelector('[data-committee-run]').onclick=async event=>{
+      const evidenceRefs=[...section.querySelectorAll('input:checked')].map(node=>node.value);if(!evidenceRefs.length){status.textContent='请选择至少一条当前标的证据。';return;}
+      if(!confirm('将调用最多 3 次已配置免费模型，只保存研究审议、不下单。继续？'))return;
+      event.target.disabled=true;status.textContent='多空与风控正在串行审议（最多约 45 秒）…';
+      try{const body=await request({method:'POST',body:JSON.stringify({market:current.market,instrument,evidenceRefs,idempotencyKey:'committee-'+crypto.randomUUID()})});status.textContent=body.reason;draw([body.data]);}catch(error){if(error.name!=='AbortError')status.textContent=error.message;}finally{event.target.disabled=false;}
+    };
+    section.querySelector('[data-committee-history]').onclick=async()=>{try{const body=await request();status.textContent=body.reason || '已读取私人审议历史';draw(body.data);}catch(error){if(error.name!=='AbortError')status.textContent=error.message;}};
+  }
+  function renderCostStress(host,experiments) {
+    if(!host)return;
+    const section=document.createElement('section');section.className='mm-action-center';section.dataset.costStress='true';
+    section.innerHTML='<h4>费用 / 滑点压力比较（非排名）</h4>'+experiments.map(row=>{const cost=row.costStress;return '<article><h5>'+esc(row.id)+'</h5><p>'+esc(cost?.reason || '旧实验未保存成本压力结果，未推算')+'</p>'+(cost?.scenarios?.length?'<div class="mm-table-scroll"><table><thead><tr><th>成本倍数</th><th>费用</th><th>滑点成本</th><th>净收益</th><th>最大回撤</th><th>成交</th></tr></thead><tbody>'+cost.scenarios.map(value=>'<tr><td>'+value.multiplier+'×</td><td>'+metric(value.totalFees)+'</td><td>'+metric(value.totalSlippage)+'</td><td>'+metric(value.totalReturnPct)+'%</td><td>'+metric(value.maxDrawdownPct)+'%</td><td>'+value.trades+'</td></tr>').join('')+'</tbody></table></div>':'')+'<p>'+esc((cost?.warnings || []).join('；'))+'</p></article>';}).join('');host.append(section);
+  }
+  window.MoneyMoneyProfessionalResearch = { renderTailRisk, renderCommittee, renderCostStress };
 
   // No polling or upstream work: only a visible, private stock-fundamentals workspace can query/index.
   let controller = new AbortController(), contextKey = '';
@@ -72,7 +98,7 @@
   function init() {
     const shell=document.getElementById('market-workspace-shell');
     if(shell)new MutationObserver(syncFilingPanel).observe(shell,{attributes:true,attributeFilter:['data-market-scope','data-workspace','data-instrument']});
-    window.addEventListener('mm-workspace-context',syncFilingPanel);
+    window.addEventListener('mm-workspace-context',()=>{committeeController.abort();syncFilingPanel();});
     let attempts=0;const timer=setInterval(()=>{syncFilingPanel();if(window.mm_isLoggedIn || ++attempts>=20)clearInterval(timer);},500);
     syncFilingPanel();
   }

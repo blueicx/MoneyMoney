@@ -11229,7 +11229,7 @@ async function openEventDecisionFromTimeline(button) {
 
 function decisionScopeInstrument() {
   const raw = String(currentInstrumentId || '').trim();
-  if (activeMarketScope === 'stocks') return raw.replace(/^us/i, '').toUpperCase() || String(window._stockSelectedSymbol || currentStockSymbol || 'AAPL').toUpperCase();
+  if (activeMarketScope === 'stocks') return raw.replace(/^stock:us:/i, '').replace(/^us/i, '').toUpperCase() || String(window._stockSelectedSymbol || currentStockSymbol || 'AAPL').toUpperCase();
   if (activeMarketScope === 'options') {
     const symbol = raw.replace(/^(option:|usoption:)(cboe:)?/i, '').toUpperCase() || String(document.getElementById('option-symbol')?.value || 'SPY').toUpperCase();
     return `option:cboe:${symbol}`;
@@ -11248,6 +11248,7 @@ function renderDecisionEvidence(items) {
   const host = document.getElementById('decision-evidence-list');
   if (!host) return;
   window.mm_decisionEvidenceIds = (items || []).map(item => item.id);
+  queueMicrotask(() => { if(host.isConnected) window.MoneyMoneyProfessionalResearch?.renderCommittee(host, items); });
   host.innerHTML = (items || []).length ? items.slice(0, 8).map(item => `<details style="padding:8px 0;border-bottom:1px dashed var(--border);"><summary style="cursor:pointer;display:flex;justify-content:space-between;gap:8px;"><span><b>${safeNewsText(item.source?.name || item.source?.id)}</b><small style="display:block;color:var(--text-secondary);">${safeNewsText(item.source?.id)} · ${safeNewsText(item.dataStatus)}</small></span><span style="font-size:10px;color:${item.dataStatus === 'live' ? 'var(--green)' : item.dataStatus === 'unavailable' ? 'var(--red)' : '#b7791f'};">${safeNewsText(item.dataStatus)}</span></summary><div style="margin-top:8px;">${decisionQualityBar('时效', item.quality?.freshness)}${decisionQualityBar('完整度', item.quality?.completeness)}${decisionQualityBar('来源可靠', item.quality?.sourceReliability)}${decisionQualityBar('多源一致', item.quality?.corroboration)}<div style="margin-top:7px;font-size:10px;color:var(--text-secondary);">数据 ${safeNewsText(item.observedAt)} · 抓取 ${safeNewsText(item.fetchedAt)} · Hash ${safeNewsText(String(item.hash || '').slice(0, 12))}${item.source?.url ? `<br><a href="${safeNewsUrl(item.source.url)}" target="_blank" rel="noopener noreferrer">打开来源原文 ↗</a>` : ''}${item.reason ? `<br><span style="color:var(--red);">${safeNewsText(item.reason)}</span>` : ''}</div></div></details>`).join('') : '<div class="empty-tip">当前市场暂无证据，数据不会由其他市场补位。</div>';
 }
 

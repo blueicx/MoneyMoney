@@ -22,6 +22,8 @@ import { buildEventEvidence, filterTimelineItems, type EventEvidence } from '../
 import { assembleHistory } from '../features/portfolio-history';
 import { FinancialTextIndex } from '../storage/financial-text-index';
 import { createFinancialResearchRouter } from './financial-research-routes';
+import { ResearchCommittee } from '../features/research-committee';
+import { createResearchCommitteeRouter } from './research-committee-routes';
 
 import { getRuntimeTelegramConfig, parseChatIds, runtimeSecrets } from '../config/runtime-secrets';
 import { api } from '../api';
@@ -355,6 +357,10 @@ app.get('/login', (req, res) => {
 });
 registerAuthRoutes(app);
 registerApiAuthProtection(app);
+app.use('/api/research/committee', createResearchCommitteeRouter(new ResearchCommittee({
+  store: stateStore, evidence: id => decisionIntelligenceStore.getEvidence(id), runtime: () => getAiRuntimeConfig('openrouter'),
+  resolve: (market, instrument) => dataLakeCatalog.resolveInstrument(market, instrument),
+})));
 let financialTextIndex: FinancialTextIndex | null = null;
 app.use('/api/research/filings', createFinancialResearchRouter({
   index: () => financialTextIndex || (financialTextIndex = new FinancialTextIndex(stateStore.health.databasePath)),
@@ -988,7 +994,8 @@ app.get('/api/evidence', async (req, res) => {
       reason: item.ok ? undefined : item.detail,
     }));
     const byId = new Map([...stored, ...live].map(item => [item.id, item]));
-    const data = [...byId.values()].sort((a, b) => b.fetchedAt.localeCompare(a.fetchedAt));
+    const savedHashes = new Map(stored.map(item => [item.id, item.hash]));
+    const data = [...byId.values()].sort((a, b) => b.fetchedAt.localeCompare(a.fetchedAt)).map(item => ({ ...item, persisted: savedHashes.get(item.id) === item.hash }));
     res.json(decisionEnvelope({ market, instrument, data, dataStatus: data.some(item => item.dataStatus === 'live') ? 'live' : data.length ? 'partial' : 'empty', source: 'scoped source health + saved evidence', reason: data.length ? null : '暂无证据' }));
   } catch (error: any) {
     res.status(/market|Instrument/.test(error.message) ? 400 : 500).json({ success: false, error: error.message, dataStatus: 'unavailable', reason: error.message });
@@ -7939,7 +7946,7 @@ app.post('/api/research/experiments', express.json(), (req, res) => {
       dataSnapshotHash: body.dataSnapshotHash ? String(body.dataSnapshotHash) : undefined,
       strategyId: body.strategyId ? String(body.strategyId) : undefined,
       strategyVersion: body.strategyVersion ? String(body.strategyVersion) : undefined,
-      feeRate: Number(body.feeRate || 0), slippage: Number(body.slippage || 0), seed: body.seed,
+      feeRate: body.feeRate == null ? undefined : Number(body.feeRate), slippage: body.slippage == null ? undefined : Number(body.slippage), seed: body.seed,
     };
     const result = runResearchExperiment({
       context,
