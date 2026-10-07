@@ -23,3 +23,15 @@
 预测概率、资金费、事件专属策略与真实结算摩擦模型；实时订阅/官方结果证据链；图表引擎对照；工作区内布局与筛选；后续模块化及性能基准仍按路线图分批，不宣称本批完成。
 
 完整测试 887/887、构建、Web/认证/四市场浏览器、专业研究和行动研究浏览器冒烟、安全扫描及差异检查通过。资源仍为 19 个 Hash/预压缩文件。发布结果在实际执行后追加。数据库、数据湖、scratch 原样保留且不纳入提交；仅部署 dist，仅操作 moneymoney.service。
+
+## 生产发布证据
+
+- 运行代码提交 `0e92affb0dc462b2ee6b1ef077f4f412aa0deac8` 已推送 master 与执行分支；发布标签 `committee-0e92aff-20261007-164728`。
+- 归档 SHA-256：`9c43cf85a3179fc1c1ee9180f5c306a3696ecd07cbe2d86e0c4c7c2e2a0d2255`；server.js：`b0c17113c97eeb0144f4bd8064c3c1d37327471e91ed17e6f37abd431a875d5c`；index.html：`9a08dbe134e2480b5d9d976b78115692545afacb3a077bfcb521827574e022e3`。
+- 远端 manifest 19 个资源逐项核验通过，moneymoney.service active、健康 alive；正式域名返回同一代码提交。
+- 管理员登录仍有效；新增审议历史 API 200、private/no-store；访客同入口 403。此验证没有发起模型调用。
+- 正式域名只读 Chromium 四市场和 SNDK 抽检通过；生产数据允许明确的来源不可用/缺失原因，不以夹具代替线上数据。
+- 原有自主纸面跑单预算 1000 USD、模式及冻结标的 Hash 核验不变。没有额外 tick、重建、重置或调整其额度。
+- 备份 `/opt/moneymoney/backups/dist-pre-committee-0e92aff-20261007-164728`；回滚 `/opt/moneymoney/dist.rollback-committee-0e92aff-20261007-164728`。
+- 本地归档、验证脚本和浏览器证据位于 `C:/Users/blueice/AppData/Local/Temp/moneymoney-committee-0e92aff-20261007-164728`，不纳入提交。
+- 重启开始的两次健康连接暂未就绪，随后重试成功。未进行回滚演练、真实三角色 AI 输出验收、容器运行或通知实际投递，不宣称这些独立门槛完成。
