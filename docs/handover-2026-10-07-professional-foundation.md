@@ -27,3 +27,16 @@ D：图表引擎对照、当前工作区内布局与市场专属筛选。
 E：按实际模块渐进拆分及性能验收。
 
 上线必须核验构建版本、Hash、域名页面、健康及回滚目录；只操作 `moneymoney.service`。镜像运行与新增渠道真实投递仍是独立未通过的验收项。
+
+## 生产发布证据
+
+- 已推送 master 与执行分支；运行构建提交 `59a19b2188063dc91ebff11a37d7ce3c47e2c18d`。
+- Release `professional-59a19b2-20261007-161829`；服务 active、健康 alive，正式域名 `https://bluetrade.bbroot.com` 报告同一提交。
+- 归档 SHA-256：`ba5ad5530d7a1e544bd51226474fd9c70020e29f71f06383a1da8b0345326d2e`。
+- server.js SHA-256：`ba13ee6479b8c90cf2f4ea7711b646572698cc3a4ae108a2f9f03dfd57e471c1`。
+- index.html SHA-256：`562df70c583db6a7ee0935e1e1340f6a63e901b856f6520fcde87aa959d045c3`；远端 19 个资源逐项对照 manifest Hash 通过。
+- 备份 `/opt/moneymoney/backups/dist-pre-professional-59a19b2-20261007-161829`；回滚 `/opt/moneymoney/dist.rollback-professional-59a19b2-20261007-161829`。
+- `smoke:production` 正式域名四市场、非热门 SNDK、访客私人接口限制通过。新增管理员财报 API 返回 200、private/no-store；管理员现有密码仍有效，不打印凭据。
+- 原有自主模拟跑单 ID、预算 1,000 USD、模式及冻结标的 Hash 核验不变；未执行额外 tick、恢复、重建或模型调用。
+- 本地发布证据目录 `C:/Users/blueice/AppData/Local/Temp/moneymoney-professional-release-20261007-161829`（归档、发布助手、只读验证与 Chromium trace），不纳入 Git。
+- 启动瞬间首次健康连接失败，脚本重试后成功；不是持续故障。本次没有进行恢复演练、Docker 实际运行或新渠道真实投递，不宣称通过这些门槛。
