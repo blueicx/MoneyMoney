@@ -2171,6 +2171,7 @@
 <link rel="stylesheet" href="/experience-enhancements.css?v=20261001">
 <script src="/chart-analysis.js"></script>
 <script defer src="/live-kline.js"></script>
+<script defer src="/trading-chart.js"></script>
 <script>
   window.selectInstrument = function selectInstrument(market, symbol) {
     const centerTitle = document.getElementById('center-title');
@@ -2583,8 +2584,8 @@
           <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:16px;">
           <div style="display:flex;gap:4px;" id="bn-timeframes">
             <button class="tf-btn" onclick="bnSetInterval('1m')">1m</button>
-            <button class="tf-btn" onclick="bnSetInterval('5m')">5m</button>
-            <button class="tf-btn active" onclick="bnSetInterval('15m')">15m</button>
+            <button class="tf-btn active" onclick="bnSetInterval('5m')">5m</button>
+            <button class="tf-btn" onclick="bnSetInterval('15m')">15m</button>
             <button class="tf-btn" onclick="bnSetInterval('1h')">1H</button>
             <button class="tf-btn" onclick="bnSetInterval('4h')">4H</button>
             <button class="tf-btn" onclick="bnSetInterval('1d')">1D</button>
@@ -2769,10 +2770,11 @@
                     <button class="tab" type="button" data-intraday-next onclick="moveStockIntradayDate(1)" title="下一可用交易日">后一日</button>
                   </span>
                   <div class="kline-control-group" aria-label="K线周期"><span class="kline-control-label">周期</span>
-                    <button class="tab stock-kline-period" data-kline-period="5m" onclick="setStockKlinePeriod('5m')">5分</button>
+                    <button class="tab stock-kline-period" data-kline-period="1m" onclick="setStockKlinePeriod('1m')">1分</button>
+                    <button class="tab stock-kline-period active" data-kline-period="5m" onclick="setStockKlinePeriod('5m')">5分</button>
                     <button class="tab stock-kline-period" data-kline-period="15m" onclick="setStockKlinePeriod('15m')">15分</button>
                     <button class="tab stock-kline-period" data-kline-period="1h" onclick="setStockKlinePeriod('1h')">1小时</button>
-                    <button class="tab stock-kline-period active" data-kline-period="1d" onclick="setStockKlinePeriod('1d')">1日</button>
+                    <button class="tab stock-kline-period" data-kline-period="1d" onclick="setStockKlinePeriod('1d')">1日</button>
                     <button class="tab stock-kline-period" data-kline-period="3d" onclick="setStockKlinePeriod('3d')">3日</button>
                     <button class="tab stock-kline-period" data-kline-period="5d" onclick="setStockKlinePeriod('5d')">5日</button>
                     <button class="tab stock-kline-period" data-kline-period="60d" onclick="setStockKlinePeriod('60d')">60日</button>
@@ -5639,7 +5641,7 @@ if (!navigator.onLine) showOfflineBanner();
 // --- Binance ---
 // --- Binance Dashboard ---
 let bnCurrentSymbol = 'BTCUSDT';
-let bnCurrentInterval = '15m';
+let bnCurrentInterval = '5m';
 let bnKlineData = [];
 let cryptoChartOverlayConfig = { patterns: false, patternTypes: {} };
 function bnSetSymbol(sym) {
@@ -5744,6 +5746,9 @@ function buildCryptoStrategySignals(bars) {
   return window.MoneyChartAnalysis?.detectStrategySignals(bars, cryptoChartStrategyConfig) || [];
 }
 function drawCandles(canvas, klines) {
+  const tradingFull = klines;
+  const tradingWindow = window.MoneyTradingChart?.select(canvas, klines, bnCurrentSymbol+'|'+bnCurrentInterval);
+  if (tradingWindow) klines = tradingWindow.rows;
   const ctx = canvas.getContext('2d');
   const fullscreen = document.body?.dataset.chartFullscreen === 'crypto';
   const W = Math.max(320, canvas.clientWidth || 640);
@@ -5754,10 +5759,10 @@ function drawCandles(canvas, klines) {
   if (fullscreen) canvas.style.height = `${H}px`;
   else canvas.style.height = 'auto';
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  const padL = 60, padR = 10, padT = 10, padB = 50;
-  const chartH = H - padT - padB - 40; // leave room for volume
+  const padL = 60, padR = 88, padT = 10, padB = 50;
+  const chartH = (H - padT - padB) * .72;
   const volTop = padT + chartH + 20;
-  const volH = 30;
+  const volH = H - volTop - padB;
   const cs = getComputedStyle(document.documentElement);
   const textColor = cs.getPropertyValue('--text-secondary')?.trim() || '#888';
   const green = '#22c55e', red = '#ef4444';
@@ -5908,7 +5913,7 @@ function calcBollinger(data, period = 20, multiplier = 2) {
   return result;
 }
   // Current price line (dashed white/gold)
-  if (klines.length > 0) {
+  if (klines.length > 0 && !window.MoneyTradingChart) {
     const lastPrice = klines[klines.length-1].close;
     if (lastPrice >= minP && lastPrice <= maxP) {
       const y = padT + chartH - ((lastPrice - minP) / range) * chartH;
@@ -6011,6 +6016,7 @@ function calcBollinger(data, period = 20, multiplier = 2) {
     const x = padL + idx * cw + cw / 2;
     ctx.fillText(lbl, x - 14, H - 25);
   });
+  window.MoneyTradingChart?.decorate(canvas, {canvas,full:tradingFull,rows:klines,interval:bnCurrentInterval,ma:[7,25],volumeUnit:'基础币',interactive:true,geometry:{W,H,padL,padR,padT,priceH:chartH,minP,maxP},redraw:()=>drawCandles(canvas,bnKlineData)});
 }
 let bnKlineController = null;
 let bnKlineRequestRevision = 0;
@@ -6035,7 +6041,7 @@ async function loadBinanceKlines(options = {}) {
     if (live && bnKlineData !== initialRows) return; // A newer push supersedes an in-flight REST snapshot.
     if (!data.success || !data.data?.length) {
       window.MoneyLiveKline?.note('crypto', (data.reason || '来源不可用') + (live ? ' · 保留最后快照（缓存）' : ' · 暂无K线'));
-      if (!live) { bnKlineData = []; const ctx = canvas.getContext('2d'); ctx.clearRect(0,0,canvas.width,canvas.height); }
+      if (!live) { bnKlineData = []; window.MoneyTradingChart?.clear(canvas); const ctx = canvas.getContext('2d'); ctx.clearRect(0,0,canvas.width,canvas.height); }
       return;
     }
     bnKlineData = data.data;
@@ -8889,7 +8895,7 @@ function renderOptionStrategies(expiry) {
 let currentStockSymbol = 'sh600519';
 let currentStockName = '贵州茅台';
 let currentStockApiSymbol = '';
-let currentStockKlinePeriod = '1d';
+let currentStockKlinePeriod = '5m';
 let currentStockKlineReason = '';
 let stockChartReplayIndex = -1;
 let stockChartKlines = [];
@@ -9150,7 +9156,7 @@ function stepStockChartReplay(action) {
   else drawStockKline(document.getElementById('stock-kline'), stockChartKlines);
   window.MoneyLiveKline?.sync();
 }
-function getStockKlineIndexFromPointer(clientX, rect, count, padLeft = 58, padRight = 14) {
+function getStockKlineIndexFromPointer(clientX, rect, count, padLeft = 58, padRight = 88) {
   const total = Math.floor(Number(count));
   const left = Number(rect?.left);
   const width = Number(rect?.width);
@@ -9558,6 +9564,7 @@ function setStockKlineViewState(state, reason = '') {
     if (element) { element.hidden = !ready; if (!ready) element.innerHTML = ''; }
   }
   if (!ready) {
+    window.MoneyTradingChart?.clear(document.getElementById('stock-kline'));
     stockChartKlines = [];
     stockChartIntradaySession = null;
     stockChartReplayIndex = -1;
@@ -9692,9 +9699,11 @@ function drawStockKline(canvas, klines) {
   const visibleCount = stockChartReplayIndex >= 0 ? Math.min(fullKlines.length, stockChartReplayIndex + 1) : fullKlines.length;
   const replayKlines = fullKlines.slice(0, visibleCount);
   const selectedIndex = Number.isInteger(stockChartFocusIndex) && stockChartFocusIndex < replayKlines.length ? stockChartFocusIndex : null;
-  const focusStart = stockChartFocusEnabled && selectedIndex != null ? getStockKlineFocusStart(replayKlines.length, selectedIndex) : 0;
+  const tradingActive = !stockChartFocusEnabled && !stockChartAsOf && !stockChartIntradayDate && stockChartReplayIndex >= stockChartKlines.length-1 && visibleCount === fullKlines.length && !window.stockMoneyKLine?.timer;
+  const tradingWindow = tradingActive ? window.MoneyTradingChart?.select(canvas,replayKlines,currentStockSymbol+'|'+currentStockKlinePeriod) : null;
+  const focusStart = stockChartFocusEnabled && selectedIndex != null ? getStockKlineFocusStart(replayKlines.length, selectedIndex) : (tradingWindow?.start || 0);
   stockChartRenderedStartIndex = focusStart;
-  klines = replayKlines.slice(focusStart, focusStart + (stockChartFocusEnabled && selectedIndex != null ? Math.min(11, replayKlines.length) : replayKlines.length));
+  klines = replayKlines.slice(focusStart, focusStart + (stockChartFocusEnabled && selectedIndex != null ? Math.min(11, replayKlines.length) : tradingWindow?.rows.length || replayKlines.length));
   const selectedVisibleIndex = selectedIndex == null ? -1 : selectedIndex - focusStart;
   if (!klines.length) {
     const replayStatus = document.getElementById('stock-chart-replay-status');
@@ -9723,7 +9732,7 @@ function drawStockKline(canvas, klines) {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, cssWidth, cssHeight);
   const W = cssWidth, H = cssHeight;
-  const padL = 58, padR = 14, padT = 28, padB = 30;
+  const padL = 58, padR = 88, padT = 28, padB = 30;
   const priceH = (H - padT - padB) * 0.72;
   const volTop = padT + priceH + 16;
   const volH = H - volTop - padB - 4;
@@ -9870,6 +9879,7 @@ function drawStockKline(canvas, klines) {
   renderChartSignalList('stock-chart-signals', overlays.signals, '当前周期未触发所选策略信号');
   renderChartPatternList('stock-chart-pattern-list', overlays.patterns, '当前周期未识别到所选蜡烛形态');
   renderChartStructureList('stock-chart-structure-list', overlays.structures, overlays.chan, '当前周期未识别到结构标记');
+  window.MoneyTradingChart?.decorate(canvas,{canvas,full:replayKlines,rows:klines,interval:currentStockKlinePeriod,ma:[5,10,20],volumeUnit:'股',interactive:tradingActive,geometry:{W,H,padL,padR,padT,priceH,minP,maxP},redraw:()=>drawStockKline(canvas,stockChartKlines)});
 }
 // --- DeFi Data ---
 async function loadDefiData() {

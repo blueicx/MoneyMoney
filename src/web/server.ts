@@ -3839,6 +3839,10 @@ app.get('/api/contracts/compare',async(req,res)=>{
     res.json({success:true,...compareContractSnapshots(rows),updatedAt:new Date().toISOString()});
   }catch(error:any){res.status(400).json({success:false,dataStatus:'unavailable',reason:error.message});}
 });
+app.get('/api/contracts/kline',async(req,res)=>{
+  try {if(req.query.market && req.query.market!=='crypto')throw new Error('合约市场不一致');res.json({success:true,...await contractResearchService.chart(String(req.query.instrument || ''),String(req.query.interval || '5m'))});}
+  catch(error:any){res.status(400).json({success:false,market:'crypto',dataStatus:'failed',reason:error.message});}
+});
 app.post('/api/contracts/capacity',express.json(),async(req,res)=>{
   if(!adminOnly(req,res))return;
   try {

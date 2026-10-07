@@ -91,8 +91,8 @@ describe('K-Line Upgrade & Advanced Capabilities', () => {
     const html = fs.readFileSync(path.join(__dirname, '../src/web/public/index.html'), 'utf8');
     const toolbar = document.querySelector('[data-kline-controls="stocks"]');
     assert.ok(toolbar, 'Stock K-line controls should be a single toolbar');
-    assert.equal(toolbar.querySelectorAll('.stock-kline-period').length, 10);
-    for (const period of ['5m', '15m', '1h', '1d', '3d', '5d', '60d', '120d', '1y', '5y']) {
+    assert.equal(toolbar.querySelectorAll('.stock-kline-period').length, 11);
+    for (const period of ['1m', '5m', '15m', '1h', '1d', '3d', '5d', '60d', '120d', '1y', '5y']) {
       assert.ok(toolbar.querySelector(`[data-kline-period="${period}"]`), `Missing ${period} period`);
     }
     assert.equal(toolbar.querySelectorAll('[data-kline-range]').length, 0, 'Range must not be a second selector');
@@ -173,7 +173,8 @@ describe('K-Line Upgrade & Advanced Capabilities', () => {
 
     const rect = { left: 100, width: 640 };
     assert.equal(window.getStockKlineIndexFromPointer(158, rect, 10), 0);
-    assert.equal(window.getStockKlineIndexFromPointer(726, rect, 10), 9);
+    assert.equal(window.getStockKlineIndexFromPointer(651, rect, 10), 9);
+    assert.equal(window.getStockKlineIndexFromPointer(726, rect, 10), null, 'right price/countdown gutter is not a candle');
     assert.equal(window.getStockKlineIndexFromPointer(99, rect, 10), null);
     assert.equal(window.getStockKlineIndexFromPointer(741, rect, 10), null);
   });

@@ -40,6 +40,27 @@ export class ContractResearchService {
       }catch(error){return {market:'crypto',dataStatus:'unavailable',source:'Gate public API',updatedAt:new Date(this.now()).toISOString(),reason:(error as Error).message,items:[]};}
     }).then(result=>({...result,items:result.items.filter((row:any)=>row.name.includes(query.toUpperCase())).slice(0,100)}));
   }
+  chart(instrument:string,interval='5m') {
+    const identity=contractIdentity(instrument),durations:Record<string,number>={'1m':60000,'5m':300000,'15m':900000,'1h':3600000};
+    if(!durations[interval])throw new Error('合约K线周期不支持');
+    const root='/'+(identity.kind==='perpetual'?'futures':'delivery')+'/usdt';
+    return this.cached('chart:'+instrument+':'+interval,15000,async()=>{
+      const source='Gate public API · '+identity.kind,updatedAt=new Date(this.now()).toISOString();
+      const base={market:'crypto',instrument,timeframe:interval,source,updatedAt,volumeUnit:'contracts',executionEnabled:false};
+      try {
+        const [metadata,raw]=await Promise.all([this.read(root+'/contracts/'+identity.contract),this.read(root+'/candlesticks?contract='+identity.contract+'&interval='+interval+'&limit=200')]);
+        if(metadata?.name!==identity.contract || metadata?.type!=='direct')throw new Error('来源合约身份或线性类型不一致');
+        if(!Array.isArray(raw))throw new Error('来源K线格式无效');
+        const seen=new Set<number>();
+        const data=raw.flatMap(row=>{
+          const t=positive(row.t),open=positive(row.o),high=positive(row.h),low=positive(row.l),close=positive(row.c),volume=numeric(row.v);
+          if(!t || t*1000>this.now() || !open || !high || !low || !close || high<Math.max(open,close) || low>Math.min(open,close) || high<low || volume==null || volume<0 || seen.has(t))return [];
+          seen.add(t);return [{time:t*1000,open,high,low,close,volume,closed:t*1000+durations[interval]<=this.now()}];
+        }).sort((a,b)=>a.time-b.time);
+        return {...base,data,dataStatus:data.length?'delayed':'empty',reason:data.length?null:'来源成功但暂无有效合约K线'};
+      }catch(error){return {...base,data:[],dataStatus:'unavailable',reason:(error as Error).message};}
+    });
+  }
   detail(instrument:string) {
     const identity=contractIdentity(instrument),root='/'+(identity.kind==='perpetual'?'futures':'delivery')+'/usdt';
     return this.cached(instrument,30000,async()=>{
