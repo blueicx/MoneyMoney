@@ -201,3 +201,11 @@
 - 仅重启 `moneymoney.service`，服务active；备份 `/opt/moneymoney/backups/dist-pre-comparison-d9ac0dd-20261008-2136` 与回滚 `/opt/moneymoney/dist.rollback-comparison-d9ac0dd-20261008-2136` 实际存在，保留此前a893762。部署前新基线 `/tmp/moneymoney-protected-d9ac0dd-baseline.json` 与部署后原自主股票账户预算、范围、路由、风控和运行状态一致。
 - 实际来源检查：AAPL/SNDK各4605根五分钟线、Gate200根延迟合约线、2条真实Binance SSE；访客403、错误市场400。正式域名四市场/SNDK/时点/右侧库恢复/390px/访客Chromium通过，无页面错误；报告系统临时目录 `mm-production-canary-d9ac0dd/production-canary-report.json`。
 - 发布后只读确认：新增自动对照关闭、账户组0、模型额度已发出0且剩余24。未调用模型、创建或执行对照订单，不修改原跑单。待固定模型选择和其余完整验收后再创建、启用；不能把本批发布报告成整个目标完成。
+
+## 私有图表标的身份修复与正式域名复验（2026-10-08，760f542）
+
+- 生产私有验收首次发现 MU/SNDK 图表模拟成交标记 API 返回 422：图表传入完整规范身份，但该身份尚无数据湖分区注册。此前读取真实跑单也确认此断点。增加独立标的解析：优先走已有注册表和历史别名；仅对带市场与 venue 的规范股票/加密身份按其显式身份校验后允许空标记响应；期权和预测标的仍须注册表或同一身份的账本记录。裸代码、错误市场、错误股票 venue 和类型不匹配仍拒绝。历史成交仅按订单/信号/快照 ID 与 Hash 核验，不按时间配对。
+- 先添加失败测试，再实现；身份与既有 lineage 定向测试 5/5。完整 `npm test` 1001/1001，TypeScript检查、构建、Web/认证/四市场三主题浏览器/实时K线/合约/自动对照冒烟全部通过，安全扫描649个跟踪文件通过，`git diff --check`通过。实时K线冒烟的推流部分使用隔离 fixture，不作为真实市场推流证据。提交 `760f542cc1c1315d5abcde3620d5c362ee776d89` 已推至 GitHub `codex/research-closure-all`。
+- 发布标签 `chart-identity-760f542-20261008-2310`。dist归档 SHA256 `b851faf85d14d426b3de2e2aecb0c7f356f61653c37f09758a6d461244c52a30`，server `89cb56df8865bdb5f9f473b960c8cf214e69b4ffab058943cd1108a7b207b69d`，index `e4ab0d9fcc39c5b92fbaffedd4bdb2ef34b89388556ccc7b0c58dfd1af26f399`。本机首次通过嵌套SSH/Bash传参的发布尝试被归档Hash守卫拦截；核对发现服务端包与本机完全相同，服务未停止。随后直接以已计算Hash调用发布脚本，切换成功。备份 `/opt/moneymoney/backups/dist-pre-chart-identity-760f542-20261008-2310` 和回滚 `/opt/moneymoney/dist.rollback-chart-identity-760f542-20261008-2310` 均实测存在；仅操作 `moneymoney.service`。
+- 部署后脚本核对正式域名版本、21项资源Hash、AAPL/SNDK各4624根真实5分钟K线、Gate 200根延迟合约K线、两条真实Binance SSE、访客403、错误市场400；独立股票跑单预算/范围/模型与报价路由/配置/运行状态相对部署前基线不变。正式域名只读 Chromium 四市场/SNDK 验收通过。隔离管理员浏览器实际验证MU/SNDK lineage API均成功返回明确空结果（两标的当前没有已关联模拟成交），crypto合约图、成交量、资金费率90点、OI与基差各1条部分快照、延迟盘口状态、三个主题、全屏、390px布局及市场切换；未创建订单或变更业务数据。报告仅保存来源状态/点数/样式，不含私人仓位或凭证，位于系统临时目录 `mm-private-chart-760f542-1.json` 与 `mm-production-canary-760f542/production-canary-report.json`。
+- 新自动对照仍 `enabled=false`、账户组0、额度已发0、剩余24；本批模型调用0。OI/基差仅有部分快照、盘口为延迟状态，期权与预测市场执行门槛未补齐；并且没有真实已关联成交供图上血缘标记检验。全目标继续进行，不能据此开启新调度或宣称完成。
