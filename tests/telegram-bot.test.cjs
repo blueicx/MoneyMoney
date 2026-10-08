@@ -123,6 +123,38 @@ test('confirms an authorized callback and sends an inline keyboard response', as
   assert.deepEqual(JSON.parse(fs.readFileSync(path.join(tempDir, 'state.json'), 'utf8')), { nextOffset: 13 });
 });
 
+test('routes a signed dynamic callback prefix without sending a second chat message', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'telegram-prefix-'));
+  const sent = [];
+  const answered = [];
+  const bot = new TelegramInteractionBot({
+    allowedChatIds: ['allowed'],
+    stateFile: path.join(tempDir, 'state.json'),
+    transport: {
+      async getUpdates() { return []; },
+      async sendMessage(chatId, text) { sent.push({ chatId, text }); },
+      async answerCallbackQuery(callbackQueryId, text) { answered.push({ callbackQueryId, text }); },
+    },
+    handlers: {},
+    callbackHandlers: {
+      'telegram-test:ack:': async ({ data }) => { assert.match(data, /^telegram-test:ack:[a-zA-Z0-9_-]+:[a-zA-Z0-9_-]+$/); },
+    },
+  });
+
+  const result = await bot.handleUpdate({
+    update_id: 22,
+    callback_query: {
+      id: 'callback-test-ack',
+      data: 'telegram-test:ack:nonce123:signature123',
+      message: { chat: { id: 'allowed', type: 'private' } },
+    },
+  });
+
+  assert.equal(result.handled, true);
+  assert.deepEqual(answered, [{ callbackQueryId: 'callback-test-ack', text: undefined }]);
+  assert.deepEqual(sent, []);
+});
+
 test('ignores unauthorized callbacks and answers unknown callbacks safely', async () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'telegram-bot-'));
   const sent = [];

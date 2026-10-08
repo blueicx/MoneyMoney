@@ -161,7 +161,7 @@ import {
 } from '../features/decision-intelligence';
 import { decisionIntelligenceStore } from '../features/decision-intelligence-store';
 import { capturePortfolioSnapshots, comparePortfolioSnapshots } from '../features/portfolio-snapshot-history';
-import { listTelegramTestDeliveries, runTelegramTestDelivery } from '../features/telegram-test-delivery';
+import { acknowledgeTelegramTestDelivery, listTelegramTestDeliveries, runTelegramTestDelivery } from '../features/telegram-test-delivery';
 import { buildDecisionMobileSummary } from '../features/decision-mobile-summary';
 import { researchRepository } from '../features/research-repository';
 import { analyzeFactor, getFactorCatalog } from '../features/factor-lab';
@@ -6582,6 +6582,13 @@ function getTelegramCallbackHandlers(commandHandlers: Record<string, TelegramCom
       update: context.update,
     });
   }
+  handlers['telegram-test:ack:'] = async ({ chatId, data }) => {
+    const record = consumeTelegramCallback(data, 'telegram-test:ack', chatId);
+    if (!record || record.workspace !== 'telegram-test' || record.scope !== telegramScopeForChat(chatId)) return telegramReply('验收按钮已过期或私聊上下文已变化；请从网页重新发起一次测试。');
+    const result = acknowledgeTelegramTestDelivery(stateStore, record.id, chatId);
+    if (result.status === 'acknowledged' || result.status === 'duplicate') return undefined;
+    return telegramReply('验收确认未通过：' + escapeTelegramHtml(result.reason));
+  };
   for (const button of getTelegramMarketButtons()) {
     handlers[`market:${button.scope}`] = async (context) => commandHandlers.market({
       chatId: context.chatId,
@@ -8562,6 +8569,7 @@ app.get('/api/ai-runners', (req, res) => {
 import {ComparisonModelBudget} from '../features/ai-comparison-budget';
 import {ComparisonScheduler, COMPARISON_MARKETS, type AutomaticComparisonRound, type ComparisonMarket} from '../features/ai-comparison-scheduler';
 import {selectComparisonWatchlist} from '../features/ai-comparison-watchlist';
+import {fetchRandomOpenRouterFreeModel} from '../features/openrouter-random-model';
 const comparisonModelBudget=new ComparisonModelBudget(stateStore);
 const comparisonScheduler=new ComparisonScheduler(stateStore);
 app.get('/api/ai-runners/comparisons/automatic',(req,res)=>{
@@ -8570,21 +8578,32 @@ app.get('/api/ai-runners/comparisons/automatic',(req,res)=>{
     reason:'独立对照调度；每小时全局最多一轮。现有自主跑单不受此开关或额度影响。'});}
   catch(error:any){res.status(503).json({success:false,reason:error.message});}
 });
-app.post('/api/ai-runners/comparisons/automatic/rebuild',express.json(),(req,res)=>{
+app.post('/api/ai-runners/comparisons/automatic/rebuild',express.json(),async(req,res)=>{
   if(!adminOnly(req,res))return;
   if(!config.aiPaperTradingEnabled)return res.status(403).json({success:false,reason:'AI模拟能力关闭'});
   try{
     const market=req.body?.market as ComparisonMarket;
     if(!COMPARISON_MARKETS.includes(market))throw new Error('请选择明确市场');
-    const runtime=getAiRuntimeConfig('openrouter'),model=String(req.body?.model || runtime.model).trim();
-    if(!model || model==='openrouter/free' || model==='openrouter/auto')throw new Error('对照必须固定具体模型版本，不能使用自动路由');
     const ids=unifiedAlertStore.listWatchlist(),pinned=Array.isArray(req.body?.pinned)?req.body.pinned.filter((id:unknown)=>typeof id==='string'&&ids.includes(id)):[];
     const selected=selectComparisonWatchlist(market,ids,pinned,id=>{
       const refs=COMPARISON_MARKETS.map(scope=>dataLakeCatalog.resolveInstrument(scope,id)).filter((ref):ref is NonNullable<typeof ref>=>!!ref);
       if(refs.length>1)throw new Error('自选身份有歧义');
       return refs[0] || null;
     });
-    if(!selected.instruments.length)return res.status(422).json({success:false,dataStatus:'unavailable',reason:'当前自选没有达到本市场撮合身份门槛的标的',excluded:selected.excluded});
+    if(!selected.instruments.length){
+      const details=[...new Set(selected.excluded.map(row=>row.reason))].slice(0,3);
+      return res.status(422).json({success:false,dataStatus:'unavailable',reason:'当前自选没有达到本市场撮合身份门槛的标的'+(details.length?'：'+details.join('；'):''),excluded:selected.excluded});
+    }
+    const runtime=getAiRuntimeConfig('openrouter'),modelSelection=String(req.body?.modelSelection || 'fixed');
+    let model='';
+    if(modelSelection==='random-free'){
+      if(!runtime.configured)throw new Error('未配置 OpenRouter；无法从免费模型目录随机选型');
+      if(runtime.apiUrl!=='https://openrouter.ai/api/v1/chat/completions')throw new Error('随机选型仅支持 OpenRouter 官方接口');
+      model=await fetchRandomOpenRouterFreeModel(runtime.apiKey);
+    }else if(modelSelection==='fixed'){
+      model=String(req.body?.model || runtime.model).trim();
+      if(!model || model==='openrouter/free' || model==='openrouter/auto')throw new Error('请填写具体模型 ID，不能使用自动路由');
+    }else throw new Error('模型选择模式无效');
     const first=selected.instruments[0];
     const data=stateStore.transaction(()=>{
       const group=createAiRunnerComparison(first.venue,first.symbolOrMarketId,first.title || first.symbolOrMarketId,1000,{},
@@ -8593,7 +8612,7 @@ app.post('/api/ai-runners/comparisons/automatic/rebuild',express.json(),(req,res
         excluded:selected.excluded.map(row=>row.instrument+'：'+row.reason)});
     });
     stateStore.appendAudit({id:crypto.randomUUID(),action:'ai_comparison_auto_rebuilt',detail:market+' '+data.groupId+'；旧账户及历史保留；未调用模型'});
-    res.json({success:true,data,excluded:selected.excluded,reason:'已冻结管理员自选；三个独立账户各1000虚拟USD，尚未执行。重建旧组必须人工恢复。'});
+    res.json({success:true,data,excluded:selected.excluded,reason:`已冻结管理员自选；三个独立账户各1000虚拟USD；模型 ${model} 已冻结，尚未执行。重建旧组必须人工恢复。`});
   }catch(error:any){res.status(400).json({success:false,reason:error.message});}
 });
 app.post('/api/ai-runners/comparisons/automatic/control',express.json(),(req,res)=>{
@@ -10061,12 +10080,19 @@ app.post('/api/telegram/test-delivery', express.json(), async (req, res) => {
     allowedChatIds: allowedChats,
     botConfigured: Boolean(telegramConfig.botToken),
     idempotencyKey: String(req.body?.idempotencyKey || ''),
-    sendMessage: async (chatId, text) => { await new TelegramApiTransport(telegramConfig.botToken, telegramConfig.proxyUrl).sendMessage(chatId, text); },
+    sendMessage: async (chatId, text, recordId) => {
+      const callbackData = issueTelegramCallback('telegram-test:ack', {
+        scope: telegramScopeForChat(chatId), id: recordId, workspace: 'telegram-test', chatId,
+      });
+      await new TelegramApiTransport(telegramConfig.botToken, telegramConfig.proxyUrl).sendMessage(chatId, text, {
+        inline_keyboard: [[{ text: '✅ 我已收到', callback_data: callbackData }]],
+      });
+    },
   });
   const deliveryStatus = result.status === 'duplicate' ? result.record?.status : result.status;
-  const statusCode = deliveryStatus === 'sent' ? 200 : deliveryStatus === 'sending' ? 202 : deliveryStatus === 'rejected' ? 403 : deliveryStatus === 'suppressed' ? 429 : deliveryStatus === 'failed' ? 502 : 503;
-  const dataStatus = deliveryStatus === 'sent' ? 'live' : deliveryStatus === 'failed' ? 'failed' : deliveryStatus === 'sending' ? 'partial' : 'unavailable';
-  res.status(statusCode).json({ success: deliveryStatus === 'sent', data: result, dataStatus, source: 'explicit administrator Telegram delivery test', updatedAt: new Date().toISOString(), reason: result.reason });
+  const statusCode = deliveryStatus === 'sent' || deliveryStatus === 'acknowledged' ? 200 : deliveryStatus === 'sending' ? 202 : deliveryStatus === 'rejected' ? 403 : deliveryStatus === 'suppressed' ? 429 : deliveryStatus === 'failed' ? 502 : 503;
+  const dataStatus = deliveryStatus === 'sent' || deliveryStatus === 'acknowledged' ? 'live' : deliveryStatus === 'failed' ? 'failed' : deliveryStatus === 'sending' ? 'partial' : 'unavailable';
+  res.status(statusCode).json({ success: deliveryStatus === 'sent' || deliveryStatus === 'acknowledged', data: result, dataStatus, source: 'explicit administrator Telegram delivery test', updatedAt: new Date().toISOString(), reason: result.reason });
 });
 
 app.get('/api/telegram/status', (req, res) => {

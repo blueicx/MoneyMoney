@@ -5,9 +5,10 @@ const HISTORY_LIMIT = 100;
 
 export interface TelegramTestDeliveryRecord {
   id: string;
-  status: 'sending' | 'sent' | 'failed' | 'suppressed';
+  status: 'sending' | 'sent' | 'acknowledged' | 'failed' | 'suppressed';
   attemptedAt: string;
   completedAt?: string;
+  acknowledgedAt?: string;
   chatFingerprint: string;
   idempotencyFingerprint: string;
   reason?: string;
@@ -52,7 +53,7 @@ export function runTelegramTestDelivery(input: {
   allowedChatIds: readonly string[];
   botConfigured: boolean;
   idempotencyKey: string;
-  sendMessage: (chatId: string, text: string) => Promise<void>;
+  sendMessage: (chatId: string, text: string, recordId: string) => Promise<void>;
   now?: string | Date;
   cooldownMs?: number;
 }) {
@@ -90,7 +91,7 @@ export function runTelegramTestDelivery(input: {
       input.store.releaseLease(leaseKey, owner);
       return Promise.resolve({ status: 'duplicate' as const, record: duplicate, reason: '该次按钮请求已处理，未重复发送' });
     }
-    const latestActualAttempt = rows.filter(item => item.chatFingerprint === chatFingerprint && ['sending', 'sent', 'failed'].includes(item.status))
+    const latestActualAttempt = rows.filter(item => item.chatFingerprint === chatFingerprint && ['sending', 'sent', 'acknowledged', 'failed'].includes(item.status))
       .sort((left, right) => right.attemptedAt.localeCompare(left.attemptedAt))[0];
     const cooldownMs = Math.max(0, Math.min(10 * 60_000, input.cooldownMs ?? 60_000));
     if (latestActualAttempt && nowMs - Date.parse(latestActualAttempt.attemptedAt) < cooldownMs) {
@@ -105,18 +106,48 @@ export function runTelegramTestDelivery(input: {
     return Promise.resolve({ status: 'failed' as const, reason: sanitizeError(error, recipientId) });
   }
 
-  return Promise.resolve().then(() => input.sendMessage(recipientId, '🤖 <b>MoneyMoney Telegram 测试</b>\n通知通道已由管理员主动验证。'))
+  return Promise.resolve().then(() => input.sendMessage(recipientId, '🤖 <b>MoneyMoney Telegram 测试</b>\n这是管理员发起的一次通道验收。点击下方按钮确认收到；不会触发交易或修改业务数据。', record.id))
     .then(() => {
+      const receipt = history(input.store).find(item => item.id === record.id);
+      if (receipt?.status === 'acknowledged') return { status: 'acknowledged' as const, record: receipt, reason: receipt.reason || '管理员已确认收到 Telegram 验收消息' };
       const completed = { ...record, status: 'sent' as const, completedAt: new Date().toISOString(), reason: 'Telegram API 已确认发送' };
       save(input.store, completed);
       return { status: 'sent' as const, record: completed, reason: completed.reason };
     })
     .catch(error => {
+      const receipt = history(input.store).find(item => item.id === record.id);
+      if (receipt?.status === 'acknowledged') return { status: 'acknowledged' as const, record: receipt, reason: receipt.reason || '管理员已确认收到 Telegram 验收消息' };
       const completed = { ...record, status: 'failed' as const, completedAt: new Date().toISOString(), reason: sanitizeError(error, recipientId) };
       save(input.store, completed);
       return { status: 'failed' as const, record: completed, reason: completed.reason };
     })
     .finally(() => { input.store.releaseLease(leaseKey, owner); });
+}
+
+export function acknowledgeTelegramTestDelivery(
+  store: TelegramTestDeliveryStore,
+  recordId: string,
+  recipientId: string,
+  now: string | Date = new Date(),
+): { status: 'acknowledged' | 'duplicate' | 'rejected'; record?: TelegramTestDeliveryRecord; reason: string } {
+  const id = String(recordId || '').trim();
+  const recipient = String(recipientId || '').trim();
+  const nowMs = now instanceof Date ? now.getTime() : Date.parse(now);
+  if (!id || !recipient || !Number.isFinite(nowMs)) return { status: 'rejected', reason: '测试确认上下文无效' };
+  const record = history(store).find(item => item.id === id);
+  if (!record || record.chatFingerprint !== fingerprint(recipient)) return { status: 'rejected', reason: '测试记录不存在或不属于当前私聊' };
+  if (record.status === 'acknowledged') return { status: 'duplicate', record, reason: '该测试消息已确认收到' };
+  if (record.status !== 'sent' && record.status !== 'sending') return { status: 'rejected', record, reason: '未成功发送的测试消息不能确认收到' };
+  const acknowledgedAt = new Date(nowMs).toISOString();
+  const acknowledged = {
+    ...record,
+    status: 'acknowledged' as const,
+    completedAt: record.completedAt || acknowledgedAt,
+    acknowledgedAt,
+    reason: '管理员已确认收到 Telegram 验收消息',
+  };
+  save(store, acknowledged);
+  return { status: 'acknowledged', record: acknowledged, reason: '管理员已确认收到 Telegram 验收消息' };
 }
 
 export function listTelegramTestDeliveries(store: TelegramTestDeliveryStore): TelegramTestDeliveryRecord[] {

@@ -2,7 +2,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
-const { runTelegramTestDelivery } = require('../dist/features/telegram-test-delivery');
+const { acknowledgeTelegramTestDelivery, runTelegramTestDelivery } = require('../dist/features/telegram-test-delivery');
 
 function createStore() {
   const values = new Map();
@@ -62,6 +62,49 @@ test('successful and failed attempts persist a redacted outcome without raw chat
   assert.equal(JSON.stringify(failed.record).includes('admin-chat-1'), false);
 });
 
+test('test delivery exposes a record-bound confirmation and only the same private chat may acknowledge it', async () => {
+  const store = createStore();
+  let sentRecordId = '';
+  const delivered = await runTelegramTestDelivery(base(store, {
+    sendMessage: async (_chatId, _text, recordId) => { sentRecordId = recordId; },
+  }));
+  assert.equal(delivered.status, 'sent');
+  assert.equal(sentRecordId, delivered.record.id);
+
+  const wrongChat = acknowledgeTelegramTestDelivery(store, sentRecordId, 'other-chat');
+  assert.equal(wrongChat.status, 'rejected');
+  const acknowledged = acknowledgeTelegramTestDelivery(store, sentRecordId, 'admin-chat-1', '2026-10-03T12:00:05.000Z');
+  assert.equal(acknowledged.status, 'acknowledged');
+  assert.equal(acknowledged.record.status, 'acknowledged');
+  assert.equal(acknowledged.record.acknowledgedAt, '2026-10-03T12:00:05.000Z');
+  assert.ok(acknowledged.record.completedAt);
+  assert.equal(acknowledgeTelegramTestDelivery(store, sentRecordId, 'admin-chat-1').status, 'duplicate');
+});
+
+test('a failed delivery cannot be acknowledged as received', async () => {
+  const store = createStore();
+  const failed = await runTelegramTestDelivery(base(store, {
+    sendMessage: async (_chatId, _text, recordId) => { store.set('failed-record-id', recordId); throw new Error('network down'); },
+  }));
+  assert.equal(failed.status, 'failed');
+  const result = acknowledgeTelegramTestDelivery(store, store.get('failed-record-id'), 'admin-chat-1');
+  assert.equal(result.status, 'rejected');
+  assert.equal(result.record.status, 'failed');
+});
+
+test('a fast receipt callback arriving before the send request returns is not lost', async () => {
+  const store = createStore();
+  const result = await runTelegramTestDelivery(base(store, {
+    sendMessage: async (_chatId, _text, recordId) => {
+      const callbackReceipt = acknowledgeTelegramTestDelivery(store, recordId, 'admin-chat-1', '2026-10-03T12:00:01.000Z');
+      assert.equal(callbackReceipt.status, 'acknowledged');
+    },
+  }));
+  assert.equal(result.status, 'acknowledged');
+  assert.equal(result.record.completedAt, '2026-10-03T12:00:01.000Z');
+  assert.equal(store.get('telegram:test-delivery-history')[0].status, 'acknowledged');
+});
+
 test('same idempotency key, cooldown, and concurrent requests do not duplicate messages', async () => {
   const store = createStore();
   let sends = 0;
@@ -115,4 +158,9 @@ test('test delivery history is bounded and telegram private routes require admin
   assert.match(ui, /\/api\/telegram\/test-delivery/);
   assert.match(ui, /confirm\([^)]*测试消息/);
   assert.match(ui, /最近测试投递/);
+  assert.ok(source.includes("handlers['telegram-test:ack:']"), 'signed test ACK callback is registered');
+  assert.ok(source.includes('我已收到'), 'test delivery includes an explicit receipt button');
+  assert.ok(source.includes('workspace: \'telegram-test\''), 'test callback is scoped to its private test workspace');
+  assert.ok(ui.includes("acknowledged: '已确认收到'"), 'admin settings display receipt acknowledgement');
+  assert.ok(ui.includes("deliveryStatus === 'acknowledged'"), 'repeated test action reports an existing receipt as successful');
 });

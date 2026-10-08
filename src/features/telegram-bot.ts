@@ -453,7 +453,12 @@ export class TelegramInteractionBot {
     if (!this.allowedChatIds.has(chatId)) return { handled: false, reason: 'unauthorized_chat' };
 
     if (callback) {
-      const knownHandler = callback.data ? this.callbackHandlers[callback.data] : undefined;
+      const callbackData = callback.data || '';
+      const exactHandler = this.callbackHandlers[callbackData] as TelegramCallbackHandler | undefined;
+      const prefixEntry = Object.entries(this.callbackHandlers)
+        .filter(([prefix]) => prefix.endsWith(':') && callbackData.startsWith(prefix))
+        .sort(([left], [right]) => right.length - left.length)[0];
+      const knownHandler: TelegramCallbackHandler | undefined = exactHandler || prefixEntry?.[1] as TelegramCallbackHandler | undefined;
       const handler = knownHandler || this.unknownCallbackHandler;
       await this.transport.answerCallbackQuery(callback.id, knownHandler ? undefined : '无法识别的按钮');
       if (!handler) return { handled: false, reason: 'unknown_callback' };

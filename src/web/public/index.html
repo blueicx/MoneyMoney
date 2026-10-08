@@ -5477,8 +5477,8 @@ async function testTelegramSettings() {
     const payload = await res.json();
     const data = payload.data || {};
     const deliveryStatus = data.status === 'duplicate' ? data.record?.status : data.status;
-    const sent = deliveryStatus === 'sent';
-    const statusLabel = { sent: '已发送', failed: '投递失败', sending: '投递状态确认中', suppressed: '已抑制', rejected: '请求被拒绝', unavailable: '发送不可用' }[deliveryStatus] || '发送未确认';
+    const sent = deliveryStatus === 'sent' || deliveryStatus === 'acknowledged';
+    const statusLabel = { sent: '已发送', acknowledged: '已确认收到', failed: '投递失败', sending: '投递状态确认中', suppressed: '已抑制', rejected: '请求被拒绝', unavailable: '发送不可用' }[deliveryStatus] || '发送未确认';
     resultEl.textContent = (sent ? '✅ ' : deliveryStatus === 'sending' ? '⏳ ' : '❌ ') + statusLabel + ' · ' + (data.reason || payload.reason || '暂无说明');
     resultEl.style.color = sent ? 'var(--green)' : 'var(--red)';
     await loadTelegramTestDeliveryHistory();
@@ -5500,7 +5500,7 @@ async function loadTelegramTestDeliveryHistory() {
     if (!response.ok || !payload.success) throw new Error(payload.reason || payload.error || '状态读取失败');
     const latest = payload.data?.testDeliveryHistory?.[0];
     if (!latest) { host.textContent = '最近测试投递：尚无记录；页面加载不会自动发送消息。'; return; }
-    const labels = { sent: '已发送', failed: '投递失败', sending: '投递中', suppressed: '已抑制' };
+    const labels = { sent: '已发送', acknowledged: '已确认收到', failed: '投递失败', sending: '投递中', suppressed: '已抑制' };
     host.textContent = `最近测试投递：${labels[latest.status] || latest.status} · ${latest.completedAt || latest.attemptedAt} · ${latest.reason || '无补充说明'}`;
   } catch (error) {
     host.textContent = `最近测试投递状态不可用：${error.message || '读取失败'}`;

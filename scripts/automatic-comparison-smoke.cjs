@@ -25,6 +25,8 @@ async function main(){let browser;try{
  const post=async(route,data)=>{const r=await page.request.post(base+route,{headers,data});return {status:r.status(),body:await r.json()};};
  for(const id of ['stock:us:AAPL','stock:us:MU','stock:us:SNDK','stock:us:SPY','stock:us:MSFT','stock:us:NVDA','crypto:binance:BTCUSDT','option:cboe:AAPL:20261016:C:100'])assert.equal((await post('/api/watchlist',{instrumentId:id})).status,200);
  const csrf=await page.request.post(base+'/api/ai-runners/comparisons/automatic/rebuild',{data:{market:'stocks'}});assert.equal(csrf.status(),403);
+ const randomNoKey=await post('/api/ai-runners/comparisons/automatic/rebuild',{market:'stocks',modelSelection:'random-free'});assert.equal(randomNoKey.status,400);assert.match(randomNoKey.body.reason,/未配置 OpenRouter/);
+ const unsupportedRandom=await post('/api/ai-runners/comparisons/automatic/rebuild',{market:'options',modelSelection:'random-free'});assert.equal(unsupportedRandom.status,422);assert.match(unsupportedRandom.body.reason,/期权/);
  const created=await post('/api/ai-runners/comparisons/automatic/rebuild',{market:'stocks',pinned:['stock:us:NVDA'],model:'fixture/fixed-model'});
  assert.equal(created.status,200,JSON.stringify(created.body));assert.deepEqual(created.body.data.instruments,['NVDA','AAPL','MU','SNDK','SPY']);assert.equal(created.body.excluded[0].instrument,'stock:us:MSFT');
  const firstGroup=created.body.data.groupId;

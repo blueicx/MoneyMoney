@@ -23,7 +23,18 @@ test('rebuild accepts an explicit fixed model without inheriting the standalone 
  w.mm_isGuest=false;w.confirm=()=>true;w.fetch=async(url,options)=>{if(options?.method==='POST')sent=JSON.parse(options.body);return {ok:true,json:async()=>payload};};
  w.eval(fs.readFileSync(path.join(__dirname,'../src/web/public/automatic-comparison.js'),'utf8'));
  await w.MoneyMoneyAutomaticComparison.refresh('stocks');
+ const selection=w.document.querySelector('[data-model-selection]');assert.ok(selection,'model selection control missing');selection.value='fixed';selection.dispatchEvent(new w.Event('change'));
  const input=w.document.querySelector('[data-fixed-model]');assert.ok(input,'fixed model entry missing');input.value='provider/fixed-version';
  w.document.querySelector('[data-rebuild]').click();await new Promise(resolve=>setImmediate(resolve));
  assert.equal(sent.model,'provider/fixed-version');assert.equal(sent.market,'stocks');dom.window.close();
+});
+test('rebuild can randomly select one listed free model and freeze it for the group',async()=>{
+ const dom=new JSDOM('<div id="paper-tab" class="active"><div id="ai-runners-list"></div></div>',{url:'https://example.com',runScripts:'outside-only',pretendToBeVisual:true}),w=dom.window;
+ const payload={success:true,featureEnabled:true,budget:{remaining:24},data:{enabled:false,groups:[],history:[]}};let sent;
+ w.mm_isGuest=false;w.confirm=()=>true;w.fetch=async(url,options)=>{if(options?.method==='POST')sent=JSON.parse(options.body);return {ok:true,json:async()=>payload};};
+ w.eval(fs.readFileSync(path.join(__dirname,'../src/web/public/automatic-comparison.js'),'utf8'));
+ await w.MoneyMoneyAutomaticComparison.refresh('stocks');
+ const selection=w.document.querySelector('[data-model-selection]');assert.ok(selection,'model selection control missing');selection.value='random-free';
+ w.document.querySelector('[data-rebuild]').click();await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(sent.modelSelection,'random-free');assert.equal(sent.market,'stocks');assert.equal(sent.model,undefined);dom.window.close();
 });
