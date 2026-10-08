@@ -15,6 +15,7 @@ import { stateStore } from '../storage/sqlite-state';
 import { unifiedPaperLedgerStore, type UnifiedPaperInstrumentType } from './unified-paper-trading';
 import type { StockQuote } from './stock-data-contracts';
 import { stockQuoteObservationTime } from './stock-signal-schedule';
+import type { PredictionExecutionContract } from './runner-prediction-quotes';
 
 export type AiRunnerVenue = 'Binance' | 'Predict.fun' | 'Stocks' | 'Options';
 export type AiRunnerStatus = 'RUNNING' | 'STOPPED';
@@ -208,6 +209,9 @@ interface CreateAiRunnerOptions {
 }
 
 export interface AiRunnerQuote {
+  predictionContract?:PredictionExecutionContract;
+  outcome?:'YES'|'NO';
+  tokenId?:string;
   optionContract?: { instrumentId:string; source:string; verified:boolean; currency:string; multiplier:number; expiresAt:string };
   market?: AiRunnerMarket;
   status?: string;

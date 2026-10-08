@@ -182,6 +182,7 @@ import { paperTradingExecutor } from '../features/trading-executor';
 import { unifiedPaperLedgerStore, calculateUnifiedPerformance, replayUnifiedPaperOrders, type UnifiedPaperOrder } from '../features/unified-paper-trading';
 import { paperChartLineage } from '../features/paper-chart-lineage';
 import { RunnerExecutionEvidenceStore, runnerSnapshotHash, runnerExecutionSnapshotId } from '../features/runner-execution-evidence';
+import { predictionOutcomeQuote } from '../features/runner-prediction-quotes';
 const runnerExecutionEvidence = new RunnerExecutionEvidenceStore(stateStore);
 import { stockChartDisclosure } from '../features/stock-chart-disclosure';
 import { logger } from '../utils/logger';
@@ -8990,14 +8991,16 @@ async function loadAiRunnerInstrumentSnapshot(runner: AiRunner, ref: AiRunnerIns
           const dataAt = Number.isFinite(bookAt) ? new Date(bookAt).toISOString() : undefined;
           const midpoint = validBook ? (bid + ask) / 2 : 0;
           const quote: AiRunnerQuote = { market: 'prediction', status, dataStatus: status, price: midpoint, fetchedAt: dataAt, source: 'Predict.fun 官方事件订单簿', bestBid: validBook ? bid : undefined, bestAsk: validBook ? ask : undefined, reason: !validBook ? '订单簿缺少有效双边 YES/NO 报价' : status === 'stale' ? '订单簿报价过期' : undefined };
+          // Current endpoint identifies a market book, not two token-scoped books or rules evidence.
+          const executableQuote = predictionOutcomeQuote(quote,'YES',new Date(),runner.policy.minFreshnessMs);
           row = {
-            ...row, dataStatus: status, source: 'Predict.fun 官方事件详情 + 订单簿', dataAt, price: midpoint,
+            ...row, dataStatus: executableQuote.dataStatus!, source: 'Predict.fun 官方事件详情 + 订单簿', dataAt, price: midpoint,
             evidence: [
               { dataset: 'market', source: 'Predict.fun 官方事件详情', status: marketResponse.success ? 'live' : 'unavailable', retrievedAt: new Date().toISOString(), reason: marketResponse.success ? undefined : '官方事件详情不可用' },
-              { dataset: 'quote', source: 'Predict.fun 官方 YES/NO 订单簿', status: bookStatus, dataAt, retrievedAt: dataAt, reason: quote.reason },
+              { dataset: 'quote', source: 'Predict.fun 官方事件订单簿（outcome 身份待核验）', status: executableQuote.dataStatus!, dataAt, retrievedAt: new Date().toISOString(), reason: executableQuote.reason },
             ],
-            candidateSignals: [], quote,
-            reason: quote.reason || '仅取得当前订单簿；缺少独立校准概率，因此规则模式不会推断交易优势',
+            candidateSignals: [], quote: executableQuote,
+            reason: executableQuote.reason || '仅取得当前订单簿；缺少独立校准概率，因此规则模式不会推断交易优势',
           };
         }
       }
@@ -9020,14 +9023,6 @@ async function loadAiRunnerInstrumentSnapshot(runner: AiRunner, ref: AiRunnerIns
     if (ref.venue !== 'Predict.fun' && openPosition && (row.rsi14 > 68 || (row as any).aboveSma === false)) row.candidateSignals = [...(row.candidateSignals || []), '规则策略候选退出'];
   }
   return { ...row, snapshotHash: runnerSnapshotHash(row) };
-}
-
-function predictionOutcomeQuote(quote: AiRunnerQuote, side: string | undefined): AiRunnerQuote {
-  if (quote.market !== 'prediction' || side !== 'NO') return quote;
-  const yesBid = Number(quote.bestBid);
-  const yesAsk = Number(quote.bestAsk);
-  if (!Number.isFinite(yesBid) || !Number.isFinite(yesAsk)) return { ...quote, bestBid: undefined, bestAsk: undefined };
-  return { ...quote, price: 1 - (yesBid + yesAsk) / 2, bestBid: 1 - yesAsk, bestAsk: 1 - yesBid };
 }
 
 interface PreparedAiRunnerTick {
@@ -9182,7 +9177,7 @@ function executePreparedRunnerTick(prepared: PreparedAiRunnerTick): { actions: A
     const ref = snapshot.ref;
     const existing = runner.positions.find(position => position.status === 'OPEN' && (position.instrumentId === runnerLedgerInstrumentId(ref) || position.instrument?.symbolOrMarketId === ref.symbolOrMarketId));
     const side = (snapshot as any).requestedSide as string | undefined;
-    const quote = predictionOutcomeQuote(snapshot.quote || { market: snapshot.market as AiRunnerMarket, status: 'unavailable', dataStatus: 'unavailable', price: 0 }, action === 'SELL' ? existing?.side : side);
+    const quote = predictionOutcomeQuote(snapshot.quote || { market: snapshot.market as AiRunnerMarket, status: 'unavailable', dataStatus: 'unavailable', price: 0 }, action === 'SELL' ? existing?.side : side,new Date(),runner.policy.minFreshnessMs);
     if (!snapshot.quote) {
       record.action = 'REJECTED'; record.reason = snapshot.reason || '没有可执行报价';
       record.riskChecks.push({ name: 'executable-quote', passed: false, reason: record.reason });
