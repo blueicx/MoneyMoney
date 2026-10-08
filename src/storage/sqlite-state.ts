@@ -1,6 +1,7 @@
 import Database from 'better-sqlite3';
 import fs from 'node:fs';
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { DATA_ROOT, ensureDir } from '../utils/paths';
 
 export interface StorageHealth {
@@ -25,7 +26,21 @@ const MIGRATIONS = [
 function backupJson(source: string, key: string, backupDir: string): void {
   ensureDir(backupDir);
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-  fs.copyFileSync(source, path.join(backupDir, `${key}-${stamp}.json`), fs.constants.COPYFILE_EXCL);
+  fs.copyFileSync(source, path.join(backupDir, `${key}-${stamp}-${randomUUID()}.json`), fs.constants.COPYFILE_EXCL);
+}
+
+function enableWriteAheadLog(db: Database.Database): void {
+  // SQLite's journal-mode switch can return BUSY immediately during first-open races.
+  // Retry only this idempotent startup pragma, with a finite deadline; corruption still throws.
+  const deadline = Date.now() + 5_000;
+  const wait = new Int32Array(new SharedArrayBuffer(4));
+  for (;;) {
+    try { db.pragma('journal_mode = WAL'); return; }
+    catch (error) {
+      if ((error as { code?: string }).code !== 'SQLITE_BUSY' || Date.now() >= deadline) throw error;
+      Atomics.wait(wait, 0, 0, Math.min(25, deadline - Date.now()));
+    }
+  }
 }
 
 export class SQLiteStateStore {
@@ -36,10 +51,12 @@ export class SQLiteStateStore {
 
   constructor(databasePath = DATABASE_FILE, migrationRoot = DATA_ROOT) {
     ensureDir(DATA_ROOT);
+    this.healthState.databasePath = databasePath;
     this.migrationRoot = migrationRoot;
     this.backupDir = path.join(migrationRoot, 'migration-backups');
     this.db = new Database(databasePath);
-    this.db.pragma('journal_mode = WAL');
+    try { enableWriteAheadLog(this.db); }
+    catch (error) { this.db.close(); throw error; }
     this.db.pragma('foreign_keys = ON');
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS state_documents (key TEXT PRIMARY KEY, version INTEGER NOT NULL DEFAULT 1, updated_at TEXT NOT NULL, payload TEXT NOT NULL);
@@ -151,8 +168,12 @@ export class SQLiteStateStore {
       try {
         const payload = JSON.parse(fs.readFileSync(source, 'utf8'));
         backupJson(source, item.key, this.backupDir);
-        this.set(item.key, payload, item.version);
-        this.healthState.migratedDocuments += 1;
+        // A second instance may have committed live state since the initial read.
+        // Migration is insert-only: legacy JSON must never replace an existing document.
+        const inserted = this.db.prepare(`INSERT INTO state_documents (key, version, updated_at, payload)
+          VALUES (?, ?, ?, ?) ON CONFLICT(key) DO NOTHING`)
+          .run(item.key, item.version, migrationAt, JSON.stringify(payload));
+        this.healthState.migratedDocuments += inserted.changes;
       } catch (error) {
         this.healthState.ok = false;
         this.healthState.migrationErrors.push(`${item.file}: ${error instanceof Error ? error.message : String(error)}`);

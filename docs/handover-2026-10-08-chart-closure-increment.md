@@ -143,3 +143,11 @@
 - 回归先复现互补估值、账本状态未失效和跨市场报价混入，再修复。最终完整测试 976/976，0 失败；构建及 Web、认证、四市场/三个主题 Chromium、合约、自动对照、实时图表六项冒烟通过。原始日志系统临时目录 `mm-outcome-valuation-reviewed-test.log`、`mm-outcome-valuation-build.log`、`mm-outcome-reviewed-smoke-*.log`。安全扫描 640 个跟踪文件通过；差异检查通过。
 - 当前真实 Predict.fun producer 仍没有可核验的 token 盘口和规则证据，不能因此宣称其已可交易。本批是估值一致性修复，不是完整来源接线。
 - 只读核验 VPS 服务 active，正式域名及 loopback 版本均为 `2569132eb078bdf053e89901f52114fb796458f7`，健康正常。本轮未上传产物、重启服务、执行生产模型或修改现有股票跑单。正式发布、真实 Telegram 投递及其余计划验收仍待完成。
+
+## 多实例首次启动与迁移保护（2026-10-08）
+
+- 新增真实 SQLite 多连接测试，固定在读取旧 JSON 与写入之间插入另一连接的新状态，复现旧文件覆盖新状态。迁移改为 insert-only；初次检查后出现的新记录不会被旧 JSON 回写，迁移计数仅计算实际插入记录。
+- 四 Worker 同时打开全新数据库的测试复现 `SQLITE_BUSY`，堆栈定位为首次 `journal_mode = WAL`，不是账本或租约业务写入。仅对这个幂等 pragma 增加 5 秒重试窗口，其他错误直接抛出并关闭连接；未放宽租约互斥规则。修复后连续 96 个新数据库、384 次 Worker 启动通过，各轮仅一个租约持有者。
+- 同毫秒备份文件重名会导致迁移失败，已先复现再为文件名增加 UUID，继续使用排他创建，不覆盖已有备份。健康信息返回实际数据库路径。损坏数据库测试保留原字节并明确失败，不创建替代库。
+- 完整测试 981/981，0 失败；构建和 Web、认证、四市场/三个主题 Chromium、合约、自动对照、实时图表六项冒烟通过。原始日志系统临时目录 `mm-startup-migration-final-test.log`、`mm-startup-migration-build.log`、`mm-startup-migration-smoke-*.log`，并发失败堆栈 `mm-startup-contention-repro.log`，复验 `mm-startup-contention-green.log`。
+- CBOE 实际来源请求超时；尚未取得可核验乘数与合约源时间，不启用期权跑单。本批使用隔离数据库与技术测试 Worker，没有使用子 agent、调用生产模型或修改现有股票跑单。生产部署及真实 Telegram 结果回复仍待完成；完整目标继续进行。
