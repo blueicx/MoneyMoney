@@ -35,7 +35,9 @@ export async function lookupTrackedResult(event:EventRecord,ports:ResultPorts):P
     const result=await ports.settlement(event.platform as 'Kalshi'|'Polymarket',event.resourceId);
     if(!result || result.instrument!==event.instrument||result.marketId!==event.resourceId||result.platform!==event.platform)return unsupported('官方结算身份不一致或缺少证据');
     if(result.status!=='settled'||!['YES','NO'].includes(result.result||'')||!result.evidenceHash)return {actual:null,status:result.status==='unavailable'?'unavailable':'pending',reason:result.reason||'官方尚未明确结算；不以市场概率作为结果',source:result.platform,url:result.sourceUrl};
-    return {actual:result.result,status:'published',source:result.platform+' 官方结算',url:result.sourceUrl,publishedAt:result.settlementAt||result.determinationAt||undefined,evidenceRefs:[result.evidenceHash]};
+    const eventAt=Date.parse(event.date),publishedAt=Number.isFinite(eventAt)?[result.settlementAt,result.determinationAt].find(value=>typeof value==='string'&&Number.isFinite(Date.parse(value))&&Date.parse(value)>=eventAt):undefined;
+    if(!publishedAt)return {actual:null,status:'pending',source:result.platform+' 官方结算',url:result.sourceUrl,reason:'官方已有明确 YES/NO，但缺少不早于事件时间的有效结算/裁定时间；暂不报告为实际结果',evidenceRefs:[result.evidenceHash]};
+    return {actual:result.result,status:'published',source:result.platform+' 官方结算',url:result.sourceUrl,publishedAt,evidenceRefs:[result.evidenceHash]};
   }
   return unsupported('结果类型不支持');
 }

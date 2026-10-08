@@ -111,3 +111,21 @@ test('malformed publication dates and unavailable results never become published
  await monitor.run('owner',[{title:'GDP',date:'2026-10-02T13:30:00Z',impact:'high'}],async text=>messages.push(text));assert.match(messages[0],/暂不可用/);assert.doesNotMatch(messages[0],/实际值：1/);
  }
 });
+
+test('typed actuals without an explicit valid publication time remain pending with a truthful reason',async()=>{
+ const {TelegramEventResultMonitor}=require('../src/features/telegram-event-results'),values=new Map(),store={get:k=>structuredClone(values.get(k)||null),set:(k,v)=>values.set(k,structuredClone(v))},messages=[];
+ const event={kind:'funding',market:'crypto',instrument:'crypto:gateio:BTC_USDT',title:'funding result',date:'2026-10-02T13:30:00Z'};
+ const monitor=new TelegramEventResultMonitor(store,async()=>({actual:'0%',status:'published',source:'Gate official',url:'https://api.gateio.ws/api/v4/futures/usdt/funding_rate'}),()=>Date.parse('2026-10-02T14:00:00Z'));
+ monitor.registerReminder('owner',event,77);await monitor.run('owner',[],async(text,reply)=>{messages.push({text,reply});return 88;});
+ assert.equal(messages.length,1);assert.equal(messages[0].reply,77);assert.match(messages[0].text,/暂不可用/);assert.match(messages[0].text,/发布时间/);assert.doesNotMatch(messages[0].text,/实际值：0%/);
+ const row=monitor.history('owner')[0];assert.equal(row.resultStatus,'pending');assert.equal(row.actual,undefined);assert.equal(row.nextCheckAt,Date.parse('2026-10-02T14:00:00Z')+300000);
+});
+
+test('typed actuals remain pending when the tracked event time itself cannot be verified',async()=>{
+ const {TelegramEventResultMonitor}=require('../src/features/telegram-event-results'),values=new Map(),store={get:k=>structuredClone(values.get(k)||null),set:(k,v)=>values.set(k,structuredClone(v))},messages=[];
+ const event={kind:'funding',market:'crypto',instrument:'crypto:gateio:BTC_USDT',title:'funding result',date:'not-a-date'};
+ let lookups=0;const monitor=new TelegramEventResultMonitor(store,async()=>{lookups++;return{actual:'0%',status:'published',source:'Gate official',publishedAt:'2026-10-02T13:45:00Z'};},()=>Date.parse('2026-10-02T14:00:00Z'));
+ monitor.registerReminder('owner',{...event,date:'2026-10-02T13:30:00Z'},77);const state=values.get('telegram-event-results:owner'),id=Object.keys(state.events)[0];state.events[id]=event;values.set('telegram-event-results:owner',state);await monitor.run('owner',[],async(text,reply)=>{messages.push({text,reply});return 88;});
+ assert.equal(messages.length,1);assert.equal(messages[0].reply,77);assert.match(messages[0].text,/事件时间/);assert.doesNotMatch(messages[0].text,/实际值：0%/);
+ assert.equal(lookups,0);assert.equal(monitor.history('owner')[0].resultStatus,'unverifiable');
+});

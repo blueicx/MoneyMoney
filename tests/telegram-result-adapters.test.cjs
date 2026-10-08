@@ -30,3 +30,15 @@ test('prediction requires explicit official settled evidence, never a probabilit
  evidence={...evidence,status:'settled',result:'YES',settlementAt:'2026-10-08T01:00:00Z'};assert.equal((await lookupTrackedResult(event,ports)).actual,'YES');
  evidence={...evidence,instrument:'prediction:kalshi:OTHER'};assert.equal((await lookupTrackedResult(event,ports)).actual,null);
 });
+
+test('prediction settlement is not published without an official determination or settlement timestamp',async()=>{
+ const {lookupTrackedResult}=moduleUnderTest(),event={kind:'prediction',market:'prediction',instrument:'prediction:kalshi:KXTEST',platform:'Kalshi',resourceId:'KXTEST',title:'settlement',date:'2026-10-08T00:00:00Z'};
+ const evidence={instrument:event.instrument,marketId:event.resourceId,platform:'Kalshi',status:'settled',result:'YES',sourceUrl:'https://api.elections.kalshi.com/trade-api/v2/markets/KXTEST',evidenceHash:'verified-hash',settlementAt:null,determinationAt:null};
+ const result=await lookupTrackedResult(event,{settlement:async()=>evidence});assert.equal(result.actual,null);assert.equal(result.status,'pending');assert.match(result.reason,/时间/);assert.deepEqual(result.evidenceRefs,['verified-hash']);
+});
+
+test('prediction result uses a valid determination time when settlement time predates the tracked event',async()=>{
+ const {lookupTrackedResult}=moduleUnderTest(),event={kind:'prediction',market:'prediction',instrument:'prediction:kalshi:KXTEST',platform:'Kalshi',resourceId:'KXTEST',title:'settlement',date:'2026-10-08T00:00:00Z'};
+ const evidence={instrument:event.instrument,marketId:event.resourceId,platform:'Kalshi',status:'settled',result:'YES',sourceUrl:'https://api.elections.kalshi.com/trade-api/v2/markets/KXTEST',evidenceHash:'verified-hash',settlementAt:'2026-10-07T23:00:00Z',determinationAt:'2026-10-08T01:00:00Z'};
+ const result=await lookupTrackedResult(event,{settlement:async()=>evidence});assert.equal(result.actual,'YES');assert.equal(result.publishedAt,'2026-10-08T01:00:00Z');
+});

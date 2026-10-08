@@ -50,8 +50,14 @@ export class TelegramEventResultMonitor {
         if (event.impact === 'high' && Number.isFinite(date) && (date >= now - 6 * 3600000 || state.events[identity(event)])) state.events[identity(event)] = event;
       }
       for (const [id, event] of Object.entries(state.events)) {
-        const age = now - Date.parse(event.date);
-        if (now-Math.max(Date.parse(event.date),state.reminders[id]?.at??0) > 72 * 3600000) {
+        const eventAt=Date.parse(event.date);
+        if(!Number.isFinite(eventAt)){
+          const terminalId=id+':terminal';
+          if(!state.deliveries.some(d=>d.id===terminalId))state.deliveries.push({id:terminalId,event,text:'⚠️ <b>事件结果追踪结束：无法核验</b>\n'+escape(event.titleZh||event.title)+'\n事件时间无法验证；不会发布来源结果。',status:'pending',attempts:0,nextAttempt:now,kind:'terminal',resultStatus:'unverifiable',reason:'事件时间无效，无法核验结果先后关系',originalMessageId:state.reminders[id]?.messageId,nextCheckAt:null,evidenceRefs:[]});
+          delete state.events[id];delete state.checkedAt[id];continue;
+        }
+        const age = now - eventAt;
+        if (now-Math.max(eventAt,state.reminders[id]?.at??0) > 72 * 3600000) {
           const resolved=state.deliveries.some(d=>d.id.startsWith(id+':result:'));
           if(!resolved&&!state.deliveries.some(d=>d.id===id+':terminal'))state.deliveries.push({id:id+':terminal',event,text:'⚠️ <b>事件结果追踪结束：无法核验</b>\n'+escape(event.titleZh||event.title)+'\n事件时间：'+escape(event.date)+'\n72小时内未取得可靠实际结果；不以预期值、前值或概率替代。',status:'pending',attempts:0,nextAttempt:now,kind:'terminal',resultStatus:'unverifiable',reason:'追踪窗口结束，未取得可靠结果',originalMessageId:state.reminders[id]?.messageId,nextCheckAt:null,evidenceRefs:[]});
           delete state.events[id];delete state.checkedAt[id];continue;
@@ -65,7 +71,16 @@ export class TelegramEventResultMonitor {
         try { result = (!event.kind||event.kind==='macro') && !previous && hasEventActual(event.actual) ? { actual: event.actual!, status: 'published', source: event.source, previous:event.previous } : await this.lookup(event); }
         catch { result = { actual: null, status: 'unavailable', reason: '结果来源请求失败，稍后重试' }; }
         state.checkedAt[id]=now;
-        const published = ['published','revised'].includes(result.status) && hasEventActual(result.actual) && (!result.publishedAt || Number.isFinite(Date.parse(result.publishedAt)) && Date.parse(result.publishedAt) >= Date.parse(event.date) && Date.parse(result.publishedAt) <= now);
+        const publishedAt=result.publishedAt?Date.parse(result.publishedAt):NaN,claimsPublication=['published','revised'].includes(result.status)&&hasEventActual(result.actual),requiresPublicationTime=!!event.kind&&event.kind!=='macro';
+        if(claimsPublication){
+          const invalidTime=requiresPublicationTime&&!Number.isFinite(publishedAt)?'类型化结果缺少可核验的来源发布时间，暂不发布为实际结果'
+            :result.publishedAt&&!Number.isFinite(publishedAt)?'来源发布时间格式无效，暂不发布为实际结果'
+            :Number.isFinite(publishedAt)&&publishedAt<eventAt?'来源发布时间早于事件时间，无法确认是本次结果'
+            :Number.isFinite(publishedAt)&&publishedAt>now?'来源发布时间晚于当前时间，等待来源校验'
+            :null;
+          if(invalidTime)result={...result,actual:null,status:'pending',reason:invalidTime};
+        }
+        const published = ['published','revised'].includes(result.status) && hasEventActual(result.actual) && (!result.publishedAt || Number.isFinite(publishedAt) && publishedAt >= eventAt && publishedAt <= now);
         if (previous && !published) continue;
         const terminal=!!event.kind&&event.kind!=='macro'&&['stopped','unsupported'].includes(result.status);
         if (!published && !terminal && age < 15 * 60000) continue;
@@ -79,7 +94,10 @@ export class TelegramEventResultMonitor {
         state.deliveries.push({ id: deliveryId, event, text: lines.join('\n'), status: 'pending', attempts: 0, nextAttempt: now,kind:terminal?'terminal':published ? previous ? 'revision':'result':'waiting',originalMessageId:state.reminders[id]?.messageId,resultStatus:published?previous?'revised':'published':result.status,reason:result.reason,nextCheckAt:terminal?null:now+(published?3600000:300000),evidenceRefs:[...(result.evidenceRefs||[]),...(url?[url]:[])],...(published ? {actual:String(result.actual),publishedAt:result.publishedAt} : {}) });
         if(terminal){delete state.events[id];delete state.checkedAt[id];}
       }
-      state.deliveries = state.deliveries.filter(d => Math.max(Date.parse(d.event.date),state.reminders?.[d.id.split(':')[0]]?.at??0) >= now - 30 * 86400000).slice(-600);
+      state.deliveries = state.deliveries.filter(d => {
+        const eventAt=Date.parse(d.event.date),reminderAt=state.reminders?.[d.id.split(':')[0]]?.at??0;
+        return Math.max(Number.isFinite(eventAt)?eventAt:0,Number.isFinite(reminderAt)?reminderAt:0)>=now-30*86400000;
+      }).slice(-600);
       const persist=()=>{
         if(this.store.refreshLease && !this.store.refreshLease(lease,this.owner,this.clock(),120000))throw new Error('事件结果租约已丢失');
         const acknowledgements=new Set(this.store.get<State>(key)?.deliveries.filter(d=>d.status==='acknowledged').map(d=>d.id));
