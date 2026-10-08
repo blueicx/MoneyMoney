@@ -6,7 +6,7 @@
   "scripts": {
     "build": "tsc && node scripts/copy-web-assets.js && node scripts/write-build-info.cjs",
     "start": "node dist/index.js",
-    "test": "node --test --test-concurrency=1 tests/*.test.cjs",
+    "test": "node scripts/run-isolated-tests.cjs",
     "dev": "ts-node src/index.ts",
     "trade": "ts-node src/index.ts",
     "live": "ts-node src/commands/dashboard.ts",
