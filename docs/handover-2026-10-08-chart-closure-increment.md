@@ -159,3 +159,11 @@
 - 先复现租约丢失后仍调用发送。每项投递前重新核验租约，旧持有者停止发送，队列保留待处理状态；不冒称 Telegram 已送达。
 - 定向结果队列 16 项测试通过，完整测试 984/984、0 失败；构建及 Web、认证、四市场/三个主题 Chromium、合约、自动对照、实时图表六项冒烟通过。原始日志系统临时目录 `mm-telegram-lineage-final-test.log`、`mm-telegram-lineage-build.log`、`mm-telegram-lineage-smoke-*.log`。
 - 以上是隔离测试及代码接线，不是生产 Telegram 实际投递。没有发送真实消息、执行生产模型、修改现有股票跑单或重启 VPS；来源接线、生产结果回复、正式发布验收与新对照启用仍待完成。
+
+## 保护旧跑单的发布基线与线上只读检查（2026-10-08）
+
+- 发布验收不再仅检查预算与自选 Hash。新增独立脚本守卫，核验旧跑单的账号、冻结范围、模型配置、模型/报价路由、策略版本、触发方式、风险配置与运行状态；忽略正常推进的现金、成交、持仓估值及运行时间，避免将正常交易进展误判为配置变更。
+- 部署前使用 `sudo -n node /tmp/verify-trading-chart-release.cjs --capture /tmp/moneymoney-<release>-baseline.json` 保存配置 Hash。文件排他创建、权限 0600，不写出持仓、密码或模型配置正文；必须与 `protected-runner-release.cjs` 一起上传。部署后验收必须传入同一基线：`sudo -n node /tmp/verify-trading-chart-release.cjs <expected-commit> /tmp/moneymoney-<release>-baseline.json`。缺失/无效基线会阻止验收，不重新生成掩盖变化。
+- 先用失败断言复现未保护模型、风险及状态，再实现。定向测试 4/4；完整测试 988/988、0 失败，构建通过。Web、认证、四市场/三个主题 Chromium、合约、自动对照、实时图表六项冒烟与安全扫描通过，差异检查通过。原始日志位于系统临时目录 `mm-protected-release-full-test.log` 与 `mm-protected-smoke-*.log`。
+- 当前 VPS 实际只读验收通过：正式域名版本仍为 `2569132eb078bdf053e89901f52114fb796458f7`；21 个资源 Hash 一致；AAPL/SNDK 各 4681 根五分钟线，Gate 200 根合约线；收到两条真实 Binance SSE 更新；访客 403、错误市场 400；旧跑单配置和状态与新保存基线一致。
+- 临时基线 `/tmp/moneymoney-protected-20261008-release-baseline.json` 只用于本次检查。正式部署前应重新排他捕获当时基线，不用较早基线覆盖管理员合法调整。本批没有重启服务、上传 dist、调用真实模型或修改跑单；真实 Telegram 结果投递、新版本部署及调度启用仍待完成，不报告“全部完成/已发布”。
