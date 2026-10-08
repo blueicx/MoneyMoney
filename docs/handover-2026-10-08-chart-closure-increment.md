@@ -194,3 +194,10 @@
 - 全局启用、单市场恢复和自动轮次统一核验调度器与账户的固定模型、完整冻结标的和市场身份。旧配置无法核验时明确拒绝执行，不迁移猜测或删除记录；现有独立股票跑单不走该校验。
 - 新增5项 red-green测试；完整测试997/997，0失败；构建和Web、认证、四市场三个主题、自动对照、实时图表、合约六项冒烟通过。实时测试计时DOM重建0、计时绘图0、隐藏绘图0。日志系统临时目录 `mm-comparison-final-test.log`、`mm-comparison-smoke-*.log`。这是隔离技术测试，不能冒充生产模型成交证据。
 - 本节提交前尚未部署该增量；部署和正式域名复验另记录。整体目标未完成，新调度继续关闭。数据库、WAL、数据湖、scratch保留。
+
+## 对照保护增量实际部署（2026-10-08，d9ac0dd）
+
+- 已提交推送源码 `d9ac0ddf930acd28512195ef5b9173a370c09ac4`，重新构建后上传和部署，归档SHA256 `0c268587ecdd296e9a40d0d7b9ba30de496abe4080d43df64a4d4d828259a9f5`；server `2f17379619eef3e579ede3938a90495d50ac30023c7d3d81d0b76d1eb117a4d6`；index `e4ab0d9fcc39c5b92fbaffedd4bdb2ef34b89388556ccc7b0c58dfd1af26f399`。21项资源Hash和正式域名版本一致。
+- 仅重启 `moneymoney.service`，服务active；备份 `/opt/moneymoney/backups/dist-pre-comparison-d9ac0dd-20261008-2136` 与回滚 `/opt/moneymoney/dist.rollback-comparison-d9ac0dd-20261008-2136` 实际存在，保留此前a893762。部署前新基线 `/tmp/moneymoney-protected-d9ac0dd-baseline.json` 与部署后原自主股票账户预算、范围、路由、风控和运行状态一致。
+- 实际来源检查：AAPL/SNDK各4605根五分钟线、Gate200根延迟合约线、2条真实Binance SSE；访客403、错误市场400。正式域名四市场/SNDK/时点/右侧库恢复/390px/访客Chromium通过，无页面错误；报告系统临时目录 `mm-production-canary-d9ac0dd/production-canary-report.json`。
+- 发布后只读确认：新增自动对照关闭、账户组0、模型额度已发出0且剩余24。未调用模型、创建或执行对照订单，不修改原跑单。待固定模型选择和其余完整验收后再创建、启用；不能把本批发布报告成整个目标完成。
