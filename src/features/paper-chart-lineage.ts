@@ -2,7 +2,7 @@ import type { UnifiedPaperLedger, UnifiedPaperOrder } from './unified-paper-trad
 
 /** Read-only projection. Time places a fill on a candle; it never links separate records. */
 export interface PaperChartSnapshotReference {id:string;market:string;instrument:string;at:string}
-export interface PaperChartSignalReference extends PaperChartSnapshotReference {snapshotIds:string[];accountId?:string;runnerId?:string;orderId?:string;strategyVersion?:string}
+export interface PaperChartSignalReference extends PaperChartSnapshotReference {snapshotIds:string[];accountId?:string;runnerId?:string;orderId?:string;strategyVersion?:string;decision?:{id?:string;runnerId?:string;orderId?:string;market?:string;instrument?:string;action?:string;side?:string}}
 export interface PaperChartReferences {signal:(id:string)=>PaperChartSignalReference|null;snapshot:(id:string)=>PaperChartSnapshotReference|null}
 export function resolvePaperChartInstrument(
   ledger:UnifiedPaperLedger,
@@ -52,10 +52,12 @@ export function paperChartLineage(ledger:UnifiedPaperLedger,market:string,instru
       else if(!Array.isArray(signal.snapshotIds)||!signal.snapshotIds.includes(snapshot.id))reason='信号未明确关联该快照';
       else if(signal.accountId&&signal.accountId!==actualAccount||signal.runnerId&&signal.runnerId!==account.runnerId||signal.orderId&&signal.orderId!==order.id)reason='信号关联的账户、跑单或订单不一致';
       else if(order.strategyVersion&&signal.strategyVersion!==order.strategyVersion)reason='策略版本不一致';
+      else if(!signal.decision||signal.decision.id!==signal.id||signal.decision.runnerId!==account.runnerId||signal.decision.orderId!==order.id||signal.decision.market!==market||String(signal.decision.instrument||'').toUpperCase()!==instrument.split(':').at(-1)?.toUpperCase())reason='成交缺少可核验的决策方向或关联身份';
+      else if(!['BUY','SELL'].includes(String(signal.decision.action))||!['BUY','SELL','YES','NO'].includes(String(order.side))||(market==='prediction'?(signal.decision.action==='BUY'?signal.decision.side!==order.side||!['YES','NO'].includes(String(order.side)):signal.decision.action!=='SELL'||order.side!=='SELL'||signal.decision.side!==order.outcome||!['YES','NO'].includes(String(order.outcome))):signal.decision.action!==order.side))reason='成交方向或预测市场 YES/NO 结果与决策不一致';
       else if(!Number.isFinite(Date.parse(signal.at))||!Number.isFinite(Date.parse(snapshot.at))||Date.parse(signal.at)>time||Date.parse(snapshot.at)>time)reason='证据时间无效或晚于成交';
     }
     if(reason){unlinked.push({orderId:order.id||null,accountId:actualAccount,reason:'未关联：'+reason});continue;}
-    markers.push({orderId:order.id,accountId:actualAccount,runnerId:order.runnerId||null,signalId:order.signalId,snapshotId:order.dataSnapshotId,experimentId:order.experimentId||null,market,instrument,time,price:order.price,quantity:order.quantity,side:order.side,feeUsd:cost(order,'feeUsd'),slippageUsd:cost(order,'slippageUsd'),spreadUsd:cost(order,'spreadUsd'),pnlUsd:Number.isFinite(order.pnlUsd)?order.pnlUsd:null});
+    markers.push({orderId:order.id,accountId:actualAccount,runnerId:order.runnerId||null,signalId:order.signalId,snapshotId:order.dataSnapshotId,experimentId:order.experimentId||null,market,instrument,time,price:order.price,quantity:order.quantity,side:order.side,...(order.instrumentType==='prediction'?{outcome:order.side==='SELL'?order.outcome:order.side}:{}),feeUsd:cost(order,'feeUsd'),slippageUsd:cost(order,'slippageUsd'),spreadUsd:cost(order,'spreadUsd'),pnlUsd:Number.isFinite(order.pnlUsd)?order.pnlUsd:null});
   }}
   markers.sort((a,b)=>a.time-b.time||a.orderId.localeCompare(b.orderId));
   return {markers,unlinked,reason:markers.length?null:unlinked.length?'仅有未关联记录；不按时间猜测策略成交':'当前标的暂无已关联模拟成交'};

@@ -17,6 +17,7 @@
     const width=intervals[interval];if(!width)return [];
     return (markers||[]).flatMap(marker=>{
       if(!marker.orderId||!marker.signalId||!marker.snapshotId||!marker.accountId||marker.market!==market||marker.instrument!==instrument||!Number.isFinite(marker.time)||marker.time>asOf||!Number.isFinite(marker.price)||marker.price<=0)return [];
+      if(market==='prediction'&&(marker.side==='SELL'? !['YES','NO'].includes(marker.outcome):!['YES','NO'].includes(marker.side)||marker.outcome!==marker.side))return [];
       const index=rows.findIndex(row=>marker.time>=row.time&&marker.time<row.time+width);
       return index<0?[]:[{...marker,index}];
     });
@@ -25,6 +26,34 @@
     const row=body?.data,fields=row?.fields;if(body?.success===false||body?.market!==marker.market||body?.instrument!==marker.instrument||row?.id!==marker.snapshotId||!/^rs_[a-f0-9]{64}$/.test(row?.id||'')||row.id!=='rs_'+row.hash||!fields||typeof fields!=='object')return false;
     const captured=Date.parse(row.at),dataAt=Date.parse(fields.dataAt);
     return Number.isFinite(captured)&&captured<=marker.time&&Number.isFinite(dataAt)&&dataAt<=marker.time+5000;
+  }
+  function verifyPaperExecutionEvidenceEnvelope(marker,body){
+    const row=body?.data,decision=row?.decision,snapshot=row?.snapshot,fields=snapshot?.fields;
+    if(body?.success===false||body?.market!==marker.market||body?.instrument!==marker.instrument||row?.market!==marker.market||row?.instrument!==marker.instrument||row?.orderId!==marker.orderId||row?.accountId!==marker.accountId||row?.signalId!==marker.signalId||row?.snapshotId!==marker.snapshotId)return false;
+    const sideMatches=marker.market==='prediction'?(decision?.action==='BUY'?['YES','NO'].includes(marker.side)&&decision.side===marker.side&&marker.outcome===marker.side:marker.side==='SELL'&&['YES','NO'].includes(marker.outcome)&&decision.side===marker.outcome):decision?.action===marker.side;
+    if(!marker.runnerId||decision?.id!==marker.signalId||decision.runnerId!==marker.runnerId||decision.orderId!==marker.orderId||decision.market!==marker.market||decision.instrument!==fields?.instrument||!['BUY','SELL'].includes(decision.action)||!sideMatches)return false;
+    if(snapshot?.id!==marker.snapshotId||!/^rs_[a-f0-9]{64}$/.test(snapshot.id||'')||snapshot.id!=='rs_'+snapshot.hash||decision.snapshotHash!==snapshot.hash||fields?.market!==marker.market||!fields.instrument||typeof fields!=='object')return false;
+    const type=({stocks:'stock',options:'option',crypto:'crypto',prediction:'prediction'})[marker.market];
+    const venue=({stocks:'us',options:'us',crypto:'binance',prediction:'predictfun'})[marker.market];
+    const symbol=String(fields.instrument).toUpperCase();
+    if(!type||marker.instrument!==`${type}:${venue}:${symbol}`)return false;
+    const fillAt=Number(marker.time),decisionAt=Date.parse(decision.at),snapshotAt=Date.parse(snapshot.at),dataAt=Date.parse(fields.dataAt);
+    if(!Number.isFinite(fillAt)||!Number.isFinite(decisionAt)||!Number.isFinite(snapshotAt)||!Number.isFinite(dataAt)||decisionAt>fillAt||snapshotAt>fillAt||dataAt>fillAt+5000)return false;
+    const notAfterFill=value=>value==null||value===''||(Number.isFinite(Date.parse(String(value)))&&Date.parse(String(value))<=fillAt+5000);
+    if(!notAfterFill(fields.quote?.fetchedAt))return false;
+    for(const list of [fields.evidence,decision.evidence])if(Array.isArray(list)&&list.some(item=>!notAfterFill(item?.dataAt)||!notAfterFill(item?.retrievedAt)))return false;
+    return Array.isArray(decision.riskChecks)&&Array.isArray(decision.signals);
+  }
+  function formatPaperExecutionEvidence(marker,body){
+    const row=body.data,decision=row.decision,fields=row.snapshot.fields,quote=fields.quote||{};
+    const lines=['成交决策：'+decision.action+' · '+String(decision.reason||'未记录原因').slice(0,500),'策略版本：'+String(decision.strategyVersion||'未关联'),'信号：'+(decision.signals.length?decision.signals.slice(0,10).map(item=>String(item).slice(0,240)).join('；'):'无独立信号说明'),
+      '风控检查：'+(decision.riskChecks.length?decision.riskChecks.slice(0,12).map(item=>`${String(item.name)} ${item.passed===true?'通过':'未通过'}${item.reason?'：'+String(item.reason).slice(0,240):''}`).join('；'):'未记录'),
+      '来源：'+String(fields.source||decision.source||'未知'),'状态：'+String(fields.status||decision.dataStatus||'未知'),'数据时间：'+String(fields.dataAt),'决策/快照时间：'+String(decision.at)+' / '+String(row.snapshot.at),'成交时参考价：'+fmt(Number(fields.price))];
+    const bid=Number(quote.bestBid),ask=Number(quote.bestAsk);if(Number.isFinite(bid)||Number.isFinite(ask))lines.push('盘口：买一 '+fmt(bid)+' · 卖一 '+fmt(ask));
+    if(Number.isFinite(Number(fields.rsi14)))lines.push('RSI14：'+fmt(Number(fields.rsi14)));
+    if(Number.isFinite(Number(fields.sma10)))lines.push('SMA10：'+fmt(Number(fields.sma10)));
+    if(Array.isArray(decision.evidence)&&decision.evidence.length)lines.push('决策来源明细：'+decision.evidence.slice(0,10).map(item=>`${String(item.dataset)} · ${String(item.source)} · ${String(item.status)} · 数据 ${String(item.dataAt||'未知')} · 抓取 ${String(item.retrievedAt||'未知')}${item.reason?' · '+String(item.reason).slice(0,180):''}`).join('\n'));
+    lines.push('快照 SHA-256：'+String(row.snapshot.hash));return lines.join('\n');
   }
   function abortPaperEvidence(p){for(const controller of p?.evidenceControllers||[])controller.abort();if(p)p.evidenceControllers=new Set();}
   function statusFor(info,bar,now){
@@ -115,7 +144,7 @@
   }
   async function loadPaperEvidence(m,marker,button,view){
     const p=m.paper,key=p.key,controller=new AbortController();p.evidenceControllers||=new Set();p.evidenceControllers.add(controller);button.disabled=true;view.hidden=false;view.textContent='正在读取成交时证据…';
-    try{const response=await fetch('/api/evidence/'+encodeURIComponent(marker.snapshotId),{signal:controller.signal}),body=await response.json();if(!response.ok||!verifyPaperEvidenceEnvelope(marker,body))throw Error(body?.reason||'快照身份、Hash或时间未通过核验');if(p.key!==key||controller.signal.aborted||!view.isConnected)return;const row=body.data,fields=row.fields;view.textContent=['来源：'+String(fields.source||body.source||'未知'),'状态：'+String(fields.status||body.dataStatus||'未知'),'数据时间：'+String(fields.dataAt),'采集时间：'+String(row.at),'价格：'+fmt(Number(fields.price)),'SHA-256：'+row.hash].join('\n');
+    try{const query=new URLSearchParams({market:marker.market,instrument:marker.instrument,accountId:marker.accountId,orderId:marker.orderId,signalId:marker.signalId,snapshotId:marker.snapshotId}),response=await fetch('/api/paper/execution-evidence?'+query,{signal:controller.signal}),body=await response.json();if(!response.ok||!verifyPaperExecutionEvidenceEnvelope(marker,body))throw Error(body?.reason||'成交、决策、账户或时点快照未通过核验');if(p.key!==key||controller.signal.aborted||!view.isConnected)return;view.textContent=formatPaperExecutionEvidence(marker,body);
     }catch(error){if(error.name!=='AbortError'&&p.key===key&&view.isConnected)view.textContent='证据不可用：'+error.message;}
     finally{p.evidenceControllers.delete(controller);if(p.key===key&&button.isConnected)button.disabled=false;}
   }
@@ -133,7 +162,7 @@
     const py=Math.max(g.padT,Math.min(g.padT+g.priceH,y(last.close)));
     if(m.paper?.toggle.checked){for(const marker of paperMarkersFor(m.paper.markers,i.rows,m.paper.market,m.paper.instrument,i.interval,i.interactive?Infinity:last.time)){
       const x=g.padL+(marker.index+.5)*(g.W-g.padL-g.padR)/i.rows.length,pointY=y(marker.price);if(pointY<g.padT||pointY>g.padT+g.priceH)continue;
-      ctx.fillStyle=getComputedStyle(m.host).getPropertyValue('--purple').trim()||'#a778ff';ctx.font='11px system-ui';ctx.fillText(marker.side==='SELL'?'▼ 模拟退出':'▲ 模拟入场',x,pointY-6);
+      ctx.fillStyle=getComputedStyle(m.host).getPropertyValue('--purple').trim()||'#a778ff';ctx.font='11px system-ui';const label=marker.market==='prediction'?(marker.side==='SELL'?`▼ 模拟退出 ${marker.outcome||''}`:`▲ 模拟入场 ${marker.side}`):marker.side==='SELL'?'▼ 模拟退出':'▲ 模拟入场';ctx.fillText(label,x,pointY-6);
     }}
     ctx.strokeStyle=last.close>=last.open?'#18bf78':'#ef5350';if(last.close>=g.minP && last.close<=g.maxP){ctx.setLineDash([5,4]);ctx.beginPath();ctx.moveTo(g.padL,py);ctx.lineTo(g.W-g.padR,py);ctx.stroke();ctx.setLineDash([]);}ctx.fillStyle=ctx.strokeStyle;ctx.fillRect(g.W-g.padR,py-12,g.padR,24);ctx.fillStyle='#fff';ctx.font='11px system-ui';ctx.fillText((last.close>g.maxP?'↑':last.close<g.minP?'↓':'')+fmt(last.close),g.W-g.padR+3,py+1);
     if(m.hover!=null){const x=g.padL+(m.hover+.5)*(g.W-g.padL-g.padR)/i.rows.length,crossY=m.crossY??y(bar.close);ctx.strokeStyle=text;ctx.setLineDash([3,3]);ctx.beginPath();ctx.moveTo(x,g.padT);ctx.lineTo(x,g.H-25);ctx.moveTo(g.padL,crossY);ctx.lineTo(g.W-g.padR,crossY);ctx.stroke();ctx.setLineDash([]);ctx.fillStyle=getComputedStyle(m.host).getPropertyValue('--bg-secondary').trim()||'#162034';ctx.fillRect(g.W-g.padR,crossY-11,g.padR,22);const label=timeLabel(bar.time,i,views.get(i.canvas)),width=Math.min(g.W,ctx.measureText(label).width+10),left=Math.max(0,Math.min(g.W-width,x-width/2));ctx.fillRect(left,g.H-25,width,23);ctx.fillStyle=text;ctx.fillText(fmt(g.maxP-(crossY-g.padT)/g.priceH*(g.maxP-g.minP)),g.W-g.padR+3,crossY+4);ctx.fillText(label,left+5,g.H-9);}
@@ -157,7 +186,7 @@
     decorate(canvas,{...options,canvas,full,rows,interval:options.interval,volumeUnit:options.volumeUnit,ma:[5,10,30,60],maColors:['#ffad00','#18bf78','#29b6f6','#a778ff'],interactive:true,geometry:{W,H,padL,padR,padT,priceH,minP,maxP},redraw:()=>render(canvas,full,options)});
     options.onViewport?.({rows,geometry:{W,H,padL,padR,padT,priceH,minP,maxP}});
   }
-  window.MoneyTradingChart={createView,windowFor,pan,latest,zoom,countdown,select,decorate,clear,render,statusFor,restoreView,scheduleFrame,scalePrice,resetPrice,priceRange,paperMarkersFor,mergeHistory,verifyPaperEvidenceEnvelope};
+  window.MoneyTradingChart={createView,windowFor,pan,latest,zoom,countdown,select,decorate,clear,render,statusFor,restoreView,scheduleFrame,scalePrice,resetPrice,priceRange,paperMarkersFor,mergeHistory,verifyPaperEvidenceEnvelope,verifyPaperExecutionEvidenceEnvelope,formatPaperExecutionEvidence};
   window.MoneyTradingChart.redraw=canvas=>mounts.get(canvas)?.info?.redraw();
   document.addEventListener('DOMContentLoaded',()=>{const css=document.createElement('style');css.textContent='.mm-contract-chart:fullscreen,.mm-trading-fullscreen{background:var(--bg-secondary);padding:16px;overflow:auto}.mm-trading-fullscreen{position:fixed;inset:0;z-index:10000}';document.head.append(css);document.addEventListener('keydown',event=>{if(event.key==='Escape')document.querySelectorAll('.mm-trading-fullscreen').forEach(host=>{host.classList.remove('mm-trading-fullscreen');host.querySelector('[data-contract-fullscreen]').textContent='全屏';window.MoneyTradingChart.redraw(host.querySelector('canvas'));});});});
   document.addEventListener('DOMContentLoaded',()=>{const style=document.createElement('style');style.textContent='.mm-trading-chart{position:relative;min-width:0}.mm-trading-status{display:flex;flex-wrap:wrap;align-items:center;gap:8px;font-size:11px;color:var(--text-secondary);font-variant-numeric:tabular-nums}.mm-trading-zone{font-size:11px;padding:4px 8px;border:1px solid var(--border);border-radius:8px;background:var(--bg-secondary);color:var(--text-primary)}.mm-trading-readout{min-height:44px;font-size:12px;line-height:1.8;color:var(--text-secondary);font-variant-numeric:tabular-nums;padding:8px 4px}.mm-trading-readout span{color:var(--purple)}.mm-trading-crosshair{position:absolute;left:0;touch-action:pan-y;cursor:crosshair}.mm-trading-latest{position:absolute;right:94px;bottom:24px;background:var(--bg-secondary);color:var(--text-primary);border:1px solid var(--border);border-radius:8px;padding:8px}.mm-trading-latest[hidden]{display:none}.mm-paper-marker-detail{padding:8px;margin:6px 0;border:1px solid var(--border);border-radius:9px;background:var(--bg-secondary);color:var(--text-primary)}.mm-paper-marker-detail p{margin:0 0 6px;line-height:1.55;overflow-wrap:anywhere}.mm-paper-marker-detail [data-paper-evidence-details]{margin:6px 0 0;padding:8px;border:1px solid var(--border);border-radius:8px;background:var(--bg-primary);color:var(--text-primary);font:11px/1.6 ui-monospace,monospace;white-space:pre-wrap;overflow-wrap:anywhere}.mm-paper-marker-detail [data-paper-evidence-details][hidden]{display:none}';document.head.append(style);const each=fn=>document.querySelectorAll('.mm-trading-chart canvas:not(.mm-trading-crosshair)').forEach(canvas=>{const m=mounts.get(canvas);if(m?.info && canvas.getClientRects().length && !document.hidden)fn(m);});new MutationObserver(()=>each(m=>queuePaint(m,true))).observe(document.documentElement,{attributes:true,attributeFilter:['data-theme']});document.addEventListener('visibilitychange',()=>{if(!document.hidden)each(m=>queuePaint(m));});setInterval(()=>each(updateClock),1000);});

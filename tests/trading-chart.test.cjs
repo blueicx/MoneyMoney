@@ -33,6 +33,13 @@ test('paper marker placement rejects incomplete lineage, other instruments and r
  const result=c.paperMarkersFor([marker,{...marker,orderId:'legacy',signalId:null},{...marker,orderId:'other',instrument:'stock:us:MU'},{...marker,orderId:'future',time:rows[60].time}],rows.slice(40,55),'stocks','stock:us:AAPL','5m',rows[54].time);
  assert.equal(result.length,1);assert.equal(result[0].index,10);assert.equal(result[0].orderId,'o');
 });
+test('prediction chart markers require an explicit matching YES/NO outcome',()=>{
+ const c=load(),base={orderId:'prediction-order',signalId:'s',snapshotId:'d',accountId:'a',market:'prediction',instrument:'prediction:predictfun:EVENT-1',time:rows[50].time,price:.4,side:'YES',outcome:'YES'};
+ assert.equal(c.paperMarkersFor([base],rows,'prediction',base.instrument,'5m').length,1);
+ assert.equal(c.paperMarkersFor([{...base,outcome:'NO'}],rows,'prediction',base.instrument,'5m').length,0);
+ assert.equal(c.paperMarkersFor([{...base,side:'SELL',outcome:undefined}],rows,'prediction',base.instrument,'5m').length,0);
+ assert.equal(c.paperMarkersFor([{...base,side:'SELL',outcome:'NO'}],rows,'prediction',base.instrument,'5m').length,1);
+});
 test('paper snapshot evidence is scoped to its exact marker and predates the fill',()=>{
  const c=load();assert.equal(typeof c.verifyPaperEvidenceEnvelope,'function','snapshot evidence verifier missing');
  const marker={market:'stocks',instrument:'stock:us:MU',snapshotId:'rs_'+'a'.repeat(64),time:Date.parse('2026-10-08T10:01:00Z')};
@@ -42,18 +49,39 @@ test('paper snapshot evidence is scoped to its exact marker and predates the fil
   const changed=structuredClone(evidence);mutate(changed);assert.equal(c.verifyPaperEvidenceEnvelope(marker,changed),false);
  }
 });
-test('chart evidence action loads only the linked snapshot into a text-only detail view',async()=>{
+test('linked execution evidence verifies all lineage identifiers and rejects decision or quote data after the fill',()=>{
+ const c=load();assert.equal(typeof c.verifyPaperExecutionEvidenceEnvelope,'function','execution evidence verifier missing');
+ const marker={market:'stocks',instrument:'stock:us:MU',accountId:'ai-runner:r1',runnerId:'r1',orderId:'o1',signalId:'s1',snapshotId:'rs_'+'a'.repeat(64),side:'BUY',time:Date.parse('2026-10-08T10:01:00Z')};
+ const at='2026-10-08T10:00:00Z',hash='a'.repeat(64),body={success:true,market:marker.market,instrument:marker.instrument,data:{market:marker.market,instrument:marker.instrument,accountId:marker.accountId,orderId:marker.orderId,signalId:marker.signalId,snapshotId:marker.snapshotId,
+  decision:{id:marker.signalId,runnerId:marker.runnerId,orderId:marker.orderId,market:marker.market,instrument:'MU',at,action:'BUY',snapshotHash:hash,signals:[],riskChecks:[]},
+  snapshot:{id:marker.snapshotId,hash,at,fields:{market:marker.market,instrument:'MU',status:'delayed',dataAt:at,quote:{fetchedAt:at},evidence:[{dataAt:at,retrievedAt:at}]}}}};
+ assert.equal(c.verifyPaperExecutionEvidenceEnvelope(marker,body),true);
+ for(const mutate of [d=>d.data.orderId='other',d=>d.data.accountId='other',d=>d.data.signalId='other',d=>d.data.snapshotId='rs_'+'b'.repeat(64),d=>d.data.decision.snapshotHash='b'.repeat(64),d=>d.data.decision.at='2026-10-08T10:02:00Z',d=>d.data.snapshot.fields.quote.fetchedAt='2026-10-08T10:02:00Z',d=>d.data.snapshot.fields.evidence[0].retrievedAt='2026-10-08T10:02:00Z']){
+  const changed=structuredClone(body);mutate(changed);assert.equal(c.verifyPaperExecutionEvidenceEnvelope(marker,changed),false);
+ }
+});
+test('prediction execution evidence binds the YES/NO outcome in both directions and closes',()=>{
+ const c=load(),at='2026-10-08T10:00:00Z',time=Date.parse('2026-10-08T10:01:00Z'),instrument='prediction:predictfun:EVENT-1',hash='c'.repeat(64),snapshotId='rs_'+hash;
+ const marker={market:'prediction',instrument,accountId:'ai-runner:r',runnerId:'r',orderId:'o',signalId:'s',snapshotId,time,side:'YES',outcome:'YES'};
+ const body={success:true,market:'prediction',instrument,data:{market:'prediction',instrument,accountId:marker.accountId,orderId:'o',signalId:'s',snapshotId,decision:{id:'s',runnerId:'r',orderId:'o',market:'prediction',instrument:'EVENT-1',at,action:'BUY',side:'YES',snapshotHash:hash,signals:[],riskChecks:[]},snapshot:{id:snapshotId,hash,at,fields:{market:'prediction',instrument:'EVENT-1',dataAt:at}}}};
+ assert.equal(c.verifyPaperExecutionEvidenceEnvelope(marker,body),true);
+ assert.equal(c.verifyPaperExecutionEvidenceEnvelope({...marker,side:'NO',outcome:'NO'},body),false);
+ const close=structuredClone(body);close.data.decision.action='SELL';close.data.decision.side='NO';const closeMarker={...marker,side:'SELL',outcome:'NO'};
+ assert.equal(c.verifyPaperExecutionEvidenceEnvelope(closeMarker,close),true);
+ assert.equal(c.verifyPaperExecutionEvidenceEnvelope({...closeMarker,outcome:'YES'},close),false);
+});
+test('chart evidence action shows the linked decision, risk checks and source details as text only',async()=>{
  const {JSDOM}=require('jsdom'),dom=new JSDOM('<div id="market-workspace-shell" data-market-scope="stocks" data-instrument="stock:us:MU"><canvas></canvas></div>',{url:'https://test.invalid',runScripts:'outside-only',pretendToBeVisual:true}),w=dom.window;
  w.mm_isLoggedIn=true;w.mm_isGuest=false;w.HTMLCanvasElement.prototype.getContext=()=>new Proxy({},{get:()=>()=>{}});
- const time=Date.parse('2026-10-08T10:01:00Z'),marker={orderId:'o1',signalId:'s1',snapshotId:'rs_'+'a'.repeat(64),accountId:'paper:r1',market:'stocks',instrument:'stock:us:MU',time,price:11,side:'BUY',feeUsd:0.1,slippageUsd:0.2};
- const evidence={success:true,market:'stocks',instrument:marker.instrument,data:{id:marker.snapshotId,hash:'a'.repeat(64),at:new Date(time-1000).toISOString(),fields:{market:'stocks',status:'delayed',source:'<img src=x onerror=alert(1)>',dataAt:new Date(time-1000).toISOString(),price:11}}};const requests=[];
- w.fetch=async url=>{requests.push(String(url));return String(url).includes('/api/evidence/')?{ok:true,json:async()=>evidence}:{ok:true,json:async()=>({success:true,market:'stocks',instrument:marker.instrument,data:{markers:[marker],unlinked:[]},reason:null})};};
+ const time=Date.parse('2026-10-08T10:01:00Z'),marker={orderId:'o1',signalId:'s1',snapshotId:'rs_'+'a'.repeat(64),accountId:'ai-runner:r1',runnerId:'r1',market:'stocks',instrument:'stock:us:MU',time,price:11,side:'BUY',feeUsd:0.1,slippageUsd:0.2},at=new Date(time-1000).toISOString();
+ const evidence={success:true,market:'stocks',instrument:marker.instrument,data:{market:marker.market,instrument:marker.instrument,orderId:marker.orderId,accountId:marker.accountId,signalId:marker.signalId,snapshotId:marker.snapshotId,decision:{id:marker.signalId,runnerId:marker.runnerId,orderId:marker.orderId,market:marker.market,instrument:'MU',at,action:'BUY',snapshotHash:'a'.repeat(64),strategyVersion:'rsi-v2',reason:'依据已核验报价模拟买入',signals:['RSI14 超卖'],riskChecks:[{name:'fresh quote',passed:true,reason:'报价未过期'}],dataStatus:'delayed',source:'Yahoo',dataAt:at,evidence:[{dataset:'bars',source:'Yahoo 1m',status:'delayed',dataAt:at,retrievedAt:at}]},snapshot:{id:marker.snapshotId,hash:'a'.repeat(64),at,fields:{market:marker.market,instrument:'MU',status:'delayed',source:'<img src=x onerror=alert(1)>',dataAt:at,price:11,quote:{bestBid:10.9,bestAsk:11.1,fetchedAt:at},rsi14:31,sma10:10.2}}}};const requests=[];
+ w.fetch=async url=>{requests.push(String(url));return String(url).includes('/api/paper/execution-evidence?')?{ok:true,json:async()=>evidence}:{ok:true,json:async()=>({success:true,market:'stocks',instrument:marker.instrument,data:{markers:[marker],unlinked:[]},reason:null})};};
  try{
   w.eval(fs.readFileSync('src/web/public/trading-chart.js','utf8'));const canvas=w.document.querySelector('canvas');w.MoneyTradingChart.render(canvas,rows,{identity:marker.instrument+'|5m',interval:'5m'});
   const toggle=w.document.querySelector('[data-paper-chart-layer]');toggle.checked=true;toggle.dispatchEvent(new w.Event('change'));
   await new Promise(resolve=>setTimeout(resolve,0));const button=w.document.querySelector('[data-paper-evidence]');assert.ok(button,'linked fill should offer its source snapshot');
   button.click();await new Promise(resolve=>setTimeout(resolve,0));
-  const detail=w.document.querySelector('[data-paper-evidence-details]');assert.ok(detail&&!detail.hidden);assert.match(detail.textContent,/<img src=x onerror=alert\(1\)>/);assert.match(detail.textContent,/2026-10-08/);assert.ok(requests.some(url=>url.includes('/api/evidence/'+encodeURIComponent(marker.snapshotId))));
+  const detail=w.document.querySelector('[data-paper-evidence-details]');assert.ok(detail&&!detail.hidden);assert.match(detail.textContent,/<img src=x onerror=alert\(1\)>/);assert.match(detail.textContent,/依据已核验报价模拟买入/);assert.match(detail.textContent,/fresh quote 通过/);assert.match(detail.textContent,/Yahoo 1m/);assert.match(detail.textContent,/RSI14：31/);assert.match(detail.textContent,/买一 10.9 · 卖一 11.1/);assert.ok(requests.some(url=>url.includes('/api/paper/execution-evidence?')));
   assert.equal(w.document.querySelector('[data-paper-evidence-details] img'),null);
  }finally{w.close();}
 });

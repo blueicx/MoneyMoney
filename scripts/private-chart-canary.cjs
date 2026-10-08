@@ -12,9 +12,23 @@ function verifyMarkerEvidence(marker,evidence){
   assert.ok(Number.isFinite(Date.parse(row.fields.dataAt))&&Date.parse(row.fields.dataAt)<=marker.time+5000);
 }
 function createPaperEvidenceFixture(market='stocks',instrument='stock:us:MU',at=Date.now()){
-  const fields={market,instrument,status:'delayed',source:'隔离浏览器夹具（非真实成交） <img src=x onerror=alert(1)>',dataAt:new Date(at-2000).toISOString(),price:42.5};
-  const hash=crypto.createHash('sha256').update(JSON.stringify(fields)).digest('hex'),snapshotId='rs_'+hash;
-  return {marker:{orderId:'fixture-order',accountId:'fixture-account',runnerId:'fixture-runner',signalId:'fixture-signal',snapshotId,market,instrument,time:at,price:42.5,quantity:1,side:'BUY',feeUsd:0,slippageUsd:0,pnlUsd:null},evidence:{success:true,market,instrument,data:{id:snapshotId,hash,at:new Date(at-1000).toISOString(),fields}}};
+  const symbol=instrument.split(':').at(-1),dataAt=new Date(at-2000).toISOString(),capturedAt=new Date(at-1000).toISOString(),source='隔离浏览器夹具（非真实成交） <img src=x onerror=alert(1)>',quote={bestBid:42.4,bestAsk:42.6,fetchedAt:dataAt};
+  const fields={market,instrument:symbol,status:'delayed',source,dataAt,price:42.5,rsi14:31,sma10:42,quote,indicatorDataStatus:undefined,indicatorDataAt:undefined,indicatorRetrievedAt:undefined,evidence:[{dataset:'bars',source:'fixture 1m',status:'delayed',dataAt,retrievedAt:new Date(at-1500).toISOString()}],modelProbability:undefined,candidateSignals:['fixture signal']};
+  const hash=crypto.createHash('sha256').update(JSON.stringify(fields)).digest('hex'),snapshotId='rs_'+hash,runnerId='fixture-runner',accountId='ai-runner:'+runnerId,orderId='fixture-order',signalId='fixture-signal';
+  const decision={id:signalId,runnerId,accountId,orderId,market,instrument:symbol,at:capturedAt,dataStatus:'delayed',source,dataAt,strategyVersion:'fixture-rules-v1',modelVersion:undefined,signals:['fixture signal'],riskChecks:[{name:'fresh quote',passed:true,reason:'fixture quote is recent'}],action:'BUY',reason:'isolated browser fixture only',evidence:fields.evidence,snapshotHash:hash};
+  const marker={orderId,accountId,runnerId,signalId,snapshotId,market,instrument,time:at,price:42.5,quantity:1,side:'BUY',feeUsd:0,slippageUsd:0,pnlUsd:null};
+  const evidence={success:true,market,instrument,dataStatus:'historical',source:'fixture',updatedAt:capturedAt,reason:'isolated fixture',evidenceRefs:[snapshotId],data:{market,instrument,orderId,accountId,signalId,snapshotId,decision,snapshot:{id:snapshotId,hash,at:capturedAt,fields}}};
+  return {marker,evidence};
+}
+function verifyExecutionEvidenceFixture(marker,evidence){
+  const row=evidence.data,snapshot=row.snapshot;
+  assert.equal(evidence.success,true);assert.equal(evidence.market,marker.market);assert.equal(evidence.instrument,marker.instrument);
+  for(const field of ['orderId','accountId','signalId','snapshotId'])assert.equal(row[field],marker[field]);
+  assert.equal(row.decision.runnerId,marker.runnerId);
+  assert.equal(snapshot.id,marker.snapshotId);assert.equal(snapshot.id,'rs_'+snapshot.hash);
+  assert.equal(crypto.createHash('sha256').update(JSON.stringify(snapshot.fields)).digest('hex'),snapshot.hash);
+  assert.equal(row.decision.id,marker.signalId);assert.equal(row.decision.orderId,marker.orderId);assert.equal(row.decision.action==='BUY'?['YES','NO','BUY'].includes(marker.side):marker.side==='SELL',true);
+  assert.ok(Date.parse(snapshot.at)<=marker.time&&Date.parse(row.decision.at)<=marker.time&&Date.parse(snapshot.fields.dataAt)<=marker.time+5000);
 }
 function paperEvidenceFixtureBars(fillTime){
   if(!Number.isFinite(fillTime))throw new Error('paper chart fixture fill time must be finite');
@@ -31,7 +45,7 @@ async function run(){
   if(login.status!==0){console.error('Private chart SSH preflight failed (exit='+String(login.status)+', code='+String(login.error?.code||'none')+')');process.exitCode=1;return;}
   const session=JSON.parse(login.stdout);login.stdout='';login.stderr='';if(!session.token||!session.csrfToken){console.error('Private chart admin login unavailable (status='+String(session.loginStatus||'invalid-session')+')');process.exitCode=1;return;}
   const report={version:null,modelCalls:0,businessWrites:0,sourceChecks:[],themes:[],lineage:{verified:0,unlinked:0},paperEvidenceUi:null,mobile:null};
-  const fixtureRoutes={markers:0,evidence:0};
+  const fixtureRoutes={markers:0,executionEvidence:0};
   try{
     phase='browser';browser=await chromium.launch({headless:true,channel:process.env.MONEYMONEY_SMOKE_BROWSER||'chrome'});
     context=await browser.newContext({viewport:{width:1440,height:1000},serviceWorkers:'block'});
@@ -45,7 +59,7 @@ async function run(){
       if(paperEvidenceFixture&&request.method()==='GET'){
         const url=new URL(request.url());
         if(url.pathname==='/api/paper/chart-markers'&&url.searchParams.get('market')===paperEvidenceFixture.marker.market&&url.searchParams.get('instrument')===paperEvidenceFixture.marker.instrument){fixtureRoutes.markers++;return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({success:true,market:paperEvidenceFixture.marker.market,instrument:paperEvidenceFixture.marker.instrument,data:{markers:[paperEvidenceFixture.marker],unlinked:[]},reason:null})});}
-        if(url.pathname==='/api/evidence/'+paperEvidenceFixture.marker.snapshotId){fixtureRoutes.evidence++;return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify(paperEvidenceFixture.evidence)});}
+        if(url.pathname==='/api/paper/execution-evidence'&&['market','instrument','accountId','orderId','signalId','snapshotId'].every(key=>url.searchParams.get(key)===paperEvidenceFixture.marker[key])){fixtureRoutes.executionEvidence++;return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify(paperEvidenceFixture.evidence)});}
       }
       if(request.url().includes('/api/contracts/detail?'))contractRequests.push(new URL(request.url()).searchParams.get('panels'));
       return route.continue();
@@ -82,7 +96,8 @@ async function run(){
     step='click-evidence';await evidenceButton.click();
     step='verify-evidence-content';
     const evidenceView=page.locator('#paper-evidence-fixture [data-paper-evidence-details]');await page.waitForFunction(()=>document.querySelector('#paper-evidence-fixture [data-paper-evidence-details]')?.textContent.includes('SHA-256'),null,{timeout:15000});
-    assert.match(await evidenceView.textContent(),/隔离浏览器夹具/);assert.match(await evidenceView.textContent(),/<img/);assert.equal(await evidenceView.locator('img').count(),0);
+    verifyExecutionEvidenceFixture(paperEvidenceFixture.marker,paperEvidenceFixture.evidence);
+    assert.match(await evidenceView.textContent(),/隔离浏览器夹具/);assert.match(await evidenceView.textContent(),/fixture-rules-v1/);assert.match(await evidenceView.textContent(),/<img/);assert.equal(await evidenceView.locator('img').count(),0);assert.ok(fixtureRoutes.executionEvidence>0,'chart UI must use the exact linked execution evidence endpoint');
     step='verify-themes';const evidenceThemeStyles=[];
     for(const theme of ['light','dark','money']){
       await page.evaluate(theme=>{if(theme==='light')document.documentElement.removeAttribute('data-theme');else document.documentElement.setAttribute('data-theme',theme);},theme);
@@ -139,4 +154,4 @@ async function run(){
   }
 }
 if(require.main===module)run().catch(error=>{console.error('Private chart preflight failed ('+String(error?.code||error?.name||'unknown')+'); credentials not logged');process.exitCode=1;});
-module.exports={allowedApiRequest,verifyMarkerEvidence,createPaperEvidenceFixture,paperEvidenceFixtureBars};
+module.exports={allowedApiRequest,verifyMarkerEvidence,createPaperEvidenceFixture,verifyExecutionEvidenceFixture,paperEvidenceFixtureBars};

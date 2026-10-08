@@ -22,3 +22,12 @@ test('private browser fixture places its fill only inside a valid final candle',
  assert.ok(fillTime>=rows.at(-1).time&&fillTime<rows.at(-1).time+60000);
  assert.ok(rows.every(row=>[row.open,row.high,row.low,row.close,row.volume].every(Number.isFinite)&&row.high>=Math.max(row.open,row.close)&&row.low<=Math.min(row.open,row.close)));
 });
+test('private browser fixture verifies full decision, account, order and immutable snapshot lineage',()=>{
+ const {createPaperEvidenceFixture,verifyExecutionEvidenceFixture}=load(),fixture=createPaperEvidenceFixture('stocks','stock:us:MU',Date.parse('2026-10-08T10:31:17.000Z'));
+ assert.doesNotThrow(()=>verifyExecutionEvidenceFixture(fixture.marker,fixture.evidence));
+ assert.equal(fixture.evidence.data.decision.strategyVersion,'fixture-rules-v1');
+ assert.ok(fixture.evidence.data.decision.riskChecks.length);
+ for(const mutate of [d=>d.data.orderId='other',d=>d.data.decision.runnerId='other',d=>d.data.snapshot.fields.price=999,d=>d.data.snapshot.at='2026-10-08T10:32:00.000Z']){
+  const changed=structuredClone(fixture.evidence);mutate(changed);assert.throws(()=>verifyExecutionEvidenceFixture(fixture.marker,changed));
+ }
+});

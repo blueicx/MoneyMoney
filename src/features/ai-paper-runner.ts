@@ -53,6 +53,8 @@ export interface AiRunnerDecisionRecord {
   snapshotHash?: string;
   strategyVersion?: string;
   modelVersion?: string;
+  /** Explicit outcome/position direction used to bind the paper fill to its decision. */
+  side?: 'YES' | 'NO' | 'LONG' | 'SHORT';
   signals: string[];
   riskChecks: Array<{ name: string; passed: boolean; reason?: string }>;
   action: 'BUY' | 'SELL' | 'NONE' | 'REJECTED' | 'REVIEW';
