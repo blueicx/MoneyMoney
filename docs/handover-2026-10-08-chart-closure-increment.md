@@ -177,3 +177,12 @@
 - 实际验收通过：Gate 90 条历史记录，结果时间 `2026-10-08T08:00:00.000Z`；Telegram 接受原消息及一次结果回复，回复绑定已核验；同一隔离 SQLite 队列重启后无重复，程序化 ACK 保留。报告 `/tmp/moneymoney-telegram-result-acc27c5-v1/report.json`。这证明真实 API 投递和模块结果闭环，不代表用户已经点击真实 ACK 按钮或所有宏观结果源已覆盖。
 - 先补失败测试再实现。完整测试 992/992、0 失败，构建、Web/认证/四市场三个主题 Chromium/合约/自动对照/实时图表六项冒烟通过。原始日志系统临时目录 `mm-real-result-final-test.log`、`mm-real-result-smoke-*.log`。
 - 本节验收没有切换生产 dist 或重启服务；正式发布、发布后矩阵、回滚演练及新调度开启仍须后续执行。既有股票自主跑单不修改，数据库、数据湖和用户文件保留。
+
+## 修复增量实际部署（2026-10-08，a893762）
+
+- 源码提交并推送 `a893762851b03e174cfa525f99aef7f66c3d7dc0` 后重新构建。dist 归档 SHA256 `defb54f33c6001498cb4ab79e09b856e1960455b73ff8a4cfceae26a7aba9211`，server SHA256 `9233f91ad48b497afa61e696e138aaa8530e3214291e571c0dc33771fa10ab25`，index SHA256 `e4ab0d9fcc39c5b92fbaffedd4bdb2ef34b89388556ccc7b0c58dfd1af26f399`；上传与切换后校验一致。
+- 发布标签 `chart-closure-a893762-20261008-2120`。备份 `/opt/moneymoney/backups/dist-pre-chart-closure-a893762-20261008-2120`，回滚 `/opt/moneymoney/dist.rollback-chart-closure-a893762-20261008-2120`；二者实际存在，仅重启 `moneymoney.service`。首次执行部署脚本因 CRLF 在第 2 行、任何切换之前失败；规范化上传脚本为 LF 后执行成功。没有修改生产环境密钥、Nginx、TLS、邻接服务或用户数据。
+- 部署后正式域名报告 `a893762`，21 项资源 Hash 通过；AAPL/SNDK 各 4681 根五分钟 K线、Gate 200 根合约 K线，两条真实 Binance SSE；访客 403、错误市场 400；部署前新基线 `/tmp/moneymoney-protected-a893762-baseline.json` 与部署后旧自主跑单配置/状态一致。
+- 部署后正式域名四市场/SNDK/历史代码/右侧库/390px/访客 Chromium 再次通过，报告系统临时目录 `mm-production-canary-a893762/production-canary-report.json`。线上 Telegram 发送模块现在具备回执与回复绑定；鉴权正常，不增加 polling 实例。
+- 同一机器、同一检测条件各取 3 次桌面冷/热加载：旧版本冷 `[14204,12203,7526]`ms、热 `[466,472,753]`ms，新版本冷 `[10686,8904,7676]`ms、热 `[422,436,491]`ms；中位数分别 12203→8904ms、472→436ms，页面错误均 0、热缓存 JS/CSS 17 项。这是实际观测，不归因全部差异为代码优化；冷加载改善约27%，不能声称达到原先30%目标。
+- 本批只部署已验证修复增量，不代表完整目标全部完成。新增自动对照保持关闭；固定模型/账户创建及启用、真实用户按钮和修订场景、物理手机及回滚演练等仍须完成。现有 $1000 股票自主跑单未被暂停、重建或改路由。
