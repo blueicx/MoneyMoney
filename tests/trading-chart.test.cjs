@@ -33,6 +33,30 @@ test('paper marker placement rejects incomplete lineage, other instruments and r
  const result=c.paperMarkersFor([marker,{...marker,orderId:'legacy',signalId:null},{...marker,orderId:'other',instrument:'stock:us:MU'},{...marker,orderId:'future',time:rows[60].time}],rows.slice(40,55),'stocks','stock:us:AAPL','5m',rows[54].time);
  assert.equal(result.length,1);assert.equal(result[0].index,10);assert.equal(result[0].orderId,'o');
 });
+test('paper snapshot evidence is scoped to its exact marker and predates the fill',()=>{
+ const c=load();assert.equal(typeof c.verifyPaperEvidenceEnvelope,'function','snapshot evidence verifier missing');
+ const marker={market:'stocks',instrument:'stock:us:MU',snapshotId:'rs_'+'a'.repeat(64),time:Date.parse('2026-10-08T10:01:00Z')};
+ const evidence={success:true,market:marker.market,instrument:marker.instrument,data:{id:marker.snapshotId,hash:'a'.repeat(64),at:'2026-10-08T10:00:00Z',fields:{market:'stocks',status:'delayed',source:'test',dataAt:'2026-10-08T10:00:00Z',price:100}}};
+ assert.equal(c.verifyPaperEvidenceEnvelope(marker,evidence),true);
+ for(const mutate of [d=>d.market='crypto',d=>d.instrument='stock:us:AAPL',d=>d.data.id='rs_'+'b'.repeat(64),d=>d.data.hash='b'.repeat(64),d=>d.data.at='2026-10-08T10:02:00Z',d=>d.data.fields.dataAt='2026-10-08T10:02:00Z']){
+  const changed=structuredClone(evidence);mutate(changed);assert.equal(c.verifyPaperEvidenceEnvelope(marker,changed),false);
+ }
+});
+test('chart evidence action loads only the linked snapshot into a text-only detail view',async()=>{
+ const {JSDOM}=require('jsdom'),dom=new JSDOM('<div id="market-workspace-shell" data-market-scope="stocks" data-instrument="stock:us:MU"><canvas></canvas></div>',{url:'https://test.invalid',runScripts:'outside-only',pretendToBeVisual:true}),w=dom.window;
+ w.mm_isLoggedIn=true;w.mm_isGuest=false;w.HTMLCanvasElement.prototype.getContext=()=>new Proxy({},{get:()=>()=>{}});
+ const time=Date.parse('2026-10-08T10:01:00Z'),marker={orderId:'o1',signalId:'s1',snapshotId:'rs_'+'a'.repeat(64),accountId:'paper:r1',market:'stocks',instrument:'stock:us:MU',time,price:11,side:'BUY',feeUsd:0.1,slippageUsd:0.2};
+ const evidence={success:true,market:'stocks',instrument:marker.instrument,data:{id:marker.snapshotId,hash:'a'.repeat(64),at:new Date(time-1000).toISOString(),fields:{market:'stocks',status:'delayed',source:'<img src=x onerror=alert(1)>',dataAt:new Date(time-1000).toISOString(),price:11}}};const requests=[];
+ w.fetch=async url=>{requests.push(String(url));return String(url).includes('/api/evidence/')?{ok:true,json:async()=>evidence}:{ok:true,json:async()=>({success:true,market:'stocks',instrument:marker.instrument,data:{markers:[marker],unlinked:[]},reason:null})};};
+ try{
+  w.eval(fs.readFileSync('src/web/public/trading-chart.js','utf8'));const canvas=w.document.querySelector('canvas');w.MoneyTradingChart.render(canvas,rows,{identity:marker.instrument+'|5m',interval:'5m'});
+  const toggle=w.document.querySelector('[data-paper-chart-layer]');toggle.checked=true;toggle.dispatchEvent(new w.Event('change'));
+  await new Promise(resolve=>setTimeout(resolve,0));const button=w.document.querySelector('[data-paper-evidence]');assert.ok(button,'linked fill should offer its source snapshot');
+  button.click();await new Promise(resolve=>setTimeout(resolve,0));
+  const detail=w.document.querySelector('[data-paper-evidence-details]');assert.ok(detail&&!detail.hidden);assert.match(detail.textContent,/<img src=x onerror=alert\(1\)>/);assert.match(detail.textContent,/2026-10-08/);assert.ok(requests.some(url=>url.includes('/api/evidence/'+encodeURIComponent(marker.snapshotId))));
+  assert.equal(w.document.querySelector('[data-paper-evidence-details] img'),null);
+ }finally{w.close();}
+});
 test('adjustment control exposes source metadata and disables unverified conversions',()=>{
  const {JSDOM}=require('jsdom'),dom=new JSDOM('<div><canvas></canvas></div>',{url:'https://test.invalid',runScripts:'outside-only',pretendToBeVisual:true}),w=dom.window;
  w.HTMLCanvasElement.prototype.getContext=()=>new Proxy({},{get:()=>()=>{}});
