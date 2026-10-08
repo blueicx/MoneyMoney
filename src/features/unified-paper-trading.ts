@@ -15,6 +15,8 @@ export interface UnifiedPaperOrder {
   outcome?: 'YES' | 'NO';
   price: number;
   quantity: number;
+  /** Explicit verified premium-to-notional multiplier. Absent legacy rows retain old units. */
+  contractMultiplier?: number;
   timestamp: string;
   strategy?: string;
   strategyVersion?: string;
@@ -36,6 +38,7 @@ export interface UnifiedPaperPosition {
   title: string;
   outcome?: 'YES' | 'NO';
   quantity: number;
+  contractMultiplier?: number;
   averageEntryPrice: number;
   currentPrice: number;
   openedAt: string;
@@ -82,6 +85,8 @@ export function validateUnifiedPaperOrder(input: Partial<UnifiedPaperOrder>): { 
   if (!Number.isFinite(Number(input.price)) || Number(input.price) <= 0) return { ok: false, error: '价格必须大于 0' };
   if (input.instrumentType === 'prediction' && Number(input.price) > 1) return { ok: false, error: '预测市场价格必须在 0 到 1 之间' };
   if (!Number.isFinite(Number(input.quantity)) || Number(input.quantity) <= 0) return { ok: false, error: '数量必须大于 0' };
+  if (input.contractMultiplier != null && (input.instrumentType !== 'option' || !Number.isFinite(input.contractMultiplier) || input.contractMultiplier <= 0)) return { ok: false, error: '期权合约乘数无效或市场不一致' };
+  if (input.contractMultiplier != null && !Number.isSafeInteger(input.quantity)) return { ok:false,error:'期权合约数量必须为正整数' };
   if (input.timestamp != null && (!String(input.timestamp || '').trim() || !Number.isFinite(new Date(String(input.timestamp)).getTime()))) return { ok: false, error: '时间戳无效' };
   return { ok: true };
 }
@@ -116,15 +121,17 @@ export function applyUnifiedPaperOrder(source: UnifiedPaperLedger, order: Unifie
   const validation = validateUnifiedPaperOrder(order);
   if (!validation.ok) throw new Error(validation.error);
   const ledger: UnifiedPaperLedger = { ...source, positions: source.positions.map(item => ({ ...item })), orders: [...source.orders] };
-  const notional = order.price * order.quantity;
+  const multiplier = order.contractMultiplier ?? 1;
+  const notional = order.price * order.quantity * multiplier;
   const costs = orderCosts(order);
   const key = positionKey(order);
   let recordedOrder: UnifiedPaperOrder = { ...order };
   if ((order.side === 'BUY' || order.side === 'YES' || order.side === 'NO') && notional + costs > ledger.cash) throw new Error('模拟账户余额不足');
   let position = ledger.positions.find(item => `${item.instrumentId}:${item.instrumentType === 'prediction' ? item.outcome : 'direction'}` === key);
+  if (position && position.contractMultiplier !== order.contractMultiplier) throw new Error('持仓与订单合约乘数不一致，不能推测或重算旧记录');
   if (order.side === 'SELL') {
     if (!position || position.quantity < order.quantity) throw new Error('没有足够的可卖持仓');
-    const closePnl = round((order.price - position.averageEntryPrice) * order.quantity, 8);
+    const closePnl = round((order.price - position.averageEntryPrice) * order.quantity * multiplier, 8);
     position.realizedPnl += closePnl;
     ledger.realizedPnl += closePnl;
     recordedOrder = { ...order, pnlUsd: closePnl };
@@ -140,6 +147,7 @@ export function applyUnifiedPaperOrder(source: UnifiedPaperLedger, order: Unifie
     } else {
       position = { instrumentId: order.instrumentId, instrumentType: order.instrumentType, title: order.title || order.instrumentId, ...(order.instrumentType === 'prediction' ? { outcome: order.side as 'YES' | 'NO' } : {}), quantity: order.quantity, averageEntryPrice: order.price, currentPrice: order.price, openedAt: order.timestamp, realizedPnl: 0 };
       ledger.positions.push(position);
+      if (order.contractMultiplier != null) position.contractMultiplier = order.contractMultiplier;
     }
   }
   ledger.orders.unshift(recordedOrder);
@@ -178,8 +186,8 @@ export function calculateUnifiedPerformance(ledger: UnifiedPaperLedger): {
 } {
   const positions = Array.isArray(ledger.positions) ? ledger.positions : [];
   const orders = Array.isArray(ledger.orders) ? ledger.orders : [];
-  const unrealizedPnl = positions.reduce((sum, position) => sum + ((position.currentPrice || 0) - (position.averageEntryPrice || 0)) * (position.quantity || 0), 0);
-  const positionValues = positions.map(position => (position.currentPrice || 0) * (position.quantity || 0));
+  const unrealizedPnl = positions.reduce((sum, position) => sum + ((position.currentPrice || 0) - (position.averageEntryPrice || 0)) * (position.quantity || 0) * (position.contractMultiplier ?? 1), 0);
+  const positionValues = positions.map(position => (position.currentPrice || 0) * (position.quantity || 0) * (position.contractMultiplier ?? 1));
   const positionsValue = positionValues.reduce((sum, value) => sum + value, 0);
   const equity = (ledger.cash || 0) + positionsValue;
   const closed = orders.filter(order => order.side === 'SELL' && Number.isFinite(order.pnlUsd));
@@ -190,8 +198,8 @@ export function calculateUnifiedPerformance(ledger: UnifiedPaperLedger): {
   const strategyAttribution: Record<string, number> = {};
   for (const order of closed) if (order.instrumentType) attributionByAsset[order.instrumentType] += Number(order.pnlUsd) || 0;
   for (const position of positions) {
-    if (position.instrumentType) attributionByAsset[position.instrumentType] += ((position.currentPrice || 0) - (position.averageEntryPrice || 0)) * (position.quantity || 0);
-    if (position.instrumentType) marketExposure[position.instrumentType] += (position.currentPrice || 0) * (position.quantity || 0);
+    if (position.instrumentType) attributionByAsset[position.instrumentType] += ((position.currentPrice || 0) - (position.averageEntryPrice || 0)) * (position.quantity || 0) * (position.contractMultiplier ?? 1);
+    if (position.instrumentType) marketExposure[position.instrumentType] += (position.currentPrice || 0) * (position.quantity || 0) * (position.contractMultiplier ?? 1);
   }
   for (const order of orders) {
     const strategy = String(order.strategy || 'unattributed');
@@ -277,7 +285,7 @@ export class UnifiedPaperLedgerStore {
       const scopedOrder = { ...order, id: order.id || randomUUID(), accountId, runnerId };
       const existingOrder = account.orders.find(item => item.id === scopedOrder.id);
       if (existingOrder) {
-        const fields = ['instrumentId', 'instrumentType', 'side', 'outcome', 'price', 'quantity', 'timestamp', 'feeUsd', 'slippageUsd', 'spreadUsd', 'strategy', 'strategyVersion', 'experimentId', 'signalId', 'dataSnapshotId', 'backtestTradeIndex', 'reason', 'accountId', 'runnerId'] as const;
+        const fields = ['instrumentId', 'instrumentType', 'side', 'outcome', 'price', 'quantity', 'contractMultiplier', 'timestamp', 'feeUsd', 'slippageUsd', 'spreadUsd', 'strategy', 'strategyVersion', 'experimentId', 'signalId', 'dataSnapshotId', 'backtestTradeIndex', 'reason', 'accountId', 'runnerId'] as const;
         if (fields.some(key => existingOrder[key] !== scopedOrder[key])) throw new Error('重复订单 ID 的内容不一致');
         return account;
       }

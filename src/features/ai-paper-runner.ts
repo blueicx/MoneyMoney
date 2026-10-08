@@ -208,6 +208,7 @@ interface CreateAiRunnerOptions {
 }
 
 export interface AiRunnerQuote {
+  optionContract?: { instrumentId:string; source:string; verified:boolean; currency:string; multiplier:number; expiresAt:string };
   market?: AiRunnerMarket;
   status?: string;
   dataStatus?: string;
@@ -420,6 +421,13 @@ export function resolveRunnerFill(
 ): { allowed: boolean; reason?: string; price?: number; bestBid?: number; bestAsk?: number; midpoint?: number } {
   const gate = evaluateRunnerQuoteGate(policy, quote, now);
   if (!gate.allowed) return gate;
+  if (quote.market === 'options') {
+    const c = quote.optionContract;
+    if (!c || c.verified !== true || !c.source?.trim() || !/^option:[^:]+:.+/.test(c.instrumentId) || c.currency !== 'USD' || !Number.isFinite(c.multiplier) || c.multiplier <= 0 || !Number.isFinite(Date.parse(c.expiresAt)) || Date.parse(c.expiresAt) <= now.getTime()) return { allowed:false,reason:'期权合约身份、币种、乘数或到期信息尚未核验' };
+    const identity = /^option:(?:us|cboe):([A-Z][A-Z0-9.]{0,9}):(\d{4}-\d{2}-\d{2}):(\d+(?:\.\d+)?):([CP])$/.exec(c.instrumentId);
+    const date = identity?.[2], day = date ? Date.parse(date+'T00:00:00Z') : NaN;
+    if (!identity || !Number.isFinite(day) || new Date(day).toISOString().slice(0,10)!==date || Number(identity[3])<=0 || new Date(c.expiresAt).toISOString().slice(0,10)!==date) return { allowed:false,reason:'期权必须是完整合约身份，行权价和到期日必须与来源一致' };
+  }
   const bestBid = Number(quote.bestBid);
   const bestAsk = Number(quote.bestAsk);
   if (!Number.isFinite(bestBid) || !Number.isFinite(bestAsk) || bestBid <= 0 || bestAsk < bestBid) {
@@ -438,7 +446,9 @@ export function calculateRunnerExecutionCosts(
 ): { feeUsd: number; slippageUsd: number; spreadUsd: number } {
   const fill = resolveRunnerFill({ minFreshnessMs: Number.MAX_SAFE_INTEGER }, quote, action, new Date(quote.fetchedAt || quote.updatedAt || Date.now()));
   if (!fill.allowed || fill.price == null || fill.midpoint == null || !Number.isFinite(quantity) || quantity <= 0) throw new Error(fill.reason || '模拟成本参数无效');
-  const notional = fill.price * quantity;
+  if (quote.market === 'options' && !Number.isSafeInteger(quantity)) throw new Error('期权合约数量必须为正整数');
+  const multiplier = quote.market === 'options' ? quote.optionContract!.multiplier : 1;
+  const notional = fill.price * quantity * multiplier;
   const feeUsd = notional * Math.max(0, Number(policy.feeRateBps) || 0) / 10_000;
   const additionalSlippage = notional * Math.max(0, Number(policy.additionalSlippageBps) || 0) / 10_000;
   return {
@@ -446,7 +456,7 @@ export function calculateRunnerExecutionCosts(
     // A buy fills at ask and a sell at bid, so spread cost is already reflected in fill-to-fill PnL.
     // Keep it as an evidence metric, not another cash deduction.
     slippageUsd: Math.round(additionalSlippage * 1_000_000) / 1_000_000,
-    spreadUsd: Math.round((Math.abs(quote.bestAsk! - quote.bestBid!) / 2 * quantity) * 1_000_000) / 1_000_000,
+    spreadUsd: Math.round((Math.abs(quote.bestAsk! - quote.bestBid!) / 2 * quantity * multiplier) * 1_000_000) / 1_000_000,
   };
 }
 
