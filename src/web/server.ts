@@ -9160,6 +9160,7 @@ function executePreparedRunnerTick(prepared: PreparedAiRunnerTick): { actions: A
       instrument: snapshot.instrument,
       source: snapshot.source, dataAt: snapshot.dataAt, reason: snapshot.reason,
       snapshotHash: snapshot.snapshotHash,
+      outcomeQuotes: snapshot.market === 'prediction' && snapshot.quote ? { [runnerLedgerInstrumentId(snapshot.ref)]: snapshot.quote } : undefined,
       prices: snapshot.quote && ['live', 'delayed'].includes(snapshot.quote.dataStatus || '') && Number.isFinite(snapshot.quote.price) ? { [snapshot.instrument]: snapshot.quote.price } : {},
     });
   }

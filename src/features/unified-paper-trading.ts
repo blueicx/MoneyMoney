@@ -297,6 +297,7 @@ export class UnifiedPaperLedgerStore {
   }
   markRunnerAccountPrices(accountId: string, prices: Map<string, number>, meta: {
     status: UnifiedPaperRunnerAccount['valuationStatus']; positionStatus?: NonNullable<UnifiedPaperPosition['markStatus']>; source?: string; updatedAt?: string; reason?: string;
+    positionMarks?: Record<string, { status: NonNullable<UnifiedPaperPosition['markStatus']>; source?: string; updatedAt?: string }>;
   }): UnifiedPaperRunnerAccount | null {
     return this.store.transaction(() => {
       const ledger = this.get();
@@ -311,7 +312,9 @@ export class UnifiedPaperLedgerStore {
         valuationUpdatedAt: updatedAt,
         valuationStatus: meta.status || 'unavailable',
         valuationReason: meta.reason,
-        positions: marked.positions.map(position => prices.has(`${position.instrumentId}:${position.outcome || ''}`) || prices.has(position.instrumentId)
+        positions: marked.positions.map(position => meta.positionMarks?.[`${position.instrumentId}:${position.outcome || ''}`]
+          ? { ...position, markStatus: meta.positionMarks[`${position.instrumentId}:${position.outcome || ''}`].status, markSource: meta.positionMarks[`${position.instrumentId}:${position.outcome || ''}`].source, markUpdatedAt: meta.positionMarks[`${position.instrumentId}:${position.outcome || ''}`].updatedAt }
+          : prices.has(`${position.instrumentId}:${position.outcome || ''}`) || prices.has(position.instrumentId)
           ? { ...position, markUpdatedAt: updatedAt, markStatus: meta.positionStatus || (meta.status === 'partial' ? 'unavailable' : meta.status) || 'unavailable', markSource: meta.source }
           : position),
       };

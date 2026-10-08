@@ -16,6 +16,7 @@ import { unifiedPaperLedgerStore, type UnifiedPaperInstrumentType } from './unif
 import type { StockQuote } from './stock-data-contracts';
 import { stockQuoteObservationTime } from './stock-signal-schedule';
 import type { PredictionExecutionContract } from './runner-prediction-quotes';
+import { predictionOutcomeQuote } from './runner-prediction-quotes';
 
 export type AiRunnerVenue = 'Binance' | 'Predict.fun' | 'Stocks' | 'Options';
 export type AiRunnerStatus = 'RUNNING' | 'STOPPED';
@@ -253,6 +254,7 @@ export interface AiRunnerMarketState {
   reason?: string;
   snapshotHash?: string;
   prices?: Record<string, number>;
+  outcomeQuotes?: Record<string, AiRunnerQuote>;
 }
 
 export function evaluateRunnerIndicatorEvidence(
@@ -707,6 +709,7 @@ export function updateAiRunnerMarketState(id: string, input: AiRunnerMarketState
     const freshStatus = ['live', 'delayed'].includes(status) && Number.isFinite(dataAtMs) && ageMs >= 0 && ageMs <= runner.policy.minFreshnessMs;
     const effectiveStatus = ['live', 'delayed'].includes(status) && !freshStatus ? 'stale' : status;
     const prices = new Map<string, number>();
+    const positionMarks: Record<string, { status: 'live' | 'delayed' | 'stale' | 'unavailable'; source?: string; updatedAt?: string }> = {};
     if (freshStatus) {
       for (const position of runner.positions.filter(item => item.status === 'OPEN')) {
         const symbol = String(position.instrument?.symbolOrMarketId || runner.symbolOrMarketId).toUpperCase();
@@ -714,22 +717,36 @@ export function updateAiRunnerMarketState(id: string, input: AiRunnerMarketState
         const explicitlyTargeted = input.instrument?.toUpperCase() === symbol
           || Object.prototype.hasOwnProperty.call(input.prices || {}, symbol)
           || Object.prototype.hasOwnProperty.call(input.prices || {}, position.instrumentId || '');
-        const price = Number(raw);
+        const instrumentId = position.instrumentId || toLedgerInstrument(position.instrument?.venue || runner.venue, symbol).instrumentId;
+        let price = Number(raw);
+        let selectedQuote: AiRunnerQuote | undefined;
+        if (scope === 'prediction') {
+          if (!explicitlyTargeted && !input.outcomeQuotes?.[instrumentId]) continue;
+          const candidate = input.outcomeQuotes?.[instrumentId];
+          selectedQuote = candidate?.market === 'prediction' && candidate.predictionContract?.instrumentId === instrumentId
+            ? predictionOutcomeQuote(candidate, position.side, now, runner.policy.minFreshnessMs) : undefined;
+          if (!selectedQuote || !['live', 'delayed'].includes(selectedQuote.dataStatus || selectedQuote.status || '')) {
+            position.markStatus = selectedQuote?.status === 'stale' ? 'stale' : 'unavailable';
+            positionMarks[`${instrumentId}:${position.side}`] = { status: position.markStatus, source: position.markSource, updatedAt: position.markUpdatedAt };
+            continue;
+          }
+          price = selectedQuote.price;
+        }
         if (Number.isFinite(price) && price > 0) {
-          const markPrice = scope === 'prediction' && position.side === 'NO' ? 1 - price : price;
+          const markPrice = price;
           if (scope === 'prediction' && (markPrice <= 0 || markPrice >= 1)) {
             position.markStatus = 'unavailable';
             continue;
           }
           position.currentPrice = markPrice;
-          position.markStatus = effectiveStatus as AiRunnerPosition['markStatus'];
-          position.markSource = input.source;
-          position.markUpdatedAt = input.dataAt;
+          position.markStatus = (selectedQuote?.dataStatus || selectedQuote?.status || effectiveStatus) as AiRunnerPosition['markStatus'];
+          position.markSource = selectedQuote?.source || input.source;
+          position.markUpdatedAt = selectedQuote?.updatedAt || input.dataAt;
           const unrealized = (markPrice - position.entryPrice) * position.quantity;
           position.maxFavorablePnlUsd = Math.max(Number(position.maxFavorablePnlUsd || 0), unrealized, 0);
           position.maxAdversePnlUsd = Math.min(Number(position.maxAdversePnlUsd || 0), unrealized, 0);
-          const instrumentId = position.instrumentId || toLedgerInstrument(position.instrument?.venue || runner.venue, symbol).instrumentId;
           prices.set(scope === 'prediction' ? `${instrumentId}:${position.side === 'NO' ? 'NO' : 'YES'}` : instrumentId, markPrice);
+          if (scope === 'prediction') positionMarks[`${instrumentId}:${position.side}`] = { status: position.markStatus as 'live' | 'delayed', source: position.markSource, updatedAt: position.markUpdatedAt };
         } else if (explicitlyTargeted || (!input.instrument && runner.universe?.kind !== 'watchlist')) {
           position.markStatus = 'unavailable';
         }
@@ -740,6 +757,10 @@ export function updateAiRunnerMarketState(id: string, input: AiRunnerMarketState
         const explicitlyTargeted = input.instrument?.toUpperCase() === symbol;
         if (explicitlyTargeted || (!input.instrument && runner.universe?.kind !== 'watchlist')) {
           position.markStatus = effectiveStatus === 'cached' ? 'cached' : effectiveStatus === 'stale' ? 'stale' : 'unavailable';
+          if (scope === 'prediction') {
+            const instrumentId = position.instrumentId || toLedgerInstrument(position.instrument?.venue || runner.venue, symbol).instrumentId;
+            positionMarks[`${instrumentId}:${position.side}`] = { status: effectiveStatus === 'stale' ? 'stale' : 'unavailable', source: position.markSource, updatedAt: position.markUpdatedAt };
+          }
         }
       }
     }
@@ -758,12 +779,14 @@ export function updateAiRunnerMarketState(id: string, input: AiRunnerMarketState
     unifiedPaperLedgerStore.markRunnerAccountPrices(accountId, prices, {
       status: ledgerStatus, source: input.source, updatedAt: input.dataAt || now.toISOString(),
       positionStatus: (['live', 'delayed', 'cached', 'stale', 'unavailable'].includes(effectiveStatus) ? effectiveStatus : 'unavailable') as 'live' | 'delayed' | 'cached' | 'stale' | 'unavailable',
+      positionMarks,
       reason: freshStatus ? undefined : (input.reason || (effectiveStatus === 'stale' ? '报价过期，保留上次估值' : undefined)),
     });
-    runner.lastDataStatus = effectiveStatus;
+    const valuationFresh = freshStatus && (scope !== 'prediction' || !openPositions.length || allFreshMarks);
+    runner.lastDataStatus = scope === 'prediction' && openPositions.length ? ledgerStatus : effectiveStatus;
     runner.lastDataSource = input.source;
     runner.lastDataAt = input.dataAt;
-    runner.lastDataReason = freshStatus ? undefined : (input.reason || (effectiveStatus === 'stale' ? '报价过期，保留上次估值' : undefined));
+    runner.lastDataReason = valuationFresh ? undefined : (input.reason || (scope === 'prediction' ? '所持 outcome 缺少新鲜、已核验的独立报价，保留最后估值' : effectiveStatus === 'stale' ? '报价过期，保留上次估值' : undefined));
     runner.lastRunAt = now.toISOString();
     if (input.snapshotHash) runner.lastSnapshotHash = input.snapshotHash;
     if (freshStatus) {
@@ -790,7 +813,7 @@ export function updateAiRunnerMarketState(id: string, input: AiRunnerMarketState
     const point: AiRunnerEquityPoint = {
       at: now.toISOString(), equityUsd: Math.round(equity * 100) / 100, drawdownPct: Math.round(drawdownPct * 100) / 100,
       realizedPnlUsd: Math.round(realizedPnlUsd * 100) / 100, unrealizedPnlUsd: Math.round(unrealizedPnlUsd * 100) / 100,
-      feeSlippageUsd: Math.round(feeSlippageUsd * 100) / 100, dataStatus: effectiveStatus, snapshotHash: input.snapshotHash,
+      feeSlippageUsd: Math.round(feeSlippageUsd * 100) / 100, dataStatus: runner.lastDataStatus, snapshotHash: input.snapshotHash,
       spreadCostUsd: Math.round(spreadCostUsd * 100) / 100,
     };
     const history = runner.equityHistory || [];
@@ -798,7 +821,7 @@ export function updateAiRunnerMarketState(id: string, input: AiRunnerMarketState
     runner.equityHistory = last && last.dataStatus === point.dataStatus && Date.parse(point.at) - Date.parse(last.at) < 1_000
       ? [...history.slice(0, -1), point]
       : [...history, point].slice(-2_000);
-    if (freshStatus && runner.status === 'RUNNING' && drawdownPct >= runner.policy.maxDrawdownPct) {
+    if (valuationFresh && runner.status === 'RUNNING' && drawdownPct >= runner.policy.maxDrawdownPct) {
       runner.status = 'STOPPED';
       runner.stoppedAt = now.toISOString();
       runner.circuitBreakerReason = `策略回撤超过 ${runner.policy.maxDrawdownPct}%`;
@@ -810,7 +833,7 @@ export function updateAiRunnerMarketState(id: string, input: AiRunnerMarketState
           + Number(position.exitFeeUsd || 0) + Number(position.exitSlippageUsd || 0);
         return sum + Math.min(0, (Number(position.pnlUsd) || 0) - costs);
       }, 0);
-    if (freshStatus && runner.status === 'RUNNING' && dailyLoss <= -Math.abs(runner.policy.maxDailyLossUsd)) {
+    if (valuationFresh && runner.status === 'RUNNING' && dailyLoss <= -Math.abs(runner.policy.maxDailyLossUsd)) {
       runner.status = 'STOPPED';
       runner.stoppedAt = now.toISOString();
       runner.circuitBreakerReason = `策略单日亏损超过 $${runner.policy.maxDailyLossUsd.toFixed(2)}`;

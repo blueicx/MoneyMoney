@@ -124,7 +124,7 @@ test('refreshing one watchlist mark does not make another independently fresh ma
   assert.equal(saved.positions.find(item => item.instrument?.symbolOrMarketId === 'MSFT').markStatus, 'delayed');
 });
 
-test('prediction-market NO positions invert YES probability before runner and unified-ledger valuation', () => {
+test('prediction-market NO valuation requires its actual outcome book and keeps the last mark otherwise', () => {
   const runner = createAiRunner('Predict.fun', '12345', 'Binary event', 100);
   const at = new Date().toISOString();
   const noQuote = { market: 'prediction', status: 'live', price: 0.6, bestBid: 0.59, bestAsk: 0.61, fetchedAt: at, source: 'official orderbook' };
@@ -133,12 +133,40 @@ test('prediction-market NO positions invert YES probability before runner and un
     market: 'prediction', status: 'live', instrument: '12345', source: 'official orderbook', dataAt: at,
     prices: { '12345': 0.4 },
   });
-  const saved = getAiRunners().find(item => item.id === runner.id);
-  assert.equal(saved.positions[0].currentPrice, 0.6);
-  assert.ok(Math.abs(saved.positions[0].maxAdversePnlUsd + 0.1) < 1e-9);
-  const account = require('../dist/features/unified-paper-trading').unifiedPaperLedgerStore.getRunnerAccount(saved.accountId);
+  let saved = getAiRunners().find(item => item.id === runner.id);
+  assert.equal(saved.positions[0].currentPrice, 0.61);
+  assert.equal(saved.positions[0].markStatus, 'unavailable');
+  const ledger = require('../dist/features/unified-paper-trading').unifiedPaperLedgerStore;
+  assert.equal(ledger.getRunnerAccount(saved.accountId).positions[0].markStatus, 'unavailable');
+  const actualQuote = { ...noQuote, predictionContract: { instrumentId: 'prediction:predictfun:12345', verified: true,
+    rules: { url: 'https://predict.fun/market/12345', source: 'Predict.fun', evidenceId: 'rule-12345', publishedAt: at },
+    outcomes: { YES: { tokenId: 'yes-12345', bestBid: .39, bestAsk: .41, updatedAt: at }, NO: { tokenId: 'no-12345', bestBid: .55, bestAsk: .57, updatedAt: at } } } };
+  updateAiRunnerMarketState(runner.id, {
+    market: 'prediction', status: 'live', instrument: '12345', source: 'official orderbook', dataAt: at,
+    prices: { '12345': .4 }, outcomeQuotes: { 'prediction:predictfun:12345': actualQuote },
+  });
+  saved = getAiRunners().find(item => item.id === runner.id);
+  assert.ok(Math.abs(saved.positions[0].currentPrice - .56) < 1e-9);
+  assert.ok(Math.abs(saved.positions[0].maxAdversePnlUsd + 0.5) < 1e-9);
+  const account = ledger.getRunnerAccount(saved.accountId);
   assert.equal(account.positions[0].outcome, 'NO');
-  assert.equal(account.positions[0].currentPrice, 0.6);
+  assert.ok(Math.abs(account.positions[0].currentPrice - .56) < 1e-9);
+  actualQuote.predictionContract.instrumentId = 'prediction:predictfun:999';
+  updateAiRunnerMarketState(runner.id, { market: 'prediction', status: 'live', instrument: '12345', dataAt: at,
+    prices: { '12345': .4 }, outcomeQuotes: { 'prediction:predictfun:12345': actualQuote } });
+  saved = getAiRunners().find(item => item.id === runner.id);
+  assert.equal(saved.positions[0].markStatus, 'unavailable');
+  assert.ok(Math.abs(saved.positions[0].currentPrice - .56) < 1e-9);
+  actualQuote.predictionContract.instrumentId = 'prediction:predictfun:12345';
+  updateAiRunnerMarketState(runner.id, { market: 'prediction', status: 'live', instrument: '12345', dataAt: at,
+    outcomeQuotes: { 'prediction:predictfun:12345': actualQuote } });
+  updateAiRunnerMarketState(runner.id, { market: 'prediction', status: 'stale', instrument: '12345', dataAt: at });
+  assert.equal(ledger.getRunnerAccount(saved.accountId).positions[0].markStatus, 'stale');
+  updateAiRunnerMarketState(runner.id, { market: 'prediction', status: 'live', instrument: '12345', dataAt: at,
+    outcomeQuotes: { 'prediction:predictfun:12345': { ...actualQuote, market: 'stocks', price: .9 } } });
+  saved = getAiRunners().find(item => item.id === runner.id);
+  assert.equal(saved.positions[0].markStatus, 'unavailable');
+  assert.ok(Math.abs(saved.positions[0].currentPrice - .56) < 1e-9);
 });
 
 test('legacy runner records without a verifiable isolated ledger remain read-only and are not guessed into a new account', () => {
