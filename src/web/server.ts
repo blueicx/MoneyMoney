@@ -84,6 +84,7 @@ import { getGlobalMacroSpotSnapshot } from '../features/global-macro-spot';
 import { getCrossAssetCorrelationRadar } from '../features/cross-asset-correlation';
 import { getPerpetualCrowding } from '../features/perpetual-crowding';
 import { ContractResearchService, contractIdentity, contractScenario } from '../features/contract-research';
+import { loadContractPanelHistory } from '../features/contract-panel-history';
 import { contractCapacity, compareContractSnapshots } from '../features/contract-comparison';
 import { compareAiRunnerReports } from '../features/ai-runner-comparison';
 import { createAiRunnerComparison, getAiRunnerComparison, validateAiRunnerComparison, buildAiRunnerComparisonSample, saveAiRunnerComparisonSample, listAiRunnerComparisonSamples, replayAiRunnerComparisonSample, type AiRunnerComparisonSample } from '../features/ai-runner-comparison-group';
@@ -3815,8 +3816,31 @@ app.get('/api/contracts/catalog', async (req,res)=>{
   } catch(error:any) {res.status(400).json({success:false,market:'crypto',dataStatus:'failed',reason:error.message});}
 });
 app.get('/api/contracts/detail', async (req,res)=>{
-  try {if(req.query.market && req.query.market!=='crypto')throw new Error('合约市场不一致');const panels=req.query.panels===undefined?undefined:String(req.query.panels).split(',').filter(Boolean);res.json({success:true,...await contractResearchService.detail(String(req.query.instrument || ''),panels)});}
+  try {
+    if(req.query.market && req.query.market!=='crypto')throw new Error('合约市场不一致');
+    const panels=req.query.panels===undefined?undefined:String(req.query.panels).split(',').filter(Boolean),instrument=String(req.query.instrument||'');
+    let detail=await contractResearchService.detail(instrument,panels);
+    if((req as any).user?.role==='admin'&&panels?.some(key=>['openInterest','basis'].includes(key))){
+      const lease='contract-history:'+instrument,owner='contract-history-'+crypto.randomUUID();let archiveReason:string|null=null;
+      if(detail.dataStatus!=='cached'&&stateStore.acquireLease(lease,owner,Date.now(),60000)){
+        try{await dataLakeCatalog.stageContractMetrics(detail);}catch(error:any){archiveReason=error.message;}finally{stateStore.releaseLease(lease,owner);}
+      }
+      detail=await loadContractPanelHistory(detail,panels,async()=>{
+        const history=await dataLakeCatalog.queryContractMetrics({market:'crypto',instrument});
+        if(archiveReason){history.dataStatus='partial';history.reason=archiveReason+'；'+history.reason;}
+        return history;
+      });
+    }
+    res.json({success:true,...detail});
+  }
   catch(error:any){res.status(400).json({success:false,market:'crypto',dataStatus:'failed',reason:error.message});}
+});
+app.get('/api/contracts/history',async(req,res)=>{
+  if(!adminOnly(req,res))return;
+  try{if(req.query.market!=='crypto')throw Error('合约历史必须指定虚拟币市场');const instrument=String(req.query.instrument||'');contractIdentity(instrument);
+    const data=await dataLakeCatalog.queryContractMetrics({market:'crypto',instrument,from:req.query.from?String(req.query.from):undefined,to:req.query.to?String(req.query.to):undefined,asOf:req.query.asOf?String(req.query.asOf):undefined,before:req.query.before?String(req.query.before):undefined,limit:req.query.limit?Number(req.query.limit):undefined});
+    res.json({success:true,...data,updatedAt:data.coverage.to,evidenceRefs:data.rows.map(row=>row.evidenceRef)});
+  }catch(error:any){res.status(400).json({success:false,market:'crypto',dataStatus:'failed',reason:error.message});}
 });
 app.post('/api/contracts/scenario', express.json(),(req,res)=>{
   if(!adminOnly(req,res))return;

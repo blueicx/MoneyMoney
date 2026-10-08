@@ -463,6 +463,60 @@ export class DataLakeCatalog {
     });
   }
 
+  /** Same-contract public quote observations, never reconstructed exchange history. */
+  async stageContractMetrics(snapshot: Record<string, any>): Promise<DatasetPartition> {
+    const match=String(snapshot.instrument).match(/^crypto:(gateio|gateio-delivery):([A-Z0-9]+_USDT(?:_\d{8})?)$/);
+    if(snapshot.market!=='crypto'||!match||(match[1]==='gateio-delivery')!==/_\d{8}$/.test(match[2]))throw Error('合约历史市场或身份无效');
+    const source='https://api.gateio.ws/api/v4/'+(match[1]==='gateio'?'futures':'delivery')+'/usdt/contracts/'+match[2];
+    if(snapshot.sections?.quote?.source!==source||snapshot.sections.quote.dataStatus!=='delayed'||!['delayed','partial'].includes(snapshot.dataStatus))throw Error('合约历史来源或报价状态不可核验');
+    const at=Date.parse(snapshot.retrievedAt),sourceTime=snapshot.sourceTime==null?null:Date.parse(snapshot.sourceTime);
+    if(!Number.isFinite(at)||at>Date.now()+5000||sourceTime!==null&&(!Number.isFinite(sourceTime)||sourceTime>at))throw Error('合约历史时间无效或来自未来');
+    const openInterestUsd=snapshot.quote?.openInterestUsd??null,basisPct=snapshot.quote?.basisPct??null;
+    if(openInterestUsd!==null&&(!Number.isFinite(openInterestUsd)||openInterestUsd<0)||basisPct!==null&&!Number.isFinite(basisPct)||openInterestUsd===null&&basisPct===null)throw Error('合约历史字段无效或缺失');
+    const previous=this.db.prepare("SELECT * FROM dataset_partitions WHERE market='crypto' AND dataset='contract-metrics' AND instrument=? AND status='committed' ORDER BY fetched_at DESC LIMIT 1").get(snapshot.instrument) as any;
+    if(previous&&at<Date.parse(previous.fetched_at)+300000)return this.listPartitions().find(row=>row.id===previous.id)!;
+    const row={market:'crypto',instrument:snapshot.instrument,source,retrievedAt:new Date(at).toISOString(),sourceTime:sourceTime===null?null:new Date(sourceTime).toISOString(),openInterestUsd,basisPct};
+    const contentHash=hash(row),id='contract_metrics_'+contentHash.slice(0,24),manifestId='manifest_'+id;
+    const target=path.join(this.lakeRoot,'crypto','contract-metrics',match[1],match[2],String(new Date(at).getUTCFullYear()),String(new Date(at).getUTCMonth()+1).padStart(2,'0'),contentHash+'.parquet');
+    const stage=path.join(this.lakeRoot,'.staging',id+'-'+crypto.randomUUID()+'.tmp');
+    if(this.getDiagnostics().quotaState==='blocked')throw Error('数据湖达到90%容量停止线，未归档新快照');
+    ensureDir(path.dirname(target));
+    const instance=await DuckDBInstance.create(':memory:',{memory_limit:'512MB',threads:'1'}),connection=await instance.connect();
+    try{
+      await connection.run('CREATE TABLE metrics (market VARCHAR,instrument VARCHAR,source VARCHAR,retrievedAt VARCHAR,sourceTime VARCHAR,openInterestUsd DOUBLE,basisPct DOUBLE)');
+      const appender=await connection.createAppender('metrics');
+      for(const value of [row.market,row.instrument,row.source,row.retrievedAt,row.sourceTime]){if(value===null)appender.appendNull();else appender.appendVarchar(value);}
+      for(const value of [openInterestUsd,basisPct]){if(value===null)appender.appendNull();else appender.appendDouble(value);}
+      appender.endRow();appender.closeSync();await connection.run(`COPY metrics TO '${sqlPath(stage)}' (FORMAT PARQUET,COMPRESSION ZSTD)`);
+      const diagnostics=this.getDiagnostics();if(diagnostics.usageBytes+fs.statSync(stage).size>=diagnostics.quotaBytes*.9)throw Error('数据湖容量不足，未发布合约历史分区');
+      fs.renameSync(stage,target);
+      const partition:DatasetPartition={id,manifestId,path:target,dataset:'contract-metrics',market:'crypto',instrument:row.instrument,timeframe:'snapshot-5m',periodStart:row.retrievedAt,periodEnd:row.retrievedAt,publishedAt:row.retrievedAt,fetchedAt:row.retrievedAt,rowCount:1,status:'committed',contentHash};
+      this.db.transaction(()=>{
+        this.db.prepare('INSERT OR IGNORE INTO dataset_manifests (id,dataset,market,source,field_version,timezone,adjustment,created_at,content_hash) VALUES (?,?,?,?,?,?,?,?,?)').run(manifestId,'contract-metrics','crypto',source,'contract-metrics-v1','UTC','not-applicable',row.retrievedAt,contentHash);
+        this.db.prepare('INSERT OR IGNORE INTO dataset_partitions (id,manifest_id,path,dataset,market,instrument,timeframe,period_start,period_end,published_at,fetched_at,row_count,status,content_hash) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run(id,manifestId,target,'contract-metrics','crypto',row.instrument,'snapshot-5m',row.retrievedAt,row.retrievedAt,row.retrievedAt,row.retrievedAt,1,'committed',contentHash);
+      })();return partition;
+    }catch(error){if(fs.existsSync(target)&&!this.db.prepare('SELECT 1 FROM dataset_partitions WHERE path=?').get(target))fs.rmSync(target,{force:true});throw error;
+    }finally{connection.closeSync();instance.closeSync();fs.rmSync(stage,{force:true});}
+  }
+
+  async queryContractMetrics(input:{market:string;instrument:string;asOf?:string;from?:string;to?:string;before?:string;limit?:number}) {
+    if(input.market!=='crypto'||!/^crypto:(gateio|gateio-delivery):[A-Z0-9]+_USDT(?:_\d{8})?$/.test(input.instrument))throw Error('合约历史市场或身份无效');
+    const ends=[input.asOf,input.to,input.before].filter(Boolean).map(value=>Date.parse(value!));
+    if(ends.some(value=>!Number.isFinite(value)))throw Error('历史查询时间区间无效');
+    const before=Math.min(Date.now(),...ends.map((value,index)=>[input.asOf,input.to,input.before].filter(Boolean)[index]===input.before&&input.before?value-1:value)),after=input.from?Date.parse(input.from):-Infinity;
+    if(!Number.isFinite(before)||Number.isNaN(after)||after>before)throw Error('历史查询时间区间无效');
+    const limit=input.limit??1000;if(!Number.isInteger(limit)||limit<1||limit>2000)throw Error('历史记录上限必须为1–2000');
+    const partitions=this.listPartitions().filter(p=>p.dataset==='contract-metrics'&&p.market==='crypto'&&p.instrument===input.instrument&&p.status==='committed'&&Date.parse(p.fetchedAt)<=before&&Date.parse(p.fetchedAt)>=after).sort((a,b)=>a.fetchedAt.localeCompare(b.fetchedAt));
+    const selected=partitions.slice(-limit),rows:Array<Record<string,any>>=[],failures:string[]=[];
+    const instance=await DuckDBInstance.create(':memory:',{memory_limit:'512MB',threads:'1'}),connection=await instance.connect();
+    try{for(const partition of selected){try{
+      const result=await connection.runAndReadAll(`SELECT * FROM read_parquet('${sqlPath(partition.path)}')`);const data=result.getRowObjectsJS();
+      if(data.length!==1||hash(data[0])!==partition.contentHash)throw Error('分区Hash不一致');
+      rows.push({...data[0],evidenceRef:partition.id,contentHash:partition.contentHash});
+    }catch{failures.push(partition.id+': 文件缺失或Hash校验失败');}}}finally{connection.closeSync();instance.closeSync();}
+    return {market:'crypto',instrument:input.instrument,rows,timeBasis:'retrievedAt',source:'Gate public API · 同合约归档快照',dataStatus:failures.length?'partial':rows.length?'historical':'empty',reason:failures.length?failures.join('；'):rows.length?'抓取时点记录，非交易所历史；缺口不插值':'尚无本合约真实归档快照；不回填推测历史',coverage:{from:rows[0]?.retrievedAt??null,to:rows.at(-1)?.retrievedAt??null,records:rows.length},hasEarlier:partitions.length>selected.length,nextBefore:selected[0]?.fetchedAt??null};
+  }
+
   listPartitions(): DatasetPartition[] {
     return (this.db.prepare('SELECT id, manifest_id AS manifestId, path, dataset, market, instrument, timeframe, period_start AS periodStart, period_end AS periodEnd, published_at AS publishedAt, fetched_at AS fetchedAt, row_count AS rowCount, status, content_hash AS contentHash FROM dataset_partitions ORDER BY published_at').all() as Array<Record<string, any>>).map((row): DatasetPartition => ({
       id: String(row.id), manifestId: String(row.manifestId), path: String(row.path), dataset: String(row.dataset), market: row.market as MarketId, instrument: String(row.instrument), timeframe: String(row.timeframe), periodStart: String(row.periodStart), periodEnd: String(row.periodEnd), publishedAt: String(row.publishedAt), fetchedAt: String(row.fetchedAt), rowCount: Number(row.rowCount), status: row.status as DatasetStatus, contentHash: String(row.contentHash),

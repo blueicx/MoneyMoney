@@ -22,37 +22,41 @@
       const fullButton=chartHost.querySelector('[data-contract-fullscreen]'),redraw=()=>{fullButton.textContent=document.fullscreenElement===chartHost || chartHost.classList.contains('mm-trading-fullscreen')?'退出全屏':'全屏';window.MoneyTradingChart.redraw(chartHost.querySelector('canvas'));};chartHost.onfullscreenchange=redraw;fullButton.onclick=async()=>{if(document.fullscreenElement===chartHost)await document.exitFullscreen();else if(chartHost.classList.contains('mm-trading-fullscreen'))chartHost.classList.remove('mm-trading-fullscreen');else try{await chartHost.requestFullscreen();}catch{chartHost.classList.add('mm-trading-fullscreen');}redraw();};
       let chartRevision=0,chartPending=false,layers;
       async function chart(force=false){if(document.hidden || panel.hidden || !chartHost.isConnected)return;if(chartPending && !force)return;const instrument=current.instrument,interval=chartHost.querySelector('select').value,revision=++chartRevision;chartPending=true;const output=chartHost.querySelector('[data-contract-chart-status]'),canvas=chartHost.querySelector('canvas');try{const value=await api('/api/contracts/kline?'+new URLSearchParams({market:'crypto',instrument,interval}));if(revision!==chartRevision || ctx().instrument!==instrument || !chartHost.isConnected)return;output.textContent=(state[value.dataStatus] || value.dataStatus)+' · '+value.source+' · 抓取 '+value.updatedAt+' · '+(value.reason || 'REST来源快照，非逐笔实时行情');canvas.hidden=!value.data.length;if(value.data.length)window.MoneyTradingChart.render(canvas,value.data,{identity:instrument+'|'+interval,interval,volumeUnit:'张',exchangeTimeZone:value.exchangeTimeZone,sourceTime:value.sourceTime,get showVolume(){return layers?.hasVolume()??true;},onViewport:view=>layers?.viewport(view)});else window.MoneyTradingChart.clear(canvas);}catch(error){if(revision===chartRevision && error.name!=='AbortError')output.textContent='请求失败 · '+error.message;}finally{if(revision===chartRevision)chartPending=false;}}
-      chartHost.querySelector('select').onchange=()=>chart(true);clearInterval(chartTimer);chart();chartTimer=setInterval(()=>{if(window.mm_isLoggedIn===true && window.mm_isGuest!==true)chart();},15000);
+      chartHost.querySelector('select').onchange=()=>chart(true);clearInterval(chartTimer);chart();chartTimer=setInterval(()=>{if(window.mm_isLoggedIn===true && window.mm_isGuest!==true){chart();layers?.poll();}},15000);
       const oldFunding=host.querySelector('[data-contract-funding]'),oldTable=host.querySelector('.mm-table-scroll');oldFunding.previousElementSibling.remove();oldFunding.remove();oldTable.previousElementSibling.remove();oldTable.remove();
       layers=contractLayers(chartHost,current.instrument,chartHost.querySelector('canvas'));
       scenario(host.querySelector('[data-contract-scenario]'));capacity(host);compare(host);
     }catch(error){if(error.name!=='AbortError')status.textContent=error.message;}}
     function contractLayers(chartHost,instrument,mainCanvas){
       const names={volume:'成交量',funding:'资金费率',openInterest:'OI',basis:'基差',depth:'盘口'},storageKey='mm-contract-layers:'+instrument;
-      let chosen=new Set(['volume']),revision=0,lastView,data=null;
+      let chosen=new Set(['volume']),revision=0,lastView,data=null,lastLoad=0;
       try{const stored=JSON.parse(localStorage.getItem(storageKey));if(Array.isArray(stored))chosen=new Set(stored.filter(key=>Object.hasOwn(names,key)));}catch{}
       const toolbar=document.createElement('fieldset');toolbar.className='mm-action-tools';toolbar.innerHTML='<legend>副图 · 当前合约</legend>'+Object.entries(names).map(([key,title])=>'<label><input type="checkbox" data-contract-layer="'+key+'"'+(chosen.has(key)?' checked':'')+'>'+title+'</label>').join('');
       chartHost.querySelector('.mm-action-tools').after(toolbar);const output=document.createElement('div');output.dataset.contractSubpanels='';chartHost.append(output);
       function draw(){
         if(document.hidden || !output.isConnected)return;
-        const canvas=output.querySelector('[data-funding-shared]');if(!canvas || !lastView || !data?.series?.funding)return;
-        const {rows,geometry:g}=lastView,points=data.series.funding.points.filter(p=>p.time>=rows[0].time && p.time<=rows.at(-1).time),context=canvas.getContext('2d'),dpr=window.devicePixelRatio||1,H=120;
+        if(!lastView || !data?.series)return;
+        for(const canvas of output.querySelectorAll('[data-funding-shared],[data-contract-history]')){
+        const key=canvas.dataset.contractHistory||'funding',series=data.series[key];if(!series?.points)continue;
+        const {rows,geometry:g}=lastView,points=series.points.filter(p=>p.time>=rows[0].time && p.time<=rows.at(-1).time),context=canvas.getContext('2d'),dpr=window.devicePixelRatio||1,H=120;
         canvas.width=g.W*dpr;canvas.height=H*dpr;canvas.style.width='100%';canvas.style.height=H+'px';context.scale(dpr,dpr);
         const color=getComputedStyle(canvas).getPropertyValue('--purple').trim()||'#a778ff';context.fillStyle=color;context.font='11px system-ui';
-        if(!points.length){context.fillText('当前K线视窗内无资金费率记录；不补值',g.padL,30);return;}
+        if(!points.length){context.fillText('当前K线视窗内无'+names[key]+'记录；不补值',g.padL,30);continue;}
         const min=Math.min(...points.map(p=>p.value)),max=Math.max(...points.map(p=>p.value)),range=max-min||Math.abs(max)*.1||1,cw=(g.W-g.padL-g.padR)/rows.length;
-        for(const p of points){let i=rows.findIndex(row=>row.time>=p.time);if(i<0)continue;const fraction=i>0?(p.time-rows[i-1].time)/(rows[i].time-rows[i-1].time):1,x=g.padL+(Math.max(0,i-1)+.5+fraction*(i?1:0))*cw,y=90-(p.value-min)/range*65;context.beginPath();context.arc(x,y,3,0,2*Math.PI);context.fill();context.fillText(number(p.value)+'%',x,Math.max(12,y-7));}
+        for(const p of points){let i=rows.findIndex(row=>row.time>=p.time);if(i<0)continue;const fraction=i>0?(p.time-rows[i-1].time)/(rows[i].time-rows[i-1].time):1,x=g.padL+(Math.max(0,i-1)+.5+fraction*(i?1:0))*cw,y=90-(p.value-min)/range*65;context.beginPath();context.arc(x,y,3,0,2*Math.PI);context.fill();context.fillText(number(p.value)+(series.unit||''),x,Math.max(12,y-7));}
+        }
       }
-      async function load(){const seq=++revision,selected=[...chosen].filter(key=>key!=='volume');output.replaceChildren();if(!selected.length)return;output.textContent='正在读取选中副图…';try{
+      async function load(background=false){const seq=++revision,selected=[...chosen].filter(key=>key!=='volume');lastLoad=Date.now();if(!background)output.replaceChildren();if(!selected.length)return;if(!background)output.textContent='正在读取选中副图…';try{
         const result=await api('/api/contracts/detail?'+new URLSearchParams({market:'crypto',instrument,panels:selected.join(',')}));if(seq!==revision || ctx().instrument!==instrument || !output.isConnected)return;data=result;
         output.innerHTML=selected.map(key=>{const series=result.series?.[key],status=series?.dataStatus||'unavailable',reason=series?.reason||(series?'来源未报告异常':'来源没有此字段');
           if(key==='funding')return '<section><h4>资金费率 · % · 与K线共享视窗</h4><p>'+esc(state[status]||status)+' · '+esc(reason)+' · 实际记录 '+esc(series?.coverage?.records??0)+'</p><canvas data-funding-shared></canvas></section>';
           if(key==='depth')return '<section><h4>盘口快照 · 非历史曲线</h4><p>抓取 '+esc(series?.retrievedAt||result.updatedAt)+' · 源时间 '+esc(series?.sourceTime||'未提供')+' · '+esc(reason)+'</p><div class="mm-table-scroll"><table><thead><tr><th>方向</th><th>价格 USDT</th><th>张数</th></tr></thead><tbody>'+[['买',result.depth?.bids||[]],['卖',result.depth?.asks||[]]].flatMap(([side,rows])=>rows.map(row=>'<tr><td>'+side+'</td><td>'+esc(number(row.price))+'</td><td>'+esc(number(row.contracts))+'</td></tr>')).join('')+'</tbody></table></div></section>';
+          if(series?.kind==='observations')return '<section><h4>'+names[key]+' · 抓取时点历史 · '+esc(series.unit||'')+'</h4><p>'+esc(state[status]||status)+' · '+esc(reason)+' · 实际记录 '+esc(series.coverage?.records??0)+'</p><canvas data-contract-history="'+key+'" aria-label="'+names[key]+'真实归档历史"></canvas></section>';
           return '<section><h4>'+names[key]+' · 当前快照 '+esc(number(series?.value))+' '+esc(series?.unit||'')+'</h4><p>'+esc(reason)+' · 抓取 '+esc(series?.retrievedAt||result.updatedAt)+'</p></section>';
         }).join('');draw();
       }catch(error){if(error.name!=='AbortError'&&seq===revision)output.textContent=error.message;}}
       toolbar.querySelectorAll('input').forEach(input=>input.onchange=()=>{if(input.checked)chosen.add(input.dataset.contractLayer);else chosen.delete(input.dataset.contractLayer);try{localStorage.setItem(storageKey,JSON.stringify([...chosen]));}catch{}window.MoneyTradingChart.redraw(mainCanvas);load();});
-      load();return{hasVolume:()=>chosen.has('volume'),viewport:view=>{lastView=view;draw();}};
+      load();return{hasVolume:()=>chosen.has('volume'),viewport:view=>{lastView=view;draw();},poll:()=>{if(!document.hidden&&!panel.hidden&&output.isConnected&&Date.now()-lastLoad>=300000&&[...chosen].some(key=>key!=='volume'))load(true);}};
     }
     function capacity(host){
       if(window.mm_isGuest===true || window.mm_isLoggedIn!==true)return;
