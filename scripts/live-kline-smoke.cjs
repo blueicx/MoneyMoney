@@ -30,6 +30,13 @@ async function main() {
     await page.waitForFunction(() => stockChartKlines.length > 10 && document.getElementById('stock-chart-card').getAttribute('aria-busy') !== 'true');
     assert.equal(await page.evaluate(()=>currentStockKlinePeriod),'5m');
     assert.match(await page.locator('#stock-chart-card .mm-trading-readout').innerText(),/开 .*高 .*低 .*收 .*MA5/);
+    let paperRequests=0;
+    await page.route('**/api/paper/chart-markers?**',route=>{paperRequests++;return route.fulfill({json:{success:true,market:'stocks',instrument:'stock:us:AAPL',dataStatus:'historical',source:'isolated ledger fixture',data:{markers:[{market:'stocks',instrument:'stock:us:AAPL',orderId:'fixture-order',signalId:'fixture-signal',snapshotId:'fixture-snapshot',accountId:'fixture-account',time:rows[60].time+1000,price:101,quantity:1,side:'BUY',feeUsd:.1,slippageUsd:.2}],unlinked:[{orderId:'legacy-order',reason:'未关联：缺少信号 ID'}]}}});});
+    assert.equal(paperRequests,0,'unselected paper layer must not request ledger');
+    await page.locator('#stock-chart-card [data-paper-chart-layer]').check();
+    await page.waitForFunction(()=>document.querySelector('#stock-chart-card details')?.textContent.includes('fixture-order'));
+    await page.locator('#stock-chart-card details summary').click();assert.equal(paperRequests,1);assert.match(await page.locator('#stock-chart-card details').innerText(),/fixture-snapshot.*费用 0.1/);assert.match(await page.locator('#stock-chart-card details').innerText(),/未关联/);
+    await page.locator('#stock-chart-card [data-paper-chart-layer]').uncheck();
     const focus = await page.evaluate(async () => { stockChartFocusIndex = 10; stockChartFocusEnabled = true; const time = stockChartKlines[10].time; window.__unifiedCalls = 0; const original = loadUnifiedStockData; loadUnifiedStockData = (...args) => { window.__unifiedCalls++; return original(...args); }; await loadStockKline(undefined, undefined, undefined, { live: true }); return { expected: time, actual: stockChartKlines[stockChartFocusIndex].time, focus: stockChartFocusEnabled, extraCalls: window.__unifiedCalls }; });
     assert.equal(focus.actual, focus.expected); assert.equal(focus.focus, true); assert.equal(focus.extraCalls, 0);
     const before = requests;

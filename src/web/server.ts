@@ -178,6 +178,8 @@ import { renderTelegramKline } from '../features/telegram-kline-image';
 import { DATA_ROOT } from '../utils/paths';
 import { paperTradingExecutor } from '../features/trading-executor';
 import { unifiedPaperLedgerStore, calculateUnifiedPerformance, replayUnifiedPaperOrders, type UnifiedPaperOrder } from '../features/unified-paper-trading';
+import { paperChartLineage } from '../features/paper-chart-lineage';
+import { stockChartDisclosure } from '../features/stock-chart-disclosure';
 import { logger } from '../utils/logger';
 import { buildSourceSlo, runtimeObservability } from '../features/runtime-observability';
 import { createDataEnvelope } from '../features/data-status';
@@ -2993,6 +2995,8 @@ app.get('/api/stock/kline', async (req, res) => {
     const intradayPeriod = String(req.query.intradayPeriod || period).trim().toLowerCase();
     const effectivePeriod = tradingDate ? intradayPeriod : period;
     const asOf = String(req.query.asOf || '').trim();
+    const adjustment=String(req.query.adjustment||'source');
+    if(!asOf && adjustment!=='source')return res.status(422).json({success:false,data:null,market:'stocks',instrument:symbol,dataStatus:'unsupported',source:'股票K线来源口径',updatedAt:new Date().toISOString(),reason:'当前源尚未声明可转换复权口径；请使用来源口径'});
     const periodConfig = STOCK_KLINE_PERIODS[effectivePeriod as keyof typeof STOCK_KLINE_PERIODS];
     if (tradingDate && asOf) return res.status(400).json({ success: false, data: null, dataStatus: 'unsupported', source: 'Yahoo Finance 历史K线', updatedAt: new Date().toISOString(), reason: '本地历史时点与外部日内区间不能混用；请退出数据时点后再查看日内K线' });
     if (tradingDate && !/^\d{4}-\d{2}-\d{2}$/.test(tradingDate)) return res.status(400).json({ success: false, data: null, dataStatus: 'failed', source: 'Yahoo Finance 历史K线', updatedAt: new Date().toISOString(), reason: 'date 必须为 YYYY-MM-DD' });
@@ -3023,6 +3027,7 @@ app.get('/api/stock/kline', async (req, res) => {
         updatedAt: historical.updatedAt || asOf,
         asOf,
         snapshotId: historical.snapshot?.id || null,
+        ...stockChartDisclosure(data,adjustment,historical.adjustment),
         reason: historicalReason,
       });
     }
@@ -3035,9 +3040,9 @@ app.get('/api/stock/kline', async (req, res) => {
     if (tradingDate) {
       const timezone = resolveStockExchangeTimeZone(requestedSymbol);
       const session = filterStockBarsForTradingDate(snapshot.data, tradingDate, timezone);
-      return res.json({ success: session.bars.length > 0, data: session.bars, dataStatus: session.bars.length ? snapshot.status : 'empty', market: 'stocks', instrument: requestedSymbol, timeframe: effectivePeriod, date: tradingDate, timezone, session, source: snapshot.source, updatedAt, reason: session.bars.length ? undefined : `来源 ${snapshot.source} 当前覆盖 ${session.availableDateRange ? `${session.availableDateRange.from} 至 ${session.availableDateRange.to}` : '暂无可用交易日'}；未提供 ${tradingDate} 的 ${effectivePeriod} 日内数据` });
+      return res.json({ success: session.bars.length > 0, data: session.bars,...stockChartDisclosure(session.bars,adjustment), dataStatus: session.bars.length ? snapshot.status : 'empty', market: 'stocks', instrument: requestedSymbol, timeframe: effectivePeriod, date: tradingDate, timezone, session, source: snapshot.source, updatedAt, reason: session.bars.length ? undefined : `来源 ${snapshot.source} 当前覆盖 ${session.availableDateRange ? `${session.availableDateRange.from} 至 ${session.availableDateRange.to}` : '暂无可用交易日'}；未提供 ${tradingDate} 的 ${effectivePeriod} 日内数据` });
     }
-    res.json({ success: true, data: snapshot.data, dataStatus: snapshot.status, source: snapshot.source, updatedAt, timezone: resolveStockExchangeTimeZone(requestedSymbol), reason: snapshot.error || undefined });
+    res.json({ success: true, data: snapshot.data,...stockChartDisclosure(snapshot.data,adjustment), dataStatus: snapshot.status, source: snapshot.source, updatedAt, timezone: resolveStockExchangeTimeZone(requestedSymbol), reason: snapshot.error || undefined });
   } catch (e: any) {
     res.json({
       success: false,
@@ -8487,6 +8492,15 @@ app.post('/api/ai-runners/:id/routing', express.json(), (req,res) => {
     stateStore.appendAudit({id:crypto.randomUUID(),action:'ai_runner_routing_updated',detail:`${data.id}: ${data.modelSelection}/${data.quoteSelection}`});
     res.json({success:true,data});
   } catch(error:any) { res.status(400).json({success:false,reason:error.message}); }
+});
+app.get('/api/paper/chart-markers',(req,res)=>{
+  if(!adminOnly(req,res))return;
+  const market=String(req.query.market||''),requested=String(req.query.instrument||'');
+  if(!['stocks','options','crypto','prediction'].includes(market))return res.status(400).json({success:false,dataStatus:'failed',reason:'图表市场无效'});
+  const ref=dataLakeCatalog.resolveInstrument(market as MarketId,requested);
+  if(!ref)return res.status(422).json({success:false,market,instrument:requested,dataStatus:'unsupported',reason:'无法核验当前市场标的身份'});
+  const data=paperChartLineage(unifiedPaperLedgerStore.get(),market,ref.id,req.query.accountId?String(req.query.accountId):undefined);
+  res.json({success:true,market,instrument:ref.id,dataStatus:data.markers.length?'historical':'empty',source:'统一持久模拟账本',updatedAt:new Date().toISOString(),reason:data.reason,evidenceRefs:data.markers.map(row=>row.snapshotId),data});
 });
 
 app.get('/api/ai-runners', (req, res) => {

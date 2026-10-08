@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { chromium } = require('playwright');
+const assert = require('node:assert/strict');
 const port = 3198;
 const base = `http://127.0.0.1:${port}`;
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'mm-load-benchmark-'));
@@ -34,15 +35,19 @@ const median = values => [...values].sort((a, b) => a - b)[Math.floor(values.len
         await page.addInitScript(() => {
           localStorage.setItem('mm-market-scope', 'stocks'); localStorage.setItem('mm-last-tab', 'stocks');
           localStorage.setItem('mm-theme', 'dark');
+          window.__benchmarkApiRequests=[];
+          const nativeFetch=window.fetch.bind(window);
+          window.fetch=async(input,options)=>{
+            const url=new URL(typeof input==='string'?input:input.url,location.href),pathname=url.pathname;
+            if(!pathname.startsWith('/api/'))return nativeFetch(input,options);
+            window.__benchmarkApiRequests.push(pathname);
+            if(pathname.startsWith('/api/auth/')||pathname==='/api/workspace/navigation')return nativeFetch(input,options);
+            const payload=pathname==='/api/stock/kline'?{success:true,dataStatus:'delayed',source:'controlled-browser-fixture',updatedAt:new Date().toISOString(),data:Array.from({length:30},(_,i)=>({time:Date.UTC(2026,8,i+1),open:100+i,close:101+i,high:102+i,low:99+i,volume:1000}))}:{success:false,data:null,dataStatus:'unavailable',reason:'受控基准：来源不可用'};
+            return new Response(JSON.stringify(payload),{status:200,headers:{'content-type':'application/json'}});
+          };
         });
         const requests = [];
         page.on('request', request => { if (new URL(request.url()).pathname.startsWith('/api/')) requests.push(new URL(request.url()).pathname); });
-        await page.route('**/api/**', route => {
-          const pathname = new URL(route.request().url()).pathname;
-          if (pathname.startsWith('/api/auth/') || pathname === '/api/workspace/navigation') return route.continue();
-          const payload = pathname === '/api/stock/kline' ? { success: true, dataStatus: 'live', source: 'controlled-browser-fixture', updatedAt: new Date().toISOString(), data: Array.from({ length: 30 }, (_, i) => ({ time: Date.UTC(2026, 8, i + 1), open: 100 + i, close: 101 + i, high: 102 + i, low: 99 + i, volume: 1000 })) } : { success: false, data: null, dataStatus: 'unavailable', reason: '受控基准：来源不可用' };
-          return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(payload) });
-        });
         const cdp = await context.newCDPSession(page);
         await cdp.send('Network.enable');
         await cdp.send('Network.setCacheDisabled', { cacheDisabled: false });
@@ -55,12 +60,13 @@ const median = values => [...values].sort((a, b) => a - b)[Math.floor(values.len
             console.error(JSON.stringify(await page.evaluate(() => ({ url: location.pathname, auth: window.mm_authReady, loggedIn: window.mm_isLoggedIn, shell: document.getElementById('market-workspace-shell')?.dataset.marketScope, state: document.getElementById('stock-chart-card')?.dataset.klineState }))));
             throw error;
           });
-          const result = await page.evaluate(() => ({ usableMs: performance.now(), bytes: performance.getEntriesByType('resource').reduce((sum, row) => sum + row.transferSize, 0), jsBytes: performance.getEntriesByType('resource').filter(row => /\.js/.test(row.name)).reduce((sum, row) => sum + row.transferSize, 0) }));
-          samples.push({ viewport: viewport.width, run, temperature, ...result, apiRequests: [...new Set(requests)] });
+          const result = await page.evaluate(() => ({ usableMs: performance.now(), bytes: performance.getEntriesByType('resource').reduce((sum, row) => sum + row.transferSize, 0), jsBytes: performance.getEntriesByType('resource').filter(row => /\.js/.test(row.name)).reduce((sum, row) => sum + row.transferSize, 0),apiRequests:window.__benchmarkApiRequests }));
+          samples.push({ viewport: viewport.width, run, temperature, ...result, apiRequests: [...new Set([...requests,...result.apiRequests])] });
         }
         await context.close();
       }
     }
+    for(const viewport of [1440,390])for(let run=0;run<3;run++){const cold=samples.find(row=>row.viewport===viewport&&row.run===run&&row.temperature==='cold'),warm=samples.find(row=>row.viewport===viewport&&row.run===run&&row.temperature==='warm');assert.ok(warm.jsBytes<cold.jsBytes*.2,'warm hashed scripts must hit browser cache');}
     console.log(JSON.stringify({ fixture: 'controlled failures + deterministic candles', cpuRate: 4, latencyMs: 80, downloadKbps: 750, samples, medians: [1440, 390].flatMap(viewport => ['cold', 'warm'].map(temperature => ({ viewport, temperature, usableMs: median(samples.filter(row => row.viewport === viewport && row.temperature === temperature).map(row => row.usableMs)) }))) }, null, 2));
   } finally {
     if (browser) await browser.close();
