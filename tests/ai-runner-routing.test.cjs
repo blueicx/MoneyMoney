@@ -45,6 +45,13 @@ test('random quote selection only chooses same identity, fresh ordered bid/ask a
   assert.equal(selected.source,'two');assert.equal(selected.quote.updatedAt,'2026-10-06T15:22:00.000Z');
   assert.equal(helpers.selectRunnerStockQuote('MU',rows.slice(0,4),120000,now),null);
 });
+test('controlled comparison quote selection uses stable provider priority, leaving standalone random selection intact',()=>{
+  const helpers=require('../dist/features/ai-paper-runner'),now=Date.parse('2026-10-08T15:22:30Z');
+  assert.equal(typeof helpers.selectControlledStockQuote,'function','缺少对照组固定报价选择');
+  const row=source=>({source,status:'live',quote:{symbol:'AAPL',currency:'USD',price:100,bestBid:99,bestAsk:101,isRealTime:true,asOf:'2026-10-08T15:22:00Z'}});
+  assert.equal(helpers.selectControlledStockQuote('AAPL',[row('primary'),row('secondary')],120000,now).source,'primary');
+  assert.equal(helpers.selectControlledStockQuote('AAPL',[row('wrong')],120000,now+3600000),null);
+});
 test('runner card exposes routing policies and selected provider rather than implying a fixed retired model',()=>{
   const html=fs.readFileSync(path.join(__dirname,'../src/web/public/index.html'),'utf8');
   assert.match(html,/r\.modelSelection === 'available-free'/);

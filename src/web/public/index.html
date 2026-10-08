@@ -4156,6 +4156,7 @@ function initAiRunnerStream() {
 }
 async function loadAiRunners() {
   initAiRunnerStream();
+  if (window.MoneyMoneyAutomaticComparison) void window.MoneyMoneyAutomaticComparison.refresh(activeMarketScope);
   try {
     const market = ['stocks','options','crypto','prediction'].includes(activeMarketScope) ? activeMarketScope : '';
     const res = await fetch('/api/ai-runners'+(market ? '?market='+market : ''));
@@ -15481,6 +15482,7 @@ window.MoneyMoneyChartBridge = {
 <script src="/action-research-workspace.js?v=20261002-contracts1" defer></script>
 <script src="/practical-experience.js?v=20261002-contracts1" defer></script>
 <script src="/professional-research.js?v=20261007" defer></script>
+<script src="/automatic-comparison.js" defer></script>
 <script src="/contracts-workspace.js?v=20261002-contracts1" defer></script>
 <link rel="stylesheet" href="/contracts-workspace.css?v=20261002-contracts1">
       <div class="drawer density-compact density-comfortable"></div>

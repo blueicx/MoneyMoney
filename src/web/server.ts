@@ -8423,7 +8423,7 @@ app.get('/api/paper/trades', (req, res) => {
 import {
   createAiRunner, stopAiRunner, getAiRunners,
   runnerOpenPosition, runnerClosePosition,
-  summarizeRunner, updateAiRunnerPolicy, updateAiRunnerRouting, selectRunnerStockQuote, pauseAiRunner, resumeAiRunner, resetAiRunnerCircuit,
+  summarizeRunner, updateAiRunnerPolicy, updateAiRunnerRouting, selectRunnerStockQuote, selectControlledStockQuote, pauseAiRunner, resumeAiRunner, resetAiRunnerCircuit,
   evaluateRunnerOpen, resolveRunnerFill, evaluateRunnerQuoteGate, calculateRunnerExecutionCosts,
   evaluateAiRunnerTrigger, isAiRunnerCallAllowed, appendAiRunnerDecision, listAiRunnerHistory,
   updateAiRunnerMarketState, recordAiRunnerModelCall, evaluateRunnerIndicatorEvidence,
@@ -8468,7 +8468,62 @@ app.get('/api/ai-runners', (req, res) => {
   res.json({ success: true, enabled: config.aiPaperTradingEnabled, data: runners });
 });
 import {ComparisonModelBudget} from '../features/ai-comparison-budget';
+import {ComparisonScheduler, COMPARISON_MARKETS, type AutomaticComparisonRound, type ComparisonMarket} from '../features/ai-comparison-scheduler';
+import {selectComparisonWatchlist} from '../features/ai-comparison-watchlist';
 const comparisonModelBudget=new ComparisonModelBudget(stateStore);
+const comparisonScheduler=new ComparisonScheduler(stateStore);
+app.get('/api/ai-runners/comparisons/automatic',(req,res)=>{
+  if(!adminOnly(req,res))return;
+  try{res.json({success:true,data:comparisonScheduler.list(),budget:comparisonModelBudget.summary(),featureEnabled:config.aiPaperTradingEnabled,
+    reason:'独立对照调度；每小时全局最多一轮。现有自主跑单不受此开关或额度影响。'});}
+  catch(error:any){res.status(503).json({success:false,reason:error.message});}
+});
+app.post('/api/ai-runners/comparisons/automatic/rebuild',express.json(),(req,res)=>{
+  if(!adminOnly(req,res))return;
+  if(!config.aiPaperTradingEnabled)return res.status(403).json({success:false,reason:'AI模拟能力关闭'});
+  try{
+    const market=req.body?.market as ComparisonMarket;
+    if(!COMPARISON_MARKETS.includes(market))throw new Error('请选择明确市场');
+    const runtime=getAiRuntimeConfig('openrouter'),model=String(req.body?.model || runtime.model).trim();
+    if(!model || model==='openrouter/free' || model==='openrouter/auto')throw new Error('对照必须固定具体模型版本，不能使用自动路由');
+    const ids=unifiedAlertStore.listWatchlist(),pinned=Array.isArray(req.body?.pinned)?req.body.pinned.filter((id:unknown)=>typeof id==='string'&&ids.includes(id)):[];
+    const selected=selectComparisonWatchlist(market,ids,pinned,id=>{
+      const refs=COMPARISON_MARKETS.map(scope=>dataLakeCatalog.resolveInstrument(scope,id)).filter((ref):ref is NonNullable<typeof ref>=>!!ref);
+      if(refs.length>1)throw new Error('自选身份有歧义');
+      return refs[0] || null;
+    });
+    if(!selected.instruments.length)return res.status(422).json({success:false,dataStatus:'unavailable',reason:'当前自选没有达到本市场撮合身份门槛的标的',excluded:selected.excluded});
+    const first=selected.instruments[0];
+    const data=stateStore.transaction(()=>{
+      const group=createAiRunnerComparison(first.venue,first.symbolOrMarketId,first.title || first.symbolOrMarketId,1000,{},
+        {seed:42,model,universe:{kind:'watchlist',sourceWatchlistId:'admin',instruments:selected.instruments}});
+      return comparisonScheduler.register({market,groupId:group.id,model,instruments:selected.instruments.map(ref=>ref.symbolOrMarketId),
+        excluded:selected.excluded.map(row=>row.instrument+'：'+row.reason)});
+    });
+    stateStore.appendAudit({id:crypto.randomUUID(),action:'ai_comparison_auto_rebuilt',detail:market+' '+data.groupId+'；旧账户及历史保留；未调用模型'});
+    res.json({success:true,data,excluded:selected.excluded,reason:'已冻结管理员自选；三个独立账户各1000虚拟USD，尚未执行。重建旧组必须人工恢复。'});
+  }catch(error:any){res.status(400).json({success:false,reason:error.message});}
+});
+app.post('/api/ai-runners/comparisons/automatic/control',express.json(),(req,res)=>{
+  if(!adminOnly(req,res))return;
+  try{
+    const {market,paused,enabled}=req.body || {};
+    if((enabled===true||paused===false)&&(!config.aiPaperTradingEnabled||!getAiRuntimeConfig('openrouter').configured))throw new Error('AI模拟能力或模型配置不可用，不能恢复调度');
+    if(typeof enabled==='boolean'&&market==null){
+      if(enabled)for(const scheduled of comparisonScheduler.list().groups){
+        const group=getAiRunnerComparison(scheduled.groupId),rows=getAiRunners().filter(row=>group?.runnerIds.includes(row.id));
+        if(!group||!validateAiRunnerComparison(group,rows).valid||rows.some(row=>row.model!==scheduled.model))throw new Error('冻结对照账户或模型配置未通过恢复校验');
+      }
+      comparisonScheduler.setEnabled(enabled);
+    }else if(COMPARISON_MARKETS.includes(market)&&typeof paused==='boolean'){
+      const scheduled=comparisonScheduler.list().groups.find(row=>row.market===market),group=scheduled&&getAiRunnerComparison(scheduled.groupId);
+      if(!paused&&(!group||!validateAiRunnerComparison(group,getAiRunners().filter(row=>group.runnerIds.includes(row.id))).valid))throw new Error('对照配置未通过恢复校验');
+      comparisonScheduler.pause(market,paused);
+    }else throw new Error('调度控制参数无效');
+    stateStore.appendAudit({id:crypto.randomUUID(),action:'ai_comparison_auto_control',detail:JSON.stringify({market,paused,enabled})});
+    res.json({success:true,data:comparisonScheduler.list(),reason:'启用/恢复后最早下个整点执行；不会立即下单。'});
+  }catch(error:any){res.status(400).json({success:false,reason:error.message});}
+});
 app.get('/api/ai-runners/comparisons/budget',(req,res)=>{
   if(!adminOnly(req,res))return;
   try{res.json({success:true,data:comparisonModelBudget.summary()});}catch(error:any){res.status(503).json({success:false,reason:error.message});}
@@ -8508,46 +8563,73 @@ app.get('/api/ai-runners/comparisons/:id/samples/:sample/replay', (req,res) => {
   try {res.json({success:true,...replayAiRunnerComparisonSample(String(req.params.id),String(req.params.sample))});}
   catch(error:any){res.status(404).json({success:false,reason:error.message});}
 });
-app.post('/api/ai-runners/comparisons/:id/tick',express.json(),async(req,res)=>{
-  if(!adminOnly(req,res))return;
-  if(!config.aiPaperTradingEnabled)return res.status(403).json({success:false,reason:'AI跑单开关关闭，未调用模型或创建订单'});
+async function runControlledComparison(groupId:string,key:string,scheduled?:AutomaticComparisonRound){
   let activatedIds: string[] = [];
   try {
-    const group=getAiRunnerComparison(String(req.params.id));if(!group)throw new Error('对照实验不存在');
-    const key=String(req.headers['idempotency-key'] || req.body?.idempotencyKey || '').trim();
+    if(!config.aiPaperTradingEnabled)throw new Error('AI模拟能力关闭');
+    const group=getAiRunnerComparison(groupId);if(!group)throw new Error('对照实验不存在');
+    // Scheduled groups cannot be executed manually outside the global hourly claim.
+    if(!scheduled&&comparisonScheduler.list().groups.some(row=>row.groupId===groupId))throw new Error('自动对照组由全局整点调度；手动执行不能绕过额度与轮转');
+    const guard=()=>{if(scheduled)comparisonScheduler.assertCurrent(scheduled);};
     if(!key || key.length>160)throw new Error('对照执行必须携带有效幂等键');
     const validation=validateAiRunnerComparison(group,getAiRunners().filter(row=>group.runnerIds.includes(row.id)));
     if(!validation.valid)throw new Error(validation.reason);
     const result=await aiRunnerTickCoordinator.run('comparison:'+group.id,'ai-comparison:'+group.id+':'+key,async()=>{
       const roundKey='ai-comparison:'+group.id+':'+key;
+      guard();
+      const primary=getAiRunners().find(row=>row.id===group.runnerIds[0])!;
+      const refs=scheduled?primary.universe!.instruments.filter(ref=>ref.symbolOrMarketId===scheduled.instrument):primary.universe!.instruments;
+      if(!refs.length)throw new Error('冻结标的身份不匹配');
+      const inputs=[];for(const ref of refs)inputs.push(await loadAiRunnerInstrumentSnapshot(primary,ref));
+      const sample=buildAiRunnerComparisonSample(group,key,new Date().toISOString(),inputs);
+      saveAiRunnerComparisonSample(group.id,sample);
+      guard();
+      if(scheduled){
+        const runtime=getAiRuntimeConfig('openrouter');
+        if(!runtime.configured)throw new Error('模型未配置；整轮等待，未调用模型或执行规则订单');
+        if(scheduled.market==='prediction')throw new Error('当前跑单快照未保存已核验的双边YES/NO合约及官方结算规则；整轮等待，不以概率或互补价格代替');
+        if(inputs.some(input=>input.market!==scheduled.market||!input.quote||!evaluateRunnerQuoteGate(primary.policy,input.quote).allowed))throw new Error(inputs.find(input=>!input.quote||!evaluateRunnerQuoteGate(primary.policy,input.quote).allowed)?.reason || '共享报价未达身份或新鲜度门槛；整轮等待');
+        const aiArms=getAiRunners().filter(row=>group.runnerIds.includes(row.id)&&row.mode!=='rules');
+        for(const arm of aiArms){
+          const at=new Date(),trigger=evaluateAiRunnerTrigger(arm,true,at),allowance=isAiRunnerCallAllowed(arm,true,at);
+          if(!trigger.allowed||!allowance.allowed)throw new Error(trigger.reason||allowance.reason||'AI账户暂不可调用；整轮等待');
+          if(arm.model!==scheduled.model)throw new Error('冻结模型版本不匹配；整轮等待');
+        }
+      }
       // Both AI arms each make one model request for their shared frozen snapshots.
       // Reserve the WHOLE round before activation; insufficient quota cannot run rules alone.
       comparisonModelBudget.reserve(roundKey,2);
       activateAiRunnerComparison(group.id,group.runnerIds);
       activatedIds=group.runnerIds;
       try {
-        const primary=getAiRunners().find(row=>row.id===group.runnerIds[0])!;
-        const inputs=[];for(const ref of primary.universe!.instruments)inputs.push(await loadAiRunnerInstrumentSnapshot(primary,ref));
-        const sample=buildAiRunnerComparisonSample(group,key,new Date().toISOString(),inputs);
-        saveAiRunnerComparisonSample(group.id,sample);
-        const prepared=[];for(const id of group.runnerIds)prepared.push(await prepareAiRunnerTick(id,'ai-comparison:'+group.id+':'+key+':'+id,sample,roundKey));
+        const prepared=[];for(const id of group.runnerIds){guard();prepared.push(await prepareAiRunnerTick(id,'ai-comparison:'+group.id+':'+key+':'+id,sample,roundKey,guard));}
         return {sample,prepared};
       }catch(error){group.runnerIds.forEach(id=>pauseAiRunner(id,'对照准备失败，未提交成交'));throw error;}
     },({sample,prepared})=>{
+      guard();
       const current=getAiRunners().filter(row=>group.runnerIds.includes(row.id));
       if(!validateAiRunnerComparison(group,current).valid || current.some(row=>row.status!=='RUNNING'))throw new Error('对照准备期间有账户被暂停或配置改变，整轮未提交成交');
       const results=prepared.map(executePreparedRunnerTick);
       saveAiRunnerComparisonSample(group.id,{...sample,results:results.flatMap(row=>row.decisions)});
-      group.runnerIds.forEach(id=>pauseAiRunner(id,'对照轮次完成；等待下一次人工执行'));
+      group.runnerIds.forEach(id=>pauseAiRunner(id,scheduled?'对照轮次完成；等待全局整点轮转':'对照轮次完成；等待下一次人工执行'));
       stateStore.appendAudit({id:crypto.randomUUID(),action:'ai_comparison_tick',detail:group.id+'；快照 '+sample.hash});
       return {sampleId:sample.id,snapshotHash:sample.hash,results,reason:validation.reason};
     });
+    return result;
+  }catch(error){
+    activatedIds.forEach(id=>pauseAiRunner(id,'对照轮次失败，未自动恢复'));
+    throw error;
+  }
+}
+app.post('/api/ai-runners/comparisons/:id/tick',express.json(),async(req,res)=>{
+  if(!adminOnly(req,res))return;
+  if(!config.aiPaperTradingEnabled)return res.status(403).json({success:false,reason:'AI跑单开关关闭，未调用模型或创建订单'});
+  try{
+    const key=String(req.headers['idempotency-key'] || req.body?.idempotencyKey || '').trim();
+    const result=await runControlledComparison(String(req.params.id),key);
     if(result.status==='busy')return res.status(409).json({success:false,reason:'该对照正在执行，未重复下单'});
     res.json({success:true,...result});
-  }catch(error:any){
-    activatedIds.forEach(id=>pauseAiRunner(id,'对照轮次失败，未自动恢复'));
-    res.status(400).json({success:false,reason:error.message});
-  }
+  }catch(error:any){res.status(400).json({success:false,reason:error.message});}
 });
 
 app.post('/api/ai-runners/create', express.json(), (req, res) => {
@@ -8775,7 +8857,7 @@ async function loadAiRunnerInstrumentSnapshot(runner: AiRunner, ref: AiRunnerIns
     } else if (ref.venue === 'Stocks') {
       const symbol = instrument.replace(/^US(?=[A-Z])/, '').replace(/\.(OQ|N)$/i,'');
       if (!/^[A-Z][A-Z0-9.:-]{0,19}$/.test(symbol)) throw new Error('股票代码格式无效');
-      if (runner.quoteSelection === 'random-valid' && !runner.comparisonControl) {
+      if ((runner.quoteSelection === 'random-valid' && !runner.comparisonControl) || runner.comparisonControl) {
         let yahoo = runnerYahooQuotes.get(symbol);
         if (!yahoo) { yahoo=createYahooStockAdapter();runnerYahooQuotes.set(symbol,yahoo);if(runnerYahooQuotes.size>100)runnerYahooQuotes.delete(runnerYahooQuotes.keys().next().value!); }
         const [nasdaq,yahooQuote,intraday] = await Promise.all([
@@ -8783,7 +8865,8 @@ async function loadAiRunnerInstrumentSnapshot(runner: AiRunner, ref: AiRunnerIns
         ]);
         const observedNow=Date.now();
         const candidates=[{source:'Nasdaq 公共双边报价',status:nasdaq.status,quote:nasdaq.data},{source:'Yahoo 股票双边报价',status:yahooQuote.status,quote:yahooQuote.data}];
-        const chosen=selectRunnerStockQuote(symbol,candidates,runner.policy.minFreshnessMs,observedNow);
+        const chosen=runner.comparisonControl ? selectControlledStockQuote(symbol,candidates,runner.policy.minFreshnessMs,observedNow)
+          : selectRunnerStockQuote(symbol,candidates,runner.policy.minFreshnessMs,observedNow);
         // Only completed one-minute candles; source time is never replaced by fetch time.
         const completed=(intraday.data || []).filter(bar=>bar.time+60_000<=observedNow);
         const metrics=runnerIndicators(completed.map(bar=>[bar.time,bar.open,bar.high,bar.low,bar.close,bar.volume]));
@@ -8889,7 +8972,7 @@ interface PreparedAiRunnerTick {
   modelVersion?: string;
 }
 
-async function prepareAiRunnerTick(runnerId: string, idempotencyKey: string, sample?: AiRunnerComparisonSample,comparisonRoundKey?:string): Promise<PreparedAiRunnerTick> {
+async function prepareAiRunnerTick(runnerId: string, idempotencyKey: string, sample?: AiRunnerComparisonSample,comparisonRoundKey?:string,comparisonGuard?:()=>void): Promise<PreparedAiRunnerTick> {
   const runner = getAiRunners().find(item => item.id === runnerId);
   let now = sample ? new Date(sample.at) : new Date();
   if (!runner) return { runnerId, idempotencyKey, snapshots: [], records: [] };
@@ -8924,6 +9007,7 @@ async function prepareAiRunnerTick(runnerId: string, idempotencyKey: string, sam
         let comparisonQuotaDenied=false;
         try {
           const result = await requestAiRunnerIntent(runner, runtime, snapshots, fetch, (model,attempt) => {
+            comparisonGuard?.();
             const current=getAiRunners().find(item=>item.id===runner.id);
             if (!current || current.status!=='RUNNING') throw new Error('跑单已暂停或停止');
             if(current.comparisonControl&&(!comparisonRoundKey||!comparisonModelBudget.consume(comparisonRoundKey,`${runner.id}:${attempt}`))){comparisonQuotaDenied=true;throw new Error('对照请求缺少有效整轮额度或已消费，整轮等待');}
@@ -9237,6 +9321,22 @@ setInterval(() => {
     } catch { /* keep interval alive */ }
   })();
 }, 60_000);
+
+// Separate, opt-in scheduler. It never changes the existing standalone runner path.
+setInterval(()=>{
+  if(!config.aiPaperTradingEnabled)return;
+  void (async()=>{
+    const round=comparisonScheduler.claim(crypto.randomUUID());if(!round)return;
+    let lost=false;
+    const heartbeat=setInterval(()=>{try{comparisonScheduler.heartbeat(round);}catch{lost=true;}},40000);heartbeat.unref();
+    try{
+      const result=await runControlledComparison(round.groupId,round.id,round);
+      if(lost)throw new Error('自动对照租约或配置已失效');
+      comparisonScheduler.finish(round,result.status==='busy'?'waiting':'completed',result.status==='busy'?'对照组租约正在使用；本小时不重复执行':'本轮已记录共同快照及三个账户结果');
+    }catch(error:any){comparisonScheduler.finish(round,'waiting',error.message || '自动对照未能完成；未自动重试');}
+    finally{clearInterval(heartbeat);}
+  })().catch(error=>logger.warn('automatic comparison scheduler failed',{reason:error instanceof Error?error.message:String(error)}));
+},30000).unref();
 
 // --- Backtesting ---
 

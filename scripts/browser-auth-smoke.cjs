@@ -102,6 +102,7 @@ async function main() {
     assert.equal(guestRunnerList.status, 403, JSON.stringify(guestRunnerList.body));
     assert.equal(guestRunnerList.body.code, 'GUEST_READ_ONLY');
     assert.equal(await page.evaluate(()=>fetch('/api/ai-runners/comparisons/budget').then(r=>r.status)),403,'comparison quota remains private');
+    assert.equal(await page.evaluate(()=>fetch('/api/ai-runners/comparisons/automatic').then(r=>r.status)),403,'automatic groups and scheduling history remain private');
     const guestRunnerHistory = await page.evaluate(() => fetch('/api/ai-runners/private-runner/history').then(async response => ({ status: response.status, body: await response.json() })));
     assert.equal(guestRunnerHistory.status, 403, JSON.stringify(guestRunnerHistory.body));
     assert.equal(guestRunnerHistory.body.code, 'GUEST_READ_ONLY');

@@ -62,9 +62,10 @@ html = html.replace(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi, (tag, attributes,
 });
 modules.guru.push(fs.readFileSync(path.join(source, 'guru-replay.js'), 'utf8'));
 modules.research.push(fs.readFileSync(path.join(source, 'action-research-workspace.js'), 'utf8'));
+modules.ai.push(fs.readFileSync(path.join(source, 'automatic-comparison.js'), 'utf8'));
 const moduleUrls = Object.fromEntries(Object.entries(modules).map(([group, code]) => [group, emit(`workspace-${group}`, code.join('\n'), 'js')]));
 moduleUrls.contracts = emit('workspace-contracts', fs.readFileSync(path.join(source, 'contracts-workspace.js')), 'js');
-html = html.replace(/<script\b[^>]*src="\/(?:guru-replay|action-research-workspace|contracts-workspace)\.js[^"\s]*"[^>]*><\/script>/g, '');
+html = html.replace(/<script\b[^>]*src="\/(?:guru-replay|action-research-workspace|contracts-workspace|automatic-comparison)\.js[^"\s]*"[^>]*><\/script>/g, '');
 
 const fingerprinted = new Map();
 html = html.replace(/(src|href)="(\/[^"?]+\.(?:js|css))(?:\?[^"\s]*)?"/g, (tag, attribute, url) => {

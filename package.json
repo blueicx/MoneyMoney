@@ -34,6 +34,7 @@
     "smoke:auth": "node scripts/browser-auth-smoke.cjs",
     "smoke:professional": "node scripts/professional-research-smoke.cjs",
     "smoke:live-kline": "node scripts/live-kline-smoke.cjs",
+    "smoke:automatic-comparison": "node scripts/automatic-comparison-smoke.cjs",
     "state:backup": "node scripts/state-backup.cjs",
     "state:restore": "node scripts/state-backup.cjs restore"
   },

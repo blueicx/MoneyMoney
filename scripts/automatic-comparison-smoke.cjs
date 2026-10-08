@@ -1,0 +1,59 @@
+const assert=require('node:assert/strict'),fs=require('node:fs'),os=require('node:os'),path=require('node:path');
+const {spawn}=require('node:child_process'),{chromium}=require('playwright');
+const root=path.join(__dirname,'..'),dir=fs.mkdtempSync(path.join(os.tmpdir(),'mm-auto-comparison-browser-'));
+process.env.MONEYMONEY_DATA_DIR=dir;
+const {dataLakeCatalog}=require('../dist/storage/data-lake'),{stateStore}=require('../dist/storage/sqlite-state');
+const {createAiRunner,getAiRunners}=require('../dist/features/ai-paper-runner');
+for(const symbol of ['AAPL','MU','SNDK','SPY','MSFT','NVDA'])dataLakeCatalog.registerInstrument({type:'stock',venue:'us',symbol});
+dataLakeCatalog.registerInstrument({type:'crypto',venue:'binance',symbol:'BTCUSDT'});
+dataLakeCatalog.registerInstrument({type:'option',venue:'cboe',symbol:'AAPL:20261016:C:100'});
+const sentinel=createAiRunner('Stocks','MU','Existing isolated runner',1000,{}, {mode:'ai-autonomous-paper',startPaused:true});
+const before=JSON.stringify(getAiRunners().find(row=>row.id===sentinel.id));
+dataLakeCatalog.close();stateStore.close();
+const base='http://127.0.0.1:3198';
+const child=spawn(process.execPath,['dist/web/server.js'],{cwd:root,stdio:'ignore',env:{...process.env,MONEYMONEY_DATA_DIR:dir,APP_HOST:'127.0.0.1',APP_PORT:'3198',MONEYMONEY_LOGIN_USER:'smoke-owner',MONEYMONEY_LOGIN_PASS:'isolated-smoke-password',MONEYMONEY_JWT_SECRET:'isolated-auto-comparison-1234567890',TELEGRAM_NETWORK_ENABLED:'false',TELEGRAM_POLLING_ENABLED:'false',TELEGRAM_BOT_TOKEN:'',TELEGRAM_CHAT_ID:'',TELEGRAM_ALLOWED_CHAT_IDS:'',TELEGRAM_ADMIN_CHAT_IDS:'',OPENROUTER_API_KEY:'',GROQ_API_KEY:'',WECOM_WEBHOOK_URL:'',BARK_DEVICE_KEY:'',MONEYMONEY_DISCORD_WEBHOOK_URL:'',MONEYMONEY_LARK_WEBHOOK_URL:'',MONEYMONEY_JSON_WEBHOOK_URL:'',AI_PAPER_TRADING_ENABLED:'true',MONEYMONEY_DISABLE_HISTORY_CAPTURE:'true',PRIVATE_KEY:'',API_KEY:''}});
+async function main(){let browser;try{
+ for(let n=0;n<80;n++){try{if((await fetch(base+'/api/health/live')).ok)break;}catch{}await new Promise(r=>setTimeout(r,250));}
+ browser=await chromium.launch({headless:true,channel:process.env.MONEYMONEY_SMOKE_BROWSER||'chrome'});
+ const page=await browser.newPage({viewport:{width:1440,height:900}}),errors=[],calls=[];
+ page.on('pageerror',e=>errors.push(e.message));page.on('request',r=>{if(r.url().includes('/comparisons/automatic'))calls.push(r.url());});
+ await page.goto(base+'/login');await page.fill('#username','smoke-owner');await page.fill('#password','isolated-smoke-password');
+ await Promise.all([page.waitForURL(u=>u.pathname==='/'),page.click('#submitBtn')]);
+ await page.waitForFunction(()=>window.mm_isLoggedIn && typeof window.showTab==='function');
+ assert.equal(calls.length,0,'no automatic comparison request in unrelated initial workspace');
+ const auth=await (await page.request.get(base+'/api/auth/status')).json(),headers={'x-csrf-token':auth.data.csrfToken};
+ const post=async(route,data)=>{const r=await page.request.post(base+route,{headers,data});return {status:r.status(),body:await r.json()};};
+ for(const id of ['stock:us:AAPL','stock:us:MU','stock:us:SNDK','stock:us:SPY','stock:us:MSFT','stock:us:NVDA','crypto:binance:BTCUSDT','option:cboe:AAPL:20261016:C:100'])assert.equal((await post('/api/watchlist',{instrumentId:id})).status,200);
+ const csrf=await page.request.post(base+'/api/ai-runners/comparisons/automatic/rebuild',{data:{market:'stocks'}});assert.equal(csrf.status(),403);
+ const created=await post('/api/ai-runners/comparisons/automatic/rebuild',{market:'stocks',pinned:['stock:us:NVDA'],model:'fixture/fixed-model'});
+ assert.equal(created.status,200,JSON.stringify(created.body));assert.deepEqual(created.body.data.instruments,['NVDA','AAPL','MU','SNDK','SPY']);assert.equal(created.body.excluded[0].instrument,'stock:us:MSFT');
+ const firstGroup=created.body.data.groupId;
+ const ids=(await (await page.request.get(base+'/api/ai-runners/comparisons/'+firstGroup)).json()).data.runnerIds;
+ const all=(await (await page.request.get(base+'/api/ai-runners')).json()).data;
+ assert.ok(all.filter(r=>ids.includes(r.id)).every(r=>r.budgetUsd===1000&&r.status==='STOPPED'&&r.model==='fixture/fixed-model'));
+ assert.equal(new Set(all.filter(r=>ids.includes(r.id)).map(r=>r.accountId)).size,3);
+ assert.equal(JSON.stringify(all.find(r=>r.id===sentinel.id), (key,value)=>key==='summary'?undefined:value),before,'existing independent runner unchanged');
+ const enable=await post('/api/ai-runners/comparisons/automatic/control',{enabled:true});assert.equal(enable.status,400,'no model configuration => cannot enable');
+ const manual=await post('/api/ai-runners/comparisons/'+firstGroup+'/tick',{idempotencyKey:'blocked-manual'});assert.equal(manual.status,400);assert.match(manual.body.reason,/全局整点/);
+ const options=await post('/api/ai-runners/comparisons/automatic/rebuild',{market:'options',model:'fixture/fixed-model'});assert.equal(options.status,422);assert.match(options.body.excluded[0].reason,/期权/);
+ assert.equal((await post('/api/ai-runners/comparisons/automatic/rebuild',{market:'crypto',model:'fixture/fixed-model'})).status,200);
+ await page.evaluate(()=>{setMarketScope('stocks');showTab('paper');});
+ const panel=page.locator('#mm-automatic-comparison');await panel.waitFor({state:'visible'});await page.waitForFunction(()=>document.getElementById('mm-automatic-comparison')?.textContent.includes('NVDA'));
+ assert.ok(!(await panel.innerText()).includes('BTCUSDT'));
+ const themes=[];for(const theme of ['light','dark','money']){
+   await page.evaluate(theme=>{if(theme==='light')document.documentElement.removeAttribute('data-theme');else document.documentElement.setAttribute('data-theme',theme);},theme);
+   await page.waitForTimeout(250);
+   themes.push(await panel.locator('button[data-rebuild]').evaluate(b=>({background:getComputedStyle(b).backgroundColor,color:getComputedStyle(b).color})));
+ }
+ assert.equal(new Set(themes.map(t=>t.background+'|'+t.color)).size,3,'all theme controls change: '+JSON.stringify(themes));
+ await page.setViewportSize({width:390,height:844});assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+2),'mobile no horizontal overflow');
+ await page.evaluate(()=>{setMarketScope('crypto');showTab('paper');});await page.waitForFunction(()=>document.getElementById('mm-automatic-comparison')?.textContent.includes('BTCUSDT'));
+ assert.ok(!(await panel.innerText()).includes('NVDA'));
+ const rebuilt=await post('/api/ai-runners/comparisons/automatic/rebuild',{market:'stocks',model:'fixture/fixed-model'});assert.equal(rebuilt.status,200);assert.equal(rebuilt.body.data.paused,true);
+ const status=(await (await page.request.get(base+'/api/ai-runners/comparisons/automatic')).json());assert.equal(status.data.enabled,false);assert.equal(status.budget.issued,0);assert.equal(status.budget.reserved,0);assert.ok(status.data.archived.some(r=>r.groupId===firstGroup));
+ const guest=await browser.newPage();await guest.goto(base+'/login');await Promise.all([guest.waitForURL(u=>u.pathname==='/'),guest.click('#guestBtn')]);
+ assert.equal((await guest.request.get(base+'/api/ai-runners/comparisons/automatic')).status(),403);
+ assert.equal((await guest.request.post(base+'/api/ai-runners/comparisons/automatic/control',{data:{enabled:true}})).status(),403);
+ assert.deepEqual(errors,[]);console.log(JSON.stringify({success:true,marketFiltering:true,threeThemes:themes,independentRunnerUnchanged:true,modelRequests:0,automaticEnabled:false,archivedGroup:firstGroup,privateEndpoints:true}));
+ }finally{await browser?.close();child.kill();await new Promise(r=>child.once('exit',r));console.log('Isolated fixture retained: '+dir);}}
+main().catch(error=>{console.error(error);process.exitCode=1;});

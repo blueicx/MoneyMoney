@@ -235,6 +235,10 @@ export function selectRunnerStockQuote(symbol: string, candidates: Array<{ sourc
     price:selected.quote!.price, bestBid:selected.quote!.bestBid, bestAsk:selected.quote!.bestAsk, updatedAt:at, fetchedAt:at } };
 }
 
+export function selectControlledStockQuote(symbol: string, candidates: Parameters<typeof selectRunnerStockQuote>[1], maxAgeMs: number, now = Date.now()) {
+  return selectRunnerStockQuote(symbol, candidates, maxAgeMs, now, () => 0);
+}
+
 export interface AiRunnerMarketState {
   market: AiRunnerMarket;
   status: string;
