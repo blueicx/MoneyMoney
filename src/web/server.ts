@@ -181,6 +181,8 @@ import { DATA_ROOT } from '../utils/paths';
 import { paperTradingExecutor } from '../features/trading-executor';
 import { unifiedPaperLedgerStore, calculateUnifiedPerformance, replayUnifiedPaperOrders, type UnifiedPaperOrder } from '../features/unified-paper-trading';
 import { paperChartLineage } from '../features/paper-chart-lineage';
+import { RunnerExecutionEvidenceStore, runnerSnapshotHash, runnerExecutionSnapshotId } from '../features/runner-execution-evidence';
+const runnerExecutionEvidence = new RunnerExecutionEvidenceStore(stateStore);
 import { stockChartDisclosure } from '../features/stock-chart-disclosure';
 import { logger } from '../utils/logger';
 import { buildSourceSlo, runtimeObservability } from '../features/runtime-observability';
@@ -1593,6 +1595,8 @@ app.post('/api/evidence/source-health/retry', express.json(), async (req, res) =
 
 app.get('/api/evidence/:id', (req, res) => {
   if (!adminOnly(req, res)) return;
+  const archived = runnerExecutionEvidence.snapshot(String(req.params.id));
+  if (archived) return res.json(decisionEnvelope({ market:archived.market,instrument:archived.instrument,data:{ ...archived,fields:archived.payload,dataStatus:archived.payload.status,source:{id:archived.payload.source,name:archived.payload.source},observedAt:archived.payload.dataAt,fetchedAt:archived.payload.quote?.fetchedAt || null,capturedAt:archived.at,reason:'成交时归档的来源快照；未计算独立可信度评分' },dataStatus:archived.payload.status,source:archived.payload.source,updatedAt:archived.at,evidenceRefs:[archived.id] }));
   const item = MARKET_IDS.flatMap(market => decisionIntelligenceStore.listEvidence(market)).find(row => row.id === String(req.params.id));
   if (!item) return res.status(404).json({ success:false,reason:'证据快照不存在' });
   return res.json(decisionEnvelope({ market:item.market,instrument:item.instrument,data:item,dataStatus:item.dataStatus,source:item.source.name,updatedAt:item.fetchedAt,evidenceRefs:[item.id] }));
@@ -8528,7 +8532,10 @@ app.get('/api/paper/chart-markers',(req,res)=>{
   if(!['stocks','options','crypto','prediction'].includes(market))return res.status(400).json({success:false,dataStatus:'failed',reason:'图表市场无效'});
   const ref=dataLakeCatalog.resolveInstrument(market as MarketId,requested);
   if(!ref)return res.status(422).json({success:false,market,instrument:requested,dataStatus:'unsupported',reason:'无法核验当前市场标的身份'});
-  const data=paperChartLineage(unifiedPaperLedgerStore.get(),market,ref.id,req.query.accountId?String(req.query.accountId):undefined);
+  const data=paperChartLineage(unifiedPaperLedgerStore.get(),market,ref.id,req.query.accountId?String(req.query.accountId):undefined,{
+    signal:id=>runnerExecutionEvidence.signal(id),
+    snapshot:id=>runnerExecutionEvidence.snapshot(id),
+  });
   res.json({success:true,market,instrument:ref.id,dataStatus:data.markers.length?'historical':'empty',source:'统一持久模拟账本',updatedAt:new Date().toISOString(),reason:data.reason,evidenceRefs:data.markers.map(row=>row.snapshotId),data});
 });
 
@@ -8861,17 +8868,6 @@ function runnerIndicators(rows: unknown[][]): { closes: number[]; price?: number
     rsi14: 100 - 100 / (1 + rs),
     sma10: closes.slice(-10).reduce((sum, value) => sum + value, 0) / 10,
   };
-}
-
-function runnerSnapshotHash(snapshot: Omit<AiRunnerInstrumentSnapshot, 'snapshotHash'>): string {
-  return crypto.createHash('sha256').update(JSON.stringify({
-    market: snapshot.market, instrument: snapshot.instrument, status: snapshot.dataStatus,
-    source: snapshot.source, dataAt: snapshot.dataAt, price: snapshot.price,
-    rsi14: snapshot.rsi14, sma10: snapshot.sma10, quote: snapshot.quote,
-    indicatorDataStatus: snapshot.indicatorDataStatus, indicatorDataAt: snapshot.indicatorDataAt,
-    indicatorRetrievedAt: snapshot.indicatorRetrievedAt, evidence: snapshot.evidence,
-    modelProbability: snapshot.modelProbability, candidateSignals: snapshot.candidateSignals,
-  })).digest('hex');
 }
 
 async function loadAiRunnerInstrumentSnapshot(runner: AiRunner, ref: AiRunnerInstrumentRef): Promise<AiRunnerInstrumentSnapshot> {
@@ -9220,20 +9216,22 @@ function executePreparedRunnerTick(prepared: PreparedAiRunnerTick): { actions: A
       const risk = evaluateRunnerOpen(runner, notionalAndCosts, new Date(), runnerLedgerInstrumentId(ref));
       record.riskChecks.push({ name: 'budget-and-risk', passed: risk.allowed, reason: risk.reason });
       if (!risk.allowed) { record.action = 'REJECTED'; record.reason = risk.reason || '风险校验未通过'; continue; }
-      const opened = runnerOpenPosition(runner.id, fill.price, quantity, side || 'LONG', snapshot.requestReason || record.reason, ref, { quote, source: snapshot.source, dataAt: snapshot.dataAt, dataSnapshotId: snapshot.snapshotHash });
+      const opened = runnerOpenPosition(runner.id, fill.price, quantity, side || 'LONG', snapshot.requestReason || record.reason, ref, { quote, source: snapshot.source, dataAt: snapshot.dataAt, signalId: record.id, dataSnapshotId: runnerExecutionSnapshotId(snapshot.snapshotHash) });
       if (!opened) { record.action = 'REJECTED'; record.reason = '模拟账户更新失败或订单被并发状态拒绝'; continue; }
       const updated = getAiRunners().find(item => item.id === runner.id);
       record.action = 'BUY'; record.reason = `${snapshot.requestReason || record.reason}；按卖一价模拟成交`;
       record.orderId = updated?.trades[0]?.orderId;
+      runnerExecutionEvidence.save(snapshot,record,runnerLedgerInstrumentId(ref),runner.accountId || 'ai-runner:'+runner.id);
       actions.push({ id: runner.id, actionZh: `BUY ${ref.symbolOrMarketId} ${quantity} @ ${fill.price}` });
     } else {
       if (!existing) { record.action = 'REJECTED'; record.reason = '没有该标的未平仓头寸可退出'; continue; }
       const costs = calculateRunnerExecutionCosts(runner.policy, quote, 'SELL', existing.quantity);
-      const pnl = runnerClosePosition(runner.id, existing.id, fill.price, snapshot.requestReason || record.reason, { quote, source: snapshot.source, dataAt: snapshot.dataAt, dataSnapshotId: snapshot.snapshotHash, ...costs });
+      const pnl = runnerClosePosition(runner.id, existing.id, fill.price, snapshot.requestReason || record.reason, { quote, source: snapshot.source, dataAt: snapshot.dataAt, signalId: record.id, dataSnapshotId: runnerExecutionSnapshotId(snapshot.snapshotHash), ...costs });
       if (pnl == null) { record.action = 'REJECTED'; record.reason = '模拟平仓未完成，持仓保持不变'; continue; }
       const updated = getAiRunners().find(item => item.id === runner.id);
       record.action = 'SELL'; record.reason = `${snapshot.requestReason || record.reason}；按买一价模拟成交，未扣成本净额前盈亏 ${pnl.toFixed(2)}`;
       record.orderId = updated?.trades[0]?.orderId;
+      runnerExecutionEvidence.save(snapshot,record,runnerLedgerInstrumentId(ref),runner.accountId || 'ai-runner:'+runner.id);
       actions.push({ id: runner.id, actionZh: `SELL ${ref.symbolOrMarketId} @ ${fill.price} PnL=${pnl.toFixed(2)}` });
     }
   }

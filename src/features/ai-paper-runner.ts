@@ -851,7 +851,7 @@ function resolveRunnerInstrument(runner: AiRunner, requested?: AiRunnerInstrumen
   return instrument;
 }
 
-export interface AiRunnerFillCosts { feeUsd?: number; slippageUsd?: number; spreadUsd?: number; dataSnapshotId?: string; source?: string; dataAt?: string; quote?: AiRunnerQuote }
+export interface AiRunnerFillCosts { feeUsd?: number; slippageUsd?: number; spreadUsd?: number; dataSnapshotId?: string; signalId?: string; source?: string; dataAt?: string; quote?: AiRunnerQuote }
 
 /** Open a position inside a runner's isolated book. */
 export function runnerOpenPosition(
@@ -890,6 +890,7 @@ export function runnerOpenPosition(
         price: entryPrice, quantity, timestamp,
         strategy: 'ai-runner', strategyVersion: r.strategyVersion,
         dataSnapshotId: costs.dataSnapshotId,
+        signalId: costs.signalId,
         feeUsd: executionCosts.feeUsd,
         slippageUsd: executionCosts.slippageUsd,
         spreadUsd: executionCosts.spreadUsd,
@@ -947,6 +948,7 @@ export function runnerClosePosition(id: string, positionId: string, exitPrice: n
         slippageUsd: executionCosts.slippageUsd,
         spreadUsd: executionCosts.spreadUsd,
         dataSnapshotId: costs.dataSnapshotId,
+        signalId: costs.signalId,
         reason: reasonZh,
       }, r.budgetUsd);
       const proceeds = pos.quantity * exitPrice;

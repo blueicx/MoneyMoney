@@ -1,17 +1,32 @@
-const { spawn } = require('node:child_process');
+const { spawn, spawnSync } = require('node:child_process');
 const http = require('node:http');
 const path = require('node:path');
 const fs = require('node:fs');
 const os = require('node:os');
 
 const port = 3187;
+const dataDirectory=fs.mkdtempSync(path.join(os.tmpdir(),'mm-web-smoke-'));
+// Seed only an isolated fixture, never an actual runner or a production order.
+const seeded=spawnSync(process.execPath,['-e',`
+ const {stateStore}=require('./dist/storage/sqlite-state');
+ const {unifiedPaperLedgerStore}=require('./dist/features/unified-paper-trading');
+ const {RunnerExecutionEvidenceStore,runnerSnapshotHash,runnerExecutionSnapshotId}=require('./dist/features/runner-execution-evidence');
+ const snapshot={market:'stocks',instrument:'AAPL',dataStatus:'delayed',source:'isolated-fixture',dataAt:'2026-10-07T23:59:00Z',price:100,quote:{price:100,bestBid:99,bestAsk:101},candidateSignals:[]};
+ snapshot.snapshotHash=runnerSnapshotHash(snapshot);
+ const decision={id:'fixture-decision',runnerId:'fixture',market:'stocks',instrument:'AAPL',snapshotHash:snapshot.snapshotHash,orderId:'fixture-order',action:'BUY',at:'2026-10-08T00:00:00Z',reason:'isolated fixture',riskChecks:[],signals:[],idempotencyKey:'fixture'};
+ stateStore.transaction(()=>{
+  unifiedPaperLedgerStore.applyRunnerOrder('ai-runner:fixture','fixture',{id:decision.orderId,instrumentType:'stock',instrumentId:'stock:us:AAPL',side:'BUY',price:101,quantity:1,timestamp:'2026-10-08T00:00:01Z',signalId:decision.id,dataSnapshotId:runnerExecutionSnapshotId(snapshot.snapshotHash)},1000);
+  new RunnerExecutionEvidenceStore(stateStore).save(snapshot,decision,'stock:us:AAPL','ai-runner:fixture');
+ });stateStore.close();
+`],{cwd:path.join(__dirname,'..'),env:{...process.env,MONEYMONEY_DATA_DIR:dataDirectory},encoding:'utf8'});
+if(seeded.status!==0)throw Error('Isolated ledger fixture failed: '+seeded.stderr);
 const child = spawn(process.execPath, [path.join(__dirname, '..', 'dist', 'web', 'server.js')], {
   cwd: path.join(__dirname, '..'),
   env: {
     ...process.env,
     APP_HOST: '127.0.0.1',
     APP_PORT: String(port),
-    MONEYMONEY_DATA_DIR: fs.mkdtempSync(path.join(os.tmpdir(),'mm-web-smoke-')),
+    MONEYMONEY_DATA_DIR: dataDirectory,
     TELEGRAM_POLLING_ENABLED: 'false',
     AI_PAPER_TRADING_ENABLED: 'false',
     PRIVATE_KEY: '',
@@ -66,6 +81,13 @@ const get = pathname => request('GET', pathname);
     const markerResponse=await authedGet('/api/paper/chart-markers?market=stocks&instrument=usAAPL');
     const markerEnvelope=JSON.parse(markerResponse.body);
     if(markerResponse.status!==200||markerEnvelope.instrument!=='stock:us:AAPL'||markerEnvelope.market!=='stocks'||!Array.isArray(markerEnvelope.data.unlinked))throw Error('paper chart canonical identity projection failed');
+    const fill=markerEnvelope.data.markers.find(row=>row.orderId==='fixture-order');
+    if(!fill||fill.signalId!=='fixture-decision'||fill.accountId!=='ai-runner:fixture')throw Error('durable decision/snapshot resolver was not connected');
+    const evidenceResponse=await authedGet('/api/evidence/'+fill.snapshotId);
+    const evidence=JSON.parse(evidenceResponse.body);
+    if(evidenceResponse.status!==200||evidence.instrument!=='stock:us:AAPL'||evidence.data.fields.quote.bestAsk!==101||evidence.data.source.name!=='isolated-fixture')throw Error('archived source evidence cannot reproduce fill quote');
+    if(evidence.data.fetchedAt!==null||!evidence.data.capturedAt)throw Error('archive capture time must not invent upstream retrieval time');
+    if((await get('/api/evidence/'+fill.snapshotId)).status!==401)throw Error('runner execution evidence exposed');
     if((await get('/api/paper/chart-markers?market=stocks&instrument=usAAPL')).status!==401)throw Error('private paper marker API exposed');
     const contractHistory=await authedGet('/api/contracts/history?market=crypto&instrument=crypto%3Agateio%3ABTC_USDT');
     const contractHistoryBody=JSON.parse(contractHistory.body);
