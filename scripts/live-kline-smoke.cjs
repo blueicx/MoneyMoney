@@ -20,8 +20,9 @@ async function main() {
     const start = Math.floor(Date.now() / 300000) * 300000;
     const rows = Array.from({ length: 80 }, (_, i) => ({ time: start - (79 - i) * 300000, open: 100, high: 105, low: 95, close: 101, volume: 5 }));
     let requests = 0;
-    await page.route('**/api/stock/kline?**', route => { requests++; return route.fulfill({ json: { success: true, data: rows, source: 'Isolated chart fixture, not market data', updatedAt: new Date().toISOString(), dataStatus: 'delayed' } }); });
-    await page.route('**/api/binance/klines?**', route => route.fulfill({ json: { success: true, data: rows, source: 'Isolated chart fixture', updatedAt: new Date().toISOString(), dataStatus: 'delayed' } }));
+    const olderRows=Array.from({length:20},(_,i)=>({...rows[0],time:rows[0].time-(20-i)*300000}));let historyRequests=0;
+    await page.route('**/api/stock/kline?**', route => { requests++;const query=new URL(route.request().url()).searchParams,paged=query.has('before');if(paged)historyRequests++; return route.fulfill({ json: { success: true,market:'stocks',instrument:query.get('api')||query.get('symbol'),timeframe:query.get('period'), data:paged?olderRows:rows, source: 'Isolated chart fixture, not market data', updatedAt: new Date().toISOString(), dataStatus: 'delayed' } }); });
+    await page.route('**/api/binance/klines?**', route => {const query=new URL(route.request().url()).searchParams,paged=query.has('before');if(paged)historyRequests++;return route.fulfill({ json: { success: true,market:'crypto',instrument:'crypto:binance:'+query.get('symbol'),timeframe:query.get('interval'), data:paged?olderRows:rows, source: 'Isolated chart fixture', updatedAt: new Date().toISOString(), dataStatus: 'delayed' } });});
     await page.goto(base + '/login'); await page.fill('#username', 'live-fixture-owner'); await page.fill('#password', 'isolated-live-fixture-password');
     await Promise.all([page.waitForURL(url => url.pathname === '/'), page.click('#submitBtn')]);
     await page.waitForFunction(() => window.mm_isLoggedIn && window.MoneyLiveKline);
@@ -39,6 +40,10 @@ async function main() {
     await page.locator('#stock-chart-card [data-paper-chart-layer]').uncheck();
     const focus = await page.evaluate(async () => { stockChartFocusIndex = 10; stockChartFocusEnabled = true; const time = stockChartKlines[10].time; window.__unifiedCalls = 0; const original = loadUnifiedStockData; loadUnifiedStockData = (...args) => { window.__unifiedCalls++; return original(...args); }; await loadStockKline(undefined, undefined, undefined, { live: true }); return { expected: time, actual: stockChartKlines[stockChartFocusIndex].time, focus: stockChartFocusEnabled, extraCalls: window.__unifiedCalls }; });
     assert.equal(focus.actual, focus.expected); assert.equal(focus.focus, true); assert.equal(focus.extraCalls, 0);
+    assert.equal(historyRequests,0,'history is not a bootstrap request');assert.equal(await page.locator('#stock-chart-card [data-chart-history]').isVisible(),false,'focused historical view must not offer ordinary source paging');
+    await page.evaluate(()=>{stockChartFocusEnabled=false;stockChartFocusIndex=null;drawStockKline(document.getElementById('stock-kline'),stockChartKlines);});
+    await page.locator('#stock-chart-card [data-chart-history]').click();await page.waitForFunction(()=>stockChartKlines.length===100);
+    await page.evaluate(()=>loadStockKline(undefined,undefined,undefined,{live:true}));assert.equal(await page.evaluate(()=>stockChartKlines[0].time),olderRows[0].time,'live refresh must retain requested history');assert.equal(historyRequests,1);
     const before = requests;
     await page.evaluate(async () => { stepStockChartReplay('previous'); await loadStockKline(undefined, undefined, undefined, { live: true }); });
     assert.equal(requests, before, 'Replay must block live reads');
@@ -64,7 +69,7 @@ async function main() {
     assert.equal(await page.evaluate(()=>MoneyTradingChart.select(document.getElementById('bn-candlestick'),bnKlineData,bnCurrentSymbol+'|'+bnCurrentInterval).rows.at(-1).time),anchored);
     await page.locator('#crypto-chart-card .mm-trading-latest').click();
     assert.equal(await page.evaluate(()=>MoneyTradingChart.select(document.getElementById('bn-candlestick'),bnKlineData,bnCurrentSymbol+'|'+bnCurrentInterval).state.follow),true);
-    await page.route('**/api/binance/klines?**', async route => { await new Promise(r => setTimeout(r, 150)); await route.fulfill({ json: { success: true, data: rows } }); });
+    await page.route('**/api/binance/klines?**', async route => {if(new URL(route.request().url()).searchParams.has('before'))return route.fallback(); await new Promise(r => setTimeout(r, 150)); await route.fulfill({ json: { success: true, data: rows } }); });
     const preserved = await page.evaluate(async start => {
       const pending = loadBinanceKlines({ live: true });
       const s = window.__fixtureStreams.findLast(s => !s.closed);
@@ -112,6 +117,8 @@ async function main() {
       themes.push(await page.evaluate(async theme => { if (theme === 'light') document.documentElement.removeAttribute('data-theme'); else document.documentElement.setAttribute('data-theme', theme); await new Promise(r => setTimeout(r, 200)); const style = getComputedStyle(document.getElementById('mm-live-status-crypto').previousElementSibling); return { theme, color: style.color, background: style.backgroundColor, radius: style.borderRadius }; }, theme));
     }
     assert.equal(new Set(themes.map(t => t.background)).size, 3); assert.ok(themes.every(t => parseFloat(t.radius) >= 6));
+    await page.locator('#crypto-chart-card [data-chart-history]').click();await page.waitForFunction(()=>bnKlineData.length>=100,{},{timeout:5000}).catch(async error=>{console.error(await page.evaluate(()=>({rows:bnKlineData.length,first:bnKlineData[0]?.time,scope:document.getElementById('market-workspace-shell')?.dataset.marketScope,note:document.querySelector('#crypto-chart-card .mm-trading-status')?.textContent})));throw error;});assert.equal(historyRequests,2);
+    await page.evaluate(()=>loadBinanceKlines({live:true}));assert.equal(await page.evaluate(()=>bnKlineData[0].time),olderRows[0].time,'crypto REST refresh must retain requested history');
     await page.route('**/api/contracts/detail?**',route=>route.fulfill({json:{success:true,market:'crypto',instrument:'crypto:gateio:BTC_USDT',contract:'BTC_USDT',kind:'perpetual',source:'Isolated Gate fixture',updatedAt:new Date().toISOString(),dataStatus:'delayed',sections:{bars:{reason:null,source:'https://www.gate.com',updatedAt:new Date().toISOString(),dataStatus:'delayed'},funding:{reason:'来源暂无记录',source:'https://www.gate.com',dataStatus:'empty'}},quote:{markPrice:101},depth:{bids:[],asks:[]},candles:[],funding:[]}}));
     await page.route('**/api/contracts/kline?**',route=>route.fulfill({json:{success:true,market:'crypto',instrument:'crypto:gateio:BTC_USDT',source:'Isolated Gate fixture',updatedAt:new Date().toISOString(),dataStatus:'delayed',data:rows,volumeUnit:'contracts'}}));
     await page.evaluate(()=>{setWorkspaceInstrument('crypto:gateio:BTC_USDT');openWorkspace('contracts');});

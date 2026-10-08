@@ -127,18 +127,22 @@ export function createYahooStockKlineAdapter(): DataSourceAdapter<StockKlineBar[
     timeoutMs: 8_000,
     retries: 1,
     fetcher: async (input, signal) => {
-      const source = (input || {}) as { symbol?: string; period?: string };
+      const source = (input || {}) as { symbol?: string; period?: string; startTime?:number;endTime?:number };
       const symbol = normalizeYahooSymbol(String(source.symbol || ''));
       if (!symbol) throw new Error('Symbol is required');
       const period = String(source.period || '1d').toLowerCase() as keyof typeof STOCK_KLINE_PERIODS;
       const config = STOCK_KLINE_PERIODS[period];
       if (!config) throw new Error(`Unsupported stock period: ${period}`);
+      const bounded=source.startTime!==undefined||source.endTime!==undefined;
+      if(bounded&&(!Number.isSafeInteger(source.startTime)||!Number.isSafeInteger(source.endTime)||Number(source.startTime)<=0||Number(source.endTime)<=Number(source.startTime)||Number(source.endTime)>Date.now()))throw Error('Invalid Yahoo time window');
+      if(bounded&&config.aggregateDays)throw Error('Multi-day aggregate pagination requires a fixed aggregation anchor; unsupported time window');
       const headers = { 'User-Agent': 'Mozilla/5.0 MoneyMoney/1.0' };
       let response: Response | undefined;
       let lastError: unknown;
       for (const host of ['query1.finance.yahoo.com', 'query2.finance.yahoo.com']) {
         try {
-          const url = `https://${host}/v8/finance/chart/${encodeURIComponent(symbol)}?interval=${encodeURIComponent(config.interval)}&range=${encodeURIComponent(config.range)}&events=div%2Csplits`;
+          const bounds=bounded?`period1=${Math.floor(source.startTime!/1000)}&period2=${Math.ceil(source.endTime!/1000)}`:`range=${encodeURIComponent(config.range)}`;
+          const url = `https://${host}/v8/finance/chart/${encodeURIComponent(symbol)}?interval=${encodeURIComponent(config.interval)}&${bounds}&events=div%2Csplits`;
           response = await fetch(url, { signal, headers });
           if (response.ok) break;
           lastError = new Error(`Yahoo Finance API failed with status: ${response.status}`);
@@ -147,7 +151,7 @@ export function createYahooStockKlineAdapter(): DataSourceAdapter<StockKlineBar[
         }
       }
       if (!response?.ok) throw lastError || new Error('Yahoo Finance API failed');
-      const bars = normalizeYahooChartPayload(await response.json() as YahooChartPayload);
+      const bars = normalizeYahooChartPayload(await response.json() as YahooChartPayload).filter(bar=>!bounded||(bar.time>=source.startTime!&&bar.time<source.endTime!));
       if (!bars.length) throw new Error('Yahoo Finance returned no historical bars');
       return config.aggregateDays ? aggregateStockBars(bars, config.aggregateDays) : bars;
     },

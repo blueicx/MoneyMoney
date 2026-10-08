@@ -1,6 +1,32 @@
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
 function load(){assert.ok(fs.existsSync('src/web/public/trading-chart.js'),'trading chart module must exist');const scope={window:{},document:{readyState:'loading',addEventListener(){}}};vm.runInNewContext(fs.readFileSync('src/web/public/trading-chart.js','utf8'),scope);return scope.window.MoneyTradingChart;}
 const rows=Array.from({length:100},(_,i)=>({time:i*300000,open:10,high:12,low:9,close:11,volume:5}));
+test('history pages merge only older actual candles without rewriting current rows or losing live refresh history',()=>{
+ const c=load();assert.equal(typeof c.mergeHistory,'function');const current=rows.slice(50),older=rows.slice(40,51).map(row=>({...row,close:10}));
+ const joined=c.mergeHistory(current,older,current[0].time);assert.equal(joined.length,60);assert.equal(joined[10].close,11);assert.equal(joined[0].time,rows[40].time);
+ const refreshed=c.mergeHistory(joined,[{...rows[99],close:12}]);assert.equal(refreshed.length,60);assert.equal(refreshed.at(-1).close,12);assert.equal(c.mergeHistory(joined,[{...rows[39],low:20}],current[0].time).length,60);
+});
+test('history control is explicit and serial, and late completion cannot overwrite another chart context',async()=>{
+ const {JSDOM}=require('jsdom'),dom=new JSDOM('<div><canvas></canvas></div>',{runScripts:'outside-only',pretendToBeVisual:true}),w=dom.window;w.HTMLCanvasElement.prototype.getContext=()=>new Proxy({},{get:()=>()=>{}});let calls=0,finish;
+ try{w.eval(fs.readFileSync('src/web/public/trading-chart.js','utf8'));const canvas=w.document.querySelector('canvas');const options={identity:'AAPL|5m',interval:'5m',loadEarlier:()=>{calls++;return new Promise(resolve=>finish=resolve);}};w.MoneyTradingChart.render(canvas,rows,options);
+ const button=w.document.querySelector('[data-chart-history]');assert.ok(button);assert.equal(calls,0);button.click();button.click();assert.equal(calls,1);assert.equal(button.disabled,true);
+ w.MoneyTradingChart.render(canvas,rows,{identity:'MU|5m',interval:'5m'});finish('old AAPL source unavailable');await new Promise(resolve=>setTimeout(resolve,10));assert.doesNotMatch(w.document.querySelector('.mm-trading-status').textContent,/old AAPL/);assert.equal(button.hidden,true);
+ }finally{w.close();}
+});
+test('clearing a chart aborts an in-flight history page and hides its control',()=>{
+ const {JSDOM}=require('jsdom'),dom=new JSDOM('<div><canvas></canvas></div>',{runScripts:'outside-only',pretendToBeVisual:true}),w=dom.window;w.HTMLCanvasElement.prototype.getContext=()=>new Proxy({},{get:()=>()=>{}});let signal;
+ try{w.eval(fs.readFileSync('src/web/public/trading-chart.js','utf8'));const canvas=w.document.querySelector('canvas');w.MoneyTradingChart.render(canvas,rows,{identity:'AAPL|5m',interval:'5m',loadEarlier:s=>{signal=s;return new Promise(()=>{});}});w.document.querySelector('[data-chart-history]').click();w.MoneyTradingChart.clear(canvas);assert.equal(signal.aborted,true);assert.equal(w.document.querySelector('[data-chart-history]').hidden,true);}finally{w.close();}
+});
+test('returning to the same instrument does not revive a cancelled page response',async()=>{
+ const {JSDOM}=require('jsdom'),dom=new JSDOM('<div><canvas></canvas></div>',{runScripts:'outside-only',pretendToBeVisual:true}),w=dom.window;w.HTMLCanvasElement.prototype.getContext=()=>new Proxy({},{get:()=>()=>{}});let finish;
+ try{w.eval(fs.readFileSync('src/web/public/trading-chart.js','utf8'));const canvas=w.document.querySelector('canvas');const options={identity:'AAPL|5m',interval:'5m',loadEarlier:()=>new Promise(resolve=>finish=resolve)};
+ w.MoneyTradingChart.render(canvas,rows,options);w.document.querySelector('[data-chart-history]').click();w.MoneyTradingChart.render(canvas,rows,{identity:'MU|5m',interval:'5m'});w.MoneyTradingChart.render(canvas,rows,options);finish('cancelled AAPL source');await new Promise(resolve=>setTimeout(resolve,10));assert.doesNotMatch(w.document.querySelector('.mm-trading-status').textContent,/cancelled AAPL/);
+ }finally{w.close();}
+});
+test('cancelled history callback cannot report successful loading',async()=>{
+ const {JSDOM}=require('jsdom'),dom=new JSDOM('<div><canvas></canvas></div>',{runScripts:'outside-only',pretendToBeVisual:true}),w=dom.window;w.HTMLCanvasElement.prototype.getContext=()=>new Proxy({},{get:()=>()=>{}});
+ try{w.eval(fs.readFileSync('src/web/public/trading-chart.js','utf8'));w.MoneyTradingChart.render(w.document.querySelector('canvas'),rows,{identity:'AAPL|5m',interval:'5m',loadEarlier:async()=>undefined});w.document.querySelector('[data-chart-history]').click();await new Promise(resolve=>setTimeout(resolve,10));assert.doesNotMatch(w.document.querySelector('.mm-trading-status').textContent,/已载入/);assert.match(w.document.querySelector('.mm-trading-status').textContent,/取消|变化/);}finally{w.close();}
+});
 test('paper marker placement rejects incomplete lineage, other instruments and replay future fills',()=>{
  const c=load();assert.equal(typeof c.paperMarkersFor,'function','paper projection missing');
  const marker={orderId:'o',signalId:'s',snapshotId:'d',accountId:'a',market:'stocks',instrument:'stock:us:AAPL',time:rows[50].time+1000,price:11,side:'BUY'};

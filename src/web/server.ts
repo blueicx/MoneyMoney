@@ -85,6 +85,7 @@ import { getCrossAssetCorrelationRadar } from '../features/cross-asset-correlati
 import { getPerpetualCrowding } from '../features/perpetual-crowding';
 import { ContractResearchService, contractIdentity, contractScenario } from '../features/contract-research';
 import { loadContractPanelHistory } from '../features/contract-panel-history';
+import { klinePageWindow, klinePageStatus } from '../features/kline-page-window';
 import { contractCapacity, compareContractSnapshots } from '../features/contract-comparison';
 import { compareAiRunnerReports } from '../features/ai-runner-comparison';
 import { createAiRunnerComparison, getAiRunnerComparison, validateAiRunnerComparison, buildAiRunnerComparisonSample, saveAiRunnerComparisonSample, listAiRunnerComparisonSamples, replayAiRunnerComparisonSample, type AiRunnerComparisonSample } from '../features/ai-runner-comparison-group';
@@ -2226,10 +2227,11 @@ app.get('/api/binance/klines', async (req, res) => {
     const limit = Number(req.query.limit || '100');
     liveKlineScope('crypto', symbol, interval);
     if (!Number.isInteger(limit) || limit < 1 || limit > 1000) throw Error('K线数量须为 1–1000');
-    const previous = binanceFeed.cachedAt('kline:' + symbol + ':' + interval);
-    const klines = await binanceFeed.getKlines(symbol, interval, limit);
-    const updatedAt = binanceFeed.cachedAt('kline:' + symbol + ':' + interval);
-    res.json({ success: !!klines.length, market: 'crypto', instrument: 'crypto:binance:' + symbol, timeframe: interval, data: klines, source: 'Binance Public Klines', updatedAt, dataStatus: !klines.length ? 'unavailable' : previous === updatedAt ? 'cached' : 'delayed', reason: klines.length ? 'REST 快照，不代表交易所实时推流' : 'Binance K线来源未返回有效记录' });
+    const page=req.query.before===undefined?undefined:klinePageWindow('crypto',interval,Number(req.query.before),limit);
+    const previous = binanceFeed.klineCachedAt(symbol,interval,limit,page?.before);
+    const klines = await binanceFeed.getKlines(symbol, interval, limit,{before:page?.before});
+    const updatedAt = binanceFeed.klineCachedAt(symbol,interval,limit,page?.before);
+    res.json({ success: !!klines.length, market: 'crypto', instrument: 'crypto:binance:' + symbol, timeframe: interval, data: klines, history:{nextBefore:klines[0]?.time??null,requestedWindow:page??null,hasEarlier:null},source: 'Binance Public Klines', updatedAt, dataStatus: !klines.length ? 'unavailable' : previous === updatedAt ? 'cached' : page?'historical':'delayed', reason: klines.length ? 'REST 快照，不代表交易所实时推流；更早记录是否存在以来源响应为准' : 'Binance K线来源未返回有效记录' });
   } catch (e: any) { res.json({ success: false, error: e.message }); }
 });
 
@@ -2996,6 +2998,8 @@ app.get('/api/stock/kline', async (req, res) => {
     const intradayPeriod = String(req.query.intradayPeriod || period).trim().toLowerCase();
     const effectivePeriod = tradingDate ? intradayPeriod : period;
     const asOf = String(req.query.asOf || '').trim();
+    if(req.query.before!==undefined&&(asOf||tradingDate))throw Error('来源历史分页不能混用本地时点或指定交易日');
+    const page=req.query.before===undefined?undefined:klinePageWindow('stocks',effectivePeriod,Number(req.query.before),Number(req.query.limit||200));
     const adjustment=String(req.query.adjustment||'source');
     if(!asOf && adjustment!=='source')return res.status(422).json({success:false,data:null,market:'stocks',instrument:symbol,dataStatus:'unsupported',source:'股票K线来源口径',updatedAt:new Date().toISOString(),reason:'当前源尚未声明可转换复权口径；请使用来源口径'});
     const periodConfig = STOCK_KLINE_PERIODS[effectivePeriod as keyof typeof STOCK_KLINE_PERIODS];
@@ -3033,7 +3037,7 @@ app.get('/api/stock/kline', async (req, res) => {
       });
     }
     const adapter = getStockKlineAdapter(effectivePeriod, requestedSymbol);
-    const snapshot = await adapter.fetch({ symbol: requestedSymbol, period: effectivePeriod });
+    const snapshot = await adapter.fetch({ symbol: requestedSymbol, period: effectivePeriod,...(page?{startTime:page.startTime,endTime:page.endTime+1}:{} ) });
     const updatedAt = snapshot.fetchedAt || new Date().toISOString();
     if (!snapshot.data?.length) {
       return res.json({ success: false, data: null, dataStatus: snapshot.status, source: snapshot.source, updatedAt, reason: snapshot.error || `暂无${periodConfig.label}股票K线数据` });
@@ -3043,7 +3047,8 @@ app.get('/api/stock/kline', async (req, res) => {
       const session = filterStockBarsForTradingDate(snapshot.data, tradingDate, timezone);
       return res.json({ success: session.bars.length > 0, data: session.bars,...stockChartDisclosure(session.bars,adjustment), dataStatus: session.bars.length ? snapshot.status : 'empty', market: 'stocks', instrument: requestedSymbol, timeframe: effectivePeriod, date: tradingDate, timezone, session, source: snapshot.source, updatedAt, reason: session.bars.length ? undefined : `来源 ${snapshot.source} 当前覆盖 ${session.availableDateRange ? `${session.availableDateRange.from} 至 ${session.availableDateRange.to}` : '暂无可用交易日'}；未提供 ${tradingDate} 的 ${effectivePeriod} 日内数据` });
     }
-    res.json({ success: true, data: snapshot.data,...stockChartDisclosure(snapshot.data,adjustment), dataStatus: snapshot.status, source: snapshot.source, updatedAt, timezone: resolveStockExchangeTimeZone(requestedSymbol), reason: snapshot.error || undefined });
+    const bars=page?snapshot.data.slice(-page.limit):snapshot.data;
+    res.json({ success: true,market:'stocks',instrument:requestedSymbol,timeframe:effectivePeriod, data: bars,...stockChartDisclosure(bars,adjustment), history:{nextBefore:bars[0]?.time??null,requestedWindow:page??null,hasEarlier:null},dataStatus: klinePageStatus(snapshot.status,!!page), source: snapshot.source, updatedAt, timezone: resolveStockExchangeTimeZone(requestedSymbol), reason: snapshot.error || undefined });
   } catch (e: any) {
     res.json({
       success: false,
@@ -6424,7 +6429,7 @@ export function getTelegramCommandHandlers(): Record<string, TelegramCommandHand
               if(!bars.length && snapshot.error)return `Binance 日内K线不可用：${escapeTelegramHtml(snapshot.error)} · ${escapeTelegramHtml(source)}`;
             } else {
               bars = (await binanceFeed.getKlines(ref.symbol, timeframe, 200)).map((bar:any) => ({ time:Number(bar.time),open:Number(bar.open),high:Number(bar.high),low:Number(bar.low),close:Number(bar.close),volume:Number(bar.volume || 0) }));
-              source = 'Binance Public Klines'; dataStatus = bars.length ? 'delayed' : 'unavailable'; updatedAt = binanceFeed.cachedAt('kline:'+ref.symbol+':'+timeframe) || new Date().toISOString();
+              source = 'Binance Public Klines'; dataStatus = bars.length ? 'delayed' : 'unavailable'; updatedAt = binanceFeed.klineCachedAt(ref.symbol,timeframe,200) || '';
             }
             dateBars = timeframe === '1d' && !tradingDate ? bars : (await binanceFeed.getKlines(ref.symbol,'1d',30)).map((bar:any) => ({time:Number(bar.time),open:Number(bar.open),high:Number(bar.high),low:Number(bar.low),close:Number(bar.close),volume:Number(bar.volume||0)}));
           }

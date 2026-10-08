@@ -19,6 +19,8 @@ export class BinanceFeed {
   private ttlMs = 10000;
   private baseUrl = 'https://data-api.binance.vision';
   cachedAt(key: string): string | null { const entry=this.cache.get(key); return entry ? new Date(entry.time).toISOString():null; }
+  klineCachedAt(symbol:string,interval:string,limit:number,before?:number) { return this.cachedAt(this.klineKey(symbol,interval,limit,before)); }
+  private klineKey(symbol:string,interval:string,limit:number,before?:number) { return `kline:${symbol}:${interval}:${limit}:${before??'latest'}`; }
 
   async getPrice(symbol: string = 'BTCUSDT'): Promise<BinanceTicker | null> {
     const cached = this.cache.get(symbol);
@@ -51,13 +53,16 @@ export class BinanceFeed {
     return results;
   }
 
-  async getKlines(symbol: string, interval: string = '1h', limit: number = 100): Promise<any[]> {
-    const key = 'kline:' + symbol + ':' + interval;
+  async getKlines(symbol: string, interval: string = '1h', limit: number = 100, window: {before?:number} = {}): Promise<any[]> {
+    const before=window.before;
+    if(before!==undefined&&(!Number.isSafeInteger(before)||before<=0||before>Date.now()))throw Error('历史分页时间无效或来自未来');
+    if(!Number.isInteger(limit)||limit<1||limit>1000)throw Error('K线数量须为1–1000');
+    const key = this.klineKey(symbol,interval,limit,before);
     const cached = this.cache.get(key);
     if (cached && Date.now() - cached.time < this.ttlMs * 6) return cached.data;
     try {
       const res = await fetch(
-        `${this.baseUrl}/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`,
+        `${this.baseUrl}/api/v3/klines?symbol=${encodeURIComponent(symbol)}&interval=${encodeURIComponent(interval)}&limit=${limit}${before!==undefined?'&endTime='+(before-1):''}`,
         { signal: AbortSignal.timeout(10000) }
       );
       if (!res.ok) return [];
@@ -67,7 +72,8 @@ export class BinanceFeed {
         low: parseFloat(k[3]), close: parseFloat(k[4]), volume: parseFloat(k[5]),
         quoteVolume: parseFloat(k[7]),
         takerBuyQuoteVolume: parseFloat(k[10]),
-      }));
+      })).filter(k=>Number.isSafeInteger(k.time)&&k.time>0&&k.time<=Date.now()&&(before===undefined||k.time<before)&&[k.open,k.high,k.low,k.close,k.volume].every(Number.isFinite)&&Math.min(k.open,k.high,k.low,k.close)>0&&k.volume>=0&&k.high>=Math.max(k.open,k.low,k.close)&&k.low<=Math.min(k.open,k.high,k.close)).sort((a,b)=>a.time-b.time);
+      while(this.cache.size>=200)this.cache.delete(this.cache.keys().next().value!);
       this.cache.set(key, { data: klines, time: Date.now() });
       return klines;
     } catch { return []; }

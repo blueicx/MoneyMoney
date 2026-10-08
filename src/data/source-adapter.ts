@@ -30,9 +30,7 @@ export class ResilientDataSourceAdapter<T> implements DataSourceAdapter<T> {
   readonly id: string;
   readonly group: string;
   private readonly options: Required<Omit<ResilientSourceOptions<T>, 'id' | 'group' | 'fetcher'>> & Pick<ResilientSourceOptions<T>, 'fetcher'>;
-  private cached: SourceSnapshot<T> | null = null;
-  private failures = 0;
-  private circuitOpenUntil = 0;
+  private inputs = new Map<string,{cached:SourceSnapshot<T>|null;failures:number;circuitOpenUntil:number;inflight?:Promise<SourceSnapshot<T>>}>();
 
   constructor(options: ResilientSourceOptions<T>) {
     this.id = options.id;
@@ -47,9 +45,21 @@ export class ResilientDataSourceAdapter<T> implements DataSourceAdapter<T> {
   }
 
   async fetch(input: unknown = undefined): Promise<SourceSnapshot<T>> {
+    const key=JSON.stringify(input)??'undefined';let state=this.inputs.get(key);
+    if(!state){
+      if(this.inputs.size>=64){const idle=[...this.inputs].find(([,entry])=>!entry.inflight);if(idle)this.inputs.delete(idle[0]);else throw Error('source input request capacity exceeded');}
+      state={cached:null,failures:0,circuitOpenUntil:0};this.inputs.set(key,state);
+    }
+    if(state.inflight)return state.inflight;
+    const current=state;
+    const pending=this.fetchInput(input,current);current.inflight=pending;
+    try{return await pending;}finally{if(current.inflight===pending)current.inflight=undefined;}
+  }
+
+  private async fetchInput(input:unknown,state:{cached:SourceSnapshot<T>|null;failures:number;circuitOpenUntil:number}):Promise<SourceSnapshot<T>> {
     const now = Date.now();
-    if (this.cached?.status === 'live' && new Date(this.cached.expiresAt).getTime() > now) return this.cached;
-    if (this.circuitOpenUntil > now && this.cached) return { ...this.cached, status: 'stale', error: 'source circuit is open', consecutiveFailures: this.failures };
+    if (state.cached?.status === 'live' && new Date(state.cached.expiresAt).getTime() > now) return state.cached;
+    if (state.circuitOpenUntil > now && state.cached) return { ...state.cached, status: 'stale', error: 'source circuit is open', consecutiveFailures: state.failures };
     const started = Date.now();
     let lastError: unknown = null;
     for (let attempt = 0; attempt <= this.options.retries; attempt += 1) {
@@ -68,9 +78,9 @@ export class ResilientDataSourceAdapter<T> implements DataSourceAdapter<T> {
           status: 'live',
           consecutiveFailures: 0,
         };
-        this.cached = snapshot;
-        this.failures = 0;
-        this.circuitOpenUntil = 0;
+        state.cached = snapshot;
+        state.failures = 0;
+        state.circuitOpenUntil = 0;
         return snapshot;
       } catch (error) {
         clearTimeout(timer);
@@ -78,11 +88,11 @@ export class ResilientDataSourceAdapter<T> implements DataSourceAdapter<T> {
         if (attempt < this.options.retries) await new Promise(resolve => setTimeout(resolve, this.options.backoffMs * (2 ** attempt)));
       }
     }
-    this.failures += 1;
-    if (this.failures >= 3) this.circuitOpenUntil = Date.now() + Math.min(5 * 60_000, this.options.backoffMs * (2 ** this.failures));
-    if (this.cached?.data != null) return { ...this.cached, status: 'stale', error: String(lastError), latencyMs: Date.now() - started, consecutiveFailures: this.failures };
+    state.failures += 1;
+    if (state.failures >= 3) state.circuitOpenUntil = Date.now() + Math.min(5 * 60_000, this.options.backoffMs * (2 ** state.failures));
+    if (state.cached?.data != null) return { ...state.cached, status: 'stale', error: String(lastError), latencyMs: Date.now() - started, consecutiveFailures: state.failures };
     const nowIso = new Date().toISOString();
-    return { data: null, source: this.id, fetchedAt: nowIso, expiresAt: nowIso, latencyMs: Date.now() - started, status: 'unavailable', error: String(lastError), consecutiveFailures: this.failures };
+    return { data: null, source: this.id, fetchedAt: nowIso, expiresAt: nowIso, latencyMs: Date.now() - started, status: 'unavailable', error: String(lastError), consecutiveFailures: state.failures };
   }
 }
 

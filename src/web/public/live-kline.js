@@ -3,7 +3,7 @@
   function mergeBar(rows, bar) {
     const last = rows[rows.length - 1];
     if (last && bar.time < last.time) return null;
-    return (last && bar.time === last.time ? rows.slice(0, -1).concat(bar) : rows.concat(bar)).slice(-1000);
+    return (last && bar.time === last.time ? rows.slice(0, -1).concat(bar) : rows.concat(bar)).slice(-2000);
   }
   function canUpdate(c) { return !!c.visible && ['stocks', 'crypto'].includes(c.market) && !c.asOf && !c.date && !c.replay; }
   let source = null, key = '', generation = 0, busy = false, lastPush = 0, nextPoll = 0, abort = null;

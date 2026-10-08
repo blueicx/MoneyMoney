@@ -77,7 +77,9 @@ test('invalid, empty or changed model configuration and corrupt state fail close
   } finally { f.close(); }
 });
 test('independent worker processes competing for the same hour receive exactly one claim', async () => {
-  const f = fixture(); try {
+  const f = fixture(),workers=[]; try {
+    // Claim contention targets an existing service database, not simultaneous first bootstrap.
+    const bootstrap=new SQLiteStateStore(path.join(f.dir,'moneymoney.sqlite'),f.dir);bootstrap.close();
     register(f.first, 'stocks'); f.first.setEnabled(true, now);
     const { Worker } = require('node:worker_threads');
     const gate = new SharedArrayBuffer(4), source = `
@@ -93,11 +95,12 @@ test('independent worker processes competing for the same hour receive exactly o
       const worker = new Worker(source, {eval:true,workerData:{owner,gate,at:now+hour,
         file:f.file,dir:f.dir,
         store:require.resolve('../src/storage/sqlite-state'),scheduler:require.resolve(modulePath)}});
+      workers.push(worker);
       worker.on('message', data => { if(data.ready){if(++ready===2){Atomics.store(new Int32Array(gate),0,1);Atomics.notify(new Int32Array(gate),0);}}else resolve(data); });
       worker.on('error',reject);
     })));
     assert.ok(outputs.every(r => !r.error), JSON.stringify(outputs)); assert.equal(outputs.filter(r => r.claimed).length,1);
-  } finally { f.close(); }
+  } finally { await Promise.all(workers.map(worker=>worker.terminate())); f.close(); }
 });
 test('pause during awaited preparation prevents an actual SQLite execution transaction from committing',async()=>{
  const f=fixture();try{
