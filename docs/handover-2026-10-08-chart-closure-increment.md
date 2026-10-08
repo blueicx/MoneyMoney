@@ -151,3 +151,11 @@
 - 同毫秒备份文件重名会导致迁移失败，已先复现再为文件名增加 UUID，继续使用排他创建，不覆盖已有备份。健康信息返回实际数据库路径。损坏数据库测试保留原字节并明确失败，不创建替代库。
 - 完整测试 981/981，0 失败；构建和 Web、认证、四市场/三个主题 Chromium、合约、自动对照、实时图表六项冒烟通过。原始日志系统临时目录 `mm-startup-migration-final-test.log`、`mm-startup-migration-build.log`、`mm-startup-migration-smoke-*.log`，并发失败堆栈 `mm-startup-contention-repro.log`，复验 `mm-startup-contention-green.log`。
 - CBOE 实际来源请求超时；尚未取得可核验乘数与合约源时间，不启用期权跑单。本批使用隔离数据库与技术测试 Worker，没有使用子 agent、调用生产模型或修改现有股票跑单。生产部署及真实 Telegram 结果回复仍待完成；完整目标继续进行。
+
+## Telegram 结果队列并发与原提醒关联（2026-10-08）
+
+- 先复现原提醒在同一事件结果查询期间登记时，结果会丢失回复 ID；现在持久化时按既有事件身份补充明确登记的原消息 ID，不根据时间相近或标题相似猜关联。
+- 先复现管理员在来源查询期间重试失败投递，会被运行中的旧状态覆盖。投递增加兼容旧记录的 controlRevision，保留更新的人工重试/ACK 状态；确认发送后保留结果消息 ID 与原提醒关系。
+- 先复现租约丢失后仍调用发送。每项投递前重新核验租约，旧持有者停止发送，队列保留待处理状态；不冒称 Telegram 已送达。
+- 定向结果队列 16 项测试通过，完整测试 984/984、0 失败；构建及 Web、认证、四市场/三个主题 Chromium、合约、自动对照、实时图表六项冒烟通过。原始日志系统临时目录 `mm-telegram-lineage-final-test.log`、`mm-telegram-lineage-build.log`、`mm-telegram-lineage-smoke-*.log`。
+- 以上是隔离测试及代码接线，不是生产 Telegram 实际投递。没有发送真实消息、执行生产模型、修改现有股票跑单或重启 VPS；来源接线、生产结果回复、正式发布验收与新对照启用仍待完成。

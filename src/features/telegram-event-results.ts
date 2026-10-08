@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 export interface EventRecord { id?: string; title: string; titleZh?: string; date: string; country?: string; impact?: string; actual?: string | null; forecast?: string | null; previous?: string | null; source?: string; kind?:'macro'|'research'|'funding'|'prediction';market?:string;instrument?:string;resourceId?:string;platform?:string; }
 export interface Result { actual: string | null; status: string; reason?: string; source?: string; url?: string; publishedAt?: string; previous?: string | null; evidenceRefs?:string[]; }
 interface Store { get<T>(key: string): T | null; set<T>(key: string, value: T): void; acquireLease?(key: string, owner: string, now: number, ttl: number): boolean; refreshLease?(key: string, owner: string, now: number, ttl: number): boolean; releaseLease?(key: string, owner: string): void; }
-interface Delivery { id: string; event: EventRecord; text: string; status: 'pending' | 'sent' | 'failed' | 'acknowledged'; attempts: number; nextAttempt: number; error?: string; actual?: string; publishedAt?: string; kind?: 'result' | 'revision' | 'waiting' | 'terminal'; originalMessageId?: number; messageId?: number; resultStatus?: string; reason?: string; nextCheckAt?: number | null; evidenceRefs?: string[]; }
+interface Delivery { id: string; event: EventRecord; text: string; status: 'pending' | 'sent' | 'failed' | 'acknowledged'; attempts: number; nextAttempt: number; error?: string; actual?: string; publishedAt?: string; kind?: 'result' | 'revision' | 'waiting' | 'terminal'; originalMessageId?: number; messageId?: number; resultStatus?: string; reason?: string; nextCheckAt?: number | null; evidenceRefs?: string[]; controlRevision?: number; }
 interface State { events: Record<string, EventRecord>; deliveries: Delivery[]; checkedAt?: Record<string,number>; reminders?: Record<string,{messageId:number;at:number}>; }
 export function hasEventActual(value: unknown): boolean {
   return value !== null && value !== undefined && !/^(?:|n\/a|na|null|unknown|pending|—|-)$/i.test(String(value).trim());
@@ -30,6 +30,7 @@ export class TelegramEventResultMonitor {
     const item=state.deliveries.find(row=>row.id===id); if(!item) return false;
     if(action==='ack') { if(item.status==='pending') return false; item.status='acknowledged'; }
     else { if(item.status!=='failed' && item.status!=='pending') return false; item.status='pending'; item.nextAttempt=this.clock(); item.attempts=0; delete item.error; }
+    item.controlRevision=(item.controlRevision||0)+1;
     this.store.set(key,state); return true;
   }
   async run(chat: string, events: EventRecord[], send: (text: string,originalMessageId?:number) => Promise<unknown>, deliveryEnabled = true): Promise<void> {
@@ -84,6 +85,16 @@ export class TelegramEventResultMonitor {
         const acknowledgements=new Set(this.store.get<State>(key)?.deliveries.filter(d=>d.status==='acknowledged').map(d=>d.id));
         state.deliveries.forEach(d=>{if(acknowledgements.has(d.id))d.status='acknowledged';});
         const latest=this.store.get<State>(key);state.reminders={...latest?.reminders,...state.reminders};
+        const latestDeliveries=new Map(latest?.deliveries.map(d=>[d.id,d]));
+        for(const delivery of state.deliveries){
+          const current=latestDeliveries.get(delivery.id);
+          if(current&&(current.controlRevision||0)>(delivery.controlRevision||0)){
+            delivery.status=current.status;delivery.attempts=current.attempts;delivery.nextAttempt=current.nextAttempt;delivery.error=current.error;delivery.controlRevision=current.controlRevision;
+          }
+        }
+        // A reminder can be registered while the source request is in flight.
+        // Fill only explicit event identity links; never guess from dates or titles.
+        for(const delivery of state.deliveries){delivery.originalMessageId??=state.reminders[identity(delivery.event)]?.messageId;}
         for(const id of Object.keys(latest?.reminders||{})){if(!knownReminders.has(id)&&latest?.events[id])state.events[id]=latest.events[id];}
         for(const [id,reminder] of Object.entries(state.reminders)){if(reminder.at<now-30*86400000)delete state.reminders[id];}
         this.store.set(key,state);
@@ -92,6 +103,7 @@ export class TelegramEventResultMonitor {
       if (!deliveryEnabled) return;
       for (const delivery of state.deliveries) {
         if (delivery.status !== 'pending' || delivery.nextAttempt > now) continue;
+        if(this.store.refreshLease && !this.store.refreshLease(lease,this.owner,this.clock(),120000))throw new Error('事件结果租约已丢失，未投递');
         delivery.attempts++;
         try { const messageId=await send(delivery.text,delivery.originalMessageId);if(typeof messageId==='number'&&Number.isSafeInteger(messageId)&&messageId>0)delivery.messageId=messageId;delivery.status = 'sent'; delete delivery.error; }
         catch { delivery.error = 'Telegram 投递失败'; delivery.nextAttempt = now + Math.min(3600000, 60000 * 2 ** (delivery.attempts - 1)); if (delivery.attempts >= 7) delivery.status = 'failed'; }

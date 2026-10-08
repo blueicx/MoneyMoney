@@ -1,4 +1,31 @@
 const test=require('node:test');const assert=require('node:assert/strict');require('ts-node/register/transpile-only');
+test('an administrator retry during source lookup survives persistence and dispatches once',async()=>{
+ const {TelegramEventResultMonitor}=require('../src/features/telegram-event-results'),values=new Map(),store={get:k=>structuredClone(values.get(k)||null),set:(k,v)=>values.set(k,structuredClone(v))};
+ let now=Date.parse('2026-10-02T14:00:00Z'),retry=false,sends=0,monitor;
+ const event={title:'CPI m/m',country:'USD',impact:'high',date:'2026-10-02T13:30:00Z'};
+ monitor=new TelegramEventResultMonitor(store,async()=>{if(retry){assert.equal(monitor.update('owner',monitor.history('owner')[0].id,'retry'),true);}return{actual:'0.3%',status:'published'};},()=>now);
+ monitor.registerReminder('owner',event,123);
+ for(let attempt=0;attempt<7;attempt++){await monitor.run('owner',[],async()=>{throw Error('offline');});now+=3600001;}
+ assert.equal(monitor.history('owner')[0].status,'failed');retry=true;
+ await monitor.run('owner',[],async()=>{sends++;return 124;});
+ assert.equal(sends,1);assert.equal(monitor.history('owner')[0].status,'sent');
+ assert.equal(monitor.history('owner')[0].attempts,1);
+});
+test('a reminder registered during its own result lookup is used by the pending reply',async()=>{
+ const {TelegramEventResultMonitor}=require('../src/features/telegram-event-results'),values=new Map(),store={get:k=>structuredClone(values.get(k)||null),set:(k,v)=>values.set(k,structuredClone(v))};
+ const event={title:'CPI m/m',country:'USD',impact:'high',date:'2026-10-02T13:30:00Z'},sent=[];let monitor;
+ monitor=new TelegramEventResultMonitor(store,async()=>{monitor.registerReminder('owner',event,321);return{actual:'0.3%',status:'published',source:'BLS',publishedAt:event.date};},()=>Date.parse('2026-10-02T14:00:00Z'));
+ await monitor.run('owner',[event],async(text,reply)=>{sent.push(reply);return 322;});
+ assert.deepEqual(sent,[321]);assert.equal(monitor.history('owner')[0].originalMessageId,321);
+});
+test('losing the monitor lease before dispatch never sends a result under an obsolete owner',async()=>{
+ const {TelegramEventResultMonitor}=require('../src/features/telegram-event-results'),values=new Map();let checks=0,sends=0;
+ const store={get:k=>structuredClone(values.get(k)||null),set:(k,v)=>values.set(k,structuredClone(v)),acquireLease:()=>true,refreshLease:()=>++checks===1,releaseLease:()=>{}};
+ const event={title:'CPI m/m',country:'USD',impact:'high',date:'2026-10-02T13:30:00Z'};
+ const monitor=new TelegramEventResultMonitor(store,async()=>({actual:'0.3%',status:'published'}),()=>Date.parse('2026-10-02T14:00:00Z'));
+ await assert.rejects(monitor.run('owner',[event],async()=>{sends++;return 20;}),/租约/);assert.equal(sends,0);
+ assert.equal(monitor.history('owner')[0].status,'pending');
+});
 test('typed results retain distinct identities, official evidence and stopped terminal states',async()=>{
  const {TelegramEventResultMonitor}=require('../src/features/telegram-event-results'),values=new Map(),store={get:k=>structuredClone(values.get(k)||null),set:(k,v)=>values.set(k,structuredClone(v))},now=Date.parse('2026-10-08T01:00:00Z'),sent=[];
  const monitor=new TelegramEventResultMonitor(store,async event=>event.kind==='research'?{actual:null,status:'stopped',reason:'task cancelled'}:{actual:'0%',status:'published',url:'https://api.gateio.ws/api/v4/futures/usdt/funding_rate',evidenceRefs:['snapshot-hash']},()=>now);
