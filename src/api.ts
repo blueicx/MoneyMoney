@@ -244,8 +244,10 @@ class PredictApi {
       return {
         success: true,
         data: {
-          marketId: book.marketId || marketId,
-          updateTimestampMs: Math.round(book.updateTimestampMs || Date.now()),
+          // Missing source identity/time remains missing; never manufacture
+          // either field from the request or local retrieval clock.
+          marketId: Number(book.marketId) || 0,
+          updateTimestampMs: Number.isFinite(Number(book.updateTimestampMs)) ? Math.round(Number(book.updateTimestampMs)) : 0,
           asks: book.asks || [],
           bids: book.bids || [],
         },

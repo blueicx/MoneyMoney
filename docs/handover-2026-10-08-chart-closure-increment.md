@@ -235,3 +235,37 @@
 - 正式域名刚刚只读复核返回版本 `962a7d01e31aa373eab7cd7d5d8b00ee0173a7fa`，健康接口 `ok=true`、`mode=view-only`、存储正常；此测试工具改动未修改生产 dist，不部署、不重启服务。
 - 额外核验最新回滚包 `acc6d02e37d072b1ff0ae293778bc2b5c734393d`：在 VPS 仅绑定 `127.0.0.1:32187` 启动，使用全新 `/tmp` 数据目录，Telegram 与 AI 跑单关闭；回滚包版本、健康接口和登录页通过，进程停止且临时目录清理。生产服务保持 active，正式域名仍为 `962a7d0`。没有切换线上 dist：因为重启正式服务会恢复既有模拟跑单/自动对照调度，隔离启动比在用户账户运行期间做生产目录切换更安全。故该项证明回滚产物可启动，不等同生产切换回滚演练。
 - 运行目标账本需继续保持进行中：等待用户点击已发送的一条 Telegram 验收消息按钮才能核实真实回调 ACK；Yahoo 复权依据、期权/预测市场真实来源与撮合、真实关联成交样本、物理手机验收及正式目录切换回滚演练仍有未完成项。此前自动对照组已按用户选择固定到 `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free`，当前管理员股票自选被冻结为股票组范围并启用整点调度；其他市场因无有效自选未建组。启用时模型额度为 `0/24`，不立即运行或下单。原有 1000 美元股票 AI 跑单未改变，真实交易保持关闭。
+
+## Yahoo Adj Close 前复权派生与时点隔离（2026-10-09，本地未发布）
+
+- Yahoo 历史请求显式请求 `includeAdjustedClose=true`。原始来源 OHLCV 保持不变；只有 Adj Close 与完整时间索引对齐且每根 OHLC 合法时，才按 `Adj Close / 来源 Close` 对该根 OHLC 等比例派生另一组价格。成交量仍是来源原值，不做比例调整。UI/API 明确写“Yahoo Adj Close 系数推导”，不声称 Yahoo 单独提供了复权 OHLC；缺数据、错位或非法数值时前复权禁用。
+- 日K/普通周期才允许该派生视图。历史 `asOf`、指定交易日（日内）及历史分页请求拒绝使用当前 Adj Close，防止未来信息泄漏和不同分页参考基准不一致。来源请求失败先按真实来源状态返回，不伪装成“复权不支持”。调整口径切换只由 API 明确广告可用时启用；更换标的/周期后重置为来源口径。
+- 先补红灯再实现：覆盖 Adj Close OHLC 系数、日期排序、缺字段/错位/非法值拒绝、多日聚合、来源口径分离、API 禁止时点/日内/分页转换及 UI 服务端能力门控。
+- 最终验证：`npm test`（代码审查后再次运行，退出码 0）；`npm run build` 通过，生成 21 个哈希/预压缩资源；`npm run smoke:web` 通过；`npm run smoke:browser` 通过，包含三主题、四市场和移动布局；`npm run security:scan` 检查 655 个跟踪文件通过；`git diff --check` 退出码 0。人工审查没有发现阻断项。
+- `data/research.db` SHA-256 `AC9368AF4F6C6007043E58614E653BAF54DDFD0A41F608E13E430A9D9EBD6516`、`data/research.db-shm` SHA-256 `FD4C9FDA9CD3F9AE7C962B0DDF37232294D55580E1AA165AA06129B8549389EB`、`data/research.db-wal` 空文件 SHA-256 `E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855` 与本轮测试前已记录的值一致；均未纳入提交。
+- 尚未部署、提交或推送。生产域名的真实 Adj Close 数据与切换验收留给总发布门禁；r1 仍保持进行中，直到生产验收完成。其余 r3–r8 未完成项、Telegram 按钮待用户点击、自动对照组当前配置以及既有 1000 美元跑单边界均不变。
+
+## Predict.fun 预测市场纸面报价身份与盘口门槛（2026-10-09，本地未发布）
+
+- 依据 [Predict.fun 市场详情](https://dev.predict.fun/get-market-by-id-25552989e0) 和 [订单簿文档](https://dev.predict.fun/get-the-orderbook-for-a-market-25326908e0)，新增仅供纸面撮合的报价构建器：要求官方市场 ID 与盘口 ID 一致、市场已注册且开放可见、二元 YES/NO token 唯一、官方 description 与报价精度有效；盘口必须带有效源时间、合法 tick、双边价格和正的顶层数量。NO 价按来源 YES 盘口与市场精度以整数 tick 互补计算，并明确标记为派生报价、非独立来源盘口。
+- `conditionId`、description Hash、精度和 YES/NO token ID 被绑定进市场身份摘要；顶档价格、数量和源时间另绑定盘口快照 Hash。纸面成交前重新核验两种摘要、官方 API 主机/路径、状态字段一致性、报价时间及互补关系。缺少源 ID/时间不再由请求参数或本地时钟补造；请求数量超过对应方向顶层可见深度时拒绝，不假设扫单或部分成交。没有更高层可见簿深时，本门槛只允许不超过单档数量。
+- Predict.fun API 只记录文档能证实的市场 `description` 抓取快照时间，不把抓取时间伪称为结算规则发布时间。市场描述不是独立的正式结算规则发布日期证据，因此本次代码只完善 quote/identity gate，不据此宣称所有预测市场自动跑单能力已通过生产门槛。
+- 先添加篡改身份红灯测试；首次测试按预期失败，加入摘要绑定后定向 runner 测试 14/14 通过。全量 `npm test` 退出码 0；`npm run build` 通过，生成 21 个带 Hash/预压缩资源；Web、认证、Chromium 四市场/三主题矩阵、实时图表、合约和自动对照冒烟均通过；安全扫描检查 655 个跟踪文件通过。自动对照冒烟是隔离夹具（`modelRequests=0`、`automaticEnabled=false`），实时 K 线推送也仅为测试 fixture，不代表生产模型/实时源验证。
+- 复核发现历史交接记录对生产自动对照状态存在冲突：一处发布后记录为关闭/零账户，较晚记录写成已启用。当前这一轮没有读取或修改生产状态，因此不据此声称线上当前开关状态。用户最近回复模型“随机”；按“创建时从可用列表随机选定一个具体免费模型，然后把该模型 ID/版本冻结到此实验”的方式解释，符合模型固定、不在每轮自动切换的约束。不得把 `openrouter/free` 这种请求级动态路由当作冻结模型。本轮未更改线上配置或调用模型；后续启用前应先只读核对生产组与冻结模型事实。
+- 本批不提交、不推送、不部署，不重启服务、不创建订单、不调用模型，也不重复发送 Telegram 验收消息。既有 Telegram 测试消息只保留一条，真实按钮 ACK 仍以用户实际点击为准。未跟踪 SQLite/WAL 文件继续原样保留；全量测试后复核 SHA-256 与此前基线一致，未纳入提交。
+
+## Predict.fun 纸面撮合结算规则门槛（2026-10-09，本地未发布）
+
+- 官方 [市场详情响应](https://dev.predict.fun/get-market-by-id-25552989e0) 展示 `description`、condition/outcome 身份和报价精度，但没有单独、可验证的结算规则字段；不能把任意非空 description（例如测试中的 `Rules`）称为可执行结算条件。
+- 将合约字段改名为 `marketDescriptionEvidence`，把只读估值和执行资格分开。新鲜 YES/NO 顶档仍可给既有预测市场持仓做来源标记；新增 `predictionSettlementRulesGate` 明确拒绝规则信号、AI 模型调用及新增开仓，并把 unsupported 原因写入跑单决策风险检查/运行诊断。`resolveRunnerFill` 再次独立阻止新增开仓，已有仓位仍可按核验方向盘口与可见深度减仓/平仓，避免规则证据缺失导致风险减仓通道失效。
+- 在官方字段契约补齐前，Predict.fun 的新开仓和 AI 决策保持不可用；既有持仓可按真实、未过期订单簿估值，风险减仓/平仓仍必须核验 outcome 盘口与顶层深度。该限制是能力阻塞，不代表功能已验收完成；没有依据时不从描述文本做语义猜测，也不提交或部署此改动。
+- 新增失败测试后完成实现；定向 runner 测试通过。全套测试、构建冒烟和安全门禁仍待最终回归。本节及当前改动仅在本地 worktree，生产状态未读取或修改。
+
+## 2026-10-09 最终本地门禁与只读生产基线
+
+- 本地最终隔离全量 `npm test`：233 个测试文件、1049 通过、0 失败；`npm run build` 通过，生成 21 个哈希/预压缩资源。构建身份显示当前 HEAD `59e12b2c7e1f6db5fda83c8cc9cf4ed5d966ba63`，因为本批修改尚未提交，不能把该构建当作本批发布候选。
+- 本地 `smoke:web`、`smoke:auth`、`smoke:browser`、`smoke:live-kline`、`smoke:contracts`、`smoke:automatic-comparison` 全部退出码 0；自动对照和实时图表测试均为隔离 fixture，自动对照 `modelRequests=0`、`automaticEnabled=false`，实时图表结果不代表生产推流。
+- `security:scan` 检查 655 个跟踪文件通过；`git diff --check` 退出码 0。全量隔离测试前后 `research.db` / WAL / SHM 哈希相同，三份用户数据均未加入版本控制。
+- 生产只读 Chromium canary 在清空 Telegram token/chat 环境变量后通过，未发送 Telegram 消息、未写业务状态：四市场可切换，访客私有决策接口 403，SNDK 可选择，AAPL 与 SNDK 普通日线分别返回 1254 / 415 根；AAPL、usAAPL、AAPL.OQ 三种历史别名均返回相同的 429 根时点数据。报告在系统临时目录 `moneymoney-readonly-canary-8ccdc241fdef48bab5d4811c640f19fb/production-canary-report.json`。
+- 该 canary 实际核验的是线上旧版本 `962a7d01e31aa373eab7cd7d5d8b00ee0173a7fa`（构建时间 `2026-10-08T19:27:47.066Z`），不是当前未提交代码；不据此宣称 Yahoo Adj Close 或 Predict.fun 新门槛已在线生效。没有切换 dist、重启服务、提交或推送。
+- 仍未通过的发布/能力门槛：期权模拟跑单无已验证的合约报价执行接线；Predict.fun 官方详情无独立结算规则字段，因此禁止新增开仓和 AI 决策；Telegram 真实按钮 ACK 需用户点击；当前生产目录切换回滚演练会触发服务重启，尚未验证不会影响正在运行的跑单/调度。生产自动对照私有状态本轮未读取；既有 1000 美元股票跑单及线上设置未修改。目标继续保持进行中。

@@ -8910,6 +8910,7 @@ let currentStockSymbol = 'sh600519';
 let currentStockName = '贵州茅台';
 let currentStockApiSymbol = '';
 let currentStockKlinePeriod = '5m';
+let stockChartAdjustment = 'source';
 let currentStockKlineReason = '';
 let stockChartReplayIndex = -1;
 let stockChartKlines = [];
@@ -9522,6 +9523,7 @@ function setStockKlinePeriod(period) {
   const nextPeriod = String(period || '1d').toLowerCase();
   if (stockChartIntradayDate && ['1m', '5m', '15m'].includes(nextPeriod)) return setStockIntradayPeriod(nextPeriod);
   if (stockChartIntradayDate) { stockChartIntradayDate = ''; stockChartIntradaySession = null; stockChartDailyContext = null; }
+  if (nextPeriod !== currentStockKlinePeriod) stockChartAdjustment = 'source';
   currentStockKlinePeriod = nextPeriod;
   clearStockKlineFocus();
   document.querySelectorAll('.stock-kline-period').forEach(btn => {
@@ -9621,6 +9623,7 @@ async function loadStockKline(symbol, name, apiSymbol, options = {}) {
     stockChartDailyContext = null;
     stockChartCompanionKey = '';
     currentStockApiSymbol = '';
+    stockChartAdjustment = 'source';
     stockChartAsOf = '';
     stockChartAsOfRevision++;
     try { stockChartAsOf = localStorage.getItem(`moneymoney:kline-as-of:${symbol}`) || ''; } catch (e) {}
@@ -9628,6 +9631,7 @@ async function loadStockKline(symbol, name, apiSymbol, options = {}) {
   if (symbol) currentStockSymbol = symbol;
   if (name) currentStockName = name;
   if (apiSymbol !== undefined) currentStockApiSymbol = apiSymbol || '';
+  const requestedAdjustment = stockChartAsOf || stockChartIntradayDate ? 'source' : stockChartAdjustment;
   syncStockKlineAsOfControl();
   if (!live) {
     stockChartFocusIndex = null;
@@ -9649,7 +9653,8 @@ async function loadStockKline(symbol, name, apiSymbol, options = {}) {
     }
     const asOfQuery = stockChartAsOf ? '&asOf=' + encodeURIComponent(stockChartAsOf) : '';
     const dateQuery = stockChartIntradayDate ? '&date=' + encodeURIComponent(stockChartIntradayDate) + '&intradayPeriod=' + encodeURIComponent(stockChartIntradayPeriod) : '';
-    const res = await fetch('/api/stock/kline?symbol=' + encodeURIComponent(currentStockSymbol) + '&period=' + encodeURIComponent(currentStockKlinePeriod) + '&interval=' + encodeURIComponent(currentStockKlinePeriod) + asOfQuery + dateQuery + (currentStockApiSymbol ? '&api=' + encodeURIComponent(currentStockApiSymbol) : ''), { signal: controller.signal });
+    const adjustmentQuery = '&adjustment=' + encodeURIComponent(requestedAdjustment);
+    const res = await fetch('/api/stock/kline?symbol=' + encodeURIComponent(currentStockSymbol) + '&period=' + encodeURIComponent(currentStockKlinePeriod) + '&interval=' + encodeURIComponent(currentStockKlinePeriod) + adjustmentQuery + asOfQuery + dateQuery + (currentStockApiSymbol ? '&api=' + encodeURIComponent(currentStockApiSymbol) : ''), { signal: controller.signal });
     const d = await res.json();
     if (requestRevision !== stockKlineRequestRevision) return;
     if (live && (controller.signal.aborted || stockChartAsOf || stockChartIntradayDate || stockChartReplayIndex < stockChartKlines.length - 1 || window.stockMoneyKLine?.timer)) return;
@@ -9706,6 +9711,7 @@ async function loadStockKline(symbol, name, apiSymbol, options = {}) {
 }
 async function loadEarlierStockKline(signal) {
   const symbol=currentStockSymbol,apiSymbol=currentStockApiSymbol,period=currentStockKlinePeriod,revision=stockKlineContextRevision,before=stockChartKlines[0]?.time;
+  if(stockChartAdjustment!=='source')return '当前前复权视图不支持历史分页，避免不同分页使用不同调整基准';
   if(!before||stockChartAsOf||stockChartIntradayDate||window.stockMoneyKLine?.timer||!['1m','5m','15m','1h','1d'].includes(period))return '当前时点、指定日期或聚合周期不支持来源历史分页';
   const query=new URLSearchParams({symbol,period,interval:period,limit:'200',before:String(before)});if(apiSymbol)query.set('api',apiSymbol);
   const response=await fetch('/api/stock/kline?'+query,{signal}),body=await response.json();
@@ -9907,7 +9913,7 @@ function drawStockKline(canvas, klines) {
   renderChartSignalList('stock-chart-signals', overlays.signals, '当前周期未触发所选策略信号');
   renderChartPatternList('stock-chart-pattern-list', overlays.patterns, '当前周期未识别到所选蜡烛形态');
   renderChartStructureList('stock-chart-structure-list', overlays.structures, overlays.chan, '当前周期未识别到结构标记');
-  window.MoneyTradingChart?.decorate(canvas,{...canvas.moneySourceMetadata,identity:currentStockSymbol+'|'+currentStockKlinePeriod,canvas,full:replayKlines,rows:klines,interval:currentStockKlinePeriod,exchangeTimeZone:stockChartExchangeTimezone,ma:[5,10,20],volumeUnit:'股',interactive:tradingActive,loadEarlier:!stockChartAsOf&&!stockChartIntradayDate&&['1m','5m','15m','1h','1d'].includes(currentStockKlinePeriod)?loadEarlierStockKline:undefined,geometry:{W,H,padL,padR,padT,priceH,minP,maxP},redraw:()=>drawStockKline(canvas,stockChartKlines)});
+  window.MoneyTradingChart?.decorate(canvas,{...canvas.moneySourceMetadata,identity:currentStockSymbol+'|'+currentStockKlinePeriod,canvas,full:replayKlines,rows:klines,interval:currentStockKlinePeriod,exchangeTimeZone:stockChartExchangeTimezone,ma:[5,10,20],volumeUnit:'股',interactive:tradingActive,loadEarlier:!stockChartAsOf&&!stockChartIntradayDate&&stockChartAdjustment==='source'&&['1m','5m','15m','1h','1d'].includes(currentStockKlinePeriod)?loadEarlierStockKline:undefined,onAdjustmentChange:value=>{if(!['source','forward'].includes(value)||stockChartAsOf||stockChartIntradayDate)return;stockChartAdjustment=value;loadStockKline();},geometry:{W,H,padL,padR,padT,priceH,minP,maxP},redraw:()=>drawStockKline(canvas,stockChartKlines)});
 }
 // --- DeFi Data ---
 async function loadDefiData() {

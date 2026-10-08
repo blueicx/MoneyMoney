@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const {
   STOCK_KLINE_PERIODS,
   normalizeYahooChartPayload,
+  normalizeYahooForwardAdjustedChartPayload,
   normalizeYahooCorporateActions,
   normalizeYahooSymbol,
   aggregateStockBars,
@@ -31,6 +32,39 @@ test('Yahoo chart payload becomes ordered numeric OHLCV bars', () => {
     { time: 20000, open: 2, high: 3, low: 2, close: 2.5, volume: 20 },
     { time: 30000, open: 3, high: 4, low: 2, close: 3.5, volume: 30 },
   ]);
+});
+
+test('Yahoo adjclose derives forward-adjusted OHLC only from fully aligned rows and leaves source volume unchanged', () => {
+  const result = normalizeYahooForwardAdjustedChartPayload({
+    chart: { result: [{
+      timestamp: [20, 10],
+      indicators: {
+        quote: [{ open: [50, 100], high: [55, 110], low: [45, 90], close: [50, 100], volume: [2, 1] }],
+        adjclose: [{ adjclose: [45, 80] }],
+      },
+    }] },
+  });
+  assert.equal(result.available, true);
+  assert.equal(result.basis, 'yahoo-adjclose-factor');
+  assert.equal(result.volumeBasis, 'source');
+  assert.deepEqual(result.bars, [
+    { time: 10000, open: 80, high: 88, low: 72, close: 80, volume: 1 },
+    { time: 20000, open: 45, high: 49.5, low: 40.5, close: 45, volume: 2 },
+  ]);
+});
+
+test('Yahoo forward adjustment fails closed when adjusted close is absent, misaligned, or invalid', () => {
+  const base = { chart: { result: [{ timestamp: [10], indicators: { quote: [{ open: [10], high: [11], low: [9], close: [10], volume: [1] }] } }] } };
+  for (const payload of [
+    base,
+    { chart: { result: [{ timestamp: [10], indicators: { quote: [{ open: [10], high: [11], low: [9], close: [10], volume: [1] }], adjclose: [{ adjclose: [] }] } }] } },
+    { chart: { result: [{ timestamp: [10], indicators: { quote: [{ open: [10], high: [11], low: [9], close: [10], volume: [1] }], adjclose: [{ adjclose: [0] }] } }] } },
+  ]) {
+    const result = normalizeYahooForwardAdjustedChartPayload(payload);
+    assert.equal(result.available, false);
+    assert.equal(result.bars, null);
+    assert.match(result.reason, /Adj Close|adjclose|调整收盘价/i);
+  }
 });
 
 test('Yahoo corporate actions retain source events without inventing publication timestamps', () => {
@@ -82,6 +116,7 @@ test('Yahoo stock kline adapter maps a period to a real chart request', async (t
   assert.equal(result.data[0].close, 1.5);
   assert.match(requestedUrl, /query1\.finance\.yahoo\.com\/v8\/finance\/chart\/AAPL/);
   assert.match(requestedUrl, /interval=5m/);
+  assert.match(requestedUrl, /includeAdjustedClose=true/);
 });
 
 test('Yahoo stock kline adapter preserves mainland stock exchange mapping', async (t) => {
@@ -115,4 +150,43 @@ test('Yahoo history adapter carries unverified price basis and corporate-action 
   assert.equal(result.data.corporateActions[0].kind, 'split');
   assert.equal(result.data.corporateActions[0].publishedAt, undefined);
   assert.ok(result.fetchedAt);
+});
+
+test('Yahoo history keeps source OHLC and Adj Close-derived OHLC as separate series', async (t) => {
+  const originalFetch = global.fetch;
+  t.after(() => { global.fetch = originalFetch; });
+  let requestedUrl = '';
+  global.fetch = async (url) => {
+    requestedUrl = String(url);
+    return { ok: true, json: async () => ({ chart: { result: [{
+      timestamp: [10, 20],
+      indicators: {
+        quote: [{ open: [100, 50], high: [110, 55], low: [90, 45], close: [100, 50], volume: [1, 2] }],
+        adjclose: [{ adjclose: [80, 45] }],
+      },
+    }] } }) };
+  };
+  const result = await createYahooStockHistoryAdapter().fetch({ symbol: 'AAPL', period: '1d' });
+  assert.equal(result.status, 'live');
+  assert.equal(result.data.bars[0].close, 100);
+  assert.equal(result.data.forwardAdjustment.available, true);
+  assert.equal(result.data.forwardAdjustedBars[0].close, 80);
+  assert.equal(result.data.forwardAdjustedBars[0].volume, 1);
+  assert.match(result.data.forwardAdjustment.reason, /成交量保持来源原值/);
+  assert.match(requestedUrl, /includeAdjustedClose=true/);
+});
+
+test('multi-day Yahoo periods aggregate adjusted daily bars only after applying each daily Adj Close factor', async (t) => {
+  const originalFetch = global.fetch;
+  t.after(() => { global.fetch = originalFetch; });
+  global.fetch = async () => ({ ok: true, json: async () => ({ chart: { result: [{
+    timestamp: [10, 20, 30],
+    indicators: {
+      quote: [{ open: [100, 50, 60], high: [110, 55, 66], low: [90, 45, 54], close: [100, 50, 60], volume: [1, 2, 3] }],
+      adjclose: [{ adjclose: [80, 45, 48] }],
+    },
+  }] } }) });
+  const result = await createYahooStockHistoryAdapter().fetch({ symbol: 'AAPL', period: '3d' });
+  assert.equal(result.data.forwardAdjustment.available, true);
+  assert.deepEqual(result.data.forwardAdjustedBars, [{ time: 10000, open: 80, high: 88, low: 40.5, close: 48, volume: 6 }]);
 });

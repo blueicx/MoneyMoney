@@ -3,6 +3,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
+require('ts-node/register/transpile-only');
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'moneymoney-ai-runner-state-'));
 process.env.MONEYMONEY_DATA_DIR = root;
@@ -128,7 +129,30 @@ test('prediction-market NO valuation requires its actual outcome book and keeps 
   const runner = createAiRunner('Predict.fun', '12345', 'Binary event', 100);
   const at = new Date().toISOString();
   const noQuote = { market: 'prediction', status: 'live', price: 0.6, bestBid: 0.59, bestAsk: 0.61, fetchedAt: at, source: 'official orderbook' };
-  assert.equal(runnerOpenPosition(runner.id, 0.61, 10, 'NO', 'test', undefined, { quote: noQuote, source: noQuote.source, dataAt: at }), true);
+  assert.equal(runnerOpenPosition(runner.id, 0.61, 10, 'NO', 'test', undefined, { quote: noQuote, source: noQuote.source, dataAt: at }), false);
+  const { buildPredictFunExecutionQuote, predictionOutcomeQuote } = require('../src/features/runner-prediction-quotes');
+  const market = { id: 12345, status: 'REGISTERED', tradingStatus: 'OPEN', isVisible: true, conditionId: 'condition-12345', description: 'Will the event happen?', decimalPrecision: 2,
+    outcomes: [{ name: 'YES', onChainId: 'yes-12345' }, { name: 'NO', onChainId: 'no-12345' }] };
+  const makeNoQuote = (bid, ask) => predictionOutcomeQuote(buildPredictFunExecutionQuote(market,
+    { marketId: 12345, updateTimestampMs: Date.parse(at), bids: [[bid, 100]], asks: [[ask, 100]] }, new Date(at)), 'NO', new Date(at));
+  const entryQuote = makeNoQuote(.39, .41);
+  assert.equal(entryQuote.bestAsk, .61);
+  assert.equal(runnerOpenPosition(runner.id, 0.61, 10, 'NO', 'test', undefined, { quote: entryQuote, source: entryQuote.source, dataAt: at }), false,
+    'new prediction positions remain blocked until independently verifiable resolution rules exist');
+  const ledger = require('../dist/features/unified-paper-trading').unifiedPaperLedgerStore;
+  const seededAccount = ledger.applyRunnerOrder(runner.accountId, runner.id, {
+    id: 'legacy-prediction-position', instrumentId: 'prediction:predictfun:12345', instrumentType: 'prediction',
+    title: 'Binary event', side: 'NO', outcome: 'NO', price: .61, quantity: 10, timestamp: at,
+  }, 100);
+  const historicalPosition = {
+    id: 'legacy-prediction-position', instrumentId: 'prediction:predictfun:12345',
+    instrument: { venue: 'Predict.fun', symbolOrMarketId: '12345', title: 'Binary event' },
+    side: 'NO', entryPrice: .61, currentPrice: .61, quantity: 10, entryTime: at,
+    markStatus: 'unavailable', markSource: 'prior source', markUpdatedAt: at, status: 'OPEN',
+  };
+  stateStore.set('ai-paper-runners', getAiRunners().map(item => item.id === runner.id
+    ? { ...item, cashUsd: seededAccount.cash, positions: [historicalPosition] }
+    : item), 1);
   updateAiRunnerMarketState(runner.id, {
     market: 'prediction', status: 'live', instrument: '12345', source: 'official orderbook', dataAt: at,
     prices: { '12345': 0.4 },
@@ -136,17 +160,17 @@ test('prediction-market NO valuation requires its actual outcome book and keeps 
   let saved = getAiRunners().find(item => item.id === runner.id);
   assert.equal(saved.positions[0].currentPrice, 0.61);
   assert.equal(saved.positions[0].markStatus, 'unavailable');
-  const ledger = require('../dist/features/unified-paper-trading').unifiedPaperLedgerStore;
   assert.equal(ledger.getRunnerAccount(saved.accountId).positions[0].markStatus, 'unavailable');
-  const actualQuote = { ...noQuote, predictionContract: { instrumentId: 'prediction:predictfun:12345', verified: true,
-    rules: { url: 'https://predict.fun/market/12345', source: 'Predict.fun', evidenceId: 'rule-12345', publishedAt: at },
-    outcomes: { YES: { tokenId: 'yes-12345', bestBid: .39, bestAsk: .41, updatedAt: at }, NO: { tokenId: 'no-12345', bestBid: .55, bestAsk: .57, updatedAt: at } } } };
+  const actualQuote = makeNoQuote(.43, .45);
   updateAiRunnerMarketState(runner.id, {
     market: 'prediction', status: 'live', instrument: '12345', source: 'official orderbook', dataAt: at,
+    executionStatus: 'unsupported', executionReason: 'Predict.fun 官方详情没有独立、可验证的结算规则',
     prices: { '12345': .4 }, outcomeQuotes: { 'prediction:predictfun:12345': actualQuote },
   });
   saved = getAiRunners().find(item => item.id === runner.id);
   assert.ok(Math.abs(saved.positions[0].currentPrice - .56) < 1e-9);
+  assert.match(saved.lastDataReason, /没有独立、可验证的结算规则/);
+  assert.match(summarizeRunner(saved).valuationReason, /没有独立、可验证的结算规则/);
   assert.ok(Math.abs(saved.positions[0].maxAdversePnlUsd + 0.5) < 1e-9);
   const account = ledger.getRunnerAccount(saved.accountId);
   assert.equal(account.positions[0].outcome, 'NO');

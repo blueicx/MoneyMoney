@@ -17,6 +17,10 @@ export interface Market {
   question: string;
   description: string;
   status: MarketStatus;
+  /** Live trading state returned by the official market details endpoint. */
+  tradingStatus?: 'OPEN' | 'CLOSED' | 'PAUSED' | string;
+  /** Visibility flag is optional for older API payloads; explicit false is never executable. */
+  isVisible?: boolean;
   isNegRisk: boolean;
   isYieldBearing: boolean;
   feeRateBps: number;

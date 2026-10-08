@@ -182,9 +182,9 @@ import { paperTradingExecutor } from '../features/trading-executor';
 import { unifiedPaperLedgerStore, calculateUnifiedPerformance, replayUnifiedPaperOrders, type UnifiedPaperOrder } from '../features/unified-paper-trading';
 import { paperChartLineage, resolvePaperChartInstrument } from '../features/paper-chart-lineage';
 import { RunnerExecutionEvidenceStore, runnerSnapshotHash, runnerExecutionSnapshotId } from '../features/runner-execution-evidence';
-import { predictionOutcomeQuote } from '../features/runner-prediction-quotes';
+import { buildPredictFunExecutionQuote, predictionOutcomeQuote, predictionSettlementRulesGate } from '../features/runner-prediction-quotes';
 const runnerExecutionEvidence = new RunnerExecutionEvidenceStore(stateStore);
-import { stockChartDisclosure } from '../features/stock-chart-disclosure';
+import { stockChartAdjustmentRequestReason, stockChartDisclosure } from '../features/stock-chart-disclosure';
 import { logger } from '../utils/logger';
 import { buildSourceSlo, runtimeObservability } from '../features/runtime-observability';
 import { createDataEnvelope } from '../features/data-status';
@@ -3018,7 +3018,8 @@ app.get('/api/stock/kline', async (req, res) => {
     if(req.query.before!==undefined&&(asOf||tradingDate))throw Error('来源历史分页不能混用本地时点或指定交易日');
     const page=req.query.before===undefined?undefined:klinePageWindow('stocks',effectivePeriod,Number(req.query.before),Number(req.query.limit||200));
     const adjustment=String(req.query.adjustment||'source');
-    if(!asOf && adjustment!=='source')return res.status(422).json({success:false,data:null,market:'stocks',instrument:symbol,dataStatus:'unsupported',source:'股票K线来源口径',updatedAt:new Date().toISOString(),reason:'当前源尚未声明可转换复权口径；请使用来源口径'});
+    const adjustmentError=stockChartAdjustmentRequestReason(adjustment,{asOf:Boolean(asOf),tradingDate:Boolean(tradingDate),paginated:Boolean(page)});
+    if(adjustmentError)return res.status(422).json({success:false,data:null,market:'stocks',instrument:symbol,timeframe:effectivePeriod,dataStatus:'unsupported',source:'股票K线来源口径',updatedAt:new Date().toISOString(),reason:adjustmentError});
     const periodConfig = STOCK_KLINE_PERIODS[effectivePeriod as keyof typeof STOCK_KLINE_PERIODS];
     if (tradingDate && asOf) return res.status(400).json({ success: false, data: null, dataStatus: 'unsupported', source: 'Yahoo Finance 历史K线', updatedAt: new Date().toISOString(), reason: '本地历史时点与外部日内区间不能混用；请退出数据时点后再查看日内K线' });
     if (tradingDate && !/^\d{4}-\d{2}-\d{2}$/.test(tradingDate)) return res.status(400).json({ success: false, data: null, dataStatus: 'failed', source: 'Yahoo Finance 历史K线', updatedAt: new Date().toISOString(), reason: 'date 必须为 YYYY-MM-DD' });
@@ -3054,18 +3055,29 @@ app.get('/api/stock/kline', async (req, res) => {
       });
     }
     const adapter = getStockKlineAdapter(effectivePeriod, requestedSymbol);
-    const snapshot = await adapter.fetch({ symbol: requestedSymbol, period: effectivePeriod,...(page?{startTime:page.startTime,endTime:page.endTime+1}:{} ) });
+    const snapshot = await adapter.fetchHistory({ symbol: requestedSymbol, period: effectivePeriod,...(page?{startTime:page.startTime,endTime:page.endTime+1}:{} ) });
     const updatedAt = snapshot.fetchedAt || new Date().toISOString();
-    if (!snapshot.data?.length) {
+    const history=snapshot.data;
+    const sourceBars=history?.bars||null;
+    const forwardAvailable=!page&&Boolean(history?.forwardAdjustment.available&&history.forwardAdjustedBars?.length);
+    const forwardReason=page?'来源历史分页无法保证统一 Adj Close 参考基准；前复权不可用':history?.forwardAdjustment.reason||'Yahoo 未返回完整 Adj Close 对齐序列；前复权不可用';
+    if (!sourceBars?.length) {
+      return res.json({ success: false, data: null, dataStatus: snapshot.status, source: snapshot.source, updatedAt, reason: snapshot.error || `暂无${periodConfig.label}股票K线数据` });
+    }
+    const bars=adjustment==='forward'?(forwardAvailable?history?.forwardAdjustedBars||null:null):sourceBars;
+    if (adjustment==='forward'&&!forwardAvailable) {
+      return res.status(422).json({success:false,data:null,market:'stocks',instrument:requestedSymbol,timeframe:effectivePeriod,dataStatus:'unsupported',source:snapshot.source,updatedAt,adjustment:{requested:adjustment,actual:history?.adjustment||'unknown',available:['source'],conversionEnabled:false,reason:forwardReason},reason:forwardReason});
+    }
+    if (!bars?.length) {
       return res.json({ success: false, data: null, dataStatus: snapshot.status, source: snapshot.source, updatedAt, reason: snapshot.error || `暂无${periodConfig.label}股票K线数据` });
     }
     if (tradingDate) {
       const timezone = resolveStockExchangeTimeZone(requestedSymbol);
-      const session = filterStockBarsForTradingDate(snapshot.data, tradingDate, timezone);
-      return res.json({ success: session.bars.length > 0, data: session.bars,...stockChartDisclosure(session.bars,adjustment), dataStatus: session.bars.length ? snapshot.status : 'empty', market: 'stocks', instrument: requestedSymbol, timeframe: effectivePeriod, date: tradingDate, timezone, session, source: snapshot.source, updatedAt, reason: session.bars.length ? undefined : `来源 ${snapshot.source} 当前覆盖 ${session.availableDateRange ? `${session.availableDateRange.from} 至 ${session.availableDateRange.to}` : '暂无可用交易日'}；未提供 ${tradingDate} 的 ${effectivePeriod} 日内数据` });
+      const session = filterStockBarsForTradingDate(bars, tradingDate, timezone);
+      return res.json({ success: session.bars.length > 0, data: session.bars,...stockChartDisclosure(session.bars,adjustment,history?.adjustment,{forwardReason}), dataStatus: session.bars.length ? snapshot.status : 'empty', market: 'stocks', instrument: requestedSymbol, timeframe: effectivePeriod, date: tradingDate, timezone, session, source: snapshot.source, updatedAt, reason: session.bars.length ? undefined : `来源 ${snapshot.source} 当前覆盖 ${session.availableDateRange ? `${session.availableDateRange.from} 至 ${session.availableDateRange.to}` : '暂无可用交易日'}；未提供 ${tradingDate} 的 ${effectivePeriod} 日内数据` });
     }
-    const bars=page?snapshot.data.slice(-page.limit):snapshot.data;
-    res.json({ success: true,market:'stocks',instrument:requestedSymbol,timeframe:effectivePeriod, data: bars,...stockChartDisclosure(bars,adjustment), history:{nextBefore:bars[0]?.time??null,requestedWindow:page??null,hasEarlier:null},dataStatus: klinePageStatus(snapshot.status,!!page), source: snapshot.source, updatedAt, timezone: resolveStockExchangeTimeZone(requestedSymbol), reason: snapshot.error || undefined });
+    const selectedBars=page?bars.slice(-page.limit):bars;
+    res.json({ success: true,market:'stocks',instrument:requestedSymbol,timeframe:effectivePeriod, data: selectedBars,...stockChartDisclosure(selectedBars,adjustment,history?.adjustment,{forwardAvailable,forwardReason,volumeBasis:history?.forwardAdjustment.volumeBasis}), history:{nextBefore:selectedBars[0]?.time??null,requestedWindow:page??null,hasEarlier:null},dataStatus: klinePageStatus(snapshot.status,!!page), source: snapshot.source, updatedAt, timezone: resolveStockExchangeTimeZone(requestedSymbol), reason: snapshot.error || undefined });
   } catch (e: any) {
     res.json({
       success: false,
@@ -8875,6 +8887,8 @@ interface AiRunnerInstrumentSnapshot extends AiRunnerModelSnapshot {
   snapshotHash: string;
   evidence?: AiRunnerDataEvidence[];
   quote?: AiRunnerQuote;
+  executionStatus?: string;
+  executionReason?: string;
   indicatorDataStatus?: string;
   indicatorDataAt?: string;
   indicatorRetrievedAt?: string;
@@ -9031,25 +9045,26 @@ async function loadAiRunnerInstrumentSnapshot(runner: AiRunner, ref: AiRunnerIns
           row = { ...row, dataStatus: 'unsupported', source: 'Predict.fun 官方 API', reason: '该事件不是经核验的 YES/NO 二元合约，当前跑单不估算合约价格' };
         } else {
           const book = bookResponse.success ? bookResponse.data : null;
-          const bookAt = Number(book?.updateTimestampMs);
-          const bookStatus = book ? runnerBookStatus(bookAt, runner.policy.minFreshnessMs) : 'unavailable';
-          const bid = Number(book?.bids?.[0]?.[0]);
-          const ask = Number(book?.asks?.[0]?.[0]);
-          const validBook = Number.isFinite(bid) && bid > 0 && Number.isFinite(ask) && ask >= bid && ask < 1;
-          const status = !validBook ? 'unavailable' : bookStatus;
+          const fetchedAt = new Date();
+          const quote = book ? buildPredictFunExecutionQuote(marketItem, book, fetchedAt, runner.policy.minFreshnessMs, config.apiBaseUrl) : {
+            market: 'prediction' as const, status: 'unavailable', dataStatus: 'unavailable', price: 0,
+            fetchedAt: fetchedAt.toISOString(), source: 'Predict.fun 官方事件详情 + 订单簿', reason: 'Predict.fun 官方订单簿不可用',
+          };
+          const bookAt = Date.parse(String(quote.updatedAt || ''));
           const dataAt = Number.isFinite(bookAt) ? new Date(bookAt).toISOString() : undefined;
-          const midpoint = validBook ? (bid + ask) / 2 : 0;
-          const quote: AiRunnerQuote = { market: 'prediction', status, dataStatus: status, price: midpoint, fetchedAt: dataAt, source: 'Predict.fun 官方事件订单簿', bestBid: validBook ? bid : undefined, bestAsk: validBook ? ask : undefined, reason: !validBook ? '订单簿缺少有效双边 YES/NO 报价' : status === 'stale' ? '订单簿报价过期' : undefined };
-          // Current endpoint identifies a market book, not two token-scoped books or rules evidence.
-          const executableQuote = predictionOutcomeQuote(quote,'YES',new Date(),runner.policy.minFreshnessMs);
+          const midpoint = quote.price;
+          const executableQuote = predictionOutcomeQuote(quote,'YES',fetchedAt,runner.policy.minFreshnessMs);
+          const settlementGate = predictionSettlementRulesGate(executableQuote);
           row = {
-            ...row, dataStatus: executableQuote.dataStatus!, source: 'Predict.fun 官方事件详情 + 订单簿', dataAt, price: midpoint,
+            ...row, dataStatus: executableQuote.dataStatus!, executionStatus: settlementGate.allowed ? 'ready' : 'unsupported',
+            executionReason: settlementGate.reason, source: 'Predict.fun 官方事件详情 + 订单簿', dataAt, price: midpoint,
             evidence: [
               { dataset: 'market', source: 'Predict.fun 官方事件详情', status: marketResponse.success ? 'live' : 'unavailable', retrievedAt: new Date().toISOString(), reason: marketResponse.success ? undefined : '官方事件详情不可用' },
-              { dataset: 'quote', source: 'Predict.fun 官方事件订单簿（outcome 身份待核验）', status: executableQuote.dataStatus!, dataAt, retrievedAt: new Date().toISOString(), reason: executableQuote.reason },
+              { dataset: 'quote', source: quote.source || 'Predict.fun 官方事件订单簿', status: executableQuote.dataStatus!, dataAt, retrievedAt: fetchedAt.toISOString(), reason: executableQuote.reason },
+              { dataset: 'settlement-rules', source: 'Predict.fun 官方市场详情契约', status: settlementGate.allowed ? 'live' : 'unsupported', retrievedAt: fetchedAt.toISOString(), reason: settlementGate.reason },
             ],
             candidateSignals: [], quote: executableQuote,
-            reason: executableQuote.reason || '仅取得当前订单簿；缺少独立校准概率，因此规则模式不会推断交易优势',
+            reason: settlementGate.reason || executableQuote.reason || '仅取得当前订单簿；缺少独立校准概率，因此规则模式不会推断交易优势',
           };
         }
       }
@@ -9103,6 +9118,8 @@ async function prepareAiRunnerTick(runnerId: string, idempotencyKey: string, sam
   let modelVersion: string | undefined;
   let aiStatusReason: string | undefined;
   if(runner.comparisonControl&&snapshots.some(snapshot=>snapshot.market!==runner.universe?.market||!snapshot.quote||!evaluateRunnerQuoteGate(runner.policy,snapshot.quote,now).allowed))aiStatusReason='共享行情未通过市场身份或新鲜报价门槛，对照不调用模型';
+  const settlementBlocked = snapshots.find(snapshot => snapshot.market === 'prediction' && snapshot.executionStatus === 'unsupported');
+  if (!aiStatusReason && settlementBlocked) aiStatusReason = settlementBlocked.executionReason || '预测市场缺少可验证的结算规则，本轮不调用模型';
   if (runner.executionState === 'legacy-readonly') aiStatusReason = '旧跑单没有可核验的统一账本关联，仅保留只读历史';
   if (runner.mode !== 'rules') {
     const latestRunner = getAiRunners().find(item => item.id === runnerId);
@@ -9136,13 +9153,16 @@ async function prepareAiRunnerTick(runnerId: string, idempotencyKey: string, sam
     let action: AiRunnerDecisionRecord['action'] = 'NONE';
     let reason = snapshot.reason || '本轮规则条件未触发';
     const signals = [...(snapshot.candidateSignals || [])];
-    const quoteGate = snapshot.quote ? evaluateRunnerQuoteGate(runner.policy, snapshot.quote, now) : { allowed: false, reason: '没有可验证报价' };
+    const quoteGate = snapshot.market === 'prediction' && snapshot.executionStatus === 'unsupported'
+      ? { allowed: false, reason: snapshot.executionReason || '预测市场缺少可验证的结算规则' }
+      : snapshot.quote ? evaluateRunnerQuoteGate(runner.policy, snapshot.quote, now) : { allowed: false, reason: '没有可验证报价' };
     const indicatorGate = snapshot.indicatorDataStatus
       ? evaluateRunnerIndicatorEvidence({ status: snapshot.indicatorDataStatus, dataAt: snapshot.indicatorDataAt, retrievedAt: snapshot.indicatorRetrievedAt }, runner.policy.minFreshnessMs, now)
       : { allowed: true as const };
     const riskChecks: AiRunnerDecisionRecord['riskChecks'] = [
       { name: 'market-scope', passed: snapshot.market === runner.universe?.market, reason: snapshot.market === runner.universe?.market ? undefined : '跨市场数据已拒绝' },
       { name: 'quote-freshness', passed: quoteGate.allowed, reason: quoteGate.reason },
+      ...(snapshot.market === 'prediction' ? [{ name: 'settlement-rule-evidence', passed: snapshot.executionStatus !== 'unsupported', reason: snapshot.executionReason }] : []),
       { name: 'strategy-indicator-evidence', passed: indicatorGate.allowed, reason: indicatorGate.reason },
     ];
     if (runner.executionState === 'legacy-readonly') {
@@ -9206,6 +9226,7 @@ function executePreparedRunnerTick(prepared: PreparedAiRunnerTick): { actions: A
   for (const snapshot of prepared.snapshots) {
     updateAiRunnerMarketState(prepared.runnerId, {
       market: snapshot.market as AiRunnerMarket, status: snapshot.dataStatus,
+      executionStatus: snapshot.executionStatus, executionReason: snapshot.executionReason,
       instrument: snapshot.instrument,
       source: snapshot.source, dataAt: snapshot.dataAt, reason: snapshot.reason,
       snapshotHash: snapshot.snapshotHash,
@@ -9238,7 +9259,7 @@ function executePreparedRunnerTick(prepared: PreparedAiRunnerTick): { actions: A
       record.action = 'REJECTED'; record.reason = indicatorEvidenceCheck.reason || '策略指标证据已过期，订单拒绝';
       continue;
     }
-    const fill = resolveRunnerFill(runner.policy, quote, action);
+    const fill = resolveRunnerFill(runner.policy, quote, action, new Date(), action === 'SELL' ? existing?.quantity : undefined);
     if (!fill.allowed || fill.price == null) {
       record.action = 'REJECTED'; record.reason = fill.reason || '模拟撮合拒绝：报价不满足条件';
       record.riskChecks.push({ name: 'executable-quote', passed: false, reason: record.reason });
@@ -9256,6 +9277,8 @@ function executePreparedRunnerTick(prepared: PreparedAiRunnerTick): { actions: A
       const costMultiplier = 1 + (Number(runner.policy.feeRateBps) + Number(runner.policy.additionalSlippageBps)) / 10_000;
       const quantity = Math.floor(target / (fill.price * Math.max(1, costMultiplier)) * 1_000_000) / 1_000_000;
       if (quantity <= 0) { record.action = 'REJECTED'; record.reason = '可用风险预算不足以形成最小模拟订单'; continue; }
+      const sizedFill = resolveRunnerFill(runner.policy, quote, 'BUY', new Date(), quantity);
+      if (!sizedFill.allowed) { record.action = 'REJECTED'; record.reason = sizedFill.reason || '模拟数量超过可见深度'; record.riskChecks.push({ name: 'visible-orderbook-depth', passed: false, reason: record.reason }); continue; }
       const costs = calculateRunnerExecutionCosts(runner.policy, quote, 'BUY', quantity);
       const notionalAndCosts = fill.price * quantity + costs.feeUsd + costs.slippageUsd;
       const risk = evaluateRunnerOpen(runner, notionalAndCosts, new Date(), runnerLedgerInstrumentId(ref));

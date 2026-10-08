@@ -107,6 +107,14 @@ test('stock K-line UI exposes an explicit data time machine control', () => {
   assert.match(html, /[?&]asOf=/);
 });
 
+test('stock K-line sends the selected adjustment while forcing source basis for time-machine and intraday views', () => {
+  const html = fs.readFileSync('src/web/public/index.html', 'utf8');
+  assert.match(html, /const requestedAdjustment = stockChartAsOf \|\| stockChartIntradayDate \? 'source' : stockChartAdjustment/);
+  assert.match(html, /adjustmentQuery = '&adjustment='/);
+  assert.match(html, /onAdjustmentChange:value=>/);
+  assert.match(html, /stockChartAdjustment==='source'/);
+});
+
 test('stock K-line time machine protects a newer date from stale loads', () => {
   const html = fs.readFileSync('src/web/public/index.html', 'utf8');
   assert.match(html, /stockChartAsOfRevision/);

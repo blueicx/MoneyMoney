@@ -1,4 +1,4 @@
-import { ResilientDataSourceAdapter, type DataSourceAdapter } from './source-adapter';
+import { ResilientDataSourceAdapter, type DataSourceAdapter, type SourceSnapshot } from './source-adapter';
 import type { StockQuote } from '../features/stock-data-contracts';
 import crypto from 'node:crypto';
 
@@ -37,6 +37,8 @@ export interface YahooCorporateAction {
 
 export interface YahooStockHistory {
   bars: StockKlineBar[];
+  forwardAdjustedBars: StockKlineBar[] | null;
+  forwardAdjustment: { available: boolean; basis: 'yahoo-adjclose-factor'; volumeBasis: 'source'; reason: string };
   corporateActions: YahooCorporateAction[];
   /** Yahoo chart metadata does not declare the price-adjustment basis. */
   adjustment: 'unknown';
@@ -46,7 +48,10 @@ type YahooChartPayload = {
   chart?: {
     result?: Array<{
       timestamp?: number[];
-      indicators?: { quote?: Array<Record<string, Array<number | null> | undefined>> };
+      indicators?: {
+        quote?: Array<Record<string, Array<number | null> | undefined>>;
+        adjclose?: Array<{ adjclose?: Array<number | null> }>;
+      };
       events?: {
         splits?: Record<string, { date?: number; numerator?: number; denominator?: number; splitRatio?: string }>;
         dividends?: Record<string, { date?: number; amount?: number }>;
@@ -101,6 +106,50 @@ export function normalizeYahooSymbol(input: string): string {
   const hongKong = value.match(/^HK(\d{4,5})$/);
   if (hongKong) return `${hongKong[1].padStart(4, '0')}.HK`;
   return value.replace(/\.(OQ|N|A|NY|NASDAQ)$/i, '');
+}
+
+export function normalizeYahooForwardAdjustedChartPayload(payload: YahooChartPayload): YahooStockHistory['forwardAdjustment'] & { bars: StockKlineBar[] | null } {
+  const unavailable = (reason: string) => ({
+    available: false,
+    bars: null,
+    basis: 'yahoo-adjclose-factor' as const,
+    volumeBasis: 'source' as const,
+    reason,
+  });
+  const result = payload?.chart?.result?.[0];
+  const timestamps = result?.timestamp || [];
+  const quote = result?.indicators?.quote?.[0];
+  const adjustedClose = result?.indicators?.adjclose?.[0]?.adjclose;
+  if (!timestamps.length || !quote || !Array.isArray(adjustedClose)) {
+    return unavailable('Yahoo 未返回 Adj Close；前复权不可用');
+  }
+  if (adjustedClose.length !== timestamps.length) {
+    return unavailable('Yahoo Adj Close 与 K线时间索引不完整对齐；前复权不可用');
+  }
+  const bars: StockKlineBar[] = [];
+  for (let index = 0; index < timestamps.length; index += 1) {
+    const timeSeconds = Number(timestamps[index]);
+    const raw = [quote.open?.[index], quote.high?.[index], quote.low?.[index], quote.close?.[index]];
+    const [sourceOpen, sourceHigh, sourceLow, sourceClose] = raw.map(Number);
+    const adjClose = Number(adjustedClose[index]);
+    const volume = Number(quote.volume?.[index] ?? 0);
+    if (!Number.isSafeInteger(timeSeconds) || timeSeconds <= 0 || raw.some(value => value == null) ||
+      ![sourceOpen, sourceHigh, sourceLow, sourceClose, adjClose, volume].every(Number.isFinite) ||
+      Math.min(sourceOpen, sourceHigh, sourceLow, sourceClose, adjClose) <= 0 || volume < 0 ||
+      sourceHigh < Math.max(sourceOpen, sourceClose, sourceLow) || sourceLow > Math.min(sourceOpen, sourceClose, sourceHigh)) {
+      return unavailable('Yahoo Adj Close 或对应 OHLCV 字段无效；拒绝生成前复权K线');
+    }
+    const factor = adjClose / sourceClose;
+    const open = sourceOpen * factor;
+    const high = sourceHigh * factor;
+    const low = sourceLow * factor;
+    if (![factor, open, high, low].every(Number.isFinite) || factor <= 0 || low > Math.min(open, adjClose) || high < Math.max(open, adjClose)) {
+      return unavailable('Yahoo Adj Close 系数产生无效OHLC；拒绝生成前复权K线');
+    }
+    bars.push({ time: timeSeconds * 1000, open, high, low, close: adjClose, volume });
+  }
+  const description = '按 Yahoo Adj Close/来源收盘价逐根比例缩放 OHLC；成交量保持来源原值，不作调整。此为可追溯派生口径，不代表 Yahoo 独立提供了复权 OHLC。';
+  return { available: true, bars: bars.sort((left, right) => left.time - right.time), basis: 'yahoo-adjclose-factor', volumeBasis: 'source', reason: description };
 }
 
 function yahooEventTimeMs(value: unknown): number | null {
@@ -159,7 +208,7 @@ async function fetchYahooChartPayload(input: unknown, signal: AbortSignal): Prom
   for (const host of ['query1.finance.yahoo.com', 'query2.finance.yahoo.com']) {
     try {
       const bounds = bounded ? `period1=${Math.floor(source.startTime! / 1000)}&period2=${Math.ceil(source.endTime! / 1000)}` : `range=${encodeURIComponent(config.range)}`;
-      const url = `https://${host}/v8/finance/chart/${encodeURIComponent(symbol)}?interval=${encodeURIComponent(config.interval)}&${bounds}&events=div%2Csplits`;
+      const url = `https://${host}/v8/finance/chart/${encodeURIComponent(symbol)}?interval=${encodeURIComponent(config.interval)}&${bounds}&events=div%2Csplits&includeAdjustedClose=true`;
       response = await fetch(url, { signal, headers });
       if (response.ok) break;
       lastError = new Error(`Yahoo Finance API failed with status: ${response.status}`);
@@ -220,13 +269,27 @@ export function createYahooStockHistoryAdapter(): DataSourceAdapter<YahooStockHi
       const bounded = startTime !== undefined && endTime !== undefined;
       const bars = normalizeYahooChartPayload(payload).filter(bar => !bounded || (bar.time >= startTime! && bar.time < endTime!));
       if (!bars.length) throw new Error('Yahoo Finance returned no historical bars');
+      const forwardAdjustment = normalizeYahooForwardAdjustedChartPayload(payload);
+      const forwardAdjustedBars = forwardAdjustment.bars
+        ? (config.aggregateDays ? aggregateStockBars(forwardAdjustment.bars, config.aggregateDays) : forwardAdjustment.bars)
+        : null;
       const corporateActions = normalizeYahooCorporateActions(payload, symbol).filter(action => !bounded || (Date.parse(action.effectiveAt) >= startTime! && Date.parse(action.effectiveAt) < endTime!));
-      return { bars: config.aggregateDays ? aggregateStockBars(bars, config.aggregateDays) : bars, corporateActions, adjustment: 'unknown' };
+      return {
+        bars: config.aggregateDays ? aggregateStockBars(bars, config.aggregateDays) : bars,
+        forwardAdjustedBars,
+        forwardAdjustment: { available: Boolean(forwardAdjustedBars), basis: forwardAdjustment.basis, volumeBasis: forwardAdjustment.volumeBasis, reason: forwardAdjustment.reason },
+        corporateActions,
+        adjustment: 'unknown',
+      };
     },
   });
 }
 
-export function createYahooStockKlineAdapter(): DataSourceAdapter<StockKlineBar[]> {
+export interface YahooStockKlineAdapter extends DataSourceAdapter<StockKlineBar[]> {
+  fetchHistory(input?: unknown): Promise<SourceSnapshot<YahooStockHistory>>;
+}
+
+export function createYahooStockKlineAdapter(): YahooStockKlineAdapter {
   const history = createYahooStockHistoryAdapter();
   return {
     id: history.id,
@@ -235,5 +298,6 @@ export function createYahooStockKlineAdapter(): DataSourceAdapter<StockKlineBar[
       const snapshot = await history.fetch(input);
       return { ...snapshot, data: snapshot.data?.bars ?? null };
     },
+    fetchHistory: input => history.fetch(input),
   };
 }

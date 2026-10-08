@@ -92,6 +92,14 @@ test('adjustment control exposes source metadata and disables unverified convers
  const control=w.document.querySelector('[data-chart-adjustment]');assert.ok(control,'adjustment disclosure control missing');assert.equal(control.querySelector('[value="forward"]').disabled,true);assert.equal(control.querySelector('[value="backward"]').disabled,true);assert.match(control.title,/来源未声明/);
  }finally{w.close();}
 });
+test('chart adjustment control enables only server-advertised bases and emits selection changes',()=>{
+ const {JSDOM}=require('jsdom'),dom=new JSDOM('<div><canvas></canvas></div>',{url:'https://test.invalid',runScripts:'outside-only',pretendToBeVisual:true}),w=dom.window,selected=[];
+ w.HTMLCanvasElement.prototype.getContext=()=>new Proxy({},{get:()=>()=>{}});
+ try{w.eval(fs.readFileSync('src/web/public/trading-chart.js','utf8'));w.MoneyTradingChart.render(w.document.querySelector('canvas'),rows,{identity:'stock:test|1d',interval:'1d',adjustment:{requested:'source',actual:'unknown',available:['source','forward'],conversionEnabled:false,reason:'使用 Yahoo Adj Close 系数推导 OHLC；成交量保持来源原值'},onAdjustmentChange:value=>selected.push(value)});
+ const control=w.document.querySelector('[data-chart-adjustment]');assert.ok(control);assert.equal(control.value,'source');assert.equal(control.querySelector('[value="forward"]').disabled,false);assert.equal(control.querySelector('[value="backward"]').disabled,true);
+ control.value='forward';control.dispatchEvent(new w.Event('change'));assert.deepEqual(selected,['forward']);
+ }finally{w.close();}
+});
 test('paper chart loads only on selection and rejects late responses after instrument changes',async()=>{
  const {JSDOM}=require('jsdom'),dom=new JSDOM('<main id="market-workspace-shell" data-market-scope="stocks" data-instrument="stock:us:AAPL"><div><canvas></canvas></div></main>',{url:'https://test.invalid',runScripts:'outside-only',pretendToBeVisual:true}),w=dom.window;let calls=0,finish;
  w.mm_isLoggedIn=true;w.mm_isGuest=false;w.HTMLCanvasElement.prototype.getContext=()=>new Proxy({},{get:()=>()=>{}});w.fetch=()=>{calls++;return new Promise(resolve=>finish=resolve);};

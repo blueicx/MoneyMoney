@@ -16,7 +16,7 @@ import { unifiedPaperLedgerStore, type UnifiedPaperInstrumentType } from './unif
 import type { StockQuote } from './stock-data-contracts';
 import { stockQuoteObservationTime } from './stock-signal-schedule';
 import type { PredictionExecutionContract } from './runner-prediction-quotes';
-import { predictionOutcomeQuote } from './runner-prediction-quotes';
+import { predictionOutcomeQuote, predictionSettlementRulesGate } from './runner-prediction-quotes';
 
 export type AiRunnerVenue = 'Binance' | 'Predict.fun' | 'Stocks' | 'Options';
 export type AiRunnerStatus = 'RUNNING' | 'STOPPED';
@@ -63,7 +63,7 @@ export interface AiRunnerDecisionRecord {
 }
 
 export interface AiRunnerDataEvidence {
-  dataset: 'bars' | 'quote' | 'market';
+  dataset: 'bars' | 'quote' | 'market' | 'settlement-rules';
   source: string;
   status: string;
   dataAt?: string;
@@ -226,6 +226,8 @@ export interface AiRunnerQuote {
   reason?: string;
   bestBid?: number;
   bestAsk?: number;
+  bestBidSize?: number;
+  bestAskSize?: number;
 }
 
 export function selectRunnerStockQuote(symbol: string, candidates: Array<{ source: string; status?: string; quote: StockQuote | null }>, maxAgeMs: number, now = Date.now(), random = Math.random): { source: string; quote: AiRunnerQuote } | null {
@@ -250,6 +252,8 @@ export function selectControlledStockQuote(symbol: string, candidates: Parameter
 export interface AiRunnerMarketState {
   market: AiRunnerMarket;
   status: string;
+  executionStatus?: string;
+  executionReason?: string;
   instrument?: string;
   source?: string;
   dataAt?: string;
@@ -426,9 +430,21 @@ export function resolveRunnerFill(
   quote: AiRunnerQuote,
   action: 'BUY' | 'SELL',
   now = new Date(),
+  quantity?: number,
 ): { allowed: boolean; reason?: string; price?: number; bestBid?: number; bestAsk?: number; midpoint?: number } {
   const gate = evaluateRunnerQuoteGate(policy, quote, now);
   if (!gate.allowed) return gate;
+  if (quote.market === 'prediction') {
+    const settlementGate = predictionSettlementRulesGate(quote);
+    // Opening adds settlement-rule exposure; reducing an already-held, verified
+    // outcome may still use the validated live book even while new entries wait.
+    if (action === 'BUY' && !settlementGate.allowed) return { allowed: false, reason: settlementGate.reason };
+    const verifiedQuote = predictionOutcomeQuote(quote, quote.outcome, now, policy.minFreshnessMs);
+    if (!['live', 'delayed'].includes(String(verifiedQuote.dataStatus || verifiedQuote.status || ''))) {
+      return { allowed: false, reason: verifiedQuote.reason || '预测市场 outcome 合约身份未核验' };
+    }
+    quote = verifiedQuote;
+  }
   if (quote.market === 'options') {
     const c = quote.optionContract;
     if (!c || c.verified !== true || !c.source?.trim() || !/^option:[^:]+:.+/.test(c.instrumentId) || c.currency !== 'USD' || !Number.isFinite(c.multiplier) || c.multiplier <= 0 || !Number.isFinite(Date.parse(c.expiresAt)) || Date.parse(c.expiresAt) <= now.getTime()) return { allowed:false,reason:'期权合约身份、币种、乘数或到期信息尚未核验' };
@@ -441,6 +457,13 @@ export function resolveRunnerFill(
   if (!Number.isFinite(bestBid) || !Number.isFinite(bestAsk) || bestBid <= 0 || bestAsk < bestBid) {
     return { allowed: false, reason: '盘口缺少有效买卖价，无法确认模拟成交' };
   }
+  if (quote.market === 'prediction') {
+    const visibleSize = action === 'BUY' ? Number(quote.bestAskSize) : Number(quote.bestBidSize);
+    if (!Number.isFinite(visibleSize) || visibleSize <= 0) return { allowed: false, reason: '预测市场订单簿缺少所选方向的顶层可见深度' };
+    if (quantity != null && (!Number.isFinite(quantity) || quantity <= 0 || quantity > visibleSize + 1e-9)) {
+      return { allowed: false, reason: `模拟数量超过顶层可见深度（可见 ${visibleSize}，请求 ${quantity}）` };
+    }
+  }
   const price = action === 'BUY' ? bestAsk : bestBid;
   if (price <= 0 || (quote.market === 'prediction' && price >= 1)) return { allowed: false, reason: '盘口价格超出市场结算范围' };
   return { allowed: true, price, bestBid, bestAsk, midpoint: (bestBid + bestAsk) / 2 };
@@ -452,7 +475,7 @@ export function calculateRunnerExecutionCosts(
   action: 'BUY' | 'SELL',
   quantity: number,
 ): { feeUsd: number; slippageUsd: number; spreadUsd: number } {
-  const fill = resolveRunnerFill({ minFreshnessMs: Number.MAX_SAFE_INTEGER }, quote, action, new Date(quote.fetchedAt || quote.updatedAt || Date.now()));
+  const fill = resolveRunnerFill({ minFreshnessMs: Number.MAX_SAFE_INTEGER }, quote, action, new Date(quote.fetchedAt || quote.updatedAt || Date.now()), quantity);
   if (!fill.allowed || fill.price == null || fill.midpoint == null || !Number.isFinite(quantity) || quantity <= 0) throw new Error(fill.reason || '模拟成本参数无效');
   if (quote.market === 'options' && !Number.isSafeInteger(quantity)) throw new Error('期权合约数量必须为正整数');
   const multiplier = quote.market === 'options' ? quote.optionContract!.multiplier : 1;
@@ -788,7 +811,9 @@ export function updateAiRunnerMarketState(id: string, input: AiRunnerMarketState
     runner.lastDataStatus = scope === 'prediction' && openPositions.length ? ledgerStatus : effectiveStatus;
     runner.lastDataSource = input.source;
     runner.lastDataAt = input.dataAt;
-    runner.lastDataReason = valuationFresh ? undefined : (input.reason || (scope === 'prediction' ? '所持 outcome 缺少新鲜、已核验的独立报价，保留最后估值' : effectiveStatus === 'stale' ? '报价过期，保留上次估值' : undefined));
+    runner.lastDataReason = input.executionStatus === 'unsupported'
+      ? (input.executionReason || input.reason || '当前报价仅供只读估值，不满足纸面执行能力门槛')
+      : valuationFresh ? undefined : (input.reason || (scope === 'prediction' ? '所持 outcome 缺少新鲜、已核验的独立报价，保留最后估值' : effectiveStatus === 'stale' ? '报价过期，保留上次估值' : undefined));
     runner.lastRunAt = now.toISOString();
     if (input.snapshotHash) runner.lastSnapshotHash = input.snapshotHash;
     if (freshStatus) {
@@ -911,7 +936,7 @@ export function runnerOpenPosition(
       if (!instrument || instrument.venue === 'Options') return;
       const ledgerInstrument = toLedgerInstrument(instrument.venue, instrument.symbolOrMarketId);
       if (!costs.quote) return;
-      const fill = resolveRunnerFill(r.policy, costs.quote, 'BUY');
+      const fill = resolveRunnerFill(r.policy, costs.quote, 'BUY', new Date(), quantity);
       if (!fill.allowed || fill.price !== entryPrice) return;
       const executionCosts = calculateRunnerExecutionCosts(r.policy, costs.quote, 'BUY', quantity);
       const cost = entryPrice * quantity + executionCosts.feeUsd + executionCosts.slippageUsd;
@@ -970,7 +995,7 @@ export function runnerClosePosition(id: string, positionId: string, exitPrice: n
       if (instrument.venue === 'Options') return;
       const ledgerInstrument = toLedgerInstrument(instrument.venue, instrument.symbolOrMarketId);
       if (!costs.quote) return;
-      const fill = resolveRunnerFill(r.policy, costs.quote, 'SELL');
+      const fill = resolveRunnerFill(r.policy, costs.quote, 'SELL', new Date(), pos.quantity);
       if (!fill.allowed || fill.price !== exitPrice) return;
       const executionCosts = calculateRunnerExecutionCosts(r.policy, costs.quote, 'SELL', pos.quantity);
       const timestamp = new Date().toISOString();
