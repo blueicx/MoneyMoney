@@ -32,7 +32,7 @@ test('stock chart renders freshness and coverage from the same current-request e
 
 test('stock source status treats live and fallback data as usable', () => {
   assert.match(sourceHealth, /snapshot\.status === 'live'[\s\S]*snapshot\.status === 'fallback'/);
-  assert.match(html, /live:'实时', delayed:'延迟', cached:'缓存', partial:'部分成功', historical:'历史数据'/);
+  assert.match(html, /live:'最新可用（实时性未声明）', delayed:'延迟', cached:'缓存', partial:'部分成功', historical:'历史数据'/);
 });
 
 test('common US ticker searches have a local fast path before remote sources', () => {

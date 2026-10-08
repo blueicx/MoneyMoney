@@ -62,6 +62,24 @@ test('chart coverage comes from its current request, not unrelated ordinary-mark
   } finally { w.close(); }
 });
 
+test('a fresh history fetch is not labeled as a real-time K-line quote', async () => {
+  const dom = new JSDOM(source, { url: 'http://localhost/', runScripts: 'outside-only' });
+  const w = dom.window;
+  w.eval("var activeMarketScope='stocks',currentStockKlinePeriod='5m',stockChartAsOf='';");
+  w.stockEscapeHtml = value => String(value);
+  w.eval(sourceFunction('loadUnifiedStockData'));
+  try {
+    await w.loadUnifiedStockData('AAPL', {
+      data: [{ time: Date.parse('2026-10-08T20:00:00.000Z'), open: 100, high: 101, low: 99, close: 100, volume: 1 }],
+      dataStatus: 'live', source: 'yahoo-finance-history', updatedAt: '2026-10-08T23:35:51.120Z',
+    });
+    const coverage = w.document.querySelector('[data-stock-coverage]').textContent;
+    assert.match(coverage, /K线：最新可用/);
+    assert.match(coverage, /实时性未声明/);
+    assert.doesNotMatch(coverage, /K线：实时(?:\s|$)/);
+  } finally { w.close(); }
+});
+
 test('hidden dashboard does not fetch private changes or market aggregates', () => {
   const dom = new JSDOM(source, { url: 'http://localhost/', runScripts: 'outside-only' });
   const w = dom.window;
