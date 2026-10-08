@@ -184,6 +184,8 @@ export function escapeTelegramHtml(value: unknown): string {
 }
 
 export class TelegramApiTransport implements TelegramTransport {
+  /** Versioned handshake for release checks; v1 binds replies and returns message receipts. */
+  readonly resultReplyProtocolVersion = 1;
   constructor(
     private readonly token: string,
     private readonly proxyUrl = '',

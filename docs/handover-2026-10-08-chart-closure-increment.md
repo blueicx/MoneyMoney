@@ -167,3 +167,13 @@
 - 先用失败断言复现未保护模型、风险及状态，再实现。定向测试 4/4；完整测试 988/988、0 失败，构建通过。Web、认证、四市场/三个主题 Chromium、合约、自动对照、实时图表六项冒烟与安全扫描通过，差异检查通过。原始日志位于系统临时目录 `mm-protected-release-full-test.log` 与 `mm-protected-smoke-*.log`。
 - 当前 VPS 实际只读验收通过：正式域名版本仍为 `2569132eb078bdf053e89901f52114fb796458f7`；21 个资源 Hash 一致；AAPL/SNDK 各 4681 根五分钟线，Gate 200 根合约线；收到两条真实 Binance SSE 更新；访客 403、错误市场 400；旧跑单配置和状态与新保存基线一致。
 - 临时基线 `/tmp/moneymoney-protected-20261008-release-baseline.json` 只用于本次检查。正式部署前应重新排他捕获当时基线，不用较早基线覆盖管理员合法调整。本批没有重启服务、上传 dist、调用真实模型或修改跑单；真实 Telegram 结果投递、新版本部署及调度启用仍待完成，不报告“全部完成/已发布”。
+
+## 正式域名浏览器与真实 Telegram 回复验收（2026-10-08）
+
+- 正式域名 Chromium 只读矩阵通过：四市场、SNDK、规范股票代码/历史时点、右侧库收缩恢复、390px 布局、访客私有接口 403、页面无 JS 错误。报告为系统临时目录 `mm-production-canary-20261008/production-canary-report.json`。该矩阵核验的是线上旧版本 `2569132`，不能代替新版部署后复验。
+- 真实投递发现旧版本发送函数缺少消息 ID 回执和回复绑定；API 鉴权正常。失败验收目录保留，未猜测原消息 ID、重跑同目录或伪装成成功。新发送模块增加 `resultReplyProtocolVersion=1` 握手，验收在发送前拒绝旧协议。
+- 新增 `telegram-result-release.cjs`：先从现有 Gate 服务选取 48 小时内唯一的真实已结算 BTC_USDT 费率，验证来源/身份/时间；默认仅预检。必须明确指定 `--send /tmp/moneymoney-telegram-result-<tag>` 才向已配置的私聊管理员投递。目录排他创建、队列与报告 0600；重复执行在发送前停止。
+- 新版模块在独立暂存 dist 中验收，设置独立临时数据目录，依赖通过 `NODE_PATH=/opt/moneymoney/node_modules` 解析；不打开生产通知队列，不实例化轮询，不创建订单或调用模型。使用 `MONEYMONEY_RESULT_MODULE_DIR=/tmp/moneymoney-result-stage-<tag>/dist/features` 指定暂存模块。
+- 实际验收通过：Gate 90 条历史记录，结果时间 `2026-10-08T08:00:00.000Z`；Telegram 接受原消息及一次结果回复，回复绑定已核验；同一隔离 SQLite 队列重启后无重复，程序化 ACK 保留。报告 `/tmp/moneymoney-telegram-result-acc27c5-v1/report.json`。这证明真实 API 投递和模块结果闭环，不代表用户已经点击真实 ACK 按钮或所有宏观结果源已覆盖。
+- 先补失败测试再实现。完整测试 992/992、0 失败，构建、Web/认证/四市场三个主题 Chromium/合约/自动对照/实时图表六项冒烟通过。原始日志系统临时目录 `mm-real-result-final-test.log`、`mm-real-result-smoke-*.log`。
+- 本节验收没有切换生产 dist 或重启服务；正式发布、发布后矩阵、回滚演练及新调度开启仍须后续执行。既有股票自主跑单不修改，数据库、数据湖和用户文件保留。
