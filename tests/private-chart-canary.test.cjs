@@ -15,3 +15,10 @@ test('real marker evidence must match its immutable hash, exact market/instrumen
   const changed=structuredClone(evidence);mutate(changed);assert.throws(()=>verifyMarkerEvidence(marker,changed));
  }
 });
+test('private browser fixture places its fill only inside a valid final candle',()=>{
+ const {paperEvidenceFixtureBars}=load();assert.equal(typeof paperEvidenceFixtureBars,'function','read-only chart fixture builder missing');
+ const fillTime=Date.parse('2026-10-08T10:31:17.000Z'),rows=paperEvidenceFixtureBars(fillTime);
+ assert.equal(rows.length,25);assert.equal(rows.at(-1).time,Date.parse('2026-10-08T10:31:00.000Z'));
+ assert.ok(fillTime>=rows.at(-1).time&&fillTime<rows.at(-1).time+60000);
+ assert.ok(rows.every(row=>[row.open,row.high,row.low,row.close,row.volume].every(Number.isFinite)&&row.high>=Math.max(row.open,row.close)&&row.low<=Math.min(row.open,row.close)));
+});

@@ -11,26 +11,42 @@ function verifyMarkerEvidence(marker,evidence){
   assert.ok(Number.isFinite(Date.parse(row.at))&&Date.parse(row.at)<=marker.time);
   assert.ok(Number.isFinite(Date.parse(row.fields.dataAt))&&Date.parse(row.fields.dataAt)<=marker.time+5000);
 }
+function createPaperEvidenceFixture(market='stocks',instrument='stock:us:MU',at=Date.now()){
+  const fields={market,instrument,status:'delayed',source:'隔离浏览器夹具（非真实成交） <img src=x onerror=alert(1)>',dataAt:new Date(at-2000).toISOString(),price:42.5};
+  const hash=crypto.createHash('sha256').update(JSON.stringify(fields)).digest('hex'),snapshotId='rs_'+hash;
+  return {marker:{orderId:'fixture-order',accountId:'fixture-account',runnerId:'fixture-runner',signalId:'fixture-signal',snapshotId,market,instrument,time:at,price:42.5,quantity:1,side:'BUY',feeUsd:0,slippageUsd:0,pnlUsd:null},evidence:{success:true,market,instrument,data:{id:snapshotId,hash,at:new Date(at-1000).toISOString(),fields}}};
+}
+function paperEvidenceFixtureBars(fillTime){
+  if(!Number.isFinite(fillTime))throw new Error('paper chart fixture fill time must be finite');
+  const interval=60000,last=Math.floor(fillTime/interval)*interval;
+  return Array.from({length:25},(_,i)=>({time:last-(24-i)*interval,open:42+i*.01,high:42.2+i*.01,low:41.9+i*.01,close:42.1+i*.01,volume:100+i}));
+}
 async function run(){
   const {chromium}=require('playwright'),base='https://bluetrade.bbroot.com';
   const key=process.env.MONEYMONEY_ACCEPTANCE_SSH_KEY||'F:/vpsk/aws_blue.pem';
   assert.ok(fs.existsSync(key),'configured current VPS key required');
-  let phase='session',browser,context;
-  const remote=`const fs=require('node:fs');process.chdir('/opt/moneymoney');const env=require('/opt/moneymoney/node_modules/dotenv').parse(fs.readFileSync('/etc/moneymoney/moneymoney.env'));(async()=>{const r=await fetch('http://127.0.0.1:3001/api/auth/login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({username:env.MONEYMONEY_LOGIN_USER,password:env.MONEYMONEY_LOGIN_PASS})});if(!r.ok)throw Error();const d=await r.json();if(d.role!=='admin'||!d.token)throw Error();process.stdout.write(JSON.stringify({token:d.token,csrfToken:d.csrfToken}));})().catch(()=>process.exitCode=1);`;
+  let phase='session',step='',browser,context;
+  const remote=`const fs=require('node:fs');process.chdir('/opt/moneymoney');const env=require('/opt/moneymoney/node_modules/dotenv').parse(fs.readFileSync('/etc/moneymoney/moneymoney.env'));(async()=>{const r=await fetch('http://127.0.0.1:3001/api/auth/login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({username:env.MONEYMONEY_LOGIN_USER,password:env.MONEYMONEY_LOGIN_PASS})});if(!r.ok){process.stdout.write(JSON.stringify({loginStatus:r.status}));return;}const d=await r.json();if(d.role!=='admin'||!d.token){process.stdout.write(JSON.stringify({loginStatus:'invalid-admin-session'}));return;}process.stdout.write(JSON.stringify({token:d.token,csrfToken:d.csrfToken}));})().catch(()=>process.exitCode=1);`;
   const login=spawnSync('ssh',['-i',key,'-o','BatchMode=yes','-o','ConnectTimeout=15','ubuntu@54.211.146.2','sudo -n node -'],{input:remote,encoding:'utf8',timeout:25000,maxBuffer:65536,windowsHide:true});
-  assert.equal(login.status,0,'in-memory VPS authentication failed');
-  const session=JSON.parse(login.stdout);login.stdout='';login.stderr='';assert.ok(session.token&&session.csrfToken);
-  const report={version:null,modelCalls:0,businessWrites:0,sourceChecks:[],themes:[],lineage:{verified:0,unlinked:0},mobile:null};
+  if(login.status!==0){console.error('Private chart SSH preflight failed (exit='+String(login.status)+', code='+String(login.error?.code||'none')+')');process.exitCode=1;return;}
+  const session=JSON.parse(login.stdout);login.stdout='';login.stderr='';if(!session.token||!session.csrfToken){console.error('Private chart admin login unavailable (status='+String(session.loginStatus||'invalid-session')+')');process.exitCode=1;return;}
+  const report={version:null,modelCalls:0,businessWrites:0,sourceChecks:[],themes:[],lineage:{verified:0,unlinked:0},paperEvidenceUi:null,mobile:null};
+  const fixtureRoutes={markers:0,evidence:0};
   try{
     phase='browser';browser=await chromium.launch({headless:true,channel:process.env.MONEYMONEY_SMOKE_BROWSER||'chrome'});
     context=await browser.newContext({viewport:{width:1440,height:1000},serviceWorkers:'block'});
     await context.addCookies([{name:'mm_token',value:session.token,url:base,httpOnly:true,secure:true,sameSite:'Lax'},
       {name:'mm_csrf',value:session.csrfToken,url:base,secure:true,sameSite:'Lax'}]);
-    const page=await context.newPage(),errors=[],contractRequests=[];
+    const page=await context.newPage(),errors=[],contractRequests=[];let paperEvidenceFixture=null;
     page.on('pageerror',()=>errors.push('pageerror'));
     await page.route('**/api/**',route=>{
       const request=route.request();
       if(!allowedApiRequest(request.url(),request.method(),base))return route.abort();
+      if(paperEvidenceFixture&&request.method()==='GET'){
+        const url=new URL(request.url());
+        if(url.pathname==='/api/paper/chart-markers'&&url.searchParams.get('market')===paperEvidenceFixture.marker.market&&url.searchParams.get('instrument')===paperEvidenceFixture.marker.instrument){fixtureRoutes.markers++;return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({success:true,market:paperEvidenceFixture.marker.market,instrument:paperEvidenceFixture.marker.instrument,data:{markers:[paperEvidenceFixture.marker],unlinked:[]},reason:null})});}
+        if(url.pathname==='/api/evidence/'+paperEvidenceFixture.marker.snapshotId){fixtureRoutes.evidence++;return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify(paperEvidenceFixture.evidence)});}
+      }
       if(request.url().includes('/api/contracts/detail?'))contractRequests.push(new URL(request.url()).searchParams.get('panels'));
       return route.continue();
     });
@@ -49,6 +65,32 @@ async function run(){
     }
     phase='contract-ui';await page.goto(base+'/',{waitUntil:'domcontentloaded',timeout:30000});
     await page.waitForFunction(()=>window.mm_isLoggedIn===true&&window.mm_isGuest!==true&&typeof window.openWorkspace==='function');
+    phase='paper-evidence-ui-fixture';
+    step='prepare-fixture';
+    paperEvidenceFixture=createPaperEvidenceFixture('stocks','stock:us:MU',Date.now());
+    const previousChartContext=await page.evaluate(()=>{const shell=document.getElementById('market-workspace-shell');return {market:shell?.dataset.marketScope??null,instrument:shell?.dataset.instrument??null,theme:document.documentElement.getAttribute('data-theme')};});
+    step='inject-chart';
+    await page.evaluate(({instrument,bars})=>{
+      setMarketScope('stocks',{openTab:false});setWorkspaceInstrument(instrument);openWorkspace('stock-quotes');
+      const shell=document.getElementById('market-workspace-shell');
+      const root=document.createElement('div');root.id='paper-evidence-fixture';document.body.append(root);const canvas=document.createElement('canvas');root.append(canvas);
+      window.MoneyTradingChart.render(canvas,bars,{identity:instrument+'|1m',interval:'1m',sourceTime:Date.now(),connection:'snapshot',exchangeTimeZone:'America/New_York',volumeUnit:'shares'});
+    },{instrument:paperEvidenceFixture.marker.instrument,bars:paperEvidenceFixtureBars(paperEvidenceFixture.marker.time)});
+    step='load-markers';const paperToggle=page.locator('#paper-evidence-fixture [data-paper-chart-layer]');await paperToggle.check();
+    step='expand-evidence-list';await page.locator('#paper-evidence-fixture summary').click();
+    step='wait-evidence-button';const evidenceButton=page.locator('#paper-evidence-fixture [data-paper-evidence]');await evidenceButton.waitFor({state:'visible',timeout:15000});
+    step='click-evidence';await evidenceButton.click();
+    step='verify-evidence-content';
+    const evidenceView=page.locator('#paper-evidence-fixture [data-paper-evidence-details]');await page.waitForFunction(()=>document.querySelector('#paper-evidence-fixture [data-paper-evidence-details]')?.textContent.includes('SHA-256'),null,{timeout:15000});
+    assert.match(await evidenceView.textContent(),/隔离浏览器夹具/);assert.match(await evidenceView.textContent(),/<img/);assert.equal(await evidenceView.locator('img').count(),0);
+    step='verify-themes';const evidenceThemeStyles=[];
+    for(const theme of ['light','dark','money']){
+      await page.evaluate(theme=>{if(theme==='light')document.documentElement.removeAttribute('data-theme');else document.documentElement.setAttribute('data-theme',theme);},theme);
+      evidenceThemeStyles.push(await page.locator('#paper-evidence-fixture .mm-paper-marker-detail').evaluate(node=>({color:getComputedStyle(node).color,background:getComputedStyle(node).backgroundColor})));
+    }
+    assert.ok(evidenceThemeStyles.every(style=>style.color&&style.background));report.paperEvidenceUi={fixtureOnly:true,opened:true,textOnly:true,themes:evidenceThemeStyles.length};
+    await page.evaluate(previous=>{document.getElementById('paper-evidence-fixture')?.remove();const shell=document.getElementById('market-workspace-shell');if(shell){if(previous.market==null)delete shell.dataset.marketScope;else shell.dataset.marketScope=previous.market;if(previous.instrument==null)delete shell.dataset.instrument;else shell.dataset.instrument=previous.instrument;}if(previous.theme==null)document.documentElement.removeAttribute('data-theme');else document.documentElement.setAttribute('data-theme',previous.theme);},previousChartContext);
+    paperEvidenceFixture=null;step='';
     await page.evaluate(()=>{setMarketScope('crypto');openWorkspace('contracts');});
     await page.locator('#mm-contract-library').waitFor({state:'visible'});
     await page.locator('[data-contract-search]').fill('BTC');await page.locator('[data-contract-search-button]').click();
@@ -88,7 +130,7 @@ async function run(){
     const output=process.env.PRIVATE_CANARY_REPORT||path.join(os.tmpdir(),'mm-private-chart-'+Date.now()+'.json');
     fs.writeFileSync(output,JSON.stringify(report,null,2),{flag:'wx',mode:0o600});
     console.log(JSON.stringify(report));
-  }catch{console.error('Private chart acceptance failed at '+phase+'; no private data or credentials logged');process.exitCode=1;}
+  }catch{console.error('Private chart acceptance failed at '+phase+(step?' / '+step:'')+'; fixture route counts '+JSON.stringify(fixtureRoutes)+'; no private data or credentials logged');process.exitCode=1;}
   finally{
     // Revoke only this isolated test session, never the owner's existing browser session.
     if(context){try{const cookies=await context.cookies(base),csrf=cookies.find(c=>c.name==='mm_csrf')?.value;
@@ -96,5 +138,5 @@ async function run(){
     await browser?.close();session.token='';session.csrfToken='';
   }
 }
-if(require.main===module)run().catch(()=>{console.error('Private chart preflight failed; credentials not logged');process.exitCode=1;});
-module.exports={allowedApiRequest,verifyMarkerEvidence};
+if(require.main===module)run().catch(error=>{console.error('Private chart preflight failed ('+String(error?.code||error?.name||'unknown')+'); credentials not logged');process.exitCode=1;});
+module.exports={allowedApiRequest,verifyMarkerEvidence,createPaperEvidenceFixture,paperEvidenceFixtureBars};
