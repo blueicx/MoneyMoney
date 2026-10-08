@@ -88,7 +88,7 @@ import { loadContractPanelHistory } from '../features/contract-panel-history';
 import { klinePageWindow, klinePageStatus } from '../features/kline-page-window';
 import { contractCapacity, compareContractSnapshots } from '../features/contract-comparison';
 import { compareAiRunnerReports } from '../features/ai-runner-comparison';
-import { createAiRunnerComparison, getAiRunnerComparison, validateAiRunnerComparison, buildAiRunnerComparisonSample, saveAiRunnerComparisonSample, listAiRunnerComparisonSamples, replayAiRunnerComparisonSample, type AiRunnerComparisonSample } from '../features/ai-runner-comparison-group';
+import { createAiRunnerComparison, getAiRunnerComparison, validateAiRunnerComparison, validateScheduledAiRunnerComparison, buildAiRunnerComparisonSample, saveAiRunnerComparisonSample, listAiRunnerComparisonSamples, replayAiRunnerComparisonSample, type AiRunnerComparisonSample } from '../features/ai-runner-comparison-group';
 import { portfolioAttribution } from '../features/portfolio-attribution';
 import { getFundingCarryRadar } from '../features/funding-carry';
 import { getOrderFlowLiquidityRadar } from '../features/order-flow-liquidity';
@@ -8591,12 +8591,12 @@ app.post('/api/ai-runners/comparisons/automatic/control',express.json(),(req,res
     if(typeof enabled==='boolean'&&market==null){
       if(enabled)for(const scheduled of comparisonScheduler.list().groups){
         const group=getAiRunnerComparison(scheduled.groupId),rows=getAiRunners().filter(row=>group?.runnerIds.includes(row.id));
-        if(!group||!validateAiRunnerComparison(group,rows).valid||rows.some(row=>row.model!==scheduled.model))throw new Error('冻结对照账户或模型配置未通过恢复校验');
+        if(!validateScheduledAiRunnerComparison(scheduled,group,rows).valid)throw new Error('冻结对照账户、标的或模型配置未通过恢复校验');
       }
       comparisonScheduler.setEnabled(enabled);
     }else if(COMPARISON_MARKETS.includes(market)&&typeof paused==='boolean'){
       const scheduled=comparisonScheduler.list().groups.find(row=>row.market===market),group=scheduled&&getAiRunnerComparison(scheduled.groupId);
-      if(!paused&&(!group||!validateAiRunnerComparison(group,getAiRunners().filter(row=>group.runnerIds.includes(row.id))).valid))throw new Error('对照配置未通过恢复校验');
+      if(!paused&&(!scheduled||!validateScheduledAiRunnerComparison(scheduled,group,getAiRunners().filter(row=>group?.runnerIds.includes(row.id))).valid))throw new Error('对照配置未通过恢复校验');
       comparisonScheduler.pause(market,paused);
     }else throw new Error('调度控制参数无效');
     stateStore.appendAudit({id:crypto.randomUUID(),action:'ai_comparison_auto_control',detail:JSON.stringify({market,paused,enabled})});
@@ -8653,6 +8653,11 @@ async function runControlledComparison(groupId:string,key:string,scheduled?:Auto
     if(!key || key.length>160)throw new Error('对照执行必须携带有效幂等键');
     const validation=validateAiRunnerComparison(group,getAiRunners().filter(row=>group.runnerIds.includes(row.id)));
     if(!validation.valid)throw new Error(validation.reason);
+    if(scheduled){
+      const frozen=comparisonScheduler.list().groups.find(row=>row.groupId===group.id);
+      const verified=frozen&&validateScheduledAiRunnerComparison(frozen,group,getAiRunners().filter(row=>group.runnerIds.includes(row.id)));
+      if(!verified?.valid)throw new Error(verified?.reason || '自动对照冻结配置缺失');
+    }
     const result=await aiRunnerTickCoordinator.run('comparison:'+group.id,'ai-comparison:'+group.id+':'+key,async()=>{
       const roundKey='ai-comparison:'+group.id+':'+key;
       guard();

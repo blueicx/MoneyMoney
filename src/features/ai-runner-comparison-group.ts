@@ -46,13 +46,46 @@ export function createAiRunnerComparison(venue: AiRunnerVenue, instrument: strin
   });
 }
 export function validateAiRunnerComparison(group: AiRunnerComparisonGroup, rows: AiRunner[]) {
-  const complete = rows.length === 3 && group.runnerIds.every(id => rows.some(row => row.id === id));
-  const valid = complete && rows.every(row => row.universe?.market === group.market && row.universe.hash === group.universeHash
+  const roles = ['rules', 'ai-review', 'ai-autonomous-paper'] as const;
+  const versions = ['rsi-sma-v1', 'ai-review-v1', 'ai-autonomous-paper-v1'];
+  const complete = rows.length === 3 && new Set(group.runnerIds).size === 3
+    && group.runnerIds.every(id => rows.some(row => row.id === id));
+  let frozenValid = false;
+  try {
+    frozenValid = complete && rows.every(row => {
+      const universe = row.universe!;
+      const verified = freezeAiRunnerUniverse([...universe.instruments], { kind: universe.kind, sourceWatchlistId: universe.sourceWatchlistId });
+      const role = group.runnerIds.indexOf(row.id);
+      return verified.hash === group.universeHash && verified.market === group.market
+        && row.accountId === 'ai-runner:' + row.id && row.executionState === 'ready'
+        && row.mode === roles[role] && row.strategyVersion === versions[role] && row.trigger === 'scheduled'
+        && (row.modelSelection == null || row.modelSelection === 'fixed')
+        && (row.quoteSelection == null || row.quoteSelection === 'fixed')
+        && hash({ universe: verified.hash, budget: row.budgetUsd, policy: row.policy, at: group.createdAt,
+          seed: group.seed, temperature: group.temperature, model: row.model || null }) === group.configHash;
+    });
+  } catch { /* Unknown/corrupt legacy configuration remains read-only; never guess a replacement. */ }
+  const valid = frozenValid && rows.every(row => row.universe?.market === group.market && row.universe.hash === group.universeHash
     && row.createdAt === group.createdAt && row.comparisonControl?.configHash === group.configHash
     && row.comparisonControl.groupId === group.id && row.comparisonControl.seed === group.seed
     && row.comparisonControl.temperature === group.temperature
     && row.budgetUsd === rows[0].budgetUsd && canonical(row.policy) === canonical(rows[0].policy));
   return { valid, reason: valid ? '共同冻结配置已核验；模型供应商不保证seed完全确定，历史重放不会再次调用模型' : '对照配置已改变或账户缺失，拒绝执行' };
+}
+/** Resume and execution must validate the scheduler against the same frozen accounts. */
+export function validateScheduledAiRunnerComparison(
+  scheduled: { market: string; groupId: string; model: string; instruments: string[] },
+  group: AiRunnerComparisonGroup | null | undefined, rows: AiRunner[],
+) {
+  const instruments = rows[0]?.universe?.instruments.map(row => row.symbolOrMarketId) ?? [];
+  const valid = !!group && validateAiRunnerComparison(group, rows).valid
+    && scheduled.groupId === group.id && scheduled.market === group.market
+    && !!scheduled.model.trim() && !['openrouter/free', 'openrouter/auto'].includes(scheduled.model)
+    && rows.every(row => row.model === scheduled.model)
+    && new Set(scheduled.instruments).size === scheduled.instruments.length
+    && scheduled.instruments.length === instruments.length
+    && scheduled.instruments.every(id => instruments.includes(id));
+  return { valid, reason: valid ? '固定对照模型、账户与冻结标的已核验' : '自动对照账户、固定模型或冻结标的不一致；拒绝恢复或执行' };
 }
 export function buildAiRunnerComparisonSample(group: AiRunnerComparisonGroup, id: string, at: string, inputs: Array<{ market: string; instrument: string }>): AiRunnerComparisonSample {
   if (!id || id.length > 180 || !Number.isFinite(Date.parse(at)) || inputs.length < 1 || inputs.length > 5) throw new Error('对照采样参数无效');
