@@ -46,7 +46,7 @@ export class ContractResearchService {
     const root='/'+(identity.kind==='perpetual'?'futures':'delivery')+'/usdt';
     return this.cached('chart:'+instrument+':'+interval,15000,async()=>{
       const source='Gate public API · '+identity.kind,updatedAt=new Date(this.now()).toISOString();
-      const base={market:'crypto',instrument,timeframe:interval,source,updatedAt,volumeUnit:'contracts',executionEnabled:false};
+      const base={market:'crypto',instrument,timeframe:interval,source,updatedAt,retrievedAt:updatedAt,sourceTime:null,exchangeTimeZone:'UTC',volumeUnit:'contracts',executionEnabled:false};
       try {
         const [metadata,raw]=await Promise.all([this.read(root+'/contracts/'+identity.contract),this.read(root+'/candlesticks?contract='+identity.contract+'&interval='+interval+'&limit=200')]);
         if(metadata?.name!==identity.contract || metadata?.type!=='direct')throw new Error('来源合约身份或线性类型不一致');
@@ -61,13 +61,17 @@ export class ContractResearchService {
       }catch(error){return {...base,data:[],dataStatus:'unavailable',reason:(error as Error).message};}
     });
   }
-  detail(instrument:string) {
+  detail(instrument:string, panels?:string[]) {
     const identity=contractIdentity(instrument),root='/'+(identity.kind==='perpetual'?'futures':'delivery')+'/usdt';
-    return this.cached(instrument,30000,async()=>{
+    const supported=['funding','depth','bars','openInterest','basis'];
+    if(panels && (!Array.isArray(panels)||panels.some(panel=>!supported.includes(panel))))throw new Error('合约副图选择无效');
+    const selected=new Set(panels ?? supported);
+    return this.cached(instrument+(panels?':panels:'+ [...selected].sort().join(','):''),30000,async()=>{
       const sections:Record<string,{dataStatus:string;reason:string|null;source:string;updatedAt:string}>={};
       const updatedAt=new Date(this.now()).toISOString();
       const read=async(key:string,path:string):Promise<any>=>{try{const value=await this.read(path);sections[key]={dataStatus:'delayed',reason:null,source:'https://api.gateio.ws/api/v4'+path,updatedAt};return value;}catch(error){sections[key]={dataStatus:'unavailable',reason:(error as Error).message,source:'https://api.gateio.ws/api/v4'+path,updatedAt};return null;}};
-      const [metadata,book,history,bars]=await Promise.all([read('quote',root+'/contracts/'+identity.contract),read('depth',root+'/order_book?contract='+identity.contract+'&limit=20'),identity.kind==='perpetual'?read('funding',root+'/funding_rate?contract='+identity.contract+'&limit=100'):Promise.resolve(null),read('bars',root+'/candlesticks?contract='+identity.contract+'&interval=1h&limit=100')]);
+      const optional=(key:string,path:string)=>{if(selected.has(key))return read(key,path);sections[key]={dataStatus:'not-loaded',reason:'副图未选择，未请求该来源',source:'https://api.gateio.ws/api/v4'+path,updatedAt};return Promise.resolve(null);};
+      const [metadata,book,history,bars]=await Promise.all([read('quote',root+'/contracts/'+identity.contract),optional('depth',root+'/order_book?contract='+identity.contract+'&limit=20'),identity.kind==='perpetual'?optional('funding',root+'/funding_rate?contract='+identity.contract+'&limit=100'):Promise.resolve(null),optional('bars',root+'/candlesticks?contract='+identity.contract+'&interval=1h&limit=100')]);
       if(identity.kind==='delivery')sections.funding={dataStatus:'unsupported',reason:'交割合约不收永续资金费率',source:'Gate delivery',updatedAt};
       const valid=metadata?.name===identity.contract && metadata?.type==='direct';
       if(metadata && !valid)sections.quote={...sections.quote,dataStatus:'unavailable',reason:'来源合约身份或线性类型不一致，未采用该数据'};
@@ -85,7 +89,12 @@ export class ContractResearchService {
         quote:{markPrice,indexPrice,lastPrice:positive(data.last_price),basisPct:markPrice && indexPrice ? markPrice/indexPrice*100-100:null,multiplier,openInterestUsd:markPrice && multiplier && size!=null && size>=0?markPrice*multiplier*size:null,
           fundingRatePct:identity.kind==='perpetual' && numeric(data.funding_rate)!=null?Number(data.funding_rate)*100:null,fundingIntervalSeconds:positive(data.funding_interval),nextFundingAt:positive(data.funding_next_apply)?new Date(Number(data.funding_next_apply)*1000).toISOString():null,
           expiresAt:positive(data.expire_time)?new Date(Number(data.expire_time)*1000).toISOString():null,leverageMax:positive(data.leverage_max),maintenanceRate:numeric(data.maintenance_rate),takerFeeRate:numeric(data.taker_fee_rate),makerFeeRate:numeric(data.maker_fee_rate),status:data.status || (valid?'来源未声明':'不可用')},
-        depth:{bids,asks,spreadPct:bids.length && asks.length && asks[0].price>=bids[0].price?(asks[0].price/bids[0].price-1)*100:null},funding,candles,evidenceRefs:Object.values(sections).map(row=>row.source),executionEnabled:false};
+        depth:{bids,asks,spreadPct:bids.length && asks.length && asks[0].price>=bids[0].price?(asks[0].price/bids[0].price-1)*100:null},funding,candles,
+        series:{funding:{kind:'history',unit:'%',points:funding.map(row=>({time:Date.parse(row.at),value:row.ratePct})),coverage:{from:funding[0]?.at ?? null,to:funding.at(-1)?.at ?? null,records:funding.length},...sections.funding},
+          depth:{kind:'snapshot',sourceTime:null,retrievedAt:updatedAt,...sections.depth},
+          openInterest:{kind:'snapshot',unit:'USDT',points:[],value:markPrice && multiplier && size!=null && size>=0?markPrice*multiplier*size:null,sourceTime:null,retrievedAt:updatedAt,dataStatus:valid?'partial':'unavailable',reason:'仅当前来源快照；未接通本合约同口径历史，不生成历史曲线'},
+          basis:{kind:'snapshot',unit:'%',points:[],value:markPrice && indexPrice?markPrice/indexPrice*100-100:null,sourceTime:null,retrievedAt:updatedAt,dataStatus:valid?'partial':'unavailable',reason:'仅当前标记/指数价格快照；缺少同口径历史，不生成历史曲线'}},
+        evidenceRefs:Object.values(sections).filter(row=>row.dataStatus!=='not-loaded').map(row=>row.source),exchangeTimeZone:'UTC',retrievedAt:updatedAt,executionEnabled:false};
     });
   }
 }

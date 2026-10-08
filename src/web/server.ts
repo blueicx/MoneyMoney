@@ -172,6 +172,8 @@ import { registerApiAuthProtection, registerAuthRoutes } from './auth-routes';
 import { registerBuiltAssets, sendBuiltPage } from './static-assets';
 import { stateStore, getStorageHealth } from '../storage/sqlite-state';
 import { TelegramEventResultMonitor, lookupOfficialEventResult } from '../features/telegram-event-results';
+import { lookupTrackedResult, resultTrackingDisabledReason } from '../features/telegram-result-adapters';
+import type { EventRecord as TelegramTrackedResult } from '../features/telegram-event-results';
 import { renderTelegramKline } from '../features/telegram-kline-image';
 import { DATA_ROOT } from '../utils/paths';
 import { paperTradingExecutor } from '../features/trading-executor';
@@ -3382,18 +3384,11 @@ app.get('/api/prediction-history', (req, res) => {
   res.json({ success: true, data });
 });
 
-app.get('/api/prediction/settlement/:platform/:marketId', async (req, res) => {
-  const platform = String(req.params.platform || '');
-  const marketId = String(req.params.marketId || '');
-  if (platform !== 'Kalshi' && platform !== 'Polymarket') {
-    return res.status(422).json({ success: false, market: 'prediction', instrument: `prediction:${platform.toLowerCase()}:${marketId}`, dataStatus: 'unsupported', source: platform || 'unknown', updatedAt: new Date().toISOString(), reason: '当前平台没有已接入且可核验的官方结算证据。' });
-  }
-  let sourceUrl: string;
-  try { sourceUrl = buildSettlementEndpoint(platform, marketId); }
-  catch (error: any) { return res.status(400).json({ success: false, market: 'prediction', dataStatus: 'failed', reason: error.message }); }
+async function refreshPredictionSettlement(platform:'Kalshi'|'Polymarket',marketId:string) {
+  const sourceUrl=buildSettlementEndpoint(platform,marketId);
   const cached = predictionSettlementRepository.latest(platform, platform === 'Kalshi' ? marketId.toUpperCase() : marketId);
   if (cached && Date.now() - Date.parse(cached.capturedAt) < 5 * 60_000) {
-    return res.json({ success: true, data: cached, history: predictionSettlementRepository.history(platform, cached.marketId), market: 'prediction', instrument: cached.instrument, dataStatus: 'cached', source: cached.sourceUrl, updatedAt: cached.capturedAt, reason: cached.reason });
+    return cached;
   }
   const cacheKey = `${platform}:${platform === 'Kalshi' ? marketId.toUpperCase() : marketId}`;
   let refresh = predictionSettlementRefreshes.get(cacheKey);
@@ -3428,15 +3423,11 @@ app.get('/api/prediction/settlement/:platform/:marketId', async (req, res) => {
     predictionSettlementRefreshes.set(cacheKey, refresh);
   }
   try {
-    const evidence = await refresh;
-    return res.json({ success: true, data: evidence, history: predictionSettlementRepository.history(platform, evidence.marketId), market: 'prediction', instrument: evidence.instrument, dataStatus: 'historical', source: evidence.sourceUrl, updatedAt: evidence.capturedAt, reason: evidence.reason });
-  } catch (error: any) {
-    if (cached) return res.json({ success: true, data: cached, history: predictionSettlementRepository.history(platform, cached.marketId), market: 'prediction', instrument: cached.instrument, dataStatus: 'cached', source: cached.sourceUrl, updatedAt: cached.capturedAt, reason: `官方来源刷新失败，显示最近快照：${error?.message || '请求失败'}` });
-    return res.status(503).json({ success: false, market: 'prediction', instrument: `prediction:${platform.toLowerCase()}:${marketId}`, dataStatus: 'unavailable', source: sourceUrl, updatedAt: new Date().toISOString(), reason: error?.message || '官方结算来源不可用' });
+    return await refresh;
   } finally {
     if (predictionSettlementRefreshes.get(cacheKey) === refresh) predictionSettlementRefreshes.delete(cacheKey);
   }
-});
+}
 
 app.get('/api/forecast-lab', (_req, res) => {
   try {
@@ -3819,7 +3810,7 @@ app.get('/api/contracts/catalog', async (req,res)=>{
   } catch(error:any) {res.status(400).json({success:false,market:'crypto',dataStatus:'failed',reason:error.message});}
 });
 app.get('/api/contracts/detail', async (req,res)=>{
-  try {if(req.query.market && req.query.market!=='crypto')throw new Error('合约市场不一致');res.json({success:true,...await contractResearchService.detail(String(req.query.instrument || ''))});}
+  try {if(req.query.market && req.query.market!=='crypto')throw new Error('合约市场不一致');const panels=req.query.panels===undefined?undefined:String(req.query.panels).split(',').filter(Boolean);res.json({success:true,...await contractResearchService.detail(String(req.query.instrument || ''),panels)});}
   catch(error:any){res.status(400).json({success:false,market:'crypto',dataStatus:'failed',reason:error.message});}
 });
 app.post('/api/contracts/scenario', express.json(),(req,res)=>{
@@ -3838,6 +3829,15 @@ app.get('/api/contracts/compare',async(req,res)=>{
     const rows=await Promise.all(instruments.map(instrument=>contractResearchService.detail(instrument)));
     res.json({success:true,...compareContractSnapshots(rows),updatedAt:new Date().toISOString()});
   }catch(error:any){res.status(400).json({success:false,dataStatus:'unavailable',reason:error.message});}
+});
+app.get('/api/prediction/settlement/:platform/:marketId', async (req,res)=>{
+  const platform=String(req.params.platform||''),marketId=String(req.params.marketId||'');
+  const context={market:'prediction',instrument:`prediction:${platform.toLowerCase()}:${marketId}`,source:platform||'unknown',updatedAt:new Date().toISOString()};
+  if(platform!=='Kalshi'&&platform!=='Polymarket')return res.status(422).json({success:false,...context,dataStatus:'unsupported',reason:'当前平台没有可核验的官方结算证据'});
+  let sourceUrl:string;try{sourceUrl=buildSettlementEndpoint(platform,marketId);}catch(error:any){return res.status(400).json({success:false,...context,dataStatus:'failed',reason:error.message});}
+  const cached=predictionSettlementRepository.latest(platform,platform==='Kalshi'?marketId.toUpperCase():marketId);
+  try{const evidence=await refreshPredictionSettlement(platform,marketId);res.json({success:true,data:evidence,history:predictionSettlementRepository.history(platform,evidence.marketId),market:'prediction',instrument:evidence.instrument,dataStatus:evidence.capturedAt===cached?.capturedAt?'cached':'historical',source:evidence.sourceUrl,updatedAt:evidence.capturedAt,reason:evidence.reason});}
+  catch(error:any){if(cached)return res.json({success:true,data:cached,history:predictionSettlementRepository.history(platform,cached.marketId),market:'prediction',instrument:cached.instrument,dataStatus:'cached',source:cached.sourceUrl,updatedAt:cached.capturedAt,reason:'官方来源刷新失败，显示最近快照：'+error.message});res.status(503).json({success:false,...context,dataStatus:'unavailable',source:sourceUrl,reason:error.message});}
 });
 app.get('/api/contracts/kline',async(req,res)=>{
   try {if(req.query.market && req.query.market!=='crypto')throw new Error('合约市场不一致');res.json({success:true,...await contractResearchService.chart(String(req.query.instrument || ''),String(req.query.interval || '5m'))});}
@@ -5335,7 +5335,33 @@ export function getTelegramCommandHandlers(): Record<string, TelegramCommandHand
       const session = telegramCommandCenterStore.getSession(chatId);
       return telegramReply(`<b>当前 Telegram 会话</b>\n市场：${escapeTelegramHtml(TELEGRAM_SCOPE_LABELS[session.marketScope])}\n工作区：${escapeTelegramHtml(session.workspace)}\n标的：${escapeTelegramHtml(session.instrumentId || '未选择')}\n周期：${escapeTelegramHtml(session.timeframe)}\n菜单页：${session.menuPage}/3\n\n清空：/session reset`);
     },
-    help: () => TELEGRAM_HELP + '\n新增：/eventresults 结果投递记录 · /actioncenter 自选行动 · /contracts 永续/交割合约 · /chart <代码> 聊天K线图片',
+    help: () => TELEGRAM_HELP + '\n新增：/eventresults 结果投递记录 · /trackresult task|funding|prediction 跟踪实际结果 · /actioncenter 自选行动 · /contracts 永续/交割合约 · /chart <代码> 聊天K线图片',
+    trackresult: async ({chatId,args})=>{
+      const disabledReason=resultTrackingDisabledReason(telegramCommandCenterStore.getPreferences(chatId).notifications.events);
+      if(disabledReason)return disabledReason;
+      const scope=telegramScopeForChat(chatId);let event:TelegramTrackedResult;
+      try{
+        if(args[0]==='task'){
+          const job=researchRepository.getJob(String(args[1]||''));if(!job||job.market!==scope)return '任务不存在或不属于当前市场；请先选择对应市场。';
+          event={kind:'research',market:job.market,resourceId:job.id,title:'研究任务 '+job.id,date:job.createdAt};
+        }else if(args[0]==='funding'){
+          if(scope!=='crypto')return '资金结算只属于虚拟币市场，请先 /market crypto。';
+          const instrument=String(args[1]||''),identity=contractIdentity(instrument);if(identity.kind!=='perpetual')return '交割合约不支持永续资金结算。';
+          const detail=await contractResearchService.detail(instrument,[]);if(!detail.quote.nextFundingAt)return '来源未提供下一次资金结算时间，不能猜测倒计时。';
+          event={kind:'funding',market:'crypto',instrument,title:identity.contract+' 实际资金结算',date:detail.quote.nextFundingAt};
+        }else if(args[0]==='prediction'){
+          if(scope!=='prediction')return '预测结算只属于预测市场，请先 /market prediction。';
+          const platform=String(args[1]||'');if(platform!=='Kalshi'&&platform!=='Polymarket')return '仅支持已有官方证据适配的 Kalshi / Polymarket。';
+          const evidence=await refreshPredictionSettlement(platform,String(args[2]||'')),date=evidence.closeAt||evidence.determinationAt||evidence.settlementAt;
+          if(!date)return '官方未提供明确截止或裁定时间，不能猜测倒计时。';
+          event={kind:'prediction',market:'prediction',instrument:evidence.instrument,resourceId:evidence.marketId,platform,title:evidence.marketId+' 官方结算',date};
+        }else return '用法：/trackresult task <任务ID> · /trackresult funding <crypto:gateio:BTC_USDT> · /trackresult prediction <Kalshi|Polymarket> <市场ID>。';
+        if(!telegramInteractionBot)return 'Telegram 暂不可用，未启动结果追踪。';
+        const messageId=await telegramInteractionBot.sendToChat(chatId,telegramReply('<b>已请求跟踪实际结果</b>\n'+escapeTelegramHtml(event.title)+'\n时间：'+escapeTelegramHtml(event.date)+'\n结果将回复此消息；来源不可用或超出72小时将明确说明，不使用预期或概率代替。'));
+        if(typeof messageId!=='number')return '消息已发送但未取得可核验消息ID，未启动追踪；请稍后重试。';
+        telegramEventResults.registerReminder(chatId,event,messageId);return undefined;
+      }catch(error:any){return '结果追踪未启动：'+escapeTelegramHtml(error.message);}
+    },
     contracts: async ({ args, chatId }) => {
       if (telegramScopeForChat(chatId) !== 'crypto') return '当前市场不支持合约查询，请先 /market crypto。';
       const instrument = String(args[0] || '');
@@ -6878,7 +6904,9 @@ function reloadTelegramIntegration(): Promise<void> {
 
 const telegramSignalPushes = new Set<string>();
 const telegramEventReminderStages = new Map<string, EventReminderThreshold | null>();
-const telegramEventResults = new TelegramEventResultMonitor(stateStore, lookupOfficialEventResult);
+const telegramEventResults = new TelegramEventResultMonitor(stateStore,event=>event.kind&&event.kind!=='macro'
+  ?lookupTrackedResult(event,{job:id=>researchRepository.getJob(id),contract:instrument=>contractResearchService.detail(instrument,['funding']),settlement:refreshPredictionSettlement})
+  :lookupOfficialEventResult(event));
 const telegramDigestPushes = new Set<string>();
 const telegramSourceStates = new Map<string, boolean>();
 let consecutivePollFail = 0;

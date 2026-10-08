@@ -1,6 +1,8 @@
 const { spawn } = require('node:child_process');
 const http = require('node:http');
 const path = require('node:path');
+const fs = require('node:fs');
+const os = require('node:os');
 
 const port = 3187;
 const child = spawn(process.execPath, [path.join(__dirname, '..', 'dist', 'web', 'server.js')], {
@@ -9,6 +11,7 @@ const child = spawn(process.execPath, [path.join(__dirname, '..', 'dist', 'web',
     ...process.env,
     APP_HOST: '127.0.0.1',
     APP_PORT: String(port),
+    MONEYMONEY_DATA_DIR: fs.mkdtempSync(path.join(os.tmpdir(),'mm-web-smoke-')),
     TELEGRAM_POLLING_ENABLED: 'false',
     AI_PAPER_TRADING_ENABLED: 'false',
     PRIVATE_KEY: '',
@@ -58,6 +61,9 @@ const get = pathname => request('GET', pathname);
     const authHeaders = { Authorization: `Bearer ${loginBody.token}` };
     const authedGet = pathname => request('GET', pathname, null, authHeaders);
     const authedRequest = (method, pathname, payload) => request(method, pathname, payload, authHeaders);
+    const unsupportedSettlement=await authedGet('/api/prediction/settlement/Manifold/example');
+    const settlementEnvelope=JSON.parse(unsupportedSettlement.body);
+    if(unsupportedSettlement.status!==422 || settlementEnvelope.instrument!=='prediction:manifold:example' || settlementEnvelope.source!=='Manifold' || !Number.isFinite(Date.parse(settlementEnvelope.updatedAt)))throw Error('unsupported settlement lost stable identity/source/time envelope');
     const home = await authedGet('/');
     if (home.status !== 200 || !home.body.includes('id="settings-tab"') || !home.body.includes('/assets/auth-client.')) throw new Error(`authenticated dashboard shell missing: ${home.status}`);
     const settings = await authedGet('/api/settings');

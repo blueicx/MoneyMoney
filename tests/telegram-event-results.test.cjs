@@ -1,4 +1,13 @@
 const test=require('node:test');const assert=require('node:assert/strict');require('ts-node/register/transpile-only');
+test('typed results retain distinct identities, official evidence and stopped terminal states',async()=>{
+ const {TelegramEventResultMonitor}=require('../src/features/telegram-event-results'),values=new Map(),store={get:k=>structuredClone(values.get(k)||null),set:(k,v)=>values.set(k,structuredClone(v))},now=Date.parse('2026-10-08T01:00:00Z'),sent=[];
+ const monitor=new TelegramEventResultMonitor(store,async event=>event.kind==='research'?{actual:null,status:'stopped',reason:'task cancelled'}:{actual:'0%',status:'published',url:'https://api.gateio.ws/api/v4/futures/usdt/funding_rate',evidenceRefs:['snapshot-hash']},()=>now);
+ const base={title:'result',date:'2026-10-08T00:00:00Z'};
+ monitor.registerReminder('owner',{...base,kind:'funding',market:'crypto',instrument:'crypto:gateio:BTC_USDT'},11);
+ monitor.registerReminder('owner',{...base,kind:'research',market:'stocks',resourceId:'job1'},22);
+ await monitor.run('owner',[],async(text,id)=>{sent.push({text,id});return 44;});
+ assert.equal(sent.length,2);assert.match(sent.find(row=>row.id===11).text,/官方原文/);assert.doesNotMatch(sent.find(row=>row.id===11).text,/预期值|前值/);assert.doesNotMatch(sent.find(row=>row.id===22).text,/继续通知/);assert.equal(monitor.history('owner').find(row=>row.originalMessageId===22).nextCheckAt,null);assert.ok(monitor.history('owner').find(row=>row.originalMessageId===11).evidenceRefs.includes('snapshot-hash'));
+});
 test('results and corrections reply to the original reminder and retain message lineage after restart',async()=>{
  const {TelegramEventResultMonitor}=require('../src/features/telegram-event-results');const values=new Map(),store={get:k=>structuredClone(values.get(k)||null),set:(k,v)=>values.set(k,structuredClone(v))};let now=Date.parse('2026-10-02T13:20:00Z'),actual='100000';const sent=[];
  const event={title:'Non-Farm Employment Change',date:'2026-10-02T13:30:00Z',impact:'high',country:'USD'};

@@ -33,3 +33,10 @@ test('price scaling is bounded, centred and can return to automatic range',()=>{
 test('default chart follows the latest 60 bars without replacing source history',()=>{const c=load(),s=c.createView();assert.equal(c.windowFor(rows,s).start,40);assert.equal(c.windowFor(rows.concat({...rows[99],time:30000000}),s).start,41);assert.equal(rows.length,100);});
 test('drag freezes a timestamp anchor across incoming candles and latest restores it',()=>{const c=load(),s=c.createView();c.pan(rows,s,10);const before=c.windowFor(rows,s);assert.equal(s.follow,false);assert.equal(before.start,30);assert.equal(c.windowFor(rows.slice(1).concat({...rows[99],time:30000000}),s).rows.at(-1).time,before.rows.at(-1).time);c.latest(s);assert.equal(c.windowFor(rows,s).start,40);});
 test('zoom is bounded and candle countdown never restarts an expired bar',()=>{const c=load(),s=c.createView();for(let i=0;i<100;i++)c.zoom(s,-1);assert.equal(s.count,15);for(let i=0;i<100;i++)c.zoom(s,1);assert.equal(s.count,300);assert.equal(c.countdown({time:1000000},'5m',1120000),'03:00');assert.equal(c.countdown({time:1000000},'5m',1300000),'等待新数据');assert.equal(c.countdown({time:1000000},'1d',1120000),'周期非短线');});
+test('volume visibility and subpanel viewport use the rendered candle window',()=>{
+ const {JSDOM}=require('jsdom'),dom=new JSDOM('<div><canvas></canvas></div>',{url:'https://test.invalid',runScripts:'outside-only',pretendToBeVisual:true}),w=dom.window;let fills=0,viewport;
+ w.HTMLCanvasElement.prototype.getContext=()=>new Proxy({fillRect(){fills++;}},{get:(target,key)=>key in target?target[key]:()=>{}});
+ try{w.eval(fs.readFileSync('src/web/public/trading-chart.js','utf8'));const canvas=w.document.querySelector('canvas');w.MoneyTradingChart.render(canvas,rows,{identity:'contract:test',interval:'5m',showVolume:false,onViewport:value=>viewport=value});
+ assert.equal(fills,60,'hidden volume must not be painted');assert.ok(viewport,'shared viewport callback missing');assert.equal(viewport.rows[0].time,rows[40].time);assert.equal(viewport.rows.at(-1).time,rows.at(-1).time);
+ }finally{w.close();}
+});

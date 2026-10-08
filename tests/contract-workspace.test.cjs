@@ -26,3 +26,19 @@ test('risk scenario computes linear long/short fees and funding with explicit as
  const short=contractScenario({...base,side:'short'});assert.equal(short.pnl,20);assert.equal(short.fundingCost,-4);
  for(const change of [{leverage:0},{quantity:-1},{feeRate:null},{shockPct:-100},{side:'buy'},{fundingPeriods:Infinity}])assert.throws(()=>contractScenario({...base,...change}));
 });
+test('selected contract panels do not request hidden funding, book or legacy hourly candles',async()=>{
+ const {ContractResearchService}=require('../src/features/contract-research'),calls=[];
+ const svc=new ContractResearchService(async path=>{calls.push(path);if(path.includes('/contracts/'))return {name:'BTC_USDT',type:'direct',mark_price:'100',index_price:'99',quanto_multiplier:'0.1',position_size:'5'};return [];},()=>1791422400000);
+ const basic=await svc.detail('crypto:gateio:BTC_USDT',[]);
+ assert.equal(calls.length,1);assert.equal(basic.sections.depth.dataStatus,'not-loaded');assert.equal(basic.sections.funding.dataStatus,'not-loaded');
+ assert.equal(basic.series.openInterest.kind,'snapshot');assert.equal(basic.series.openInterest.points.length,0);assert.match(basic.series.openInterest.reason,/历史/);
+ await svc.detail('crypto:gateio:BTC_USDT',['funding']);assert.equal(calls.filter(p=>p.includes('/funding_rate?')).length,1);assert.equal(calls.filter(p=>p.includes('/order_book?')).length,0);assert.equal(calls.filter(p=>p.includes('/candlesticks?')).length,0);
+ await assert.rejects(async()=>svc.detail('crypto:gateio:BTC_USDT',['wrong']),/副图/);
+});
+test('selected contract history has explicit coverage and snapshots never acquire a fake source timestamp',async()=>{
+ const {ContractResearchService}=require('../src/features/contract-research');const now=1791422400000;
+ const svc=new ContractResearchService(async path=>path.includes('/contracts/')?{name:'BTC_USDT',type:'direct',mark_price:'100',index_price:'99',quanto_multiplier:'0.1',position_size:'5'}:path.includes('/funding_rate?')?[{t:now/1000-100,r:'0.01'},{t:now/1000+100,r:'0.01'}]:{bids:[{p:'99',s:'2'}],asks:[{p:'101',s:'3'}]},()=>now);
+ const result=await svc.detail('crypto:gateio:BTC_USDT',['funding','depth','openInterest','basis']);
+ assert.equal(result.series.funding.kind,'history');assert.equal(result.series.funding.points.length,1);assert.equal(result.series.funding.coverage.from,new Date(now-100000).toISOString());
+ assert.equal(result.series.depth.kind,'snapshot');assert.equal(result.series.depth.sourceTime,null);assert.equal(result.series.depth.retrievedAt,new Date(now).toISOString());assert.equal(result.series.basis.points.length,0);
+});
