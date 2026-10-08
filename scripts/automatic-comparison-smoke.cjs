@@ -4,7 +4,7 @@ const root=path.join(__dirname,'..'),dir=fs.mkdtempSync(path.join(os.tmpdir(),'m
 process.env.MONEYMONEY_DATA_DIR=dir;
 const {dataLakeCatalog}=require('../dist/storage/data-lake'),{stateStore}=require('../dist/storage/sqlite-state');
 const {createAiRunner,getAiRunners}=require('../dist/features/ai-paper-runner');
-for(const symbol of ['AAPL','MU','SNDK','SPY','MSFT','NVDA'])dataLakeCatalog.registerInstrument({type:'stock',venue:'us',symbol});
+for(const symbol of ['AAPL','MU','SPY','MSFT','NVDA'])dataLakeCatalog.registerInstrument({type:'stock',venue:'us',symbol});
 dataLakeCatalog.registerInstrument({type:'crypto',venue:'binance',symbol:'BTCUSDT'});
 dataLakeCatalog.registerInstrument({type:'option',venue:'cboe',symbol:'AAPL:20261016:C:100'});
 const sentinel=createAiRunner('Stocks','MU','Existing isolated runner',1000,{}, {mode:'ai-autonomous-paper',startPaused:true});

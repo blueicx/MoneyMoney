@@ -112,7 +112,7 @@ import { getForecastLabReport, resolveForecastCase } from '../features/forecast-
 import { calculatePredictionPosition } from '../features/prediction-position-sizer';
 import { aiCommentaryConfigured, getAiMarketCommentary } from '../features/ai-commentary';
 import { getAiConfigurationStatus, testAiConnection, type AiChain } from '../features/ai-runtime-config';
-import { unifiedInstrumentService, normalizeInstrumentRef, summarizeTimelineAvailability, filterEventsForInstrument, type InstrumentType } from '../features/unified-instruments';
+import { unifiedInstrumentService, normalizeInstrumentRef, parseInstrumentQuery, summarizeTimelineAvailability, filterEventsForInstrument, type InstrumentType } from '../features/unified-instruments';
 import { stockDataService } from '../features/stock-data-service';
 import { buildStockCoverageMap } from '../features/instrument-coverage';
 import { MARKET_SCOPES, filterInstrumentResults, type MarketScope } from '../features/market-scope';
@@ -8588,7 +8588,19 @@ app.post('/api/ai-runners/comparisons/automatic/rebuild',express.json(),async(re
     const selected=selectComparisonWatchlist(market,ids,pinned,id=>{
       const refs=COMPARISON_MARKETS.map(scope=>dataLakeCatalog.resolveInstrument(scope,id)).filter((ref):ref is NonNullable<typeof ref>=>!!ref);
       if(refs.length>1)throw new Error('自选身份有歧义');
-      return refs[0] || null;
+      if(refs[0])return refs[0];
+      // A stored, fully-qualified identity carries its own market and venue.
+      // Accept only an exact canonical round-trip; bare symbols remain unresolved.
+      if(!/^(?:stock|option|crypto|prediction):/i.test(id))return null;
+      const parsed=parseInstrumentQuery(id);
+      if(!parsed)return null;
+      const canonical=normalizeInstrumentRef({...parsed,title:parsed.symbol,aliases:[]});
+      if(canonical.id!==id)return null;
+      const validSymbol=canonical.type==='stock'?/^[A-Z][A-Z0-9.]{0,9}$/.test(canonical.symbol)
+        :canonical.type==='crypto'?/^[A-Z0-9]{2,20}(?:USDT|USDC|USD)$/.test(canonical.symbol)
+        :canonical.type==='prediction'?/^\d+$/.test(canonical.symbol)
+        :/^[A-Z0-9._:-]{1,100}$/.test(canonical.symbol);
+      return validSymbol?canonical:null;
     });
     if(!selected.instruments.length){
       const details=[...new Set(selected.excluded.map(row=>row.reason))].slice(0,3);
