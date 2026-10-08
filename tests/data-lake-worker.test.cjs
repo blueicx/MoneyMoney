@@ -42,6 +42,86 @@ test('backfill worker writes real adapter bars by time partition and query merge
   } finally { catalog.close(); fs.rmSync(root, { recursive: true, force: true }); }
 });
 
+test('stock backfill archives observed corporate actions and never labels Yahoo close as unadjusted', async () => {
+  const { root, catalog } = tempCatalog();
+  try {
+    const observedAt = '2026-10-09T00:00:00.000Z';
+    const worker = new DataLakeBackfillWorker(catalog, {
+      providers: [{
+        id: 'yahoo-finance-history', market: 'stocks', datasets: ['bars'], timeframes: ['1d'],
+        createAdapter: () => { throw new Error('history adapter should be used'); },
+        createHistoryAdapter: () => ({
+          fetch: async () => ({
+            data: {
+              bars: [{ time: Date.parse('2026-09-21T00:00:00.000Z'), open: 50, high: 55, low: 49, close: 54, volume: 10 }],
+              adjustment: 'unknown',
+              corporateActions: [{ id: 'yahoo-split-aapl', market: 'stocks', instrument: 'AAPL', kind: 'split', effectiveAt: '2026-09-21T00:00:00.000Z', factor: 2, source: 'Yahoo Finance chart events' }],
+            },
+            source: 'yahoo-finance-history', fetchedAt: observedAt, expiresAt: observedAt, latencyMs: 1, status: 'live',
+          }),
+        }),
+      }],
+    });
+    catalog.createBackfill({ market: 'stocks', dataset: 'bars', instrument: 'AAPL', timeframe: '1d', from: '2026-09-20T00:00:00.000Z', to: '2026-09-22T00:00:00.000Z' });
+    const job = await worker.runOnce();
+    assert.equal(job.status, 'succeeded');
+    const action = catalog.listCorporateActions('stocks', 'AAPL')[0];
+    assert.equal(action.id, 'yahoo-split-aapl');
+    assert.equal(action.observedAt, observedAt);
+    assert.equal(action.publishedAt, undefined);
+    const history = await catalog.queryBarsAsOf({ market: 'stocks', instrument: 'AAPL', timeframe: '1d', asOf: '2026-10-10T00:00:00.000Z' });
+    assert.equal(history.adjustment, 'unknown');
+  } finally { catalog.close(); fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('stock backfill rejects corporate-action evidence for a different market identity before publishing bars', async () => {
+  const { root, catalog } = tempCatalog();
+  try {
+    const worker = new DataLakeBackfillWorker(catalog, {
+      providers: [{
+        id: 'yahoo-finance-history', market: 'stocks', datasets: ['bars'], timeframes: ['1d'],
+        createAdapter: () => { throw new Error('history adapter should be used'); },
+        createHistoryAdapter: () => ({ fetch: async () => ({
+          data: {
+            bars: [{ time: Date.parse('2026-09-21T00:00:00.000Z'), open: 50, high: 55, low: 49, close: 54, volume: 10 }],
+            adjustment: 'unknown',
+            corporateActions: [{ id: 'wrong-scope', market: 'stocks', instrument: 'MSFT', kind: 'split', effectiveAt: '2026-09-21T00:00:00.000Z', factor: 2, source: 'Yahoo Finance chart events' }],
+          }, source: 'yahoo-finance-history', fetchedAt: '2026-10-09T00:00:00.000Z', expiresAt: '2026-10-09T00:01:00.000Z', latencyMs: 1, status: 'live',
+        }) }),
+      }],
+    });
+    catalog.createBackfill({ market: 'stocks', dataset: 'bars', instrument: 'AAPL', timeframe: '1d', from: '2026-09-20T00:00:00.000Z', to: '2026-09-22T00:00:00.000Z' });
+    const result = await worker.runOnce();
+    assert.equal(result.status, 'failed');
+    assert.match(result.reason, /公司行动.*标的|corporate action.*instrument/i);
+    assert.deepEqual(catalog.listPartitions(), []);
+    assert.deepEqual(catalog.listCorporateActions('stocks', 'MSFT'), []);
+  } finally { catalog.close(); fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('stock backfill keeps Yahoo venue aliases attached to the requested instrument identity', async () => {
+  const { root, catalog } = tempCatalog();
+  try {
+    const worker = new DataLakeBackfillWorker(catalog, {
+      providers: [{
+        id: 'yahoo-finance-history', market: 'stocks', datasets: ['bars'], timeframes: ['1d'],
+        createAdapter: () => { throw new Error('history adapter should be used'); },
+        createHistoryAdapter: () => ({ fetch: async () => ({
+          data: {
+            bars: [{ time: Date.parse('2026-09-21T00:00:00.000Z'), open: 50, high: 55, low: 49, close: 54, volume: 10 }],
+            adjustment: 'unknown',
+            corporateActions: [{ id: 'yahoo-split-shanghai-alias', market: 'stocks', instrument: '600519.SS', kind: 'split', effectiveAt: '2026-09-21T00:00:00.000Z', factor: 2, source: 'Yahoo Finance chart events' }],
+          }, source: 'yahoo-finance-history', fetchedAt: '2026-10-09T00:00:00.000Z', expiresAt: '2026-10-09T00:01:00.000Z', latencyMs: 1, status: 'live',
+        }) }),
+      }],
+    });
+    catalog.createBackfill({ market: 'stocks', dataset: 'bars', instrument: 'SH600519', timeframe: '1d', from: '2026-09-20T00:00:00.000Z', to: '2026-09-22T00:00:00.000Z' });
+    const result = await worker.runOnce();
+    assert.equal(result.status, 'succeeded');
+    assert.equal(catalog.listCorporateActions('stocks', 'SH600519')[0].instrument, 'SH600519');
+  } finally { catalog.close(); fs.rmSync(root, { recursive: true, force: true }); }
+});
+
 test('backfill worker records an explicit empty-source failure without publishing data', async () => {
   const { root, catalog } = tempCatalog();
   try {

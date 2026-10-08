@@ -13,7 +13,7 @@ export interface DatasetManifest { id: string; dataset: string; market: MarketId
 export interface DatasetPartition { id: string; manifestId: string; path: string; dataset: string; market: MarketId; instrument: string; timeframe: string; periodStart: string; periodEnd: string; publishedAt: string; fetchedAt: string; rowCount: number; status: DatasetStatus; contentHash: string; }
 export interface PointInTimeSnapshot { id: string; market: MarketId; instrument: string; dataset: string; timeframe: string; asOf: string; partitionId: string; contentHash: string; source: string | null; createdAt: string; }
 export interface DataRevision { id: string; dataset: string; market: MarketId; instrument: string; timeframe: string; partitionId: string; publishedAt: string; contentHash: string; supersedes?: string; reason?: string; }
-export interface CorporateAction { id: string; market: 'stocks'; instrument: string; kind: 'split' | 'dividend' | 'symbol-change' | 'delisting'; effectiveAt: string; publishedAt?: string; factor?: number; oldSymbol?: string; newSymbol?: string; source: string; }
+export interface CorporateAction { id: string; market: 'stocks'; instrument: string; kind: 'split' | 'dividend' | 'symbol-change' | 'delisting'; effectiveAt: string; publishedAt?: string; observedAt?: string; factor?: number; oldSymbol?: string; newSymbol?: string; source: string; }
 export interface ProviderContract { id: string; provider: string; market: MarketId; datasets: string[]; timezone: string; units: Record<string, string>; revisionPolicy: 'point-in-time' | 'latest'; }
 export interface DataQualityReport { valid: boolean; rowCount: number; duplicateTimestamps: number; outOfOrderRows: number; missingFields: string[]; futureRows: number; errors: string[]; checkedAt: string; }
 export interface BackfillCheckpoint { cursor?: string; rowsWritten: number; partitionsCommitted: number; }
@@ -124,7 +124,7 @@ export class DataLakeCatalog {
       CREATE TABLE IF NOT EXISTS data_quality_reports (partition_id TEXT PRIMARY KEY, report TEXT NOT NULL, checked_at TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS data_revisions (id TEXT PRIMARY KEY, dataset TEXT NOT NULL, market TEXT NOT NULL, instrument TEXT NOT NULL, timeframe TEXT NOT NULL, partition_id TEXT NOT NULL, published_at TEXT NOT NULL, content_hash TEXT NOT NULL, supersedes TEXT, reason TEXT);
       CREATE TABLE IF NOT EXISTS point_in_time_snapshots (id TEXT PRIMARY KEY, market TEXT NOT NULL, instrument TEXT NOT NULL, dataset TEXT NOT NULL, timeframe TEXT NOT NULL, as_of TEXT NOT NULL, partition_id TEXT NOT NULL, content_hash TEXT NOT NULL, source TEXT, created_at TEXT NOT NULL);
-      CREATE TABLE IF NOT EXISTS corporate_actions (id TEXT PRIMARY KEY, market TEXT NOT NULL, instrument TEXT NOT NULL, kind TEXT NOT NULL, effective_at TEXT NOT NULL, factor REAL, old_symbol TEXT, new_symbol TEXT, source TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS corporate_actions (id TEXT PRIMARY KEY, market TEXT NOT NULL, instrument TEXT NOT NULL, kind TEXT NOT NULL, effective_at TEXT NOT NULL, factor REAL, old_symbol TEXT, new_symbol TEXT, source TEXT NOT NULL, observed_at TEXT);
       CREATE TABLE IF NOT EXISTS provider_contracts (id TEXT PRIMARY KEY, provider TEXT NOT NULL, market TEXT NOT NULL, datasets TEXT NOT NULL, timezone TEXT NOT NULL, units TEXT NOT NULL, revision_policy TEXT NOT NULL, updated_at TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS instrument_registry (id TEXT PRIMARY KEY, market TEXT NOT NULL, venue TEXT NOT NULL, symbol TEXT NOT NULL, title TEXT NOT NULL, aliases TEXT NOT NULL, registered_at TEXT NOT NULL);
       CREATE INDEX IF NOT EXISTS idx_instrument_registry_symbol ON instrument_registry (market, symbol);
@@ -140,6 +140,7 @@ export class DataLakeCatalog {
     `);
     this.ensureBackfillColumns();
     if (!(this.db.prepare('PRAGMA table_info(corporate_actions)').all() as Array<{name:string}>).some(row=>row.name==='published_at')) this.db.exec('ALTER TABLE corporate_actions ADD COLUMN published_at TEXT');
+    if (!(this.db.prepare('PRAGMA table_info(corporate_actions)').all() as Array<{name:string}>).some(row=>row.name==='observed_at')) this.db.exec('ALTER TABLE corporate_actions ADD COLUMN observed_at TEXT');
     this.migrateLegacyInstrumentIdentities();
   }
 
@@ -215,7 +216,8 @@ export class DataLakeCatalog {
     const connection = await instance.connect();
     try {
       for (const candidate of candidates) {
-        if (!fs.existsSync(candidate.path) || candidate.adjustment !== (input.adjustment || 'unadjusted') || candidate.timezone !== (input.timezone || 'UTC')) continue;
+        const candidateAdjustment = /^yahoo-finance-history(?::|$)/i.test(candidate.source) && candidate.adjustment === 'unadjusted' ? 'unknown' : candidate.adjustment;
+        if (!fs.existsSync(candidate.path) || candidateAdjustment !== (input.adjustment || 'unadjusted') || candidate.timezone !== (input.timezone || 'UTC')) continue;
         const result = await connection.runAndReadAll(`SELECT observation_ts AS timestamp, close FROM read_parquet('${sqlPath(candidate.path)}') ORDER BY observation_ts`);
         const evidence: DataDiscrepancy['evidence'] = [];
         for (const row of result.getRowObjectsJS() as Array<Record<string, unknown>>) {
@@ -241,7 +243,7 @@ export class DataLakeCatalog {
     validateInstrument(input.market, input.instrument);
     this.resolveInstrument(input.market, input.instrument);
     if (!input.dataset || !input.timeframe || !input.source) throw new Error('dataset, timeframe and source are required');
-    const contract = this.listProviderContracts(input.market).find(item => item.provider === input.source && item.datasets.includes(input.dataset));
+    const contract = this.listProviderContracts(input.market).find(item => (item.provider === input.source || input.source.startsWith(`${item.provider}:`)) && item.datasets.includes(input.dataset));
     if (contract) {
       if ((input.timezone || 'UTC') !== contract.timezone) throw new Error('provider timezone mismatch');
       for (const [field, expectedUnit] of Object.entries(contract.units)) {
@@ -250,14 +252,16 @@ export class DataLakeCatalog {
     }
     const publishedAt = Date.parse(input.publishedAt);
     if (!Number.isFinite(publishedAt)) throw new Error('invalid publishedAt');
+    const yahooHistory = input.market === 'stocks' && /^yahoo-finance-history(?::|$)/i.test(input.source);
+    const adjustment = yahooHistory ? 'unknown' : input.adjustment || 'unadjusted';
     const quality = qualityReport(input.rows);
     if (!quality.valid) throw new Error(`quality gate rejected partition: ${quality.errors.join('; ')}`);
-    await this.rejectConflictingBars(input);
+    await this.rejectConflictingBars({ ...input, adjustment });
     const first = Date.parse(input.rows[0].timestamp);
     const last = Date.parse(input.rows[input.rows.length - 1].timestamp);
     const year = new Date(first).getUTCFullYear();
     const month = String(new Date(first).getUTCMonth() + 1).padStart(2, '0');
-    const contentHash = hash({ ...input, rows: input.rows });
+    const contentHash = hash({ ...input, adjustment, rows: input.rows });
     const partitionId = `partition_${contentHash.slice(0, 24)}`;
     const manifestId = `manifest_${contentHash.slice(0, 24)}`;
     const relative = path.join(input.market, input.dataset, input.instrument, input.timeframe, String(year), month, `${contentHash}.parquet`);
@@ -281,7 +285,7 @@ export class DataLakeCatalog {
       await connection.run(`COPY bars TO '${sqlPath(stagePath)}' (FORMAT PARQUET, COMPRESSION ZSTD)`);
     } finally { connection.closeSync(); instance.closeSync(); }
     fs.renameSync(stagePath, finalPath);
-    const manifest: DatasetManifest = { id: manifestId, dataset: input.dataset, market: input.market, source: input.source, fieldVersion: input.fieldVersion || 'bars-v1', timezone: input.timezone || 'UTC', adjustment: input.adjustment || 'unadjusted', createdAt: new Date().toISOString(), contentHash };
+    const manifest: DatasetManifest = { id: manifestId, dataset: input.dataset, market: input.market, source: input.source, fieldVersion: input.fieldVersion || 'bars-v1', timezone: input.timezone || 'UTC', adjustment, createdAt: new Date().toISOString(), contentHash };
     const partition: DatasetPartition = { id: partitionId, manifestId, path: finalPath, dataset: input.dataset, market: input.market, instrument: input.instrument, timeframe: input.timeframe, periodStart: new Date(first).toISOString(), periodEnd: new Date(last).toISOString(), publishedAt: new Date(publishedAt).toISOString(), fetchedAt: manifest.createdAt, rowCount: input.rows.length, status: 'committed', contentHash };
     const previous = this.db.prepare('SELECT id FROM data_revisions WHERE market = ? AND dataset = ? AND instrument = ? AND timeframe = ? ORDER BY published_at DESC, id DESC LIMIT 1').get(input.market, input.dataset, input.instrument, input.timeframe) as { id?: string } | undefined;
     const revision: DataRevision = { id: `revision_${partitionId}`, dataset: input.dataset, market: input.market, instrument: input.instrument, timeframe: input.timeframe, partitionId, publishedAt: partition.publishedAt, contentHash, ...(previous?.id ? { supersedes: String(previous.id) } : {}) };
@@ -335,7 +339,7 @@ export class DataLakeCatalog {
       const contentHash = crypto.createHash('sha256').update(selected.map(item => String(item.content_hash)).join('|')).digest('hex');
       const snapshot: PointInTimeSnapshot = { id: `snapshot_${contentHash.slice(0, 24)}_${asOf}`, market: input.market, instrument: input.instrument, dataset: 'bars', timeframe: input.timeframe, asOf: new Date(asOf).toISOString(), partitionId: selected.map(item => String(item.id)).join(','), contentHash, source: source || null, createdAt: new Date().toISOString() };
       this.db.prepare('INSERT OR IGNORE INTO point_in_time_snapshots (id,market,instrument,dataset,timeframe,as_of,partition_id,content_hash,source,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)').run(snapshot.id, snapshot.market, snapshot.instrument, snapshot.dataset, snapshot.timeframe, snapshot.asOf, snapshot.partitionId, snapshot.contentHash, snapshot.source, snapshot.createdAt);
-      const adjustments=[...new Set(selected.map(row=>row.adjustment))];
+      const adjustments=[...new Set(selected.map(row=>/^yahoo-finance-history(?::|$)/i.test(String(row.source)) && row.adjustment === 'unadjusted' ? 'unknown' : String(row.adjustment)))];
       return { rows, dataStatus: 'historical', source, adjustment:adjustments.length===1?adjustments[0]:'mixed', updatedAt: String(latest.published_at || ''), snapshot: this.getSnapshot(snapshot.id) || snapshot };
     } finally { connection.closeSync(); instance.closeSync(); }
   }
@@ -359,21 +363,29 @@ export class DataLakeCatalog {
     if (!['split', 'dividend', 'symbol-change', 'delisting'].includes(input.kind)) throw new Error('Invalid corporate action kind');
     if (!Number.isFinite(Date.parse(input.effectiveAt)) || !input.source?.trim()) throw new Error('Corporate action requires effectiveAt and source');
     if(input.publishedAt && !Number.isFinite(Date.parse(input.publishedAt))) throw new Error('Corporate action publication time invalid');
+    if(input.observedAt && !Number.isFinite(Date.parse(input.observedAt))) throw new Error('Corporate action observation time invalid');
     if (input.kind === 'split' && (!Number.isFinite(input.factor) || Number(input.factor) <= 0)) throw new Error('Split factor must be positive');
     if (input.kind === 'dividend' && (!Number.isFinite(input.factor) || Number(input.factor) < 0)) throw new Error('Dividend amount must be nonnegative');
     if (input.kind === 'symbol-change' && (!input.oldSymbol || !input.newSymbol || input.oldSymbol === input.newSymbol)) throw new Error('Symbol change requires distinct old and new symbols');
-    this.db.prepare('INSERT OR REPLACE INTO corporate_actions (id,market,instrument,kind,effective_at,factor,old_symbol,new_symbol,source,published_at) VALUES (?,?,?,?,?,?,?,?,?,?)').run(input.id,input.market,input.instrument,input.kind,new Date(input.effectiveAt).toISOString(),input.factor ?? null,input.oldSymbol || null,input.newSymbol || null,input.source.trim(),input.publishedAt?new Date(input.publishedAt).toISOString():null);
-    return { ...input, effectiveAt: new Date(input.effectiveAt).toISOString(), source: input.source.trim() };
+    const effectiveAt = new Date(input.effectiveAt).toISOString();
+    const publishedAt = input.publishedAt ? new Date(input.publishedAt).toISOString() : null;
+    const observedAt = input.observedAt ? new Date(input.observedAt).toISOString() : null;
+    this.db.prepare(`INSERT INTO corporate_actions (id,market,instrument,kind,effective_at,factor,old_symbol,new_symbol,source,published_at,observed_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET
+      market=excluded.market,instrument=excluded.instrument,kind=excluded.kind,effective_at=excluded.effective_at,factor=excluded.factor,
+      old_symbol=excluded.old_symbol,new_symbol=excluded.new_symbol,source=excluded.source,
+      published_at=COALESCE(corporate_actions.published_at,excluded.published_at),
+      observed_at=CASE WHEN corporate_actions.observed_at IS NULL THEN excluded.observed_at WHEN excluded.observed_at IS NULL THEN corporate_actions.observed_at ELSE MIN(corporate_actions.observed_at,excluded.observed_at) END`).run(input.id,input.market,input.instrument,input.kind,effectiveAt,input.factor ?? null,input.oldSymbol || null,input.newSymbol || null,input.source.trim(),publishedAt,observedAt);
+    return this.listCorporateActions('stocks', input.instrument).find(action => action.id === input.id)!;
   }
 
   listCorporateActions(market?: MarketId, instrument?: string): CorporateAction[] {
     const rows = (market && instrument
-      ? this.db.prepare('SELECT id,market,instrument,kind,effective_at AS effectiveAt,factor,old_symbol AS oldSymbol,new_symbol AS newSymbol,source FROM corporate_actions WHERE market = ? AND instrument = ? ORDER BY effective_at').all(market, instrument)
+      ? this.db.prepare('SELECT id,market,instrument,kind,effective_at AS effectiveAt,factor,old_symbol AS oldSymbol,new_symbol AS newSymbol,source,published_at AS publishedAt,observed_at AS observedAt FROM corporate_actions WHERE market = ? AND instrument = ? ORDER BY effective_at').all(market, instrument)
       : market
-        ? this.db.prepare('SELECT id,market,instrument,kind,effective_at AS effectiveAt,factor,old_symbol AS oldSymbol,new_symbol AS newSymbol,source FROM corporate_actions WHERE market = ? ORDER BY effective_at').all(market)
-        : this.db.prepare('SELECT id,market,instrument,kind,effective_at AS effectiveAt,factor,old_symbol AS oldSymbol,new_symbol AS newSymbol,source FROM corporate_actions ORDER BY effective_at').all()) as Array<Record<string, unknown>>;
-    const published=new Map((this.db.prepare('SELECT id,published_at FROM corporate_actions WHERE published_at IS NOT NULL').all() as Array<{id:string;published_at:string}>).map(row=>[row.id,row.published_at]));
-    return rows.map(row => ({ id: String(row.id), market: row.market as 'stocks', instrument: String(row.instrument), kind: row.kind as CorporateAction['kind'], effectiveAt: String(row.effectiveAt), ...(published.has(String(row.id))?{publishedAt:published.get(String(row.id))}:{}), ...(row.factor == null ? {} : { factor: Number(row.factor) }), ...(row.oldSymbol ? { oldSymbol: String(row.oldSymbol) } : {}), ...(row.newSymbol ? { newSymbol: String(row.newSymbol) } : {}), source: String(row.source) }));
+        ? this.db.prepare('SELECT id,market,instrument,kind,effective_at AS effectiveAt,factor,old_symbol AS oldSymbol,new_symbol AS newSymbol,source,published_at AS publishedAt,observed_at AS observedAt FROM corporate_actions WHERE market = ? ORDER BY effective_at').all(market)
+        : this.db.prepare('SELECT id,market,instrument,kind,effective_at AS effectiveAt,factor,old_symbol AS oldSymbol,new_symbol AS newSymbol,source,published_at AS publishedAt,observed_at AS observedAt FROM corporate_actions ORDER BY effective_at').all()) as Array<Record<string, unknown>>;
+    return rows.map(row => ({ id: String(row.id), market: row.market as 'stocks', instrument: String(row.instrument), kind: row.kind as CorporateAction['kind'], effectiveAt: String(row.effectiveAt), ...(row.publishedAt == null ? {} : { publishedAt: String(row.publishedAt) }), ...(row.observedAt == null ? {} : { observedAt: String(row.observedAt) }), ...(row.factor == null ? {} : { factor: Number(row.factor) }), ...(row.oldSymbol ? { oldSymbol: String(row.oldSymbol) } : {}), ...(row.newSymbol ? { newSymbol: String(row.newSymbol) } : {}), source: String(row.source) }));
   }
 
   registerProviderContract(input: ProviderContract): ProviderContract {

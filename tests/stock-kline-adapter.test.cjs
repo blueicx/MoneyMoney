@@ -3,8 +3,11 @@ const assert = require('node:assert/strict');
 const {
   STOCK_KLINE_PERIODS,
   normalizeYahooChartPayload,
+  normalizeYahooCorporateActions,
+  normalizeYahooSymbol,
   aggregateStockBars,
   createYahooStockKlineAdapter,
+  createYahooStockHistoryAdapter,
 } = require('../dist/data/yahoo-adapter');
 
 test('stock period catalog is a single selectable set', () => {
@@ -28,6 +31,25 @@ test('Yahoo chart payload becomes ordered numeric OHLCV bars', () => {
     { time: 20000, open: 2, high: 3, low: 2, close: 2.5, volume: 20 },
     { time: 30000, open: 3, high: 4, low: 2, close: 3.5, volume: 30 },
   ]);
+});
+
+test('Yahoo corporate actions retain source events without inventing publication timestamps', () => {
+  assert.equal(normalizeYahooSymbol('SH600519'), '600519.SS');
+  const actions = normalizeYahooCorporateActions({ chart: { result: [{ events: {
+    splits: { '1767225600': { date: 1767225600, numerator: 4, denominator: 1 } },
+    dividends: { '1767312000': { date: 1767312000, amount: 0.25 } },
+  } }] } }, 'usAAPL');
+  assert.equal(actions.length, 2);
+  assert.deepEqual(actions.map(({ kind, instrument, effectiveAt, factor, source, publishedAt }) => ({ kind, instrument, effectiveAt, factor, source, publishedAt })), [
+    { kind: 'split', instrument: 'AAPL', effectiveAt: '2026-01-01T00:00:00.000Z', factor: 4, source: 'Yahoo Finance chart events', publishedAt: undefined },
+    { kind: 'dividend', instrument: 'AAPL', effectiveAt: '2026-01-02T00:00:00.000Z', factor: 0.25, source: 'Yahoo Finance chart events', publishedAt: undefined },
+  ]);
+  assert.notEqual(actions[0].id, actions[1].id);
+  const invalidPayload = { chart: { result: [{ events: { splits: {
+    bad: { date: 'bad', numerator: 4, denominator: 1 },
+    '1767225600': { date: 1767225600, numerator: -4, denominator: 1 },
+  } } }] } };
+  assert.deepEqual(normalizeYahooCorporateActions(invalidPayload, 'AAPL'), []);
 });
 
 test('daily stock bars can be aggregated into real multi-day period bars', () => {
@@ -76,4 +98,21 @@ test('Yahoo stock kline adapter preserves mainland stock exchange mapping', asyn
   const result = await createYahooStockKlineAdapter().fetch({ symbol: 'sh600519', period: '1d' });
   assert.equal(result.status, 'live');
   assert.match(requestedUrl, /chart\/600519\.SS/);
+});
+
+test('Yahoo history adapter carries unverified price basis and corporate-action evidence', async (t) => {
+  const originalFetch = global.fetch;
+  t.after(() => { global.fetch = originalFetch; });
+  global.fetch = async () => ({ ok: true, json: async () => ({ chart: { result: [{
+    timestamp: [1767225600],
+    indicators: { quote: [{ open: [10], high: [11], low: [9], close: [10.5], volume: [100] }] },
+    events: { splits: { '1767225600': { date: 1767225600, numerator: 2, denominator: 1 } } },
+  }] } }) });
+  const result = await createYahooStockHistoryAdapter().fetch({ symbol: 'AAPL', period: '1d' });
+  assert.equal(result.status, 'live');
+  assert.equal(result.data.adjustment, 'unknown');
+  assert.equal(result.data.bars.length, 1);
+  assert.equal(result.data.corporateActions[0].kind, 'split');
+  assert.equal(result.data.corporateActions[0].publishedAt, undefined);
+  assert.ok(result.fetchedAt);
 });

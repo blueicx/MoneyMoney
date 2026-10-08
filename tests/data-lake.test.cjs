@@ -3,6 +3,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
+const Database = require('better-sqlite3');
 
 const { DataLakeCatalog } = require('../dist/storage/data-lake');
 
@@ -251,6 +252,50 @@ test('data lake persists stock corporate actions and provider contracts with mar
     assert.deepEqual(catalog.listCorporateActions('crypto'), []);
     assert.deepEqual(catalog.listProviderContracts('stocks').map(item => item.id), ['provider-yahoo-bars']);
     assert.deepEqual(catalog.listProviderContracts('crypto'), []);
+  } finally { catalog.close(); fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('corporate action first-observed time is immutable to later refetches while verified publication time can be added', () => {
+  const { root, catalog } = tempCatalog();
+  try {
+    const base = { id: 'observed-split', market: 'stocks', instrument: 'AAPL', kind: 'split', effectiveAt: '2026-09-21T00:00:00.000Z', factor: 2, source: 'Yahoo Finance chart events' };
+    catalog.saveCorporateAction({ ...base, observedAt: '2026-10-02T00:00:00.000Z' });
+    catalog.saveCorporateAction({ ...base, observedAt: '2026-10-03T00:00:00.000Z' });
+    const updated = catalog.saveCorporateAction({ ...base, observedAt: '2026-10-03T00:00:00.000Z', publishedAt: '2026-09-10T00:00:00.000Z' });
+    assert.equal(updated.observedAt, '2026-10-02T00:00:00.000Z');
+    const stored = catalog.listCorporateActions('stocks', 'AAPL')[0];
+    assert.equal(stored.observedAt, '2026-10-02T00:00:00.000Z');
+    assert.equal(stored.publishedAt, '2026-09-10T00:00:00.000Z');
+  } finally { catalog.close(); fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('corporate-action observed timestamp migrates an existing catalog schema without losing records', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'moneymoney-corporate-migration-'));
+  const databasePath = path.join(root, 'catalog.sqlite');
+  const legacy = new Database(databasePath);
+  legacy.exec(`CREATE TABLE corporate_actions (
+    id TEXT PRIMARY KEY, market TEXT NOT NULL, instrument TEXT NOT NULL, kind TEXT NOT NULL,
+    effective_at TEXT NOT NULL, factor REAL, old_symbol TEXT, new_symbol TEXT, source TEXT NOT NULL, published_at TEXT
+  );
+  INSERT INTO corporate_actions VALUES ('legacy-action','stocks','AAPL','split','2026-09-21T00:00:00.000Z',2,NULL,NULL,'legacy-source',NULL);`);
+  legacy.close();
+  const catalog = new DataLakeCatalog({ lakeRoot: path.join(root, 'lake'), databasePath });
+  try {
+    const existing = catalog.listCorporateActions('stocks', 'AAPL')[0];
+    assert.equal(existing.id, 'legacy-action');
+    assert.equal(existing.observedAt, undefined);
+    const added = catalog.saveCorporateAction({ id: 'new-action', market: 'stocks', instrument: 'AAPL', kind: 'split', effectiveAt: '2026-09-22T00:00:00.000Z', factor: 2, source: 'new-source', observedAt: '2026-10-09T00:00:00.000Z' });
+    assert.equal(added.observedAt, '2026-10-09T00:00:00.000Z');
+    assert.equal(catalog.listCorporateActions('stocks', 'AAPL').length, 2);
+  } finally { catalog.close(); fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('Yahoo chart close remains unknown adjustment basis even for legacy stage callers', async () => {
+  const { root, catalog } = tempCatalog();
+  try {
+    await catalog.stageBars({ market: 'stocks', dataset: 'bars', instrument: 'AAPL', timeframe: '1d', source: 'yahoo-finance-history', publishedAt: '2026-09-03T00:00:00.000Z', adjustment: 'unadjusted', rows: stockRows });
+    const result = await catalog.queryBarsAsOf({ market: 'stocks', instrument: 'AAPL', timeframe: '1d', asOf: '2026-09-04T00:00:00.000Z' });
+    assert.equal(result.adjustment, 'unknown');
   } finally { catalog.close(); fs.rmSync(root, { recursive: true, force: true }); }
 });
 

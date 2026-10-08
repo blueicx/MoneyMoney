@@ -21,10 +21,31 @@ test('comparison aligns dates and retains invalid-price gaps instead of averagin
 });
 test('corporate actions with unknown adjustment prevent misleading returns', async()=>{
   assert.equal(typeof mod.assembleHistory,'function');
-  const catalog={queryBarsAsOf:async()=>({rows:bars([100,50,55]),source:'unadjusted source'}),listCorporateActions:()=>[{kind:'split',effectiveAt:'2026-09-21T00:00:00Z'}]};
+  const catalog={queryBarsAsOf:async()=>({rows:bars([100,50,55]),source:'unadjusted source'}),listCorporateActions:()=>[{id:'split',market:'stocks',instrument:'AAPL',kind:'split',factor:2,effectiveAt:'2026-09-21T00:00:00Z',observedAt:'2026-09-21T00:00:00Z',source:'test'}]};
   const result=await mod.assembleHistory(catalog,'stocks',['stock:us:AAPL'],'2026-09-30T00:00:00Z');
   assert.equal(result.series[0].dataStatus,'unavailable');
   assert.match(result.series[0].reason,/公司行动|复权/);
+});
+test('point-in-time history hides a corporate action before its first observation and blocks unverified conversion after', async()=>{
+ const {assembleHistory}=require('../dist/features/portfolio-history.js');
+ const action={id:'yahoo-split',market:'stocks',instrument:'AAPL',kind:'split',factor:2,effectiveAt:'2026-09-21T00:00:00Z',observedAt:'2026-10-01T00:00:00Z',source:'Yahoo Finance chart events'};
+ const catalog={queryBarsAsOf:async()=>({rows:bars([100,50,55]),source:'yahoo-finance-history',adjustment:'unknown'}),listCorporateActions:()=>[action]};
+ const before=await assembleHistory(catalog,'stocks',['stock:us:AAPL'],'2026-09-30T00:00:00Z');
+ assert.deepEqual(before.series[0].corporateActions,[]);
+ const after=await assembleHistory(catalog,'stocks',['stock:us:AAPL'],'2026-10-02T00:00:00Z');
+ assert.equal(after.series[0].corporateActions[0].observedAt,action.observedAt);
+ assert.equal(after.series[0].dataStatus,'unavailable');
+ assert.match(after.series[0].reason,/公司行动|复权/);
+});
+test('point-in-time history omits legacy corporate actions with missing or invalid knowledge timestamps',async()=>{
+ const {assembleHistory}=require('../dist/features/portfolio-history.js');
+ const actions=[
+  {id:'legacy-unknown',market:'stocks',instrument:'AAPL',kind:'split',factor:2,effectiveAt:'2026-09-21T00:00:00Z',source:'legacy'},
+  {id:'invalid-time',market:'stocks',instrument:'AAPL',kind:'split',factor:2,effectiveAt:'2026-09-22T00:00:00Z',publishedAt:'not-a-date',source:'legacy'},
+ ];
+ const catalog={queryBarsAsOf:async()=>({rows:bars([100,50,55]),source:'yahoo-finance-history',adjustment:'unknown'}),listCorporateActions:()=>actions};
+ const result=await assembleHistory(catalog,'stocks',['stock:us:AAPL'],'2026-10-02T00:00:00Z');
+ assert.deepEqual(result.series[0].corporateActions,[]);
 });
 test('legacy bare symbols resolve only through verified market registry and unresolved rows remain unavailable',async()=>{
  const {assembleHistory}=require('../dist/features/portfolio-history.js');

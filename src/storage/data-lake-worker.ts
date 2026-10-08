@@ -1,5 +1,5 @@
 import { createBinanceKlineAdapter, CRYPTO_KLINE_PERIODS, type CryptoKlineBar } from '../data/binance-kline-adapter';
-import { createYahooStockKlineAdapter, STOCK_KLINE_PERIODS, type StockKlineBar } from '../data/yahoo-adapter';
+import { createYahooStockHistoryAdapter, createYahooStockKlineAdapter, normalizeYahooSymbol, STOCK_KLINE_PERIODS, type StockKlineBar, type YahooCorporateAction, type YahooStockHistory } from '../data/yahoo-adapter';
 import type { DataSourceAdapter } from '../data/source-adapter';
 import { dataLakeCatalog, type BarRow, type DataBackfillJob, type DataLakeCatalog } from './data-lake';
 
@@ -12,6 +12,7 @@ export interface DataLakeBackfillProvider {
   datasets: readonly string[];
   timeframes?: readonly string[];
   createAdapter: () => DataSourceAdapter<BackfillBar[]>;
+  createHistoryAdapter?: () => DataSourceAdapter<YahooStockHistory>;
 }
 
 export interface DataLakeBackfillWorkerOptions {
@@ -22,8 +23,9 @@ export interface DataLakeBackfillWorkerOptions {
 
 const DEFAULT_PROVIDERS: readonly DataLakeBackfillProvider[] = [
   {
-    id: 'yahoo-stock-bars', market: 'stocks', datasets: ['bars'], timeframes: Object.keys(STOCK_KLINE_PERIODS),
+    id: 'yahoo-finance-history', market: 'stocks', datasets: ['bars'], timeframes: Object.keys(STOCK_KLINE_PERIODS),
     createAdapter: () => createYahooStockKlineAdapter(),
+    createHistoryAdapter: () => createYahooStockHistoryAdapter(),
   },
   {
     id: 'binance-crypto-bars', market: 'crypto', datasets: ['bars'], timeframes: Object.keys(CRYPTO_KLINE_PERIODS),
@@ -94,24 +96,39 @@ export class DataLakeBackfillWorker {
 
   private async execute(job: DataBackfillJob): Promise<void> {
     let provider: DataLakeBackfillProvider | undefined;
-    let adapter: DataSourceAdapter<BackfillBar[]>;
+    let adapter: DataSourceAdapter<BackfillBar[] | YahooStockHistory>;
     if (this.legacyAdapterFactory) {
       if (job.market !== 'stocks') throw new Error('当前兼容回补 Worker 仅支持 stocks 市场');
       if (job.dataset !== 'bars') throw new Error('当前兼容回补 Worker 仅支持 bars 数据集');
       if (!STOCK_KLINE_PERIODS[job.timeframe]) throw new Error(`当前兼容回补 Worker 不支持周期：${job.timeframe}`);
-      adapter = this.legacyAdapterFactory();
+      adapter = this.legacyAdapterFactory() as DataSourceAdapter<BackfillBar[] | YahooStockHistory>;
     } else {
       provider = this.providers.find(candidate => candidate.market === job.market && candidate.datasets.includes(job.dataset) && (!candidate.timeframes || candidate.timeframes.includes(job.timeframe)));
       if (!provider) throw new Error(`当前 ${job.market}/${job.dataset}/${job.timeframe} 没有可用 Provider，来源不可用`);
-      adapter = provider.createAdapter();
+      adapter = provider.createHistoryAdapter?.() || provider.createAdapter() as DataSourceAdapter<BackfillBar[] | YahooStockHistory>;
     }
     const from = Date.parse(job.from);
     const to = Date.parse(job.to);
     const snapshot = await adapter.fetch({ symbol: job.instrument, period: job.timeframe });
-    if (!snapshot.data?.length || ['unavailable', 'unconfigured'].includes(snapshot.status)) {
+    const historyData = snapshot.data && !Array.isArray(snapshot.data) ? snapshot.data as YahooStockHistory : null;
+    const sourceBars = Array.isArray(snapshot.data) ? snapshot.data as BackfillBar[] : historyData?.bars || [];
+    const corporateActions = (historyData?.corporateActions || []) as YahooCorporateAction[];
+    if (!sourceBars.length || ['unavailable', 'unconfigured'].includes(snapshot.status)) {
       throw new Error(snapshot.error || '来源未返回可用历史K线');
     }
-    const bars = snapshot.data.filter(isFiniteBar).filter(bar => bar.time >= from && bar.time <= to);
+    if (corporateActions.some(action => action.market !== job.market || job.market !== 'stocks' || normalizeYahooSymbol(String(action.instrument)) !== normalizeYahooSymbol(job.instrument))) {
+      throw new Error('公司行动证据与回补任务的市场/标的不一致，拒绝发布本批历史数据');
+    }
+    if (corporateActions.some(action => !action.id?.trim() || !action.source?.trim() || !['split', 'dividend'].includes(action.kind) || !Number.isFinite(Date.parse(action.effectiveAt)) ||
+      (action.kind === 'split' && (!Number.isFinite(action.factor) || Number(action.factor) <= 0)) ||
+      (action.kind === 'dividend' && (!Number.isFinite(action.factor) || Number(action.factor) < 0)))) {
+      throw new Error('公司行动证据字段无效，拒绝发布本批历史数据');
+    }
+    const actionsToPersist = corporateActions.filter(action => {
+      const effectiveAt = Date.parse(action.effectiveAt);
+      return effectiveAt >= from && effectiveAt <= to;
+    }).map(action => ({ ...action, instrument: job.instrument }));
+    const bars = sourceBars.filter(isFiniteBar).filter(bar => bar.time >= from && bar.time <= to);
     if (!bars.length) throw new Error('来源未返回指定区间内的历史K线');
     const groups = new Map<string, BarRow[]>();
     for (const bar of bars) {
@@ -125,11 +142,14 @@ export class DataLakeBackfillWorker {
     let rowCount = 0;
     let partitionsCommitted = 0;
     for (const rows of groups.values()) {
-      await this.catalog.stageBars({ market: job.market, dataset: job.dataset, instrument: job.instrument, timeframe: job.timeframe, source, publishedAt: snapshot.fetchedAt, timezone: 'UTC', units: { timestamp: 'UTC', price: 'native', volume: 'native' }, rows });
+      await this.catalog.stageBars({ market: job.market, dataset: job.dataset, instrument: job.instrument, timeframe: job.timeframe, source, publishedAt: snapshot.fetchedAt, timezone: 'UTC', adjustment: historyData?.adjustment, units: { timestamp: 'UTC', price: 'native', volume: 'native' }, rows });
       rowCount += rows.length;
       partitionsCommitted += 1;
       const checkpoint = this.catalog.heartbeatBackfill(job.id, this.workerId, { cursor: rows[rows.length - 1]?.timestamp, rowsWritten: rowCount, partitionsCommitted });
       if (!checkpoint) throw new Error('回补任务租约已失效，请重新排队后重试');
+    }
+    for (const action of actionsToPersist) {
+      this.catalog.saveCorporateAction({ ...action, observedAt: snapshot.fetchedAt });
     }
     this.catalog.updateBackfill(job.id, 'succeeded', `已写入 ${groups.size} 个 Parquet 分区，共 ${rowCount} 根K线，来源 ${source}`, this.workerId);
   }

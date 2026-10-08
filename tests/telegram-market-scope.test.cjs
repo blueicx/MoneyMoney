@@ -5,6 +5,8 @@ const path = require('node:path');
 const test = require('node:test');
 const serverSource = fs.readFileSync('src/web/server.ts', 'utf8');
 
+require('./isolated-data-root.cjs');
+
 const { TelegramCommandCenterStore } = require('../dist/features/telegram-command-center');
 const { buildTelegramBottomMenu, getTelegramMenuEntries } = require('../dist/web/telegram-menu');
 const { getTelegramCommandHandlers } = require('../dist/web/server');

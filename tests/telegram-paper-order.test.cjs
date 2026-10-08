@@ -1,6 +1,8 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
+require('./isolated-data-root.cjs');
+
 const { getTelegramCommandHandlers } = require('../dist/web/server.js');
 const { unifiedPaperLedgerStore } = require('../dist/features/unified-paper-trading.js');
 const { telegramCommandCenterStore } = require('../dist/features/telegram-command-center.js');

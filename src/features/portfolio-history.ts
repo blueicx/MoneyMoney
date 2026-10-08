@@ -53,7 +53,11 @@ export async function assembleHistory(catalog: HistoryCatalog, market: MarketId,
       }
       const points=[...byDate].sort(([a],[b])=>a.localeCompare(b)).map(([date,point])=>({date,close:point.close,value:null as number|null}));
       const start=points[0]?.date;
-      const actions=market === 'stocks' ? catalog.listCorporateActions('stocks',ref.symbol).filter(action=>start && action.effectiveAt.slice(0,10)>=start && Date.parse(action.effectiveAt)<=Date.parse(asOf)) : [];
+      const actions=market === 'stocks' ? catalog.listCorporateActions('stocks',ref.symbol).filter(action=>{
+        if(!start || action.effectiveAt.slice(0,10)<start || Date.parse(action.effectiveAt)>Date.parse(asOf))return false;
+        const knownTimes=[action.publishedAt,action.observedAt].filter((value):value is string=>Boolean(value)).map(Date.parse).filter(Number.isFinite);
+        return knownTimes.length>0 && Math.min(...knownTimes)<=Date.parse(asOf);
+      }) : [];
       entry.rawPoints=points.map(point=>({...point}));entry.corporateActions=actions;entry.adjustment=history.adjustment || null;
       if (actions.length) {
         const verified=history.adjustment==='unadjusted' && actions.every(action=>action.kind==='split' && Number.isFinite(action.factor) && action.factor!>0 && action.source?.trim() && action.publishedAt && Date.parse(action.publishedAt)<=Date.parse(asOf));
