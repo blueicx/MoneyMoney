@@ -4,6 +4,33 @@ import type { UnifiedPaperLedger, UnifiedPaperOrder } from './unified-paper-trad
 export interface PaperChartSnapshotReference {id:string;market:string;instrument:string;at:string}
 export interface PaperChartSignalReference extends PaperChartSnapshotReference {snapshotIds:string[];accountId?:string;runnerId?:string;orderId?:string;strategyVersion?:string}
 export interface PaperChartReferences {signal:(id:string)=>PaperChartSignalReference|null;snapshot:(id:string)=>PaperChartSnapshotReference|null}
+export function resolvePaperChartInstrument(
+  ledger:UnifiedPaperLedger,
+  market:string,
+  query:string,
+  resolveRegistered?:(market:string,query:string)=>{id:string}|null,
+):string|null {
+  const type=({stocks:'stock',options:'option',crypto:'crypto',prediction:'prediction'} as Record<string,string>)[market];
+  if(!type||!query)return null;
+  try {
+    const registered=resolveRegistered?.(market,query);
+    if(registered&&registered.id.startsWith(type+':'))return registered.id;
+  } catch { return null; }
+  // A canonical InstrumentRef carries its own market and venue. Accept this
+  // explicit identity when a paper fill already proves the same identity, or
+  // for normalized stock/crypto identities that may not have a lake partition.
+  const match=query.match(/^(stock|option|crypto|prediction):([a-z0-9._-]+):([A-Za-z0-9._:/-]+)$/);
+  if(!match||match[1]!==type)return null;
+  const [,idType,venue,symbol]=match;
+  const canonical=`${idType}:${venue.toLowerCase()}:${idType==='prediction'?symbol:symbol.toUpperCase()}`;
+  if(query!==canonical)return null;
+  if(idType==='stock'&&(venue.toLowerCase()!=='us'||!/^[A-Z][A-Z0-9.]{0,9}$/.test(symbol)))return null;
+  if(idType==='crypto'&&!/^[A-Z0-9]{2,20}(?:[_-]?[A-Z0-9]{2,20})?$/.test(symbol))return null;
+  const ledgerHasIdentity=[...ledger.orders,...Object.values(ledger.runnerAccounts||{}).flatMap(account=>account.orders)]
+    .some(order=>order.instrumentType===type&&order.instrumentId===canonical);
+  if(idType==='option'||idType==='prediction')return ledgerHasIdentity?canonical:null;
+  return canonical;
+}
 export function paperChartLineage(ledger:UnifiedPaperLedger,market:string,instrument:string,accountId?:string,references?:PaperChartReferences) {
   const type=({stocks:'stock',options:'option',crypto:'crypto',prediction:'prediction'} as Record<string,string>)[market];
   const accounts=[{id:'unified-paper-ledger',runnerId:undefined as string|undefined,orders:ledger.orders},...Object.values(ledger.runnerAccounts||{}).map(account=>({id:account.accountId,runnerId:account.runnerId,orders:account.orders}))];

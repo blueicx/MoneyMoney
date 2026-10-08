@@ -180,7 +180,7 @@ import { renderTelegramKline } from '../features/telegram-kline-image';
 import { DATA_ROOT } from '../utils/paths';
 import { paperTradingExecutor } from '../features/trading-executor';
 import { unifiedPaperLedgerStore, calculateUnifiedPerformance, replayUnifiedPaperOrders, type UnifiedPaperOrder } from '../features/unified-paper-trading';
-import { paperChartLineage } from '../features/paper-chart-lineage';
+import { paperChartLineage, resolvePaperChartInstrument } from '../features/paper-chart-lineage';
 import { RunnerExecutionEvidenceStore, runnerSnapshotHash, runnerExecutionSnapshotId } from '../features/runner-execution-evidence';
 import { predictionOutcomeQuote } from '../features/runner-prediction-quotes';
 const runnerExecutionEvidence = new RunnerExecutionEvidenceStore(stateStore);
@@ -8531,13 +8531,14 @@ app.get('/api/paper/chart-markers',(req,res)=>{
   if(!adminOnly(req,res))return;
   const market=String(req.query.market||''),requested=String(req.query.instrument||'');
   if(!['stocks','options','crypto','prediction'].includes(market))return res.status(400).json({success:false,dataStatus:'failed',reason:'图表市场无效'});
-  const ref=dataLakeCatalog.resolveInstrument(market as MarketId,requested);
-  if(!ref)return res.status(422).json({success:false,market,instrument:requested,dataStatus:'unsupported',reason:'无法核验当前市场标的身份'});
-  const data=paperChartLineage(unifiedPaperLedgerStore.get(),market,ref.id,req.query.accountId?String(req.query.accountId):undefined,{
+  const ledger=unifiedPaperLedgerStore.get();
+  const instrument=resolvePaperChartInstrument(ledger,market,requested,(scope,query)=>dataLakeCatalog.resolveInstrument(scope as MarketId,query));
+  if(!instrument)return res.status(422).json({success:false,market,instrument:requested,dataStatus:'unsupported',reason:'无法核验当前市场标的身份'});
+  const data=paperChartLineage(ledger,market,instrument,req.query.accountId?String(req.query.accountId):undefined,{
     signal:id=>runnerExecutionEvidence.signal(id),
     snapshot:id=>runnerExecutionEvidence.snapshot(id),
   });
-  res.json({success:true,market,instrument:ref.id,dataStatus:data.markers.length?'historical':'empty',source:'统一持久模拟账本',updatedAt:new Date().toISOString(),reason:data.reason,evidenceRefs:data.markers.map(row=>row.snapshotId),data});
+  res.json({success:true,market,instrument,dataStatus:data.markers.length?'historical':'empty',source:'统一持久模拟账本',updatedAt:new Date().toISOString(),reason:data.reason,evidenceRefs:data.markers.map(row=>row.snapshotId),data});
 });
 
 app.get('/api/ai-runners', (req, res) => {
