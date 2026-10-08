@@ -26,3 +26,13 @@
 `telegram-release-smoke.cjs` 默认仅检查真实 K 线与配置；明确传入 `--send` 才向配置中的私聊管理员发送真实数据图片和说明。它不启动轮询、不创建事件、不创建订单。
 
 上线须核对测试、构建、Web/认证/四市场 Chromium 冒烟、安全扫描、构建版本、产物 Hash、正式域名及备份回滚路径。Telegram API 接受图片和消息不等于用户已经点击所有按钮，也不等于所有宏观事件结果源覆盖完成。
+
+## 2026-10-09 结果时间核验补充
+
+- funding/research/prediction 等类型化结果只有在来源提供可解析、且不早于事件时间、不晚于检查时刻的发布时间后才会标成“已发布”；缺失或无效时间继续待核验，不展示实际值。预测结算会从官方结算时间、裁定时间中选取符合事件时间边界的证据时间。
+- 持久化的损坏事件日期现在生成明确“无法核验”终态，不调用来源、不被历史清理静默丢弃。
+- 验证：`npm test` 1017/1017；build、`smoke:web`、`smoke:auth`、`smoke:browser`、`smoke:contracts`、`smoke:automatic-comparison`、`smoke:live-kline`、security scan、`git diff --check` 均通过。生产私有图表 canary 报告 `businessWrites=0`、`modelCalls=0`、自动对照关闭；独立 AI 跑单配置与状态未变。
+- 代码提交：`d6863c611c24a227ad0604063d227f2f4ded239d`；发布标记：`telegram-result-d6863c6-20261009-0137`。
+- dist 包 SHA-256：`c06dcbde7f5542a54b0424f3906877a01220b012acb9b47623ccffedf78e3b4a`；server SHA-256：`85a1421abae03514aa8359a00c2b2d759ef077ff3585e0396cb8e11db315b268`；index SHA-256：`d29dfd84c352c0244a55b27bfbbca1b270a99cc233df980785bc2c855398baff`。
+- VPS 备份：`/opt/moneymoney/backups/dist-pre-telegram-result-d6863c6-20261009-0137`；回滚目录：`/opt/moneymoney/dist.rollback-telegram-result-d6863c6-20261009-0137`；`moneymoney.service` active，正式域名版本与构建提交一致。
+- 该 VPS 未安装 `/opt/moneymoney/scripts/deploy-vps-dist.sh`；发布时通过 SSH 上传版本唯一的 `/tmp/deploy-vps-dist-telegram-result-d6863c6-20261009-0137.sh`，核对脚本 Hash 后执行 CRLF 规范化的 stdin 脚本。以后部署前仍应检查安装状态，不覆盖远端临时文件。
