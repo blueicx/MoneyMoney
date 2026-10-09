@@ -8,9 +8,10 @@ const { chromium } = require('playwright');
 const assert = require('node:assert/strict');
 const port = 3198;
 const base = `http://127.0.0.1:${port}`;
+const appRoot = path.resolve(process.env.MONEYMONEY_BENCHMARK_ROOT || path.join(__dirname, '..'));
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'mm-load-benchmark-'));
-const child = spawn(process.execPath, ['dist/web/server.js'], {
-  cwd: path.join(__dirname, '..'), stdio: 'ignore',
+const child = spawn(process.execPath, [path.join(appRoot, 'dist', 'web', 'server.js')], {
+  cwd: appRoot, stdio: 'ignore',
   env: { ...process.env, MONEYMONEY_DATA_DIR: root, APP_HOST: '127.0.0.1', APP_PORT: String(port), TELEGRAM_POLLING_ENABLED: 'false', TELEGRAM_BOT_TOKEN: '', TELEGRAM_CHAT_ID: '', AI_PAPER_TRADING_ENABLED: 'false', MONEYMONEY_DISABLE_GURU_REFRESH: 'true', PRIVATE_KEY: '', API_KEY: '', MONEYMONEY_LOGIN_USER: 'benchmark-owner', MONEYMONEY_LOGIN_PASS: 'benchmark-only-92!', MONEYMONEY_JWT_SECRET: 'benchmark-only-secret-0123456789abcdef' },
 });
 const median = values => [...values].sort((a, b) => a - b)[Math.floor(values.length / 2)];
@@ -56,18 +57,29 @@ const median = values => [...values].sort((a, b) => a - b)[Math.floor(values.len
         for (const temperature of ['cold', 'warm']) {
           requests.length = 0;
           await page.goto(base + '/?market=stocks&workspace=stock-quotes&instrument=AAPL', { waitUntil: 'domcontentloaded' });
-          await page.waitForFunction(() => document.getElementById('stock-chart-card')?.getAttribute('aria-busy') !== 'true' && typeof window.loadStockKline === 'function' && document.getElementById('market-workspace-shell')?.dataset.marketScope === 'stocks').catch(async error => {
+          await page.waitForFunction(() => !!window.mm_authReady && window.mm_isLoggedIn === true
+            && document.getElementById('market-workspace-shell')?.dataset.marketScope === 'stocks'
+            && document.getElementById('market-workspace-shell')?.dataset.workspace === 'stock-quotes').catch(async error => {
+            console.error(JSON.stringify(await page.evaluate(() => ({ auth: !!window.mm_authReady, loggedIn: window.mm_isLoggedIn, scope: document.getElementById('market-workspace-shell')?.dataset.marketScope, workspace: document.getElementById('market-workspace-shell')?.dataset.workspace }))));
+            throw error;
+          });
+          const shellReadyMs = await page.evaluate(() => performance.now());
+          await page.waitForFunction(() => window.__benchmarkApiRequests.includes('/api/stock/kline')
+            && ['ready', 'empty', 'failed'].includes(document.getElementById('stock-chart-card')?.dataset.klineState)
+            && document.getElementById('stock-chart-card')?.getAttribute('aria-busy') !== 'true'
+            && !!window.MoneyTradingChart).catch(async error => {
             console.error(JSON.stringify(await page.evaluate(() => ({ url: location.pathname, auth: window.mm_authReady, loggedIn: window.mm_isLoggedIn, shell: document.getElementById('market-workspace-shell')?.dataset.marketScope, state: document.getElementById('stock-chart-card')?.dataset.klineState }))));
             throw error;
           });
-          const result = await page.evaluate(() => ({ usableMs: performance.now(), bytes: performance.getEntriesByType('resource').reduce((sum, row) => sum + row.transferSize, 0), jsBytes: performance.getEntriesByType('resource').filter(row => /\.js/.test(row.name)).reduce((sum, row) => sum + row.transferSize, 0),apiRequests:window.__benchmarkApiRequests }));
+          const result = await page.evaluate(shellReadyMs => ({ shellReadyMs, chartReadyMs: performance.now(), chartState: document.getElementById('stock-chart-card')?.dataset.klineState, bytes: performance.getEntriesByType('resource').reduce((sum, row) => sum + row.transferSize, 0), jsBytes: performance.getEntriesByType('resource').filter(row => /\.js/.test(row.name)).reduce((sum, row) => sum + row.transferSize, 0), apiRequests: window.__benchmarkApiRequests }), shellReadyMs);
+          assert.ok(result.apiRequests.includes('/api/stock/kline'), 'chart readiness must follow the scoped K-line request');
           samples.push({ viewport: viewport.width, run, temperature, ...result, apiRequests: [...new Set([...requests,...result.apiRequests])] });
         }
         await context.close();
       }
     }
     for(const viewport of [1440,390])for(let run=0;run<3;run++){const cold=samples.find(row=>row.viewport===viewport&&row.run===run&&row.temperature==='cold'),warm=samples.find(row=>row.viewport===viewport&&row.run===run&&row.temperature==='warm');assert.ok(warm.jsBytes<cold.jsBytes*.2,'warm hashed scripts must hit browser cache');}
-    console.log(JSON.stringify({ fixture: 'controlled failures + deterministic candles', cpuRate: 4, latencyMs: 80, downloadKbps: 750, samples, medians: [1440, 390].flatMap(viewport => ['cold', 'warm'].map(temperature => ({ viewport, temperature, usableMs: median(samples.filter(row => row.viewport === viewport && row.temperature === temperature).map(row => row.usableMs)) }))) }, null, 2));
+    console.log(JSON.stringify({ fixture: 'controlled failures + deterministic candles', cpuRate: 4, latencyMs: 80, downloadKbps: 750, samples, medians: [1440, 390].flatMap(viewport => ['cold', 'warm'].map(temperature => { const group = samples.filter(row => row.viewport === viewport && row.temperature === temperature); return { viewport, temperature, shellReadyMs: median(group.map(row => row.shellReadyMs)), chartReadyMs: median(group.map(row => row.chartReadyMs)), jsBytes: median(group.map(row => row.jsBytes)) }; })) }, null, 2));
   } finally {
     if (browser) await browser.close();
     child.kill('SIGINT'); setTimeout(() => child.kill('SIGKILL'), 1500).unref();

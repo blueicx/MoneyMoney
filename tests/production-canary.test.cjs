@@ -1,7 +1,13 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const test = require('node:test');
-const { validatePublicBaseUrl, containsInstrumentIdentity, explicitLibraryEmptyReason } = require('../scripts/production-readonly-canary.cjs');
+const { validatePublicBaseUrl, containsInstrumentIdentity, explicitLibraryEmptyReason, parseJsonHttpResponse } = require('../scripts/production-readonly-canary.cjs');
+
+test('production canary reports HTTP gateway errors instead of masking HTML as a JSON parse failure',()=>{
+  assert.throws(()=>parseJsonHttpResponse({status:502,contentType:'text/html',text:'<html><h1>Bad Gateway</h1></html>'}),/HTTP 502.*text\/html.*Bad Gateway/);
+  assert.deepEqual(parseJsonHttpResponse({status:200,contentType:'application/json',text:'{"success":true,"data":[]}'}),{success:true,data:[]});
+  assert.throws(()=>parseJsonHttpResponse({status:200,contentType:'text/html',text:'<html>oops</html>'}),/HTTP 200.*valid JSON/);
+});
 
 test('production canary matches long prediction event titles without accepting a different candidate',()=>{
   const name='Will Luiz Inácio Lula da Silva win the 2026 Brazilian presidential election?';

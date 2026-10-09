@@ -65,6 +65,17 @@ function verifyKlineResponse(body, asOf) {
   return {records:rows.length,dataStatus:body.dataStatus,source:body.source,updatedAt:body.updatedAt,reason:body.reason || null};
 }
 
+function parseJsonHttpResponse({ status, contentType, text }) {
+  const bodyText = String(text || '');
+  const mime = String(contentType || 'unknown content type').split(';')[0].trim();
+  if (status < 200 || status >= 300) {
+    const detail = bodyText.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 240);
+    throw new Error(`events API returned HTTP ${status} (${mime})${detail ? `: ${detail}` : ''}`);
+  }
+  try { return JSON.parse(bodyText); }
+  catch { throw new Error(`events API returned HTTP ${status} (${mime}) but the response was not valid JSON`); }
+}
+
 async function checkKlineAliases(page,target) {
   const asOf='2026-10-05T23:59:59.000Z',historical=[];
   for(const symbol of ['AAPL','usAAPL','AAPL.OQ']){
@@ -112,13 +123,19 @@ async function selectAndCheckNonPopularStock(page) {
   assert.ok(await rows.count(), 'non-popular stock SNDK should resolve to a selectable result or explicit empty-state row');
   await rows.first().click();
   await page.waitForFunction(() => /SNDK/i.test(document.querySelector('#stock-chart-title')?.textContent || ''), null, { timeout: 20_000 });
-  const events = await page.evaluate(async () => {
-    const response = await fetch('/api/events/entities?market=stocks&instrumentId=stock:us:SNDK');
-    return { status: response.status, body: await response.json() };
+  const eventsResponse = await page.evaluate(async () => {
+    const query = new URLSearchParams({ market: 'stocks', instrumentId: 'stock:us:SNDK' });
+    let response;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      response = await fetch(`/api/events/entities?${query}`);
+      if (![502, 503, 504].includes(response.status) || attempt === 2) break;
+      await new Promise(resolve => setTimeout(resolve, 350 * (attempt + 1)));
+    }
+    return { status: response.status, contentType: response.headers.get('content-type'), text: await response.text() };
   });
-  assert.equal(events.status, 200);
-  assert.ok(Array.isArray(events.body.data));
-  assert.ok(events.body.data.length || events.body.reason, 'event panel must show evidence or a real empty/unavailable reason');
+  const events = parseJsonHttpResponse(eventsResponse);
+  assert.ok(Array.isArray(events.data));
+  assert.ok(events.data.length || events.reason, 'event panel must show evidence or a real empty/unavailable reason');
 }
 
 async function checkSettlementEvidence(page) {
@@ -250,4 +267,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { validatePublicBaseUrl, containsInstrumentIdentity, explicitLibraryEmptyReason, verifyKlineResponse, runProductionCanary };
+module.exports = { validatePublicBaseUrl, containsInstrumentIdentity, explicitLibraryEmptyReason, verifyKlineResponse, parseJsonHttpResponse, runProductionCanary };

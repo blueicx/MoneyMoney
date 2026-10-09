@@ -125,3 +125,5 @@ test('workspace visibility overrides inline display styles', () => {
   assert.match(html, /\.workspace-hidden[^}]*display:\s*none\s*!important/);
   assert.match(html, /classList\.toggle\(['"]workspace-hidden['"],\s*!visible\)/);
 });
+
+test.after(() => dom.window.close());

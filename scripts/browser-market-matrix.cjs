@@ -177,7 +177,43 @@ async function main() {
     browser = await chromium.launch({ headless: true, channel: process.env.MONEYMONEY_SMOKE_BROWSER || 'chrome' });
     context = await browser.newContext({ viewport: { width: 1440, height: 900 }, serviceWorkers: 'block' });
     const page = await context.newPage();
+    await page.addInitScript(() => {
+      window.__workspaceContextTrace = [];
+      window.addEventListener('mm-workspace-context', event => window.__workspaceContextTrace.push(event.detail || {}));
+      Object.defineProperty(window, 'MoneyWorkspaceModules', {
+        configurable: true,
+        set(api) {
+          const ensure = api.ensure.bind(api);
+          api.ensure = group => {
+            if (group === 'charts') window.__chartEnsureStack = new Error().stack;
+            return ensure(group);
+          };
+          const invoke = api.invoke.bind(api);
+          api.invoke = (group, name, args) => {
+            if (group === 'charts') window.__chartEnsureStack = new Error().stack + `\\n${name}`;
+            return invoke(group, name, args);
+          };
+          Object.defineProperty(window, 'MoneyWorkspaceModules', { configurable: true, writable: true, value: api });
+        },
+      });
+    });
     const pageErrors = [];
+    const lazyAssetRequests = [];
+    let stockTimelineRequests = 0;
+    let captureCryptoWorkspaceRequests = false;
+    const cryptoWorkspaceRequests = [];
+    page.on('request', request => {
+      const url = request.url();
+      if (/\/assets\/(?:chart-analysis|live-kline|trading-chart|workspace-charts|interactive-history|workflow-polish|professional-research|automatic-comparison|action-research-workspace|contracts-workspace|workspace-research|workspace-contracts|workspace-comparison|workspace-(?:stocks|options|crypto|prediction|portfolio|trading|events|ops))/.test(url)) lazyAssetRequests.push(url);
+      if (captureCryptoWorkspaceRequests && url.startsWith(base)) {
+        const pathname = new URL(url).pathname;
+        if (/^\/api\/(?:binance|defi\/tvl|crypto\/global|sentiment|stock\/(?:indices|market-breadth)|prediction-radar|events\/timeline)/.test(pathname)) cryptoWorkspaceRequests.push(pathname);
+      }
+    });
+    await page.route('**/api/events/timeline?*', route => {
+      stockTimelineRequests += 1;
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, market: 'stocks', dataStatus: 'empty', source: 'Browser acceptance fixture', updatedAt: '2026-09-29T01:00:00.000Z', reason: '验收夹具未提供事件记录。', sourceStatus: {}, data: [] }) });
+    });
     let settlementStatus = null;
     page.on('pageerror', error => pageErrors.push(error.message));
     page.on('response', response => {
@@ -366,6 +402,22 @@ async function main() {
     await Promise.all([page.waitForURL(url => url.pathname === '/', { timeout: 15_000 }), page.click('#submitBtn')]);
     await page.waitForFunction(() => window.mm_authReady && window.mm_isLoggedIn === true, null, { timeout: 10_000 });
     await page.waitForSelector('#market-workspace-shell');
+    await page.waitForTimeout(500);
+    assert.deepEqual(lazyAssetRequests, [], `the overview cold start must not download chart, research, comparison or contract bundles; contexts=${JSON.stringify(await page.evaluate(() => window.__workspaceContextTrace))}; stack=${await page.evaluate(() => window.__chartEnsureStack || '')}`);
+    await page.evaluate(() => showTab('analysis'));
+    await page.waitForFunction(() => window.loadTradeAssistant && !window.loadTradeAssistant.toString().includes('MoneyWorkspaceModules.invoke'), null, { timeout: 10_000 });
+    assert.ok(lazyAssetRequests.some(url => /workspace-trading/.test(url)), 'opening the trade-assistant workspace should load its large feature bundle on demand');
+    await page.evaluate(() => setMarketScope('stocks'));
+    await page.waitForFunction(() => window.MoneyTradingChart && window.MoneyChartAnalysis, null, { timeout: 10_000 });
+    assert.ok(lazyAssetRequests.some(url => /workspace-charts/.test(url)), 'opening the stock workspace should load its chart bundle on demand');
+    await page.evaluate(() => openWorkspace('decision-intelligence'));
+    await page.waitForFunction(() => window.MoneyMoneyHistoryChart && window.MoneyMoneyWorkflow, null, { timeout: 10_000 });
+    assert.ok(lazyAssetRequests.some(url => /workspace-research/.test(url)), 'opening research should load its bundle on demand');
+    await page.evaluate(() => { currentInstrumentId = null; openWorkspace('events'); });
+    await page.waitForFunction(() => document.getElementById('market-timeline-list')?.textContent.includes('当前市场暂无事件与新闻'), null, { timeout: 10_000 });
+    assert.equal(stockTimelineRequests, 1, 'opening the events workspace without an instrument should request its market timeline once');
+    assert.ok(lazyAssetRequests.some(url => /workspace-events/.test(url)), 'the event timeline module should load only when its workspace is opened');
+    await page.evaluate(() => setMarketScope('overview'));
     await auditThemeControls(page);
     await page.evaluate(() => { setMarketScope('prediction'); setMarketScope('stocks'); });
     await page.waitForTimeout(500);
@@ -415,6 +467,12 @@ async function main() {
     assert.match(await page.locator('#option-chain').innerText(), /双边报价可见/);
     assert.match(await page.locator('#option-chain').innerText(), /价差过宽/);
     assert.match(await page.locator('#options-updated').innerText(), /不等于合约逐笔报价时间/);
+    captureCryptoWorkspaceRequests = true;
+    await page.evaluate(() => setMarketScope('crypto'));
+    await page.waitForFunction(() => document.body.dataset.marketScope === 'crypto');
+    await page.waitForTimeout(900);
+    captureCryptoWorkspaceRequests = false;
+    assert.deepEqual(cryptoWorkspaceRequests.sort(), ['/api/binance/depth', '/api/binance/klines', '/api/binance/trades'], 'crypto chart entry must fetch only its visible candles and order-book panels, not hidden overview/research workspaces');
     await page.evaluate(() => setMarketScope('stocks'));
     await page.waitForSelector('#stock-library-quick .stock-library-item');
     await page.locator('#stock-library-quick .stock-library-item').first().click();

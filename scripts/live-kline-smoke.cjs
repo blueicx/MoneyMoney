@@ -25,10 +25,15 @@ async function main() {
     await page.route('**/api/binance/klines?**', route => {const query=new URL(route.request().url()).searchParams,paged=query.has('before');if(paged)historyRequests++;return route.fulfill({ json: { success: true,market:'crypto',instrument:'crypto:binance:'+query.get('symbol'),timeframe:query.get('interval'), data:paged?olderRows:rows, source: 'Isolated chart fixture', updatedAt: new Date().toISOString(), dataStatus: 'delayed' } });});
     await page.goto(base + '/login'); await page.fill('#username', 'live-fixture-owner'); await page.fill('#password', 'isolated-live-fixture-password');
     await Promise.all([page.waitForURL(url => url.pathname === '/'), page.click('#submitBtn')]);
-    await page.waitForFunction(() => window.mm_isLoggedIn && window.MoneyLiveKline);
+    await page.waitForFunction(() => window.mm_isLoggedIn);
+    assert.equal(await page.evaluate(() => !!window.MoneyLiveKline), false, 'the live chart transport should remain unloaded before entering a chart workspace');
     await page.evaluate(async () => { setMarketScope('stocks'); openWorkspace('stock-quotes'); await loadStockKline('usAAPL', 'Apple', ''); });
     await page.locator('#stock-chart-card').waitFor({ state: 'visible' });
-    await page.waitForFunction(() => stockChartKlines.length > 10 && document.getElementById('stock-chart-card').getAttribute('aria-busy') !== 'true');
+    await page.waitForFunction(() => window.MoneyLiveKline && window.MoneyTradingChart);
+    await page.waitForFunction(() => stockChartKlines.length > 10 && document.getElementById('stock-chart-card').getAttribute('aria-busy') !== 'true').catch(async error => {
+      console.error(JSON.stringify(await page.evaluate(() => ({ scope: document.body.dataset.marketScope, workspace: document.getElementById('market-workspace-shell')?.dataset.workspace, selected: window._stockSelectedSymbol, current: currentStockSymbol, chartState: document.getElementById('stock-chart-card')?.dataset.klineState, busy: document.getElementById('stock-chart-card')?.getAttribute('aria-busy'), status: document.querySelector('#stock-chart-card .mm-trading-status')?.textContent, reason: currentStockKlineReason, rows: stockChartKlines?.length, chartRuntime: !!window.MoneyTradingChart, chartAnalysis: !!window.MoneyChartAnalysis, loadedGroups: [...document.querySelectorAll('script[data-workspace-group]')].map(script => script.dataset.workspaceGroup) }))));
+      throw error;
+    });
     assert.equal(await page.evaluate(()=>currentStockKlinePeriod),'5m');
     assert.match(await page.locator('#stock-chart-card .mm-trading-readout').innerText(),/开 .*高 .*低 .*收 .*MA5/);
     let paperRequests=0;

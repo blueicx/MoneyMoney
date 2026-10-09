@@ -155,6 +155,31 @@ test('market overview requests have a bounded timeout and retain partial data', 
   assert.match(html, /if \(hasPartialFailure && cached\?\.html\) \{[\s\S]*显示上一份完整缓存/);
 });
 
+test('market switching does not fetch hidden market-overview cards', () => {
+  const start = html.indexOf('function setMarketScope(scope, options = {})');
+  const end = html.indexOf('function marketScopeRequestToken()', start);
+  const body = html.slice(start, end);
+  assert.match(body, /if \(scope === 'overview'\) loadMarketOverview\(\);/);
+  assert.doesNotMatch(body, /loadNewsTicker\(\);\s*loadMarketOverview\(\);\s*if \(scope === 'overview'\)/);
+});
+
+test('crypto quote workspace does not fan out to hidden depth, trades and research panels', () => {
+  const start = html.indexOf('async function loadBinanceDashboard()');
+  const end = html.indexOf('async function loadBinancePortfolio()', start);
+  const body = html.slice(start, end);
+  assert.match(body, /switch\s*\(activeWorkspaceId\)/);
+  assert.match(body, /case 'crypto-quotes'[\s\S]*loadBinanceKlines\(\)/);
+  const quoteStart = body.indexOf("case 'crypto-quotes':");
+  const quoteEnd = body.indexOf("case 'events':", quoteStart);
+  const quoteLoader = body.slice(quoteStart, quoteEnd);
+  for (const hiddenLoader of ['loadMovers()', 'loadSentiment()', 'loadHeatmap()', 'loadPerpetualCrowding()', 'loadFundingCarry()', 'loadBitcoinOnchain()', 'loadOrderFlowLiquidity()', 'loadAlertsForChart()', 'loadMTF()', 'loadPortfolioSummary()']) {
+    assert.doesNotMatch(quoteLoader, new RegExp(hiddenLoader.replace(/[()]/g, '\\$&')));
+  }
+  const intervalStart = html.indexOf('function bnSetInterval(iv)');
+  const intervalEnd = html.indexOf('async function loadBinancePrices()', intervalStart);
+  assert.doesNotMatch(html.slice(intervalStart, intervalEnd), /loadBinanceDepth\(\)|loadBinanceTrades\(\)/, 'changing the chart timeframe must not refetch unrelated live panels');
+});
+
 test('stock overview consumes the breadth contract without dropping index coverage', () => {
   assert.match(html, /indicesRes\.data\.slice\(0, 6\)/);
   assert.match(html, /bd\.leadingSectors/);

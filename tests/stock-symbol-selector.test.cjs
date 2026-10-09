@@ -147,7 +147,8 @@ test('stock library keeps the Magnificent Seven without a center quote request',
 
 test('instrument selection refreshes the active workspace with the selected instrument', () => {
   assert.match(html, /function loadMarketTimeline\(\)[\s\S]*currentInstrumentFilterId\(\)/);
-  assert.match(html, /function loadActiveWorkspaceInstrument\([\s\S]*activeWorkspaceId === 'events'[\s\S]*loadMarketTimeline/);
+  assert.match(html, /function loadEventTimelineWorkspace\(\)[\s\S]*MoneyWorkspaceModules\.invoke\('events', 'loadMarketTimeline'/);
+  assert.match(html, /function loadActiveWorkspaceInstrument\([\s\S]*activeWorkspaceId === 'events'[\s\S]*loadEventTimelineWorkspace/);
   assert.match(html, /function selectStockFromInstrumentLibrary\([\s\S]*loadActiveWorkspaceInstrument/);
   assert.match(html, /window\.openWorkspace = function\(id\)[\s\S]*loadActiveWorkspaceInstrument/);
   assert.match(html, /function selectCryptoLibraryAsset\([\s\S]*activeWorkspaceId = 'crypto-quotes'/);
