@@ -1,9 +1,54 @@
 import type { UnifiedPaperLedger, UnifiedPaperOrder } from './unified-paper-trading';
+import { verifyEvidenceSnapshotHash, type EvidenceSnapshot, type SignalOutcome } from './decision-intelligence';
+import type { PointInTimeSnapshot } from '../storage/data-lake';
 
 /** Read-only projection. Time places a fill on a candle; it never links separate records. */
-export interface PaperChartSnapshotReference {id:string;market:string;instrument:string;at:string}
-export interface PaperChartSignalReference extends PaperChartSnapshotReference {snapshotIds:string[];accountId?:string;runnerId?:string;orderId?:string;strategyVersion?:string;decision?:{id?:string;runnerId?:string;orderId?:string;market?:string;instrument?:string;action?:string;side?:string}}
+export interface PaperChartSnapshotReference {id:string;market:string;instrument:string;at:string;retrievedAt?:string}
+export interface PaperChartSignalReference extends PaperChartSnapshotReference {snapshotIds:string[];accountId?:string;runnerId?:string;orderId?:string;strategyVersion?:string;action?:string;outcome?:string;decision?:{id?:string;runnerId?:string;orderId?:string;market?:string;instrument?:string;action?:string;side?:string}}
 export interface PaperChartReferences {signal:(id:string)=>PaperChartSignalReference|null;snapshot:(id:string)=>PaperChartSnapshotReference|null}
+export interface PaperChartReferenceSources {
+  runnerSignal:(id:string)=>PaperChartSignalReference|null;
+  runnerSnapshot:(id:string)=>PaperChartSnapshotReference|null;
+  researchSignal:(id:string)=>SignalOutcome|null;
+  evidenceSnapshot:(id:string)=>EvidenceSnapshot|null;
+  pointInTimeSnapshot:(id:string)=>PointInTimeSnapshot|null;
+  resolveInstrument?:(market:string,instrument:string)=>string|null;
+}
+
+const unusableEvidenceStatuses=new Set(['empty','failed','unavailable','unsupported']);
+
+export function createPaperChartReferences(sources:PaperChartReferenceSources):PaperChartReferences{
+  const snapshot=(id:string):PaperChartSnapshotReference|null=>{
+    const runner=sources.runnerSnapshot(id);
+    if(runner){
+      const payloadStatus=(runner as PaperChartSnapshotReference & {payload?:{status?:unknown}}).payload?.status;
+      return typeof payloadStatus==='string'&&unusableEvidenceStatuses.has(payloadStatus)?null:runner;
+    }
+    const evidence=sources.evidenceSnapshot(id);
+    if(evidence)return evidence.id===id&&evidence.instrument&&verifyEvidenceSnapshotHash(evidence)&&!unusableEvidenceStatuses.has(evidence.dataStatus)
+      ?{id:evidence.id,market:evidence.market,instrument:evidence.instrument,at:evidence.observedAt,retrievedAt:evidence.fetchedAt}:null;
+    const row=sources.pointInTimeSnapshot(id);
+    if(!row||row.id!==id||row.dataset!=='bars'||!row.instrument||!/^([a-f0-9]{64})$/i.test(row.contentHash)||!row.partitionId)return null;
+    const instrument=sources.resolveInstrument?.(row.market,row.instrument)||null;
+    if(!instrument)return null;
+    return {id:row.id,market:row.market,instrument,at:row.asOf,retrievedAt:row.createdAt};
+  };
+  return {
+    signal(id){
+      const runner=sources.runnerSignal(id);if(runner)return runner;
+      const row=sources.researchSignal(id);
+      if(!row||row.id!==id||!row.market||!row.instrument||!Number.isFinite(row.triggeredAt))return null;
+      let at:string;try{at=new Date(row.triggeredAt).toISOString();}catch{return null;}
+      const snapshotIds=Array.isArray(row.evidenceRefs)?[...new Set(row.evidenceRefs.filter((value):value is string=>typeof value==='string'&&!!value))].filter(snapshotId=>{
+        const reference=snapshot(snapshotId);
+        return !!reference&&reference.market===row.market&&reference.instrument===row.instrument;
+      }):[];
+      if(!snapshotIds.length)return null;
+      return {id:row.id,market:row.market,instrument:row.instrument,at,snapshotIds,...(row.strategyVersion?{strategyVersion:row.strategyVersion}:{}),...(row.action?{action:row.action}:{}),...(row.outcome?{outcome:row.outcome}:{})};
+    },
+    snapshot,
+  };
+}
 export function resolvePaperChartInstrument(
   ledger:UnifiedPaperLedger,
   market:string,
@@ -52,9 +97,11 @@ export function paperChartLineage(ledger:UnifiedPaperLedger,market:string,instru
       else if(!Array.isArray(signal.snapshotIds)||!signal.snapshotIds.includes(snapshot.id))reason='信号未明确关联该快照';
       else if(signal.accountId&&signal.accountId!==actualAccount||signal.runnerId&&signal.runnerId!==account.runnerId||signal.orderId&&signal.orderId!==order.id)reason='信号关联的账户、跑单或订单不一致';
       else if(order.strategyVersion&&signal.strategyVersion!==order.strategyVersion)reason='策略版本不一致';
-      else if(!signal.decision||signal.decision.id!==signal.id||signal.decision.runnerId!==account.runnerId||signal.decision.orderId!==order.id||signal.decision.market!==market||String(signal.decision.instrument||'').toUpperCase()!==instrument.split(':').at(-1)?.toUpperCase())reason='成交缺少可核验的决策方向或关联身份';
-      else if(!['BUY','SELL'].includes(String(signal.decision.action))||!['BUY','SELL','YES','NO'].includes(String(order.side))||(market==='prediction'?(signal.decision.action==='BUY'?signal.decision.side!==order.side||!['YES','NO'].includes(String(order.side)):signal.decision.action!=='SELL'||order.side!=='SELL'||signal.decision.side!==order.outcome||!['YES','NO'].includes(String(order.outcome))):signal.decision.action!==order.side))reason='成交方向或预测市场 YES/NO 结果与决策不一致';
-      else if(!Number.isFinite(Date.parse(signal.at))||!Number.isFinite(Date.parse(snapshot.at))||Date.parse(signal.at)>time||Date.parse(snapshot.at)>time)reason='证据时间无效或晚于成交';
+      else if(signal.decision
+        ? signal.decision.id!==signal.id||signal.decision.runnerId!==account.runnerId||signal.decision.orderId!==order.id||signal.decision.market!==market||String(signal.decision.instrument||'').toUpperCase()!==instrument.split(':').at(-1)?.toUpperCase()
+        : Boolean(account.runnerId||signal.runnerId))reason='成交缺少可核验的决策方向或关联身份';
+      else if(!paperActionMatches(signal,order,market))reason='成交方向或预测市场 YES/NO 结果与信号不一致';
+      else if(!Number.isFinite(Date.parse(signal.at))||!Number.isFinite(Date.parse(snapshot.at))||signal.retrievedAt!=null&&!Number.isFinite(Date.parse(signal.retrievedAt))||snapshot.retrievedAt!=null&&!Number.isFinite(Date.parse(snapshot.retrievedAt))||Date.parse(signal.at)>time||Date.parse(snapshot.at)>time||signal.retrievedAt!=null&&Date.parse(signal.retrievedAt)>time||snapshot.retrievedAt!=null&&Date.parse(snapshot.retrievedAt)>time)reason='证据时间无效或晚于成交';
     }
     if(reason){unlinked.push({orderId:order.id||null,accountId:actualAccount,reason:'未关联：'+reason});continue;}
     markers.push({orderId:order.id,accountId:actualAccount,runnerId:order.runnerId||null,signalId:order.signalId,snapshotId:order.dataSnapshotId,experimentId:order.experimentId||null,market,instrument,time,price:order.price,quantity:order.quantity,side:order.side,...(order.instrumentType==='prediction'?{outcome:order.side==='SELL'?order.outcome:order.side}:{}),feeUsd:cost(order,'feeUsd'),slippageUsd:cost(order,'slippageUsd'),spreadUsd:cost(order,'spreadUsd'),pnlUsd:Number.isFinite(order.pnlUsd)?order.pnlUsd:null});
@@ -63,3 +110,13 @@ export function paperChartLineage(ledger:UnifiedPaperLedger,market:string,instru
   return {markers,unlinked,reason:markers.length?null:unlinked.length?'仅有未关联记录；不按时间猜测策略成交':'当前标的暂无已关联模拟成交'};
 }
 function cost(order:UnifiedPaperOrder,key:'feeUsd'|'slippageUsd'|'spreadUsd'){return Number.isFinite(order[key])?order[key]:null;}
+
+function paperActionMatches(signal:PaperChartSignalReference,order:UnifiedPaperOrder,market:string):boolean{
+  const action=String(signal.decision?.action||signal.action||'');
+  if(!['BUY','SELL'].includes(action)||!['BUY','SELL','YES','NO'].includes(String(order.side)))return false;
+  const outcome=String(signal.decision?.side||signal.outcome||'');
+  if(market==='prediction')return action==='BUY'
+    ? ['YES','NO'].includes(String(order.side))&&outcome===order.side
+    : order.side==='SELL'&&['YES','NO'].includes(String(order.outcome))&&outcome===order.outcome;
+  return action===order.side;
+}

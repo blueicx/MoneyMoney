@@ -56,3 +56,27 @@ test('invalid fill timestamps and nonfinite prices never become chart markers',(
  const order={id:'o',instrumentType:'stock',instrumentId:'stock:us:AAPL',side:'BUY',price:NaN,quantity:1,timestamp:'bad',signalId:'s',dataSnapshotId:'d'};
  const result=paperChartLineage({orders:[order]},'stocks',order.instrumentId);assert.equal(result.markers.length,0);assert.equal(result.unlinked.length,1);
 });
+
+test('explicit research signal and evidence IDs can link a main-ledger fill without runner-only decision fields',()=>{
+ const {paperChartLineage}=require('../src/features/paper-chart-lineage');
+ const order={id:'manual-fill',instrumentType:'stock',instrumentId:'stock:us:AAPL',side:'BUY',price:101,quantity:2,timestamp:'2026-10-08T00:02:00Z',signalId:'research-signal',dataSnapshotId:'evidence-snapshot',feeUsd:0.4};
+ const signal={id:'research-signal',market:'stocks',instrument:order.instrumentId,at:'2026-10-08T00:00:00Z',snapshotIds:['evidence-snapshot'],action:'BUY'};
+ const snapshot={id:'evidence-snapshot',market:'stocks',instrument:order.instrumentId,at:'2026-10-08T00:01:00Z',retrievedAt:'2026-10-08T00:01:10Z'};
+ const ledger={orders:[order],runnerAccounts:{}};
+ const result=paperChartLineage(ledger,'stocks',order.instrumentId,undefined,{signal:id=>id===signal.id?signal:null,snapshot:id=>id===snapshot.id?snapshot:null});
+ assert.equal(result.markers.length,1);assert.equal(result.markers[0].orderId,order.id);assert.equal(result.markers[0].signalId,signal.id);assert.equal(result.markers[0].snapshotId,snapshot.id);assert.equal(result.markers[0].accountId,'unified-paper-ledger');assert.equal(result.markers[0].feeUsd,0.4);
+});
+
+test('generic research references still reject mismatched action, instrument, or evidence retrieval after the fill',()=>{
+ const {paperChartLineage}=require('../src/features/paper-chart-lineage');
+ const order={id:'manual-fill',instrumentType:'stock',instrumentId:'stock:us:AAPL',side:'BUY',price:101,quantity:2,timestamp:'2026-10-08T00:02:00Z',signalId:'research-signal',dataSnapshotId:'evidence-snapshot'};
+ const signal={id:'research-signal',market:'stocks',instrument:order.instrumentId,at:'2026-10-08T00:00:00Z',snapshotIds:['evidence-snapshot'],action:'BUY'};
+ const snapshot={id:'evidence-snapshot',market:'stocks',instrument:order.instrumentId,at:'2026-10-08T00:01:00Z',retrievedAt:'2026-10-08T00:01:10Z'};
+ const ledger={orders:[order],runnerAccounts:{}};
+ for(const refs of [
+  {signal:id=>({...signal,action:'SELL'}),snapshot:()=>snapshot},
+  {signal:()=>({...signal,instrument:'stock:us:MU'}),snapshot:()=>snapshot},
+  {signal:()=>signal,snapshot:()=>({...snapshot,retrievedAt:'2026-10-08T00:03:00Z'})},
+  {signal:()=>({...signal,snapshotIds:['other-snapshot']}),snapshot:()=>snapshot},
+ ]){const result=paperChartLineage(ledger,'stocks',order.instrumentId,undefined,refs);assert.equal(result.markers.length,0);assert.equal(result.unlinked.length,1);}
+});

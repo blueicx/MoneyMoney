@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import { portfolioTailRisk } from './portfolio-tail-risk';
+import { DATA_STATUS_VALUES } from './data-status';
 import { assertMarketContext, type DataStatus, type MarketId } from './research-contracts';
 
 export interface EvidenceQualityDimensions {
@@ -66,6 +67,7 @@ export function createEvidenceSnapshot(input: Omit<Partial<EvidenceSnapshot>, 'q
   corroboratingSources?: number;
 }): EvidenceSnapshot {
   const context = assertMarketContext({ market: input.market, workspace: input.workspace, instrument: input.instrument });
+  if (!(DATA_STATUS_VALUES as readonly unknown[]).includes(input.dataStatus)) throw new Error('Evidence data status is invalid');
   if (!input.source?.id?.trim() || !input.source?.name?.trim()) throw new Error('Evidence source is required');
   if (input.source.url && !/^https?:\/\//i.test(input.source.url)) throw new Error('Evidence source URL must be http(s)');
   const observedAt = validIso(input.observedAt, 'observedAt');
@@ -94,6 +96,33 @@ export function createEvidenceSnapshot(input: Omit<Partial<EvidenceSnapshot>, 'q
     },
     ...(input.reason ? { reason: input.reason } : {}),
   };
+}
+
+export function verifyEvidenceSnapshotHash(snapshot: EvidenceSnapshot): boolean {
+  try {
+    if (!snapshot || typeof snapshot !== 'object' || !snapshot.id || !snapshot.hash || !snapshot.source || !snapshot.fields || typeof snapshot.fields !== 'object') return false;
+    if (!(DATA_STATUS_VALUES as readonly unknown[]).includes(snapshot.dataStatus)) return false;
+    const context = assertMarketContext({ market: snapshot.market, workspace: snapshot.workspace, instrument: snapshot.instrument });
+    const observedAt = validIso(snapshot.observedAt, 'observedAt');
+    const fetchedAt = validIso(snapshot.fetchedAt, 'fetchedAt');
+    const expectedFields = [...new Set((snapshot.expectedFields || []).map(String))].sort();
+    if (JSON.stringify(expectedFields) !== JSON.stringify(snapshot.expectedFields)) return false;
+    const payload = {
+      market: context.market,
+      instrument: context.instrument || '',
+      workspace: context.workspace,
+      dataStatus: snapshot.dataStatus,
+      source: snapshot.source,
+      observedAt,
+      fetchedAt,
+      fields: snapshot.fields,
+      expectedFields,
+      reason: snapshot.reason || '',
+    };
+    return contentHash(payload) === snapshot.hash;
+  } catch {
+    return false;
+  }
 }
 
 export function compareEvidenceSnapshots(left: EvidenceSnapshot, right: EvidenceSnapshot): Array<{ field: string; before: unknown; after: unknown }> {
@@ -487,6 +516,8 @@ export interface SignalOutcome {
   source: string;
   triggeredAt: number;
   entryPrice: number;
+  action?: 'BUY' | 'SELL';
+  outcome?: 'YES' | 'NO';
   exitPrice?: number;
   mfePct?: number;
   maePct?: number;

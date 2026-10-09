@@ -157,6 +157,7 @@ import {
   reviewDecision,
   runScenario,
   summarizeNegativeKnowledge,
+  verifyEvidenceSnapshotHash,
   type PortfolioRow,
   type ScenarioDefinition,
 } from '../features/decision-intelligence';
@@ -181,7 +182,7 @@ import { renderTelegramKline } from '../features/telegram-kline-image';
 import { DATA_ROOT } from '../utils/paths';
 import { paperTradingExecutor } from '../features/trading-executor';
 import { unifiedPaperLedgerStore, calculateUnifiedPerformance, replayUnifiedPaperOrders, type UnifiedPaperOrder } from '../features/unified-paper-trading';
-import { paperChartLineage, resolvePaperChartInstrument } from '../features/paper-chart-lineage';
+import { createPaperChartReferences, paperChartLineage, resolvePaperChartInstrument } from '../features/paper-chart-lineage';
 import { RunnerExecutionEvidenceStore, runnerSnapshotHash, runnerExecutionSnapshotId } from '../features/runner-execution-evidence';
 import { buildPredictFunExecutionQuote, predictionOutcomeQuote, predictionSettlementRulesGate } from '../features/runner-prediction-quotes';
 const runnerExecutionEvidence = new RunnerExecutionEvidenceStore(stateStore);
@@ -1895,6 +1896,8 @@ app.post('/api/signals/outcomes', express.json(), (req, res) => {
     const previous = decisionIntelligenceStore.getSignalOutcome(String(signal.id));
     if (previous && (previous.market !== market || previous.instrument !== signal.instrument)) throw new Error('Signal identity and market cannot change');
     if (signal.status && !['generated', 'confirmed', 'paper-filled', 'tracking', 'invalidated', 'closed', 'expired', 'reviewed'].includes(String(signal.status))) throw new Error('Signal status is invalid');
+    if (signal.action != null && !['BUY', 'SELL'].includes(String(signal.action))) throw new Error('Signal action must be BUY or SELL');
+    if (signal.outcome != null && (market !== 'prediction' || !['YES', 'NO'].includes(String(signal.outcome)))) throw new Error('Signal outcome must be YES or NO on prediction markets');
     if (previous && signal.status && signal.status !== previous.status) {
       if (!String(signal.statusReason || signal.invalidationReason || '').trim()) throw new Error('Signal status changes require a reason');
       if (previous.status && !canTransitionSignalStatus(previous.status, signal.status)) throw new Error(`Invalid signal status transition: ${previous.status} -> ${signal.status}`);
@@ -5286,7 +5289,7 @@ async function stockSignalsForChat(chatId: string, args: string[], automatic = f
       if(!Number.isFinite(entry) || entry<=0 || !row.updatedAt || decisionIntelligenceStore.getSignalOutcome(id))continue;
       const evidence=createEvidenceSnapshot({market:'stocks',workspace:'signals',instrument:row.candidate.instrumentId,dataStatus:row.dataStatus==='cached' ? 'cached':row.dataStatus==='live' ? 'live':'delayed',source:{id:'stock-signal-scan',name:row.source},observedAt:row.updatedAt,fetchedAt:snapshot.updatedAt,fields:{entry,action:row.action?.action,reasons:row.action?.reasons,metrics:row.action?.metrics,scanId:snapshot.id,pools:row.candidate.sources}});
       decisionIntelligenceStore.saveEvidence(evidence);
-      decisionIntelligenceStore.saveSignalOutcome({id,market:'stocks',instrument:row.candidate.instrumentId,strategyId:'stock-technical-scan',strategyVersion:'technical-v1',timeframe:'1d',source:row.source,triggeredAt,entryPrice:entry,sample:'live',status:'generated',statusReason:'扫描生成；前向观察是标的走势，不代表模拟成交或做空',evidenceRefs:[evidence.id]});
+      decisionIntelligenceStore.saveSignalOutcome({id,market:'stocks',instrument:row.candidate.instrumentId,strategyId:'stock-technical-scan',strategyVersion:'technical-v1',timeframe:'1d',source:row.source,triggeredAt,entryPrice:entry,...(['BUY','SELL'].includes(String(row.action?.action))?{action:row.action?.action as 'BUY'|'SELL'}:{}),sample:'live',status:'generated',statusReason:'扫描生成；前向观察是标的走势，不代表模拟成交或做空',evidenceRefs:[evidence.id]});
     }
   }).catch(error=>telegramCommandCenterStore.recordAudit(chatId,'stock_signal_lineage_error',String(error instanceof Error ? error.message:'信号血缘保存失败').slice(0,160)));
   return text;
@@ -8319,11 +8322,17 @@ function validatePaperOrderReferences(order: UnifiedPaperOrder): void {
         (order.backtestTradeIndex !== undefined && !experiment.backtest?.trades?.[order.backtestTradeIndex])) throw new Error('模拟订单实验与市场、标的或策略不匹配');
   }
   if (order.dataSnapshotId) {
-    const snapshot = dataLakeCatalog.getSnapshot(order.dataSnapshotId);
-    if (!snapshot || snapshot.market !== market || !samePaperInstrument(market, order.instrumentId, snapshot.instrument)) throw new Error('证据快照与市场或标的不匹配');
-    const snapshotTime = Date.parse(snapshot.asOf);
+    const storedSnapshot = dataLakeCatalog.getSnapshot(order.dataSnapshotId);
+    const evidence = storedSnapshot ? null : decisionIntelligenceStore.getEvidence(order.dataSnapshotId);
+    if (!storedSnapshot && (!evidence || !verifyEvidenceSnapshotHash(evidence))) throw new Error('证据快照不存在或内容 Hash 校验失败');
+    const snapshotMarket = storedSnapshot?.market ?? evidence?.market;
+    const snapshotInstrument = storedSnapshot?.instrument ?? evidence?.instrument;
+    const snapshotTime = Date.parse(storedSnapshot?.asOf ?? evidence?.observedAt ?? '');
     const orderTime = Date.parse(order.timestamp);
-    if (!Number.isFinite(snapshotTime) || snapshotTime > orderTime || orderTime - snapshotTime > 72 * 60 * 60 * 1000) throw new Error('证据快照过期或晚于模拟订单');
+    const retrievedAt = Date.parse(storedSnapshot?.createdAt ?? evidence?.fetchedAt ?? '');
+    if (snapshotMarket !== market || !snapshotInstrument || !samePaperInstrument(market, order.instrumentId, snapshotInstrument)) throw new Error('证据快照与市场或标的不匹配');
+    if (!Number.isFinite(snapshotTime) || !Number.isFinite(retrievedAt) || snapshotTime > orderTime || retrievedAt > orderTime || orderTime - snapshotTime > 72 * 60 * 60 * 1000) throw new Error('证据快照过期或晚于模拟订单');
+    if (evidence && ['empty', 'failed', 'unavailable', 'unsupported'].includes(String(evidence.dataStatus))) throw new Error('不可用或失败的来源快照不能关联成交');
   }
 }
 
@@ -8562,16 +8571,23 @@ app.post('/api/ai-runners/:id/routing', express.json(), (req,res) => {
 });
 app.get('/api/paper/chart-markers',(req,res)=>{
   if(!adminOnly(req,res))return;
-  const market=String(req.query.market||''),requested=String(req.query.instrument||'');
-  if(!['stocks','options','crypto','prediction'].includes(market))return res.status(400).json({success:false,dataStatus:'failed',reason:'图表市场无效'});
-  const ledger=unifiedPaperLedgerStore.get();
-  const instrument=resolvePaperChartInstrument(ledger,market,requested,(scope,query)=>dataLakeCatalog.resolveInstrument(scope as MarketId,query));
-  if(!instrument)return res.status(422).json({success:false,market,instrument:requested,dataStatus:'unsupported',reason:'无法核验当前市场标的身份'});
-  const data=paperChartLineage(ledger,market,instrument,req.query.accountId?String(req.query.accountId):undefined,{
-    signal:id=>runnerExecutionEvidence.signal(id),
-    snapshot:id=>runnerExecutionEvidence.snapshot(id),
-  });
-  res.json({success:true,market,instrument,dataStatus:data.markers.length?'historical':'empty',source:'统一持久模拟账本',updatedAt:new Date().toISOString(),reason:data.reason,evidenceRefs:data.markers.map(row=>row.snapshotId),data});
+  try {
+    const market=String(req.query.market||''),requested=String(req.query.instrument||'');
+    if(!['stocks','options','crypto','prediction'].includes(market))return res.status(400).json({success:false,dataStatus:'failed',reason:'图表市场无效'});
+    const ledger=unifiedPaperLedgerStore.get();
+    const instrument=resolvePaperChartInstrument(ledger,market,requested,(scope,query)=>dataLakeCatalog.resolveInstrument(scope as MarketId,query));
+    if(!instrument)return res.status(422).json({success:false,market,instrument:requested,dataStatus:'unsupported',reason:'无法核验当前市场标的身份'});
+    const references=createPaperChartReferences({
+      runnerSignal:id=>runnerExecutionEvidence.signal(id),
+      runnerSnapshot:id=>runnerExecutionEvidence.snapshot(id),
+      researchSignal:id=>decisionIntelligenceStore.getSignalOutcome(id),
+      evidenceSnapshot:id=>decisionIntelligenceStore.getEvidence(id),
+      pointInTimeSnapshot:id=>dataLakeCatalog.getSnapshot(id),
+      resolveInstrument:(scope,symbol)=>dataLakeCatalog.resolveInstrument(scope as MarketId,symbol)?.id||null,
+    });
+    const data=paperChartLineage(ledger,market,instrument,req.query.accountId?String(req.query.accountId):undefined,references);
+    res.json({success:true,market,instrument,dataStatus:data.markers.length?'historical':'empty',source:'统一持久模拟账本',updatedAt:new Date().toISOString(),reason:data.reason,evidenceRefs:data.markers.map(row=>row.snapshotId),data});
+  } catch(error:any) { res.status(503).json({success:false,dataStatus:'unavailable',reason:error?.message||'成交图层暂时不可用'}); }
 });
 
 app.get('/api/ai-runners', (req, res) => {
