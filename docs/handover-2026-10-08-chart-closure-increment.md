@@ -269,3 +269,24 @@
 - 生产只读 Chromium canary 在清空 Telegram token/chat 环境变量后通过，未发送 Telegram 消息、未写业务状态：四市场可切换，访客私有决策接口 403，SNDK 可选择，AAPL 与 SNDK 普通日线分别返回 1254 / 415 根；AAPL、usAAPL、AAPL.OQ 三种历史别名均返回相同的 429 根时点数据。报告在系统临时目录 `moneymoney-readonly-canary-8ccdc241fdef48bab5d4811c640f19fb/production-canary-report.json`。
 - 该 canary 实际核验的是线上旧版本 `962a7d01e31aa373eab7cd7d5d8b00ee0173a7fa`（构建时间 `2026-10-08T19:27:47.066Z`），不是当前未提交代码；不据此宣称 Yahoo Adj Close 或 Predict.fun 新门槛已在线生效。没有切换 dist、重启服务、提交或推送。
 - 仍未通过的发布/能力门槛：期权模拟跑单无已验证的合约报价执行接线；Predict.fun 官方详情无独立结算规则字段，因此禁止新增开仓和 AI 决策；Telegram 真实按钮 ACK 需用户点击；当前生产目录切换回滚演练会触发服务重启，尚未验证不会影响正在运行的跑单/调度。生产自动对照私有状态本轮未读取；既有 1000 美元股票跑单及线上设置未修改。目标继续保持进行中。
+
+## Deribit BTC/ETH 期权跑单来源接线与 taker 费用修正（2026-10-09，本地未发布）
+
+- 将独立 Deribit BTC/ETH 纸面期权路径接入 runner 快照生产端：要求完整合约身份、open/未到期、BTC/ETH 对应 USD 指数、合约大小 1、有效数量步长、双边价格、源时间及至少一个整份合约顶档深度。只做有限损失 LONG 买入，禁止空头；账本标的保留 `option:deribit:<完整合约>`，开平仓报价必须精确匹配冻结合约。没有足够本地历史时 rules 模式记录无动作，不伪造回测。
+- 复核官方 [Deribit ticker](https://docs.deribit.com/api-reference/market-data/public-ticker)、[instrument](https://docs.deribit.com/api-reference/market-data/public-get_instrument) 与[费用表](https://support.deribit.com/hc/en-us/articles/25944746248989-Fees)：期权盘口 amount 按底层币计，需使用 contract size 换算；标准 BTC/ETH 期权 taker 费按公开合约费率乘指数/数量，并以成交权利金的 12.5% 封顶。原通用 10bp 权利金模型会明显低估，现改为取合约 `taker_commission` 并应用封顶；费率缺失/非法时拒绝模拟撮合，不应用个人账户折扣。
+- 失败先行测试曾复现费率字段丢失及费用 `$0.088` 与公式应计 `$11` 的差异，修复后新增费用/顶档深度预算缩量（二分搜索）及源时间必须不晚于抓取时间校验，期权聚焦测试 13/13 通过。预算不足以覆盖真实费用时自动减少整张数量；数量受卖一可见深度限制，不以低估通用费率整笔错拒。只读实时源抽样：`BTC-10OCT26-82000-C` 报价通过全部执行门槛，报价源年龄约 1.85 秒，卖一 `$655.09872`，公开 taker rate `0.0003`，模拟 taker fee `$24.566202`；没有创建跑单、订单或调用模型。较早的一个低流动性合约未通过深度门槛，继续 fail-closed。
+- 最新验证：`npm test` 退出码 0（233 个隔离测试文件，1059 pass / 0 fail，用户数据库哈希不变）；构建 21 个 Hash/预压缩资源；`smoke:web`、`smoke:auth`、`smoke:browser`、`smoke:live-kline`、`smoke:contracts`、`smoke:automatic-comparison`、`security:scan` 与 `git diff --check` 通过。合约 smoke 曾与另一浏览器任务并发时超时，串行重跑通过；自动对照使用隔离夹具，模型请求 0、总开关关闭。密钥扫描覆盖 655 个已跟踪文件，并单独扫描了新建的未跟踪 Deribit 模块。
+- 未提交、未推送、未部署；仍需完成预测市场官方结算规则门槛、Telegram 实际按钮 ACK（等用户点击）、生产状态/回滚演练边界及整体 Goal 其余未验项。既有 1000 美元股票独立跑单、生产对照组和用户 SQLite/WAL/SHM 未更改；无真实交易执行。
+
+## Predict.fun 官方市场定义字段绑定（2026-10-09，本地未发布）
+
+- 继续核对官方 [Get market by ID](https://dev.predict.fun/get-market-by-id-25552989e0) 与 [Market schema](https://dev.predict.fun/market-14037477d0)：文档列有 `question`、`description`、`oracleQuestionId`、`resolverAddress`、`outcomes`、`feeRateBps`、`questionIndex`、`marketVariant`、`marketType`、`variantData`、`variantDetails` 等；没有单独、类型化的结算规则字段。嵌套 `resolution` 响应含 outcome/status 和盘口字段，不是可直接作为市场结算条款的规则文本。
+- 预测合约快照现将上述稳定语义字段、YES/NO outcome 定义及 `resolution` 中非盘口元数据做有界、排序规范化后纳入 `definitionHash`，再绑定至 `marketIdentityHash` 和盘口快照 Hash。`resolution.bestBid/bestAsk` 等动态报价排除在定义 Hash 外，并继续由盘口快照单独校验。来源结构异常、快照篡改或身份字段变化均拒绝使用；JSON 快照保留原型安全。
+- 即使官方 oracle/变体字段齐全，也只证明快照身份可审计，不证明人类可读规则完整或裁定可复现。`predictionSettlementRulesGate` 和新增开仓拒绝逻辑保持不变；不触发 AI 决策、不创建订单，不把 Predict.fun 纳入可交易自动对照。
+- 按 TDD 新增官方元数据变化、哈希篡改和 `__proto__` 输入回归测试；`tests/runner-prediction-quotes.test.cjs` 7/7 通过，构建通过。完整测试及剩余发布门禁需在本批结束前复跑。当前改动未提交、未推送、未部署，生产与用户数据库未触碰。
+
+## 本轮验收复验（2026-10-09，本地未发布）
+
+- 完整 `npm test` 复跑退出码 0：233 个隔离测试文件、1065 pass / 0 fail；构建成功并生成 21 个哈希/预压缩资源。注意此工作树含未提交差异，构建元数据仍只标记父提交 `126b3f19af728fc240cce00ab0387c7d5e857892`，不能把该身份当作当前差异的发布版本。Web、认证、四市场/三主题 Chromium、合约工作流、K线、自动对照、安全扫描均通过；自动对照夹具 `modelRequests=0`、`automaticEnabled=false`。实时K线验收是隔离传输夹具，不代表生产上游实时报价验收。
+- `git diff --check` 通过；Secret scan 覆盖 655 个已跟踪文件，新增 Deribit 文件也已单独审查。工作区 `data/research.db`、`-shm`、`-wal` SHA-256 仍分别为 `AC9368AF4F6C6007043E58614E653BAF54DDFD0A41F608E13E430A9D9EBD6516`、`FD4C9FDA9CD3F9AE7C962B0DDF37232294D55580E1AA165AA06129B8549389EB`、`E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855`；`runtime.mjs validate` 无错误或冲突。
+- 本轮仍未提交、推送或部署。发布门槛尚未满足：Predict.fun 缺少可独立核验的结算规则，预测市场自动决策/开仓继续 fail-closed；真实 Telegram 测试按钮仍待用户点击确认；生产回滚演练会重启服务，未证明不影响活动跑单与调度，因此不执行。既有股票跑单及生产自动对照状态未改动。

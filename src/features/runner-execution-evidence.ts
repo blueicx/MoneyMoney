@@ -4,6 +4,7 @@ import type { AiRunnerDecisionRecord } from './ai-paper-runner';
 import type { MarketId } from './research-contracts';
 import type { PaperChartSignalReference, PaperChartSnapshotReference } from './paper-chart-lineage';
 import type { UnifiedPaperLedger } from './unified-paper-trading';
+import { parseDeribitOptionInstrumentName } from './runner-deribit-options';
 
 type Store=Pick<SQLiteStateStore,'get'|'set'|'transaction'>;
 const digest=(value:unknown)=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -17,7 +18,12 @@ function payload(row:Record<string,any>){return {
 };}
 export function runnerSnapshotHash(row:Record<string,any>){return digest(payload(row));}
 export function runnerExecutionSnapshotId(hash:string){if(!/^[a-f0-9]{64}$/.test(hash))throw Error('快照 Hash 无效');return 'rs_'+hash;}
-function identity(market:string,symbol:string){const prefix=({stocks:'stock:us:',options:'option:us:',crypto:'crypto:binance:',prediction:'prediction:predictfun:'} as Record<string,string>)[market];return prefix?prefix+symbol.toUpperCase():null;}
+function identity(market:string,symbol:string){
+  const normalized=symbol.toUpperCase();
+  if(market==='options'&&parseDeribitOptionInstrumentName(normalized))return 'option:deribit:'+normalized;
+  const prefix=({stocks:'stock:us:',options:'option:us:',crypto:'crypto:binance:',prediction:'prediction:predictfun:'} as Record<string,string>)[market];
+  return prefix?prefix+normalized:null;
+}
 interface Snapshot extends PaperChartSnapshotReference {market:MarketId;hash:string;payload:Record<string,any>}
 interface Signal extends PaperChartSignalReference {runnerId:string;accountId:string;orderId:string;hash:string;decision:AiRunnerDecisionRecord}
 export interface ExecutionEvidenceLookup {market:MarketId;instrument:string;accountId:string;orderId:string;signalId:string;snapshotId:string}

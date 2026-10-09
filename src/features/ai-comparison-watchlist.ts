@@ -1,6 +1,7 @@
 import type { InstrumentRef } from './unified-instruments';
 import type { AiRunnerInstrumentRef } from './ai-paper-runner';
 import type { ComparisonMarket } from './ai-comparison-scheduler';
+import { parseDeribitOptionInstrumentName } from './runner-deribit-options';
 
 export function selectComparisonWatchlist(market: ComparisonMarket, watchlist: string[], pinned: string[], resolve: (id: string) => InstrumentRef | null | undefined) {
   const pins = new Set(pinned), ids = [...new Set(watchlist)].sort((a, b) => Number(pins.has(b)) - Number(pins.has(a)));
@@ -17,8 +18,9 @@ export function selectComparisonWatchlist(market: ComparisonMarket, watchlist: s
     const venue = ref.type === 'stock' && ref.venue === 'us' ? 'Stocks'
       : ref.type === 'crypto' && ref.venue === 'binance' && /^[A-Z0-9]+USDT$/.test(ref.symbol) ? 'Binance'
       : ref.type === 'prediction' && ['predict.fun', 'predictfun'].includes(ref.venue) && /^\d+$/.test(ref.symbol) ? 'Predict.fun'
+      : ref.type === 'option' && ref.venue === 'deribit' && parseDeribitOptionInstrumentName(ref.symbol) ? 'Options'
       : null;
-    if (!venue) { excluded.push({ instrument: id, reason: ref.type === 'option' ? '期权合约身份、乘数、有效双边报价及到期信息尚未全部接通，等待能力核验' : '当前模拟撮合未支持此交易场所；不切换其他来源补位' }); continue; }
+    if (!venue) { excluded.push({ instrument: id, reason: ref.type === 'option' ? '期权仅接受完整的 Deribit BTC/ETH 到期合约身份；其他来源尚未通过模拟撮合校验' : '当前模拟撮合未支持此交易场所；不切换其他来源补位' }); continue; }
     if (instruments.length === 5) { excluded.push({ instrument: id, reason: '冻结自选容量最多5个；未加入本实验' }); continue; }
     instruments.push({ venue, symbolOrMarketId: ref.symbol, title: ref.title });
   }

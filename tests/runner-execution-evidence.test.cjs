@@ -92,6 +92,23 @@ test('prediction paper fills link BUY decisions to their explicit YES or NO outc
   assert.equal(store.executionForOrder({orders:[],runnerAccounts:{[accountId]:{accountId,runnerId:record.runnerId,orders:[{...closeOrder,outcome:'YES'}]}}},closeExpected),null,'closing outcome must match the persisted decision');
  }finally{db.close();}
 });
+test('Deribit option fills retain exact venue-bound execution evidence and chart lineage',()=>{
+ const {SQLiteStateStore}=require('../src/storage/sqlite-state'),{RunnerExecutionEvidenceStore,runnerSnapshotHash}=require('../src/features/runner-execution-evidence');
+ const {paperChartLineage}=require('../src/features/paper-chart-lineage');
+ const file=path.join(fs.mkdtempSync(path.join(os.tmpdir(),'mm-runner-evidence-deribit-')),'state.sqlite'),db=new SQLiteStateStore(file,path.dirname(file)),store=new RunnerExecutionEvidenceStore(db);
+ const market='options',symbol='BTC-19OCT26-65000-C',instrument='option:deribit:'+symbol,accountId='ai-runner:deribit-runner',at='2026-10-09T00:00:05Z';
+ const snapshot={market,instrument:symbol,dataStatus:'live',source:'Deribit Public API',dataAt:'2026-10-09T00:00:00Z',price:84,quote:{market:'options',price:84,bestBid:80,bestAsk:88,fetchedAt:'2026-10-09T00:00:00Z'},evidence:[]};snapshot.snapshotHash=runnerSnapshotHash(snapshot);
+ const record={id:'deribit-decision',runnerId:'deribit-runner',market,instrument:symbol,snapshotHash:snapshot.snapshotHash,orderId:'deribit-order',action:'BUY',side:'LONG',at,signals:[],riskChecks:[{name:'verified-option-contract',passed:true}],evidence:[]};
+ const order={id:record.orderId,instrumentType:'option',instrumentId:instrument,accountId,runnerId:record.runnerId,signalId:record.id,dataSnapshotId:'rs_'+snapshot.snapshotHash,contractMultiplier:1,price:88,quantity:1,side:'BUY',timestamp:'2026-10-09T00:00:06Z'};
+ const ledger={orders:[],runnerAccounts:{[accountId]:{accountId,runnerId:record.runnerId,orders:[order]}}};
+ try{
+  store.save(snapshot,record,instrument,accountId);
+  const expected={market,instrument,accountId,orderId:order.id,signalId:record.id,snapshotId:order.dataSnapshotId};
+  const linked=store.executionForOrder(ledger,expected);assert.ok(linked,'venue-qualified Deribit fill must resolve its exact evidence');assert.equal(linked.instrument,instrument);
+  assert.equal(paperChartLineage(ledger,'options',instrument,undefined,store).markers.length,1,'the verified option fill must appear on the matching option chart');
+  assert.equal(store.executionForOrder(ledger,{...expected,instrument:'option:us:'+symbol}),null,'another option venue must not alias the Deribit contract');
+ }finally{db.close();}
+});
 test('execution-evidence HTTP endpoint is private and verifies the requested order from the unified ledger',()=>{
  const server=fs.readFileSync('src/web/server.ts','utf8'),start=server.indexOf("app.get('/api/paper/execution-evidence'");assert.notEqual(start,-1,'linked execution evidence endpoint missing');
  const end=server.indexOf("app.get('/api/paper/chart-markers'",start),route=server.slice(start,end);

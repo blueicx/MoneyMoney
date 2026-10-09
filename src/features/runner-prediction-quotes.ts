@@ -26,6 +26,23 @@ export interface PredictionExecutionContract {
     observedAt: string;
     description: string;
     descriptionHash: string;
+    officialDefinition: {
+      schema: 'predictfun-market-definition-v1';
+      question: string | null;
+      oracleQuestionId: string | null;
+      resolverAddress: string | null;
+      marketVariant: string | null;
+      marketType: string | null;
+      feeRateBps: number | null;
+      questionIndex: number | null;
+      isNegRisk: boolean | null;
+      isYieldBearing: boolean | null;
+      variantData: unknown | null;
+      variantDetails: unknown | null;
+      outcomeDefinitions: unknown | null;
+      resolutionMetadata: unknown | null;
+      definitionHash: string;
+    };
   };
   outcomes: Record<'YES' | 'NO', PredictionOutcomeBookQuote>;
 }
@@ -40,11 +57,82 @@ function sha256(value: string): string {
   return createHash('sha256').update(value, 'utf8').digest('hex');
 }
 
+function normalizeJson(value: unknown, depth = 0): unknown {
+  if (depth > 8) throw new Error('depth');
+  if (value === null || typeof value === 'boolean') return value;
+  if (typeof value === 'string') {
+    if (value.length > 4_096) throw new Error('string-size');
+    return value;
+  }
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) throw new Error('number');
+    return value;
+  }
+  if (Array.isArray(value)) {
+    if (value.length > 128) throw new Error('array-size');
+    return value.map(item => normalizeJson(item, depth + 1));
+  }
+  const object = record(value);
+  if (!object) throw new Error('type');
+  const keys = Object.keys(object).sort();
+  if (keys.length > 128) throw new Error('object-size');
+  return Object.fromEntries(keys.map(key => [key, normalizeJson(object[key], depth + 1)]));
+}
+
+function optionalOfficialText(value: unknown): string | null {
+  if (value == null) return null;
+  if (typeof value !== 'string' || value.length > 2_048) throw new Error('invalid official text');
+  return value.trim() || null;
+}
+
+function optionalOfficialNumber(value: unknown): number | null {
+  if (value == null) return null;
+  if (typeof value !== 'number' || !Number.isFinite(value)) throw new Error('invalid official number');
+  return value;
+}
+
+function optionalOfficialBoolean(value: unknown): boolean | null {
+  if (value == null) return null;
+  if (typeof value !== 'boolean') throw new Error('invalid official boolean');
+  return value;
+}
+
+function resolutionMetadata(value: unknown): unknown | null {
+  if (value == null) return null;
+  const resolution = record(value);
+  if (!resolution) throw new Error('invalid resolution metadata');
+  const { bestBid: _bestBid, bestAsk: _bestAsk, ...stableMetadata } = resolution;
+  return normalizeJson(stableMetadata);
+}
+
+function officialDefinition(market: UnknownRecord): PredictionExecutionContract['marketDescriptionEvidence']['officialDefinition'] {
+  let variantData: unknown | null = null;
+  if (market.variantData != null) variantData = normalizeJson(market.variantData);
+  const definition = {
+    schema: 'predictfun-market-definition-v1' as const,
+    question: optionalOfficialText(market.question),
+    oracleQuestionId: optionalOfficialText(market.oracleQuestionId),
+    resolverAddress: optionalOfficialText(market.resolverAddress),
+    marketVariant: optionalOfficialText(market.marketVariant),
+    marketType: optionalOfficialText(market.marketType),
+    feeRateBps: optionalOfficialNumber(market.feeRateBps),
+    questionIndex: optionalOfficialNumber(market.questionIndex),
+    isNegRisk: optionalOfficialBoolean(market.isNegRisk),
+    isYieldBearing: optionalOfficialBoolean(market.isYieldBearing),
+    variantData,
+    variantDetails: market.variantDetails == null ? null : normalizeJson(market.variantDetails),
+    outcomeDefinitions: market.outcomes == null ? null : normalizeJson(market.outcomes),
+    resolutionMetadata: resolutionMetadata(market.resolution),
+  };
+  return { ...definition, definitionHash: sha256(JSON.stringify(definition)) };
+}
+
 function hashMarketIdentity(input: {
   marketId: string;
   conditionId: string;
   decimalPrecision: number;
   descriptionHash: string;
+  definitionHash: string;
   yesTokenId: string;
   noTokenId: string;
 }): string {
@@ -53,6 +141,7 @@ function hashMarketIdentity(input: {
     conditionId: input.conditionId,
     decimalPrecision: input.decimalPrecision,
     descriptionHash: input.descriptionHash,
+    definitionHash: input.definitionHash,
     outcomes: { YES: input.yesTokenId, NO: input.noTokenId },
   }));
 }
@@ -131,6 +220,9 @@ export function buildPredictFunExecutionQuote(
     || market.isVisible !== true || !description || !conditionId || (precision !== 2 && precision !== 3)) {
     return rejectedQuote('unsupported', '市场未注册开放、官方 description、conditionId 或报价精度未通过核验', fetchedAt);
   }
+  let definition: PredictionExecutionContract['marketDescriptionEvidence']['officialDefinition'];
+  try { definition = officialDefinition(market); }
+  catch { return rejectedQuote('unavailable', 'Predict.fun 官方结构化市场元数据不是受支持的 JSON 快照', fetchedAt); }
   const outcomes = Array.isArray(market.outcomes) ? market.outcomes : [];
   if (outcomes.length !== 2) return rejectedQuote('unsupported', '市场不是恰好包含 YES/NO 的二元合约', fetchedAt);
   const mapped = new Map<'YES' | 'NO', string>();
@@ -172,7 +264,7 @@ export function buildPredictFunExecutionQuote(
   const descriptionHash = sha256(description);
   const marketIdentityHash = hashMarketIdentity({
     marketId: String(id), conditionId, decimalPrecision: precision,
-    descriptionHash, yesTokenId, noTokenId,
+    descriptionHash, definitionHash: definition.definitionHash, yesTokenId, noTokenId,
   });
   const bookSnapshotHash = hashTopOfBook({
     marketIdentityHash, updatedAt, yesBidTicks: bestBid.ticks, yesAskTicks: bestAsk.ticks,
@@ -203,6 +295,7 @@ export function buildPredictFunExecutionQuote(
       observedAt: fetchedAt!,
       description,
       descriptionHash,
+      officialDefinition: definition,
     },
     outcomes: {
       YES: {
@@ -267,12 +360,37 @@ export function predictionOutcomeQuote(
     || !Number.isFinite(observedAt) || !Number.isFinite(fetchedAt) || observedAt > fetchedAt || fetchedAt > now.getTime()) {
     return reject('缺少可验证的官方市场 description 快照或抓取时间');
   }
+  let definition: PredictionExecutionContract['marketDescriptionEvidence']['officialDefinition'];
+  try {
+    const raw = evidence.officialDefinition as unknown;
+    const captured = record(raw);
+    if (!captured || captured.schema !== 'predictfun-market-definition-v1') throw new Error('missing definition');
+    definition = officialDefinition({
+      question: captured.question,
+      oracleQuestionId: captured.oracleQuestionId,
+      resolverAddress: captured.resolverAddress,
+      marketVariant: captured.marketVariant,
+      marketType: captured.marketType,
+      feeRateBps: captured.feeRateBps,
+      questionIndex: captured.questionIndex,
+      isNegRisk: captured.isNegRisk,
+      isYieldBearing: captured.isYieldBearing,
+      variantData: captured.variantData,
+      variantDetails: captured.variantDetails,
+      outcomes: captured.outcomeDefinitions,
+      resolution: captured.resolutionMetadata,
+    });
+    if (definition.definitionHash !== captured.definitionHash) throw new Error('definition hash mismatch');
+  } catch {
+    return reject('官方 oracle / variant 元数据快照缺失或与证据 Hash 不一致');
+  }
   let rulesUrl: URL;
   try { rulesUrl = new URL(evidence.url); } catch { return reject('市场详情证据链接无效'); }
   const marketId = contract.instrumentId.slice('prediction:predictfun:'.length);
   const expectedIdentityHash = hashMarketIdentity({
     marketId, conditionId: contract.conditionId, decimalPrecision: contract.decimalPrecision,
     descriptionHash: evidence.descriptionHash,
+    definitionHash: definition.definitionHash,
     yesTokenId: contract.outcomes?.YES?.tokenId || '',
     noTokenId: contract.outcomes?.NO?.tokenId || '',
   });

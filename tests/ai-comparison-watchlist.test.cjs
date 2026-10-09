@@ -20,3 +20,15 @@ test('legacy aliases cannot duplicate a canonical security in the frozen univers
  const selected=selectComparisonWatchlist('stocks',['usAAPL','stock:us:AAPL'],[],()=>ref);
  assert.equal(selected.instruments.length,1);assert.match(selected.excluded[0].reason,/重复/);
 });
+test('automatic options comparison accepts only exact Deribit BTC/ETH contracts supported by the runner',()=>{
+ const {selectComparisonWatchlist}=load(),rows=[
+  {id:'option:deribit:BTC-19OCT26-65000-C',type:'option',venue:'deribit',symbol:'BTC-19OCT26-65000-C',title:'BTC call',aliases:[]},
+  {id:'option:cboe:SPY-20270115-500-C',type:'option',venue:'cboe',symbol:'SPY-20270115-500-C',title:'SPY call',aliases:[]},
+  {id:'option:deribit:BTC-PERPETUAL',type:'option',venue:'deribit',symbol:'BTC-PERPETUAL',title:'BTC perpetual',aliases:[]},
+ ];
+ const selected=selectComparisonWatchlist('options',rows.map(row=>row.id),[],id=>rows.find(row=>row.id===id));
+ assert.deepEqual(selected.instruments.map(row=>row.symbolOrMarketId),['BTC-19OCT26-65000-C']);
+ assert.equal(selected.instruments[0].venue,'Options');
+ assert.equal(selected.excluded.length,2);
+ assert.ok(selected.excluded.every(row=>/Deribit|期权/.test(row.reason)));
+});

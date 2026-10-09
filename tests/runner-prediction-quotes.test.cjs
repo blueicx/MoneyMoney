@@ -59,6 +59,39 @@ test('Predict.fun official YES book builds precision-safe read-only YES/NO evide
  assert.equal(buildPredictFunExecutionQuote(market,book,now,120000,'https://evil.example').dataStatus,'unsupported');
 });
 
+test('Predict.fun official oracle and variant metadata are frozen into the contract identity without enabling entries',()=>{
+ const {buildPredictFunExecutionQuote,predictionOutcomeQuote,predictionSettlementRulesGate}=require('../src/features/runner-prediction-quotes');
+ const now=new Date('2026-10-09T00:00:10.000Z');
+ const market={id:73,status:'REGISTERED',tradingStatus:'OPEN',isVisible:true,conditionId:'condition-73',question:'Will BTC close above the opening price?',description:'Official market description',oracleQuestionId:'oracle-question-73',resolverAddress:'0x1234567890abcdef',marketVariant:'CRYPTO_UP_DOWN',marketType:'CRYPTO_UP_DOWN',feeRateBps:100,questionIndex:2,isNegRisk:false,isYieldBearing:false,variantData:{type:'CRYPTO_UP_DOWN',priceFeedProvider:'PYTH',priceFeedSymbol:'BTC/USD',startPrice:80000,endPrice:81000},variantDetails:{crypto:{symbol:'BTC/USD',comparison:'above'}},resolution:{name:'YES',indexSet:1,onChainId:'yes-73',status:'UNRESOLVED',bestBid:{price:.49,size:80},bestAsk:{price:.51,size:100}},decimalPrecision:2,outcomes:[{name:'YES',onChainId:'yes-73',indexSet:1},{name:'NO',onChainId:'no-73',indexSet:2}]};
+ const book={marketId:73,updateTimestampMs:now.getTime(),bids:[[.49,80]],asks:[[.51,100]]};
+ const quote=buildPredictFunExecutionQuote(market,book,now);
+ const definition=quote.predictionContract.marketDescriptionEvidence.officialDefinition;
+ assert.equal(definition.question,market.question);
+ assert.equal(definition.oracleQuestionId,market.oracleQuestionId);
+ assert.equal(definition.resolverAddress,market.resolverAddress);
+ assert.equal(definition.marketVariant,market.marketVariant);
+ assert.equal(definition.feeRateBps,market.feeRateBps);
+ assert.equal(definition.questionIndex,market.questionIndex);
+ assert.deepEqual(definition.variantData,market.variantData);
+ assert.deepEqual(definition.variantDetails,market.variantDetails);
+ assert.deepEqual(definition.outcomeDefinitions,market.outcomes);
+ assert.equal(definition.resolutionMetadata.status,'UNRESOLVED');
+ assert.equal(Object.hasOwn(definition.resolutionMetadata,'bestBid'),false,'dynamic quote fields are kept in the separate book snapshot');
+ assert.match(definition.definitionHash,/^[a-f0-9]{64}$/);
+ const alteredVariant=buildPredictFunExecutionQuote({...market,variantData:{...market.variantData,endPrice:82000}},book,now);
+ assert.notEqual(alteredVariant.predictionContract.marketIdentityHash,quote.predictionContract.marketIdentityHash);
+ const alteredRules=buildPredictFunExecutionQuote({...market,variantDetails:{crypto:{...market.variantDetails.crypto,comparison:'at-or-above'}}},book,now);
+ assert.notEqual(alteredRules.predictionContract.marketIdentityHash,quote.predictionContract.marketIdentityHash);
+ const sourceJson=JSON.parse('{"__proto__":{"polluted":true},"type":"CRYPTO_UP_DOWN"}');
+ const safeSnapshot=buildPredictFunExecutionQuote({...market,variantData:sourceJson},book,now).predictionContract.marketDescriptionEvidence.officialDefinition.variantData;
+ assert.equal(Object.getPrototypeOf(safeSnapshot),Object.prototype);
+ assert.equal(Object.prototype.polluted,undefined);
+ assert.equal(Object.hasOwn(safeSnapshot,'__proto__'),true);
+ const tampered={...quote,predictionContract:{...quote.predictionContract,marketDescriptionEvidence:{...quote.predictionContract.marketDescriptionEvidence,officialDefinition:{...definition,variantData:{...definition.variantData,endPrice:82000}}}}};
+ assert.equal(predictionOutcomeQuote(tampered,'YES',now).dataStatus,'unsupported');
+ assert.equal(predictionSettlementRulesGate(predictionOutcomeQuote(quote,'YES',now)).allowed,false,'official metadata is auditable identity evidence, not verified settlement semantics');
+});
+
 test('Predict.fun market description alone is not sufficient settlement-rules evidence for paper matching',()=>{
  const {buildPredictFunExecutionQuote,predictionOutcomeQuote,predictionSettlementRulesGate}=require('../src/features/runner-prediction-quotes');
  const {resolveRunnerFill}=require('../src/features/ai-paper-runner');

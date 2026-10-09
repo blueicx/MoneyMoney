@@ -64,6 +64,7 @@ import { binanceFeed, alertManager, anomalyDetector } from '../features/binance'
 import { llmAnalyzer, redditSentiment, whaleMonitor, strategyComparison, tradeJournal } from '../features/ai-social';
 import { binancePortfolio } from '../features/binance-portfolio';
 import { getEquityOptionsSnapshot, getOptionsSnapshot } from '../features/options-market';
+import { fetchDeribitOptionExecutionQuote, parseDeribitOptionInstrumentName } from '../features/runner-deribit-options';
 import { getMacroCalendar, getGlobalCryptoMetrics } from '../features/external-market-data';
 import { getStablecoinLiquidity } from '../features/stablecoin-liquidity';
 import { getYieldQuality } from '../features/yield-quality';
@@ -8523,6 +8524,7 @@ import {
   runnerOpenPosition, runnerClosePosition,
   summarizeRunner, updateAiRunnerPolicy, updateAiRunnerRouting, selectRunnerStockQuote, selectControlledStockQuote, pauseAiRunner, resumeAiRunner, resetAiRunnerCircuit,
   evaluateRunnerOpen, resolveRunnerFill, evaluateRunnerQuoteGate, calculateRunnerExecutionCosts,
+  sizeDeribitOptionPaperOrder,
   evaluateAiRunnerTrigger, isAiRunnerCallAllowed, appendAiRunnerDecision, listAiRunnerHistory,
   updateAiRunnerMarketState, recordAiRunnerModelCall, evaluateRunnerIndicatorEvidence,
   normalizeAiRunnerStockKlines,
@@ -8901,7 +8903,7 @@ interface AiRunnerInstrumentSnapshot extends AiRunnerModelSnapshot {
 function runnerLedgerInstrumentId(instrument: AiRunnerInstrumentRef): string {
   const symbol = instrument.symbolOrMarketId.toUpperCase();
   if (instrument.venue === 'Stocks') return `stock:us:${symbol}`;
-  if (instrument.venue === 'Options') return `option:us:${symbol}`;
+  if (instrument.venue === 'Options') return parseDeribitOptionInstrumentName(symbol) ? `option:deribit:${symbol}` : `option:us:${symbol}`;
   if (instrument.venue === 'Predict.fun') return `prediction:predictfun:${symbol}`;
   return `crypto:binance:${symbol}`;
 }
@@ -8942,7 +8944,23 @@ async function loadAiRunnerInstrumentSnapshot(runner: AiRunner, ref: AiRunnerIns
   };
   try {
     if (ref.venue === 'Options') {
-      row = { ...row, dataStatus: 'unsupported', reason: '期权合约身份或可靠买卖价不足，当前跑单不支持' };
+      const identity = parseDeribitOptionInstrumentName(instrument);
+      if (!identity) {
+        row = { ...row, dataStatus: 'unsupported', executionStatus: 'unsupported', executionReason: '仅支持完整的 Deribit BTC/ETH 到期合约身份', reason: '期权合约身份不完整；请使用 Deribit 的 BTC-到期日-行权价-C/P 合约名' };
+      } else {
+        const quote = await fetchDeribitOptionExecutionQuote(instrument, { maxAgeMs: runner.policy.minFreshnessMs });
+        const retrievedAt = quote.optionContract.retrievedAt;
+        const historyReason = '该合约暂无足够的本地历史K线用于规则信号或回测；当前只开放真实来源双边报价支持的有限损失买入模拟与持仓退出';
+        row = {
+          ...row, dataStatus: quote.dataStatus, source: quote.source, dataAt: quote.fetchedAt,
+          price: quote.price, quote, executionStatus: 'ready', executionReason: historyReason,
+          reason: historyReason,
+          evidence: [
+            { dataset: 'market', source: 'Deribit public/get_instrument', status: quote.dataStatus, dataAt: quote.fetchedAt, retrievedAt },
+            { dataset: 'quote', source: 'Deribit public/ticker', status: quote.dataStatus, dataAt: quote.fetchedAt, retrievedAt },
+          ],
+        };
+      }
     } else if (ref.venue === 'Binance') {
       const [barsResult, depth] = await Promise.all([
         getRunnerKlineAdapter(instrument).fetch(),
@@ -9071,9 +9089,10 @@ async function loadAiRunnerInstrumentSnapshot(runner: AiRunner, ref: AiRunnerIns
     }
   } catch (error) {
     const failureReason = error instanceof Error ? error.message.slice(0, 240) : '数据请求失败';
-    const failureSource = row.source || (ref.venue === 'Binance' ? 'Binance 公共行情接口' : ref.venue === 'Stocks' ? '腾讯证券行情接口' : ref.venue === 'Predict.fun' ? 'Predict.fun 官方 API' : '当前市场数据源');
+    const failureSource = row.source || (ref.venue === 'Binance' ? 'Binance 公共行情接口' : ref.venue === 'Stocks' ? '腾讯证券行情接口' : ref.venue === 'Predict.fun' ? 'Predict.fun 官方 API' : 'Deribit Public API');
     row = {
       ...row, dataStatus: 'unavailable', source: failureSource, reason: failureReason,
+      ...(ref.venue === 'Options' ? { executionStatus: 'unsupported', executionReason: failureReason } : {}),
       evidence: [...(row.evidence || []), { dataset: 'market', source: failureSource, status: 'unavailable', retrievedAt: new Date().toISOString(), reason: failureReason }],
     };
   }
@@ -9120,6 +9139,8 @@ async function prepareAiRunnerTick(runnerId: string, idempotencyKey: string, sam
   if(runner.comparisonControl&&snapshots.some(snapshot=>snapshot.market!==runner.universe?.market||!snapshot.quote||!evaluateRunnerQuoteGate(runner.policy,snapshot.quote,now).allowed))aiStatusReason='共享行情未通过市场身份或新鲜报价门槛，对照不调用模型';
   const settlementBlocked = snapshots.find(snapshot => snapshot.market === 'prediction' && snapshot.executionStatus === 'unsupported');
   if (!aiStatusReason && settlementBlocked) aiStatusReason = settlementBlocked.executionReason || '预测市场缺少可验证的结算规则，本轮不调用模型';
+  const optionBlocked = snapshots.find(snapshot => snapshot.market === 'options' && snapshot.executionStatus !== 'ready');
+  if (!aiStatusReason && optionBlocked) aiStatusReason = optionBlocked.executionReason || optionBlocked.reason || '期权合约报价未通过模拟执行门槛，本轮不调用模型';
   if (runner.executionState === 'legacy-readonly') aiStatusReason = '旧跑单没有可核验的统一账本关联，仅保留只读历史';
   if (runner.mode !== 'rules') {
     const latestRunner = getAiRunners().find(item => item.id === runnerId);
@@ -9163,6 +9184,7 @@ async function prepareAiRunnerTick(runnerId: string, idempotencyKey: string, sam
       { name: 'market-scope', passed: snapshot.market === runner.universe?.market, reason: snapshot.market === runner.universe?.market ? undefined : '跨市场数据已拒绝' },
       { name: 'quote-freshness', passed: quoteGate.allowed, reason: quoteGate.reason },
       ...(snapshot.market === 'prediction' ? [{ name: 'settlement-rule-evidence', passed: snapshot.executionStatus !== 'unsupported', reason: snapshot.executionReason }] : []),
+      ...(snapshot.market === 'options' ? [{ name: 'verified-option-contract', passed: snapshot.executionStatus === 'ready', reason: snapshot.executionReason }] : []),
       { name: 'strategy-indicator-evidence', passed: indicatorGate.allowed, reason: indicatorGate.reason },
     ];
     if (runner.executionState === 'legacy-readonly') {
@@ -9267,6 +9289,7 @@ function executePreparedRunnerTick(prepared: PreparedAiRunnerTick): { actions: A
     }
     if (action === 'BUY') {
       if (existing) { record.action = 'REJECTED'; record.reason = '该标的已有未平仓头寸'; continue; }
+      if (snapshot.market === 'options' && side !== 'LONG') { record.action = 'REJECTED'; record.reason = '期权模拟仅允许买入持有的有限损失方向'; continue; }
       const perInstrumentRemaining = runner.universe?.kind === 'watchlist'
         ? Math.max(0, (runner.policy.maxPerInstrumentUsd ?? runner.policy.maxTradeUsd) - runner.positions.filter(position => position.status === 'OPEN' && position.instrumentId === runnerLedgerInstrumentId(ref)).reduce((sum, position) => sum + position.entryPrice * position.quantity, 0))
         : runner.policy.maxTradeUsd;
@@ -9275,12 +9298,14 @@ function executePreparedRunnerTick(prepared: PreparedAiRunnerTick): { actions: A
         : runner.policy.maxTradeUsd;
       const target = Math.min(runner.cashUsd * 0.95, runner.policy.maxTradeUsd, perInstrumentRemaining, totalRemaining);
       const costMultiplier = 1 + (Number(runner.policy.feeRateBps) + Number(runner.policy.additionalSlippageBps)) / 10_000;
-      const quantity = Math.floor(target / (fill.price * Math.max(1, costMultiplier)) * 1_000_000) / 1_000_000;
+      const quantity = quote.market === 'options'
+        ? sizeDeribitOptionPaperOrder(runner.policy, quote, target, new Date())
+        : Math.floor(target / (fill.price * Math.max(1, costMultiplier)) * 1_000_000) / 1_000_000;
       if (quantity <= 0) { record.action = 'REJECTED'; record.reason = '可用风险预算不足以形成最小模拟订单'; continue; }
       const sizedFill = resolveRunnerFill(runner.policy, quote, 'BUY', new Date(), quantity);
       if (!sizedFill.allowed) { record.action = 'REJECTED'; record.reason = sizedFill.reason || '模拟数量超过可见深度'; record.riskChecks.push({ name: 'visible-orderbook-depth', passed: false, reason: record.reason }); continue; }
       const costs = calculateRunnerExecutionCosts(runner.policy, quote, 'BUY', quantity);
-      const notionalAndCosts = fill.price * quantity + costs.feeUsd + costs.slippageUsd;
+      const notionalAndCosts = fill.price * quantity * (quote.market === 'options' ? quote.optionContract!.multiplier : 1) + costs.feeUsd + costs.slippageUsd;
       const risk = evaluateRunnerOpen(runner, notionalAndCosts, new Date(), runnerLedgerInstrumentId(ref));
       record.riskChecks.push({ name: 'budget-and-risk', passed: risk.allowed, reason: risk.reason });
       if (!risk.allowed) { record.action = 'REJECTED'; record.reason = risk.reason || '风险校验未通过'; continue; }

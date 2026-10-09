@@ -38,6 +38,16 @@ test('live balances, positions and runtime status do not invalidate an unchanged
   rows[0].cashUsd = 500; rows[0].status = 'RUNNING'; rows[1].lastDataStatus = 'cached';
   assert.equal(validateAiRunnerComparison(group, rows).valid, true);
 });
+test('automatic comparison can freeze one exact Deribit option across three isolated paper accounts',()=>{
+  const symbol='BTC-19OCT26-65000-C';
+  const group=createAiRunnerComparison('Options',symbol,'Deribit BTC call',1000,{}, {
+    seed:19,model:'fixture/fixed-model',universe:{kind:'watchlist',sourceWatchlistId:'admin',instruments:[{venue:'Options',symbolOrMarketId:symbol,title:'Deribit BTC call'}]},
+  });
+  const rows=group.runnerIds.map(id=>runner.getAiRunners().find(item=>item.id===id));
+  assert.equal(validateAiRunnerComparison(group,rows).valid,true);
+  assert.equal(new Set(rows.map(row=>row.accountId)).size,3);
+  assert.ok(rows.every(row=>row.universe.market==='options'&&row.universe.instruments[0].symbolOrMarketId===symbol));
+});
 test('automatic resume requires the same fixed model and complete frozen instrument membership', () => {
   const { group, rows } = fixture();
   const scheduled = { market: 'stocks', groupId: group.id, model: 'fixture/fixed-model', instruments: ['MU'] };

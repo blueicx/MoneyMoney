@@ -2431,7 +2431,7 @@
         <div class="section-title" style="margin-top:20px;">最近交易</div>
         <div id="paper-trades"></div>
         <div class="section-title" style="margin-top:24px;">🤖 AI 模拟跑单</div>
-        <p id="ai-runner-desc" style="font-size:11.5px;color:var(--text-secondary);margin-bottom:10px;">规则跑单、AI 只读评审、受风控约束的 AI 模拟单均使用独立账本。股票仅有日K而无实时盘口时只记录研究决策，不模拟成交；期权数据未达撮合门槛时不可启动。AI 跑单默认开启模拟能力，不自动创建或恢复跑单；真实交易关闭。</p>
+        <p id="ai-runner-desc" style="font-size:11.5px;color:var(--text-secondary);margin-bottom:10px;">规则跑单、AI 只读评审、受风控约束的 AI 模拟单均使用独立账本。股票仅有日K而无实时盘口时只记录研究决策；期权仅开放经核验的 Deribit BTC/ETH 完整合约、双边报价和可见深度，并且只允许有限损失的买入模拟。AI 跑单默认开启模拟能力，不自动创建或恢复跑单；真实交易关闭。</p>
         <div id="ai-runner-feature-state" class="empty-tip" hidden aria-live="polite" style="margin-bottom:10px;">AI 模拟跑单功能当前由服务端安全开关关闭；此处仅查看历史记录，不会启动或执行跑单。</div>
         <div id="ai-runners-summary" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;margin-bottom:12px;"></div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px;">
@@ -2439,7 +2439,7 @@
             <option value="Binance">🏦 币安</option>
             <option value="Predict.fun">🎯 Predict.fun</option>
             <option value="Stocks">📈 美股</option>
-            <option value="Options" disabled title="当前缺少经核验的合约身份、实时双边报价与可用历史">期权（数据能力未达门槛）</option>
+            <option value="Options" title="仅支持经核验的 Deribit BTC/ETH 完整到期合约；历史不足时不提供规则回测">🧾 Deribit 期权（模拟买入）</option>
           </select>
           <select id="ai-runner-universe-kind" onchange="syncAiRunnerUniverseHint()" style="padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);font-size:12px;">
             <option value="single">单标的</option><option value="watchlist">冻结自选组（最多5个）</option>
@@ -5344,6 +5344,9 @@ function syncAiRunnerVenueHint() {
   } else if (venue === 'Predict.fun') {
     symbolEl.placeholder = '如 12345（市场ID）';
     if (descEl) descEl.textContent = '设定金额，输入 Predict.fun 的市场 ID（纯数字），AI 将读取新闻和该市场盘口计算获胜概率。';
+  } else if (venue === 'Options') {
+    symbolEl.placeholder = '如 BTC-19OCT26-65000-C';
+    if (descEl) descEl.textContent = '仅支持 Deribit BTC/ETH 完整期权合约名；来源必须提供未到期合约身份、有效美元指数、真实双边价及至少一个完整合约的顶层深度。仅模拟买入，不提供无历史依据的规则回测。手续费按公开 taker 费率并应用权利金 12.5% 上限；不计个人账户折扣。';
   } else {
     symbolEl.placeholder = '如 BTCUSDT / ETHUSDT';
     if (descEl) descEl.textContent = '设定金额，选择币安交易对（如 BTCUSDT），AI 会自动读取K线、RSI、MACD指标和多空情绪进行模拟交易。';

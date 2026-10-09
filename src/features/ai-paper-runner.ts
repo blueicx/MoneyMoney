@@ -17,6 +17,8 @@ import type { StockQuote } from './stock-data-contracts';
 import { stockQuoteObservationTime } from './stock-signal-schedule';
 import type { PredictionExecutionContract } from './runner-prediction-quotes';
 import { predictionOutcomeQuote, predictionSettlementRulesGate } from './runner-prediction-quotes';
+import { parseDeribitOptionInstrumentName } from './runner-deribit-options';
+export { normalizeDeribitOptionExecutionQuote, fetchDeribitOptionExecutionQuote } from './runner-deribit-options';
 
 export type AiRunnerVenue = 'Binance' | 'Predict.fun' | 'Stocks' | 'Options';
 export type AiRunnerStatus = 'RUNNING' | 'STOPPED';
@@ -124,6 +126,7 @@ export interface AiRunnerPosition {
   exitTime?: string;
   pnlUsd?: number;
   currentPrice?: number;
+  contractMultiplier?: number;
   markStatus?: 'live' | 'delayed' | 'cached' | 'stale' | 'unavailable';
   markSource?: string;
   markUpdatedAt?: string;
@@ -215,7 +218,12 @@ export interface AiRunnerQuote {
   predictionContract?:PredictionExecutionContract;
   outcome?:'YES'|'NO';
   tokenId?:string;
-  optionContract?: { instrumentId:string; source:string; verified:boolean; currency:string; multiplier:number; expiresAt:string };
+  optionContract?: {
+    instrumentId:string; source:string; verified:boolean; currency:string; multiplier:number; expiresAt:string;
+    venue?: 'deribit'; sourceInstrumentName?: string; instrumentType?: 'reversed'; baseCurrency?: 'BTC'|'ETH'; quoteCurrency?: 'BTC'|'ETH'; settlementCurrency?: 'BTC'|'ETH'; counterCurrency?: 'USD';
+    optionType?: 'call'|'put'; strike?: number; contractSize?: number; minTradeAmount?: number; takerCommission?: number; indexPrice?: number;
+    rawBestBidPrice?: number; rawBestAskPrice?: number; bestBidAmount?: number; bestAskAmount?: number; retrievedAt?: string;
+  };
   market?: AiRunnerMarket;
   status?: string;
   dataStatus?: string;
@@ -321,6 +329,7 @@ export function freezeAiRunnerUniverse(
     const symbolOrMarketId = String(item.symbolOrMarketId || '').trim().toUpperCase();
     if (!symbolOrMarketId) throw new Error('跑单标的标识不能为空');
     if (item.venue === 'Stocks' && !/^[A-Z][A-Z0-9.:-]{0,19}$/.test(symbolOrMarketId)) throw new Error('股票标的格式无效');
+    if (item.venue === 'Options' && !parseDeribitOptionInstrumentName(symbolOrMarketId)) throw new Error('期权跑单只接受完整的 Deribit BTC/ETH 合约身份');
     if (item.venue === 'Binance' && !/^[A-Z0-9]{1,20}USDT$/.test(symbolOrMarketId)) throw new Error('当前跑单只支持 USDT 计价的币安现货交易对，以避免把其他计价币误当美元');
     if (item.venue === 'Predict.fun' && !/^[A-Z0-9:_-]{1,80}$/.test(symbolOrMarketId)) throw new Error('预测市场 ID 格式无效');
     return Object.freeze({ venue: item.venue, symbolOrMarketId, ...(item.title ? { title: String(item.title).slice(0, 160) } : {}) });
@@ -448,9 +457,50 @@ export function resolveRunnerFill(
   if (quote.market === 'options') {
     const c = quote.optionContract;
     if (!c || c.verified !== true || !c.source?.trim() || !/^option:[^:]+:.+/.test(c.instrumentId) || c.currency !== 'USD' || !Number.isFinite(c.multiplier) || c.multiplier <= 0 || !Number.isFinite(Date.parse(c.expiresAt)) || Date.parse(c.expiresAt) <= now.getTime()) return { allowed:false,reason:'期权合约身份、币种、乘数或到期信息尚未核验' };
-    const identity = /^option:(?:us|cboe):([A-Z][A-Z0-9.]{0,9}):(\d{4}-\d{2}-\d{2}):(\d+(?:\.\d+)?):([CP])$/.exec(c.instrumentId);
-    const date = identity?.[2], day = date ? Date.parse(date+'T00:00:00Z') : NaN;
-    if (!identity || !Number.isFinite(day) || new Date(day).toISOString().slice(0,10)!==date || Number(identity[3])<=0 || new Date(c.expiresAt).toISOString().slice(0,10)!==date) return { allowed:false,reason:'期权必须是完整合约身份，行权价和到期日必须与来源一致' };
+    if (c.venue === 'deribit' || c.instrumentId.startsWith('option:deribit:')) {
+      const identity = parseDeribitOptionInstrumentName(c.sourceInstrumentName || '');
+      const sourceAt = Date.parse(String(quote.fetchedAt || quote.updatedAt || ''));
+      const retrievedAt = Date.parse(String(c.retrievedAt || ''));
+      const indexPrice = Number(c.indexPrice);
+      const rawBid = Number(c.rawBestBidPrice);
+      const rawAsk = Number(c.rawBestAskPrice);
+      const bidAmount = Number(c.bestBidAmount);
+      const askAmount = Number(c.bestAskAmount);
+      const contractSize = Number(c.contractSize);
+      const minTradeAmount = Number(c.minTradeAmount);
+      const takerCommission = Number(c.takerCommission);
+      const expectedBid = rawBid * indexPrice;
+      const expectedAsk = rawAsk * indexPrice;
+      const bidSize = Math.floor(Number(c.bestBidAmount) / contractSize + 1e-9);
+      const askSize = Math.floor(Number(c.bestAskAmount) / contractSize + 1e-9);
+      if (!identity || c.instrumentId !== `option:deribit:${c.sourceInstrumentName}` || c.multiplier !== 1 || contractSize !== 1
+        || c.instrumentType !== 'reversed' || c.counterCurrency !== 'USD'
+        || c.baseCurrency !== identity.baseCurrency || c.quoteCurrency !== identity.baseCurrency || c.settlementCurrency !== identity.baseCurrency
+        || c.optionType !== identity.optionType || c.strike !== identity.strike
+        || !Number.isFinite(minTradeAmount) || minTradeAmount <= 0 || minTradeAmount > contractSize
+        || Math.abs(contractSize / minTradeAmount - Math.round(contractSize / minTradeAmount)) > 1e-8
+        || !Number.isFinite(takerCommission) || takerCommission <= 0 || takerCommission > 0.01
+        || !Number.isFinite(indexPrice) || indexPrice <= 0 || !Number.isFinite(rawBid) || !Number.isFinite(rawAsk) || rawBid <= 0 || rawAsk < rawBid
+        || !Number.isFinite(bidAmount) || !Number.isFinite(askAmount) || bidAmount < contractSize || askAmount < contractSize
+        || !Number.isFinite(sourceAt) || !Number.isFinite(retrievedAt) || sourceAt > retrievedAt || sourceAt > now.getTime() || retrievedAt > now.getTime()
+        || new Date(c.expiresAt).toISOString().slice(0, 10) !== identity.expiryDate
+        || !Number.isFinite(expectedBid) || !Number.isFinite(expectedAsk)
+        || Math.abs(Number(quote.bestBid) - expectedBid) > Math.max(1e-7, expectedBid * 1e-8)
+        || Math.abs(Number(quote.bestAsk) - expectedAsk) > Math.max(1e-7, expectedAsk * 1e-8)
+        || Math.abs(Number(quote.price) - (expectedBid + expectedAsk) / 2) > Math.max(1e-7, ((expectedBid + expectedAsk) / 2) * 1e-8)
+        || Number(quote.bestBidSize) !== bidSize || Number(quote.bestAskSize) !== askSize) {
+        return { allowed:false,reason:'Deribit 期权合约、币种换算、源时间或盘口证据不一致' };
+      }
+      if (!Number.isSafeInteger(quantity ?? 1) || (quantity ?? 1) <= 0) return { allowed:false,reason:'Deribit 模拟订单仅支持正整数合约数' };
+      const visibleSize = action === 'BUY' ? Number(quote.bestAskSize) : Number(quote.bestBidSize);
+      if (!Number.isFinite(visibleSize) || visibleSize < 1 || (quantity != null && quantity > visibleSize)) {
+        return { allowed:false,reason:`Deribit 顶层可见深度不足（可见 ${visibleSize} 个完整合约）` };
+      }
+    } else {
+      const identity = /^option:(?:us|cboe):([A-Z][A-Z0-9.]{0,9}):(\d{4}-\d{2}-\d{2}):(\d+(?:\.\d+)?):([CP])$/.exec(c.instrumentId);
+      const date = identity?.[2], day = date ? Date.parse(date+'T00:00:00Z') : NaN;
+      if (!identity || !Number.isFinite(day) || new Date(day).toISOString().slice(0,10)!==date || Number(identity[3])<=0 || new Date(c.expiresAt).toISOString().slice(0,10)!==date) return { allowed:false,reason:'期权必须是完整合约身份，行权价和到期日必须与来源一致' };
+    }
   }
   const bestBid = Number(quote.bestBid);
   const bestAsk = Number(quote.bestAsk);
@@ -475,12 +525,19 @@ export function calculateRunnerExecutionCosts(
   action: 'BUY' | 'SELL',
   quantity: number,
 ): { feeUsd: number; slippageUsd: number; spreadUsd: number } {
-  const fill = resolveRunnerFill({ minFreshnessMs: Number.MAX_SAFE_INTEGER }, quote, action, new Date(quote.fetchedAt || quote.updatedAt || Date.now()), quantity);
+  const validationTime = quote.market === 'options' ? quote.optionContract?.retrievedAt : undefined;
+  const fill = resolveRunnerFill({ minFreshnessMs: Number.MAX_SAFE_INTEGER }, quote, action, new Date(validationTime || quote.fetchedAt || quote.updatedAt || Date.now()), quantity);
   if (!fill.allowed || fill.price == null || fill.midpoint == null || !Number.isFinite(quantity) || quantity <= 0) throw new Error(fill.reason || '模拟成本参数无效');
   if (quote.market === 'options' && !Number.isSafeInteger(quantity)) throw new Error('期权合约数量必须为正整数');
   const multiplier = quote.market === 'options' ? quote.optionContract!.multiplier : 1;
   const notional = fill.price * quantity * multiplier;
-  const feeUsd = notional * Math.max(0, Number(policy.feeRateBps) || 0) / 10_000;
+  const optionContract = quote.market === 'options' ? quote.optionContract : undefined;
+  const feeUsd = optionContract?.venue === 'deribit'
+    ? Math.min(
+      Number(optionContract.indexPrice) * Number(optionContract.takerCommission) * Number(optionContract.contractSize) * quantity,
+      notional * 0.125,
+    )
+    : notional * Math.max(0, Number(policy.feeRateBps) || 0) / 10_000;
   const additionalSlippage = notional * Math.max(0, Number(policy.additionalSlippageBps) || 0) / 10_000;
   return {
     feeUsd: Math.round(feeUsd * 1_000_000) / 1_000_000,
@@ -489,6 +546,39 @@ export function calculateRunnerExecutionCosts(
     slippageUsd: Math.round(additionalSlippage * 1_000_000) / 1_000_000,
     spreadUsd: Math.round((Math.abs(quote.bestAsk! - quote.bestBid!) / 2 * quantity * multiplier) * 1_000_000) / 1_000_000,
   };
+}
+
+/** Size only what the visible Deribit ask can fill while keeping premium and actual source fees inside budget. */
+export function sizeDeribitOptionPaperOrder(
+  policy: Pick<AiRunnerPolicy, 'minFreshnessMs' | 'feeRateBps' | 'additionalSlippageBps'>,
+  quote: AiRunnerQuote,
+  budgetUsd: number,
+  now = new Date(),
+): number {
+  if (quote.market !== 'options' || quote.optionContract?.venue !== 'deribit'
+    || !Number.isFinite(budgetUsd) || budgetUsd <= 0) return 0;
+  const fill = resolveRunnerFill(policy, quote, 'BUY', now);
+  if (!fill.allowed || fill.price == null) return 0;
+  const depth = Number(quote.bestAskSize);
+  const maximum = Math.floor(Math.min(budgetUsd / fill.price, depth));
+  if (!Number.isSafeInteger(maximum) || maximum <= 0) return 0;
+
+  // Fee is monotonic with quantity. Binary search avoids a loop proportional to a large book level.
+  let low = 0;
+  let high = maximum;
+  while (low < high) {
+    const quantity = Math.ceil((low + high) / 2);
+    let totalCost = Number.POSITIVE_INFINITY;
+    try {
+      const costs = calculateRunnerExecutionCosts(policy, quote, 'BUY', quantity);
+      totalCost = fill.price * quantity * quote.optionContract.multiplier + costs.feeUsd + costs.slippageUsd;
+    } catch {
+      return 0;
+    }
+    if (Number.isFinite(totalCost) && totalCost <= budgetUsd + 1e-8) low = quantity;
+    else high = quantity - 1;
+  }
+  return low;
 }
 
 export function isAiRunnerCallAllowed(
@@ -665,7 +755,6 @@ export function createAiRunner(
     kind: options.universe?.kind,
     sourceWatchlistId: options.universe?.sourceWatchlistId,
   });
-  if (frozenUniverse.market === 'options') throw new Error('期权缺少满足模拟撮合要求的合约身份与买卖价数据，当前不可启动跑单');
   const primary = frozenUniverse.instruments[0];
   const id = `ar_${randomUUID()}`;
   const accountId = `ai-runner:${id}`;
@@ -903,7 +992,7 @@ export function updateAiRunnerRouting(id: string, patch: { modelSelection: 'fixe
 function toLedgerInstrument(venue: AiRunnerVenue, symbolOrMarketId: string): { instrumentType: UnifiedPaperInstrumentType; instrumentId: string } {
   const symbol = String(symbolOrMarketId || '').trim().toUpperCase();
   if (venue === 'Stocks') return { instrumentType: 'stock', instrumentId: `stock:us:${symbol}` };
-  if (venue === 'Options') return { instrumentType: 'option', instrumentId: `option:us:${symbol}` };
+  if (venue === 'Options') return { instrumentType: 'option', instrumentId: parseDeribitOptionInstrumentName(symbol) ? `option:deribit:${symbol}` : `option:us:${symbol}` };
   if (venue === 'Predict.fun') return { instrumentType: 'prediction', instrumentId: `prediction:predictfun:${symbol}` };
   return { instrumentType: 'crypto', instrumentId: `crypto:binance:${symbol}` };
 }
@@ -933,13 +1022,15 @@ export function runnerOpenPosition(
       if (r.status !== 'RUNNING' || r.executionState === 'legacy-readonly') return;
       if (!Number.isFinite(entryPrice) || !Number.isFinite(quantity) || entryPrice <= 0 || quantity <= 0) return;
       const instrument = resolveRunnerInstrument(r, requestedInstrument);
-      if (!instrument || instrument.venue === 'Options') return;
+      if (!instrument || (instrument.venue === 'Options' && (side !== 'LONG' || costs.quote?.optionContract?.venue !== 'deribit'))) return;
       const ledgerInstrument = toLedgerInstrument(instrument.venue, instrument.symbolOrMarketId);
       if (!costs.quote) return;
+      if (instrument.venue === 'Options' && costs.quote.optionContract?.instrumentId !== ledgerInstrument.instrumentId) return;
       const fill = resolveRunnerFill(r.policy, costs.quote, 'BUY', new Date(), quantity);
       if (!fill.allowed || fill.price !== entryPrice) return;
       const executionCosts = calculateRunnerExecutionCosts(r.policy, costs.quote, 'BUY', quantity);
-      const cost = entryPrice * quantity + executionCosts.feeUsd + executionCosts.slippageUsd;
+      const contractMultiplier = instrument.venue === 'Options' ? costs.quote.optionContract!.multiplier : 1;
+      const cost = entryPrice * quantity * contractMultiplier + executionCosts.feeUsd + executionCosts.slippageUsd;
       if (!evaluateRunnerOpen(r, cost, new Date(), ledgerInstrument.instrumentId).allowed) return;
       const accountId = r.accountId || `ai-runner:${r.id}`;
       const timestamp = new Date().toISOString();
@@ -952,6 +1043,7 @@ export function runnerOpenPosition(
         side: (instrument.venue === 'Predict.fun' ? outcome : 'BUY') as any,
         ...(outcome ? { outcome } : {}),
         price: entryPrice, quantity, timestamp,
+        ...(instrument.venue === 'Options' ? { contractMultiplier } : {}),
         strategy: 'ai-runner', strategyVersion: r.strategyVersion,
         dataSnapshotId: costs.dataSnapshotId,
         signalId: costs.signalId,
@@ -968,6 +1060,7 @@ export function runnerOpenPosition(
         instrument,
         side: (outcome || 'LONG') as AiRunnerPosition['side'],
         entryPrice, currentPrice: entryPrice, quantity,
+        ...(instrument.venue === 'Options' ? { contractMultiplier } : {}),
         entryTime: timestamp,
         markStatus: (costs.quote.dataStatus || costs.quote.status || 'unavailable') as AiRunnerPosition['markStatus'], markSource: costs.source, markUpdatedAt: costs.dataAt || timestamp,
         entryFeeUsd: executionCosts.feeUsd, entrySlippageUsd: executionCosts.slippageUsd,
@@ -992,12 +1085,15 @@ export function runnerClosePosition(id: string, positionId: string, exitPrice: n
       const pos = r.positions.find(p => p.id === positionId && p.status === 'OPEN');
       if (!pos) return;
       const instrument = pos.instrument || r.universe?.instruments.find(item => item.symbolOrMarketId === r.symbolOrMarketId) || { venue: r.venue, symbolOrMarketId: r.symbolOrMarketId, title: r.title };
-      if (instrument.venue === 'Options') return;
+      if (instrument.venue === 'Options' && costs.quote?.optionContract?.venue !== 'deribit') return;
       const ledgerInstrument = toLedgerInstrument(instrument.venue, instrument.symbolOrMarketId);
       if (!costs.quote) return;
+      if (instrument.venue === 'Options' && costs.quote.optionContract?.instrumentId !== ledgerInstrument.instrumentId) return;
       const fill = resolveRunnerFill(r.policy, costs.quote, 'SELL', new Date(), pos.quantity);
       if (!fill.allowed || fill.price !== exitPrice) return;
       const executionCosts = calculateRunnerExecutionCosts(r.policy, costs.quote, 'SELL', pos.quantity);
+      const contractMultiplier = instrument.venue === 'Options' ? costs.quote.optionContract!.multiplier : 1;
+      if (pos.contractMultiplier != null && pos.contractMultiplier !== contractMultiplier) return;
       const timestamp = new Date().toISOString();
       const orderId = `ai-paper:${r.id}:${randomUUID()}`;
       const account = unifiedPaperLedgerStore.applyRunnerOrder(r.accountId || `ai-runner:${r.id}`, r.id, {
@@ -1007,6 +1103,7 @@ export function runnerClosePosition(id: string, positionId: string, exitPrice: n
         side: 'SELL',
         ...(instrument.venue === 'Predict.fun' ? { outcome: pos.side === 'NO' ? 'NO' : 'YES' } : {}),
         price: exitPrice, quantity: pos.quantity, timestamp,
+        ...(instrument.venue === 'Options' ? { contractMultiplier } : {}),
         strategy: 'ai-runner', strategyVersion: r.strategyVersion,
         feeUsd: executionCosts.feeUsd,
         slippageUsd: executionCosts.slippageUsd,
@@ -1015,8 +1112,8 @@ export function runnerClosePosition(id: string, positionId: string, exitPrice: n
         signalId: costs.signalId,
         reason: reasonZh,
       }, r.budgetUsd);
-      const proceeds = pos.quantity * exitPrice;
-      const grossPnl = (exitPrice - pos.entryPrice) * pos.quantity;
+      const proceeds = pos.quantity * exitPrice * contractMultiplier;
+      const grossPnl = (exitPrice - pos.entryPrice) * pos.quantity * contractMultiplier;
       pnl = parseFloat(grossPnl.toFixed(4));
       pos.exitPrice = exitPrice;
       pos.exitTime = timestamp;
