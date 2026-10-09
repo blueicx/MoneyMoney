@@ -19,6 +19,15 @@ export interface AiRunnerModelSnapshot {
   reason?: string;
 }
 
+function unwrapSingleJsonFence(content: unknown): unknown {
+  if (typeof content !== 'string') return content;
+  const text = content.trim();
+  const whole = text.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
+  if (whole) return whole[1].trim();
+  const blocks = [...text.matchAll(/```(?:json)?\s*([\s\S]*?)```/gi)];
+  return blocks.length === 1 ? blocks[0][1].trim() : content;
+}
+
 export async function requestAiRunnerIntent(
   runner: Pick<AiRunner, 'model' | 'universe' | 'comparisonControl' | 'modelSelection'>,
   runtime: AiRuntimeConfig,
@@ -92,7 +101,7 @@ export async function requestAiRunnerIntent(
     if (!response.ok) return { ok: false, reason: `AI 接口返回 HTTP ${response.status}`, model };
     const payload = await response.json() as { model?: string; choices?: Array<{ message?: { content?: unknown } }> };
     const content = payload.choices?.[0]?.message?.content;
-    const validated = validateAiRunnerModelIntent(content, runner);
+    const validated = validateAiRunnerModelIntent(unwrapSingleJsonFence(content), runner);
     if (!validated.ok) return { ok: false, reason: validated.reason, model };
     if (validated.intent.market && validated.intent.market !== runner.universe?.market) return { ok: false, reason: 'AI 意图市场与冻结范围不一致', model };
     return { ok: true, intent: validated.intent, model: String(payload.model || model).slice(0, 160) };

@@ -20,6 +20,27 @@ test('AI runner model request uses one configured model and validates a bounded 
   assert.equal(request.body.max_tokens <= 1000, true);
 });
 
+test('AI runner accepts one fenced JSON object without relaxing the intent schema', async () => {
+  const fenced = 'The decision is below:\n```json\n' + JSON.stringify(body) + '\n```';
+  const result = await requestAiRunnerIntent(runner, runtime, [], async () => ({
+    ok: true,
+    json: async () => ({ choices: [{ message: { content: fenced } }] }),
+  }));
+  assert.equal(result.ok, true);
+  assert.equal(result.intent.instrument, 'AAPL');
+  assert.equal(result.intent.action, 'HOLD');
+});
+
+test('AI runner still rejects multiple fenced JSON objects as ambiguous', async () => {
+  const ambiguous = '```json\n' + JSON.stringify(body) + '\n```\n```json\n' + JSON.stringify(body) + '\n```';
+  const result = await requestAiRunnerIntent(runner, runtime, [], async () => ({
+    ok: true,
+    json: async () => ({ choices: [{ message: { content: ambiguous } }] }),
+  }));
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'AI 意图格式无效');
+});
+
 test('AI runner model request fails closed on missing configuration, timeout, HTTP errors, and invalid intent', async () => {
   assert.equal((await requestAiRunnerIntent(runner, { ...runtime, configured: false }, [], async () => { throw new Error('must not call'); })).reason, '未配置 OpenRouter，AI 跑单不可用');
   assert.equal((await requestAiRunnerIntent(runner, runtime, [], async () => { throw new Error('private network detail'); })).reason, 'AI 请求失败或超时');
