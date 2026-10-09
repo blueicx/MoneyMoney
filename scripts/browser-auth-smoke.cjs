@@ -103,6 +103,16 @@ async function main() {
     assert.equal(guestRunnerList.body.code, 'GUEST_READ_ONLY');
     assert.equal(await page.evaluate(()=>fetch('/api/ai-runners/comparisons/budget').then(r=>r.status)),403,'comparison quota remains private');
     assert.equal(await page.evaluate(()=>fetch('/api/paper/chart-markers?market=stocks&instrument=usAAPL').then(r=>r.status)),403,'paper markers and account lineage remain private');
+    const guestPaperReads = await page.evaluate(async () => Promise.all([
+      '/api/paper/ledger',
+      '/api/paper/positions',
+      '/api/paper/performance',
+      '/api/paper/orders/private-smoke-id',
+      '/api/paper/execution-evidence?market=stocks&instrument=stock%3Aus%3AAAPL&accountId=private&orderId=private&signalId=private&snapshotId=private',
+    ].map(async url => ({ url, status: (await fetch(url)).status }))));
+    assert.deepEqual(guestPaperReads.map(item => item.status), [403, 403, 403, 403, 403], JSON.stringify(guestPaperReads));
+    const guestPaperWrite = await page.evaluate(() => fetch('/api/paper/orders', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: 'guest-private-smoke-id' }) }).then(response => response.status));
+    assert.equal(guestPaperWrite, 403, 'guests must not create or mutate private paper orders');
     assert.equal(await page.locator('[data-paper-chart-layer]').count(),0,'guest cannot see private paper chart controls');
     assert.equal(await page.evaluate(()=>fetch('/api/ai-runners/comparisons/automatic').then(r=>r.status)),403,'automatic groups and scheduling history remain private');
     const guestRunnerHistory = await page.evaluate(() => fetch('/api/ai-runners/private-runner/history').then(async response => ({ status: response.status, body: await response.json() })));

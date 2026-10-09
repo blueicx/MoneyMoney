@@ -49,7 +49,9 @@ test('guest access only permits explicit read-only GET paths', () => {
 test('guest can read the stock library and search but cannot read private paper state', () => {
   assert.equal(auth.isGuestRequestAllowed('GET', '/watchlist'), false, 'the global personal watchlist is private');
   assert.equal(auth.isGuestRequestAllowed('GET', '/workspace/watchlist'), true, 'the scoped workspace endpoint returns an empty private group to guests');
-  assert.equal(auth.isGuestRequestAllowed('GET', '/paper/positions'), false);
+  for (const endpoint of ['/paper/ledger', '/paper/positions', '/paper/performance', '/paper/orders/private-id', '/paper/execution-evidence', '/paper/chart-markers']) {
+    assert.equal(auth.isGuestRequestAllowed('GET', endpoint), false, `${endpoint} contains private paper account data`);
+  }
   assert.equal(auth.isGuestRequestAllowed('GET', '/stock/search'), true);
   assert.equal(auth.isGuestRequestAllowed('POST', '/watchlist'), false);
 });
