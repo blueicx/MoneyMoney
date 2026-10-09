@@ -61,6 +61,7 @@ import { newsFeed, settingsManager } from '../features/news-settings';
 import { getStockNews, getStockNewsSnapshot } from '../features/stock-news';
 import { reportScheduler } from '../features/report-scheduler';
 import { binanceFeed, alertManager, anomalyDetector } from '../features/binance';
+import { fetchRunnerBinanceKlines } from '../features/runner-binance-kline';
 import { llmAnalyzer, redditSentiment, whaleMonitor, strategyComparison, tradeJournal } from '../features/ai-social';
 import { binancePortfolio } from '../features/binance-portfolio';
 import { getEquityOptionsSnapshot, getOptionsSnapshot } from '../features/options-market';
@@ -8851,11 +8852,7 @@ function getRunnerKlineAdapter(symbol: string): ResilientDataSourceAdapter<unkno
       ttlMs: 60_000,
       timeoutMs: 8_000,
       retries: 2,
-      fetcher: async (_input, signal) => {
-        const response = await fetch(`https://api.binance.com/api/v3/klines?symbol=${key}&interval=1h&limit=20`, { signal });
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        return await response.json() as unknown[][];
-      },
+      fetcher: async (_input, signal) => fetchRunnerBinanceKlines(key, signal),
     });
     runnerKlineAdapters.set(key, adapter);
   }
