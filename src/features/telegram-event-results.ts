@@ -296,8 +296,121 @@ export function parseBeaGdpResult(scheduleHtml: string, releaseHtml: string, eve
   };
 }
 
+interface BeaPioReleaseLink { title: string; url: string; reportMonth: string; reportYear: string; }
+const BEA_PIO_EVENT_TITLES = new Set([
+  'core pce price index m/m', 'core pce price index y/y',
+  'pce price index m/m', 'pce price index y/y',
+  'personal income m/m', 'personal spending m/m',
+]);
+
+function findBeaPioRelease(scheduleHtml: string, event: Pick<EventRecord, 'title' | 'date' | 'country'>): BeaPioReleaseLink | Result {
+  const source = 'U.S. Bureau of Economic Analysis (BEA)';
+  const unavailable = (reason: string, status = 'unavailable'): Result => ({ actual: null, status, source, reason });
+  if (event.country !== 'USD' || !BEA_PIO_EVENT_TITLES.has(event.title.trim().toLowerCase())) return unavailable('仅支持美元 BEA 个人收入与支出及 PCE 指标', 'unsupported');
+  const parts = eventEasternParts(event.date);
+  if (!parts || parts.hour !== '08' || parts.minute !== '30') return unavailable('事件时间与 BEA 官方 8:30 a.m. 东部时间发布时刻不一致');
+  const monthDay = `${parts.month} ${Number(parts.day)}`;
+  const rows = [...scheduleHtml.matchAll(/<tr\b[^>]*>([\s\S]*?)<\/tr>/gi)].flatMap(match => {
+    const row = match[1];
+    const date = row.match(/class=["'][^"']*\brelease-date\b[^"']*["'][^>]*>([^<]+)</i)?.[1]?.trim();
+    const time = row.match(/<small\b[^>]*>([^<]+)</i)?.[1]?.trim();
+    const titleHtml = row.match(/<td\b[^>]*class=["'][^"']*\brelease-title\b[^"']*["'][^>]*>([\s\S]*?)<\/td>/i)?.[1];
+    const title = titleHtml ? beaHtmlText(titleHtml) : '';
+    const report = title.match(/^Personal Income and Outlays,\s+([A-Z][a-z]+)\s+(\d{4})$/);
+    if (date !== monthDay || !report || report[2] !== parts.year) return [];
+    const href = row.match(/<a\b[^>]*href=["']([^"']+)["'][^>]*>/i)?.[1];
+    return [{ title, reportMonth: report[1], reportYear: report[2], time, href }];
+  });
+  if (!rows.length) return unavailable('BEA 官方发布日程尚无该日期、报告月份可匹配的个人收入与支出发布', 'pending');
+  if (rows.length !== 1) return unavailable('BEA 官方日程在该日期有多个个人收入与支出条目，无法唯一匹配', 'unsupported');
+  const row = rows[0];
+  if (!/^8:30\s*AM$/i.test(row.time || '')) return unavailable('BEA 官方日程发布时间不是 8:30 a.m.，拒绝按日期猜测', 'unsupported');
+  if (!row.href) return unavailable('BEA 官方个人收入与支出原文尚未发布，继续等待', 'pending');
+  try {
+    const url = new URL(row.href, 'https://www.bea.gov');
+    if (url.protocol !== 'https:' || url.hostname !== 'www.bea.gov' || url.username || url.password || url.port || !new RegExp(`^/news/${row.reportYear}/[a-z0-9-]+$`, 'i').test(url.pathname)) return unavailable('BEA 日程中的个人收入与支出原文链接不符合官方页面格式', 'unsupported');
+    return { title: row.title, url: url.toString(), reportMonth: row.reportMonth, reportYear: row.reportYear };
+  } catch { return unavailable('BEA 日程中的个人收入与支出原文链接无效', 'unsupported'); }
+}
+
+function signedBeaPercent(direction: string, value: string): string | null {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric < 0) return null;
+  return `${/decreased|fell/i.test(direction) && numeric !== 0 ? '-' : ''}${value}%`;
+}
+
+/** Parse only the matching BEA Personal Income and Outlays release vintage. */
+export function parseBeaPceResult(scheduleHtml: string, releaseHtml: string, event: Pick<EventRecord, 'title' | 'date' | 'country'>, retrievedAt = new Date().toISOString()): Result {
+  const source = 'U.S. Bureau of Economic Analysis (BEA)';
+  const unavailable = (reason: string, status = 'unavailable', url?: string): Result => ({ actual: null, status, source, reason, ...(url ? { url } : {}) });
+  const link = findBeaPioRelease(scheduleHtml, event);
+  if ('actual' in link) return link;
+  const parts = eventEasternParts(event.date), eventAt = Date.parse(event.date), retrieved = Date.parse(retrievedAt);
+  if (!parts || !Number.isFinite(eventAt) || !Number.isFinite(retrieved) || retrieved < eventAt) return unavailable('事件发布时间或来源抓取时间尚不能核验', 'pending', link.url);
+  const text = beaHtmlText(releaseHtml);
+  const embargo = text.match(/EMBARGOED\s+UNTIL\s+RELEASE\s+AT\s+8:30\s*a\.m\.\s+(?:EDT|EST),\s*\w+,\s*([A-Z][a-z]+\s+\d{1,2},\s+\d{4})/i);
+  const eventDay = Date.UTC(Number(parts.year), new Date(`${parts.month} 1, ${parts.year} UTC`).getUTCMonth(), Number(parts.day));
+  if (!embargo || Date.parse(`${embargo[1]} UTC`) !== eventDay) return unavailable('BEA 原文解禁日期与该事件日期不一致', 'unavailable', link.url);
+  const heading = releaseHtml.match(/<h1\b[^>]*>([\s\S]*?)<\/h1>/i)?.[1];
+  const title = heading ? beaHtmlText(heading) : '';
+  if (title !== link.title || !title.includes(`${link.reportMonth} ${link.reportYear}`)) return unavailable('BEA 原文标题或报告月份与官方日程不一致', 'unavailable', link.url);
+
+  const month = link.reportMonth.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const indicator = event.title.trim().toLowerCase();
+  let value: string | null = null;
+  let seriesReason = '';
+  if (indicator === 'pce price index m/m' || indicator === 'core pce price index m/m') {
+    const match = text.match(new RegExp(`From the preceding month, the PCE price index for ${month} (increased|decreased|rose|fell) ([\\d.]+) percent\\.\\s*Excluding food and energy, the PCE price index (increased|decreased|rose|fell) ([\\d.]+) percent\\b`, 'i'));
+    if (match) value = signedBeaPercent(indicator.startsWith('core ') ? match[3] : match[1], indicator.startsWith('core ') ? match[4] : match[2]);
+    seriesReason = indicator.startsWith('core ') ? '核心 PCE（月率）' : '总 PCE（月率）';
+  } else if (indicator === 'pce price index y/y' || indicator === 'core pce price index y/y') {
+    const match = text.match(new RegExp(`From the same month one year ago, the PCE price index for ${month} (increased|decreased|rose|fell) ([\\d.]+) percent\\.\\s*Excluding food and energy, the PCE price index (increased|decreased|rose|fell) ([\\d.]+) percent from one year ago\\b`, 'i'));
+    if (match) value = signedBeaPercent(indicator.startsWith('core ') ? match[3] : match[1], indicator.startsWith('core ') ? match[4] : match[2]);
+    seriesReason = indicator.startsWith('core ') ? '核心 PCE（同比）' : '总 PCE（同比）';
+  } else if (indicator === 'personal income m/m') {
+    const match = text.match(new RegExp(`Personal income (increased|decreased|rose|fell) \\$[\\d,.]+ billion \\(([\\d.]+) percent at a monthly rate\\) in ${month}\\b`, 'i'));
+    if (match) value = signedBeaPercent(match[1], match[2]);
+    seriesReason = '个人收入（月率）';
+  } else if (indicator === 'personal spending m/m') {
+    const summary = text.match(/Personal income\b[\s\S]{0,500}?personal consumption expenditures \(PCE\) (increased|decreased|rose|fell) \$[\d,.]+ billion \(([\d.]+) percent\)/i);
+    if (summary && text.includes(`Personal Income and Outlays, ${link.reportMonth} ${link.reportYear}`)) value = signedBeaPercent(summary[1], summary[2]);
+    seriesReason = '个人支出按 BEA 当前美元 PCE 月率口径';
+  }
+  if (value === null) return unavailable(`BEA 原文没有可唯一匹配的${seriesReason || '指定指标'}实际值；不以其他系列或修订序列代替`, 'pending', link.url);
+  return {
+    actual: value, status: 'published', source, url: link.url,
+    publishedAt: new Date(eventAt).toISOString(), retrievedAt: new Date(retrieved).toISOString(),
+    reason: `取自与事件日期、报告月份一致的 BEA 原始新闻稿（${seriesReason}）；保留本次发布版本，不用后续修订值替代。`,
+    evidenceRefs: [link.url, link.title, `${link.reportMonth} ${link.reportYear}`],
+  };
+}
+
 const officialCache = new Map<string, { at: number; html: string }>();
 export async function lookupOfficialEventResult(event: EventRecord): Promise<Result> {
+  const beaPioEvent = BEA_PIO_EVENT_TITLES.has(event.title.trim().toLowerCase());
+  if (beaPioEvent) {
+    if (event.country !== 'USD') return { actual: null, status: 'unsupported', source: 'U.S. Bureau of Economic Analysis (BEA)', reason: 'BEA 美国发布结果只匹配 USD 事件' };
+    const parts = eventEasternParts(event.date);
+    if (!parts) return { actual: null, status: 'unavailable', source: 'U.S. Bureau of Economic Analysis (BEA)', reason: 'PCE 事件日期无效，无法匹配 BEA 发布日程' };
+    try {
+      const scheduleUrl = `https://www.bea.gov/news/schedule/full?year=${encodeURIComponent(parts.year)}`;
+      let schedule = officialCache.get(scheduleUrl);
+      if (!schedule || Date.now() - schedule.at > 300000) {
+        const response = await fetch(scheduleUrl, { signal: AbortSignal.timeout(8000), headers: { 'User-Agent': 'MoneyMoney research contact via website' } });
+        if (!response.ok) return { actual: null, status: 'unavailable', source: 'U.S. Bureau of Economic Analysis (BEA)', reason: `BEA 官方日程不可用（HTTP ${response.status}）`, url: scheduleUrl };
+        schedule = { at: Date.now(), html: await response.text() }; officialCache.set(scheduleUrl, schedule);
+      }
+      const release = findBeaPioRelease(schedule.html, event);
+      if ('actual' in release) return release;
+      let page = officialCache.get(release.url);
+      if (!page || Date.now() - page.at > 300000) {
+        const response = await fetch(release.url, { signal: AbortSignal.timeout(8000), headers: { 'User-Agent': 'MoneyMoney research contact via website' } });
+        if (!response.ok) return { actual: null, status: 'unavailable', source: 'U.S. Bureau of Economic Analysis (BEA)', reason: `BEA 官方个人收入与支出原文不可用（HTTP ${response.status}）`, url: release.url };
+        page = { at: Date.now(), html: await response.text() }; officialCache.set(release.url, page);
+      }
+      return parseBeaPceResult(schedule.html, page.html, event, new Date(Math.max(schedule.at, page.at)).toISOString());
+    } catch { return { actual: null, status: 'unavailable', source: 'U.S. Bureau of Economic Analysis (BEA)', reason: 'BEA 官方日程或个人收入与支出原文请求失败，稍后重试' }; }
+  }
   const beaGdpEvent = /^(?:GDP\s+q\/q(?:\s+(?:advance|second|third|final))?|GDP|Gross Domestic Product)$/i.test(event.title.trim());
   if (beaGdpEvent && event.country === 'USD') {
     const parts = eventEasternParts(event.date);

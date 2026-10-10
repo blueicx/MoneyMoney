@@ -104,6 +104,33 @@ test('BEA GDP actuals require the scheduled release date, exact quarter and esti
  const winterRelease=release.replace('2nd Quarter 2026','4th Quarter 2025').replace('Thursday, July 30, 2026','Friday, January 30, 2026').replace('second quarter of 2026','fourth quarter of 2025');
  assert.equal(parseBeaGdpResult(winterSchedule,winterRelease,winterEvent,'2026-01-30T13:35:00.000Z').status,'published','8:30 a.m. ET must account for standard time as well as daylight time');
 });
+test('BEA PCE results match the exact indicator, report month, official date, and release vintage',()=>{
+ const {parseBeaPceResult}=require('../src/features/telegram-event-results');
+ const event={title:'Core PCE Price Index m/m',date:'2026-09-30T12:30:00.000Z',country:'USD'};
+ const schedule='<tr><td class="scheduled-date"><div class="release-date">September 30</div><small>8:30 AM</small></td><td class="release-title">Personal Income and Outlays, August 2026</td><td><a href="/news/2026/personal-income-and-outlays-august-2026">View</a></td></tr>';
+ const release='<h1>Personal Income and Outlays, August 2026</h1><p>EMBARGOED UNTIL RELEASE AT 8:30 a.m. EDT, Wednesday, September 30, 2026</p><p>Personal income increased $66.6 billion (0.2 percent at a monthly rate) in August, according to estimates released today by the U.S. Bureau of Economic Analysis (BEA). Disposable personal income increased $68.6 billion (0.3 percent), and personal consumption expenditures (PCE) increased $190.8 billion (0.9 percent).</p><p>From the preceding month, the PCE price index for August increased 0.3 percent. Excluding food and energy, the PCE price index increased 0.2 percent.</p><p>From the same month one year ago, the PCE price index for August increased 3.4 percent. Excluding food and energy, the PCE price index increased 3.0 percent from one year ago.</p>';
+ const retrievedAt='2026-09-30T12:35:00.000Z';
+ for(const [title,expected] of [['PCE Price Index m/m','0.3%'],['Core PCE Price Index m/m','0.2%'],['PCE Price Index y/y','3.4%'],['Core PCE Price Index y/y','3.0%'],['Personal Income m/m','0.2%'],['Personal Spending m/m','0.9%']]){
+  const result=parseBeaPceResult(schedule,release,{...event,title},retrievedAt);
+  assert.equal(result.status,'published',title);assert.equal(result.actual,expected,title);assert.equal(result.publishedAt,event.date,title);assert.equal(result.retrievedAt,retrievedAt,title);assert.equal(result.url,'https://www.bea.gov/news/2026/personal-income-and-outlays-august-2026',title);
+ }
+ assert.notEqual(parseBeaPceResult(schedule,release,{...event,date:'2026-10-01T12:30:00.000Z'},retrievedAt).status,'published','a neighboring event date cannot borrow the result');
+ assert.notEqual(parseBeaPceResult(schedule,release,{...event,title:'Core PCE Price Index m/m',country:'EUR'},retrievedAt).status,'published','a non-USD event cannot borrow a US result');
+ assert.notEqual(parseBeaPceResult(schedule,release.replace('August 2026','July 2026'),event,retrievedAt).status,'published','a different report month cannot be substituted');
+ assert.notEqual(parseBeaPceResult(schedule,release,event,'2026-09-30T12:29:59.000Z').status,'published','a pre-release fetch cannot publish an actual');
+ assert.notEqual(parseBeaPceResult(schedule+schedule,release,event,retrievedAt).status,'published','ambiguous schedule entries must fail closed');
+ assert.notEqual(parseBeaPceResult(schedule,release.replace('Excluding food and energy, the PCE price index increased 0.2 percent.',''),event,retrievedAt).status,'published','missing core series cannot be replaced with headline PCE');
+});
+test('BEA PCE resolver fetches only the scheduled official release page',async()=>{
+ const {lookupOfficialEventResult}=require('../src/features/telegram-event-results');
+ const event={title:'Core PCE Price Index y/y',date:'2025-10-31T12:30:00.000Z',country:'USD'},calls=[];
+ const schedule='<tr><td class="scheduled-date"><div class="release-date">October 31</div><small>8:30 AM</small></td><td class="release-title">Personal Income and Outlays, September 2025</td><td><a href="/news/2025/personal-income-and-outlays-september-2025">View</a></td></tr>';
+ const release='<h1>Personal Income and Outlays, September 2025</h1><p>EMBARGOED UNTIL RELEASE AT 8:30 a.m. EDT, Friday, October 31, 2025</p><p>Personal income increased $10 billion (0.1 percent at a monthly rate) in September, according to estimates released today by the U.S. Bureau of Economic Analysis (BEA). Disposable personal income increased $8 billion (0.1 percent), and personal consumption expenditures (PCE) increased $9 billion (0.1 percent).</p><p>From the same month one year ago, the PCE price index for September increased 2.8 percent. Excluding food and energy, the PCE price index increased 2.9 percent from one year ago.</p>';
+ const previousFetch=global.fetch;
+ global.fetch=async input=>{const url=String(input);calls.push(url);if(url==='https://www.bea.gov/news/schedule/full?year=2025')return{ok:true,status:200,text:async()=>schedule};if(url==='https://www.bea.gov/news/2025/personal-income-and-outlays-september-2025')return{ok:true,status:200,text:async()=>release};throw new Error('unexpected external request '+url);};
+ try{const result=await lookupOfficialEventResult(event);assert.equal(result.status,'published');assert.equal(result.actual,'2.9%');assert.equal(result.source,'U.S. Bureau of Economic Analysis (BEA)');assert.equal(result.url,'https://www.bea.gov/news/2025/personal-income-and-outlays-september-2025');assert.deepEqual(calls,['https://www.bea.gov/news/schedule/full?year=2025','https://www.bea.gov/news/2025/personal-income-and-outlays-september-2025']);assert.ok(Number.isFinite(Date.parse(result.retrievedAt)));}
+ finally{global.fetch=previousFetch;}
+});
 test('BEA GDP resolver fetches the official year schedule and same-day release page',async()=>{
  const {lookupOfficialEventResult}=require('../src/features/telegram-event-results');
  const event={title:'GDP q/q',date:'2026-07-30T12:30:00.000Z',country:'USD'},calls=[];

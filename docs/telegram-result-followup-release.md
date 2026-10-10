@@ -15,7 +15,7 @@
 
 ## 明确未完成的覆盖
 
-免费周日历没有实际值字段，财报日历当前也没有实际值。GDP、财报和未接入结果适配器的其他事件仍显示结果来源不可用，不假称获取结果。BLS 被拒绝访问时同样明确说明。
+免费周日历没有结构化实际值字段。结果追踪不能把该日历中的预期、前值或网页当前序列当成实际值；只使用独立核验的来源适配器。BLS 被拒绝访问或官方原文无法匹配时会明确说明，不假称获取结果。
 
 九项扩充还需要后续批次：图片周期/日期按钮与形态标注、完整会话式组合提醒、可配置盘前/盘后摘要、单独机构订阅、任务文件直接传输、投递人工重试/ACK，以及逐命令真实 Telegram 交互验收。本批不能替代上述全部完成。
 
@@ -36,3 +36,11 @@
 - dist 包 SHA-256：`c06dcbde7f5542a54b0424f3906877a01220b012acb9b47623ccffedf78e3b4a`；server SHA-256：`85a1421abae03514aa8359a00c2b2d759ef077ff3585e0396cb8e11db315b268`；index SHA-256：`d29dfd84c352c0244a55b27bfbbca1b270a99cc233df980785bc2c855398baff`。
 - VPS 备份：`/opt/moneymoney/backups/dist-pre-telegram-result-d6863c6-20261009-0137`；回滚目录：`/opt/moneymoney/dist.rollback-telegram-result-d6863c6-20261009-0137`；`moneymoney.service` active，正式域名版本与构建提交一致。
 - 该 VPS 未安装 `/opt/moneymoney/scripts/deploy-vps-dist.sh`；发布时通过 SSH 上传版本唯一的 `/tmp/deploy-vps-dist-telegram-result-d6863c6-20261009-0137.sh`，核对脚本 Hash 后执行 CRLF 规范化的 stdin 脚本。以后部署前仍应检查安装状态，不覆盖远端临时文件。
+
+## 2026-10-11 BEA PCE 结果适配
+
+- 官方宏观适配器在已支持的 BEA GDP 之外，增加 BEA《Personal Income and Outlays》结果：`PCE Price Index m/m`、`PCE Price Index y/y`、对应的 `Core PCE` 两个周期、`Personal Income m/m` 和 `Personal Spending m/m`。
+- 只接受 USD 事件，且必须在 BEA 官方年度日程中唯一匹配同一东部日期、8:30 a.m. 发布时刻、单一报告月份与原文链接；原文标题、解禁日期和发布抓取时间也必须匹配。未匹配、缺行、歧义或来源失败均不发布实际值。
+- PCE 核心/总值分别从同一条官方新闻稿的月率或同比句子解析；“个人支出”对应原文中的当前美元 PCE 月率。输出保留 BEA 本次发布的值、发布时间、抓取时间和原文证据链接，不用后续修订序列补值。
+- 官方依据：[BEA 2026 发布日程](https://www.bea.gov/news/schedule/full?year=2026)、[BEA Personal Income and Outlays, August 2026](https://www.bea.gov/news/2026/personal-income-and-outlays-august-2026)、[BEA 核心 PCE 指标说明](https://www.bea.gov/data/personal-consumption-expenditures-price-index-excluding-food-and-energy)。BEA 说明 PCE 指数随月度 Personal Income and Outlays 报告发布；2026 年 8 月原文列出 PCE 与核心 PCE 的月率和同比。
+- 自动化验收：6 个精确标题、事件日期/报告月份/国家/抓取时间校验、同日重复日程、缺少核心序列和官方解析路由；不发送 Telegram 实际消息，不调用模型或创建交易。
