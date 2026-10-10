@@ -99,11 +99,12 @@ async function main() {
     assert.equal(preserved, 108, 'a delayed REST response must not overwrite newer stream data');
     await page.locator('#crypto-chart-card').locator('button', { hasText: '暂停自动更新' }).click();
     await page.waitForFunction(() => document.getElementById('mm-live-status-crypto')?.textContent.includes('自动更新已关闭'));
+    await page.evaluate(async () => { await new Promise(requestAnimationFrame); await new Promise(requestAnimationFrame); });
     const performance = await page.evaluate(async () => {
       const host=document.querySelector('#crypto-chart-card .mm-trading-chart'),readout=host.querySelector('.mm-trading-readout');
-      let mutations=0,paints=0;const observer=new MutationObserver(list=>mutations+=list.length);observer.observe(readout,{childList:true,subtree:true,characterData:true});
-      const original=CanvasRenderingContext2D.prototype.stroke;CanvasRenderingContext2D.prototype.stroke=function(...args){if(this.canvas.classList.contains('mm-trading-crosshair'))paints++;return original.apply(this,args);};
-      await new Promise(resolve=>setTimeout(resolve,1200));const timerMutations=mutations,timerPaints=paints;
+      let mutations=0,paints=0,phase='timer';const timerPaintStacks=[];const observer=new MutationObserver(list=>mutations+=list.length);observer.observe(readout,{childList:true,subtree:true,characterData:true});
+      const original=CanvasRenderingContext2D.prototype.stroke;CanvasRenderingContext2D.prototype.stroke=function(...args){if(this.canvas.classList.contains('mm-trading-crosshair')){paints++;if(phase==='timer')timerPaintStacks.push(new Error().stack);}return original.apply(this,args);};
+      await new Promise(resolve=>setTimeout(resolve,1200));const timerMutations=mutations,timerPaints=paints;phase='pointer';
       const layer=host.querySelector('.mm-trading-crosshair'),box=layer.getBoundingClientRect();
       for(let n=0;n<30;n++)layer.dispatchEvent(new PointerEvent('pointermove',{clientX:box.left+100+n,clientY:box.top+100,pointerId:1}));
       await new Promise(requestAnimationFrame);await new Promise(requestAnimationFrame);const pointerPaints=paints-timerPaints;
@@ -111,8 +112,9 @@ async function main() {
       MoneyTradingChart.redraw(document.getElementById('bn-candlestick'));layer.dispatchEvent(new PointerEvent('pointermove',{clientX:box.left+140,clientY:box.top+120,pointerId:1}));
       await new Promise(resolve=>setTimeout(resolve,1200));const hiddenPaints=paints-before;
       delete document.hidden;observer.disconnect();CanvasRenderingContext2D.prototype.stroke=original;
-      return {timerMutations,timerPaints,pointerPaints,hiddenPaints};
+      return {timerMutations,timerPaints,timerPaintStacks,pointerPaints,hiddenPaints};
     });
+    if(performance.timerPaints)console.error('live-kline timer redraw diagnostic: '+JSON.stringify({timerPaints:performance.timerPaints,stacks:performance.timerPaintStacks}));
     assert.equal(performance.timerMutations,0,'countdown must not rebuild OHLC/MA DOM');assert.equal(performance.timerPaints,0,'countdown must not redraw canvas');assert.ok(performance.pointerPaints<=2,'pointer burst must coalesce into one frame');assert.equal(performance.hiddenPaints,0,'hidden document must not draw');
     await page.locator('#crypto-chart-card').locator('button', { hasText: '开启自动更新' }).click();
     const gestures=await page.evaluate(async()=>{
