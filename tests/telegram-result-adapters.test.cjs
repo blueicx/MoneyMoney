@@ -45,12 +45,22 @@ test('prediction result uses a valid determination time when settlement time pre
 
 test('earnings events preserve stock identity and report-period evidence when mapped for result tracking',async()=>{
  const {toTrackedCalendarEvent,lookupTrackedResult}=moduleUnderTest();
- const tracked=toTrackedCalendarEvent({id:'earnings-2026-07-29-AAPL',title:'AAPL 财报',category:'earnings',date:'2026-07-29T20:00:00.000Z',country:'US',forecast:'1.20',previous:'1.10',actual:null,source:'Nasdaq Public Calendar',symbol:'AAPL',reportPeriodEnd:'2026-06-30'});
+ const tracked=toTrackedCalendarEvent({id:'earnings-2026-07-29-AAPL',title:'AAPL 财报',category:'earnings',date:'2026-07-29T20:00:00.000Z',country:'US',forecast:'1.20',previous:'1.10',actual:null,source:'Nasdaq Public Calendar',retrievedAt:'2026-07-29T13:00:00.000Z',symbol:'AAPL',reportPeriodEnd:'2026-06-30'});
  assert.equal(tracked.kind,'earnings');assert.equal(tracked.market,'stocks');assert.equal(tracked.instrument,'stock:us:AAPL');assert.equal(tracked.reportPeriodEnd,'2026-06-30');
+ assert.equal(tracked.retrievedAt,'2026-07-29T13:00:00.000Z');
  const ports={secEarnings:async(symbol,periodEnd,eventDate)=>({symbol,reportPeriodEnd:periodEnd,acceptedAt:'2026-08-01T17:30:00.000Z',form:'10-Q',accessionNumber:'0000320193-26-000081',epsUsdPerShare:1.234,revenueUsd:85000000000,sourceUrl:'https://www.sec.gov/Archives/edgar/data/320193/000032019326000081/aapl-20260630.htm'})};
  const result=await lookupTrackedResult(tracked,ports);assert.equal(result.status,'published');assert.equal(result.publishedAt,'2026-08-01T17:30:00.000Z');assert.match(result.actual,/GAAP EPS/);assert.match(result.actual,/85,000,000,000/);assert.match(result.reason,/口径/);
  ports.secEarnings=async()=>({symbol:'MSFT',reportPeriodEnd:'2026-06-30',acceptedAt:'2026-08-01T17:30:00.000Z',form:'10-Q',accessionNumber:'x',epsUsdPerShare:1,revenueUsd:2,sourceUrl:'https://www.sec.gov/'});
  assert.equal((await lookupTrackedResult(tracked,ports)).status,'unsupported');
+});
+
+test('SEC 8-K earnings release is accepted only with the same tracked stock, report period, and filing evidence',async()=>{
+ const {lookupTrackedResult}=moduleUnderTest();
+ const event={kind:'earnings',market:'stocks',instrument:'stock:us:AAPL',symbol:'AAPL',reportPeriodEnd:'2026-06-30',title:'AAPL earnings',date:'2026-08-01T16:00:00.000Z'};
+ const filing={symbol:'AAPL',reportPeriodEnd:'2026-06-30',acceptedAt:'2026-08-01T17:30:00.000Z',form:'8-K',accessionNumber:'0000320193-26-000111',epsUsdPerShare:1.45,revenueUsd:91000000000,sourceUrl:'https://www.sec.gov/Archives/edgar/data/320193/000032019326000111/aapl-earnings-release.htm'};
+ assert.equal((await lookupTrackedResult(event,{secEarnings:async()=>filing})).status,'published');
+ assert.match((await lookupTrackedResult(event,{secEarnings:async()=>filing})).source,/8-K/);
+ assert.equal((await lookupTrackedResult(event,{secEarnings:async()=>({...filing,form:'8-K/A',accessionNumber:'bad'})})).status,'unsupported');
 });
 
 test('event result command provides per-item details and validates the signed chat-bound callback payload',()=>{

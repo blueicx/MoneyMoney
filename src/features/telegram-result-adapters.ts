@@ -66,9 +66,9 @@ export async function lookupTrackedResult(event:EventRecord,ports:ResultPorts):P
     if(event.market!=='stocks'||!/^stock:us:[A-Z][A-Z0-9.-]{0,9}$/.test(event.instrument||'')||event.instrument!==`stock:us:${symbol}`||!/^\d{4}-\d{2}-\d{2}$/.test(event.reportPeriodEnd||''))return unsupported('财报标的或报告期身份未能核验');
     if(!ports.secEarnings)return unsupported('SEC 财报结果适配器不可用');
     const actual=await ports.secEarnings(symbol,event.reportPeriodEnd!,event.date);
-    if(!actual)return {actual:null,status:'pending',source:'SEC EDGAR',reason:'SEC 尚无该报告期、该股票的可核验 10-Q/10-K 实际数据；继续等待，不用预期值代替'};
+    if(!actual)return {actual:null,status:'pending',source:'SEC EDGAR',reason:'SEC 尚无该报告期、该股票的可核验 8-K/10-Q/10-K 实际数据；继续等待，不用预期值代替'};
     const acceptedAt=Date.parse(actual.acceptedAt),eventDay=Date.parse(`${event.date.slice(0,10)}T00:00:00.000Z`);
-    if(actual.symbol!==symbol||actual.reportPeriodEnd!==event.reportPeriodEnd||!['10-Q','10-Q/A','10-K','10-K/A'].includes(actual.form)||!/^\d{10}-\d{2}-\d{6}$/.test(actual.accessionNumber)||!Number.isFinite(acceptedAt)||!Number.isFinite(eventDay)||acceptedAt<eventDay||!validSecUrl(actual.sourceUrl))return unsupported('SEC 申报身份、报告期、时间或原文链接不一致');
+    if(actual.symbol!==symbol||actual.reportPeriodEnd!==event.reportPeriodEnd||!['8-K','8-K/A','10-Q','10-Q/A','10-K','10-K/A'].includes(actual.form)||!/^\d{10}-\d{2}-\d{6}$/.test(actual.accessionNumber)||!Number.isFinite(acceptedAt)||!Number.isFinite(eventDay)||acceptedAt<eventDay||!validSecUrl(actual.sourceUrl))return unsupported('SEC 申报身份、报告期、时间或原文链接不一致');
     const values:string[]=[];
     if(actual.epsUsdPerShare!==null&&Number.isFinite(actual.epsUsdPerShare))values.push(`SEC GAAP EPS ${new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',minimumFractionDigits:2,maximumFractionDigits:4}).format(actual.epsUsdPerShare)}`);
     if(actual.revenueUsd!==null&&Number.isFinite(actual.revenueUsd))values.push(`营收 ${dollars(actual.revenueUsd)}`);

@@ -58,11 +58,18 @@ test('registering another reminder during an in-flight lookup is not overwritten
  monitor.registerReminder('owner',first,44);await monitor.run('owner',[],async()=>66);await monitor.run('owner',[],async()=>77);
  assert.equal(monitor.history('owner').find(row=>row.event.title==='second').originalMessageId,55);
 });
-test('an event with a result on first observation is delivered, persisted and deduplicated after restart',async()=>{
+test('macro calendar actuals from untrusted sources are never published as verified results',async()=>{
  const {TelegramEventResultMonitor}=require('../src/features/telegram-event-results');const values=new Map(),store={get:k=>values.get(k)||null,set:(k,v)=>values.set(k,structuredClone(v))};let now=Date.parse('2026-10-02T13:40:00Z');const messages=[];
- const event={id:'jobs',title:'Non-Farm Employment Change',titleZh:'非农就业',date:'2026-10-02T13:30:00Z',impact:'high',country:'USD',actual:'100K',forecast:'90K',previous:'80K',source:'fixture'};
- const monitor=new TelegramEventResultMonitor(store,async()=>({actual:null,status:'unsupported',reason:'no source'}),()=>now);await monitor.run('owner',[event],async text=>messages.push(text));assert.equal(messages.length,1);assert.match(messages[0],/100K/);
- await new TelegramEventResultMonitor(store,async()=>({actual:null,status:'unsupported',reason:'no source'}),()=>now).run('owner',[event],async text=>messages.push(text));assert.equal(messages.length,1);
+ const event={id:'jobs',title:'GDP q/q',titleZh:'GDP',date:'2026-10-02T13:30:00Z',impact:'high',country:'USD',actual:'100K',forecast:'90K',previous:'80K',source:'untrusted fixture',retrievedAt:'2026-10-02T13:45:00Z'};
+ const monitor=new TelegramEventResultMonitor(store,async()=>({actual:null,status:'unsupported',reason:'no official source'}),()=>now);await monitor.run('owner',[event],async text=>messages.push(text));assert.equal(messages.length,0);
+ now+=6*60_000;await monitor.run('owner',[],async text=>messages.push(text));assert.equal(messages.length,1);assert.doesNotMatch(messages[0],/实际值：100K/);assert.match(messages[0],/no official source/);
+});
+test('ForexFactory macro actuals require an exact source and post-event retrieval time, and disclose that timestamp',async()=>{
+ const {TelegramEventResultMonitor}=require('../src/features/telegram-event-results');const values=new Map(),store={get:k=>values.get(k)||null,set:(k,v)=>values.set(k,structuredClone(v))};let now=Date.parse('2026-10-02T13:50:00Z');const messages=[];
+ const event={id:'jobs',title:'Non-Farm Employment Change',titleZh:'非农就业',date:'2026-10-02T13:30:00Z',impact:'high',country:'USD',actual:'100K',forecast:'90K',previous:'80K',source:'ForexFactory Public JSON',retrievedAt:'2026-10-02T13:45:00Z'};
+ const monitor=new TelegramEventResultMonitor(store,async()=>({actual:null,status:'unsupported',reason:'官方结果来源暂未覆盖此指标'}),()=>now);await monitor.run('owner',[event],async text=>messages.push(text));assert.equal(messages.length,1);assert.match(messages[0],/实际值：100K/);assert.match(messages[0],/ForexFactory Public JSON/);assert.match(messages[0],/抓取时间：2026-10-02T13:45:00.000Z/);
+ const invalidValues=new Map(),invalidStore={get:k=>invalidValues.get(k)||null,set:(k,v)=>invalidValues.set(k,structuredClone(v))},invalidMessages=[];
+ const staleMonitor=new TelegramEventResultMonitor(invalidStore,async()=>({actual:null,status:'unsupported',reason:'unsupported'}),()=>now);await staleMonitor.run('owner',[{...event,retrievedAt:'2026-10-02T13:20:00Z'}],async text=>invalidMessages.push(text));assert.equal(invalidMessages.length,1);assert.doesNotMatch(invalidMessages[0],/实际值：100K/,'pre-release calendar snapshots cannot supply an actual');
 });
 test('a reminded event survives disappearing from the next calendar; result lookup and failed delivery retry',async()=>{
  const {TelegramEventResultMonitor}=require('../src/features/telegram-event-results');const values=new Map(),store={get:k=>values.get(k)||null,set:(k,v)=>values.set(k,structuredClone(v))};let now=Date.parse('2026-10-02T23:55:00Z'),attempts=0;
@@ -143,14 +150,16 @@ test('result detail keeps the actual-result source, safe official URL, retry sta
  const {TelegramEventResultMonitor,formatEventResultDetail}=require('../src/features/telegram-event-results');
  const values=new Map(),store={get:k=>structuredClone(values.get(k)||null),set:(k,v)=>values.set(k,structuredClone(v))};
  const event={id:'earnings-2026-08-01-AAPL',kind:'earnings',market:'stocks',instrument:'stock:us:AAPL',resourceId:'earnings-2026-08-01-AAPL',symbol:'AAPL',reportPeriodEnd:'2026-06-30',title:'<AAPL>',date:'2026-08-01T20:00:00.000Z',impact:'high',source:'Nasdaq Public Calendar'};
- const monitor=new TelegramEventResultMonitor(store,async()=>({actual:'SEC GAAP EPS $1.23',status:'published',source:'SEC EDGAR 10-Q',url:'https://www.sec.gov/Archives/edgar/data/320193/filing.htm',publishedAt:'2026-08-01T17:30:00.000Z',reason:'GAAP'}),()=>Date.parse('2026-08-01T21:00:00.000Z'));
+ const monitor=new TelegramEventResultMonitor(store,async()=>({actual:'SEC GAAP EPS $1.23',status:'published',source:'SEC EDGAR 10-Q',url:'https://www.sec.gov/Archives/edgar/data/320193/filing.htm',publishedAt:'2026-08-01T17:30:00.000Z',retrievedAt:'2026-08-01T17:35:00.000Z',reason:'GAAP'}),()=>Date.parse('2026-08-01T21:00:00.000Z'));
  await monitor.run('owner',[event],async()=>77);
  const row=monitor.history('owner')[0],detail=monitor.detail('owner',row.id);
  assert.equal(detail.source,'SEC EDGAR 10-Q');
  assert.equal(detail.resultUrl,'https://www.sec.gov/Archives/edgar/data/320193/filing.htm');
  assert.equal(detail.actual,'SEC GAAP EPS $1.23');
+ assert.equal(detail.retrievedAt,'2026-08-01T17:35:00.000Z');
  assert.match(formatEventResultDetail(detail),/SEC EDGAR 10-Q/);
  assert.match(formatEventResultDetail(detail),/SEC GAAP EPS \$1\.23/);
+ assert.match(formatEventResultDetail(detail),/来源抓取时间：2026-08-01T17:35:00.000Z/);
  assert.match(formatEventResultDetail(detail),/&lt;AAPL&gt;/);
  assert.doesNotMatch(formatEventResultDetail(detail),/<AAPL>/);
  assert.equal(monitor.detail('another-chat',row.id),null);

@@ -73,3 +73,33 @@ test('SEC quarterly earnings require exact period, filing accession, and post-ev
   assert.equal(parseSecQuarterlyEarningsActual(facts, submissions, { ...input, reportPeriodEnd: '2026-03-31' }), null);
   assert.equal(parseSecQuarterlyEarningsActual(facts, submissions, { ...input, eventDate: '2026-08-02T00:00:00.000Z' }), null);
 });
+
+test('SEC 8-K earnings release actuals require matching XBRL accession and report period', () => {
+  const accessionNumber = '0000320193-26-000111';
+  const facts = { facts: { 'us-gaap': {
+    EarningsPerShareDiluted: { units: { 'USD/shares': [
+      { start: '2026-04-01', end: '2026-06-30', val: 1.45, form: '8-K', filed: '2026-08-01', accn: accessionNumber },
+      { start: '2026-04-01', end: '2026-06-30', val: 99, form: '8-K', filed: '2026-08-01', accn: '0000320193-26-000999' },
+    ] } },
+    RevenueFromContractWithCustomerExcludingAssessedTax: { units: { USD: [
+      { start: '2026-04-01', end: '2026-06-30', val: 91000000000, form: '8-K', filed: '2026-08-01', accn: accessionNumber },
+    ] } },
+  } } };
+  const submissions = { name: 'Apple Inc.', filings: { recent: {
+    form: ['8-K'], accessionNumber: [accessionNumber], filingDate: ['2026-08-01'], reportDate: ['2026-08-01'],
+    acceptanceDateTime: ['2026-08-01T17:30:00.000Z'], primaryDocument: ['aapl-earnings-release.htm'],
+  } } };
+  const actual = parseSecQuarterlyEarningsActual(facts, submissions, {
+    symbol: 'AAPL', cik: '0000320193', reportPeriodEnd: '2026-06-30', eventDate: '2026-08-01T16:00:00.000Z',
+  });
+  assert.equal(actual.form, '8-K');
+  assert.equal(actual.epsUsdPerShare, 1.45);
+  assert.equal(actual.revenueUsd, 91000000000);
+  assert.match(actual.sourceUrl, /aapl-earnings-release\.htm$/);
+
+  const mismatched = structuredClone(submissions);
+  mismatched.filings.recent.accessionNumber[0] = '0000320193-26-000222';
+  assert.equal(parseSecQuarterlyEarningsActual(facts, mismatched, {
+    symbol: 'AAPL', cik: '0000320193', reportPeriodEnd: '2026-06-30', eventDate: '2026-08-01T16:00:00.000Z',
+  }), null, 'facts from another accession must not be attached to this 8-K');
+});

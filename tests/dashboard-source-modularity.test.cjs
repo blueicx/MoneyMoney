@@ -29,6 +29,12 @@ test('asset builder expands the marked classic runtime before applying workspace
   assert.match(builder, /workspace-loader/);
 });
 
+test('fundamentals workspace loads the deferred SEC filing research module', () => {
+  const loader = fs.readFileSync(path.join(publicRoot, 'modules', 'workspace-loader.js'), 'utf8');
+  assert.match(loader, /\['research-lab', 'action-center', 'decision-intelligence', 'screener', 'backtest', 'risk', 'fundamentals'\]\.includes\(id\)/);
+  assert.match(fs.readFileSync(path.join(publicRoot, 'professional-research.js'), 'utf8'), /financial-text-research/);
+});
+
 test('runtime expansion treats JavaScript replacement tokens as literal source', () => {
   const { expandDashboardRuntime } = require(path.join(root, 'scripts', 'dashboard-source-transform.cjs'));
   const runtimePath = path.join(publicRoot, 'modules', 'dashboard-runtime.js');

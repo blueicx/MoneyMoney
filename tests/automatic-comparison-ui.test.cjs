@@ -1,4 +1,9 @@
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),{JSDOM}=require('jsdom');
+test('runner comparison loads its lazy chart dependency and keeps the comparison table on chart failure',()=>{
+ const runtime=fs.readFileSync(path.join(__dirname,'../src/web/public/modules/dashboard-runtime.js'),'utf8');
+ const start=runtime.indexOf('async function compareAiRunners()'),end=runtime.indexOf('\nasync function tickAiRunnerComparison',start),body=runtime.slice(start,end);
+ assert.notEqual(start,-1);assert.match(body,/MoneyWorkspaceModules\.ensure\('research'\)/);assert.match(body,/权益曲线暂不可用/);
+});
 test('automatic comparison panel loads only visible private workspace and filters current market',async()=>{
  const file=path.join(__dirname,'../src/web/public/automatic-comparison.js');assert.ok(fs.existsSync(file),'缺少自动对照工作区');
  const dom=new JSDOM('<div id="paper-tab" class="tab-content"><div id="ai-runners-list"></div></div>',{url:'https://example.com',runScripts:'outside-only',pretendToBeVisual:true}),w=dom.window;

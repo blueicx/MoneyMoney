@@ -24,7 +24,7 @@ const result = buildUpcomingEvents({
       impactLabel: '高影响',
       forecast: '3.0%',
       previous: '2.9%',
-      actual: null,
+      actual: '2.8%',
     }],
   },
   earnings: [{
@@ -44,11 +44,14 @@ const result = buildUpcomingEvents({
 assert.equal(result.count, 3);
 assert.equal(result.events[0].category, 'macro');
 assert.equal(result.events[0].countryLabel, '美国');
+assert.equal(result.events[0].actual, '2.8%');
+assert.equal(result.events[0].retrievedAt, '2026-09-14T00:00:00Z', 'macro actuals must retain the calendar fetch timestamp');
 assert.ok(result.warnings.includes('宏观日历使用近期缓存'));
 assert.deepEqual(result.events.map(event => event.category), ['macro', 'central-bank', 'earnings']);
 assert.equal(result.events[2].impact, 'high');
 assert.match(result.events[2].detail, /盘后/);
 assert.equal(result.events[2].symbol, 'AAPL');
 assert.equal(result.events[2].reportPeriodEnd, '2026-06-30');
+assert.equal(result.events[2].retrievedAt, '2026-09-14T00:00:00Z', 'earnings events must retain their provider fetch timestamp');
 
 console.log('upcoming event calendar helpers: all assertions passed');

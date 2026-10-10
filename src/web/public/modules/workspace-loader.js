@@ -71,7 +71,7 @@
     const group = id === 'guru-holdings' ? 'guru' : id === 'contracts' ? 'contracts'
       : id === 'events' ? 'events'
       : (id === 'stock-quotes' && market === 'stocks') || (id === 'crypto-quotes' && market === 'crypto') ? 'charts'
-        : ['research-lab', 'action-center', 'decision-intelligence', 'screener', 'backtest', 'risk'].includes(id) ? 'research' : null;
+        : ['research-lab', 'action-center', 'decision-intelligence', 'screener', 'backtest', 'risk', 'fundamentals'].includes(id) ? 'research' : null;
     if (group) ensure(group).catch(error => window.showToast?.(error.message, 'error'));
   });
 })();

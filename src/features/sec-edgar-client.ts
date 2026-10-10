@@ -198,7 +198,7 @@ export interface SecQuarterlyEarningsActual {
   cik: string;
   reportPeriodEnd: string;
   acceptedAt: string;
-  form: '10-Q' | '10-Q/A' | '10-K' | '10-K/A';
+  form: '10-Q' | '10-Q/A' | '10-K' | '10-K/A' | '8-K' | '8-K/A';
   accessionNumber: string;
   epsUsdPerShare: number | null;
   revenueUsd: number | null;
@@ -266,8 +266,9 @@ export function parseSecQuarterlyEarningsActual(
     const reportDate = text(reportDates[index]);
     const acceptedAtRaw = text(acceptances[index]);
     const acceptedAtMs = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/.test(acceptedAtRaw) ? Date.parse(acceptedAtRaw) : Number.NaN;
-    if (!['10-Q', '10-Q/A', '10-K', '10-K/A'].includes(form) || !/^\d{10}-\d{2}-\d{6}$/.test(accessionNumber)
-      || !validDate(filingDate) || reportDate !== reportPeriodEnd || !Number.isFinite(acceptedAtMs)
+    const currentEventReport = form === '8-K' || form === '8-K/A';
+    if (!['10-Q', '10-Q/A', '10-K', '10-K/A', '8-K', '8-K/A'].includes(form) || !/^\d{10}-\d{2}-\d{6}$/.test(accessionNumber)
+      || !validDate(filingDate) || (!currentEventReport && reportDate !== reportPeriodEnd) || !Number.isFinite(acceptedAtMs)
       || new Date(acceptedAtMs).toISOString() < notBefore) continue;
     rows.push({ form: form as SecQuarterlyEarningsActual['form'], accessionNumber, filingDate,
       acceptedAt: new Date(acceptedAtMs).toISOString(), document: text(documents[index]) });

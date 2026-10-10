@@ -705,7 +705,13 @@ async function compareAiRunners() {
     if(market!==activeMarketScope)return;if(!response.ok || !data.success)throw Error(data.reason || '对照不可用');
     const metric=value=>typeof value==='number' ? value.toFixed(2):'不可用';
     host.innerHTML='<h4>独立账户对照 · '+safeNewsText(data.market)+'</h4><p>'+safeNewsText(data.reason)+'</p><p>共同真实快照 '+data.pairedSnapshotCount+'；'+(data.fairComparison?'条件一致':'条件不完整，不提供优劣排名')+'</p><div data-ai-comparison-chart></div><div class="mm-table-scroll"><table><thead><tr><th>跑单 / 模式</th><th>权益 USD</th><th>已实现</th><th>费用 / 额外滑点</th><th>回撤 %</th><th>平仓</th></tr></thead><tbody>'+data.rows.map(row=>'<tr><td>'+safeNewsText(row.title)+' · '+safeNewsText(row.mode)+'</td><td>'+metric(row.equity)+'</td><td>'+metric(row.realizedPnl)+'</td><td>'+metric(row.recordedCosts)+'</td><td>'+metric(row.drawdown)+'</td><td>'+row.closedCount+'</td></tr>').join('')+'</tbody></table></div><details><summary>实验条件与限制</summary>'+data.checks.map(row=>'<p>'+safeNewsText(row.name)+' · '+(row.matched?'一致':'不完整/不同')+' · '+safeNewsText(row.reason)+'</p>').join('')+'</details><ul>'+data.warnings.map(reason=>'<li>'+safeNewsText(reason)+'</li>').join('')+'</ul>';
-    window.MoneyMoneyHistoryChart?.render(host.querySelector('[data-ai-comparison-chart]'),data.rows.map(row=>({label:row.title+' · '+row.mode,points:row.points})),{title:'实际纸面账户权益，不是预测',unit:'USD',reason:'缺少真实估值轮次时不补曲线'});
+    const chartHost=host.querySelector('[data-ai-comparison-chart]');
+    try {
+      if(!window.MoneyMoneyHistoryChart && window.MoneyWorkspaceModules?.ensure) await window.MoneyWorkspaceModules.ensure('research');
+      if(market!==activeMarketScope)return;
+      if(window.MoneyMoneyHistoryChart) window.MoneyMoneyHistoryChart.render(chartHost,data.rows.map(row=>({label:row.title+' · '+row.mode,points:row.points})),{title:'实际纸面账户权益，不是预测',unit:'USD',reason:'缺少真实估值轮次时不补曲线'});
+      else chartHost.textContent='权益曲线组件不可用；上方账户比较表仍可查看。';
+    } catch(error) { chartHost.textContent='权益曲线暂不可用；账户比较表仍可查看。'+(error.message || '图表资源加载失败'); }
   }catch(error){host.textContent=error.message || '对照请求失败';}
 }
 async function tickAiRunnerComparison(id) {

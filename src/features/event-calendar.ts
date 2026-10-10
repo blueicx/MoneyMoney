@@ -31,6 +31,7 @@ export interface UpcomingEvent {
   previous: string | null;
   actual: string | null;
   source: string;
+  retrievedAt?: string;
   symbol?: string;
   reportPeriodEnd?: string | null;
 }
@@ -405,6 +406,7 @@ function mergeCalendarEvents(input: MergeInput): UpcomingEvent[] {
       previous: item.previous,
       actual: item.actual,
       source: input.macro?.source ?? 'ForexFactory',
+      retrievedAt: input.macro?.fetchedAt,
     });
   }
 
@@ -434,6 +436,7 @@ function mergeCalendarEvents(input: MergeInput): UpcomingEvent[] {
         previous: item.lastYearEps || null,
         actual: null,
         source: day.source,
+        retrievedAt: day.fetchedAt,
         symbol: item.symbol,
         reportPeriodEnd: item.reportPeriodEnd || null,
       });
