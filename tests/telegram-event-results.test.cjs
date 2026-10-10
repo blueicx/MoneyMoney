@@ -86,6 +86,47 @@ test('official results require matching release date, country, exact series and 
  const {parseBlsResult}=require('../src/features/telegram-event-results');const html='<pre>Transmission of material is embargoed until 8:30 a.m. (ET) Friday, October 2, 2026. Total nonfarm payroll employment increased by 100,000 in September. The unemployment rate was unchanged at 4.0 percent.</pre>';
  const event={title:'Non-Farm Employment Change',date:'2026-10-02T12:30:00Z',country:'USD'};assert.equal(parseBlsResult(html,event).actual,'100000');assert.equal(parseBlsResult(html,{...event,date:'2026-11-02T12:30:00Z'}).actual,null);assert.equal(parseBlsResult(html,{...event,country:'EUR'}).actual,null);
 });
+test('BEA GDP actuals require the scheduled release date, exact quarter and estimate stage',()=>{
+ const {parseBeaGdpResult}=require('../src/features/telegram-event-results');
+ const event={title:'GDP q/q',date:'2026-07-30T12:30:00.000Z',country:'USD'};
+ const schedule='<tr class="scheduled-releases-type-press"><td class="scheduled-date"><div class="release-date">July 30</div><small>8:30 AM</small></td><td class="release-title">GDP (Advance Estimate), 2nd Quarter 2026</td><td class="views-field-field-scheduled-release-url"><a href="/news/2026/gdp-advance-estimate-2nd-quarter-2026">View</a></td></tr>';
+ const release='<h1>GDP (Advance Estimate), 2nd Quarter 2026</h1><p>EMBARGOED UNTIL RELEASE AT 8:30 a.m. EDT, Thursday, July 30, 2026</p><p>Real gross domestic product (GDP) increased at an annual rate of 1.5 percent in the second quarter of 2026 (April, May, and June), according to the advance estimate released today by the U.S. Bureau of Economic Analysis (BEA).</p>';
+ const result=parseBeaGdpResult(schedule,release,event,'2026-07-30T12:35:00.000Z');
+ assert.equal(result.status,'published');assert.equal(result.actual,'Real GDP 1.5% annualized (Advance Estimate)');assert.equal(result.source,'U.S. Bureau of Economic Analysis (BEA)');assert.equal(result.url,'https://www.bea.gov/news/2026/gdp-advance-estimate-2nd-quarter-2026');assert.equal(result.publishedAt,event.date);assert.equal(result.retrievedAt,'2026-07-30T12:35:00.000Z');
+ assert.notEqual(parseBeaGdpResult(schedule,release,{...event,date:'2026-07-31T12:30:00.000Z'}).status,'published','a neighboring date cannot borrow the release');
+ assert.notEqual(parseBeaGdpResult(schedule,release.replace('second quarter of 2026','third quarter of 2026'),event).status,'published','the reported quarter must match the official scheduled release');
+ assert.notEqual(parseBeaGdpResult(schedule,release.replace('advance estimate released today','second estimate released today'),event).status,'published','the reported estimate stage must match the official title');
+ assert.notEqual(parseBeaGdpResult(schedule,release,event,'2026-07-30T12:29:59.000Z').status,'published','a result fetched before the release cannot be published');
+ assert.notEqual(parseBeaGdpResult(schedule+schedule,release,event).status,'published','ambiguous same-day GDP releases must not be guessed');
+ assert.notEqual(parseBeaGdpResult(schedule,release,{...event,country:'EUR'}).status,'published','GDP events from another currency are not matched');
+ const winterEvent={...event,date:'2026-01-30T13:30:00.000Z'};
+ const winterSchedule=schedule.replace('July 30','January 30').replace('2nd Quarter 2026','4th Quarter 2025');
+ const winterRelease=release.replace('2nd Quarter 2026','4th Quarter 2025').replace('Thursday, July 30, 2026','Friday, January 30, 2026').replace('second quarter of 2026','fourth quarter of 2025');
+ assert.equal(parseBeaGdpResult(winterSchedule,winterRelease,winterEvent,'2026-01-30T13:35:00.000Z').status,'published','8:30 a.m. ET must account for standard time as well as daylight time');
+});
+test('BEA GDP resolver fetches the official year schedule and same-day release page',async()=>{
+ const {lookupOfficialEventResult}=require('../src/features/telegram-event-results');
+ const event={title:'GDP q/q',date:'2026-07-30T12:30:00.000Z',country:'USD'},calls=[];
+ const schedule='<tr class="scheduled-releases-type-press"><td class="scheduled-date"><div class="release-date">July 30</div><small>8:30 AM</small></td><td class="release-title">GDP (Advance Estimate), 2nd Quarter 2026</td><td class="views-field-field-scheduled-release-url"><a href="/news/2026/gdp-advance-estimate-2nd-quarter-2026">View</a></td></tr>';
+ const release='<h1>GDP (Advance Estimate), 2nd Quarter 2026</h1><p>EMBARGOED UNTIL RELEASE AT 8:30 a.m. EDT, Thursday, July 30, 2026</p><p>Real gross domestic product (GDP) increased at an annual rate of 1.5 percent in the second quarter of 2026, according to the advance estimate released today by the U.S. Bureau of Economic Analysis (BEA).</p>';
+ const previousFetch=global.fetch;
+ global.fetch=async input=>{const url=String(input);calls.push(url);if(url==='https://www.bea.gov/news/schedule/full?year=2026')return{ok:true,status:200,text:async()=>schedule};if(url==='https://www.bea.gov/news/2026/gdp-advance-estimate-2nd-quarter-2026')return{ok:true,status:200,text:async()=>release};throw new Error('unexpected external request '+url);};
+ try{const result=await lookupOfficialEventResult(event);assert.equal(result.status,'published');assert.equal(result.actual,'Real GDP 1.5% annualized (Advance Estimate)');assert.equal(result.source,'U.S. Bureau of Economic Analysis (BEA)');assert.equal(calls.length,2);assert.ok(Number.isFinite(Date.parse(result.retrievedAt)));}
+ finally{global.fetch=previousFetch;}
+});
+test('BEA GDP result detail retains the official release link for Telegram follow-up',async()=>{
+ const {TelegramEventResultMonitor,formatEventResultDetail,parseBeaGdpResult}=require('../src/features/telegram-event-results');
+ const values=new Map(),store={get:k=>structuredClone(values.get(k)||null),set:(k,v)=>values.set(k,structuredClone(v))};
+ const event={title:'GDP q/q',date:'2026-07-30T12:30:00.000Z',country:'USD',impact:'high'};
+ const schedule='<tr><td><div class="release-date">July 30</div><small>8:30 AM</small></td><td class="release-title">GDP (Advance Estimate), 2nd Quarter 2026</td><td><a href="/news/2026/gdp-advance-estimate-2nd-quarter-2026">View</a></td></tr>';
+ const release='<h1>GDP (Advance Estimate), 2nd Quarter 2026</h1><p>EMBARGOED UNTIL RELEASE AT 8:30 a.m. EDT, Thursday, July 30, 2026</p><p>Real gross domestic product (GDP) increased at an annual rate of 1.5 percent in the second quarter of 2026, according to the advance estimate released today by the U.S. Bureau of Economic Analysis (BEA).</p>';
+ const actual=parseBeaGdpResult(schedule,release,event,'2026-07-30T12:35:00.000Z'),monitor=new TelegramEventResultMonitor(store,async()=>actual,()=>Date.parse('2026-07-30T12:40:00.000Z'));
+ await monitor.run('owner',[event],async()=>77);
+ const row=monitor.history('owner')[0],detail=monitor.detail('owner',row.id);
+ assert.equal(detail.resultUrl,'https://www.bea.gov/news/2026/gdp-advance-estimate-2nd-quarter-2026');
+ assert.match(formatEventResultDetail(detail),/Real GDP 1\.5% annualized/);
+ assert.match(formatEventResultDetail(detail),/www\.bea\.gov\/news\/2026\/gdp-advance-estimate-2nd-quarter-2026/);
+});
 test('paused notifications retain pending results without exhausting retries; lease uses current time and TTL',async()=>{
  const {TelegramEventResultMonitor}=require('../src/features/telegram-event-results');const values=new Map();let now=Date.parse('2026-10-02T14:00:00Z'),leaseArgs;
  const store={get:k=>values.get(k)||null,set:(k,v)=>values.set(k,structuredClone(v)),acquireLease:(...args)=>{leaseArgs=args;return true},releaseLease:()=>{}};

@@ -12,7 +12,7 @@ export function hasEventActual(value: unknown): boolean {
 const escape = (s: unknown) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const identity = (event: EventRecord) => createHash('sha256').update(JSON.stringify(event.kind&&event.kind!=='macro'?[event.kind,event.market,event.instrument,event.resourceId,event.date]:[event.country, event.title, event.date])).digest('hex');
 function safeResultUrl(value?:string):string|null{
-  try{const url=new URL(value||'');return url.protocol==='https:'&&!url.username&&!url.password&&!url.port&&['www.bls.gov','www.sec.gov','api.gateio.ws','api.elections.kalshi.com','gamma-api.polymarket.com','polymarket.com','kalshi.com','nfs.faireconomy.media'].includes(url.hostname)?url.toString():null;}catch{return null;}
+  try{const url=new URL(value||'');return url.protocol==='https:'&&!url.username&&!url.password&&!url.port&&['www.bls.gov','www.bea.gov','www.sec.gov','api.gateio.ws','api.elections.kalshi.com','gamma-api.polymarket.com','polymarket.com','kalshi.com','nfs.faireconomy.media'].includes(url.hostname)?url.toString():null;}catch{return null;}
 }
 function reportedMacroCalendarActual(event:EventRecord,now:number):Result|null{
   if((event.kind&&event.kind!=='macro')||event.source!=='ForexFactory Public JSON'||!hasEventActual(event.actual))return null;
@@ -218,8 +218,109 @@ export function parseBlsResult(html: string, event: Pick<EventRecord, 'title' | 
   return unavailable;
 }
 
+function eventEasternParts(eventDate: string): Record<string, string> | null {
+  const timestamp = Date.parse(eventDate);
+  if (!Number.isFinite(timestamp)) return null;
+  return Object.fromEntries(new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York', month: 'long', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', hourCycle: 'h23',
+  }).formatToParts(timestamp).filter(part => part.type !== 'literal').map(part => [part.type, part.value]));
+}
+
+function beaHtmlText(html: string): string {
+  return html.replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ').replace(/&nbsp;|&#160;/gi, ' ').replace(/&amp;/gi, '&')
+    .replace(/&ndash;|&#8211;/gi, '–').replace(/&mdash;|&#8212;/gi, '—').replace(/&quot;/gi, '"')
+    .replace(/\s+/g, ' ').trim();
+}
+
+interface BeaGdpReleaseLink { title: string; url: string; }
+function findBeaGdpRelease(scheduleHtml: string, event: Pick<EventRecord, 'title' | 'date' | 'country'>): BeaGdpReleaseLink | Result {
+  const unavailable = (reason: string, status = 'unavailable'): Result => ({ actual: null, status, source: 'U.S. Bureau of Economic Analysis (BEA)', reason });
+  if (event.country !== 'USD' || !/^(?:GDP\s+q\/q(?:\s+(?:advance|second|third|final))?|GDP|Gross Domestic Product)$/i.test(event.title.trim())) return unavailable('仅支持美元 GDP 季度发布事件', 'unsupported');
+  const parts = eventEasternParts(event.date);
+  if (!parts || parts.hour !== '08' || parts.minute !== '30') return unavailable('事件时间与 BEA 官方 8:30 a.m. 东部时间发布时刻不一致');
+  const monthDay = `${parts.month} ${Number(parts.day)}`;
+  const year = parts.year;
+  const rows = [...scheduleHtml.matchAll(/<tr\b[^>]*>([\s\S]*?)<\/tr>/gi)].flatMap(match => {
+    const row = match[1];
+    const date = row.match(/class=["'][^"']*\brelease-date\b[^"']*["'][^>]*>([^<]+)</i)?.[1]?.trim();
+    const time = row.match(/<small\b[^>]*>([^<]+)</i)?.[1]?.trim();
+    const titleHtml = row.match(/<td\b[^>]*class=["'][^"']*\brelease-title\b[^"']*["'][^>]*>([\s\S]*?)<\/td>/i)?.[1];
+    const title = titleHtml ? beaHtmlText(titleHtml) : '';
+    if (date !== monthDay || !/^GDP\b/i.test(title)) return [];
+    const href = row.match(/<a\b[^>]*href=["']([^"']+)["'][^>]*>/i)?.[1];
+    return [{ date, time, title, href }];
+  });
+  if (!rows.length) return unavailable('BEA 官方发布日程尚无该日期可匹配的 GDP 发布；不以事后历史值代替', 'pending');
+  if (rows.length !== 1) return unavailable('BEA 官方日程在该日期有多个 GDP 条目，无法唯一匹配', 'unsupported');
+  const row = rows[0];
+  if (!/^8:30\s*AM$/i.test(row.time || '')) return unavailable('BEA 官方日程发布时间不是 8:30 a.m.，拒绝按日期猜测', 'unsupported');
+  if (!row.href) return unavailable('BEA 官方 GDP 发布页面尚未发布，继续等待', 'pending');
+  try {
+    const url = new URL(row.href, 'https://www.bea.gov');
+    if (url.protocol !== 'https:' || url.hostname !== 'www.bea.gov' || url.username || url.password || url.port || !/^\/news\/\d{4}\/[a-z0-9-]+$/i.test(url.pathname)) return unavailable('BEA 日程中的 GDP 原文链接不符合官方页面格式', 'unsupported');
+    return { title: row.title, url: url.toString() };
+  } catch { return unavailable('BEA 日程中的 GDP 原文链接无效', 'unsupported'); }
+}
+
+/** Parse a single BEA release vintage; no current/revised series is substituted for the event release. */
+export function parseBeaGdpResult(scheduleHtml: string, releaseHtml: string, event: Pick<EventRecord, 'title' | 'date' | 'country'>, retrievedAt = new Date().toISOString()): Result {
+  const link = findBeaGdpRelease(scheduleHtml, event);
+  if ('actual' in link) return link;
+  const url = link.url;
+  const parts = eventEasternParts(event.date);
+  const retrieved = Date.parse(retrievedAt), eventAt = Date.parse(event.date);
+  if (!parts || !Number.isFinite(retrieved) || !Number.isFinite(eventAt) || retrieved < eventAt) return { actual: null, status: 'pending', source: 'U.S. Bureau of Economic Analysis (BEA)', url, reason: '事件发布时间或来源抓取时间尚不能核验' };
+  const text = beaHtmlText(releaseHtml);
+  const embargo = text.match(/EMBARGOED\s+UNTIL\s+RELEASE\s+AT\s+8:30\s*a\.m\.\s+(?:EDT|EST),\s*\w+,\s*([A-Z][a-z]+\s+\d{1,2},\s+\d{4})/i);
+  if (!embargo || Date.parse(`${embargo[1]} UTC`) !== Date.UTC(Number(parts.year), new Date(`${parts.month} 1, ${parts.year} UTC`).getUTCMonth(), Number(parts.day))) return { actual: null, status: 'unavailable', source: 'U.S. Bureau of Economic Analysis (BEA)', url, reason: 'BEA 原文的解禁日期与事件日期不一致' };
+  const heading = releaseHtml.match(/<h1\b[^>]*>([\s\S]*?)<\/h1>/i)?.[1];
+  const title = heading ? beaHtmlText(heading) : '';
+  const scheduled = text.match(/Real gross domestic product\s*\(GDP\)\s+(increased|decreased)\s+at\s+an\s+annual\s+rate\s+of\s+([\d.]+)\s+percent\s+in\s+the\s+(first|second|third|fourth)\s+quarter\s+of\s+(\d{4})/i);
+  const estimate = text.match(/according to the (advance|second|third) estimate released today/i)?.[1]?.toLowerCase();
+  const scheduledStage = title.match(/\b(advance|second|third)\s+estimate\b/i)?.[1]?.toLowerCase();
+  const releaseStage = title.match(/(1st|first|2nd|second|3rd|third|4th|fourth)\s+quarter\s+(\d{4})/i);
+  const quarterNumber = (value: string) => ({ '1st': 'first', first: 'first', '2nd': 'second', second: 'second', '3rd': 'third', third: 'third', '4th': 'fourth', fourth: 'fourth' } as Record<string, string>)[value.toLowerCase()];
+  if (!title || !title.includes(link.title) || !scheduled || !estimate || estimate !== scheduledStage || !releaseStage
+    || quarterNumber(releaseStage[1]) !== scheduled[3].toLowerCase() || releaseStage[2] !== scheduled[4]) {
+    return { actual: null, status: 'unavailable', source: 'U.S. Bureau of Economic Analysis (BEA)', url, reason: 'BEA 原文标题、报告季度或估算阶段与官方日程不一致；未发布实际值' };
+  }
+  const numericValue = Number(scheduled[2]);
+  const value = /decreased/i.test(scheduled[1]) ? (numericValue === 0 ? '0' : `-${scheduled[2]}`) : scheduled[2];
+  if (!Number.isFinite(numericValue)) return { actual: null, status: 'unavailable', source: 'U.S. Bureau of Economic Analysis (BEA)', url, reason: 'BEA GDP 数值无法解析' };
+  const stage = scheduledStage![0].toUpperCase() + scheduledStage!.slice(1) + ' Estimate';
+  return {
+    actual: `Real GDP ${value}% annualized (${stage})`, status: 'published', source: 'U.S. Bureau of Economic Analysis (BEA)', url,
+    publishedAt: new Date(eventAt).toISOString(), retrievedAt: new Date(retrieved).toISOString(),
+    reason: 'BEA 季调 GDP 按年率（SAAR）发布；保留本次发布版本，不以之后修订替代。', evidenceRefs: [url, `BEA ${releaseStage[1]} Quarter ${releaseStage[2]} ${stage}`],
+  };
+}
+
 const officialCache = new Map<string, { at: number; html: string }>();
 export async function lookupOfficialEventResult(event: EventRecord): Promise<Result> {
+  const beaGdpEvent = /^(?:GDP\s+q\/q(?:\s+(?:advance|second|third|final))?|GDP|Gross Domestic Product)$/i.test(event.title.trim());
+  if (beaGdpEvent && event.country === 'USD') {
+    const parts = eventEasternParts(event.date);
+    if (!parts) return { actual: null, status: 'unavailable', source: 'U.S. Bureau of Economic Analysis (BEA)', reason: 'GDP 事件日期无效，无法匹配 BEA 发布日程' };
+    try {
+      const scheduleUrl = `https://www.bea.gov/news/schedule/full?year=${encodeURIComponent(parts.year)}`;
+      let schedule = officialCache.get(scheduleUrl);
+      if (!schedule || Date.now() - schedule.at > 300000) {
+        const response = await fetch(scheduleUrl, { signal: AbortSignal.timeout(8000), headers: { 'User-Agent': 'MoneyMoney research contact via website' } });
+        if (!response.ok) return { actual: null, status: 'unavailable', source: 'U.S. Bureau of Economic Analysis (BEA)', reason: `BEA 官方日程不可用（HTTP ${response.status}）`, url: scheduleUrl };
+        schedule = { at: Date.now(), html: await response.text() }; officialCache.set(scheduleUrl, schedule);
+      }
+      const release = findBeaGdpRelease(schedule.html, event);
+      if ('actual' in release) return release;
+      let page = officialCache.get(release.url);
+      if (!page || Date.now() - page.at > 300000) {
+        const response = await fetch(release.url, { signal: AbortSignal.timeout(8000), headers: { 'User-Agent': 'MoneyMoney research contact via website' } });
+        if (!response.ok) return { actual: null, status: 'unavailable', source: 'U.S. Bureau of Economic Analysis (BEA)', reason: `BEA 官方 GDP 原文不可用（HTTP ${response.status}）`, url: release.url };
+        page = { at: Date.now(), html: await response.text() }; officialCache.set(release.url, page);
+      }
+      return parseBeaGdpResult(schedule.html, page.html, event, new Date(Math.max(schedule.at, page.at)).toISOString());
+    } catch { return { actual: null, status: 'unavailable', source: 'U.S. Bureau of Economic Analysis (BEA)', reason: 'BEA 官方 GDP 日程或原文请求失败，稍后重试' }; }
+  }
   if (event.country !== 'USD' || !/^(Non-Farm Employment Change|Nonfarm Payrolls|Unemployment Rate|(Core )?CPI (m\/m|y\/y))$/i.test(event.title)) {
     return { actual: null, status: 'unsupported', reason: '当前日历只提供倒计时和预期；该指标尚无已核验的结果来源' };
   }
