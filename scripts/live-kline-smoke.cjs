@@ -55,9 +55,24 @@ async function main() {
     assert.equal(await page.locator('#stock-kline').getAttribute('data-trading-mode'),'historical','Replay must not display a live candle countdown');
     await page.evaluate(async () => { stepStockChartReplay('next'); stockChartAsOf = '2026-01-01'; MoneyLiveKline.sync(); await loadStockKline(undefined, undefined, undefined, { live: true }); });
     assert.equal(requests, before, 'asOf must block live reads');
+    await page.route('**/api/alerts**', route => new URL(route.request().url()).pathname === '/api/alerts' ? route.fulfill({ json: [] }) : route.fallback());
+    await page.route('**/api/support-resistance?**', route => {
+      const query = new URL(route.request().url()).searchParams;
+      return route.fulfill({ json: { success: true, data: { symbol: query.get('symbol'), interval: query.get('interval'), supports: [], resistances: [], fetchedAt: new Date().toISOString() } } });
+    });
+    await page.evaluate(() => {
+      const original = window.loadAlertsForChart;
+      window.__chartAlertLoads = 0;
+      window.loadAlertsForChart = async (...args) => {
+        window.__chartAlertLoads += 1;
+        try { return await original(...args); } finally { window.__chartAlertLoads -= 1; }
+      };
+    });
     await page.evaluate(async () => { stockChartAsOf = ''; setMarketScope('crypto'); openWorkspace('crypto-quotes'); bnCurrentSymbol = 'BTCUSDT'; bnCurrentInterval = '5m'; await loadBinanceKlines(); MoneyLiveKline.sync(); });
     await page.waitForFunction(() => window.__fixtureStreams.some(s => !s.closed && s.url.includes('BTCUSDT')));
     await page.waitForFunction(() => bnCurrentInterval === '5m' && bnKlineData.length === 80 && bnKlineData.at(-1).close === 101);
+    await page.waitForFunction(() => window.__chartAlertLoads === 0 && cryptoSupportResistanceState.status === 'success' && cryptoSupportResistanceState.key === 'BTCUSDT|5m');
+    await page.evaluate(() => setCryptoChartOverlay('supportResistance', false));
     const push = await page.evaluate(start => {
       const stream = window.__fixtureStreams.findLast(s => !s.closed);
       const emit = bar => stream.dispatchEvent(new MessageEvent('kline', { data: JSON.stringify({ instrument: 'crypto:binance:BTCUSDT', timeframe: '5m', bar, eventTime: Date.now() }) }));
@@ -82,6 +97,8 @@ async function main() {
       await pending; return bnKlineData.at(-1).close;
     }, start);
     assert.equal(preserved, 108, 'a delayed REST response must not overwrite newer stream data');
+    await page.locator('#crypto-chart-card').locator('button', { hasText: '暂停自动更新' }).click();
+    await page.waitForFunction(() => document.getElementById('mm-live-status-crypto')?.textContent.includes('自动更新已关闭'));
     const performance = await page.evaluate(async () => {
       const host=document.querySelector('#crypto-chart-card .mm-trading-chart'),readout=host.querySelector('.mm-trading-readout');
       let mutations=0,paints=0;const observer=new MutationObserver(list=>mutations+=list.length);observer.observe(readout,{childList:true,subtree:true,characterData:true});
@@ -97,6 +114,7 @@ async function main() {
       return {timerMutations,timerPaints,pointerPaints,hiddenPaints};
     });
     assert.equal(performance.timerMutations,0,'countdown must not rebuild OHLC/MA DOM');assert.equal(performance.timerPaints,0,'countdown must not redraw canvas');assert.ok(performance.pointerPaints<=2,'pointer burst must coalesce into one frame');assert.equal(performance.hiddenPaints,0,'hidden document must not draw');
+    await page.locator('#crypto-chart-card').locator('button', { hasText: '开启自动更新' }).click();
     const gestures=await page.evaluate(async()=>{
       const canvas=document.getElementById('bn-candlestick'),layer=canvas.parentElement.querySelector('.mm-trading-crosshair'),box=layer.getBoundingClientRect(),key=bnCurrentSymbol+'|'+bnCurrentInterval;
       const event=(type,id,x,y)=>layer.dispatchEvent(new PointerEvent(type,{pointerId:id,pointerType:'touch',clientX:box.left+x,clientY:box.top+y}));

@@ -1,9 +1,10 @@
 import { createHash } from 'node:crypto';
 
-export interface EventRecord { id?: string; title: string; titleZh?: string; date: string; country?: string; impact?: string; actual?: string | null; forecast?: string | null; previous?: string | null; source?: string; kind?:'macro'|'research'|'funding'|'prediction';market?:string;instrument?:string;resourceId?:string;platform?:string; }
+export interface EventRecord { id?: string; title: string; titleZh?: string; date: string; country?: string; impact?: string; actual?: string | null; forecast?: string | null; previous?: string | null; source?: string; kind?:'macro'|'earnings'|'research'|'funding'|'prediction';market?:string;instrument?:string;resourceId?:string;platform?:string;symbol?:string;reportPeriodEnd?:string|null; }
 export interface Result { actual: string | null; status: string; reason?: string; source?: string; url?: string; publishedAt?: string; previous?: string | null; evidenceRefs?:string[]; }
 interface Store { get<T>(key: string): T | null; set<T>(key: string, value: T): void; acquireLease?(key: string, owner: string, now: number, ttl: number): boolean; refreshLease?(key: string, owner: string, now: number, ttl: number): boolean; releaseLease?(key: string, owner: string): void; }
-interface Delivery { id: string; event: EventRecord; text: string; status: 'pending' | 'sent' | 'failed' | 'acknowledged'; attempts: number; nextAttempt: number; error?: string; actual?: string; publishedAt?: string; kind?: 'result' | 'revision' | 'waiting' | 'terminal'; originalMessageId?: number; messageId?: number; resultStatus?: string; reason?: string; nextCheckAt?: number | null; evidenceRefs?: string[]; controlRevision?: number; }
+interface Delivery { id: string; event: EventRecord; text: string; status: 'pending' | 'sent' | 'failed' | 'acknowledged'; attempts: number; nextAttempt: number; error?: string; actual?: string; publishedAt?: string; resultSource?: string; resultUrl?: string; kind?: 'result' | 'revision' | 'waiting' | 'terminal'; originalMessageId?: number; messageId?: number; resultStatus?: string; reason?: string; nextCheckAt?: number | null; evidenceRefs?: string[]; controlRevision?: number; }
+export interface EventResultDetail { id: string; title: string; eventDate: string; deliveryStatus: Delivery['status']; resultStatus: string; attempts: number; actual: string | null; publishedAt: string | null; source: string; resultUrl: string | null; reason: string | null; error: string | null; nextCheckAt: string | null; evidenceRefs: string[]; }
 interface State { events: Record<string, EventRecord>; deliveries: Delivery[]; checkedAt?: Record<string,number>; reminders?: Record<string,{messageId:number;at:number}>; }
 export function hasEventActual(value: unknown): boolean {
   return value !== null && value !== undefined && !/^(?:|n\/a|na|null|unknown|pending|—|-)$/i.test(String(value).trim());
@@ -11,7 +12,27 @@ export function hasEventActual(value: unknown): boolean {
 const escape = (s: unknown) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const identity = (event: EventRecord) => createHash('sha256').update(JSON.stringify(event.kind&&event.kind!=='macro'?[event.kind,event.market,event.instrument,event.resourceId,event.date]:[event.country, event.title, event.date])).digest('hex');
 function officialResultUrl(value?:string):string|null{
-  try{const url=new URL(value||'');return url.protocol==='https:'&&!url.username&&!url.password&&!url.port&&['www.bls.gov','api.gateio.ws','api.elections.kalshi.com','gamma-api.polymarket.com','polymarket.com','kalshi.com'].includes(url.hostname)?url.toString():null;}catch{return null;}
+  try{const url=new URL(value||'');return url.protocol==='https:'&&!url.username&&!url.password&&!url.port&&['www.bls.gov','www.sec.gov','api.gateio.ws','api.elections.kalshi.com','gamma-api.polymarket.com','polymarket.com','kalshi.com'].includes(url.hostname)?url.toString():null;}catch{return null;}
+}
+
+export function formatEventResultDetail(detail: EventResultDetail): string {
+  const deliveryStatus: Record<Delivery['status'], string> = { pending: '待发送/重试', sent: '已发送', failed: '发送失败', acknowledged: '已确认' };
+  const resultStatus: Record<string, string> = { published: '已发布', revised: '已修订', pending: '等待来源结果', unavailable: '来源不可用', unsupported: '不支持追踪', unverifiable: '无法核验', stopped: '已停止' };
+  return [
+    '<b>事件结果详情</b>',
+    escape(detail.title),
+    '事件时间：' + escape(detail.eventDate),
+    '投递状态：' + escape(deliveryStatus[detail.deliveryStatus] || detail.deliveryStatus),
+    '结果状态：' + escape(resultStatus[detail.resultStatus] || detail.resultStatus),
+    '实际值：' + escape(detail.actual || '暂无可核验实际值'),
+    ...(detail.publishedAt ? ['结果发布时间：' + escape(detail.publishedAt)] : []),
+    '结果来源：' + escape(detail.source || '未知'),
+    ...(detail.reason ? ['说明：' + escape(detail.reason)] : []),
+    ...(detail.error ? ['最近投递错误：' + escape(detail.error)] : []),
+    '投递尝试：' + escape(detail.attempts),
+    ...(detail.nextCheckAt ? ['下次检查：' + escape(detail.nextCheckAt)] : []),
+    ...(detail.evidenceRefs.length ? ['证据引用：' + escape(detail.evidenceRefs.join('、'))] : []),
+  ].join('\n');
 }
 
 /** Durable follow-up queue; no result is inferred from a forecast or another release. */
@@ -20,6 +41,26 @@ export class TelegramEventResultMonitor {
   private readonly owner = 'event-results:' + process.pid + ':' + createHash('sha256').update(String(Math.random())).digest('hex');
   constructor(private readonly store: Store, private readonly lookup: (event: EventRecord) => Promise<Result>, private readonly clock = Date.now) {}
   history(chat: string): Delivery[] { return this.store.get<State>('telegram-event-results:' + chat)?.deliveries ?? []; }
+  detail(chat: string, id: string): EventResultDetail | null {
+    const row = this.history(chat).find(item => item.id === id);
+    if (!row) return null;
+    return {
+      id: row.id,
+      title: row.event.titleZh || row.event.title,
+      eventDate: row.event.date,
+      deliveryStatus: row.status,
+      resultStatus: row.resultStatus || (row.status === 'failed' ? 'unavailable' : row.status === 'sent' || row.status === 'acknowledged' ? 'published' : 'pending'),
+      attempts: row.attempts,
+      actual: row.actual || null,
+      publishedAt: row.publishedAt || null,
+      source: row.resultSource || row.event.source || '未知',
+      resultUrl: officialResultUrl(row.resultUrl),
+      reason: row.reason || null,
+      error: row.error || null,
+      nextCheckAt: row.nextCheckAt ? new Date(row.nextCheckAt).toISOString() : null,
+      evidenceRefs: Array.isArray(row.evidenceRefs) ? row.evidenceRefs.filter(item => typeof item === 'string').slice(0, 12) : [],
+    };
+  }
   registerReminder(chat: string,event: EventRecord,messageId: number): void {
     if(!Number.isSafeInteger(messageId)||messageId<=0||!Number.isFinite(Date.parse(event.date)))return;
     const key='telegram-event-results:'+chat,state=this.store.get<State>(key)??{events:{},deliveries:[]},id=identity(event);
@@ -72,26 +113,29 @@ export class TelegramEventResultMonitor {
         catch { result = { actual: null, status: 'unavailable', reason: '结果来源请求失败，稍后重试' }; }
         state.checkedAt[id]=now;
         const publishedAt=result.publishedAt?Date.parse(result.publishedAt):NaN,claimsPublication=['published','revised'].includes(result.status)&&hasEventActual(result.actual),requiresPublicationTime=!!event.kind&&event.kind!=='macro';
+        const earningsEventDay=event.kind==='earnings'?Date.parse(`${event.date.slice(0,10)}T00:00:00.000Z`):NaN;
+        const resultNotBefore=event.kind==='earnings'&&Number.isFinite(earningsEventDay)?earningsEventDay:eventAt;
         if(claimsPublication){
           const invalidTime=requiresPublicationTime&&!Number.isFinite(publishedAt)?'类型化结果缺少可核验的来源发布时间，暂不发布为实际结果'
             :result.publishedAt&&!Number.isFinite(publishedAt)?'来源发布时间格式无效，暂不发布为实际结果'
-            :Number.isFinite(publishedAt)&&publishedAt<eventAt?'来源发布时间早于事件时间，无法确认是本次结果'
+            :Number.isFinite(publishedAt)&&publishedAt<resultNotBefore?'来源发布时间早于事件时间，无法确认是本次结果'
             :Number.isFinite(publishedAt)&&publishedAt>now?'来源发布时间晚于当前时间，等待来源校验'
             :null;
           if(invalidTime)result={...result,actual:null,status:'pending',reason:invalidTime};
         }
-        const published = ['published','revised'].includes(result.status) && hasEventActual(result.actual) && (!result.publishedAt || Number.isFinite(publishedAt) && publishedAt >= eventAt && publishedAt <= now);
+        const published = ['published','revised'].includes(result.status) && hasEventActual(result.actual) && (!result.publishedAt || Number.isFinite(publishedAt) && publishedAt >= resultNotBefore && publishedAt <= now);
         if (previous && !published) continue;
         const terminal=!!event.kind&&event.kind!=='macro'&&['stopped','unsupported'].includes(result.status);
         if (!published && !terminal && age < 15 * 60000) continue;
         const deliveryId = terminal?id+':terminal':published ? id + ':result:' + createHash('sha256').update(String(result.actual)).digest('hex') : id + ':waiting';
-        const existing=state.deliveries.find(d=>d.id===deliveryId);if(existing){existing.nextCheckAt=now+(published?3600000:300000);if(!published){existing.resultStatus=result.status;existing.reason=result.reason;}continue;}
+        const url=officialResultUrl(result.url);
+        const existing=state.deliveries.find(d=>d.id===deliveryId);if(existing){existing.nextCheckAt=now+(published?3600000:300000);existing.resultSource=result.source||event.source||existing.resultSource;existing.resultUrl=url||existing.resultUrl;if(!published){existing.resultStatus=result.status;existing.reason=result.reason;}continue;}
         const lines = [terminal?'⚠️ <b>结果追踪已停止</b>':published ? previous ? '📊 <b>事件结果已修订</b>' : '📊 <b>事件结果已发布</b>' : '⏳ <b>事件结果暂不可用</b>', escape(event.titleZh || event.title), '事件时间：' + escape(event.date)];
-        if (published) lines.push('实际值：' + escape(result.actual),...(!event.kind||event.kind==='macro'?['预期值：' + escape(event.forecast ?? '未提供'),'前值：'+escape(result.previous ?? event.previous ?? '未提供')]:[]),...(previous ? ['此前通知值：'+escape(previous.actual ?? '旧记录未保存结构化实际值')] : []),...(result.publishedAt ? ['结果时间：'+escape(result.publishedAt)] : []));
+        if (published) lines.push('实际值：' + escape(result.actual),...(!event.kind||event.kind==='macro'?['预期值：' + escape(event.forecast ?? '未提供'),'前值：'+escape(result.previous ?? event.previous ?? '未提供')]:[]),...(event.kind==='earnings'&&event.forecast?['Nasdaq EPS 预期：'+escape(event.forecast)+'（可能与 SEC GAAP 口径不同）']:[]),...(event.kind==='earnings'&&result.reason?['口径说明：'+escape(result.reason)]:[]),...(previous ? ['此前通知值：'+escape(previous.actual ?? '旧记录未保存结构化实际值')] : []),...(result.publishedAt ? ['结果时间：'+escape(result.publishedAt)] : []));
         else lines.push('原因：' + escape(result.reason || '来源尚未提供实际值'), terminal?'追踪已停止；不会通知虚构结果。':'未编造实际值；取得可靠结果后继续通知。');
         lines.push('来源：' + escape(result.source || event.source || '未知'), '这是数据通知，不构成交易指令。');
-        const url=officialResultUrl(result.url);if(url)lines.push('<a href="'+escape(url)+'">官方原文</a>');
-        state.deliveries.push({ id: deliveryId, event, text: lines.join('\n'), status: 'pending', attempts: 0, nextAttempt: now,kind:terminal?'terminal':published ? previous ? 'revision':'result':'waiting',originalMessageId:state.reminders[id]?.messageId,resultStatus:published?previous?'revised':'published':result.status,reason:result.reason,nextCheckAt:terminal?null:now+(published?3600000:300000),evidenceRefs:[...(result.evidenceRefs||[]),...(url?[url]:[])],...(published ? {actual:String(result.actual),publishedAt:result.publishedAt} : {}) });
+        if(url)lines.push('<a href="'+escape(url)+'">官方原文</a>');
+        state.deliveries.push({ id: deliveryId, event, text: lines.join('\n'), status: 'pending', attempts: 0, nextAttempt: now,kind:terminal?'terminal':published ? previous ? 'revision':'result':'waiting',originalMessageId:state.reminders[id]?.messageId,resultStatus:published?previous?'revised':'published':result.status,reason:result.reason,resultSource:result.source||event.source,resultUrl:url||undefined,nextCheckAt:terminal?null:now+(published?3600000:300000),evidenceRefs:[...(result.evidenceRefs||[]),...(url?[url]:[])],...(published ? {actual:String(result.actual),publishedAt:result.publishedAt} : {}) });
         if(terminal){delete state.events[id];delete state.checkedAt[id];}
       }
       state.deliveries = state.deliveries.filter(d => {

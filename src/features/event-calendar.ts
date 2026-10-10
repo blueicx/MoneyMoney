@@ -31,6 +31,8 @@ export interface UpcomingEvent {
   previous: string | null;
   actual: string | null;
   source: string;
+  symbol?: string;
+  reportPeriodEnd?: string | null;
 }
 
 export interface UpcomingEventCalendar {
@@ -432,6 +434,8 @@ function mergeCalendarEvents(input: MergeInput): UpcomingEvent[] {
         previous: item.lastYearEps || null,
         actual: null,
         source: day.source,
+        symbol: item.symbol,
+        reportPeriodEnd: item.reportPeriodEnd || null,
       });
     }
   }

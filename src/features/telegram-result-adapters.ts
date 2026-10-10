@@ -2,15 +2,46 @@ import type { EventRecord, Result } from './telegram-event-results';
 import type { ResearchJob } from './research-contracts';
 import type { SettlementEvidence } from './prediction-settlement';
 import type { ContractResearchService } from './contract-research';
+import type { UpcomingEvent } from './event-calendar';
+
+interface SecEarningsSnapshot {
+  symbol: string;
+  reportPeriodEnd: string;
+  acceptedAt: string;
+  form: string;
+  accessionNumber: string;
+  epsUsdPerShare: number | null;
+  revenueUsd: number | null;
+  sourceUrl: string;
+}
 
 interface ResultPorts {
   job?: (id:string)=>ResearchJob|null;
   contract?: (instrument:string)=>ReturnType<ContractResearchService['detail']>;
   settlement?: (platform:'Kalshi'|'Polymarket',id:string)=>Promise<SettlementEvidence|null>;
+  secEarnings?: (symbol:string,reportPeriodEnd:string,eventDate:string)=>Promise<SecEarningsSnapshot|null>;
 }
 export function resultTrackingDisabledReason(eventsEnabled:boolean):string|null {
   return eventsEnabled?null:'未启动结果追踪：事件通知已关闭，请先在通知设置中开启事件通知；不会自动修改你的偏好。';
 }
+
+export function toTrackedCalendarEvent(event:UpcomingEvent):EventRecord {
+  if(event.category==='earnings'){
+    const symbol=String(event.symbol||'').trim().toUpperCase();
+    const safeSymbol=/^[A-Z][A-Z0-9.-]{0,9}$/.test(symbol)?symbol:'';
+    return {...event,kind:'earnings',market:'stocks',instrument:safeSymbol?`stock:us:${safeSymbol}`:undefined,resourceId:event.id,symbol:safeSymbol||undefined,reportPeriodEnd:event.reportPeriodEnd||undefined};
+  }
+  return {...event,kind:'macro'};
+}
+
+function dollars(value:number):string {
+  return new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',maximumFractionDigits:0}).format(value);
+}
+
+function validSecUrl(value:string):boolean {
+  try { const url=new URL(value);return url.protocol==='https:'&&(url.hostname==='sec.gov'||url.hostname.endsWith('.sec.gov')); } catch { return false; }
+}
+
 /** Same durable result monitor and existing business repositories, no inferred outcomes. */
 export async function lookupTrackedResult(event:EventRecord,ports:ResultPorts):Promise<Result>{
   const unsupported=(reason:string):Result=>({actual:null,status:'unsupported',reason});
@@ -29,6 +60,20 @@ export async function lookupTrackedResult(event:EventRecord,ports:ResultPorts):P
     const matches=snapshot.funding.filter((row:{at:string;ratePct:number})=>row.at===event.date);
     if(matches.length!==1)return {actual:null,status:snapshot.sections.funding.dataStatus==='unavailable'?'unavailable':'pending',reason:snapshot.sections.funding.reason||'该结算时间尚无唯一实际费率，不使用当前预估费率'};
     return {actual:String(matches[0].ratePct)+'%',status:'published',source:'Gate 实际历史资金费率',url:snapshot.sections.funding.source,publishedAt:matches[0].at};
+  }
+  if(event.kind==='earnings'){
+    const symbol=String(event.symbol||'').trim().toUpperCase();
+    if(event.market!=='stocks'||!/^stock:us:[A-Z][A-Z0-9.-]{0,9}$/.test(event.instrument||'')||event.instrument!==`stock:us:${symbol}`||!/^\d{4}-\d{2}-\d{2}$/.test(event.reportPeriodEnd||''))return unsupported('财报标的或报告期身份未能核验');
+    if(!ports.secEarnings)return unsupported('SEC 财报结果适配器不可用');
+    const actual=await ports.secEarnings(symbol,event.reportPeriodEnd!,event.date);
+    if(!actual)return {actual:null,status:'pending',source:'SEC EDGAR',reason:'SEC 尚无该报告期、该股票的可核验 10-Q/10-K 实际数据；继续等待，不用预期值代替'};
+    const acceptedAt=Date.parse(actual.acceptedAt),eventDay=Date.parse(`${event.date.slice(0,10)}T00:00:00.000Z`);
+    if(actual.symbol!==symbol||actual.reportPeriodEnd!==event.reportPeriodEnd||!['10-Q','10-Q/A','10-K','10-K/A'].includes(actual.form)||!/^\d{10}-\d{2}-\d{6}$/.test(actual.accessionNumber)||!Number.isFinite(acceptedAt)||!Number.isFinite(eventDay)||acceptedAt<eventDay||!validSecUrl(actual.sourceUrl))return unsupported('SEC 申报身份、报告期、时间或原文链接不一致');
+    const values:string[]=[];
+    if(actual.epsUsdPerShare!==null&&Number.isFinite(actual.epsUsdPerShare))values.push(`SEC GAAP EPS ${new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',minimumFractionDigits:2,maximumFractionDigits:4}).format(actual.epsUsdPerShare)}`);
+    if(actual.revenueUsd!==null&&Number.isFinite(actual.revenueUsd))values.push(`营收 ${dollars(actual.revenueUsd)}`);
+    if(!values.length)return {actual:null,status:'pending',source:'SEC EDGAR',reason:'SEC 已有同报告期申报，但没有可核验的季度 EPS 或营收事实'};
+    return {actual:values.join(' · '),status:'published',source:`SEC EDGAR ${actual.form}`,url:actual.sourceUrl,publishedAt:new Date(acceptedAt).toISOString(),evidenceRefs:[actual.accessionNumber],reason:'SEC XBRL 为 GAAP 披露；Nasdaq EPS 预期可能采用调整后口径，不直接据此计算超预期'};
   }
   if(event.kind==='prediction'){
     if(event.market!=='prediction'||!event.instrument||!event.resourceId||!['Kalshi','Polymarket'].includes(event.platform||'')||!ports.settlement)return unsupported('预测结算身份或平台缺失');

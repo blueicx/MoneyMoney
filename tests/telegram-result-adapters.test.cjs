@@ -42,3 +42,25 @@ test('prediction result uses a valid determination time when settlement time pre
  const evidence={instrument:event.instrument,marketId:event.resourceId,platform:'Kalshi',status:'settled',result:'YES',sourceUrl:'https://api.elections.kalshi.com/trade-api/v2/markets/KXTEST',evidenceHash:'verified-hash',settlementAt:'2026-10-07T23:00:00Z',determinationAt:'2026-10-08T01:00:00Z'};
  const result=await lookupTrackedResult(event,{settlement:async()=>evidence});assert.equal(result.actual,'YES');assert.equal(result.publishedAt,'2026-10-08T01:00:00Z');
 });
+
+test('earnings events preserve stock identity and report-period evidence when mapped for result tracking',async()=>{
+ const {toTrackedCalendarEvent,lookupTrackedResult}=moduleUnderTest();
+ const tracked=toTrackedCalendarEvent({id:'earnings-2026-07-29-AAPL',title:'AAPL 财报',category:'earnings',date:'2026-07-29T20:00:00.000Z',country:'US',forecast:'1.20',previous:'1.10',actual:null,source:'Nasdaq Public Calendar',symbol:'AAPL',reportPeriodEnd:'2026-06-30'});
+ assert.equal(tracked.kind,'earnings');assert.equal(tracked.market,'stocks');assert.equal(tracked.instrument,'stock:us:AAPL');assert.equal(tracked.reportPeriodEnd,'2026-06-30');
+ const ports={secEarnings:async(symbol,periodEnd,eventDate)=>({symbol,reportPeriodEnd:periodEnd,acceptedAt:'2026-08-01T17:30:00.000Z',form:'10-Q',accessionNumber:'0000320193-26-000081',epsUsdPerShare:1.234,revenueUsd:85000000000,sourceUrl:'https://www.sec.gov/Archives/edgar/data/320193/000032019326000081/aapl-20260630.htm'})};
+ const result=await lookupTrackedResult(tracked,ports);assert.equal(result.status,'published');assert.equal(result.publishedAt,'2026-08-01T17:30:00.000Z');assert.match(result.actual,/GAAP EPS/);assert.match(result.actual,/85,000,000,000/);assert.match(result.reason,/口径/);
+ ports.secEarnings=async()=>({symbol:'MSFT',reportPeriodEnd:'2026-06-30',acceptedAt:'2026-08-01T17:30:00.000Z',form:'10-Q',accessionNumber:'x',epsUsdPerShare:1,revenueUsd:2,sourceUrl:'https://www.sec.gov/'});
+ assert.equal((await lookupTrackedResult(tracked,ports)).status,'unsupported');
+});
+
+test('event result command provides per-item details and validates the signed chat-bound callback payload',()=>{
+ const server=fs.readFileSync('src/web/server.ts','utf8');
+ const command=server.slice(server.indexOf('eventresults: ({ chatId })'),server.indexOf('inbox: ({chatId})'));
+ const callback=server.slice(server.indexOf("if (data.startsWith('event-result:handle:"),server.indexOf("if (data.startsWith('delivery:handle:"));
+ assert.match(command,/['"]detail['"]/);
+ assert.match(command,/详情/);
+ assert.match(callback,/record\.chatId\s*!==\s*ctx\.chatId|consumeTelegramCallback\(data,\s*'event-result:handle',\s*ctx\.chatId\)/);
+ assert.match(callback,/telegramEventResults\.detail\(ctx\.chatId,\s*id\)/);
+ assert.match(callback,/formatEventResultDetail/);
+ assert.match(callback,/telegramSafeExternalUrl/);
+});

@@ -5,8 +5,8 @@ import { randomUUID } from 'node:crypto';
 import { DATA_ROOT, PROJECT_ROOT, ensureDir } from '../utils/paths';
 import { stateStore, type SQLiteStateStore } from '../storage/sqlite-state';
 
-export type AutomationJobId = 'radar-refresh' | 'risk-patrol' | 'assistant-refresh' | 'ai-runners' | 'state-backup';
-export type AutomationRunStatus = 'RUNNING' | 'SUCCESS' | 'FAILED';
+export type AutomationJobId = 'radar-refresh' | 'risk-patrol' | 'assistant-refresh' | 'ai-runners' | 'state-backup' | 'sqlite-wal-health';
+export type AutomationRunStatus = 'RUNNING' | 'SUCCESS' | 'WARNING' | 'FAILED';
 
 export interface AutomationRun {
   id: string;
@@ -52,7 +52,159 @@ export function defaultAutomationJobs(): AutomationJob[] {
     { id: 'assistant-refresh', nameZh: '智能助手刷新', descriptionZh: '汇总多市场环境、行动建议和研究提醒。', cadenceZh: '按需刷新', enabled: true, lastStatus: 'NEVER', lastMessage: '等待首次刷新', lastRunAt: null, lastDurationMs: null, runCount: 0, failureCount: 0, recentRuns: [] },
     { id: 'ai-runners', nameZh: 'AI 模拟跑单', descriptionZh: '按策略 tick 独立模拟账户并记录运行结果。', cadenceZh: '每 60 秒', enabled: true, lastStatus: 'NEVER', lastMessage: '暂无运行记录', lastRunAt: null, lastDurationMs: null, runCount: 0, failureCount: 0, recentRuns: [] },
     { id: 'state-backup', nameZh: '业务状态备份', descriptionZh: '一致性备份 SQLite、运行状态与已发布数据湖，并验证快照。', cadenceZh: '每天一次 · 保留最近 7 份已验证快照', enabled: true, lastStatus: 'NEVER', lastMessage: '等待首次备份', lastRunAt: null, lastDurationMs: null, runCount: 0, failureCount: 0, recentRuns: [] },
+    { id: 'sqlite-wal-health', nameZh: 'SQLite WAL 健康巡检', descriptionZh: '只读检查数据库与 WAL/SHM 容量；默认 WAL 阈值 256 MiB，可由 MONEYMONEY_WAL_WARN_BYTES 调整；不执行 checkpoint 或清理。', cadenceZh: '每 15 分钟', enabled: true, lastStatus: 'NEVER', lastMessage: '等待首次巡检', lastRunAt: null, lastDurationMs: null, runCount: 0, failureCount: 0, recentRuns: [] },
   ];
+}
+
+export type SQLiteWalHealthStatus = 'healthy' | 'warning' | 'unavailable';
+export interface SQLiteWalDatabaseHealth {
+  name: 'moneymoney.sqlite' | 'research.db';
+  status: 'healthy' | 'warning';
+  databaseBytes: number;
+  walBytes: number;
+  shmBytes: number;
+}
+export interface SQLiteWalHealthReport {
+  status: SQLiteWalHealthStatus;
+  checkedAt: string;
+  thresholdBytes: number;
+  databases: SQLiteWalDatabaseHealth[];
+  reason: string;
+}
+
+const DEFAULT_WAL_WARN_BYTES = 256 * 1024 * 1024;
+
+export function configuredSQLiteWalWarnBytes(value = process.env.MONEYMONEY_WAL_WARN_BYTES): number {
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed >= 1024 * 1024 ? parsed : DEFAULT_WAL_WARN_BYTES;
+}
+
+function safeRegularFileBytes(file: string): number {
+  try {
+    const stat = fs.lstatSync(file);
+    if (stat.isSymbolicLink() || !stat.isFile()) throw new Error(`SQLite 状态文件不是普通文件: ${path.basename(file)}`);
+    return stat.size;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') return 0;
+    throw error;
+  }
+}
+
+export function inspectSqliteWalHealth(dataRoot = DATA_ROOT, thresholdBytes = configuredSQLiteWalWarnBytes()): SQLiteWalHealthReport {
+  const threshold = Number.isSafeInteger(thresholdBytes) && thresholdBytes >= 0 ? thresholdBytes : configuredSQLiteWalWarnBytes();
+  const databases: SQLiteWalDatabaseHealth[] = [];
+  for (const name of ['moneymoney.sqlite', 'research.db'] as const) {
+    const databasePath = path.join(path.resolve(dataRoot), name);
+    const databaseBytes = safeRegularFileBytes(databasePath);
+    if (databaseBytes === 0 && !fs.existsSync(databasePath)) continue;
+    const walBytes = safeRegularFileBytes(`${databasePath}-wal`);
+    const shmBytes = safeRegularFileBytes(`${databasePath}-shm`);
+    databases.push({ name, status: walBytes > threshold ? 'warning' : 'healthy', databaseBytes, walBytes, shmBytes });
+  }
+  if (!databases.length) return { status: 'unavailable', checkedAt: new Date().toISOString(), thresholdBytes: threshold, databases, reason: '未找到可巡检的 SQLite 数据库文件' };
+  const warnings = databases.filter(item => item.status === 'warning').map(item => `${item.name} WAL ${(item.walBytes / 1024 / 1024).toFixed(1)} MiB 超过 ${(threshold / 1024 / 1024).toFixed(1)} MiB 告警阈值`);
+  const sizes = databases.map(item => `${item.name} DB ${(item.databaseBytes / 1024 / 1024).toFixed(1)} MiB / WAL ${(item.walBytes / 1024 / 1024).toFixed(1)} MiB / SHM ${(item.shmBytes / 1024 / 1024).toFixed(1)} MiB`).join('；');
+  return {
+    status: warnings.length ? 'warning' : 'healthy',
+    checkedAt: new Date().toISOString(),
+    thresholdBytes: threshold,
+    databases,
+    reason: warnings.length ? `${warnings.join('；')}；${sizes}；只读检查未执行 checkpoint 或清理` : `${sizes}；SQLite 与 WAL/SHM 容量正常；本次只读检查未执行 checkpoint 或清理`,
+  };
+}
+
+export type SQLiteWalHealthRunStatus = 'SUCCESS' | 'WARNING' | 'FAILED' | 'BUSY' | 'SKIPPED';
+export interface SQLiteWalHealthRunResult { status: SQLiteWalHealthRunStatus; message: string; finishedAt?: string; report?: SQLiteWalHealthReport; }
+type WalHealthRunRecord = Omit<AutomationRun, 'id' | 'jobId' | 'durationMs'> & { durationMs?: number };
+
+export interface SQLiteWalHealthSchedulerOptions {
+  store: BackupLeaseStore;
+  owner?: string;
+  clock?: () => number;
+  intervalMs?: number;
+  isEnabled?: () => boolean;
+  getLastRunAt?: () => string | null;
+  inspect?: () => SQLiteWalHealthReport;
+  recordRun?: (run: WalHealthRunRecord) => void;
+}
+
+export class SQLiteWalHealthScheduler {
+  private readonly owner: string;
+  private readonly clock: () => number;
+  private readonly intervalMs: number;
+  private timer: NodeJS.Timeout | null = null;
+  private active: Promise<SQLiteWalHealthRunResult> | null = null;
+
+  constructor(private readonly options: SQLiteWalHealthSchedulerOptions) {
+    this.owner = options.owner || `sqlite-wal-health:${process.pid}:${randomUUID()}`;
+    this.clock = options.clock || Date.now;
+    this.intervalMs = Math.max(60_000, options.intervalMs || 15 * 60_000);
+  }
+
+  start(): void {
+    if (this.timer) return;
+    void this.runIfDue().catch(() => undefined);
+    this.timer = setInterval(() => { void this.runIfDue().catch(() => undefined); }, this.intervalMs);
+    this.timer.unref?.();
+  }
+
+  async stop(): Promise<void> {
+    if (this.timer) clearInterval(this.timer);
+    this.timer = null;
+    await this.active?.catch(() => undefined);
+  }
+
+  runIfDue(): Promise<SQLiteWalHealthRunResult> {
+    if (this.options.isEnabled && !this.options.isEnabled()) return Promise.resolve({ status: 'SKIPPED', message: 'SQLite WAL 健康巡检已停用' });
+    const lastRun = this.options.getLastRunAt?.() || null;
+    const previous = lastRun ? Date.parse(lastRun) : Number.NaN;
+    if (Number.isFinite(previous) && previous <= this.clock() && this.clock() - previous < this.intervalMs) {
+      return Promise.resolve({ status: 'SKIPPED', message: '最近一次 SQLite WAL 巡检仍在 15 分钟有效期内' });
+    }
+    return this.execute();
+  }
+
+  runNow(): Promise<SQLiteWalHealthRunResult> { return this.execute(); }
+
+  private execute(): Promise<SQLiteWalHealthRunResult> {
+    if (this.active) return Promise.resolve({ status: 'BUSY', message: 'SQLite WAL 巡检正在运行，不重复启动' });
+    const pending = this.executeWithLease();
+    this.active = pending;
+    return pending.finally(() => { if (this.active === pending) this.active = null; });
+  }
+
+  private async executeWithLease(): Promise<SQLiteWalHealthRunResult> {
+    const leaseKey = 'automation:sqlite-wal-health';
+    const startedMs = this.clock();
+    const startedAt = new Date(startedMs).toISOString();
+    let acquired = false;
+    try {
+      acquired = this.options.store.acquireLease(leaseKey, this.owner, startedMs, 60_000);
+      if (!acquired) return { status: 'BUSY', message: '其他服务实例持有 WAL 巡检租约，本次不重复运行' };
+      const report = (this.options.inspect || (() => inspectSqliteWalHealth()))();
+      const finishedAt = new Date(this.clock()).toISOString();
+      const status: SQLiteWalHealthRunStatus = report.status === 'healthy' ? 'SUCCESS' : report.status === 'warning' ? 'WARNING' : 'FAILED';
+      const message = report.reason;
+      (this.options.recordRun || (run => { saveAutomationRun('sqlite-wal-health', run); }))({ status, message, startedAt, finishedAt });
+      return { status, message, finishedAt, report };
+    } catch (error) {
+      const finishedAt = new Date(this.clock()).toISOString();
+      const message = 'SQLite WAL 巡检失败：' + String((error as Error)?.message || error).slice(0, 300);
+      try { (this.options.recordRun || (run => { saveAutomationRun('sqlite-wal-health', run); }))({ status: 'FAILED', message, startedAt, finishedAt }); } catch { /* Preserve the inspection failure if Ops persistence is unavailable. */ }
+      return { status: 'FAILED', message, finishedAt };
+    } finally {
+      if (acquired) try { this.options.store.releaseLease(leaseKey, this.owner); } catch { /* Lease expiry remains the fallback cleanup. */ }
+    }
+  }
+}
+
+export function createSQLiteWalHealthScheduler(options: Omit<SQLiteWalHealthSchedulerOptions, 'inspect' | 'getLastRunAt' | 'recordRun'> & Partial<Pick<SQLiteWalHealthSchedulerOptions, 'inspect' | 'getLastRunAt' | 'recordRun'>>): SQLiteWalHealthScheduler {
+  return new SQLiteWalHealthScheduler({
+    ...options,
+    getLastRunAt: options.getLastRunAt || (() => getAutomationJobs().find(item => item.id === 'sqlite-wal-health')?.recentRuns[0]?.finishedAt || null),
+    inspect: options.inspect || (() => inspectSqliteWalHealth()),
+    recordRun: options.recordRun || (run => { saveAutomationRun('sqlite-wal-health', run); }),
+  });
 }
 
 export type StateBackupRunStatus = 'SUCCESS' | 'FAILED' | 'SKIPPED' | 'BUSY';

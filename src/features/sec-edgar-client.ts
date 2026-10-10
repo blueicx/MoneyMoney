@@ -29,6 +29,7 @@ interface SecXbrlEntry {
   form?: string;
   fp?: string;
   filed?: string;
+  accn?: string;
 }
 
 export interface SecCompanyFactsPayload {
@@ -185,6 +186,109 @@ function validDate(value: unknown): value is string {
   return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === date;
 }
 
+export interface SecQuarterlyEarningsInput {
+  symbol: string;
+  cik: string;
+  reportPeriodEnd: string;
+  eventDate: string;
+}
+
+export interface SecQuarterlyEarningsActual {
+  symbol: string;
+  cik: string;
+  reportPeriodEnd: string;
+  acceptedAt: string;
+  form: '10-Q' | '10-Q/A' | '10-K' | '10-K/A';
+  accessionNumber: string;
+  epsUsdPerShare: number | null;
+  revenueUsd: number | null;
+  sourceUrl: string;
+}
+
+const QUARTERLY_EPS_TAGS = ['EarningsPerShareDiluted', 'EarningsPerShareBasic'];
+const QUARTERLY_REVENUE_TAGS = [
+  'RevenueFromContractWithCustomerExcludingAssessedTax',
+  'RevenueFromContractWithCustomerIncludingAssessedTax',
+  'Revenues',
+  'SalesRevenueNet',
+];
+
+function quarterlyValue(
+  facts: SecCompanyFactsPayload,
+  tags: string[],
+  reportPeriodEnd: string,
+  accessionNumber: string,
+  filingDate: string,
+  filingForm: string,
+  unitPattern: RegExp,
+): number | null {
+  const gaap = facts?.facts?.['us-gaap'] || {};
+  for (const tag of tags) {
+    const units = gaap[tag]?.units || {};
+    for (const [unit, rows] of Object.entries(units)) {
+      if (!unitPattern.test(unit)) continue;
+      const candidates = (rows || []).filter(row => {
+        if (text(row.accn) !== accessionNumber || text(row.end) !== reportPeriodEnd || text(row.filed) !== filingDate) return false;
+        const form = text(row.form).toUpperCase();
+        if (form !== filingForm || !row.start || !validDate(row.start) || !validDate(row.end)) return false;
+        const durationDays = (Date.parse(`${row.end}T00:00:00Z`) - Date.parse(`${row.start}T00:00:00Z`)) / 86_400_000;
+        return durationDays >= 70 && durationDays <= 110 && Number.isFinite(Number(row.val));
+      }).sort((a, b) => String(a.form || '').localeCompare(String(b.form || '')));
+      if (candidates.length) return Number(candidates[0].val);
+    }
+  }
+  return null;
+}
+
+export function parseSecQuarterlyEarningsActual(
+  companyFacts: SecCompanyFactsPayload,
+  submissions: SecSubmissionsPayload,
+  input: SecQuarterlyEarningsInput,
+): SecQuarterlyEarningsActual | null {
+  const symbol = text(input.symbol).toUpperCase();
+  const cik = paddedCik(input.cik);
+  const reportPeriodEnd = text(input.reportPeriodEnd);
+  const eventAt = Date.parse(input.eventDate);
+  if (!/^[A-Z][A-Z0-9.-]{0,9}$/.test(symbol) || !cik || !validDate(reportPeriodEnd) || !Number.isFinite(eventAt)) return null;
+  const notBefore = `${new Date(eventAt).toISOString().slice(0, 10)}T00:00:00.000Z`;
+  const recent = submissions?.filings?.recent || {};
+  const forms = Array.isArray(recent.form) ? recent.form : [];
+  const accessions = Array.isArray(recent.accessionNumber) ? recent.accessionNumber : [];
+  const filingDates = Array.isArray(recent.filingDate) ? recent.filingDate : [];
+  const reportDates = Array.isArray(recent.reportDate) ? recent.reportDate : [];
+  const acceptances = Array.isArray(recent.acceptanceDateTime) ? recent.acceptanceDateTime : [];
+  const documents = Array.isArray(recent.primaryDocument) ? recent.primaryDocument : [];
+  const rows: Array<{ form: SecQuarterlyEarningsActual['form']; accessionNumber: string; filingDate: string; acceptedAt: string; document: string }> = [];
+  for (let index = 0; index < forms.length; index += 1) {
+    const form = text(forms[index]).toUpperCase();
+    const accessionNumber = text(accessions[index]);
+    const filingDate = text(filingDates[index]);
+    const reportDate = text(reportDates[index]);
+    const acceptedAtRaw = text(acceptances[index]);
+    const acceptedAtMs = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/.test(acceptedAtRaw) ? Date.parse(acceptedAtRaw) : Number.NaN;
+    if (!['10-Q', '10-Q/A', '10-K', '10-K/A'].includes(form) || !/^\d{10}-\d{2}-\d{6}$/.test(accessionNumber)
+      || !validDate(filingDate) || reportDate !== reportPeriodEnd || !Number.isFinite(acceptedAtMs)
+      || new Date(acceptedAtMs).toISOString() < notBefore) continue;
+    rows.push({ form: form as SecQuarterlyEarningsActual['form'], accessionNumber, filingDate,
+      acceptedAt: new Date(acceptedAtMs).toISOString(), document: text(documents[index]) });
+  }
+  const accessionBase = `https://www.sec.gov/Archives/edgar/data/${Number(cik)}/`;
+  const candidates = rows.map(row => {
+    const epsUsdPerShare = quarterlyValue(companyFacts, QUARTERLY_EPS_TAGS, reportPeriodEnd, row.accessionNumber, row.filingDate, row.form, /^USD\s*\/\s*shares$/i);
+    const revenueUsd = quarterlyValue(companyFacts, QUARTERLY_REVENUE_TAGS, reportPeriodEnd, row.accessionNumber, row.filingDate, row.form, /^USD$/i);
+    if (epsUsdPerShare == null && revenueUsd == null) return null;
+    const archivePath = `${accessionBase}${row.accessionNumber.replace(/-/g, '')}/`;
+    const safeDocument = /^[A-Za-z0-9._/-]+$/.test(row.document) && row.document.split('/').every(part => part && part !== '.' && part !== '..') ? row.document : '';
+    return {
+      symbol, cik, reportPeriodEnd, acceptedAt: row.acceptedAt, form: row.form, accessionNumber: row.accessionNumber,
+      epsUsdPerShare, revenueUsd,
+      sourceUrl: safeDocument ? `${archivePath}${encodeURI(safeDocument)}` : archivePath,
+    } satisfies SecQuarterlyEarningsActual;
+  }).filter((row): row is SecQuarterlyEarningsActual => row !== null)
+    .sort((a, b) => b.acceptedAt.localeCompare(a.acceptedAt));
+  return candidates[0] || null;
+}
+
 export function reportedValueUnitForFilingDate(value: unknown): 'usd' | 'thousand-usd' | 'unknown' {
   const filingDate = text(value);
   if (!validDate(filingDate)) return 'unknown';
@@ -321,6 +425,14 @@ function cached<T>(key: string, ttlMs: number): T | null {
   return entry.value as T;
 }
 
+async function loadCachedSecPayload<T>(key: string, url: string): Promise<T> {
+  const hit = cached<T>(key, SEC_TTL_MS);
+  if (hit) return hit;
+  const value = await fetchSecJson<T>(url);
+  jsonCache.set(key, { ts: Date.now(), value });
+  return value;
+}
+
 async function loadTickerAdapter(): Promise<SecTickerRecord[]> {
   if (!tickerAdapter) {
     tickerAdapter = new ResilientDataSourceAdapter<SecTickerRecord[]>({
@@ -357,7 +469,7 @@ export async function loadSecSubmissions(symbol: string): Promise<{ companyName:
   const key = `sec-submissions:${record.ticker}`;
   const hit = cached<{ companyName: string; cik: string; filings: StockFiling[] }>(key, SEC_TTL_MS);
   if (hit) return hit;
-  const payload = await fetchSecJson<SecSubmissionsPayload>(`https://data.sec.gov/submissions/CIK${record.cik}.json`);
+  const payload = await loadCachedSecPayload<SecSubmissionsPayload>(`sec-submissions-raw:${record.ticker}`, `https://data.sec.gov/submissions/CIK${record.cik}.json`);
   const parsed = parseSecSubmissions(payload);
   const accessionBase = `https://www.sec.gov/Archives/edgar/data/${Number(record.cik)}/`;
   const value = { companyName: parsed.companyName || record.title, cik: record.cik, filings: parsed.filings.map(filing => ({
@@ -375,9 +487,20 @@ export async function loadSecCompanyFacts(symbol: string): Promise<StockCompanyF
   const key = `sec-companyfacts:${record.ticker}`;
   const hit = cached<StockCompanyFacts>(key, SEC_TTL_MS);
   if (hit) return hit;
-  const payload = await fetchSecJson<SecCompanyFactsPayload>(`https://data.sec.gov/api/xbrl/companyfacts/CIK${record.cik}.json`);
+  const payload = await loadCachedSecPayload<SecCompanyFactsPayload>(`sec-companyfacts-raw:${record.ticker}`, `https://data.sec.gov/api/xbrl/companyfacts/CIK${record.cik}.json`);
   const parsed = parseSecCompanyFacts(payload);
   const value: StockCompanyFacts = { symbol: record.ticker, cik: record.cik, companyName: parsed.companyName || record.title, annualFacts: parsed.annualFacts };
   jsonCache.set(key, { ts: Date.now(), value });
   return value;
+}
+
+export async function loadSecQuarterlyEarningsActual(input: Omit<SecQuarterlyEarningsInput, 'cik'>): Promise<SecQuarterlyEarningsActual | null> {
+  const reportPeriodEnd = text(input.reportPeriodEnd);
+  if (!validDate(reportPeriodEnd)) return null;
+  const record = await findSecTicker(input.symbol);
+  const [companyFacts, submissions] = await Promise.all([
+    loadCachedSecPayload<SecCompanyFactsPayload>(`sec-companyfacts-raw:${record.ticker}`, `https://data.sec.gov/api/xbrl/companyfacts/CIK${record.cik}.json`),
+    loadCachedSecPayload<SecSubmissionsPayload>(`sec-submissions-raw:${record.ticker}`, `https://data.sec.gov/submissions/CIK${record.cik}.json`),
+  ]);
+  return parseSecQuarterlyEarningsActual(companyFacts, submissions, { ...input, symbol: record.ticker, cik: record.cik, reportPeriodEnd });
 }

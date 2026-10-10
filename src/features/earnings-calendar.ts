@@ -8,6 +8,7 @@ export interface EarningsItem {
   marketCapUsd: number | null;
   marketCapLabel: string;
   fiscalQuarter: string;
+  reportPeriodEnd?: string | null;
   epsForecast: string;
   estimates: string;
   lastYearEps: string;
@@ -70,6 +71,19 @@ function text(value: any): string {
   return normalized && normalized.toUpperCase() !== 'N/A' ? normalized : '';
 }
 
+function reportPeriodEnd(value: unknown): string | null {
+  const raw = text(value);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    const parsed = new Date(`${raw}T00:00:00Z`);
+    return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === raw ? raw : null;
+  }
+  const usDate = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (!usDate) return null;
+  const normalized = `${usDate[3]}-${usDate[1].padStart(2, '0')}-${usDate[2].padStart(2, '0')}`;
+  const parsed = new Date(`${normalized}T00:00:00Z`);
+  return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === normalized ? normalized : null;
+}
+
 export async function getEarningsCalendar(requestedDate?: string): Promise<EarningsCalendar> {
   const date = requestedDate?.trim() || currentUsMarketDate();
   if (!isValidDate(date)) throw new Error('日期格式应为 YYYY-MM-DD');
@@ -99,6 +113,7 @@ export async function getEarningsCalendar(requestedDate?: string): Promise<Earni
       marketCapUsd: parseMarketCap(row.marketCap),
       marketCapLabel: text(row.marketCap),
       fiscalQuarter: text(row.fiscalQuarterEnding),
+      reportPeriodEnd: reportPeriodEnd(row.fiscalQuarterEnding),
       epsForecast: text(row.epsForecast),
       estimates: text(row.noOfEsts),
       lastYearEps: text(row.lastYearEPS),

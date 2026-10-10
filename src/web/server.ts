@@ -176,8 +176,9 @@ import { verifyLoginToken, extractAuthToken } from './auth';
 import { registerApiAuthProtection, registerAuthRoutes } from './auth-routes';
 import { registerBuiltAssets, sendBuiltPage } from './static-assets';
 import { stateStore, getStorageHealth } from '../storage/sqlite-state';
-import { TelegramEventResultMonitor, lookupOfficialEventResult } from '../features/telegram-event-results';
-import { lookupTrackedResult, resultTrackingDisabledReason } from '../features/telegram-result-adapters';
+import { TelegramEventResultMonitor, formatEventResultDetail, lookupOfficialEventResult } from '../features/telegram-event-results';
+import { lookupTrackedResult, resultTrackingDisabledReason, toTrackedCalendarEvent } from '../features/telegram-result-adapters';
+import { loadSecQuarterlyEarningsActual } from '../features/sec-edgar-client';
 import type { EventRecord as TelegramTrackedResult } from '../features/telegram-event-results';
 import { renderTelegramKline } from '../features/telegram-kline-image';
 import { DATA_ROOT } from '../utils/paths';
@@ -215,6 +216,7 @@ import {
   upsertResearchEntry,
 } from '../features/research-workspace';
 import {
+  createSQLiteWalHealthScheduler,
   createStateBackupScheduler,
   getAutomationJobs,
   getAutomationOverview,
@@ -961,6 +963,11 @@ const stateBackupScheduler = createStateBackupScheduler({
   store: stateStore,
   intervalMs: 60 * 60_000,
   isEnabled: () => getAutomationJobs().find(job => job.id === 'state-backup')?.enabled !== false,
+});
+const sqliteWalHealthScheduler = createSQLiteWalHealthScheduler({
+  store: stateStore,
+  intervalMs: 15 * 60_000,
+  isEnabled: () => getAutomationJobs().find(job => job.id === 'sqlite-wal-health')?.enabled !== false,
 });
 
 const screenerTrackingStore = new ScreenerTrackingStore(stateStore);
@@ -6568,8 +6575,8 @@ export function getTelegramCommandHandlers(): Record<string, TelegramCommandHand
       if (!rows.length) return '暂无事件结果投递记录；高影响事件结束后会继续查询，缺少实际值时说明来源原因。';
       const text='<b>事件结果通知记录</b>\n'+rows.map(row=>`${escapeTelegramHtml(row.event.titleZh || row.event.title)} · ${escapeTelegramHtml(row.event.date)}\n${({sent:'已发送',pending:'待发送/重试',failed:'发送失败',acknowledged:'已确认'})[row.status]} · 尝试 ${row.attempts} 次${row.error ? ' · '+escapeTelegramHtml(row.error):''}`).join('\n\n');
       const buttons=rows.map(row=>{
-        const actions: Array<'ack'|'retry'> = row.status==='failed'||row.status==='pending' ? ['retry'] : row.status==='acknowledged' ? [] : ['ack'];
-        return actions.map(action=>({text:action==='ack'?'确认已读':'重试',callback_data:issueTelegramCallback('event-result:handle',{scope:telegramScopeForChat(chatId),id:JSON.stringify([action,row.id]),workspace:'events',chatId})}));
+        const actions: Array<'detail'|'ack'|'retry'> = ['detail', ...(row.status==='failed'||row.status==='pending' ? ['retry' as const] : row.status==='acknowledged' ? [] : ['ack' as const])];
+        return actions.map(action=>({text:action==='detail'?'查看详情':action==='ack'?'确认已读':'重试',callback_data:issueTelegramCallback('event-result:handle',{scope:telegramScopeForChat(chatId),id:JSON.stringify([action,row.id]),workspace:'events',chatId})}));
       }).filter(row=>row.length);
       return buttons.length ? telegramInlineReply(text,buttons):text;
     },
@@ -6728,7 +6735,15 @@ function startTelegramInteractionBot(): void {
       if (data.startsWith('event-result:handle:')) {
         const record = consumeTelegramCallback(data,'event-result:handle',ctx.chatId);
         if (!record || record.workspace !== 'events' || record.scope !== telegramScopeForChat(ctx.chatId)) return telegramReply('事件结果按钮已过期或市场已切换，请刷新 /eventresults。');
-        let action:string,id:string; try { [action,id] = JSON.parse(record.id); } catch { return telegramReply('事件结果按钮无效。'); }
+        let payload: unknown; try { payload = JSON.parse(record.id); } catch { return telegramReply('事件结果按钮无效。'); }
+        if (!Array.isArray(payload) || payload.length !== 2 || !payload.every(item => typeof item === 'string')) return telegramReply('事件结果按钮无效。');
+        const [action,id] = payload as [string,string];
+        if (action === 'detail') {
+          const detail=telegramEventResults.detail(ctx.chatId,id);
+          if(!detail)return telegramReply('未找到属于当前私聊的事件结果记录。');
+          const message=formatEventResultDetail(detail),url=telegramSafeExternalUrl(detail.resultUrl || '');
+          return url?telegramInlineReply(message,[[{text:'打开官方结果来源',url}]]):telegramReply(message);
+        }
         if (!['ack','retry'].includes(action) || !telegramEventResults.update(ctx.chatId,id,action as 'ack'|'retry')) return telegramReply('该结果当前不能确认或重试；请刷新 /eventresults。');
         if (action === 'ack') return telegramReply('✅ 已确认这条事件结果通知。');
         const history=telegramEventResults.history(ctx.chatId);
@@ -7021,7 +7036,7 @@ function reloadTelegramIntegration(): Promise<void> {
 const telegramSignalPushes = new Set<string>();
 const telegramEventReminderStages = new Map<string, EventReminderThreshold | null>();
 const telegramEventResults = new TelegramEventResultMonitor(stateStore,event=>event.kind&&event.kind!=='macro'
-  ?lookupTrackedResult(event,{job:id=>researchRepository.getJob(id),contract:instrument=>contractResearchService.detail(instrument,['funding']),settlement:refreshPredictionSettlement})
+  ?lookupTrackedResult(event,{job:id=>researchRepository.getJob(id),contract:instrument=>contractResearchService.detail(instrument,['funding']),settlement:refreshPredictionSettlement,secEarnings:(symbol,reportPeriodEnd,eventDate)=>loadSecQuarterlyEarningsActual({symbol,reportPeriodEnd,eventDate})})
   :lookupOfficialEventResult(event));
 const telegramDigestPushes = new Set<string>();
 const telegramSourceStates = new Map<string, boolean>();
@@ -7142,6 +7157,7 @@ async function monitorTelegramEventAlerts(): Promise<void> {
     calendar = null;
   }
   const highImpactEvents = calendar?.events.filter(event => event.impact === 'high') ?? [];
+  const trackedHighImpactEvents = highImpactEvents.map(toTrackedCalendarEvent);
   for (const chatId of chats) {
     const suppressed = telegramAlertSuppressed(chatId, 'high');
     for (const event of highImpactEvents) {
@@ -7157,7 +7173,7 @@ async function monitorTelegramEventAlerts(): Promise<void> {
           const messageId=await telegramInteractionBot.sendToChat(chatId, telegramReply(
             `📅 <b>高影响事件提醒</b>\n${formatEventLineZh(event)}\n提醒节点：提前 ${eventReminderThresholdLabel(reminder.stage)}\n距离：${eventCountdownLabel(minutesUntil)}`,
           ));
-          if(typeof messageId==='number')telegramEventResults.registerReminder(chatId,event,messageId);
+          if(typeof messageId==='number')telegramEventResults.registerReminder(chatId,toTrackedCalendarEvent(event),messageId);
           telegramEventReminderStages.set(key, reminder.stage);
         } catch {}
       } else if (reminder.stage !== previousStage && reminder.stage !== null && !reminder.shouldSend) {
@@ -7167,7 +7183,7 @@ async function monitorTelegramEventAlerts(): Promise<void> {
       }
 
     }
-    await telegramEventResults.run(chatId, highImpactEvents, async (text,originalMessageId) => {
+    await telegramEventResults.run(chatId, trackedHighImpactEvents, async (text,originalMessageId) => {
       if (!telegramInteractionBot) throw new Error('Bot unavailable');
       return telegramInteractionBot.sendToChat(chatId, {...telegramReply(text),replyToMessageId:originalMessageId});
     }, !suppressed);
@@ -9529,6 +9545,13 @@ async function runAutomationJob(jobId: string): Promise<{ message: string }> {
 
 app.post('/api/ops/run/:jobId', async (req, res) => {
   const jobId = String(req.params.jobId) as Parameters<typeof saveAutomationRun>[0];
+  if (jobId === 'sqlite-wal-health') {
+    if (!adminOnly(req, res)) return;
+    const result = await sqliteWalHealthScheduler.runNow();
+    if (result.status === 'BUSY') return res.status(409).json({ success: false, error: result.message });
+    if (result.status === 'FAILED') return res.status(500).json({ success: false, error: result.message, data: result });
+    return res.json({ success: true, data: { jobId, ...result } });
+  }
   if (jobId === 'state-backup') {
     if (!adminOnly(req, res)) return;
     const result = await stateBackupScheduler.runNow();
@@ -10343,6 +10366,7 @@ async function main() {
     startUnifiedAlertMonitor();
     startCoverageCanaryMonitor();
     stateBackupScheduler.start();
+    sqliteWalHealthScheduler.start();
     startPaperDriftMonitor();
     startMarketHistoryCaptureMonitor();
     if (process.env.MONEYMONEY_DISABLE_GURU_REFRESH !== 'true') startGuruHoldingsRefreshMonitor();
@@ -10382,6 +10406,7 @@ async function main() {
     stopUnifiedAlertMonitor();
     stopCoverageCanaryMonitor();
     await stateBackupScheduler.stop();
+    await sqliteWalHealthScheduler.stop();
     stopPaperDriftMonitor();
     await stopMarketHistoryCaptureMonitor();
     if (process.env.MONEYMONEY_DISABLE_GURU_REFRESH !== 'true') await stopGuruHoldingsRefreshMonitor();

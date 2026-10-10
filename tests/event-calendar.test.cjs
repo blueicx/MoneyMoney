@@ -34,7 +34,7 @@ const result = buildUpcomingEvents({
     count: 1,
     items: [{
       symbol: 'AAPL', name: 'Apple Inc.', marketCapUsd: 3_000_000_000_000,
-      marketCapLabel: '$3T', fiscalQuarter: 'Q4', epsForecast: '1.55',
+      marketCapLabel: '$3T', fiscalQuarter: '2026-06-30', reportPeriodEnd: '2026-06-30', epsForecast: '1.55',
       estimates: '30', lastYearEps: '1.46', lastYearReportDate: '',
       timing: 'after', timingLabel: '盘后',
     }],
@@ -48,5 +48,7 @@ assert.ok(result.warnings.includes('宏观日历使用近期缓存'));
 assert.deepEqual(result.events.map(event => event.category), ['macro', 'central-bank', 'earnings']);
 assert.equal(result.events[2].impact, 'high');
 assert.match(result.events[2].detail, /盘后/);
+assert.equal(result.events[2].symbol, 'AAPL');
+assert.equal(result.events[2].reportPeriodEnd, '2026-06-30');
 
 console.log('upcoming event calendar helpers: all assertions passed');

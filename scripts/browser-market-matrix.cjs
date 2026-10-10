@@ -200,6 +200,7 @@ async function main() {
     const pageErrors = [];
     const lazyAssetRequests = [];
     let stockTimelineRequests = 0;
+    let stockTimelineFixture = null;
     let captureCryptoWorkspaceRequests = false;
     const cryptoWorkspaceRequests = [];
     page.on('request', request => {
@@ -212,6 +213,7 @@ async function main() {
     });
     await page.route('**/api/events/timeline?*', route => {
       stockTimelineRequests += 1;
+      stockTimelineFixture = { url: route.request().url(), method: route.request().method() };
       return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, market: 'stocks', dataStatus: 'empty', source: 'Browser acceptance fixture', updatedAt: '2026-09-29T01:00:00.000Z', reason: '验收夹具未提供事件记录。', sourceStatus: {}, data: [] }) });
     });
     let settlementStatus = null;
@@ -414,7 +416,18 @@ async function main() {
     await page.waitForFunction(() => window.MoneyMoneyHistoryChart && window.MoneyMoneyWorkflow, null, { timeout: 10_000 });
     assert.ok(lazyAssetRequests.some(url => /workspace-research/.test(url)), 'opening research should load its bundle on demand');
     await page.evaluate(() => { currentInstrumentId = null; openWorkspace('events'); });
-    await page.waitForFunction(() => document.getElementById('market-timeline-list')?.textContent.includes('当前市场暂无事件与新闻'), null, { timeout: 10_000 });
+    await page.waitForFunction(() => document.getElementById('market-timeline-list')?.textContent.includes('当前市场暂无事件与新闻'), null, { timeout: 10_000 }).catch(async error => {
+      console.error(JSON.stringify(await page.evaluate(state => ({
+        timelineRequests: state.requests,
+        fixture: state.fixture,
+        pageErrors: state.pageErrors,
+        workspace: document.getElementById('market-workspace-shell')?.dataset.workspace,
+        market: document.body.dataset.marketScope,
+        timeline: document.getElementById('market-timeline-list')?.outerHTML.slice(0, 3000),
+        contextTrace: window.__workspaceContextTrace,
+      }), { requests: stockTimelineRequests, fixture: stockTimelineFixture, pageErrors })));
+      throw error;
+    });
     assert.equal(stockTimelineRequests, 1, 'opening the events workspace without an instrument should request its market timeline once');
     assert.ok(lazyAssetRequests.some(url => /workspace-events/.test(url)), 'the event timeline module should load only when its workspace is opened');
     await page.evaluate(() => setMarketScope('overview'));

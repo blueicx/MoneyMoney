@@ -129,3 +129,29 @@ test('typed actuals remain pending when the tracked event time itself cannot be 
  assert.equal(messages.length,1);assert.equal(messages[0].reply,77);assert.match(messages[0].text,/事件时间/);assert.doesNotMatch(messages[0].text,/实际值：0%/);
  assert.equal(lookups,0);assert.equal(monitor.history('owner')[0].resultStatus,'unverifiable');
 });
+
+test('SEC earnings published on the event date are accepted despite an approximate calendar clock',async()=>{
+ const {TelegramEventResultMonitor}=require('../src/features/telegram-event-results');
+ const values=new Map(),store={get:k=>structuredClone(values.get(k)||null),set:(k,v)=>values.set(k,structuredClone(v))},messages=[];
+ const event={id:'earnings-2026-08-01-AAPL',kind:'earnings',market:'stocks',instrument:'stock:us:AAPL',resourceId:'earnings-2026-08-01-AAPL',symbol:'AAPL',reportPeriodEnd:'2026-06-30',title:'AAPL Earnings',date:'2026-08-01T20:00:00.000Z',impact:'high',forecast:'1.20',source:'Nasdaq Public Calendar'};
+ const monitor=new TelegramEventResultMonitor(store,async()=>({actual:'SEC GAAP EPS $1.23 · Revenue $85,000,000,000',status:'published',source:'SEC EDGAR 10-Q',url:'https://www.sec.gov/Archives/edgar/data/320193/000032019326000081/aapl-20260630.htm',publishedAt:'2026-08-01T17:30:00.000Z',reason:'SEC XBRL 为 GAAP 口径；Nasdaq 预期可能采用调整后口径，不直接计算超预期'}),()=>Date.parse('2026-08-01T21:00:00.000Z'));
+ await monitor.run('owner',[event],async text=>messages.push(text));
+ assert.equal(messages.length,1);assert.match(messages[0],/事件结果已发布/);assert.match(messages[0],/SEC GAAP EPS/);assert.match(messages[0],/GAAP 口径/);assert.match(messages[0],/SEC EDGAR 10-Q/);assert.match(messages[0],/<a href="https:\/\/www\.sec\.gov\/Archives\//);
+});
+
+test('result detail keeps the actual-result source, safe official URL, retry state, and escaped content',async()=>{
+ const {TelegramEventResultMonitor,formatEventResultDetail}=require('../src/features/telegram-event-results');
+ const values=new Map(),store={get:k=>structuredClone(values.get(k)||null),set:(k,v)=>values.set(k,structuredClone(v))};
+ const event={id:'earnings-2026-08-01-AAPL',kind:'earnings',market:'stocks',instrument:'stock:us:AAPL',resourceId:'earnings-2026-08-01-AAPL',symbol:'AAPL',reportPeriodEnd:'2026-06-30',title:'<AAPL>',date:'2026-08-01T20:00:00.000Z',impact:'high',source:'Nasdaq Public Calendar'};
+ const monitor=new TelegramEventResultMonitor(store,async()=>({actual:'SEC GAAP EPS $1.23',status:'published',source:'SEC EDGAR 10-Q',url:'https://www.sec.gov/Archives/edgar/data/320193/filing.htm',publishedAt:'2026-08-01T17:30:00.000Z',reason:'GAAP'}),()=>Date.parse('2026-08-01T21:00:00.000Z'));
+ await monitor.run('owner',[event],async()=>77);
+ const row=monitor.history('owner')[0],detail=monitor.detail('owner',row.id);
+ assert.equal(detail.source,'SEC EDGAR 10-Q');
+ assert.equal(detail.resultUrl,'https://www.sec.gov/Archives/edgar/data/320193/filing.htm');
+ assert.equal(detail.actual,'SEC GAAP EPS $1.23');
+ assert.match(formatEventResultDetail(detail),/SEC EDGAR 10-Q/);
+ assert.match(formatEventResultDetail(detail),/SEC GAAP EPS \$1\.23/);
+ assert.match(formatEventResultDetail(detail),/&lt;AAPL&gt;/);
+ assert.doesNotMatch(formatEventResultDetail(detail),/<AAPL>/);
+ assert.equal(monitor.detail('another-chat',row.id),null);
+});
