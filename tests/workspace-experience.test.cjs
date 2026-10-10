@@ -7,7 +7,7 @@ const {
   normalizePeerPrices,
   buildGuruHoldingsMatrix,
 } = require('../dist/features/workspace-experience.js');
-const publicHtml = fs.readFileSync(path.join(__dirname, '../src/web/public/index.html'), 'utf8');
+const publicHtml = require('./helpers/dashboard-source.cjs').readDashboardSource();
 const publicEnhancements = fs.readFileSync(path.join(__dirname, '../src/web/public/experience-enhancements.js'), 'utf8');
 const publicStyles = fs.readFileSync(path.join(__dirname, '../src/web/public/experience-enhancements.css'), 'utf8');
 const serverSource = fs.readFileSync(path.join(__dirname, '../src/web/server.ts'), 'utf8');

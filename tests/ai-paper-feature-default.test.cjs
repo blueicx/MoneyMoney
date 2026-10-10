@@ -20,7 +20,7 @@ test('explicit false disables paper runners', () => assert.equal(enabled('false'
 test('explicit true enables paper runners', () => assert.equal(enabled('true'), true));
 test('invalid feature flag fails closed', () => { for (const value of ['', 'FALSE', 'invalid']) assert.equal(enabled(value), false); });
 test('runner workspace explains the enabled default without claiming automatic startup', () => {
-  const html = fs.readFileSync(path.resolve(__dirname, '../src/web/public/index.html'), 'utf8');
+  const html = require('./helpers/dashboard-source.cjs').readDashboardSource();
   assert.match(html, /AI 跑单默认开启模拟能力，不自动创建或恢复跑单/);
   assert.doesNotMatch(html, /AI 跑单开关默认关闭|服务端开关默认关闭/);
 });

@@ -2,7 +2,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const test = require('node:test');
 
-const html = fs.readFileSync('src/web/public/index.html', 'utf8');
+const html = require('./helpers/dashboard-source.cjs').readDashboardSource();
 const server = fs.readFileSync('src/web/server.ts', 'utf8');
 
 test('macro workspace declares independent market sections', () => {

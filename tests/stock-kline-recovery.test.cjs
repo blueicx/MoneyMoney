@@ -6,7 +6,7 @@ const path = require('node:path');
 const { JSDOM } = require('jsdom');
 const { DataLakeCatalog } = require('../dist/storage/data-lake');
 
-const html = fs.readFileSync('src/web/public/index.html', 'utf8');
+const html = require('./helpers/dashboard-source.cjs').readDashboardSource();
 function functionSource(name) {
   const start = html.search(new RegExp(`(?:async )?function ${name}\\(`));
   assert.ok(start >= 0, `${name} exists in the real dashboard`);

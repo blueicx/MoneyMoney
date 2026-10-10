@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const { JSDOM } = require('jsdom');
-const html = fs.readFileSync('src/web/public/index.html', 'utf8');
+const html = require('./helpers/dashboard-source.cjs').readDashboardSource();
 
 function workspace(market, current) {
   const dom = new JSDOM(html, { runScripts: 'outside-only', url: 'http://localhost/' });

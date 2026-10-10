@@ -93,7 +93,7 @@ test('settlement repository records rules revisions and keeps venue identities i
 
 test('settlement API and prediction cards expose rules, evidence and explicit unknown state', () => {
   const server = fs.readFileSync('src/web/server.ts', 'utf8');
-  const html = fs.readFileSync('src/web/public/index.html', 'utf8');
+  const html = require('./helpers/dashboard-source.cjs').readDashboardSource();
   const feature = fs.readFileSync('src/features/prediction-settlement.ts', 'utf8');
   assert.match(server, /\/api\/prediction\/settlement\/:platform\/:marketId/);
   assert.match(server, /PredictionSettlementRepository/);

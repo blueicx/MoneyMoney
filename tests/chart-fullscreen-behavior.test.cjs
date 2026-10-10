@@ -10,7 +10,7 @@ describe('Chart fullscreen behavior', () => {
   let window;
 
   before(() => {
-    const html = fs.readFileSync(path.join(__dirname, '../src/web/public/index.html'), 'utf8');
+    const html = require('./helpers/dashboard-source.cjs').readDashboardSource();
     dom = new JSDOM(html, {
       runScripts: 'outside-only',
       url: 'http://localhost/',

@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 
 const server = fs.readFileSync('src/web/server.ts', 'utf8');
-const page = fs.readFileSync('src/web/public/index.html', 'utf8');
+const page = require('./helpers/dashboard-source.cjs').readDashboardSource();
 
 test('market research API is wired to scoped data and persistent templates', () => {
   assert.match(server, /app\.get\('\/api\/screener'/);

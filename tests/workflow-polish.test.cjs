@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 
-const page = fs.readFileSync('src/web/public/index.html', 'utf8');
+const page = require('./helpers/dashboard-source.cjs').readDashboardSource();
 const server = fs.readFileSync('src/web/server.ts', 'utf8');
 const { buildBacktestPreflight } = require('../dist/features/backtest-preflight.js');
 const { assessResearchFreshness } = require('../dist/features/research-freshness.js');

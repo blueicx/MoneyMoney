@@ -2,7 +2,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const test = require('node:test');
 
-const html = fs.readFileSync('src/web/public/index.html', 'utf8');
+const html = require('./helpers/dashboard-source.cjs').readDashboardSource();
 
 test('renders market-first navigation with global actions after watchlist', () => {
   assert.match(html, /id="market-scope-bar"/);

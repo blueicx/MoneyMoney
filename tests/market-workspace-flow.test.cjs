@@ -6,7 +6,7 @@ const {
   isWorkspaceAllowed,
   resolveWorkspaceNavigation,
 } = require('../dist/features/market-workspace.js');
-const html = fs.readFileSync('src/web/public/index.html', 'utf8');
+const html = require('./helpers/dashboard-source.cjs').readDashboardSource();
 const server = fs.readFileSync('src/web/server.ts', 'utf8');
 
 test('默认工作区稳定且属于当前市场菜单', () => {

@@ -1,4 +1,4 @@
-const test=require('node:test');const assert=require('node:assert/strict');const fs=require('node:fs');const {JSDOM}=require('jsdom');const html=fs.readFileSync('src/web/public/index.html','utf8');
+const test=require('node:test');const assert=require('node:assert/strict');const fs=require('node:fs');const {JSDOM}=require('jsdom');const html=require('./helpers/dashboard-source.cjs').readDashboardSource();
 test('canonical crypto and options selections pass symbols, not identity strings, to existing loaders',()=>{
  const source=html.slice(html.indexOf('function loadActiveWorkspaceInstrument()'),html.indexOf('window.openWorkspace = function(id)'));
  for(const [market,id,workspace,symbol] of [['crypto','crypto:binance:ETHUSDT','crypto-quotes','ETHUSDT'],['options','option:cboe:SPY','option-chain','SPY']]){

@@ -5,6 +5,7 @@ const path = require('path');
 const crypto = require('node:crypto');
 const zlib = require('node:zlib');
 const ts = require('typescript');
+const { expandDashboardRuntime } = require('./dashboard-source-transform.cjs');
 
 const root = path.join(__dirname, '..');
 const source = path.join(root, 'src', 'web', 'public');
@@ -87,6 +88,7 @@ function splitWorkspaces(code) {
 }
 
 let html = fs.readFileSync(path.join(source, 'index.html'), 'utf8');
+html = expandDashboardRuntime(html, source);
 let number = 0;
 html = html.replace(/<style\b[^>]*>([\s\S]*?)<\/style>/gi, (_, css) => `<link rel="stylesheet" href="${emit(`dashboard-style-${++number}`, css, 'css')}">`);
 html = html.replace(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi, (tag, attributes, code) => {
@@ -131,6 +133,9 @@ html = html.replace(/<script\b([^>]*)>/gi, (tag, attributes) => {
   if (!/\bsrc\s*=/.test(attributes) || /\b(?:async|defer)\b/i.test(attributes) || /\btype\s*=\s*["']module["']/i.test(attributes)) return tag;
   return `<script${attributes} defer>`;
 });
+for (const sourceOnlyFile of ['modules/dashboard-runtime.js', 'modules/dashboard-base.css']) {
+  fs.rmSync(path.join(target, sourceOnlyFile), { force: true });
+}
 fs.writeFileSync(path.join(target, 'index.html'), html);
 fs.writeFileSync(path.join(target, 'asset-manifest.json'), JSON.stringify(manifest, null, 2));
 for (const page of ['index.html', 'login.html']) {

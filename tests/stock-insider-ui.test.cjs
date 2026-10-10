@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 
-const html = fs.readFileSync('src/web/public/index.html', 'utf8');
+const html = require('./helpers/dashboard-source.cjs').readDashboardSource();
 const renderSource = html.match(/function renderInsiderRadar\(data\) \{[\s\S]*?\n\}/)?.[0];
 assert.ok(renderSource, 'renderInsiderRadar should exist in the stock workspace');
 

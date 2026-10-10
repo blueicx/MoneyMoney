@@ -70,7 +70,7 @@ test('Telegram daily digest is per-chat, market-grouped, evidence-linked and sch
 
 test('private runtime diagnostics API and connected UI panels are present', () => {
   const server = fs.readFileSync('src/web/server.ts', 'utf8');
-  const page = fs.readFileSync('src/web/public/index.html', 'utf8');
+  const page = require('./helpers/dashboard-source.cjs').readDashboardSource();
   assert.ok(server.includes("app.get('/api/diagnostics'"));
   assert.match(page, /来源故障时间线/);
   assert.match(page, /负知识库/);
@@ -78,7 +78,7 @@ test('private runtime diagnostics API and connected UI panels are present', () =
 });
 
 test('workspace deep links take priority over the last visited tab', () => {
-  const page = fs.readFileSync('src/web/public/index.html', 'utf8');
+  const page = require('./helpers/dashboard-source.cjs').readDashboardSource();
   assert.match(page, /requestedWorkspaceFromUrl[\s\S]*workspaceTabFor\(activeWorkspaceId\)[\s\S]*showTab\(requestedWorkspaceTab/);
 });
 

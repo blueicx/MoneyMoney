@@ -8,7 +8,7 @@ const serverSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'web', 'serv
 const authRoutesSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'web', 'auth-routes.ts'), 'utf8');
 const authClientSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'web', 'public', 'modules', 'auth-client.js'), 'utf8');
 const loginHtml = fs.readFileSync(path.join(__dirname, '..', 'src', 'web', 'public', 'login.html'), 'utf8');
-const indexHtml = fs.readFileSync(path.join(__dirname, '..', 'src', 'web', 'public', 'index.html'), 'utf8');
+const indexHtml = require('./helpers/dashboard-source.cjs').readDashboardSource();
 
 test('guest token is signed and carries the guest role', () => {
   const token = auth.createLoginToken('guest', 'guest', 60_000);

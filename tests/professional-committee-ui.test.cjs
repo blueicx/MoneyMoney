@@ -7,7 +7,7 @@ test('committee offers only persisted evidence and stock scope normalizes canoni
   const base={market:'stocks',instrument:'AAPL',source:{name:'test'},dataStatus:'delayed',observedAt:new Date().toISOString()};
   w.MoneyMoneyProfessionalResearch.renderCommittee(w.document.getElementById('host'),[{...base,id:'stored',persisted:true},{...base,id:'temporary',persisted:false},{...base,id:'unknown'}]);
   assert.deepEqual([...w.document.querySelectorAll('[data-committee-evidence] input')].map(n=>n.value),['stored']);
-  const html=fs.readFileSync('src/web/public/index.html','utf8'),source=html.match(/function decisionScopeInstrument\(\) \{[\s\S]*?\n\}/)[0];
+  const html=require('./helpers/dashboard-source.cjs').readDashboardSource(),source=html.match(/function decisionScopeInstrument\(\) \{[\s\S]*?\n\}/)[0];
   for(const currentInstrumentId of ['stock:us:AAPL','usAAPL','AAPL'])assert.equal(vm.runInNewContext(source+';decisionScopeInstrument()', {currentInstrumentId,activeMarketScope:'stocks',window:{}}),'AAPL');
   dom.window.close();
 });

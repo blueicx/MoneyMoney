@@ -133,7 +133,7 @@ test('duplicate response preserves the original delivery outcome instead of impl
   assert.equal(duplicate.record.status, 'failed');
   const server = fs.readFileSync(path.join(__dirname, '..', 'src', 'web', 'server.ts'), 'utf8');
   assert.match(server, /result\.status === 'duplicate' \? result\.record\?\.status : result\.status/);
-  const ui = fs.readFileSync(path.join(__dirname, '..', 'src', 'web', 'public', 'index.html'), 'utf8');
+  const ui = require('./helpers/dashboard-source.cjs').readDashboardSource();
   assert.match(ui, /data\.status === 'duplicate' \? data\.record\?\.status : data\.status/);
 });
 
@@ -154,7 +154,7 @@ test('test delivery history is bounded and telegram private routes require admin
     const body = source.slice(start, source.indexOf('\n});', start) + 4);
     assert.match(body, /adminOnly\(req, res\)/, `${route} is admin-only`);
   }
-  const ui = fs.readFileSync(path.join(__dirname, '..', 'src', 'web', 'public', 'index.html'), 'utf8');
+  const ui = require('./helpers/dashboard-source.cjs').readDashboardSource();
   assert.match(ui, /\/api\/telegram\/test-delivery/);
   assert.match(ui, /confirm\([^)]*测试消息/);
   assert.match(ui, /最近测试投递/);

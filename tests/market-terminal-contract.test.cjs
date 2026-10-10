@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { JSDOM } = require('jsdom');
 
-const html = fs.readFileSync(path.join(__dirname, '..', 'src/web/public/index.html'), 'utf8');
+const html = require('./helpers/dashboard-source.cjs').readDashboardSource();
 const dom = new JSDOM(html);
 const document = dom.window.document;
 

@@ -47,7 +47,7 @@ test('invalid legacy return units disable tail estimates without aborting the ex
 test('portfolio analytics and workspace render the same tail-risk result with source and warning labels',()=>{
   const fs=require('fs');
   assert.match(fs.readFileSync('src/features/decision-intelligence.ts','utf8'),/tailRisk:\s*portfolioTailRisk\(rows/);
-  assert.match(fs.readFileSync('src/web/public/index.html','utf8'),/MoneyMoneyProfessionalResearch\?\.renderTailRisk/);
+  assert.match(require('./helpers/dashboard-source.cjs').readDashboardSource(),/MoneyMoneyProfessionalResearch\?\.renderTailRisk/);
   const server=fs.readFileSync('src/web/server.ts','utf8');
   assert.match(server,/map\(row\s*=>\s*\(\{\.\.\.row,\s*datedReturns:\s*undefined/);
   assert.match(server,/tailRisk\s*=\s*\{\s*\.\.\.data\.tailRisk,\s*source:/);

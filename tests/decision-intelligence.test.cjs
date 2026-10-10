@@ -199,7 +199,7 @@ test('saved workspaces restore only market-scoped instruments and safe layout st
 
 test('stable APIs and one connected decision workspace are present', () => {
   const server = fs.readFileSync('src/web/server.ts', 'utf8');
-  const page = fs.readFileSync('src/web/public/index.html', 'utf8');
+  const page = require('./helpers/dashboard-source.cjs').readDashboardSource();
   for (const route of [
     "app.get('/api/evidence'", "app.post('/api/evidence'", "app.get('/api/scenarios'", "app.post('/api/scenarios/run'",
     "app.get('/api/decisions'", "app.post('/api/decisions'", "app.get('/api/portfolio/analytics'",

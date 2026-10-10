@@ -66,7 +66,7 @@ test('web and Telegram use one digest aggregator while web acknowledgement remai
 });
 
 test('digest UI exposes acknowledgement and safe item links', () => {
-  const html = fs.readFileSync(path.join(__dirname, '../src/web/public/index.html'), 'utf8');
+  const html = require('./helpers/dashboard-source.cjs').readDashboardSource();
   assert.match(html, /id="market-change-digest"/);
   assert.match(html, /function loadMarketChangeDigest\(/);
   assert.match(html, /function acknowledgeMarketChange\(/);

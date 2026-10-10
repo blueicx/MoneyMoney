@@ -62,7 +62,7 @@ assert.equal(typeof costPerformance.strategyAttribution, 'object');
 
 const fsNode = require('fs');
 const path = require('path');
-const indexHtml = fsNode.readFileSync(path.join(__dirname, '..', 'src', 'web', 'public', 'index.html'), 'utf8');
+const indexHtml = require('./helpers/dashboard-source.cjs').readDashboardSource();
 
 assert.match(indexHtml, /id=.admin-paper-unified-stats./, 'Critical DOM: admin-paper-unified-stats is present');
 assert.match(indexHtml, /id=.admin-paper-unified-categories./, 'Critical DOM: admin-paper-unified-categories is present');

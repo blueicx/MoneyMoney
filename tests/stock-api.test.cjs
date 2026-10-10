@@ -22,7 +22,7 @@ test('source health exposes stock source groups without prediction-only items', 
   assert.match(sourceHealth, /requestedMarketScope|scope/);
 });
 
-const html = fs.readFileSync('src/web/public/index.html', 'utf8');
+const html = require('./helpers/dashboard-source.cjs').readDashboardSource();
 test('stock chart renders freshness and coverage from the same current-request envelope', () => {
   assert.match(html, /loadUnifiedStockData\(currentStockSymbol, d\)/);
   assert.match(html, /payload\.dataStatus|数据来源/);

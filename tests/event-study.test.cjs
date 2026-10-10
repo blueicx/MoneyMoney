@@ -95,7 +95,7 @@ test('event study repository keeps records isolated by market and supports share
 
 test('event study API is wired to point-in-time bars and private evidence routes', () => {
   const server = fs.readFileSync('src/web/server.ts', 'utf8');
-  const html = fs.readFileSync('src/web/public/index.html', 'utf8');
+  const html = require('./helpers/dashboard-source.cjs').readDashboardSource();
   assert.match(server, /app\.post\('\/api\/event-studies'/);
   assert.match(server, /queryBarsAsOf\(\{ market, instrument, timeframe, asOf \}\)/);
   assert.match(server, /app\.get\('\/api\/events\/:id\/evidence'/);

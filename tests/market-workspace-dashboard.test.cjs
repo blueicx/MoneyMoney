@@ -87,7 +87,7 @@ test('访客不读取私人自选卡片，单卡来源失败不污染其他卡�
 });
 
 test('看板页面显示数据明细并将卡片点击跳到对应工作区', () => {
-  const html = fs.readFileSync(path.join(__dirname, '../src/web/public/index.html'), 'utf8');
+  const html = require('./helpers/dashboard-source.cjs').readDashboardSource();
   assert.match(html, /workspace-dashboard-status-label/);
   assert.match(html, /workspace-dashboard-card-metrics/);
   assert.match(html, /function openDashboardWorkspace\(/);

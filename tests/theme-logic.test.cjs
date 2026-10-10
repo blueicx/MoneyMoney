@@ -4,7 +4,7 @@ const path = require('node:path');
 const test = require('node:test');
 const vm = require('node:vm');
 
-const indexHtml = fs.readFileSync(path.join(__dirname, '..', 'src', 'web', 'public', 'index.html'), 'utf8');
+const indexHtml = require('./helpers/dashboard-source.cjs').readDashboardSource();
 
 function extractCode(html) {
   const match = html.match(/function updateThemeButtons[\s\S]*?function toggleTheme\(\) {[\s\S]*?\n}/);

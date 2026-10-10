@@ -35,7 +35,7 @@ test('scenario engine applies probability shocks only to prediction exposures', 
 });
 
 test('portfolio import UI previews rows before committing them', () => {
-  const source = fs.readFileSync('src/web/public/index.html', 'utf8');
+  const source = require('./helpers/dashboard-source.cjs').readDashboardSource();
   assert.match(source, /commit:\s*false/);
   assert.match(source, /commitPortfolioCsv\(\)/);
   assert.match(source, /确认写入/);
@@ -57,7 +57,7 @@ test('private decision, portfolio and workspace routes enforce admin access', ()
 });
 
 test('evidence changes are visible in the decision workspace and use a per-market seen marker', () => {
-  const source = fs.readFileSync('src/web/public/index.html', 'utf8');
+  const source = require('./helpers/dashboard-source.cjs').readDashboardSource();
   assert.match(source, /renderDecisionEvidenceChanges/);
   assert.match(source, /\/api\/evidence\/changes/);
   assert.match(source, /mm-evidence-seen/);

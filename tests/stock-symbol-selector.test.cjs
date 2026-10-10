@@ -2,7 +2,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const test = require('node:test');
 
-const html = fs.readFileSync('src/web/public/index.html', 'utf8');
+const html = require('./helpers/dashboard-source.cjs').readDashboardSource();
 const serviceWorker = fs.readFileSync('src/web/public/sw.js', 'utf8');
 
 test('stock market exposes all Magnificent Seven shortcuts', () => {

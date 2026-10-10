@@ -51,7 +51,7 @@ test('SLO window ignores samples outside the requested market/time window and ex
 test('seven-day SLO and version routes are wired and validate market scope', () => {
   const server = fs.readFileSync('src/web/server.ts', 'utf8');
   const authRoutes = fs.readFileSync('src/web/auth-routes.ts', 'utf8');
-  const page = fs.readFileSync('src/web/public/index.html', 'utf8');
+  const page = require('./helpers/dashboard-source.cjs').readDashboardSource();
   const packageJson = JSON.parse(fs.readFileSync('package.json', 'utf8'));
   assert.ok(server.includes("app.get('/api/data/slo'"));
   assert.ok(server.includes("app.get('/api/health/version'"));

@@ -6,7 +6,7 @@ const crypto = require('node:crypto');
 const zlib = require('node:zlib');
 const vm = require('node:vm');
 const { JSDOM } = require('jsdom');
-const source = fs.readFileSync('src/web/public/index.html', 'utf8');
+const source = require('./helpers/dashboard-source.cjs').readDashboardSource();
 function sourceFunction(name) {
   const start = source.search(new RegExp(`(?:async )?function ${name}\\(`));
   return source.slice(start, source.indexOf('\n}', start) + 2);

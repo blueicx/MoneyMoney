@@ -57,11 +57,11 @@ test('AI commentary route forwards the selected scope and avoids prediction fetc
 });
 
 test('frontend sends the active instrument for stock, option and crypto AI commentary', () => {
-  assert.match(fs.readFileSync('src/web/public/index.html', 'utf8'), /activeMarketScope === 'stocks'[\s\S]*currentStockSymbol/);
-  assert.match(fs.readFileSync('src/web/public/index.html', 'utf8'), /activeMarketScope === 'options'[\s\S]*option-symbol/);
-  assert.match(fs.readFileSync('src/web/public/index.html', 'utf8'), /activeMarketScope === 'crypto'[\s\S]*bnCurrentSymbol/);
-  assert.match(fs.readFileSync('src/web/public/index.html', 'utf8'), /workspace: typeof activeWorkspaceId/);
-  assert.match(fs.readFileSync('src/web/public/index.html', 'utf8'), /handleAiMarketAction/);
+  assert.match(require('./helpers/dashboard-source.cjs').readDashboardSource(), /activeMarketScope === 'stocks'[\s\S]*currentStockSymbol/);
+  assert.match(require('./helpers/dashboard-source.cjs').readDashboardSource(), /activeMarketScope === 'options'[\s\S]*option-symbol/);
+  assert.match(require('./helpers/dashboard-source.cjs').readDashboardSource(), /activeMarketScope === 'crypto'[\s\S]*bnCurrentSymbol/);
+  assert.match(require('./helpers/dashboard-source.cjs').readDashboardSource(), /workspace: typeof activeWorkspaceId/);
+  assert.match(require('./helpers/dashboard-source.cjs').readDashboardSource(), /handleAiMarketAction/);
 });
 
 test('AI commentary pending requests are isolated by scope signature', () => {

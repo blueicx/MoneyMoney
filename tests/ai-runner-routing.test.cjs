@@ -53,7 +53,7 @@ test('controlled comparison quote selection uses stable provider priority, leavi
   assert.equal(helpers.selectControlledStockQuote('AAPL',[row('wrong')],120000,now+3600000),null);
 });
 test('runner card exposes routing policies and selected provider rather than implying a fixed retired model',()=>{
-  const html=fs.readFileSync(path.join(__dirname,'../src/web/public/index.html'),'utf8');
+  const html=require('./helpers/dashboard-source.cjs').readDashboardSource();
   assert.match(html,/r\.modelSelection === 'available-free'/);
   assert.match(html,/r\.quoteSelection === 'random-valid'/);
   assert.match(html,/safeNewsText\(r\.lastDataSource/);

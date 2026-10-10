@@ -93,7 +93,7 @@ test('WAL health scheduler records a warning result and releases its cross-proce
 });
 
 test('Ops renders WAL threshold warnings with a distinct attention color', () => {
-  const source = fs.readFileSync(path.join(process.cwd(), 'src/web/public/index.html'), 'utf8');
+  const source = require('./helpers/dashboard-source.cjs').readDashboardSource();
   assert.match(source, /job\.lastStatus === 'WARNING'.*var\(--yellow\)/);
 });
 

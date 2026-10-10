@@ -52,7 +52,7 @@ test('runner attribution leaves realized PnL unknown until there is an explicit 
 
 test('private runner history API and existing history panel expose scoped attribution', () => {
   const server = fs.readFileSync(path.join(__dirname, '../src/web/server.ts'), 'utf8');
-  const html = fs.readFileSync(path.join(__dirname, '../src/web/public/index.html'), 'utf8');
+  const html = require('./helpers/dashboard-source.cjs').readDashboardSource();
   assert.match(server, /app\.get\('\/api\/ai-runners\/:id\/history', \(req, res\) => \{\s*if \(!adminOnly\(req, res\)\) return;/);
   assert.match(server, /attribution = aiRunnerPortfolioAttribution\(runner\.universe\?\.market/);
   assert.match(html, /跑单成交归因 · 原始报价口径/);

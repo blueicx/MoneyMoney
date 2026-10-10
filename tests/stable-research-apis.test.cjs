@@ -39,7 +39,7 @@ test('instrument events preserve source-health reasons instead of collapsing fai
   assert.match(serverSource, /timeline\.sourceStatus/);
   assert.match(serverSource, /persistTimelineEventEvidence\(selectedEvent\)/);
   assert.match(serverSource, /entityEvidence\.id|selectedEventEvidenceId/);
-  const html = fs.readFileSync('src/web/public/index.html', 'utf8');
+  const html = require('./helpers/dashboard-source.cjs').readDashboardSource();
   assert.match(html, /persistTimelineEventEvidence\(entity\)/);
   assert.match(html, /entityPayload\.sourceStatus/);
 });
@@ -100,7 +100,7 @@ test('K-line time machine reads persisted asOf snapshots without live fallback',
 });
 
 test('stock K-line UI exposes an explicit data time machine control', () => {
-  const html = fs.readFileSync('src/web/public/index.html', 'utf8');
+  const html = require('./helpers/dashboard-source.cjs').readDashboardSource();
   assert.match(html, /data-chart-as-of/);
   assert.match(html, /applyStockKlineAsOf/);
   assert.match(html, /clearStockKlineAsOf/);
@@ -108,7 +108,7 @@ test('stock K-line UI exposes an explicit data time machine control', () => {
 });
 
 test('stock K-line sends the selected adjustment while forcing source basis for time-machine and intraday views', () => {
-  const html = fs.readFileSync('src/web/public/index.html', 'utf8');
+  const html = require('./helpers/dashboard-source.cjs').readDashboardSource();
   assert.match(html, /const requestedAdjustment = stockChartAsOf \|\| stockChartIntradayDate \? 'source' : stockChartAdjustment/);
   assert.match(html, /adjustmentQuery = '&adjustment='/);
   assert.match(html, /onAdjustmentChange:value=>/);
@@ -116,7 +116,7 @@ test('stock K-line sends the selected adjustment while forcing source basis for 
 });
 
 test('stock K-line time machine protects a newer date from stale loads', () => {
-  const html = fs.readFileSync('src/web/public/index.html', 'utf8');
+  const html = require('./helpers/dashboard-source.cjs').readDashboardSource();
   assert.match(html, /stockChartAsOfRevision/);
   assert.match(html, /stockKlineRequestRevision/);
   assert.match(html, /requestRevision !== stockKlineRequestRevision/);

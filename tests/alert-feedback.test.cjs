@@ -33,7 +33,7 @@ test('delivery history, ACK, retry and feedback routes are admin-only', () => {
     assert.notEqual(start, -1, `missing route ${route}`);
     assert.match(server.slice(start, start + 320), /adminOnly\(req, res\)/, `${route} must deny guest access`);
   }
-  const page = fs.readFileSync('src/web/public/index.html', 'utf8');
+  const page = require('./helpers/dashboard-source.cjs').readDashboardSource();
   const feedbackUi = page.slice(page.indexOf('async function loadAlertDeliveryFeedback()'), page.indexOf('async function setAlertDeliveryFeedback'));
   assert.match(feedbackUi, /window\.mm_isLoggedIn !== true \|\| window\.mm_isGuest/);
   assert.doesNotMatch(feedbackUi, /localStorage\.getItem\(['"]mm_token['"]\)/, 'HttpOnly sessions do not expose a legacy browser token');

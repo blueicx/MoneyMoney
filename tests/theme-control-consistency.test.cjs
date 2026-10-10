@@ -4,7 +4,7 @@ const path = require('node:path');
 const test = require('node:test');
 
 const publicRoot = path.join(__dirname, '../src/web/public');
-const html = fs.readFileSync(path.join(publicRoot, 'index.html'), 'utf8');
+const html = require('./helpers/dashboard-source.cjs').readDashboardSource();
 const styles = html.match(/<style>([\s\S]*?)<\/style>/)?.[1] || '';
 const contractsCss = fs.readFileSync(path.join(publicRoot, 'contracts-workspace.css'), 'utf8');
 const formControlRuleStart = styles.indexOf(':where(input:not([type="checkbox"])');

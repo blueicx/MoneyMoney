@@ -1,5 +1,5 @@
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
-const html=fs.readFileSync('src/web/public/index.html','utf8');
+const html=require('./helpers/dashboard-source.cjs').readDashboardSource();
 for(const market of ['crypto','stocks'])test(`${market} history accepts same-context live refresh but rejects a new selection`,async()=>{
  const crypto=market==='crypto',name=crypto?'loadEarlierCryptoKline':'loadEarlierStockKline';
  const start=html.indexOf('async function '+name+'('),end=html.indexOf('\n}',start)+2;

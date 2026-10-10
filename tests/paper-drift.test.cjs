@@ -119,7 +119,7 @@ test('analysis engine consults the persisted drift gate for strategy signals', (
 });
 
 test('paper workspace exposes drift status and manual resume controls', () => {
-  const html = fs.readFileSync(path.join(__dirname, '../src/web/public/index.html'), 'utf8');
+  const html = require('./helpers/dashboard-source.cjs').readDashboardSource();
   assert.match(html, /id="paper-drift-status"/);
   assert.match(html, /async function loadPaperDriftStatus\(/);
   assert.match(html, /async function resumePaperDriftGate\(/);

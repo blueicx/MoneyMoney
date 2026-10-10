@@ -10,7 +10,7 @@ describe('K-Line Upgrade & Advanced Capabilities', () => {
   let document;
 
   before(() => {
-    const html = fs.readFileSync(path.join(__dirname, '../src/web/public/index.html'), 'utf-8');
+    const html = require('./helpers/dashboard-source.cjs').readDashboardSource();
     dom = new JSDOM(html, { runScripts: "dangerously" });
     window = dom.window;
     document = window.document;
@@ -47,7 +47,7 @@ describe('K-Line Upgrade & Advanced Capabilities', () => {
   it('AbortController, timer cleanup and Request deduping are utilized', () => {
     // A proper behavior test for AbortController existence in our code
     assert.ok(window.AbortController, 'Should have AbortController available in window');
-    const htmlStr = fs.readFileSync(path.join(__dirname, '../src/web/public/index.html'), 'utf-8');
+    const htmlStr = require('./helpers/dashboard-source.cjs').readDashboardSource();
     assert.match(htmlStr, /new AbortController\(\)/, 'Should use AbortController for request cancellation');
   });
 
@@ -78,17 +78,17 @@ describe('K-Line Upgrade & Advanced Capabilities', () => {
     assert.ok(layerToggles.length > 0, 'Should have layer toggles');
     assert.ok(document.querySelector('[data-chart-pattern="doji"]'), 'Doji should have an independent toggle');
     assert.ok(document.querySelector('#stock-chart-structure-list'), 'Structure explanation list should exist');
-    assert.match(fs.readFileSync(path.join(__dirname, '../src/web/public/index.html'), 'utf8'), /MA5[^<]{0,80}数值|formatChartPrice/);
+    assert.match(require('./helpers/dashboard-source.cjs').readDashboardSource(), /MA5[^<]{0,80}数值|formatChartPrice/);
   });
 
   it('Center grid removes the reserved right-library column', () => {
-    const html = fs.readFileSync(path.join(__dirname, '../src/web/public/index.html'), 'utf8');
+    const html = require('./helpers/dashboard-source.cjs').readDashboardSource();
     assert.match(html, /\.market-workspace-shell\s*\{[\s\S]*?grid-template-columns:\s*224px\s+minmax\(0,\s*1fr\);/);
     assert.doesNotMatch(html, /\.market-workspace-shell\s*\{[\s\S]*?grid-template-columns:\s*224px\s+minmax\(0,\s*1fr\)\s+280px;/);
   });
 
   it('K-line toolbar exposes one mutually exclusive period selector', () => {
-    const html = fs.readFileSync(path.join(__dirname, '../src/web/public/index.html'), 'utf8');
+    const html = require('./helpers/dashboard-source.cjs').readDashboardSource();
     const toolbar = document.querySelector('[data-kline-controls="stocks"]');
     assert.ok(toolbar, 'Stock K-line controls should be a single toolbar');
     assert.equal(toolbar.querySelectorAll('.stock-kline-period').length, 11);
@@ -103,7 +103,7 @@ describe('K-Line Upgrade & Advanced Capabilities', () => {
   });
 
   it('styles native date controls and scrollbars with the active MoneyMoney theme', () => {
-    const html = fs.readFileSync(path.join(__dirname, '../src/web/public/index.html'), 'utf8');
+    const html = require('./helpers/dashboard-source.cjs').readDashboardSource();
     assert.ok(/:root\s*\{[^}]*color-scheme:\s*light;/s.test(html), 'light mode should set a matching native control scheme');
     assert.ok(/\[data-theme="dark"\]\s*,\s*\[data-theme="money"\]\s*\{[^}]*color-scheme:\s*dark;/s.test(html), 'dark themes should set dark native controls');
     assert.ok(/input\[type="date"\][\s\S]*?color-scheme:\s*inherit;[\s\S]*?background:[^;]*var\(--bg/.test(html), 'date inputs should inherit the active theme and use theme surfaces');
@@ -113,20 +113,20 @@ describe('K-Line Upgrade & Advanced Capabilities', () => {
   });
 
   it('switching market tabs does not clear the K-line period active state', () => {
-    const html = fs.readFileSync(path.join(__dirname, '../src/web/public/index.html'), 'utf8');
+    const html = require('./helpers/dashboard-source.cjs').readDashboardSource();
     assert.doesNotMatch(html, /document\.querySelectorAll\('\.tab'\)\.forEach\(\(t\) => t\.classList\.remove\('active'\)\)/);
     assert.match(html, /document\.querySelectorAll\('\.tabs \.tab'\)/);
   });
 
   it('Pattern details expose concrete OHLC prices and explicit unavailable reasons', () => {
-    const html = fs.readFileSync(path.join(__dirname, '../src/web/public/index.html'), 'utf8');
+    const html = require('./helpers/dashboard-source.cjs').readDashboardSource();
     assert.match(html, /formatPatternOHLC/);
     assert.match(html, /\[['"]O['"],\s*item\?\.open\]/);
     assert.match(html, /当前周期暂不支持|来源不可用|暂无数据/);
   });
 
   it('structure explanations expose exact price and lifecycle status', () => {
-    const html = fs.readFileSync(path.join(__dirname, '../src/web/public/index.html'), 'utf8');
+    const html = require('./helpers/dashboard-source.cjs').readDashboardSource();
     assert.match(html, /item\.price/);
     assert.match(html, /item\.status/);
     assert.match(html, /确认状态/);
@@ -152,12 +152,12 @@ describe('K-Line Upgrade & Advanced Capabilities', () => {
     assert.ok(document.querySelector('[data-chart-layout-toggle]'));
     assert.ok(document.querySelector('#stock-kline-companion'));
     assert.ok(document.querySelector('[data-chart-companion-mode]'));
-    assert.match(fs.readFileSync(path.join(__dirname, '../src/web/public/index.html'), 'utf8'), /mm-stock-chart-layout-v1/);
-    assert.match(fs.readFileSync(path.join(__dirname, '../src/web/public/index.html'), 'utf8'), /mm-stock-chart-companion-v1/);
+    assert.match(require('./helpers/dashboard-source.cjs').readDashboardSource(), /mm-stock-chart-layout-v1/);
+    assert.match(require('./helpers/dashboard-source.cjs').readDashboardSource(), /mm-stock-chart-companion-v1/);
   });
 
   it('provides explicit metric definitions and distinguishes scores from historical hit rates', () => {
-    const html = fs.readFileSync(path.join(__dirname, '../src/web/public/index.html'), 'utf8');
+    const html = require('./helpers/dashboard-source.cjs').readDashboardSource();
     assert.match(html, /营收增长[^\n]*营收同比/);
     assert.match(html, /ROE[^\n]*净利润[^\n]*股东权益/);
     assert.match(html, /规则汇总评分，不是命中率/);
@@ -188,7 +188,7 @@ describe('K-Line Upgrade & Advanced Capabilities', () => {
   });
 
   it('drills a selected daily candle into exchange-local intraday data and preserves a return-to-daily action', () => {
-    const html = fs.readFileSync(path.join(__dirname, '../src/web/public/index.html'), 'utf8');
+    const html = require('./helpers/dashboard-source.cjs').readDashboardSource();
     assert.equal(typeof window.enterStockIntraday, 'function');
     assert.equal(typeof window.exitStockIntraday, 'function');
     assert.equal(typeof window.setStockIntradayPeriod, 'function');
@@ -201,7 +201,7 @@ describe('K-Line Upgrade & Advanced Capabilities', () => {
   });
 
   it('waits for restored daily bars before relocating the intraday date selection', () => {
-    const html = fs.readFileSync(path.join(__dirname, '../src/web/public/index.html'), 'utf8');
+    const html = require('./helpers/dashboard-source.cjs').readDashboardSource();
     const start = html.indexOf('async function exitStockIntraday()');
     const end = html.indexOf('\nfunction setStockIntradayPeriod', start);
     assert.notEqual(start, -1, 'return-to-daily must be awaitable');
