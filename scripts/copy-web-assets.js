@@ -10,6 +10,10 @@ const root = path.join(__dirname, '..');
 const source = path.join(root, 'src', 'web', 'public');
 const target = path.join(root, 'dist', 'web', 'public');
 
+const runtimeScripts = path.join(root, 'dist', 'scripts');
+fs.mkdirSync(runtimeScripts, { recursive: true });
+fs.copyFileSync(path.join(root, 'scripts', 'state-backup.cjs'), path.join(runtimeScripts, 'state-backup.cjs'));
+
 if (!fs.existsSync(source)) {
   console.error(`Missing web asset source: ${source}`);
   process.exit(1);

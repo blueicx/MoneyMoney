@@ -16,6 +16,12 @@ export interface AiRunnerModelSnapshot {
   sma10?: number;
   candidateSignals?: string[];
   openPosition?: boolean;
+  portfolioCorrelation?: {
+    applicable: boolean;
+    allowed: boolean;
+    reason: string;
+    comparisons: Array<{ instrumentId: string; correlation: number | null; observations: number }>;
+  };
   reason?: string;
 }
 
@@ -79,12 +85,22 @@ export async function requestAiRunnerIntent(
     rsi14: Number.isFinite(item.rsi14) ? item.rsi14 : undefined,
     sma10: Number.isFinite(item.sma10) ? item.sma10 : undefined,
     candidateSignals: (item.candidateSignals || []).slice(0, 6),
-    openPosition: item.openPosition === true, reason: String(item.reason || '').slice(0, 240),
+      openPosition: item.openPosition === true,
+      portfolioCorrelation: item.portfolioCorrelation ? {
+        applicable: item.portfolioCorrelation.applicable,
+        allowed: item.portfolioCorrelation.allowed,
+        reason: String(item.portfolioCorrelation.reason || '').slice(0, 180),
+        comparisons: item.portfolioCorrelation.comparisons.slice(0, 5).map(row => ({
+          instrumentId: String(row.instrumentId).slice(0, 80), correlation: Number.isFinite(row.correlation) ? row.correlation : null,
+          observations: Math.max(0, Math.floor(row.observations)),
+        })),
+      } : undefined,
+      reason: String(item.reason || '').slice(0, 240),
   }));
   const messages = [
     {
       role: 'system',
-      content: '你是 MoneyMoney 的模拟交易研究助手。不得输出思维链。仅根据给定快照返回一个 JSON 对象，字段为 action(BUY/SELL/HOLD)、instrument、side(可选)、confidence(0到1)、rationale(简短证据摘要)、counterEvidence(字符串数组)、riskNotes(字符串数组)、market。只能选择输入中冻结范围内的 instrument；任一决策所依赖的数据或指标陈旧、历史、失败或证据不足时必须 HOLD。不得提出真实下单。',
+      content: '你是 MoneyMoney 的模拟交易研究助手。不得输出思维链。仅根据给定快照返回一个 JSON 对象，字段为 action(BUY/SELL/HOLD)、instrument、side(可选)、confidence(0到1)、rationale(简短证据摘要)、counterEvidence(字符串数组)、riskNotes(字符串数组)、market。只能选择输入中冻结范围内的 instrument；任一决策所依赖的数据或指标陈旧、历史、失败或证据不足时必须 HOLD；组合相关性检查未通过时必须 HOLD。不得提出真实下单。',
     },
     { role: 'user', content: JSON.stringify({ market: runner.universe?.market, allowedInstruments: runner.universe?.instruments.map(item => item.symbolOrMarketId), snapshots: safeSnapshots }) },
   ];

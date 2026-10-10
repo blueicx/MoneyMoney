@@ -5,6 +5,7 @@ const path = require('node:path');
 const { JSDOM } = require('jsdom');
 
 const html = fs.readFileSync(path.join(__dirname, '..', 'src/web/public/index.html'), 'utf8');
+const server = fs.readFileSync(path.join(__dirname, '..', 'src/web/server.ts'), 'utf8');
 const dom = new JSDOM(html, { 
   runScripts: "dangerously", 
   url: "http://localhost",
@@ -35,6 +36,8 @@ test('stock chart exposes user-selectable analysis overlays and replay controls'
   assert.ok(document.querySelector('[data-chart-overlay="signals"]'));
   assert.ok(document.querySelector('[data-chart-overlay="patterns"]'));
   assert.ok(document.querySelector('[data-chart-overlay="boll"]'));
+  assert.ok(document.querySelector('[data-chart-overlay="supportResistance"]'));
+  assert.ok(document.querySelector('#stock-sr-status'));
   assert.ok(document.querySelector('[data-chart-strategy="maCross"]'));
   assert.ok(document.querySelector('[data-chart-strategy="rsiReversal"]'));
   assert.ok(document.querySelector('#stock-chart-signals'));
@@ -42,9 +45,48 @@ test('stock chart exposes user-selectable analysis overlays and replay controls'
   assert.ok(document.querySelector('#bn-chart-patterns'));
   assert.ok(document.querySelector('#bn-chart-pattern-list'));
   assert.ok(document.querySelector('[data-crypto-overlay="patterns"]'));
+  assert.ok(document.querySelector('[data-crypto-overlay="supportResistance"]'));
+  assert.ok(document.querySelector('#crypto-sr-status'));
   assert.ok(document.querySelector('#bn-chart-strategies'));
   assert.ok(document.querySelector('#bn-chart-signals'));
   assert.ok(document.querySelector('[data-chart-replay="next"]'));
+});
+
+test('crypto support/resistance rendering stays inside the crypto chart renderer', () => {
+  const stockStateStart = html.indexOf('function setStockKlineViewState(');
+  const stockStateEnd = html.indexOf('async function loadStockKline(', stockStateStart);
+  const cryptoDrawStart = html.indexOf('function drawCandles(canvas, klines)');
+  const cryptoDrawEnd = html.indexOf('\nlet bnKlineController', cryptoDrawStart);
+  assert.ok(stockStateStart >= 0 && stockStateEnd > stockStateStart);
+  assert.ok(cryptoDrawStart >= 0 && cryptoDrawEnd > cryptoDrawStart);
+  assert.doesNotMatch(html.slice(stockStateStart, stockStateEnd), /cryptoSupportResistanceState|drawSupportResistance/,
+    'stock status changes must not access crypto overlay state or renderer-local canvas variables');
+  assert.match(html.slice(cryptoDrawStart, cryptoDrawEnd), /drawSupportResistance\(ctx,\s*lines,\s*geometry\)/,
+    'provider levels must be drawn by the crypto chart with its own price geometry');
+  assert.doesNotMatch(html.slice(cryptoDrawStart, cryptoDrawEnd), /Support\/Resistance auto-detection/,
+    'crypto levels must use the selected Binance-backed source layer, not an implicit second renderer');
+  const endpointStart = server.indexOf("app.get('/api/support-resistance'");
+  const endpointEnd = server.indexOf("app.get('/api/confluence'", endpointStart);
+  const endpoint = server.slice(endpointStart, endpointEnd);
+  assert.match(endpoint, /market === 'stocks'[\s\S]*?analyzeSupportResistance\(instrument, interval, bars\)/);
+  assert.match(endpoint, /market !== 'crypto'[\s\S]*?不会跨市场回退/);
+});
+
+test('stock support/resistance is hidden outside the current live chart context', () => {
+  const stockDrawStart = html.indexOf('function drawStockKline(canvas, klines)');
+  const stockDrawEnd = html.indexOf('// --- DeFi Data ---', stockDrawStart);
+  const stockStateStart = html.indexOf('function setStockKlineViewState(');
+  const stockStateEnd = html.indexOf('async function loadStockKline(', stockStateStart);
+  assert.ok(stockDrawStart >= 0 && stockDrawEnd > stockDrawStart);
+  assert.ok(stockStateStart >= 0 && stockStateEnd > stockStateStart);
+  const stockDraw = html.slice(stockDrawStart, stockDrawEnd);
+  assert.match(stockDraw, /stockChartOverlayConfig\.supportResistance\s*&&\s*tradingActive/,
+    'levels from current data must not be projected into historical, focused, or replay views');
+  assert.match(stockDraw, /stockSupportResistanceState/);
+  assert.match(stockDraw, /当前图表不是最新行情视图，支撑\/阻力暂隐藏/);
+  assert.match(html, /function stockSupportResistanceViewAvailable\(\)[\s\S]*stockChartAsOf[\s\S]*stockChartIntradayDate[\s\S]*stockChartFocusEnabled[\s\S]*stockChartReplayIndex/,
+    'date focus, time travel and replay must suppress levels computed with later bars');
+  assert.doesNotMatch(html.slice(stockStateStart, stockStateEnd), /cryptoSupportResistanceState|\bW, H, padL, padR, padT\b/);
 });
 
 test('right library has market-specific entry point instead of generic event fallback', () => {

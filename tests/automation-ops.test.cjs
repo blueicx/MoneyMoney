@@ -8,6 +8,10 @@ const {
 const jobs = defaultAutomationJobs();
 assert.ok(jobs.some(job => job.id === 'radar-refresh'));
 assert.ok(jobs.some(job => job.id === 'risk-patrol'));
+const backup = jobs.find(job => job.id === 'state-backup');
+assert.ok(backup, 'the daily state backup must be a visible automation job');
+assert.equal(backup.enabled, true);
+assert.match(backup.cadenceZh, /24 小时|每天/);
 
 const updated = recordAutomationRun(jobs, 'radar-refresh', {
   status: 'SUCCESS',

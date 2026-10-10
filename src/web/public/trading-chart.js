@@ -12,6 +12,21 @@
   function scalePrice(s,delta){s.priceScale=Math.max(.25,Math.min(8,(s.priceScale||1)*Math.exp(Math.max(-200,Math.min(200,delta))/150)));}
   function resetPrice(s){if(s)delete s.priceScale;}
   function priceRange(s,minP,maxP){const mid=(minP+maxP)/2,half=(maxP-minP||Math.abs(mid)*.01||1)*(s?.priceScale||1)/2;return {minP:mid-half,maxP:mid+half};}
+  function supportResistanceLineLayout(data,geometry){
+    const min=Number(geometry?.minP),max=Number(geometry?.maxP),height=Number(geometry?.priceH),top=Number(geometry?.padT||0);
+    if(!Number.isFinite(min)||!Number.isFinite(max)||max<=min||!Number.isFinite(height)||height<=0)return [];
+    const rows=[...(Array.isArray(data?.supports)?data.supports:[]),...(Array.isArray(data?.resistances)?data.resistances:[])],seen=new Set();
+    return rows.filter(row=>row&&(row.type==='support'||row.type==='resistance')&&row.price!=null&&Number.isFinite(Number(row.price))&&Number(row.price)>0&&Number(row.price)>=min&&Number(row.price)<=max)
+      .map(row=>{const price=Number(row.price),key=row.type+':'+price;if(seen.has(key))return null;seen.add(key);return {type:row.type,price,y:top+(max-price)/(max-min)*height,touches:Number.isFinite(Number(row.touches))?Math.max(0,Math.floor(Number(row.touches))):0,strength:Number.isFinite(Number(row.strength))?Math.max(0,Math.min(100,Number(row.strength))):null};})
+      .filter(Boolean).sort((a,b)=>Math.abs(a.price-(min+max)/2)-Math.abs(b.price-(min+max)/2)).slice(0,8);
+  }
+  function drawSupportResistance(ctx,lines,geometry){
+    if(!ctx||!Array.isArray(lines)||!geometry)return 0;let drawn=0;
+    for(const line of lines){if(!Number.isFinite(line.y)||line.y<geometry.padT||line.y>geometry.padT+geometry.priceH)continue;
+      ctx.save?.();ctx.globalAlpha=.58;ctx.strokeStyle=line.type==='support'?'#22c55e':'#ef4444';ctx.fillStyle=ctx.strokeStyle;ctx.lineWidth=1;ctx.setLineDash([4,4]);ctx.beginPath();ctx.moveTo(geometry.padL,line.y);ctx.lineTo(geometry.W-geometry.padR,line.y);ctx.stroke();ctx.setLineDash([]);ctx.font='10px system-ui';ctx.textAlign='left';ctx.textBaseline='bottom';ctx.fillText((line.type==='support'?'S':'R')+' '+fmt(line.price),geometry.padL+4,line.y-2);ctx.restore?.();drawn++;
+    }
+    return drawn;
+  }
   const intervals={'1m':60000,'3m':180000,'5m':300000,'15m':900000,'30m':1800000,'1h':3600000,'4h':14400000,'1d':86400000,'1w':604800000};
   function paperMarkersFor(markers,rows,market,instrument,interval,asOf=Infinity){
     const width=intervals[interval];if(!width)return [];
@@ -187,7 +202,7 @@
     decorate(canvas,{...options,canvas,full,rows,interval:options.interval,volumeUnit:options.volumeUnit,ma:[5,10,30,60],maColors:['#ffad00','#18bf78','#29b6f6','#a778ff'],interactive:true,geometry:{W,H,padL,padR,padT,priceH,minP,maxP},redraw:()=>render(canvas,full,options)});
     options.onViewport?.({rows,geometry:{W,H,padL,padR,padT,priceH,minP,maxP}});
   }
-  window.MoneyTradingChart={createView,windowFor,pan,latest,zoom,countdown,select,decorate,clear,render,statusFor,restoreView,scheduleFrame,scalePrice,resetPrice,priceRange,paperMarkersFor,mergeHistory,verifyPaperEvidenceEnvelope,verifyPaperExecutionEvidenceEnvelope,formatPaperExecutionEvidence};
+  window.MoneyTradingChart={createView,windowFor,pan,latest,zoom,countdown,select,decorate,clear,render,statusFor,restoreView,scheduleFrame,scalePrice,resetPrice,priceRange,supportResistanceLineLayout,drawSupportResistance,paperMarkersFor,mergeHistory,verifyPaperEvidenceEnvelope,verifyPaperExecutionEvidenceEnvelope,formatPaperExecutionEvidence};
   window.MoneyTradingChart.redraw=canvas=>mounts.get(canvas)?.info?.redraw();
   function whenDomReady(callback) {
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', callback, { once: true });

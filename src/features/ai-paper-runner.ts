@@ -32,6 +32,114 @@ export interface AiRunnerInstrumentRef {
   title?: string;
 }
 
+export interface AiRunnerCorrelationSeries {
+  market: AiRunnerMarket;
+  instrumentId: string;
+  timeframe: string;
+  source: string;
+  status: string;
+  points: Array<{ time: number; close: number }>;
+}
+
+export interface AiRunnerCorrelationEvaluation {
+  applicable: boolean;
+  allowed: boolean;
+  reason: string;
+  comparisons: Array<{ instrumentId: string; correlation: number | null; observations: number }>;
+}
+
+/**
+ * Fail-closed entry guard for a frozen same-market watchlist. It deliberately
+ * does not use the global cross-asset radar: runner risk must be computed from
+ * the exact held instruments and timestamp-aligned source series.
+ */
+export function evaluateAiRunnerPortfolioCorrelation(input: {
+  market: AiRunnerMarket;
+  universeKind: 'single' | 'watchlist';
+  candidateInstrumentId?: string;
+  candidate: AiRunnerCorrelationSeries | null | undefined;
+  openInstrumentIds: string[];
+  universeInstrumentIds: string[];
+  comparators: AiRunnerCorrelationSeries[];
+  asOf: number;
+  threshold?: number;
+  minimumAlignedReturns?: number;
+}): AiRunnerCorrelationEvaluation {
+  const notApplicable = (reason: string): AiRunnerCorrelationEvaluation => ({ applicable: false, allowed: true, reason, comparisons: [] });
+  if (input.universeKind !== 'watchlist') return notApplicable('单标的跑单不适用组合相关性门控');
+  if (input.market !== 'stocks' && input.market !== 'crypto') return notApplicable('相关性门控仅适用于股票与虚拟币自选组');
+  const prefix = input.market === 'stocks' ? 'stock:us:' : 'crypto:binance:';
+  const threshold = Number.isFinite(input.threshold) && Number(input.threshold) >= 0 && Number(input.threshold) <= 1 ? Number(input.threshold) : 0.9;
+  const minimum = Number.isSafeInteger(input.minimumAlignedReturns) && Number(input.minimumAlignedReturns) >= 3
+    ? Number(input.minimumAlignedReturns) : 10;
+  const blocked = (reason: string, comparisons: AiRunnerCorrelationEvaluation['comparisons'] = []): AiRunnerCorrelationEvaluation => ({ applicable: true, allowed: false, reason, comparisons });
+  const pass = (reason: string, comparisons: AiRunnerCorrelationEvaluation['comparisons'] = []): AiRunnerCorrelationEvaluation => ({ applicable: true, allowed: true, reason, comparisons });
+  if (!Number.isFinite(input.asOf) || input.asOf <= 0) return blocked('缺少有效的共同数据时点，组合相关性无法评估');
+  if (input.openInstrumentIds.some(id => !id.startsWith(prefix)) || input.universeInstrumentIds.some(id => !id.startsWith(prefix))) {
+    return blocked('冻结自选或现有持仓身份与当前市场不一致，拒绝新增仓位');
+  }
+  const candidateId = input.candidateInstrumentId || input.candidate?.instrumentId || '';
+  if (!candidateId.startsWith(prefix) || !input.universeInstrumentIds.includes(candidateId)) {
+    return blocked('候选标的没有绑定到当前市场的冻结标的范围');
+  }
+  const heldOthers = [...new Set(input.openInstrumentIds)].filter(id => id !== candidateId);
+  if (!heldOthers.length) return pass('当前没有其他同市场持仓，无需比较相关性');
+
+  const comparisons: AiRunnerCorrelationEvaluation['comparisons'] = [];
+  const cleanPoints = (series: AiRunnerCorrelationSeries) => {
+    const points = new Map<number, number>();
+    for (const point of series.points || []) {
+      if (Number.isFinite(point.time) && point.time > 0 && point.time <= input.asOf
+        && Number.isFinite(point.close) && point.close > 0) points.set(point.time, point.close);
+    }
+    return points;
+  };
+  const pearson = (left: number[], right: number[]): number | null => {
+    if (left.length < minimum || left.length !== right.length) return null;
+    const meanLeft = left.reduce((sum, value) => sum + value, 0) / left.length;
+    const meanRight = right.reduce((sum, value) => sum + value, 0) / right.length;
+    let covariance = 0, varianceLeft = 0, varianceRight = 0;
+    for (let index = 0; index < left.length; index += 1) {
+      const a = left[index] - meanLeft, b = right[index] - meanRight;
+      covariance += a * b; varianceLeft += a * a; varianceRight += b * b;
+    }
+    if (varianceLeft <= 0 || varianceRight <= 0) return null;
+    return Math.max(-1, Math.min(1, covariance / Math.sqrt(varianceLeft * varianceRight)));
+  };
+  const candidate = input.candidate;
+  if (!candidate || candidate.market !== input.market || candidate.instrumentId !== candidateId) {
+    return blocked('候选标的缺少与持仓可比的历史序列，拒绝新增仓位');
+  }
+  if (!candidate.timeframe || !candidate.source || !['live', 'delayed', 'historical'].includes(candidate.status)) {
+    return blocked('候选标的相关性历史来源或状态不可用，拒绝新增仓位');
+  }
+  const candidatePoints = cleanPoints(candidate);
+  for (const instrumentId of heldOthers) {
+    if (!input.universeInstrumentIds.includes(instrumentId)) return blocked('现有持仓不属于冻结自选，拒绝推测风险归属', comparisons);
+    const peer = input.comparators.find(row => row.instrumentId === instrumentId);
+    if (!peer || peer.market !== input.market || !peer.instrumentId.startsWith(prefix)
+      || peer.timeframe !== candidate.timeframe || peer.source !== candidate.source
+      || !['live', 'delayed', 'historical'].includes(peer.status)) {
+      return blocked(`持仓 ${instrumentId} 的相关性历史来源或周期不可比`, [...comparisons, { instrumentId, correlation: null, observations: 0 }]);
+    }
+    const peerPoints = cleanPoints(peer);
+    const commonTimes = [...candidatePoints.keys()].filter(time => peerPoints.has(time)).sort((a, b) => a - b);
+    const left: number[] = [], right: number[] = [];
+    for (let index = 1; index < commonTimes.length; index += 1) {
+      const previous = commonTimes[index - 1], current = commonTimes[index];
+      const leftBase = candidatePoints.get(previous)!, rightBase = peerPoints.get(previous)!;
+      if (leftBase <= 0 || rightBase <= 0) continue;
+      left.push((candidatePoints.get(current)! - leftBase) / leftBase);
+      right.push((peerPoints.get(current)! - rightBase) / rightBase);
+    }
+    const correlation = pearson(left, right);
+    comparisons.push({ instrumentId, correlation, observations: left.length });
+    if (correlation == null) return blocked(`与持仓 ${instrumentId} 的同步收益不足 ${minimum} 组，拒绝新增仓位`, comparisons);
+    if (correlation >= threshold) return blocked(`与持仓 ${instrumentId} 高度相关（相关系数 ${correlation.toFixed(2)} ≥ ${threshold.toFixed(2)}），组合过度集中`, comparisons);
+  }
+  return pass('同周期、同来源的冻结自选历史相关性低于门槛', comparisons);
+}
+
 export interface AiRunnerUniverse {
   kind: 'single' | 'watchlist';
   market: AiRunnerMarket;

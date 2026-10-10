@@ -31,6 +31,7 @@ function chartHarness(fetcher) {
     var currentStockSymbol='usAAPL', currentStockName='Apple', currentStockApiSymbol='AAPL.OQ';
     var currentStockKlinePeriod='1d', stockChartAsOf='2026-10-05T23:59:59.999Z', stockChartAsOfRevision=0;
     var stockKlineRequestRevision=0, stockKlineContextRevision=0, stockKlineController=null, currentStockKlineReason='';
+    var stockSupportResistanceState={ key:null, status:'idle', data:null, controller:null, retryAt:0, loadedAt:0 };
     var stockChartIntradayDate='', stockChartIntradaySession=null, stockChartDailyContext=null, stockChartCompanionKey='';
     var stockChartFocusIndex=null, stockChartFocusEnabled=false, stockChartRenderedStartIndex=0;
     var stockChartReplayIndex=1, stockChartKlines=[{close:1}], stockChartExchangeTimezone='America/New_York';

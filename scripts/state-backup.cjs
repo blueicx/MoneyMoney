@@ -4,10 +4,17 @@ const os = require('node:os');
 const path = require('node:path');
 const Database = require('better-sqlite3');
 
-const root = path.resolve(__dirname, '..');
+const runtimeRoot = path.resolve(__dirname, '..');
+const root = path.basename(runtimeRoot).toLowerCase() === 'dist' ? path.resolve(runtimeRoot, '..') : runtimeRoot;
 const dataRoot = path.resolve(process.env.MONEYMONEY_DATA_DIR || path.join(root, 'data'));
 const backupRoot = path.join(dataRoot, 'backups');
 const stamp = () => new Date().toISOString().replace(/[:.]/g, '-');
+const BACKUP_NAME_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z$/;
+
+function retentionCount() {
+  const configured = Number(process.env.MONEYMONEY_BACKUP_RETENTION);
+  return Number.isInteger(configured) && configured >= 1 && configured <= 90 ? configured : 7;
+}
 
 function walkFiles(directory, base = directory) {
   if (!fs.existsSync(directory)) return [];
@@ -18,7 +25,19 @@ function walkFiles(directory, base = directory) {
   });
 }
 
-function sha256(file) { return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex'); }
+function sha256(file) {
+  const hash = crypto.createHash('sha256');
+  const descriptor = fs.openSync(file, 'r');
+  const buffer = Buffer.allocUnsafe(1024 * 1024);
+  try {
+    let bytesRead;
+    do {
+      bytesRead = fs.readSync(descriptor, buffer, 0, buffer.length, null);
+      if (bytesRead > 0) hash.update(buffer.subarray(0, bytesRead));
+    } while (bytesRead > 0);
+    return hash.digest('hex');
+  } finally { fs.closeSync(descriptor); }
+}
 
 function sqliteSummary(file) {
   const db = new Database(file, { readonly: true, fileMustExist: true });
@@ -35,6 +54,21 @@ function sqliteSummary(file) {
   } finally { db.close(); }
 }
 
+function inspectSqliteSidecars(name) {
+  const file = path.join(dataRoot, name);
+  const inspect = suffix => {
+    const sidecar = `${file}${suffix}`;
+    try {
+      const stat = fs.statSync(sidecar);
+      return { present: stat.isFile(), bytes: stat.isFile() ? stat.size : null, observedAt: new Date().toISOString() };
+    } catch (error) {
+      if (error && error.code === 'ENOENT') return { present: false, bytes: 0, observedAt: new Date().toISOString() };
+      throw error;
+    }
+  };
+  return { wal: inspect('-wal'), shm: inspect('-shm') };
+}
+
 async function backup() {
   const primaryDb = path.join(dataRoot, 'moneymoney.sqlite');
   if (!fs.existsSync(primaryDb)) throw new Error('data/moneymoney.sqlite 不存在，请先启动一次服务');
@@ -42,6 +76,7 @@ async function backup() {
   const target = path.join(backupRoot, stamp());
   fs.mkdirSync(target, { recursive: false });
   const databases = {};
+  const sourceSqliteSidecars = {};
   for (const name of ['moneymoney.sqlite', 'research.db']) {
     const source = path.join(dataRoot, name);
     if (!fs.existsSync(source)) continue;
@@ -49,6 +84,7 @@ async function backup() {
     const db = new Database(source, { readonly: true, fileMustExist: true });
     try { await db.backup(output); } finally { db.close(); }
     databases[name] = sqliteSummary(output);
+    sourceSqliteSidecars[name] = inspectSqliteSidecars(name);
   }
   for (const name of fs.readdirSync(dataRoot)) {
     const source = path.join(dataRoot, name);
@@ -66,9 +102,48 @@ async function backup() {
     filter: source => path.resolve(source) === path.resolve(lakeSource) || path.basename(source) !== '.staging',
   });
   const files = walkFiles(target).filter(name => name !== 'manifest.json').sort();
-  const manifest = { format: 2, createdAt: new Date().toISOString(), files: Object.fromEntries(files.map(name => [name, sha256(path.join(target, name))])), databases };
+  const manifest = { format: 2, createdAt: new Date().toISOString(), files: Object.fromEntries(files.map(name => [name, sha256(path.join(target, name))])), databases, sourceSqliteSidecars };
   fs.writeFileSync(path.join(target, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
+  verifyBackupForRetention(target);
+  pruneVerifiedBackups(retentionCount());
   process.stdout.write(`State backup created: ${target}\n`);
+}
+
+function verifyBackupForRetention(sourceRoot) {
+  const manifestPath = path.join(sourceRoot, 'manifest.json');
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+  verifyFiles(sourceRoot, manifest);
+  for (const [name, expected] of Object.entries(manifest.databases || {})) {
+    if (!['moneymoney.sqlite', 'research.db'].includes(name)) throw new Error(`Unexpected database in backup manifest: ${name}`);
+    verifyDatabaseCounts(path.join(sourceRoot, name), expected);
+  }
+}
+
+function pruneVerifiedBackups(retention) {
+  const backupRootResolved = path.resolve(backupRoot);
+  const valid = [];
+  for (const entry of fs.readdirSync(backupRootResolved, { withFileTypes: true })) {
+    if (!entry.isDirectory() || entry.isSymbolicLink() || !BACKUP_NAME_PATTERN.test(entry.name)) continue;
+    const directory = path.resolve(backupRootResolved, entry.name);
+    const relative = path.relative(backupRootResolved, directory);
+    if (!relative || relative.startsWith('..') || path.isAbsolute(relative) || path.dirname(directory) !== backupRootResolved) continue;
+    try {
+      verifyBackupForRetention(directory);
+      const manifest = JSON.parse(fs.readFileSync(path.join(directory, 'manifest.json'), 'utf8'));
+      valid.push({ directory, createdAt: Date.parse(manifest.createdAt), name: entry.name });
+    } catch {
+      // An incomplete or corrupt backup is preserved for diagnosis, never pruned as valid retention.
+    }
+  }
+  valid.sort((a, b) => {
+    const left = Number.isFinite(a.createdAt) ? a.createdAt : -Infinity;
+    const right = Number.isFinite(b.createdAt) ? b.createdAt : -Infinity;
+    return right - left || b.name.localeCompare(a.name);
+  });
+  for (const item of valid.slice(retention)) {
+    if (path.dirname(item.directory) !== backupRootResolved || !BACKUP_NAME_PATTERN.test(path.basename(item.directory))) continue;
+    fs.rmSync(item.directory, { recursive: true, force: false });
+  }
 }
 
 function safeBackupPath(input) {

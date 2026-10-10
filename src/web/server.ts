@@ -91,7 +91,7 @@ import { klinePageWindow, klinePageStatus } from '../features/kline-page-window'
 import { contractCapacity, compareContractSnapshots } from '../features/contract-comparison';
 import { compareAiRunnerReports } from '../features/ai-runner-comparison';
 import { createAiRunnerComparison, getAiRunnerComparison, validateAiRunnerComparison, validateScheduledAiRunnerComparison, buildAiRunnerComparisonSample, saveAiRunnerComparisonSample, listAiRunnerComparisonSamples, replayAiRunnerComparisonSample, type AiRunnerComparisonSample } from '../features/ai-runner-comparison-group';
-import { portfolioAttribution } from '../features/portfolio-attribution';
+import { portfolioAttribution, aiRunnerPortfolioAttribution } from '../features/portfolio-attribution';
 import { getFundingCarryRadar } from '../features/funding-carry';
 import { getOrderFlowLiquidityRadar } from '../features/order-flow-liquidity';
 import { getBitcoinOnchainRadar } from '../features/bitcoin-onchain';
@@ -105,7 +105,7 @@ import {
 } from '../features/event-alerts';
 import { getCrossAssetRisk } from '../features/cross-asset-risk';
 import { getMarketRegime } from '../features/market-regime';
-import { getSupportResistance } from '../features/support-resistance';
+import { analyzeSupportResistance, getSupportResistance } from '../features/support-resistance';
 import { getMultiTimeframeConfluence } from '../features/multi-timeframe';
 import { getEventRisk } from '../features/event-risk';
 import { getCachedPredictionRadarSlice, getPredictionRadar, warmPredictionRadarCache, type PredictionMarket, type PredictionRadar } from '../features/prediction-radar';
@@ -200,7 +200,7 @@ import { DataCoverageCanary, DEFAULT_DATA_COVERAGE_CANARY_TARGETS, shouldRunOnce
 import { summarizePublishedCoverage, type CoverageSourceObservation } from '../features/data-coverage-status';
 import { buildEventEntities, clusterEventEntities, selectResearchEvent } from '../features/event-intelligence';
 import { curlCommand } from '../utils/platform-command';
-import { STOCK_KLINE_PERIODS, createYahooStockKlineAdapter } from '../data/yahoo-adapter';
+import { STOCK_KLINE_PERIODS, createYahooStockKlineAdapter, normalizeYahooSymbol } from '../data/yahoo-adapter';
 import { createBinanceKlineAdapter } from '../data/binance-kline-adapter';
 import { actionsForScreener, fieldsForScreener, filterRows, isScreenerScope, paginateRows, serializeTemplate, sortRows, type ScreenerFilter, type ScreenerScope, type ScreenerSort } from '../features/market-screener';
 import { compareInstruments, createCompareSnapshot, type CompareInstrument, type CompareScope } from '../features/instrument-compare';
@@ -215,6 +215,7 @@ import {
   upsertResearchEntry,
 } from '../features/research-workspace';
 import {
+  createStateBackupScheduler,
   getAutomationJobs,
   getAutomationOverview,
   saveAutomationRun,
@@ -955,6 +956,12 @@ function adminOnly(req: express.Request, res: express.Response): boolean {
   }
   return false;
 }
+
+const stateBackupScheduler = createStateBackupScheduler({
+  store: stateStore,
+  intervalMs: 60 * 60_000,
+  isEnabled: () => getAutomationJobs().find(job => job.id === 'state-backup')?.enabled !== false,
+});
 
 const screenerTrackingStore = new ScreenerTrackingStore(stateStore);
 function loadScreenerTracking() { return screenerTrackingStore.list(); }
@@ -3995,11 +4002,45 @@ app.get('/api/regime', async (req, res) => {
 
 app.get('/api/support-resistance', async (req, res) => {
   try {
+    const market = String(req.query.market || 'crypto').trim().toLowerCase();
+    if (market === 'stocks') {
+      const requestedInstrument = String(req.query.symbol || '').trim();
+      const interval = String(req.query.interval || req.query.timeframe || '1d').trim().toLowerCase();
+      const instrument = normalizeYahooSymbol(requestedInstrument);
+      const parsedInstrument = parseInstrumentQuery(instrument);
+      if (!/^[A-Z0-9.^=\-]{1,24}$/.test(instrument) || parsedInstrument?.type === 'crypto' || parsedInstrument?.type === 'option' || parsedInstrument?.type === 'prediction') {
+        return res.status(422).json({ success: false, market: 'stocks', instrument: requestedInstrument, timeframe: interval, dataStatus: 'unsupported', source: 'Yahoo Finance 历史K线', updatedAt: new Date().toISOString(), reason: '股票标的代码格式无效，拒绝跨市场或模糊解析' });
+      }
+      if (!Object.prototype.hasOwnProperty.call(STOCK_KLINE_PERIODS, interval)) {
+        return res.status(422).json({ success: false, market: 'stocks', instrument, requestedInstrument, timeframe: interval, dataStatus: 'unsupported', source: 'Yahoo Finance 历史K线', updatedAt: new Date().toISOString(), reason: `当前股票周期不支持：${interval}` });
+      }
+      const adjustment = String(req.query.adjustment || 'source').trim().toLowerCase();
+      if (!['source', 'forward'].includes(adjustment)) {
+        return res.status(422).json({ success: false, market: 'stocks', instrument, requestedInstrument, timeframe: interval, dataStatus: 'unsupported', source: 'Yahoo Finance 历史K线', updatedAt: new Date().toISOString(), reason: '股票复权口径仅支持 source 或 forward' });
+      }
+      const snapshot = await getStockKlineAdapter(interval, instrument).fetchHistory({ symbol: instrument, period: interval });
+      const history = snapshot.data;
+      const bars = adjustment === 'forward' ? history?.forwardAdjustedBars : history?.bars;
+      if (!bars?.length) {
+        const reason = adjustment === 'forward'
+          ? history?.forwardAdjustment.reason || snapshot.error || 'Yahoo 前复权数据不可用；未改用来源原始口径'
+          : snapshot.error || `Yahoo Finance 当前未提供 ${instrument} 的 ${interval} 历史K线`;
+        return res.status(snapshot.status === 'unavailable' || !history ? 503 : 422).json({ success: false, market: 'stocks', instrument, requestedInstrument, timeframe: interval, dataStatus: adjustment === 'forward' ? 'unsupported' : 'unavailable', source: snapshot.source || 'Yahoo Finance 历史K线', updatedAt: snapshot.fetchedAt || new Date().toISOString(), reason });
+      }
+      const data = analyzeSupportResistance(instrument, interval, bars);
+      const dataStatus = snapshot.status === 'stale' || snapshot.status === 'cached' ? 'cached'
+        : snapshot.status === 'degraded' || snapshot.status === 'fallback' ? 'partial' : 'historical';
+      return res.json({ success: true, market: 'stocks', instrument, requestedInstrument, timeframe: interval, dataStatus, sourceStatus: snapshot.status, source: snapshot.source, updatedAt: snapshot.fetchedAt, adjustment, coverage: { from: bars[0]?.time ?? null, to: bars[bars.length - 1]?.time ?? null, bars: bars.length }, reason: snapshot.error || undefined, data });
+    }
+    if (market !== 'crypto') return res.status(422).json({ success: false, market, instrument: String(req.query.symbol || ''), timeframe: String(req.query.interval || ''), dataStatus: 'unsupported', source: '支撑/阻力分析', updatedAt: new Date().toISOString(), reason: '支撑/阻力当前只支持股票历史K线和 Binance 虚拟币K线，不会跨市场回退' });
     const symbol = typeof req.query.symbol === 'string' ? req.query.symbol : 'BTCUSDT';
     const interval = typeof req.query.interval === 'string' ? req.query.interval : '4h';
     res.json({ success: true, data: await getSupportResistance(symbol, interval) });
   } catch (e: any) {
-    res.json({ success: false, error: e.message });
+    const market = String(req.query.market || 'crypto').trim().toLowerCase();
+    const reason = String(e?.message || '支撑/阻力数据处理失败').slice(0, 240);
+    const dataStatus = /at least 30 bars|Not enough kline/i.test(reason) ? 'empty' : 'unavailable';
+    res.status(dataStatus === 'empty' ? 422 : 503).json({ success: false, data: null, market, instrument: String(req.query.symbol || ''), timeframe: String(req.query.interval || req.query.timeframe || ''), dataStatus, source: market === 'stocks' ? 'Yahoo Finance 历史K线' : 'Binance 历史K线', updatedAt: new Date().toISOString(), reason, error: reason });
   }
 });
 
@@ -8537,10 +8578,11 @@ import {
   sizeDeribitOptionPaperOrder,
   evaluateAiRunnerTrigger, isAiRunnerCallAllowed, appendAiRunnerDecision, listAiRunnerHistory,
   updateAiRunnerMarketState, recordAiRunnerModelCall, evaluateRunnerIndicatorEvidence,
+  evaluateAiRunnerPortfolioCorrelation,
   normalizeAiRunnerStockKlines,
   activateAiRunnerComparison,
   type AiRunner, type AiRunnerDecisionRecord, type AiRunnerInstrumentRef, type AiRunnerMarket,
-  type AiRunnerQuote, type AiRunnerDataEvidence,
+  type AiRunnerQuote, type AiRunnerDataEvidence, type AiRunnerCorrelationSeries,
 } from '../features/ai-paper-runner';
 import { ResilientDataSourceAdapter } from '../data/source-adapter';
 import { AiRunnerTickCoordinator, buildAiRunnerTickIdempotencyKey } from '../features/ai-runner-coordinator';
@@ -8907,6 +8949,8 @@ interface AiRunnerInstrumentSnapshot extends AiRunnerModelSnapshot {
   indicatorDataStatus?: string;
   indicatorDataAt?: string;
   indicatorRetrievedAt?: string;
+  correlationSeries?: AiRunnerCorrelationSeries;
+  portfolioCorrelation?: AiRunnerModelSnapshot['portfolioCorrelation'];
   modelProbability?: number;
   requestedAction?: 'BUY' | 'SELL';
   requestedSide?: 'YES' | 'NO' | 'LONG';
@@ -9004,6 +9048,10 @@ async function loadAiRunnerInstrumentSnapshot(runner: AiRunner, ref: AiRunnerIns
       row = {
         ...row, dataStatus, source: 'Binance K线 + 公共盘口', dataAt,
         indicatorDataStatus: bars.length ? barsResult.status : 'unavailable', indicatorDataAt, indicatorRetrievedAt: barsResult.fetchedAt,
+        ...(bars.length ? { correlationSeries: {
+          market: 'crypto' as const, instrumentId: runnerLedgerInstrumentId(ref), timeframe: '1h', source: 'Binance 1h K线',
+          status: barsResult.status, points: bars.filter(item => Number(item[0]) + 3_600_000 <= Date.now()).map(item => ({ time: Number(item[0]) + 3_600_000, close: Number(item[4]) })),
+        } } : {}),
         evidence: [
           { dataset: 'bars', source: 'Binance 1h K线', status: bars.length ? barsResult.status : 'unavailable', dataAt: indicatorDataAt, retrievedAt: barsResult.fetchedAt, reason: indicatorGate.reason || barsResult.error },
           { dataset: 'quote', source: 'Binance 公共盘口', status: bookStatus, dataAt: dataAt, retrievedAt: dataAt, reason: quote.reason },
@@ -9037,6 +9085,10 @@ async function loadAiRunnerInstrumentSnapshot(runner: AiRunner, ref: AiRunnerIns
         const indicatorGate=evaluateRunnerIndicatorEvidence({status:indicatorStatus,dataAt:indicatorDataAt,retrievedAt:intraday.fetchedAt},runner.policy.minFreshnessMs);
         row={...row, source:chosen?.source || '股票双边报价池',dataStatus:chosen?'live':'unavailable',dataAt:chosen?.quote.updatedAt,
           price:chosen?.quote.price,quote:chosen?.quote,indicatorDataStatus:indicatorStatus,indicatorDataAt,indicatorRetrievedAt:intraday.fetchedAt,
+          ...(completed.length ? { correlationSeries: {
+            market: 'stocks' as const, instrumentId: runnerLedgerInstrumentId(ref), timeframe: '1m', source: 'Yahoo 已完成1分钟K线',
+            status: indicatorStatus, points: completed.map(bar => ({ time: bar.time + 60_000, close: bar.close })),
+          } } : {}),
           rsi14:metrics.rsi14,sma10:metrics.sma10,candidateSignals:[],
           evidence:[...candidates.map(candidate=>({dataset:'quote' as const,source:candidate.source,status:candidate.status,dataAt:candidate.quote?.asOf || undefined,retrievedAt:candidate===candidates[0]?nasdaq.fetchedAt:yahooQuote.fetchedAt,
             reason:candidate.quote ? '仅符合身份、时间、实时标记及双边价格校验的来源可被随机选中' : (candidate===candidates[0]?nasdaq.error:yahooQuote.error)})),
@@ -9145,6 +9197,25 @@ async function prepareAiRunnerTick(runnerId: string, idempotencyKey: string, sam
     }
   }else for (const ref of refs.slice(0, 5)) snapshots.push(await loadAiRunnerInstrumentSnapshot(runner, ref));
   if (!sample) now = new Date();
+  const universeInstrumentIds = refs.slice(0, 5).map(runnerLedgerInstrumentId);
+  const openInstrumentIds = runner.positions.filter(position => position.status === 'OPEN').map(position => {
+    if (position.instrumentId) return position.instrumentId;
+    if (position.instrument) return runnerLedgerInstrumentId(position.instrument);
+    return `unknown:${position.id}`;
+  });
+  const correlationComparators = snapshots.flatMap(snapshot => snapshot.correlationSeries ? [snapshot.correlationSeries] : []);
+  for (const snapshot of snapshots) {
+    snapshot.portfolioCorrelation = evaluateAiRunnerPortfolioCorrelation({
+      market: snapshot.market as AiRunnerMarket,
+      universeKind: runner.universe?.kind || (refs.length > 1 ? 'watchlist' : 'single'),
+      candidateInstrumentId: runnerLedgerInstrumentId(snapshot.ref),
+      candidate: snapshot.correlationSeries,
+      openInstrumentIds,
+      universeInstrumentIds,
+      comparators: correlationComparators,
+      asOf: now.getTime(),
+    });
+  }
   const candidateSignal = snapshots.some(item => item.candidateSignals?.length && ['live', 'delayed'].includes(item.quote?.dataStatus || ''));
   let intent: PreparedAiRunnerTick['intent'];
   let modelVersion: string | undefined;
@@ -9199,6 +9270,7 @@ async function prepareAiRunnerTick(runnerId: string, idempotencyKey: string, sam
       ...(snapshot.market === 'prediction' ? [{ name: 'settlement-rule-evidence', passed: snapshot.executionStatus !== 'unsupported', reason: snapshot.executionReason }] : []),
       ...(snapshot.market === 'options' ? [{ name: 'verified-option-contract', passed: snapshot.executionStatus === 'ready', reason: snapshot.executionReason }] : []),
       { name: 'strategy-indicator-evidence', passed: indicatorGate.allowed, reason: indicatorGate.reason },
+      ...(snapshot.portfolioCorrelation?.applicable ? [{ name: 'portfolio-correlation', passed: snapshot.portfolioCorrelation.allowed, reason: snapshot.portfolioCorrelation.reason }] : []),
     ];
     if (runner.executionState === 'legacy-readonly') {
       action = 'REJECTED'; reason = '旧跑单没有可核验的统一账本关联，仅保留只读历史';
@@ -9294,6 +9366,11 @@ function executePreparedRunnerTick(prepared: PreparedAiRunnerTick): { actions: A
       record.action = 'REJECTED'; record.reason = indicatorEvidenceCheck.reason || '策略指标证据已过期，订单拒绝';
       continue;
     }
+    const correlationCheck = record.riskChecks.find(check => check.name === 'portfolio-correlation');
+    if (action === 'BUY' && correlationCheck && !correlationCheck.passed) {
+      record.action = 'REJECTED'; record.reason = correlationCheck.reason || '组合相关性风控拒绝新增仓位';
+      continue;
+    }
     const fill = resolveRunnerFill(runner.policy, quote, action, new Date(), action === 'SELL' ? existing?.quantity : undefined);
     if (!fill.allowed || fill.price == null) {
       record.action = 'REJECTED'; record.reason = fill.reason || '模拟撮合拒绝：报价不满足条件';
@@ -9385,7 +9462,9 @@ app.get('/api/ai-runners/:id/history', (req, res) => {
   const runner = getAiRunners().find(item => item.id === String(req.params.id));
   if (!runner) return res.status(404).json({ success: false, error: '未找到跑单' });
   const page = listAiRunnerHistory(runner.id, typeof req.query.cursor === 'string' ? req.query.cursor : undefined, Number(req.query.limit || 50));
-  res.json({ success: true, data: page.data, nextCursor: page.nextCursor, runnerId: runner.id, dataStatus: page.data.length ? 'historical' : 'empty', reason: page.data.length ? undefined : '暂无跑单决策记录' });
+  const accountId = runner.accountId || `ai-runner:${runner.id}`;
+  const attribution = aiRunnerPortfolioAttribution(runner.universe?.market || 'stocks', runner.id, unifiedPaperLedgerStore.getRunnerAccount(accountId));
+  res.json({ success: true, data: page.data, nextCursor: page.nextCursor, runnerId: runner.id, attribution, dataStatus: page.data.length ? 'historical' : 'empty', reason: page.data.length ? undefined : '暂无跑单决策记录' });
 });
 
 app.post('/api/ai-runners/:id/tick', express.json(), async (req, res) => {
@@ -9450,6 +9529,13 @@ async function runAutomationJob(jobId: string): Promise<{ message: string }> {
 
 app.post('/api/ops/run/:jobId', async (req, res) => {
   const jobId = String(req.params.jobId) as Parameters<typeof saveAutomationRun>[0];
+  if (jobId === 'state-backup') {
+    if (!adminOnly(req, res)) return;
+    const result = await stateBackupScheduler.runNow();
+    if (result.status === 'BUSY') return res.status(409).json({ success: false, error: result.message });
+    if (result.status === 'FAILED') return res.status(500).json({ success: false, error: result.message, data: result });
+    return res.json({ success: true, data: { jobId, ...result } });
+  }
   if (jobId === 'ai-runners' && !adminOnly(req, res)) return;
   const startedAt = new Date().toISOString();
   try {
@@ -10256,6 +10342,7 @@ async function main() {
     riskPatrol.start();
     startUnifiedAlertMonitor();
     startCoverageCanaryMonitor();
+    stateBackupScheduler.start();
     startPaperDriftMonitor();
     startMarketHistoryCaptureMonitor();
     if (process.env.MONEYMONEY_DISABLE_GURU_REFRESH !== 'true') startGuruHoldingsRefreshMonitor();
@@ -10294,6 +10381,7 @@ async function main() {
     stopTelegramCommandCenterMonitor();
     stopUnifiedAlertMonitor();
     stopCoverageCanaryMonitor();
+    await stateBackupScheduler.stop();
     stopPaperDriftMonitor();
     await stopMarketHistoryCaptureMonitor();
     if (process.env.MONEYMONEY_DISABLE_GURU_REFRESH !== 'true') await stopGuruHoldingsRefreshMonitor();

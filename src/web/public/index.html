@@ -2612,6 +2612,8 @@
               <label><input type="checkbox" data-crypto-strategy="bollinger" onchange="setCryptoChartStrategy('bollinger', this.checked)"> 布林反转</label>
               <label><input type="checkbox" data-crypto-strategy="volumeBreakout" onchange="setCryptoChartStrategy('volumeBreakout', this.checked)"> 放量突破</label>
               <label><input type="checkbox" data-crypto-overlay="patterns" onchange="setCryptoChartOverlay('patterns', this.checked)"> 蜡烛形态</label>
+              <label><input type="checkbox" data-crypto-overlay="supportResistance" onchange="setCryptoChartOverlay('supportResistance', this.checked)"> 支撑/阻力</label>
+              <span id="crypto-sr-status" hidden style="align-items:center;gap:6px;color:var(--text-secondary);font-size:11px;"></span>
               <div id="crypto-chart-pattern-controls" class="chart-pattern-controls" aria-label="逐项蜡烛形态开关"><span class="chart-pattern-controls-title">逐项形态</span><label><input type="checkbox" data-chart-pattern="doji" data-chart-pattern-scope="crypto"> 十字星</label></div>
             </div>
             <div id="bn-chart-ma-values" class="chart-ma-values" aria-live="polite"></div>
@@ -2806,7 +2808,9 @@
                 <label><input type="checkbox" data-chart-overlay="structures" onchange="setStockChartOverlay('structures', this.checked)"> 结构标记</label>
                 <label><input type="checkbox" data-chart-overlay="ma" checked="" onchange="setStockChartOverlay('ma', this.checked)"> 均线</label>
                 <label><input type="checkbox" data-chart-overlay="boll" onchange="setStockChartOverlay('boll', this.checked)"> 布林带</label>
+                <label><input type="checkbox" data-chart-overlay="supportResistance" onchange="setStockChartOverlay('supportResistance', this.checked)"> 支撑/阻力</label>
                 <label><input type="checkbox" data-chart-overlay="volume" checked="" onchange="setStockChartOverlay('volume', this.checked)"> 成交量</label>
+                <span id="stock-sr-status" class="kline-data-status" aria-live="polite" hidden></span>
                 <span class="stock-chart-replay-label">回放</span>
                 <button class="tab" type="button" data-chart-replay="reset" onclick="stepStockChartReplay('reset')">⏮</button>
                 <button class="tab" type="button" data-chart-replay="previous" onclick="stepStockChartReplay('previous')">‹</button>
@@ -4322,14 +4326,22 @@ async function loadAiRunnerHistory(id, button) {
     const payload = await res.json();
     if (!res.ok || !payload.success) throw new Error(payload.error || '决策历史不可用');
     const rows = payload.data || [];
-    host.innerHTML = rows.length ? rows.map(item => `
+    const attribution = payload.attribution || {};
+    const attributionRows = Array.isArray(attribution.strategies) ? attribution.strategies : [];
+    const attributionPanel = `<section style="margin:8px 0 12px;padding:10px;border:1px solid var(--border);border-radius:10px;background:var(--bg-secondary);color:var(--text-secondary);font-size:11px;">
+      <strong style="color:var(--text);">跑单成交归因 · 原始报价口径</strong>
+      <div style="margin-top:4px;">只统计当前跑单独立账本中明确关联的订单；不折算未知汇率，不把费用缺失按零补齐，也不生成订单。</div>
+      ${attributionRows.length ? attributionRows.map(group => `<div style="margin-top:6px;padding-top:6px;border-top:1px solid var(--border);"><strong style="color:var(--text);">${safeNewsText(group.instrument)} · ${safeNewsText(group.strategy)} @ ${safeNewsText(group.strategyVersion)}</strong><div>已实现报价盈亏：${group.realizedQuotePnl == null ? '未知' : safeNewsText(Number(group.realizedQuotePnl).toFixed(4))} · 记录费用字段：${group.recordedFeesUsd == null ? '不完整' : safeNewsText(Number(group.recordedFeesUsd).toFixed(4))} · 记录滑点字段：${group.recordedSlippageUsd == null ? '不完整' : safeNewsText(Number(group.recordedSlippageUsd).toFixed(4))}</div><div>${safeNewsText(group.reason || '')}</div></div>`).join('') : `<div style="margin-top:5px;">${safeNewsText(attribution.reason || '当前没有可归因的模拟成交')}</div>`}
+      ${(attribution.warnings || []).map(reason => `<div style="margin-top:4px;color:var(--yellow);">提示：${safeNewsText(reason)}</div>`).join('')}
+    </section>`;
+    host.innerHTML = attributionPanel + (rows.length ? rows.map(item => `
       <div style="border-top:1px solid var(--border);padding:8px 4px;color:var(--text-secondary);font-size:11px;">
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;"><strong style="color:var(--text);">${safeNewsText(item.action)} · ${safeNewsText(item.instrument)}</strong><span>${safeNewsText(item.dataStatus)}${item.source ? ` · ${safeNewsText(item.source)}` : ''}</span><span>${safeNewsText(item.at)}</span></div>
         <div style="margin-top:4px;color:var(--text);">${safeNewsText(item.reason || '')}</div>
         <div style="margin-top:3px;">${(item.signals || []).map(safeNewsText).join(' · ') || '无触发信号'}${item.snapshotHash ? ` · 快照 ${safeNewsText(item.snapshotHash.slice(0, 16))}` : ''}${item.orderId ? ` · 订单 ${safeNewsText(item.orderId)}` : ''}</div>
         ${(item.evidence || []).map(evidence => `<div style="margin-top:3px;">证据 ${safeNewsText(evidence.dataset)} · ${safeNewsText(evidence.status)} · ${safeNewsText(evidence.source)}${evidence.dataAt ? ` · 数据 ${safeNewsText(evidence.dataAt)}` : ''}${evidence.retrievedAt ? ` · 获取 ${safeNewsText(evidence.retrievedAt)}` : ''}${evidence.reason ? ` · ${safeNewsText(evidence.reason)}` : ''}</div>`).join('')}
         ${(item.riskChecks || []).length ? `<div style="margin-top:3px;">校验：${item.riskChecks.map(check => `${safeNewsText(check.name)} ${check.passed ? '通过' : `拒绝${check.reason ? '（' + safeNewsText(check.reason) + '）' : ''}`}`).join(' · ')}</div>` : ''}
-      </div>`).join('') : '<div style="color:var(--text-secondary);font-size:11px;padding:8px;">暂无跑单决策记录。</div>';
+      </div>`).join('') : '<div style="color:var(--text-secondary);font-size:11px;padding:8px;">暂无跑单决策记录。</div>');
     if (button) button.setAttribute('aria-expanded', 'true');
   } catch (error) {
     host.innerHTML = `<div style="color:var(--yellow);font-size:11px;padding:8px;">${safeNewsText(error?.message || '读取决策失败')}</div>`;
@@ -5650,7 +5662,9 @@ if (!navigator.onLine) showOfflineBanner();
 let bnCurrentSymbol = 'BTCUSDT';
 let bnCurrentInterval = '5m';
 let bnKlineData = [];
-let cryptoChartOverlayConfig = { patterns: false, patternTypes: {} };
+let cryptoChartOverlayConfig = { patterns: false, supportResistance: true, patternTypes: {} };
+const cryptoSupportResistanceCache = new Map();
+const cryptoSupportResistanceState = { key: null, status: 'idle', data: null, controller: null, retryAt: 0 };
 function bnSetSymbol(sym) {
     if (activeMarketScope !== "crypto") return;
   if (bnCurrentSymbol !== sym) {
@@ -5740,7 +5754,56 @@ function loadCryptoChartOverlayConfig() {
 function setCryptoChartOverlay(name, enabled) {
   cryptoChartOverlayConfig[name] = Boolean(enabled);
   try { localStorage.setItem(cryptoChartOverlayStorageKey(), JSON.stringify(cryptoChartOverlayConfig)); } catch (e) {}
+  if (name === 'supportResistance') {
+    if (enabled) void loadCryptoSupportResistance(true);
+    else { cryptoSupportResistanceState.controller?.abort(); cryptoSupportResistanceState.key = null; cryptoSupportResistanceState.status = 'idle'; cryptoSupportResistanceState.data = null; updateCryptoSupportResistanceStatus(''); }
+  }
   if (bnKlineData.length) drawCandles(document.getElementById('bn-candlestick'), bnKlineData);
+}
+function updateCryptoSupportResistanceStatus(message, retry = false) {
+  const host = document.getElementById('crypto-sr-status');
+  if (!host) return;
+  host.replaceChildren();
+  host.hidden = !message;
+  if (!message) return;
+  const label = document.createElement('span'); label.textContent = message; host.append(label);
+  if (retry) { const button = document.createElement('button'); button.type = 'button'; button.className = 'tf-btn'; button.textContent = '重试'; button.onclick = () => void loadCryptoSupportResistance(true); host.append(button); }
+}
+async function loadCryptoSupportResistance(force = false) {
+  if (!cryptoChartOverlayConfig.supportResistance) return;
+  const symbol = bnCurrentSymbol, interval = bnCurrentInterval, key = `${symbol}|${interval}`;
+  const scope = document.getElementById('market-workspace-shell')?.dataset.marketScope;
+  if (scope && scope !== 'crypto') return;
+  const cached = cryptoSupportResistanceCache.get(key);
+  if (!force && cached && Date.now() - cached.cachedAt < 120_000) {
+    cryptoSupportResistanceState.key = key; cryptoSupportResistanceState.status = 'success'; cryptoSupportResistanceState.data = cached.data;
+    updateCryptoSupportResistanceStatus(`支撑/阻力：${cached.data.supports.length + cached.data.resistances.length} 条 · Binance ${interval} K线 · ${cached.data.fetchedAt || '时间未知'}`);
+    return;
+  }
+  if (!force && cryptoSupportResistanceState.key === key && (cryptoSupportResistanceState.status === 'loading' || cryptoSupportResistanceState.status === 'success' || Date.now() < cryptoSupportResistanceState.retryAt)) return;
+  cryptoSupportResistanceState.controller?.abort();
+  const controller = new AbortController(); cryptoSupportResistanceState.controller = controller;
+  cryptoSupportResistanceState.key = key; cryptoSupportResistanceState.status = 'loading'; cryptoSupportResistanceState.data = null;
+  updateCryptoSupportResistanceStatus(`支撑/阻力：正在读取 Binance ${interval} K线…`);
+  try {
+    const response = await fetch('/api/support-resistance?' + new URLSearchParams({ symbol, interval }), { signal: controller.signal });
+    const body = await response.json();
+    if (controller.signal.aborted || cryptoSupportResistanceState.key !== key || symbol !== bnCurrentSymbol || interval !== bnCurrentInterval) return;
+    const activeScope = document.getElementById('market-workspace-shell')?.dataset.marketScope;
+    if (activeScope && activeScope !== 'crypto') { cryptoSupportResistanceState.key = null; cryptoSupportResistanceState.status = 'idle'; return; }
+    const data = body?.data;
+    if (!response.ok || !body?.success || data?.symbol !== symbol || data?.interval !== interval || !Array.isArray(data.supports) || !Array.isArray(data.resistances)) throw new Error(body?.reason || body?.error || '来源不可用或标的/周期不匹配');
+    cryptoSupportResistanceState.status = 'success'; cryptoSupportResistanceState.data = data; cryptoSupportResistanceState.retryAt = 0;
+    cryptoSupportResistanceCache.set(key, { data, cachedAt: Date.now() });
+    if (cryptoSupportResistanceCache.size > 24) cryptoSupportResistanceCache.delete(cryptoSupportResistanceCache.keys().next().value);
+    const count = data.supports.length + data.resistances.length;
+    updateCryptoSupportResistanceStatus(count ? `支撑/阻力：${count} 条 · Binance ${interval} K线 · ${data.fetchedAt || '时间未知'}` : `Binance ${interval} K线来源正常；当前区间未识别到支撑/阻力`);
+  } catch (error) {
+    if (error?.name === 'AbortError' || cryptoSupportResistanceState.key !== key) return;
+    cryptoSupportResistanceState.status = 'failed'; cryptoSupportResistanceState.data = null; cryptoSupportResistanceState.retryAt = Date.now() + 30_000;
+    updateCryptoSupportResistanceStatus(`支撑/阻力不可用：${String(error?.message || '请求失败').slice(0, 120)}`, true);
+  }
+  if (cryptoSupportResistanceState.key === key && cryptoSupportResistanceState.data && bnKlineData.length) drawCandles(document.getElementById('bn-candlestick'), bnKlineData);
 }
 function setCryptoChartPattern(name, enabled) {
   cryptoChartOverlayConfig.patternTypes[name] = Boolean(enabled);
@@ -5781,6 +5844,7 @@ function drawCandles(canvas, klines) {
   }
   loadCryptoChartStrategyConfig();
   loadCryptoChartOverlayConfig();
+  if (cryptoChartOverlayConfig.supportResistance) void loadCryptoSupportResistance();
   const strategySignals = buildCryptoStrategySignals(klines);
   const cryptoPatterns = cryptoChartOverlayConfig.patterns
     ? (window.MoneyChartAnalysis?.detectCandlestickPatterns(klines) || []).filter(item => cryptoChartOverlayConfig.patternTypes?.[item.type] !== false)
@@ -5938,61 +6002,11 @@ function calcBollinger(data, period = 20, multiplier = 2) {
       ctx.fillText(priceLabel, W - padR - labelWidth + 4, y + 4);
     }
   }
-  // Support/Resistance auto-detection
-  if (klines.length >= 20) {
-    const lookback = 5; // Bars on each side to confirm a swing point
-    const supports = [];
-    const resistances = [];
-    for (let i = lookback; i < klines.length - lookback; i++) {
-      let isHigh = true, isLow = true;
-      for (let j = i - lookback; j <= i + lookback; j++) {
-        if (j === i) continue;
-        if (klines[j].high >= klines[i].high) isHigh = false;
-        if (klines[j].low <= klines[i].low) isLow = false;
-      }
-      if (isHigh) resistances.push(klines[i].high);
-      if (isLow) supports.push(klines[i].low);
-    }
-    // Cluster nearby levels and draw strongest ones
-    function clusterLevels(levels, tolerance) {
-      if (!levels.length) return [];
-      levels.sort((a,b) => a-b);
-      const clusters = [[levels[0]]];
-      for (let i = 1; i < levels.length; i++) {
-        if (Math.abs(levels[i] - clusters[clusters.length-1][0]) <= tolerance) {
-          clusters[clusters.length-1].push(levels[i]);
-        } else {
-          clusters.push([levels[i]]);
-        }
-      }
-      return clusters.map(c => c.reduce((a,b)=>a+b,0)/c.length).slice(-3); // Top 3
-    }
-    const tolerance = range * 0.01;
-    const supLevels = clusterLevels(supports, tolerance);
-    const resLevels = clusterLevels(resistances, tolerance);
-    // Draw support lines (green dashed)
-    supLevels.forEach(level => {
-      const y = padT + chartH - ((level - minP) / range) * chartH;
-      ctx.strokeStyle = 'rgba(34,197,94,.4)';
-      ctx.setLineDash([8, 6]);
-      ctx.lineWidth = 1;
-      ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(W - padR, y); ctx.stroke();
-      ctx.fillStyle = 'rgba(34,197,94,.7)';
-      ctx.font = '9px sans-serif';
-      ctx.fillText('S', padL + 2, y - 2);
-    });
-    // Draw resistance lines (red dashed)
-    resLevels.forEach(level => {
-      const y = padT + chartH - ((level - minP) / range) * chartH;
-      ctx.strokeStyle = 'rgba(239,68,68,.4)';
-      ctx.setLineDash([8, 6]);
-      ctx.lineWidth = 1;
-      ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(W - padR, y); ctx.stroke();
-      ctx.fillStyle = 'rgba(239,68,68,.7)';
-      ctx.font = '9px sans-serif';
-      ctx.fillText('R', padL + 2, y + 10);
-    });
-    ctx.setLineDash([]);
+  if (cryptoChartOverlayConfig.supportResistance && cryptoSupportResistanceState.status === 'success'
+    && cryptoSupportResistanceState.key === `${bnCurrentSymbol}|${bnCurrentInterval}` && cryptoSupportResistanceState.data) {
+    const geometry = { W, H, padL, padR, padT, priceH: chartH, minP, maxP };
+    const lines = window.MoneyTradingChart?.supportResistanceLineLayout(cryptoSupportResistanceState.data, geometry) || [];
+    window.MoneyTradingChart?.drawSupportResistance(ctx, lines, geometry);
   }
   // Price Alert Lines
   if (typeof bnActiveAlerts !== 'undefined' && bnActiveAlerts.length > 0) {
@@ -8944,6 +8958,8 @@ try {
   if (['5m', '15m', '1h', '1d', '1y'].includes(savedCompanion.period)) stockChartCompanionPeriod = savedCompanion.period;
 } catch (e) {}
 let stockChartOverlayConfig = window.MoneyChartAnalysis?.normalizeOverlayConfig({ strategies:{ maCross:true, rsiReversal:false, bollinger:false, volumeBreakout:false } }) || { signals:true, patterns:false, structures:false, volume:true, indicators:{ ma:true, boll:false, macd:false }, strategies:{ maCross:true, rsiReversal:false, bollinger:false, volumeBreakout:false }, patternTypes:{}, maxLabels:80 };
+const stockSupportResistanceCache = new Map();
+const stockSupportResistanceState = { key: null, status: 'idle', data: null, controller: null, retryAt: 0, loadedAt: 0 };
 let cryptoChartStrategyConfig = { maCross:true, rsiReversal:false, bollinger:false, volumeBreakout:false };
 var INLINE_CANDLE_PATTERN_CATALOG = [
   ['doji','十字星'], ['hammer','锤头线'], ['hanging-man','上吊线'], ['shooting-star','流星线'], ['long-shadow','长影线'],
@@ -9011,6 +9027,7 @@ function loadStockChartOverlayConfig() {
   try {
     const raw = JSON.parse(localStorage.getItem(stockChartStorageKey()) || 'null');
     stockChartOverlayConfig = window.MoneyChartAnalysis?.normalizeOverlayConfig(raw || {}) || stockChartOverlayConfig;
+    stockChartOverlayConfig.supportResistance = raw?.supportResistance === true;
   } catch (e) {}
   document.querySelectorAll('[data-chart-overlay]').forEach(input => {
     const name = input.dataset.chartOverlay;
@@ -9023,10 +9040,104 @@ function loadStockChartOverlayConfig() {
   });
   syncChartPatternControls(stockChartOverlayConfig, 'stock');
 }
+function stockSupportResistanceKey() {
+  return `${currentStockSymbol}|${currentStockApiSymbol || currentStockSymbol}|${currentStockKlinePeriod}|${stockChartAdjustment}`;
+}
+function stockSupportResistanceViewAvailable() {
+  const scope = document.getElementById('market-workspace-shell')?.dataset.marketScope || activeMarketScope;
+  return scope === 'stocks' && !stockChartAsOf && !stockChartIntradayDate && !stockChartFocusEnabled
+    && !window.stockMoneyKLine?.timer && stockChartReplayIndex >= stockChartKlines.length - 1;
+}
+function updateStockSupportResistanceStatus(message, retry = false) {
+  const host = document.getElementById('stock-sr-status');
+  if (!host) return;
+  const signature = `${message}\u001f${retry}`;
+  if (host.dataset.statusSignature === signature) return;
+  host.dataset.statusSignature = signature;
+  host.replaceChildren();
+  host.hidden = !message;
+  if (!message) return;
+  const label = document.createElement('span'); label.textContent = message; host.append(label);
+  if (retry) {
+    const button = document.createElement('button'); button.type = 'button'; button.className = 'tab'; button.textContent = '重试';
+    button.onclick = () => void loadStockSupportResistance(true); host.append(button);
+  }
+}
+async function loadStockSupportResistance(force = false) {
+  if (!stockChartOverlayConfig.supportResistance) return;
+  const host = document.getElementById('stock-sr-status');
+  if (!stockSupportResistanceViewAvailable()) {
+    updateStockSupportResistanceStatus('当前图表不是最新行情视图，支撑/阻力暂隐藏');
+    return;
+  }
+  const symbol = currentStockApiSymbol || currentStockSymbol;
+  const interval = currentStockKlinePeriod;
+  const adjustment = stockChartAdjustment;
+  const key = stockSupportResistanceKey();
+  if (!symbol || stockChartKlines.length < 30) {
+    updateStockSupportResistanceStatus('当前来源历史K线不足30根，无法计算支撑/阻力');
+    return;
+  }
+  const cached = stockSupportResistanceCache.get(key);
+  if (!force && cached && Date.now() - cached.cachedAt < 120_000) {
+    stockSupportResistanceState.key = key; stockSupportResistanceState.status = 'success';
+    stockSupportResistanceState.data = cached.data; stockSupportResistanceState.loadedAt = cached.cachedAt;
+    updateStockSupportResistanceStatus(`${cached.data.supports.length + cached.data.resistances.length} 条 · ${cached.source} · 缓存历史K线 · ${cached.updatedAt || '时间未知'}`);
+    if (stockChartKlines.length) drawStockKline(document.getElementById('stock-kline'), stockChartKlines);
+    return;
+  }
+  if (!force && stockSupportResistanceState.key === key && stockSupportResistanceState.status === 'success'
+    && Date.now() - stockSupportResistanceState.loadedAt < 120_000) return;
+  if (!force && stockSupportResistanceState.key === key && (stockSupportResistanceState.status === 'loading' || Date.now() < stockSupportResistanceState.retryAt)) return;
+  stockSupportResistanceState.controller?.abort();
+  const controller = new AbortController(); stockSupportResistanceState.controller = controller;
+  stockSupportResistanceState.key = key; stockSupportResistanceState.status = 'loading'; stockSupportResistanceState.data = null;
+  updateStockSupportResistanceStatus(`正在读取 ${symbol} · ${interval} 历史K线…`);
+  try {
+    const query = new URLSearchParams({ market: 'stocks', symbol, interval, adjustment });
+    const response = await fetch('/api/support-resistance?' + query, { signal: controller.signal });
+    const body = await response.json();
+    if (controller.signal.aborted || stockSupportResistanceState.key !== key || key !== stockSupportResistanceKey()) return;
+    if (!stockSupportResistanceViewAvailable()) {
+      stockSupportResistanceState.status = 'idle'; stockSupportResistanceState.data = null;
+      updateStockSupportResistanceStatus('当前图表不是最新行情视图，支撑/阻力暂隐藏'); return;
+    }
+    const data = body?.data;
+    if (!response.ok || !body?.success || body.market !== 'stocks' || body.requestedInstrument !== symbol
+      || body.timeframe !== interval || !data || data.symbol !== body.instrument || data.interval !== interval
+      || !Array.isArray(data.supports) || !Array.isArray(data.resistances)) {
+      throw new Error(body?.reason || body?.error || '历史来源不可用或标的/周期不匹配');
+    }
+    const source = String(body.source || '股票历史K线');
+    const updatedAt = String(body.updatedAt || data.fetchedAt || '时间未知');
+    stockSupportResistanceState.status = 'success'; stockSupportResistanceState.data = data;
+    stockSupportResistanceState.loadedAt = Date.now(); stockSupportResistanceState.retryAt = 0;
+    stockSupportResistanceCache.set(key, { data, source, updatedAt, cachedAt: stockSupportResistanceState.loadedAt });
+    if (stockSupportResistanceCache.size > 24) stockSupportResistanceCache.delete(stockSupportResistanceCache.keys().next().value);
+    const count = data.supports.length + data.resistances.length;
+    updateStockSupportResistanceStatus(count ? `${count} 条 · ${source} · ${body.dataStatus || 'historical'} · ${formatChartTime(updatedAt)}` : `${source} 历史数据可用；当前覆盖区间未识别到支撑/阻力`);
+    if (stockSupportResistanceState.key === key && stockChartKlines.length) drawStockKline(document.getElementById('stock-kline'), stockChartKlines);
+  } catch (error) {
+    if (error?.name === 'AbortError' || stockSupportResistanceState.key !== key) return;
+    stockSupportResistanceState.status = 'failed'; stockSupportResistanceState.data = null;
+    stockSupportResistanceState.retryAt = Date.now() + 30_000;
+    updateStockSupportResistanceStatus(`支撑/阻力不可用：${String(error?.message || '请求失败').slice(0, 120)}`, true);
+  }
+}
 function setStockChartOverlay(name, enabled) {
   if (['ma', 'boll', 'macd'].includes(name)) stockChartOverlayConfig.indicators[name] = Boolean(enabled);
   else stockChartOverlayConfig[name] = Boolean(enabled);
   try { localStorage.setItem(stockChartStorageKey(), JSON.stringify(stockChartOverlayConfig)); } catch (e) {}
+  if (name === 'supportResistance') {
+    if (enabled) void loadStockSupportResistance(true);
+    else {
+      stockSupportResistanceState.controller?.abort(); stockSupportResistanceState.key = null;
+      stockSupportResistanceState.status = 'idle'; stockSupportResistanceState.data = null;
+      updateStockSupportResistanceStatus('');
+    }
+    if (stockChartKlines.length) drawStockKline(document.getElementById('stock-kline'), stockChartKlines);
+    return;
+  }
   
   if (window.stockMoneyKLine) {
      window.stockMoneyKLine.toggleLayer(name, enabled);
@@ -9604,7 +9715,13 @@ function setStockKlineViewState(state, reason = '') {
 async function loadStockKline(symbol, name, apiSymbol, options = {}) {
   const live = options.live === true;
   if (live && (stockChartAsOf || stockChartIntradayDate || stockChartReplayIndex < stockChartKlines.length - 1 || window.stockMoneyKLine?.timer)) return;
-  if (!live) { stockKlineContextRevision++; window.MoneyLiveKline?.stop(); }
+  if (!live) {
+    stockKlineContextRevision++; window.MoneyLiveKline?.stop();
+    stockSupportResistanceState.controller?.abort();
+    stockSupportResistanceState.key = null; stockSupportResistanceState.status = 'idle';
+    stockSupportResistanceState.data = null; stockSupportResistanceState.loadedAt = 0;
+    if (stockChartOverlayConfig.supportResistance) updateStockSupportResistanceStatus('K线上下文更新中，支撑/阻力待刷新');
+  }
   const requestRevision = ++stockKlineRequestRevision;
   if (stockKlineController) stockKlineController.abort();
   const controller = new AbortController();
@@ -9667,6 +9784,7 @@ async function loadStockKline(symbol, name, apiSymbol, options = {}) {
       if (live) { window.MoneyLiveKline?.note('stocks', '刷新失败：' + (d.reason || d.error || '暂无数据') + ' · 保留最后快照'); return; }
       currentStockKlineReason = d.reason || d.error || '暂无数据';
       setStockKlineStatus(currentStockKlineReason);
+      if (stockChartOverlayConfig.supportResistance) updateStockSupportResistanceStatus('当前K线不可用，无法计算支撑/阻力');
       setStockKlineViewState(d.dataStatus === 'failed' ? 'failed' : 'empty', currentStockKlineReason);
       const context = canvas.getContext('2d');
       context.setTransform(1, 0, 0, 1, 0, 0);
@@ -9698,6 +9816,7 @@ async function loadStockKline(symbol, name, apiSymbol, options = {}) {
     if (!live) loadStockChartOverlayConfig();
     if (window.stockMoneyKLine?.update) window.stockMoneyKLine.update(stockChartKlines, { resetReplay: true });
     else drawStockKline(canvas, stockChartKlines);
+    if (stockChartOverlayConfig.supportResistance) void loadStockSupportResistance();
     if (!live && stockChartCompanionOpen) loadStockChartCompanion();
     if (!live && !document.getElementById('mm-stock-multi-chart')?.hidden) window.MoneyMoneyExperience?.loadMultiChart?.();
     canvas.style.visibility = 'visible';
@@ -9706,6 +9825,7 @@ async function loadStockKline(symbol, name, apiSymbol, options = {}) {
     if (requestRevision !== stockKlineRequestRevision || controller.signal.aborted) return;
     if (live) { window.MoneyLiveKline?.note('stocks', '来源不可用 · 保留最后快照（缓存）'); return; }
     currentStockKlineReason = '股票K线来源不可用，请稍后重试';
+    if (stockChartOverlayConfig.supportResistance) updateStockSupportResistanceStatus('K线来源不可用，暂不能计算支撑/阻力');
     setStockKlineStatus(currentStockKlineReason);
     setStockKlineViewState('failed', currentStockKlineReason);
   } finally {
@@ -9738,6 +9858,16 @@ function drawStockKline(canvas, klines) {
   const replayKlines = fullKlines.slice(0, visibleCount);
   const selectedIndex = Number.isInteger(stockChartFocusIndex) && stockChartFocusIndex < replayKlines.length ? stockChartFocusIndex : null;
   const tradingActive = !stockChartFocusEnabled && !stockChartAsOf && !stockChartIntradayDate && stockChartReplayIndex >= stockChartKlines.length-1 && visibleCount === fullKlines.length && !window.stockMoneyKLine?.timer;
+  if (stockChartOverlayConfig.supportResistance) {
+    if (tradingActive) {
+      const key = stockSupportResistanceKey();
+      if (stockSupportResistanceState.key !== key || stockSupportResistanceState.status === 'idle'
+        || (stockSupportResistanceState.status === 'failed' && Date.now() >= stockSupportResistanceState.retryAt)
+        || (stockSupportResistanceState.status === 'success' && Date.now() - stockSupportResistanceState.loadedAt >= 120_000)) {
+        void loadStockSupportResistance();
+      }
+    } else updateStockSupportResistanceStatus('当前图表不是最新行情视图，支撑/阻力暂隐藏');
+  }
   const tradingWindow = tradingActive ? window.MoneyTradingChart?.select(canvas,replayKlines,currentStockSymbol+'|'+currentStockKlinePeriod) : null;
   const focusStart = stockChartFocusEnabled && selectedIndex != null ? getStockKlineFocusStart(replayKlines.length, selectedIndex) : (tradingWindow?.start || 0);
   stockChartRenderedStartIndex = focusStart;
@@ -9856,6 +9986,12 @@ function drawStockKline(canvas, klines) {
       ctx.stroke(); ctx.setLineDash([]);
     });
   });
+  if (stockChartOverlayConfig.supportResistance && tradingActive && stockSupportResistanceState.status === 'success'
+    && stockSupportResistanceState.key === stockSupportResistanceKey() && stockSupportResistanceState.data) {
+    const geometry = { W, H, padL, padR, padT, priceH, minP, maxP };
+    const lines = window.MoneyTradingChart?.supportResistanceLineLayout(stockSupportResistanceState.data, geometry) || [];
+    window.MoneyTradingChart?.drawSupportResistance(ctx, lines, geometry);
+  }
   overlays.signals.forEach(signal => {
     const bar = klines[signal.index]; if (!bar) return;
     const x = xCenter(signal.index), y = signal.side === 'buy' ? yPrice(bar.low) + 14 : yPrice(bar.high) - 14;

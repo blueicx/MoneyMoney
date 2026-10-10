@@ -20,6 +20,24 @@ test('AI runner model request uses one configured model and validates a bounded 
   assert.equal(request.body.max_tokens <= 1000, true);
 });
 
+test('AI receives the correlation verdict but not the raw runner price history', async () => {
+  let sent;
+  const result = await requestAiRunnerIntent(runner, runtime, [{
+    instrument: 'AAPL', market: 'stocks', dataStatus: 'delayed', price: 10,
+    portfolioCorrelation: { applicable: true, allowed: false, reason: '与持仓高度相关', comparisons: [{ instrumentId: 'stock:us:MSFT', correlation: 0.95, observations: 20 }] },
+    correlationSeries: { market: 'stocks', instrumentId: 'stock:us:AAPL', points: [{ time: 1, close: 10_000_000 }] },
+  }], async (_url, init) => {
+    sent = JSON.parse(init.body);
+    return { ok: true, json: async () => ({ choices: [{ message: { content: JSON.stringify(body) } }] }) };
+  });
+  assert.equal(result.ok, true);
+  const userPayload = JSON.parse(sent.messages[1].content);
+  assert.equal(userPayload.snapshots[0].portfolioCorrelation.allowed, false);
+  assert.equal(userPayload.snapshots[0].portfolioCorrelation.comparisons[0].correlation, 0.95);
+  assert.equal('correlationSeries' in userPayload.snapshots[0], false);
+  assert.doesNotMatch(sent.messages[1].content, /10000000/);
+});
+
 test('AI runner accepts one fenced JSON object without relaxing the intent schema', async () => {
   const fenced = 'The decision is below:\n```json\n' + JSON.stringify(body) + '\n```';
   const result = await requestAiRunnerIntent(runner, runtime, [], async () => ({

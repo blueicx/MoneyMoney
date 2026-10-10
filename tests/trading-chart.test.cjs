@@ -6,6 +6,14 @@ test('history pages merge only older actual candles without rewriting current ro
  const joined=c.mergeHistory(current,older,current[0].time);assert.equal(joined.length,60);assert.equal(joined[10].close,11);assert.equal(joined[0].time,rows[40].time);
  const refreshed=c.mergeHistory(joined,[{...rows[99],close:12}]);assert.equal(refreshed.length,60);assert.equal(refreshed.at(-1).close,12);assert.equal(c.mergeHistory(joined,[{...rows[39],low:20}],current[0].time).length,60);
 });
+test('support and resistance line layout maps only real in-range provider levels to the active price scale',()=>{
+ const c=load();assert.equal(typeof c.supportResistanceLineLayout,'function','support/resistance chart projection missing');
+ const geometry={W:800,H:400,padL:60,padR:80,padT:10,priceH:250,minP:90,maxP:110};
+ const data={supports:[{type:'support',price:100,touches:3,strength:80},{type:'support',price:80,touches:2}],resistances:[{type:'resistance',price:105,touches:4,strength:70},{type:'resistance',price:105,touches:4}]};
+ const lines=c.supportResistanceLineLayout(data,geometry);assert.equal(lines.length,2);assert.equal(lines.find(row=>row.price===100).y,135);assert.equal(lines.find(row=>row.price===105).y,72.5);assert.equal(lines.some(row=>row.price===80),false);
+ let strokes=0;const ctx={save(){},restore(){},setLineDash(){},beginPath(){},moveTo(){},lineTo(){},stroke(){strokes++;},fillText(){}};
+ assert.equal(c.drawSupportResistance(ctx,lines,geometry),2);assert.equal(strokes,2);assert.equal(c.supportResistanceLineLayout(data,{...geometry,maxP:90,minP:110}).length,0);
+});
 test('history control is explicit and serial, and late completion cannot overwrite another chart context',async()=>{
  const {JSDOM}=require('jsdom'),dom=new JSDOM('<div><canvas></canvas></div>',{runScripts:'outside-only',pretendToBeVisual:true}),w=dom.window;w.HTMLCanvasElement.prototype.getContext=()=>new Proxy({},{get:()=>()=>{}});let calls=0,finish;
  try{w.eval(fs.readFileSync('src/web/public/trading-chart.js','utf8'));const canvas=w.document.querySelector('canvas');const options={identity:'AAPL|5m',interval:'5m',loadEarlier:()=>{calls++;return new Promise(resolve=>finish=resolve);}};w.MoneyTradingChart.render(canvas,rows,options);

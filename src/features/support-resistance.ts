@@ -30,6 +30,15 @@ export interface SrResult {
   fetchedAt: string;
 }
 
+export interface SupportResistanceBar {
+  time: number;
+  open?: number;
+  high: number;
+  low: number;
+  close: number;
+  volume?: number;
+}
+
 interface CacheEntry {
   ts: number;
   value: SrResult;
@@ -115,23 +124,28 @@ function clusterLevels(points: SwingPoint[], currentPrice: number, tolerancePct 
   }));
 }
 
-export async function getSupportResistance(symbol = 'BTCUSDT', interval = '4h'): Promise<SrResult> {
-  const key = `${symbol}:${interval}`;
-  const cached = cache.get(key);
-  if (cached && Date.now() - cached.ts < CACHE_TTL_MS) return cached.value;
+export function analyzeSupportResistance(symbol: string, interval: string, input: SupportResistanceBar[]): SrResult {
+  if (!Array.isArray(input) || input.length < 30) throw new Error(`Not enough kline data for S/R ${symbol}; at least 30 bars are required`);
+  const source = input.slice(-500);
+  const klines = source.map((bar, index) => {
+    const time = Number(bar.time), high = Number(bar.high), low = Number(bar.low), close = Number(bar.close);
+    const open = bar.open == null ? close : Number(bar.open), volume = bar.volume == null ? 0 : Number(bar.volume);
+    if (![time, open, high, low, close, volume].every(Number.isFinite) || time <= 0 || low <= 0 || volume < 0
+      || high < Math.max(open, close, low) || low > Math.min(open, close, high)
+      || (index > 0 && time <= Number(source[index - 1].time))) {
+      throw new Error(`Invalid or unordered OHLCV row for S/R ${symbol}`);
+    }
+    return { time, high, low, close, volume };
+  });
+  if (klines.length < 30) throw new Error(`Not enough kline data for S/R ${symbol}; at least 30 bars are required`);
 
-  const klines = await binanceFeed.getKlines(symbol, interval, 200);
-  if (!klines || klines.length < 30) throw new Error(`Not enough kline data for S/R ${symbol}`);
-
-  const highs = klines.map(k => Number(k.high));
-  const lows = klines.map(k => Number(k.low));
-  const volumes = klines.map(k => Number(k.volume));
-  const times = klines.map(k => Number(k.time));
-  const currentPrice = Number(klines[klines.length - 1].close);
-
+  const highs = klines.map(k => k.high);
+  const lows = klines.map(k => k.low);
+  const volumes = klines.map(k => k.volume);
+  const times = klines.map(k => k.time);
+  const currentPrice = klines[klines.length - 1].close;
   const swings = findSwings(highs, lows, volumes, times);
 
-  // Score levels by touches + recency + volume rank
   const maxVol = Math.max(...volumes, 1);
   const now = Date.now();
   const ageSpan = Math.max(now - times[0], 1);
@@ -139,64 +153,51 @@ export async function getSupportResistance(symbol = 'BTCUSDT', interval = '4h'):
   const buildLevels = (
     clustered: ReturnType<typeof clusterLevels>,
     type: 'support' | 'resistance',
-  ): SrLevel[] =>
-    clustered
-      .filter(l => type === 'support' ? l.price <= currentPrice : l.price >= currentPrice)
-      .map(l => {
-        const touchScore = Math.min(40, l.touches * 10);
-        const recencyScore = supportResistanceRecencyScore(l.lastTouchTime, times[0], now);
-        const ageRatio = Math.max(0, now - l.lastTouchTime) / ageSpan;
-        const recentBonus = ageRatio < 0.15 ? 15 : ageRatio < 0.4 ? 8 : 0;
-        const volScore = Math.min(20, (l.totalVolume / maxVol) * 20);
-        const proximityScore = Math.max(0, 10 - Math.abs(l.price - currentPrice) / currentPrice * 100 * 2);
-        return {
-          type,
-          price: l.price,
-          touches: l.touches,
-          lastTouchTime: new Date(l.lastTouchTime).toISOString(),
-          strength: Math.min(100, Math.round(touchScore + recencyScore + recentBonus + volScore + proximityScore)),
-          distancePct: Math.round(((l.price - currentPrice) / currentPrice * 100) * 100) / 100,
-        };
-      })
-      .sort((a, b) => b.strength - a.strength)
-      .slice(0, 5);
+  ): SrLevel[] => clustered
+    .filter(level => type === 'support' ? level.price <= currentPrice : level.price >= currentPrice)
+    .map(level => {
+      const touchScore = Math.min(40, level.touches * 10);
+      const recencyScore = supportResistanceRecencyScore(level.lastTouchTime, times[0], now);
+      const ageRatio = Math.max(0, now - level.lastTouchTime) / ageSpan;
+      const recentBonus = ageRatio < 0.15 ? 15 : ageRatio < 0.4 ? 8 : 0;
+      const volScore = Math.min(20, (level.totalVolume / maxVol) * 20);
+      const proximityScore = Math.max(0, 10 - Math.abs(level.price - currentPrice) / currentPrice * 100 * 2);
+      return {
+        type,
+        price: level.price,
+        touches: level.touches,
+        lastTouchTime: new Date(level.lastTouchTime).toISOString(),
+        strength: Math.min(100, Math.round(touchScore + recencyScore + recentBonus + volScore + proximityScore)),
+        distancePct: Math.round(((level.price - currentPrice) / currentPrice * 100) * 100) / 100,
+      };
+    })
+    .sort((a, b) => b.strength - a.strength)
+    .slice(0, 5);
 
   const supports = buildLevels(clusterLevels(swings.lows, currentPrice), 'support');
   const resistances = buildLevels(clusterLevels(swings.highs, currentPrice), 'resistance');
-
-  const nearestSupport = supports.length > 0
-    ? supports.reduce((best, s) => s.distancePct > best.distancePct ? s : best, supports[0])
-    : undefined;
-  const nearestResistance = resistances.length > 0
-    ? resistances.reduce((best, r) => r.distancePct < best.distancePct ? r : best, resistances[0])
-    : undefined;
-
+  const nearestSupport = supports.length ? supports.reduce((best, level) => level.distancePct > best.distancePct ? level : best, supports[0]) : undefined;
+  const nearestResistance = resistances.length ? resistances.reduce((best, level) => level.distancePct < best.distancePct ? level : best, resistances[0]) : undefined;
   let trendHintZh: string;
-  if (!nearestSupport && !nearestResistance) {
-    trendHintZh = '价格处于无参考区间，建议观望';
-  } else if (nearestSupport && !nearestResistance) {
-    trendHintZh = `价格突破所有阻力，下方支撑 $${nearestSupport.price}（${nearestSupport.distancePct}%），趋势偏强`;
-  } else if (!nearestSupport && nearestResistance) {
-    trendHintZh = `价格跌破所有支撑，上方阻力 $${nearestResistance.price}（${nearestResistance.distancePct}%），趋势偏弱`;
-  } else {
+  if (!nearestSupport && !nearestResistance) trendHintZh = '价格处于无参考区间，建议观望';
+  else if (nearestSupport && !nearestResistance) trendHintZh = `价格突破所有阻力，下方支撑 $${nearestSupport.price}（${nearestSupport.distancePct}%），趋势偏强`;
+  else if (!nearestSupport && nearestResistance) trendHintZh = `价格跌破所有支撑，上方阻力 $${nearestResistance.price}（${nearestResistance.distancePct}%），趋势偏弱`;
+  else {
     const rangeSize = Math.abs(nearestResistance!.price - nearestSupport!.price) / currentPrice * 100;
     trendHintZh = rangeSize > 6
       ? `区间较宽（${rangeSize.toFixed(1)}%），支撑 $${nearestSupport!.price} · 阻力 $${nearestResistance!.price}`
       : `区间紧凑（${rangeSize.toFixed(1)}%），可能即将变盘，支撑 $${nearestSupport!.price} · 阻力 $${nearestResistance!.price}`;
   }
+  return { symbol, interval, currentPrice: Math.round(currentPrice * 10000) / 10000, supports, resistances, nearestSupport, nearestResistance, trendHintZh, fetchedAt: new Date().toISOString() };
+}
 
-  const result: SrResult = {
-    symbol,
-    interval,
-    currentPrice: Math.round(currentPrice * 10000) / 10000,
-    supports,
-    resistances,
-    nearestSupport,
-    nearestResistance,
-    trendHintZh,
-    fetchedAt: new Date().toISOString(),
-  };
+export async function getSupportResistance(symbol = 'BTCUSDT', interval = '4h'): Promise<SrResult> {
+  const key = `${symbol}:${interval}`;
+  const cached = cache.get(key);
+  if (cached && Date.now() - cached.ts < CACHE_TTL_MS) return cached.value;
 
+  const klines = await binanceFeed.getKlines(symbol, interval, 200);
+  const result = analyzeSupportResistance(symbol, interval, klines || []);
   cache.set(key, { ts: Date.now(), value: result });
   return result;
 }
