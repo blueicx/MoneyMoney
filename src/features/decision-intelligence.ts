@@ -126,6 +126,7 @@ export function verifyEvidenceSnapshotHash(snapshot: EvidenceSnapshot): boolean 
 }
 
 export function compareEvidenceSnapshots(left: EvidenceSnapshot, right: EvidenceSnapshot): Array<{ field: string; before: unknown; after: unknown }> {
+  if (!verifyEvidenceSnapshotHash(left) || !verifyEvidenceSnapshotHash(right)) throw new Error('Evidence snapshot hash verification failed');
   if (left.market !== right.market || left.instrument !== right.instrument) throw new Error('Evidence snapshots must belong to the same market and instrument');
   const keys = [...new Set([...Object.keys(left.fields), ...Object.keys(right.fields)])].sort();
   return keys.filter(key => stable(left.fields[key]) !== stable(right.fields[key])).map(field => ({ field, before: left.fields[field], after: right.fields[field] }));

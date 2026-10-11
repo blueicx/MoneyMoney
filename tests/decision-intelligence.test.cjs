@@ -50,6 +50,17 @@ test('evidence comparison reports changed fields without mutating either snapsho
   assert.equal(base.fields.price, 60000);
 });
 
+test('evidence comparison rejects fields changed after the snapshot hash was captured', () => {
+  const snapshot = createEvidenceSnapshot({
+    market: 'crypto', instrument: 'BTCUSDT', workspace: 'analysis', dataStatus: 'cached',
+    source: { id: 'binance-public', name: 'Binance' }, observedAt: '2026-09-19T01:00:00Z',
+    fetchedAt: '2026-09-19T01:00:01Z', fields: { price: 60000 }, expectedFields: ['price'],
+  });
+  const tampered = { ...snapshot, fields: { ...snapshot.fields, price: 999999 } };
+
+  assert.throws(() => compareEvidenceSnapshots(snapshot, tampered), /hash|evidence/i);
+});
+
 test('scenario runs are deterministic stress tests and never claim to be forecasts', () => {
   const scenario = {
     id: 'risk-off', name: 'Risk off', market: 'stocks',
