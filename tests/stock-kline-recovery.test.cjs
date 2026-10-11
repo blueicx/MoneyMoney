@@ -32,10 +32,10 @@ function chartHarness(fetcher) {
     var currentStockKlinePeriod='1d', stockChartAsOf='2026-10-05T23:59:59.999Z', stockChartAsOfRevision=0;
     var stockKlineRequestRevision=0, stockKlineContextRevision=0, stockKlineController=null, currentStockKlineReason='', stockKlineInFlightRequests=new Map();
     var stockSupportResistanceState={ key:null, status:'idle', data:null, controller:null, retryAt:0, loadedAt:0 };
-    var stockChartIntradayDate='', stockChartIntradaySession=null, stockChartDailyContext=null, stockChartCompanionKey='';
+    var stockChartIntradayDate='', stockChartIntradayPeriod='5m', stockChartIntradaySession=null, stockChartDailyContext=null, stockChartCompanionKey='';
     var stockChartFocusIndex=null, stockChartFocusEnabled=false, stockChartRenderedStartIndex=0;
     var stockChartReplayIndex=1, stockChartKlines=[{close:1}], stockChartExchangeTimezone='America/New_York';
-    var stockChartCompanionOpen=false, stockChartOverlayConfig={}, activeMarketScope='stocks';
+    var stockChartCompanionOpen=false, stockChartOverlayConfig={}, activeMarketScope='stocks', stockChartAdjustment='source';
   `);
   for (const name of ['stockKlineAsOfStorageKey', 'syncStockKlineAsOfControl', 'clearStockKlineAsOf', 'setStockKlineStatus', 'loadUnifiedStockData', 'setStockKlineViewState', 'stockKlineRequestKey', 'runStockKlineSingleFlight', 'performStockKlineLoad', 'loadStockKline']) {
     if (html.includes(`function ${name}(`)) window.eval(functionSource(name));
@@ -67,6 +67,28 @@ test('a stock restores its own cutoff and clearing it returns to ordinary candle
     h.window.clearStockKlineAsOf();
     await new Promise(resolve => setImmediate(resolve));
     assert.equal(new URL(urls.at(-1), 'http://localhost/').searchParams.has('asOf'), false);
+  } finally { h.close(); }
+});
+
+test('ordinary source chart opts into the bounded bootstrap while asOf and selected intraday requests do not', async () => {
+  const urls=[];
+  const h=chartHarness(async url=>{urls.push(url);return response({success:true,data:[{time:1,open:10,high:12,low:9,close:11,volume:1}],dataStatus:'live',source:'fixture'});});
+  try {
+    h.window.stockChartAsOf='';h.window.stockChartIntradayDate='';h.window.stockChartAdjustment='source';
+    await h.window.loadStockKline();
+    assert.equal(new URL(urls.at(-1),'http://localhost/').searchParams.get('chartWindow'),'1');
+    h.window.stockChartAsOf='2026-10-05T23:59:59.999Z';
+    await h.window.loadStockKline();
+    assert.equal(new URL(urls.at(-1),'http://localhost/').searchParams.has('chartWindow'),false);
+    h.window.stockChartAsOf='';h.window.stockChartIntradayDate='2026-10-05';
+    await h.window.loadStockKline();
+    assert.equal(new URL(urls.at(-1),'http://localhost/').searchParams.has('chartWindow'),false);
+    h.window.stockChartIntradayDate='';h.window.stockChartAdjustment='forward';
+    await h.window.loadStockKline();
+    assert.equal(new URL(urls.at(-1),'http://localhost/').searchParams.has('chartWindow'),false);
+    h.window.stockChartAdjustment='source';h.window.currentStockKlinePeriod='3d';
+    await h.window.loadStockKline();
+    assert.equal(new URL(urls.at(-1),'http://localhost/').searchParams.has('chartWindow'),false);
   } finally { h.close(); }
 });
 

@@ -6412,7 +6412,8 @@ async function performStockKlineLoad(symbol, name, apiSymbol, options = {}) {
     const asOfQuery = stockChartAsOf ? '&asOf=' + encodeURIComponent(stockChartAsOf) : '';
     const dateQuery = stockChartIntradayDate ? '&date=' + encodeURIComponent(stockChartIntradayDate) + '&intradayPeriod=' + encodeURIComponent(stockChartIntradayPeriod) : '';
     const adjustmentQuery = '&adjustment=' + encodeURIComponent(requestedAdjustment);
-    const res = await fetch('/api/stock/kline?symbol=' + encodeURIComponent(currentStockSymbol) + '&period=' + encodeURIComponent(currentStockKlinePeriod) + '&interval=' + encodeURIComponent(currentStockKlinePeriod) + adjustmentQuery + asOfQuery + dateQuery + (currentStockApiSymbol ? '&api=' + encodeURIComponent(currentStockApiSymbol) : ''), { signal: controller.signal });
+    const chartWindowQuery = !stockChartAsOf && !stockChartIntradayDate && requestedAdjustment === 'source' && ['1m','5m','15m','1h','1d'].includes(currentStockKlinePeriod) ? '&chartWindow=1' : '';
+    const res = await fetch('/api/stock/kline?symbol=' + encodeURIComponent(currentStockSymbol) + '&period=' + encodeURIComponent(currentStockKlinePeriod) + '&interval=' + encodeURIComponent(currentStockKlinePeriod) + adjustmentQuery + asOfQuery + dateQuery + chartWindowQuery + (currentStockApiSymbol ? '&api=' + encodeURIComponent(currentStockApiSymbol) : ''), { signal: controller.signal });
     const d = await res.json();
     if (requestRevision !== stockKlineRequestRevision) return;
     if (live && (controller.signal.aborted || stockChartAsOf || stockChartIntradayDate || stockChartReplayIndex < stockChartKlines.length - 1 || window.stockMoneyKLine?.timer)) return;

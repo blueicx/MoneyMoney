@@ -87,7 +87,7 @@ import { getCrossAssetCorrelationRadar } from '../features/cross-asset-correlati
 import { getPerpetualCrowding } from '../features/perpetual-crowding';
 import { ContractResearchService, contractIdentity, contractScenario } from '../features/contract-research';
 import { loadContractPanelHistory } from '../features/contract-panel-history';
-import { klinePageWindow, klinePageStatus } from '../features/kline-page-window';
+import { klinePageWindow, klinePageStatus, stockKlineChartInitialWindow } from '../features/kline-page-window';
 import { contractCapacity, compareContractSnapshots } from '../features/contract-comparison';
 import { compareAiRunnerReports } from '../features/ai-runner-comparison';
 import { createAiRunnerComparison, getAiRunnerComparison, validateAiRunnerComparison, validateScheduledAiRunnerComparison, buildAiRunnerComparisonSample, saveAiRunnerComparisonSample, listAiRunnerComparisonSamples, replayAiRunnerComparisonSample, type AiRunnerComparisonSample } from '../features/ai-runner-comparison-group';
@@ -3040,6 +3040,7 @@ app.get('/api/stock/kline', async (req, res) => {
     if(req.query.before!==undefined&&(asOf||tradingDate))throw Error('来源历史分页不能混用本地时点或指定交易日');
     const page=req.query.before===undefined?undefined:klinePageWindow('stocks',effectivePeriod,Number(req.query.before),Number(req.query.limit||200));
     const adjustment=String(req.query.adjustment||'source');
+    const initialWindow=stockKlineChartInitialWindow(effectivePeriod,{enabled:req.query.chartWindow==='1',asOf:Boolean(asOf),tradingDate:Boolean(tradingDate),paginated:Boolean(page),adjustment});
     const adjustmentError=stockChartAdjustmentRequestReason(adjustment,{asOf:Boolean(asOf),tradingDate:Boolean(tradingDate),paginated:Boolean(page)});
     if(adjustmentError)return res.status(422).json({success:false,data:null,market:'stocks',instrument:symbol,timeframe:effectivePeriod,dataStatus:'unsupported',source:'股票K线来源口径',updatedAt:new Date().toISOString(),reason:adjustmentError});
     const periodConfig = STOCK_KLINE_PERIODS[effectivePeriod as keyof typeof STOCK_KLINE_PERIODS];
@@ -3077,7 +3078,7 @@ app.get('/api/stock/kline', async (req, res) => {
       });
     }
     const adapter = getStockKlineAdapter(effectivePeriod, requestedSymbol);
-    const snapshot = await adapter.fetchHistory({ symbol: requestedSymbol, period: effectivePeriod,...(page?{startTime:page.startTime,endTime:page.endTime+1}:{} ) });
+    const snapshot = await adapter.fetchHistory({ symbol: requestedSymbol, period: effectivePeriod,...(page?{startTime:page.startTime,endTime:page.endTime+1}:initialWindow?{startTime:initialWindow.startTime,endTime:initialWindow.endTime}:{}) });
     const updatedAt = snapshot.fetchedAt || new Date().toISOString();
     const history=snapshot.data;
     const sourceBars=history?.bars||null;
@@ -3098,8 +3099,8 @@ app.get('/api/stock/kline', async (req, res) => {
       const session = filterStockBarsForTradingDate(bars, tradingDate, timezone);
       return res.json({ success: session.bars.length > 0, data: session.bars,...stockChartDisclosure(session.bars,adjustment,history?.adjustment,{forwardReason}), dataStatus: session.bars.length ? snapshot.status : 'empty', market: 'stocks', instrument: requestedSymbol, timeframe: effectivePeriod, date: tradingDate, timezone, session, source: snapshot.source, sourceTime: history?.sourceTime || null, updatedAt, reason: session.bars.length ? undefined : `来源 ${snapshot.source} 当前覆盖 ${session.availableDateRange ? `${session.availableDateRange.from} 至 ${session.availableDateRange.to}` : '暂无可用交易日'}；未提供 ${tradingDate} 的 ${effectivePeriod} 日内数据` });
     }
-    const selectedBars=page?bars.slice(-page.limit):bars;
-    res.json({ success: true,market:'stocks',instrument:requestedSymbol,timeframe:effectivePeriod, data: selectedBars,...stockChartDisclosure(selectedBars,adjustment,history?.adjustment,{forwardAvailable,forwardReason,volumeBasis:history?.forwardAdjustment.volumeBasis}), history:{nextBefore:selectedBars[0]?.time??null,requestedWindow:page??null,hasEarlier:null},dataStatus: klinePageStatus(snapshot.status,!!page), source: snapshot.source, sourceTime: history?.sourceTime || null, updatedAt, timezone: resolveStockExchangeTimeZone(requestedSymbol), reason: snapshot.error || undefined });
+    const selectedBars=page?bars.slice(-page.limit):initialWindow?bars.slice(-initialWindow.limit):bars;
+    res.json({ success: true,market:'stocks',instrument:requestedSymbol,timeframe:effectivePeriod, data: selectedBars,...stockChartDisclosure(selectedBars,adjustment,history?.adjustment,{forwardAvailable,forwardReason,volumeBasis:history?.forwardAdjustment.volumeBasis}), history:{nextBefore:selectedBars[0]?.time??null,requestedWindow:page??initialWindow??null,hasEarlier:null},dataStatus: klinePageStatus(snapshot.status,!!page), source: snapshot.source, sourceTime: history?.sourceTime || null, updatedAt, timezone: resolveStockExchangeTimeZone(requestedSymbol), reason: snapshot.error || undefined });
   } catch (e: any) {
     res.json({
       success: false,

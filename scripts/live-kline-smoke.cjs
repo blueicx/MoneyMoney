@@ -19,9 +19,9 @@ async function main() {
     });
     const start = Math.floor(Date.now() / 300000) * 300000;
     const rows = Array.from({ length: 80 }, (_, i) => ({ time: start - (79 - i) * 300000, open: 100, high: 105, low: 95, close: 101, volume: 5 }));
-    let requests = 0;
+    let requests = 0;const stockKlineQueries=[];
     const olderRows=Array.from({length:20},(_,i)=>({...rows[0],time:rows[0].time-(20-i)*300000}));let historyRequests=0;
-    await page.route('**/api/stock/kline?**', route => { requests++;const query=new URL(route.request().url()).searchParams,paged=query.has('before');if(paged)historyRequests++; return route.fulfill({ json: { success: true,market:'stocks',instrument:query.get('api')||query.get('symbol'),timeframe:query.get('period'), data:paged?olderRows:rows, source: 'Isolated chart fixture, not market data', updatedAt: new Date().toISOString(), dataStatus: 'delayed' } }); });
+    await page.route('**/api/stock/kline?**', route => { requests++;const query=new URL(route.request().url()).searchParams;stockKlineQueries.push(query.toString());const paged=query.has('before');if(paged)historyRequests++; return route.fulfill({ json: { success: true,market:'stocks',instrument:query.get('api')||query.get('symbol'),timeframe:query.get('period'), data:paged?olderRows:rows, source: 'Isolated chart fixture, not market data', updatedAt: new Date().toISOString(), dataStatus: 'delayed' } }); });
     await page.route('**/api/stock/indices', async route => {
       await new Promise(resolve => setTimeout(resolve, 700));
       return route.fulfill({ json: { success: true, data: [{ name: 'Isolated index fixture', price: 100, changePct: 0.1 }] } });
@@ -56,6 +56,7 @@ async function main() {
     await delayedIndexResponse;
     await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 0)));
     assert.equal(requests, 1, 'late index-card completion must not reload an already-open instrument K-line');
+    assert.equal(new URLSearchParams(stockKlineQueries[0]).get('chartWindow'),'1','ordinary stock chart bootstrap must opt into the bounded response');
     await page.locator('#stock-chart-card').waitFor({ state: 'visible' });
     await page.waitForFunction(() => window.MoneyLiveKline && window.MoneyTradingChart);
     await page.waitForFunction(() => stockChartKlines.length > 10 && document.getElementById('stock-chart-card').getAttribute('aria-busy') !== 'true').catch(async error => {
@@ -90,6 +91,7 @@ async function main() {
     assert.equal(historyRequests,0,'history is not a bootstrap request');assert.equal(await page.locator('#stock-chart-card [data-chart-history]').isVisible(),false,'focused historical view must not offer ordinary source paging');
     await page.evaluate(()=>{stockChartFocusEnabled=false;stockChartFocusIndex=null;drawStockKline(document.getElementById('stock-kline'),stockChartKlines);});
     await page.locator('#stock-chart-card [data-chart-history]').click();await page.waitForFunction(()=>stockChartKlines.length===100);
+    assert.equal(new URLSearchParams(stockKlineQueries.at(-1)).has('chartWindow'),false,'earlier-page request must use the existing bounded cursor contract');
     await page.evaluate(()=>loadStockKline(undefined,undefined,undefined,{live:true}));assert.equal(await page.evaluate(()=>stockChartKlines[0].time),olderRows[0].time,'live refresh must retain requested history');assert.equal(historyRequests,1);
     const before = requests;
     await page.evaluate(async () => { stepStockChartReplay('previous'); await loadStockKline(undefined, undefined, undefined, { live: true }); });
