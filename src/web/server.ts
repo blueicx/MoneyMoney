@@ -176,7 +176,7 @@ import { verifyLoginToken, extractAuthToken } from './auth';
 import { registerApiAuthProtection, registerAuthRoutes } from './auth-routes';
 import { registerBuiltAssets, sendBuiltPage } from './static-assets';
 import { stateStore, getStorageHealth } from '../storage/sqlite-state';
-import { TelegramEventResultMonitor, formatEventResultDetail, lookupOfficialEventResult } from '../features/telegram-event-results';
+import { TelegramEventResultMonitor, formatEventResultDetail, lookupOfficialEventResult, summarizeTelegramResultCoverage, recordTelegramResultCoverageAudit, TELEGRAM_RESULT_COVERAGE_AUDIT_KEY } from '../features/telegram-event-results';
 import { lookupTrackedResult, resultTrackingDisabledReason, toTrackedCalendarEvent } from '../features/telegram-result-adapters';
 import { loadSecQuarterlyEarningsActual } from '../features/sec-edgar-client';
 import type { EventRecord as TelegramTrackedResult } from '../features/telegram-event-results';
@@ -184,6 +184,7 @@ import { renderTelegramKline } from '../features/telegram-kline-image';
 import { DATA_ROOT } from '../utils/paths';
 import { paperTradingExecutor } from '../features/trading-executor';
 import { unifiedPaperLedgerStore, calculateUnifiedPerformance, replayUnifiedPaperOrders, type UnifiedPaperOrder } from '../features/unified-paper-trading';
+import { pendingOptionSettlements } from '../features/paper-account-lifecycle';
 import { createPaperChartReferences, paperChartLineage, resolvePaperChartInstrument } from '../features/paper-chart-lineage';
 import { RunnerExecutionEvidenceStore, runnerSnapshotHash, runnerExecutionSnapshotId } from '../features/runner-execution-evidence';
 import { buildPredictFunExecutionQuote, predictionOutcomeQuote, predictionSettlementRulesGate } from '../features/runner-prediction-quotes';
@@ -3093,10 +3094,10 @@ app.get('/api/stock/kline', async (req, res) => {
     if (tradingDate) {
       const timezone = resolveStockExchangeTimeZone(requestedSymbol);
       const session = filterStockBarsForTradingDate(bars, tradingDate, timezone);
-      return res.json({ success: session.bars.length > 0, data: session.bars,...stockChartDisclosure(session.bars,adjustment,history?.adjustment,{forwardReason}), dataStatus: session.bars.length ? snapshot.status : 'empty', market: 'stocks', instrument: requestedSymbol, timeframe: effectivePeriod, date: tradingDate, timezone, session, source: snapshot.source, updatedAt, reason: session.bars.length ? undefined : `来源 ${snapshot.source} 当前覆盖 ${session.availableDateRange ? `${session.availableDateRange.from} 至 ${session.availableDateRange.to}` : '暂无可用交易日'}；未提供 ${tradingDate} 的 ${effectivePeriod} 日内数据` });
+      return res.json({ success: session.bars.length > 0, data: session.bars,...stockChartDisclosure(session.bars,adjustment,history?.adjustment,{forwardReason}), dataStatus: session.bars.length ? snapshot.status : 'empty', market: 'stocks', instrument: requestedSymbol, timeframe: effectivePeriod, date: tradingDate, timezone, session, source: snapshot.source, sourceTime: history?.sourceTime || null, updatedAt, reason: session.bars.length ? undefined : `来源 ${snapshot.source} 当前覆盖 ${session.availableDateRange ? `${session.availableDateRange.from} 至 ${session.availableDateRange.to}` : '暂无可用交易日'}；未提供 ${tradingDate} 的 ${effectivePeriod} 日内数据` });
     }
     const selectedBars=page?bars.slice(-page.limit):bars;
-    res.json({ success: true,market:'stocks',instrument:requestedSymbol,timeframe:effectivePeriod, data: selectedBars,...stockChartDisclosure(selectedBars,adjustment,history?.adjustment,{forwardAvailable,forwardReason,volumeBasis:history?.forwardAdjustment.volumeBasis}), history:{nextBefore:selectedBars[0]?.time??null,requestedWindow:page??null,hasEarlier:null},dataStatus: klinePageStatus(snapshot.status,!!page), source: snapshot.source, updatedAt, timezone: resolveStockExchangeTimeZone(requestedSymbol), reason: snapshot.error || undefined });
+    res.json({ success: true,market:'stocks',instrument:requestedSymbol,timeframe:effectivePeriod, data: selectedBars,...stockChartDisclosure(selectedBars,adjustment,history?.adjustment,{forwardAvailable,forwardReason,volumeBasis:history?.forwardAdjustment.volumeBasis}), history:{nextBefore:selectedBars[0]?.time??null,requestedWindow:page??null,hasEarlier:null},dataStatus: klinePageStatus(snapshot.status,!!page), source: snapshot.source, sourceTime: history?.sourceTime || null, updatedAt, timezone: resolveStockExchangeTimeZone(requestedSymbol), reason: snapshot.error || undefined });
   } catch (e: any) {
     res.json({
       success: false,
@@ -7038,6 +7039,37 @@ const telegramEventReminderStages = new Map<string, EventReminderThreshold | nul
 const telegramEventResults = new TelegramEventResultMonitor(stateStore,event=>event.kind&&event.kind!=='macro'
   ?lookupTrackedResult(event,{job:id=>researchRepository.getJob(id),contract:instrument=>contractResearchService.detail(instrument,['funding']),settlement:refreshPredictionSettlement,secEarnings:(symbol,reportPeriodEnd,eventDate)=>loadSecQuarterlyEarningsActual({symbol,reportPeriodEnd,eventDate})})
   :lookupOfficialEventResult(event));
+function auditTelegramResultCoverage(): void {
+  try {
+    const chats = [...telegramAdminChatIds()];
+    const rows = chats.flatMap(chatId => telegramEventResults.history(chatId).map(row => ({ ...row, chatId })));
+    recordTelegramResultCoverageAudit(stateStore, rows);
+  } catch (error) {
+    logger.warn('Telegram result coverage audit failed', { reason: error instanceof Error ? error.message : String(error) });
+  }
+}
+const telegramResultCoverageAuditTimer = setInterval(() => { auditTelegramResultCoverage(); }, 15 * 60_000);
+telegramResultCoverageAuditTimer.unref?.();
+const telegramResultCoverageAuditInitialTimer = setTimeout(() => { auditTelegramResultCoverage(); }, 15_000);
+telegramResultCoverageAuditInitialTimer.unref?.();
+app.get('/api/telegram/results/coverage', (req, res) => {
+  if (!adminOnly(req, res)) return;
+  const chats = [...telegramAdminChatIds()];
+  const rows = chats.flatMap(chatId => telegramEventResults.history(chatId).map(row => ({ ...row, chatId })));
+  const data = summarizeTelegramResultCoverage(rows);
+  const recent = rows.slice(-100).reverse().map(row => ({
+    id: row.id, title: row.event.titleZh || row.event.title, kind: row.event.kind || row.event.market || 'unknown',
+    eventDate: row.event.date, deliveryStatus: row.status, resultStatus: row.resultStatus || row.kind || 'unknown',
+    actual: row.actual || null, source: row.resultSource || row.event.source || null, publishedAt: row.publishedAt || null,
+    retrievedAt: row.retrievedAt || null, nextCheckAt: Number.isFinite(Number(row.nextCheckAt)) ? new Date(Number(row.nextCheckAt)).toISOString() : null,
+    reason: row.reason || null, error: row.error || null,
+    evidenceRefs: (row.evidenceRefs || []).flatMap(value => { try { const url = new URL(String(value)); return ['http:', 'https:'].includes(url.protocol) ? [url.toString()] : []; } catch { return []; } }).slice(0, 5),
+  }));
+  const dataStatus = data.total === 0 ? 'empty' : data.stuckCountdowns.length ? 'partial' : 'historical';
+  res.json({ success: true, market: 'all', instrument: null, dataStatus, source: 'Telegram event result outbox', updatedAt: new Date().toISOString(),
+    reason: data.total === 0 ? '尚无事件结果跟踪记录' : data.stuckCountdowns.length ? '发现结果跟踪长期停留在倒计时或等待状态；实际值仍为空，未将其视为已发布' : null,
+    audit: stateStore.get(TELEGRAM_RESULT_COVERAGE_AUDIT_KEY), data: { ...data, recent } });
+});
 const telegramDigestPushes = new Set<string>();
 const telegramSourceStates = new Map<string, boolean>();
 let consecutivePollFail = 0;
@@ -8596,6 +8628,7 @@ import {
   updateAiRunnerMarketState, recordAiRunnerModelCall, evaluateRunnerIndicatorEvidence,
   evaluateAiRunnerPortfolioCorrelation,
   normalizeAiRunnerStockKlines,
+  summarizeAiRunnerQuality,
   activateAiRunnerComparison,
   type AiRunner, type AiRunnerDecisionRecord, type AiRunnerInstrumentRef, type AiRunnerMarket,
   type AiRunnerQuote, type AiRunnerDataEvidence, type AiRunnerCorrelationSeries,
@@ -8627,6 +8660,35 @@ app.post('/api/ai-runners/:id/routing', express.json(), (req,res) => {
     stateStore.appendAudit({id:crypto.randomUUID(),action:'ai_runner_routing_updated',detail:`${data.id}: ${data.modelSelection}/${data.quoteSelection}`});
     res.json({success:true,data});
   } catch(error:any) { res.status(400).json({success:false,reason:error.message}); }
+});
+
+app.get('/api/paper/accounts/:id/lifecycle', (req, res) => {
+  if (!adminOnly(req, res)) return;
+  const accountId = String(req.params.id || '');
+  const account = unifiedPaperLedgerStore.getAccount(accountId);
+  if (!account) return res.status(404).json({ success: false, market: 'all', instrument: null, dataStatus: 'empty', reason: '模拟账户不存在' });
+  const pendingOptions = pendingOptionSettlements(account.positions);
+  const events = account.lifecycleEvents || [];
+  const receivables = account.corporateReceivables || [];
+  res.json({ success: true, market: 'all', instrument: null, dataStatus: pendingOptions.length || events.some(event => event.status === 'pending-review') ? 'partial' : events.length || receivables.length ? 'historical' : 'empty',
+    source: 'unified paper ledger + verified corporate-action registry', updatedAt: new Date().toISOString(),
+    reason: pendingOptions.length ? '存在等待官方结算证据的期权持仓；未自动结算' : events.length || receivables.length ? null : '暂无账户生命周期事件',
+    data: { accountId, events, receivables, pendingOptionSettlements: pendingOptions } });
+});
+
+app.post('/api/paper/accounts/:id/reconcile', express.json(), (req, res) => {
+  if (!adminOnly(req, res)) return;
+  const accountId = String(req.params.id || '');
+  if (!unifiedPaperLedgerStore.getAccount(accountId)) return res.status(404).json({ success: false, dataStatus: 'empty', reason: '模拟账户不存在' });
+  try {
+    const actions = dataLakeCatalog.listCorporateActions('stocks');
+    const result = unifiedPaperLedgerStore.reconcileCorporateActions(accountId, actions);
+    const lifecycle = unifiedPaperLedgerStore.getAccount(accountId)!;
+    stateStore.appendAudit({ id: `paper-reconcile-${accountId}-${Date.now()}`, action: 'paper_account_lifecycle_reconcile', detail: JSON.stringify({ accountId, applied: result.applied, pending: result.pending, alreadyApplied: result.alreadyApplied }) });
+    res.json({ success: true, market: 'all', instrument: null, dataStatus: result.pending ? 'partial' : result.applied || result.alreadyApplied ? 'historical' : 'empty',
+      source: 'verified corporate-action registry', updatedAt: new Date().toISOString(), reason: result.pending ? '部分事件因身份映射、持仓历史或付款/结算证据不足而保留待核验' : result.applied ? null : '没有适用于该账户当前/历史持仓的新增公司行动',
+      data: { accountId, ...result, events: lifecycle.lifecycleEvents || [], receivables: lifecycle.corporateReceivables || [], pendingOptionSettlements: pendingOptionSettlements(lifecycle.positions) } });
+  } catch (error: any) { res.status(400).json({ success: false, dataStatus: 'failed', reason: error?.message || '账户生命周期对账失败' }); }
 });
 app.get('/api/paper/chart-markers',(req,res)=>{
   if(!adminOnly(req,res))return;
@@ -9246,8 +9308,10 @@ interface PreparedAiRunnerTick {
   idempotencyKey: string;
   snapshots: AiRunnerInstrumentSnapshot[];
   records: AiRunnerDecisionRecord[];
-  intent?: { action: 'BUY' | 'SELL' | 'HOLD'; instrument: string; side?: 'YES' | 'NO' | 'LONG'; rationale: string; counterEvidence: string[]; riskNotes: string[] };
+  intent?: { action: 'BUY' | 'SELL' | 'HOLD'; instrument: string; side?: 'YES' | 'NO' | 'LONG'; confidence: number; rationale: string; counterEvidence: string[]; riskNotes: string[] };
   modelVersion?: string;
+  modelLatencyMs?: number;
+  modelCallStatus?: 'success' | 'failed' | 'skipped';
 }
 
 async function prepareAiRunnerTick(runnerId: string, idempotencyKey: string, sample?: AiRunnerComparisonSample,comparisonRoundKey?:string,comparisonGuard?:()=>void): Promise<PreparedAiRunnerTick> {
@@ -9287,6 +9351,8 @@ async function prepareAiRunnerTick(runnerId: string, idempotencyKey: string, sam
   const candidateSignal = snapshots.some(item => item.candidateSignals?.length && ['live', 'delayed'].includes(item.quote?.dataStatus || ''));
   let intent: PreparedAiRunnerTick['intent'];
   let modelVersion: string | undefined;
+  let modelLatencyMs: number | undefined;
+  let modelCallStatus: NonNullable<PreparedAiRunnerTick['modelCallStatus']> = 'skipped';
   let aiStatusReason: string | undefined;
   if(runner.comparisonControl&&snapshots.some(snapshot=>snapshot.market!==runner.universe?.market||!snapshot.quote||!evaluateRunnerQuoteGate(runner.policy,snapshot.quote,now).allowed))aiStatusReason='共享行情未通过市场身份或新鲜报价门槛，对照不调用模型';
   const settlementBlocked = snapshots.find(snapshot => snapshot.market === 'prediction' && snapshot.executionStatus === 'unsupported');
@@ -9306,6 +9372,7 @@ async function prepareAiRunnerTick(runnerId: string, idempotencyKey: string, sam
       else {
         const decisionId = `${idempotencyKey}:model`;
         let comparisonQuotaDenied=false;
+        const modelStartedAt = Date.now();
         try {
           const result = await requestAiRunnerIntent(runner, runtime, snapshots, fetch, (model,attempt) => {
             comparisonGuard?.();
@@ -9314,10 +9381,12 @@ async function prepareAiRunnerTick(runnerId: string, idempotencyKey: string, sam
             if(current.comparisonControl&&(!comparisonRoundKey||!comparisonModelBudget.consume(comparisonRoundKey,`${runner.id}:${attempt}`))){comparisonQuotaDenied=true;throw new Error('对照请求缺少有效整轮额度或已消费，整轮等待');}
             recordAiRunnerModelCall(runner.id, { at:new Date().toISOString(),model,decisionId:`${decisionId}:attempt:${attempt}` });
           });
+          modelLatencyMs = Math.max(0, Date.now() - modelStartedAt);
+          modelCallStatus = result.ok ? 'success' : 'failed';
           if(comparisonQuotaDenied)throw new Error('对照额度不再有效，整轮等待，未提交规则或AI订单');
           if (result.ok) { intent = result.intent; modelVersion = result.model; }
           else { aiStatusReason = result.reason; modelVersion = result.model; }
-        } catch (error) { if(comparisonQuotaDenied)throw error;aiStatusReason = error instanceof Error ? error.message : 'AI 调用失败'; }
+        } catch (error) { modelLatencyMs = Math.max(0, Date.now() - modelStartedAt); modelCallStatus = 'failed'; if(comparisonQuotaDenied)throw error;aiStatusReason = error instanceof Error ? error.message : 'AI 调用失败'; }
       }
     }
   }
@@ -9387,7 +9456,8 @@ async function prepareAiRunnerTick(runnerId: string, idempotencyKey: string, sam
       at: now.toISOString(), market: snapshot.market as AiRunnerMarket, instrument: snapshot.instrument,
       dataStatus: snapshot.dataStatus, source: snapshot.source, dataAt: snapshot.dataAt,
       evidence: snapshot.evidence, snapshotHash: snapshot.snapshotHash, strategyVersion: runner.strategyVersion,
-      modelVersion, signals: signals.slice(0, 20), riskChecks, action, reason,
+      modelVersion, modelConfidence: intent && intent.instrument === snapshot.instrument ? intent.confidence : undefined,
+      modelLatencyMs, modelCallStatus, signals: signals.slice(0, 20), riskChecks, action, reason,
     };
   });
   return { runnerId, idempotencyKey, snapshots, records, intent, modelVersion };
@@ -9536,6 +9606,35 @@ app.get('/api/ai-runners/:id/history', (req, res) => {
   const attribution = aiRunnerPortfolioAttribution(market, runner.id, account);
   const selectionAttribution = aiRunnerSelectionAttribution(market, runner, account);
   res.json({ success: true, data: page.data, nextCursor: page.nextCursor, runnerId: runner.id, attribution, selectionAttribution, dataStatus: page.data.length ? 'historical' : 'empty', reason: page.data.length ? undefined : '暂无跑单决策记录' });
+});
+
+app.get('/api/ai-runners/:id/quality', (req, res) => {
+  if (!adminOnly(req, res)) return;
+  const runner = getAiRunners().find(item => item.id === String(req.params.id));
+  if (!runner) return res.status(404).json({ success: false, dataStatus: 'empty', reason: '未找到跑单' });
+  const account = unifiedPaperLedgerStore.getRunnerAccount(runner.accountId || `ai-runner:${runner.id}`);
+  const decisions: ReturnType<typeof listAiRunnerHistory>['data'] = [];
+  let cursor: string | undefined;
+  let pageCount = 0;
+  do {
+    const page = listAiRunnerHistory(runner.id, cursor, 200);
+    decisions.push(...page.data);
+    cursor = page.nextCursor || undefined;
+    pageCount += 1;
+  } while (cursor && pageCount < 10);
+  const historyTruncated = Boolean(cursor);
+  if (!account || account.runnerId !== runner.id) return res.json({
+    success: true, runnerId: runner.id, dataStatus: 'partial', source: 'AI runner history + unified paper ledger', updatedAt: new Date().toISOString(),
+    reason: '跑单账户未能与统一模拟账本核验；仅展示决策历史，不计算成熟结果',
+    historyTruncated, data: summarizeAiRunnerQuality({ decisions, positions: [], aiCalls: runner.aiCalls || [] }),
+  });
+  const ledgerOrderIds = new Set(account.orders.map(order => order.id));
+  const verifiedClosed = runner.positions.filter(position => position.status === 'CLOSED'
+    && position.entryOrderId && position.exitOrderId && ledgerOrderIds.has(position.entryOrderId) && ledgerOrderIds.has(position.exitOrderId));
+  const data = summarizeAiRunnerQuality({ decisions, positions: verifiedClosed, aiCalls: runner.aiCalls || [] });
+  res.json({ success: true, runnerId: runner.id, dataStatus: data.matured.calibrationAvailable ? 'historical' : 'partial',
+    source: 'AI runner history + unified paper ledger', updatedAt: new Date().toISOString(), reason: data.matured.reason || null,
+    historyTruncated, data });
 });
 
 app.post('/api/ai-runners/:id/tick', express.json(), async (req, res) => {

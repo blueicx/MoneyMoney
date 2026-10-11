@@ -13,7 +13,7 @@ export interface DatasetManifest { id: string; dataset: string; market: MarketId
 export interface DatasetPartition { id: string; manifestId: string; path: string; dataset: string; market: MarketId; instrument: string; timeframe: string; periodStart: string; periodEnd: string; publishedAt: string; fetchedAt: string; rowCount: number; status: DatasetStatus; contentHash: string; }
 export interface PointInTimeSnapshot { id: string; market: MarketId; instrument: string; dataset: string; timeframe: string; asOf: string; partitionId: string; contentHash: string; source: string | null; createdAt: string; }
 export interface DataRevision { id: string; dataset: string; market: MarketId; instrument: string; timeframe: string; partitionId: string; publishedAt: string; contentHash: string; supersedes?: string; reason?: string; }
-export interface CorporateAction { id: string; market: 'stocks'; instrument: string; kind: 'split' | 'dividend' | 'symbol-change' | 'delisting'; effectiveAt: string; publishedAt?: string; observedAt?: string; factor?: number; oldSymbol?: string; newSymbol?: string; source: string; }
+export interface CorporateAction { id: string; market: 'stocks'; instrument: string; kind: 'split' | 'dividend' | 'symbol-change' | 'delisting'; effectiveAt: string; publishedAt?: string; observedAt?: string; factor?: number; currency?: string; oldSymbol?: string; newSymbol?: string; source: string; }
 export interface ProviderContract { id: string; provider: string; market: MarketId; datasets: string[]; timezone: string; units: Record<string, string>; revisionPolicy: 'point-in-time' | 'latest'; }
 export interface DataQualityReport { valid: boolean; rowCount: number; duplicateTimestamps: number; outOfOrderRows: number; missingFields: string[]; futureRows: number; errors: string[]; checkedAt: string; }
 export interface BackfillCheckpoint { cursor?: string; rowsWritten: number; partitionsCommitted: number; }
@@ -124,7 +124,7 @@ export class DataLakeCatalog {
       CREATE TABLE IF NOT EXISTS data_quality_reports (partition_id TEXT PRIMARY KEY, report TEXT NOT NULL, checked_at TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS data_revisions (id TEXT PRIMARY KEY, dataset TEXT NOT NULL, market TEXT NOT NULL, instrument TEXT NOT NULL, timeframe TEXT NOT NULL, partition_id TEXT NOT NULL, published_at TEXT NOT NULL, content_hash TEXT NOT NULL, supersedes TEXT, reason TEXT);
       CREATE TABLE IF NOT EXISTS point_in_time_snapshots (id TEXT PRIMARY KEY, market TEXT NOT NULL, instrument TEXT NOT NULL, dataset TEXT NOT NULL, timeframe TEXT NOT NULL, as_of TEXT NOT NULL, partition_id TEXT NOT NULL, content_hash TEXT NOT NULL, source TEXT, created_at TEXT NOT NULL);
-      CREATE TABLE IF NOT EXISTS corporate_actions (id TEXT PRIMARY KEY, market TEXT NOT NULL, instrument TEXT NOT NULL, kind TEXT NOT NULL, effective_at TEXT NOT NULL, factor REAL, old_symbol TEXT, new_symbol TEXT, source TEXT NOT NULL, observed_at TEXT);
+      CREATE TABLE IF NOT EXISTS corporate_actions (id TEXT PRIMARY KEY, market TEXT NOT NULL, instrument TEXT NOT NULL, kind TEXT NOT NULL, effective_at TEXT NOT NULL, factor REAL, old_symbol TEXT, new_symbol TEXT, source TEXT NOT NULL, observed_at TEXT, currency TEXT);
       CREATE TABLE IF NOT EXISTS provider_contracts (id TEXT PRIMARY KEY, provider TEXT NOT NULL, market TEXT NOT NULL, datasets TEXT NOT NULL, timezone TEXT NOT NULL, units TEXT NOT NULL, revision_policy TEXT NOT NULL, updated_at TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS instrument_registry (id TEXT PRIMARY KEY, market TEXT NOT NULL, venue TEXT NOT NULL, symbol TEXT NOT NULL, title TEXT NOT NULL, aliases TEXT NOT NULL, registered_at TEXT NOT NULL);
       CREATE INDEX IF NOT EXISTS idx_instrument_registry_symbol ON instrument_registry (market, symbol);
@@ -141,6 +141,7 @@ export class DataLakeCatalog {
     this.ensureBackfillColumns();
     if (!(this.db.prepare('PRAGMA table_info(corporate_actions)').all() as Array<{name:string}>).some(row=>row.name==='published_at')) this.db.exec('ALTER TABLE corporate_actions ADD COLUMN published_at TEXT');
     if (!(this.db.prepare('PRAGMA table_info(corporate_actions)').all() as Array<{name:string}>).some(row=>row.name==='observed_at')) this.db.exec('ALTER TABLE corporate_actions ADD COLUMN observed_at TEXT');
+    if (!(this.db.prepare('PRAGMA table_info(corporate_actions)').all() as Array<{name:string}>).some(row=>row.name==='currency')) this.db.exec('ALTER TABLE corporate_actions ADD COLUMN currency TEXT');
     this.migrateLegacyInstrumentIdentities();
   }
 
@@ -370,22 +371,24 @@ export class DataLakeCatalog {
     const effectiveAt = new Date(input.effectiveAt).toISOString();
     const publishedAt = input.publishedAt ? new Date(input.publishedAt).toISOString() : null;
     const observedAt = input.observedAt ? new Date(input.observedAt).toISOString() : null;
-    this.db.prepare(`INSERT INTO corporate_actions (id,market,instrument,kind,effective_at,factor,old_symbol,new_symbol,source,published_at,observed_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET
+    if (input.currency && !/^[A-Z]{3}$/.test(input.currency.trim().toUpperCase())) throw new Error('Corporate action currency must be an ISO 4217 code');
+    this.db.prepare(`INSERT INTO corporate_actions (id,market,instrument,kind,effective_at,factor,old_symbol,new_symbol,source,published_at,observed_at,currency)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET
       market=excluded.market,instrument=excluded.instrument,kind=excluded.kind,effective_at=excluded.effective_at,factor=excluded.factor,
       old_symbol=excluded.old_symbol,new_symbol=excluded.new_symbol,source=excluded.source,
       published_at=COALESCE(corporate_actions.published_at,excluded.published_at),
-      observed_at=CASE WHEN corporate_actions.observed_at IS NULL THEN excluded.observed_at WHEN excluded.observed_at IS NULL THEN corporate_actions.observed_at ELSE MIN(corporate_actions.observed_at,excluded.observed_at) END`).run(input.id,input.market,input.instrument,input.kind,effectiveAt,input.factor ?? null,input.oldSymbol || null,input.newSymbol || null,input.source.trim(),publishedAt,observedAt);
+      observed_at=CASE WHEN corporate_actions.observed_at IS NULL THEN excluded.observed_at WHEN excluded.observed_at IS NULL THEN corporate_actions.observed_at ELSE MIN(corporate_actions.observed_at,excluded.observed_at) END,
+      currency=COALESCE(corporate_actions.currency,excluded.currency)`).run(input.id,input.market,input.instrument,input.kind,effectiveAt,input.factor ?? null,input.oldSymbol || null,input.newSymbol || null,input.source.trim(),publishedAt,observedAt,input.currency?.trim().toUpperCase() || null);
     return this.listCorporateActions('stocks', input.instrument).find(action => action.id === input.id)!;
   }
 
   listCorporateActions(market?: MarketId, instrument?: string): CorporateAction[] {
     const rows = (market && instrument
-      ? this.db.prepare('SELECT id,market,instrument,kind,effective_at AS effectiveAt,factor,old_symbol AS oldSymbol,new_symbol AS newSymbol,source,published_at AS publishedAt,observed_at AS observedAt FROM corporate_actions WHERE market = ? AND instrument = ? ORDER BY effective_at').all(market, instrument)
+      ? this.db.prepare('SELECT id,market,instrument,kind,effective_at AS effectiveAt,factor,currency,old_symbol AS oldSymbol,new_symbol AS newSymbol,source,published_at AS publishedAt,observed_at AS observedAt FROM corporate_actions WHERE market = ? AND instrument = ? ORDER BY effective_at').all(market, instrument)
       : market
-        ? this.db.prepare('SELECT id,market,instrument,kind,effective_at AS effectiveAt,factor,old_symbol AS oldSymbol,new_symbol AS newSymbol,source,published_at AS publishedAt,observed_at AS observedAt FROM corporate_actions WHERE market = ? ORDER BY effective_at').all(market)
-        : this.db.prepare('SELECT id,market,instrument,kind,effective_at AS effectiveAt,factor,old_symbol AS oldSymbol,new_symbol AS newSymbol,source,published_at AS publishedAt,observed_at AS observedAt FROM corporate_actions ORDER BY effective_at').all()) as Array<Record<string, unknown>>;
-    return rows.map(row => ({ id: String(row.id), market: row.market as 'stocks', instrument: String(row.instrument), kind: row.kind as CorporateAction['kind'], effectiveAt: String(row.effectiveAt), ...(row.publishedAt == null ? {} : { publishedAt: String(row.publishedAt) }), ...(row.observedAt == null ? {} : { observedAt: String(row.observedAt) }), ...(row.factor == null ? {} : { factor: Number(row.factor) }), ...(row.oldSymbol ? { oldSymbol: String(row.oldSymbol) } : {}), ...(row.newSymbol ? { newSymbol: String(row.newSymbol) } : {}), source: String(row.source) }));
+        ? this.db.prepare('SELECT id,market,instrument,kind,effective_at AS effectiveAt,factor,currency,old_symbol AS oldSymbol,new_symbol AS newSymbol,source,published_at AS publishedAt,observed_at AS observedAt FROM corporate_actions WHERE market = ? ORDER BY effective_at').all(market)
+        : this.db.prepare('SELECT id,market,instrument,kind,effective_at AS effectiveAt,factor,currency,old_symbol AS oldSymbol,new_symbol AS newSymbol,source,published_at AS publishedAt,observed_at AS observedAt FROM corporate_actions ORDER BY effective_at').all()) as Array<Record<string, unknown>>;
+    return rows.map(row => ({ id: String(row.id), market: row.market as 'stocks', instrument: String(row.instrument), kind: row.kind as CorporateAction['kind'], effectiveAt: String(row.effectiveAt), ...(row.publishedAt == null ? {} : { publishedAt: String(row.publishedAt) }), ...(row.observedAt == null ? {} : { observedAt: String(row.observedAt) }), ...(row.factor == null ? {} : { factor: Number(row.factor) }), ...(row.currency ? { currency: String(row.currency) } : {}), ...(row.oldSymbol ? { oldSymbol: String(row.oldSymbol) } : {}), ...(row.newSymbol ? { newSymbol: String(row.newSymbol) } : {}), source: String(row.source) }));
   }
 
   registerProviderContract(input: ProviderContract): ProviderContract {

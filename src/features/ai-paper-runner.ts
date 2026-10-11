@@ -163,6 +163,9 @@ export interface AiRunnerDecisionRecord {
   snapshotHash?: string;
   strategyVersion?: string;
   modelVersion?: string;
+  modelConfidence?: number;
+  modelLatencyMs?: number;
+  modelCallStatus?: 'success' | 'failed' | 'skipped';
   /** Explicit outcome/position direction used to bind the paper fill to its decision. */
   side?: 'YES' | 'NO' | 'LONG' | 'SHORT';
   signals: string[];
@@ -249,6 +252,68 @@ export interface AiRunnerPosition {
   entrySpreadUsd?: number;
   exitSpreadUsd?: number;
   status: 'OPEN' | 'CLOSED';
+}
+
+/** Summarize only explicit decision->entry-order->closed-position lineage. */
+export function summarizeAiRunnerQuality(input: {
+  decisions?: AiRunnerDecisionRecord[];
+  positions?: AiRunnerPosition[];
+  aiCalls?: Array<{ at: string; model?: string; decisionId: string }>;
+}, minimumSamples = 20) {
+  const decisions = Array.isArray(input.decisions) ? input.decisions : [];
+  const positions = Array.isArray(input.positions) ? input.positions : [];
+  const positionByEntryOrder = new Map<string, AiRunnerPosition>();
+  for (const position of positions) {
+    if (position.status === 'CLOSED' && position.entryOrderId && Number.isFinite(Date.parse(String(position.exitTime || '')))) {
+      positionByEntryOrder.set(position.entryOrderId, position);
+    }
+  }
+  const decisionByOrder = new Map<string, AiRunnerDecisionRecord>();
+  for (const decision of decisions) if (decision.orderId && decision.modelConfidence != null
+    && Number.isFinite(decision.modelConfidence) && decision.modelConfidence >= 0 && decision.modelConfidence <= 1) {
+    decisionByOrder.set(decision.orderId, decision);
+  }
+  const matured = [...decisionByOrder.values()].flatMap(decision => {
+    const position = positionByEntryOrder.get(String(decision.orderId));
+    if (!position) return [];
+    const costs = Number(position.entryFeeUsd || 0) + Number(position.exitFeeUsd || 0)
+      + Number(position.entrySlippageUsd || 0) + Number(position.exitSlippageUsd || 0);
+    const netPnl = Number(position.pnlUsd) - costs;
+    if (!Number.isFinite(netPnl)) return [];
+    return [{ decisionId: decision.id, orderId: decision.orderId, strategyVersion: decision.strategyVersion || 'unknown',
+      modelVersion: decision.modelVersion || 'unknown', confidence: decision.modelConfidence!, outcome: netPnl > 0 ? 1 : 0, netPnl,
+      closedAt: position.exitTime! }];
+  });
+  const sortedLatencies = decisions.flatMap(row => Number.isFinite(row.modelLatencyMs) && row.modelLatencyMs! >= 0 ? [row.modelLatencyMs!] : []).sort((a, b) => a - b);
+  const percentile = (p: number) => sortedLatencies.length ? sortedLatencies[Math.min(sortedLatencies.length - 1, Math.ceil(sortedLatencies.length * p) - 1)] : null;
+  const versionGroups = new Map<string, { strategyVersion: string; modelVersion: string; count: number; wins: number; brier: number }>();
+  for (const row of matured) {
+    const key = `${row.strategyVersion}|${row.modelVersion}`;
+    const group = versionGroups.get(key) || { strategyVersion: row.strategyVersion, modelVersion: row.modelVersion, count: 0, wins: 0, brier: 0 };
+    group.count += 1; group.wins += row.outcome;
+    group.brier += (row.confidence - row.outcome) ** 2;
+    versionGroups.set(key, group);
+  }
+  const enough = matured.length >= Math.max(1, Math.floor(minimumSamples));
+  const unlinkedDecisions = decisions.filter(row => row.modelConfidence != null && (!row.orderId || !positionByEntryOrder.has(row.orderId))).length;
+  return {
+    decisions: decisions.length,
+    modelCalls: Array.isArray(input.aiCalls) ? input.aiCalls.length : 0,
+    failedModelCalls: decisions.filter(row => row.modelCallStatus === 'failed').length,
+    skippedModelCalls: decisions.filter(row => row.modelCallStatus === 'skipped').length,
+    unlinkedDecisions,
+    latency: { samples: sortedLatencies.length, averageMs: sortedLatencies.length ? sortedLatencies.reduce((sum, value) => sum + value, 0) / sortedLatencies.length : null, p95Ms: percentile(0.95) },
+    matured: {
+      count: matured.length,
+      calibrationAvailable: enough,
+      brierScore: enough ? matured.reduce((sum, row) => sum + (row.confidence - row.outcome) ** 2, 0) / matured.length : null,
+      winRate: enough ? matured.filter(row => row.outcome === 1).length / matured.length : null,
+      reason: enough ? undefined : `已成熟且明确关联订单的样本 ${matured.length} 笔；至少 20 笔后才显示置信度校准和胜率`,
+      modelVersionGroups: [...versionGroups.values()].map(row => ({ strategyVersion: row.strategyVersion, modelVersion: row.modelVersion, count: row.count,
+        brierScore: enough && row.count >= Math.max(1, Math.floor(minimumSamples)) ? row.brier / row.count : null,
+        winRate: enough && row.count >= Math.max(1, Math.floor(minimumSamples)) ? row.wins / row.count : null })),
+    },
+  };
 }
 
 export interface AiRunnerBenchmark {

@@ -59,6 +59,27 @@ async function main() {
     assert.equal(runnerState.createDisabled, true, 'UI must not offer a start action while the server feature flag is off');
     assert.equal(runnerState.tickDisabled, true, 'UI must not offer a manual tick while the server feature flag is off');
     assert.equal(runnerState.disabledNoticeVisible, true, 'UI must explain why the runner is disabled');
+    await page.evaluate(async () => {
+      const host = document.createElement('div'); host.id = 'ai-runner-history-browser-quality'; document.body.append(host);
+      const originalFetch = window.fetch;
+      const fixtures = {
+        '/api/ai-runners/browser-quality/history': { success: true, data: [], attribution: { reason: '测试无成交' }, selectionAttribution: { status: 'unavailable', reason: '测试数据不足' } },
+        '/api/ai-runners/browser-quality/quality': { success: true, dataStatus: 'partial', reason: '已成熟且明确关联的样本不足', data: { decisions: 2, modelCalls: 2, failedModelCalls: 1, skippedModelCalls: 0, unlinkedDecisions: 1, latency: { averageMs: 90, p95Ms: 150 }, matured: { count: 1, calibrationAvailable: false, reason: '已成熟且明确关联订单的样本 1 笔；至少 20 笔后才显示置信度校准和胜率', modelVersionGroups: [{ strategyVersion: 'strategy-fixture', modelVersion: 'model-fixture', count: 1, brierScore: null, winRate: null }] } } },
+      };
+      window.fetch = async (input, init) => {
+        const pathname = new URL(typeof input === 'string' ? input : input.url, location.href).pathname;
+        const fixture = fixtures[pathname];
+        if (!fixture) return originalFetch(input, init);
+        return { ok: true, status: 200, json: async () => fixture };
+      };
+      try { await loadAiRunnerHistory('browser-quality'); }
+      finally { window.fetch = originalFetch; }
+    });
+    const qualityPanel = page.locator('#ai-runner-history-browser-quality');
+    assert.match(await qualityPanel.innerText(), /AI 质量与前向结果/);
+    assert.match(await qualityPanel.innerText(), /至少 20 笔/);
+    assert.match(await qualityPanel.innerText(), /strategy-fixture · model-fixture/);
+    assert.doesNotMatch(await qualityPanel.innerText(), /Brier 0\.000 · 胜率 0\.0%/);
     const budget=await page.evaluate(()=>fetch('/api/ai-runners/comparisons/budget').then(r=>r.json()));
     assert.equal(budget.success,true);assert.equal(budget.data.limit,24);assert.equal(budget.data.issued,0);
     const streamResponse = await page.evaluate(async () => {
@@ -71,6 +92,8 @@ async function main() {
     await page.evaluate(() => showTab('settings'));
     await page.waitForFunction(() => document.getElementById('settings-tab')?.textContent?.includes('手动发送测试消息'));
     assert.ok((await page.locator('#settings-tab').innerText()).includes('手动发送测试消息'), 'loaded settings expose an explicit Telegram test action');
+    await page.waitForFunction(() => document.getElementById('telegram-result-coverage')?.textContent?.includes('Telegram 结果跟踪诊断'), null, { timeout: 3_000 });
+    assert.match(await page.locator('#telegram-result-coverage').innerText(), /尚无事件结果跟踪记录/);
     const telegramStatus = await page.evaluate(() => fetch('/api/telegram/status').then(async response => ({ status: response.status, body: await response.json() })));
     assert.equal(telegramStatus.status, 200);
     assert.ok(Array.isArray(telegramStatus.body.data.testDeliveryHistory));
@@ -84,6 +107,15 @@ async function main() {
     const slo = await page.evaluate(() => fetch('/api/ops/slo').then(response => response.json()));
     assert.equal(slo.success, true);
     assert.ok(slo.data.runtime.http.requests >= 1);
+    const lifecycle = await page.evaluate(() => fetch('/api/paper/accounts/main/lifecycle').then(async response => ({ status: response.status, body: await response.json() })));
+    assert.equal(lifecycle.status, 200);
+    assert.equal(lifecycle.body.data.accountId, 'main');
+    const reconcile = await page.evaluate(csrf => fetch('/api/paper/accounts/main/reconcile', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-csrf-token': csrf }, body: '{}' }).then(async response => ({ status: response.status, body: await response.json() })), status.data.csrfToken);
+    assert.equal(reconcile.status, 200, JSON.stringify(reconcile.body));
+    const resultCoverage = await page.evaluate(() => fetch('/api/telegram/results/coverage').then(async response => ({ status: response.status, body: await response.json() })));
+    assert.equal(resultCoverage.status, 200);
+    assert.ok(Number.isFinite(resultCoverage.body.data.total));
+    assert.ok(Array.isArray(resultCoverage.body.data.recent), 'admin diagnostics include recent waiting/published/revised result state');
 
     const missingCsrf = await page.request.post(`${baseUrl}/api/report/daily`, { data: {} });
     assert.equal(missingCsrf.status(), 403);
@@ -104,6 +136,12 @@ async function main() {
     assert.equal(guestRunnerList.body.code, 'GUEST_READ_ONLY');
     assert.equal(await page.evaluate(()=>fetch('/api/ai-runners/comparisons/budget').then(r=>r.status)),403,'comparison quota remains private');
     assert.equal(await page.evaluate(()=>fetch('/api/paper/chart-markers?market=stocks&instrument=usAAPL').then(r=>r.status)),403,'paper markers and account lineage remain private');
+    const guestLifecycle = await page.evaluate(async () => (await Promise.all([
+      fetch('/api/paper/accounts/main/lifecycle'),
+      fetch('/api/paper/accounts/main/reconcile', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }),
+      fetch('/api/telegram/results/coverage'),
+    ])).map(response => response.status));
+    assert.deepEqual(guestLifecycle, [403, 403, 403], 'paper lifecycle and Telegram result diagnostics stay private');
     const guestPaperReads = await page.evaluate(async () => Promise.all([
       '/api/paper/ledger',
       '/api/paper/positions',

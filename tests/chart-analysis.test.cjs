@@ -70,6 +70,62 @@ test('detects selectable strategy signals with a strategy label and price', () =
   assert.ok(found.some(item => item.strategy === 'maCross'));
 });
 
+test('strategy chart points retain scoped evidence and distinguish forming from confirmed candles', () => {
+  const input = [
+    { time: 100, open: 10, high: 11, low: 9, close: 10.5, volume: 10 },
+    { time: 200, open: 10.5, high: 12, low: 10, close: 11.5, volume: 20 },
+  ];
+  const signals = [
+    { index: 0, side: 'buy', strategy: 'maCross', label: '均线金叉', reason: 'MA5 上穿 MA20', price: 10.5, time: 100 },
+    { index: 1, side: 'sell', strategy: 'rsiReversal', label: 'RSI反转卖出', reason: '跌破70', price: 11.5, time: 200 },
+  ];
+  const points = analysis.buildStrategyChartPoints({
+    bars: input, signals, market: 'stocks', instrument: 'stock:us:AAPL', timeframe: '5m',
+    strategyVersion: 'chart-strategy-v1', source: 'NASDAQ snapshot', sourceTime: '2026-10-11T01:00:00.000Z',
+    live: true, sourceFresh: true, currentBarClosed: false,
+  });
+  assert.equal(points.length, 2);
+  assert.equal(points[0].status, 'confirmed');
+  assert.equal(points[1].status, 'forming');
+  assert.equal(points[1].triggerPrice, 11.5);
+  assert.equal(points[1].time, 200);
+  assert.equal(points[1].market, 'stocks');
+  assert.equal(points[1].instrument, 'stock:us:AAPL');
+  assert.equal(points[1].timeframe, '5m');
+  assert.equal(points[1].source, 'NASDAQ snapshot');
+  assert.equal(points[1].sourceTime, '2026-10-11T01:00:00.000Z');
+  assert.equal(points[1].strategyVersion, 'chart-strategy-v1');
+});
+
+test('live strategy preview is suppressed on stale source and becomes confirmed only after close evidence', () => {
+  const input = [{ time: 10, open: 10, high: 12, low: 9, close: 11, volume: 1 }];
+  const signals = [{ index: 0, side: 'buy', strategy: 'maCross', label: '金叉', reason: 'cross', price: 11, time: 10 }];
+  const context = { bars: input, signals, market: 'crypto', instrument: 'crypto:binance:BTCUSDT', timeframe: '1m', live: true, sourceFresh: false };
+  assert.deepEqual(analysis.buildStrategyChartPoints(context), []);
+  const closed = analysis.buildStrategyChartPoints({ ...context, sourceFresh: true, currentBarClosed: true });
+  assert.equal(closed.length, 1);
+  assert.equal(closed[0].status, 'confirmed');
+  const historical = analysis.buildStrategyChartPoints({ ...context, live: false, sourceFresh: false });
+  assert.equal(historical[0].status, 'confirmed');
+});
+
+test('stock forming signals require provider source time rather than a recent browser fetch', () => {
+  const html = require('./helpers/dashboard-source.cjs').readDashboardSource();
+  const start = html.indexOf('function buildStockStrategySignals');
+  const block = html.slice(start, start + 1800);
+  assert.match(block, /const sourceTime = Number\(metadata\.sourceTime\)/);
+  assert.match(block, /sourceFresh = Number\.isFinite\(sourceTime\)/);
+  assert.doesNotMatch(block, /const fetchedAt = Number\(metadata\.retrievedAt\)/);
+});
+
+test('strategy points reject invalid market, identity, timeframe, and future indices', () => {
+  const point = { index: 1, side: 'buy', strategy: 'maCross', label: '金叉', reason: 'cross', price: 11, time: 20 };
+  const bars = [{ time: 10, open: 10, high: 10, low: 9, close: 10, volume: 1 }, { time: 20, open: 10, high: 12, low: 10, close: 11, volume: 1 }];
+  assert.deepEqual(analysis.buildStrategyChartPoints({ bars, signals: [point], market: 'options', instrument: 'stock:us:AAPL', timeframe: '1d' }), []);
+  assert.deepEqual(analysis.buildStrategyChartPoints({ bars, signals: [{ ...point, index: 2 }], market: 'stocks', instrument: 'stock:us:AAPL', timeframe: '1d' }), []);
+  assert.deepEqual(analysis.buildStrategyChartPoints({ bars, signals: [point], market: 'stocks', instrument: '', timeframe: '1d' }), []);
+});
+
 test('keeps strategy defaults when loading an older overlay preference', () => {
   const config = analysis.normalizeOverlayConfig({ signals: true, indicators: { ma: true } });
   assert.equal(config.strategies.maCross, true);

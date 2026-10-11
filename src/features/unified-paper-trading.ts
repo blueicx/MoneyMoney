@@ -1,5 +1,6 @@
 import { stateStore, SQLiteStateStore } from '../storage/sqlite-state';
 import { randomUUID } from 'node:crypto';
+import { reconcilePaperCorporateActions, type PaperCorporateActionEvidence } from './paper-account-lifecycle';
 
 export type UnifiedPaperInstrumentType = 'stock' | 'option' | 'crypto' | 'prediction';
 export type UnifiedPaperSide = 'BUY' | 'SELL' | 'YES' | 'NO';
@@ -58,6 +59,8 @@ export interface UnifiedPaperLedger {
   peakEquity: number;
   maxDrawdownPct: number;
   runnerAccounts?: Record<string, UnifiedPaperRunnerAccount>;
+  lifecycleEvents?: import('./paper-account-lifecycle').PaperLifecycleEvent[];
+  corporateReceivables?: import('./paper-account-lifecycle').PaperCorporateReceivable[];
 }
 
 export interface UnifiedPaperRunnerAccount extends Omit<UnifiedPaperLedger, 'runnerAccounts'> {
@@ -70,7 +73,7 @@ export interface UnifiedPaperRunnerAccount extends Omit<UnifiedPaperLedger, 'run
 
 export function emptyUnifiedPaperLedger(startingCash = 1000): UnifiedPaperLedger {
   const cash = Math.max(0, Number(startingCash) || 1000);
-  return { startingCash: cash, cash, positions: [], orders: [], realizedPnl: 0, peakEquity: cash, maxDrawdownPct: 0 };
+  return { startingCash: cash, cash, positions: [], orders: [], realizedPnl: 0, peakEquity: cash, maxDrawdownPct: 0, lifecycleEvents: [], corporateReceivables: [] };
 }
 
 export function validateUnifiedPaperOrder(input: Partial<UnifiedPaperOrder>): { ok: boolean; error?: string } {
@@ -253,6 +256,27 @@ export function replayUnifiedPaperOrders(input: { startingCash?: number; orders:
 export class UnifiedPaperLedgerStore {
   constructor(private readonly store: SQLiteStateStore = stateStore) {}
   get(): UnifiedPaperLedger { return this.store.get<UnifiedPaperLedger>('paper-ledger') || emptyUnifiedPaperLedger(); }
+  getAccount(accountId: string): UnifiedPaperLedger | UnifiedPaperRunnerAccount | null {
+    const ledger = this.get();
+    if (['main', 'unified-paper-ledger'].includes(accountId)) return ledger;
+    const account = ledger.runnerAccounts?.[accountId];
+    return account && account.runnerId ? account : null;
+  }
+  reconcileCorporateActions(accountId: string, actions: PaperCorporateActionEvidence[], now = Date.now()) {
+    return this.store.transaction(() => {
+      const root = this.get();
+      if (['main', 'unified-paper-ledger'].includes(accountId)) {
+        const result = reconcilePaperCorporateActions(root, actions, now);
+        if (result.applied || result.pending) this.store.set('paper-ledger', result.ledger, 2);
+        return result;
+      }
+      const current = root.runnerAccounts?.[accountId];
+      if (!current || !current.runnerId) throw new Error('模拟账户不存在或未关联有效跑单');
+      const result = reconcilePaperCorporateActions(current, actions, now);
+      if (result.applied || result.pending) this.store.set('paper-ledger', { ...root, runnerAccounts: { ...(root.runnerAccounts || {}), [accountId]: result.ledger } }, 2);
+      return result;
+    });
+  }
   ensureRunnerAccount(accountId: string, runnerId: string, startingCash: number): UnifiedPaperRunnerAccount {
     if (!accountId.trim() || !runnerId.trim()) throw new Error('AI 跑单账户标识缺失');
     return this.store.transaction(() => {

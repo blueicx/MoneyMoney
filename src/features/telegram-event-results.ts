@@ -2,12 +2,69 @@ import { createHash } from 'node:crypto';
 
 export interface EventRecord { id?: string; title: string; titleZh?: string; date: string; country?: string; impact?: string; actual?: string | null; forecast?: string | null; previous?: string | null; source?: string; retrievedAt?: string; kind?:'macro'|'earnings'|'research'|'funding'|'prediction';market?:string;instrument?:string;resourceId?:string;platform?:string;symbol?:string;reportPeriodEnd?:string|null; }
 export interface Result { actual: string | null; status: string; reason?: string; source?: string; url?: string; publishedAt?: string; retrievedAt?: string; previous?: string | null; evidenceRefs?:string[]; }
-interface Store { get<T>(key: string): T | null; set<T>(key: string, value: T): void; acquireLease?(key: string, owner: string, now: number, ttl: number): boolean; refreshLease?(key: string, owner: string, now: number, ttl: number): boolean; releaseLease?(key: string, owner: string): void; }
+interface Store { get<T>(key: string): T | null; set<T>(key: string, value: T): void; appendAudit?(input: { id: string; action: string; detail: string; at?: string }): void; acquireLease?(key: string, owner: string, now: number, ttl: number): boolean; refreshLease?(key: string, owner: string, now: number, ttl: number): boolean; releaseLease?(key: string, owner: string): void; }
 interface Delivery { id: string; event: EventRecord; text: string; status: 'pending' | 'sent' | 'failed' | 'acknowledged'; attempts: number; nextAttempt: number; error?: string; actual?: string; publishedAt?: string; retrievedAt?: string; resultSource?: string; resultUrl?: string; kind?: 'result' | 'revision' | 'waiting' | 'terminal'; originalMessageId?: number; messageId?: number; resultStatus?: string; reason?: string; nextCheckAt?: number | null; evidenceRefs?: string[]; controlRevision?: number; }
+type CoverageDelivery = Delivery & { chatId?: string };
+export const TELEGRAM_RESULT_COVERAGE_AUDIT_KEY = 'telegram-result-coverage-audit-v1';
 export interface EventResultDetail { id: string; title: string; eventDate: string; deliveryStatus: Delivery['status']; resultStatus: string; attempts: number; actual: string | null; publishedAt: string | null; retrievedAt: string | null; source: string; resultUrl: string | null; reason: string | null; error: string | null; nextCheckAt: string | null; evidenceRefs: string[]; }
 interface State { events: Record<string, EventRecord>; deliveries: Delivery[]; checkedAt?: Record<string,number>; reminders?: Record<string,{messageId:number;at:number}>; }
 export function hasEventActual(value: unknown): boolean {
   return value !== null && value !== undefined && !/^(?:|n\/a|na|null|unknown|pending|—|-)$/i.test(String(value).trim());
+}
+export function summarizeTelegramResultCoverage(rows: CoverageDelivery[], now = Date.now()) {
+  const deliveries = Array.isArray(rows) ? rows : [];
+  const published = deliveries.filter(row => ['published', 'revised'].includes(String(row.resultStatus || '')) && hasEventActual(row.actual));
+  const waiting = deliveries.filter(row => !hasEventActual(row.actual) && ['pending', 'waiting'].includes(String(row.resultStatus || row.kind || '')));
+  const stuckCountdowns = waiting.flatMap(row => {
+    const next = Number(row.nextCheckAt);
+    const eventAt = Date.parse(String(row.event?.date || ''));
+    const overdueMs = Number.isFinite(next) ? now - next : 0;
+    const eventAgeMs = Number.isFinite(eventAt) ? now - eventAt : 0;
+    if (overdueMs < 2 * 3600000 && eventAgeMs < 24 * 3600000) return [];
+    return [{ id: row.id, ...(row.chatId ? { chatId: row.chatId } : {}), kind: row.event?.kind || row.event?.market || 'unknown', resultStatus: row.resultStatus || 'pending',
+      source: row.resultSource || row.event?.source || '未知', nextCheckAt: Number.isFinite(next) ? new Date(next).toISOString() : null,
+      hoursOverdue: Number.isFinite(next) ? Math.max(0, Math.floor(overdueMs / 3600000)) : null,
+      eventAgeHours: Number.isFinite(eventAt) ? Math.max(0, Math.floor(eventAgeMs / 3600000)) : null,
+      actual: hasEventActual(row.actual) ? String(row.actual) : null, actionable: true,
+      reason: row.reason || row.error || '结果仍未发布或核验；检查来源覆盖、最近错误与下次检查时间' }];
+  });
+  return {
+    total: deliveries.length,
+    published: published.length,
+    revised: published.filter(row => row.resultStatus === 'revised').length,
+    waiting: waiting.length,
+    failedDeliveries: deliveries.filter(row => row.status === 'failed').length,
+    unavailable: deliveries.filter(row => ['unavailable', 'unsupported', 'unverifiable', 'stopped'].includes(String(row.resultStatus || ''))).length,
+    byKind: deliveries.reduce<Record<string, number>>((counts, row) => { const key = String(row.event?.kind || row.event?.market || 'unknown'); counts[key] = (counts[key] || 0) + 1; return counts; }, {}),
+    bySource: deliveries.reduce<Record<string, number>>((counts, row) => { const key = String(row.resultSource || row.event?.source || '未知'); counts[key] = (counts[key] || 0) + 1; return counts; }, {}),
+    stuckCountdowns,
+  };
+}
+
+/** Persist one deduplicated incident per changed set of overdue countdowns; this never sends a message. */
+export function recordTelegramResultCoverageAudit(store: Store, rows: CoverageDelivery[], now = Date.now()) {
+  const summary = summarizeTelegramResultCoverage(rows, now);
+  const active = summary.stuckCountdowns.map(item => ({ chatId: item.chatId || '', id: item.id })).sort((a, b) => a.chatId.localeCompare(b.chatId) || a.id.localeCompare(b.id));
+  const fingerprint = createHash('sha256').update(JSON.stringify(active)).digest('hex');
+  const previous = store.get<{ fingerprint: string; checkedAt?: string; stuckCount: number; stuck?: typeof summary.stuckCountdowns }>(TELEGRAM_RESULT_COVERAGE_AUDIT_KEY);
+  const checkedAt = new Date(now).toISOString();
+  if (fingerprint !== previous?.fingerprint) {
+    if (active.length) store.appendAudit?.({
+      id: `telegram-result-coverage-stuck:${fingerprint}`,
+      action: 'telegram_result_coverage_stuck',
+      detail: JSON.stringify({ checkedAt, stuckCount: active.length, stuck: summary.stuckCountdowns }),
+      at: checkedAt,
+    });
+    else if ((previous?.stuckCount || 0) > 0) store.appendAudit?.({
+      id: `telegram-result-coverage-recovered:${fingerprint}`,
+      action: 'telegram_result_coverage_recovered',
+      detail: JSON.stringify({ checkedAt, recoveredCount: previous!.stuckCount }),
+      at: checkedAt,
+    });
+  }
+  const audit = { fingerprint, checkedAt, stuckCount: active.length, stuck: summary.stuckCountdowns };
+  store.set(TELEGRAM_RESULT_COVERAGE_AUDIT_KEY, audit);
+  return { ...summary, audit };
 }
 const escape = (s: unknown) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const identity = (event: EventRecord) => createHash('sha256').update(JSON.stringify(event.kind&&event.kind!=='macro'?[event.kind,event.market,event.instrument,event.resourceId,event.date]:[event.country, event.title, event.date])).digest('hex');

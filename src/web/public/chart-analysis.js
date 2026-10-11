@@ -407,6 +407,47 @@
     return found.sort((left, right) => left.index - right.index || left.strategy.localeCompare(right.strategy));
   }
 
+  function buildStrategyChartPoints({
+    bars = [], signals = [], market, instrument, timeframe, strategyVersion = 'chart-strategy-v1',
+    source = '', sourceTime = null, live = false, sourceFresh = true, currentBarClosed,
+  } = {}) {
+    const expectedPrefix = market === 'stocks' ? 'stock:' : market === 'crypto' ? 'crypto:' : '';
+    const normalized = Array.isArray(bars) ? bars.map(normalizeBar) : [];
+    if (!expectedPrefix || typeof instrument !== 'string' || !instrument.startsWith(expectedPrefix) || !String(timeframe || '').trim() || !normalized.length) return [];
+    const lastIndex = normalized.length - 1;
+    const sourceTimestamp = sourceTime == null ? null : (Number.isFinite(Number(sourceTime)) ? Number(sourceTime) : Date.parse(String(sourceTime)));
+    const validSourceTime = Number.isFinite(sourceTimestamp) ? new Date(sourceTimestamp).toISOString() : null;
+    return (Array.isArray(signals) ? signals : []).flatMap(signal => {
+      const index = Number(signal?.index);
+      if (!Number.isInteger(index) || index < 0 || index > lastIndex || !['buy', 'sell'].includes(signal?.side) || !signal?.strategy) return [];
+      const bar = normalized[index];
+      const isLatest = index === lastIndex;
+      const explicitlyClosed = isLatest && (currentBarClosed === true || bars[index]?.closed === true);
+      // Historical candles are confirmed. In live mode the current candle remains provisional
+      // until the feed explicitly closes it or a later candle proves it has ended.
+      if (live && isLatest && !sourceFresh && !explicitlyClosed) return [];
+      const status = live && isLatest && !explicitlyClosed ? 'forming' : 'confirmed';
+      const price = Number(signal.price ?? bar.close);
+      if (!Number.isFinite(price) || price <= 0) return [];
+      return [{
+        ...signal,
+        index,
+        market,
+        instrument,
+        timeframe: String(timeframe),
+        strategyVersion: String(signal.strategyVersion || strategyVersion),
+        side: signal.side,
+        time: bar.time,
+        triggerPrice: price,
+        price,
+        reason: String(signal.reason || ''),
+        source: String(source || ''),
+        sourceTime: validSourceTime,
+        status,
+      }];
+    });
+  }
+
   function buildChartOverlays({ bars = [], signals = [], config = {} } = {}) {
     const normalized = bars.map(normalizeBar);
     const options = normalizeOverlayConfig(config);
@@ -521,5 +562,5 @@
     };
   }
 
-  return { DEFAULT_CONFIG, CANDLE_PATTERN_CATALOG, normalizeOverlayConfig, chartDataStatusLabel, detectCandlestickPatterns, detectStructures, detectChanStructures, detectStrategySignals, movingAverage, bollingerBands, calculateMACD, buildChartOverlays, stepReplay, protectReplayContext, createDrawingTool };
+  return { DEFAULT_CONFIG, CANDLE_PATTERN_CATALOG, normalizeOverlayConfig, chartDataStatusLabel, detectCandlestickPatterns, detectStructures, detectChanStructures, detectStrategySignals, buildStrategyChartPoints, movingAverage, bollingerBands, calculateMACD, buildChartOverlays, stepReplay, protectReplayContext, createDrawingTool };
 });

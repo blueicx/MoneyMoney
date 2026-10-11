@@ -32,11 +32,15 @@ export interface YahooCorporateAction {
   kind: 'split' | 'dividend';
   effectiveAt: string;
   factor: number;
+  currency?: string;
   source: 'Yahoo Finance chart events';
 }
 
 export interface YahooStockHistory {
   bars: StockKlineBar[];
+  /** Provider-reported regular-market timestamp; absent when Yahoo does not declare it. */
+  sourceTime: string | null;
+  currency?: string | null;
   forwardAdjustedBars: StockKlineBar[] | null;
   forwardAdjustment: { available: boolean; basis: 'yahoo-adjclose-factor'; volumeBasis: 'source'; reason: string };
   corporateActions: YahooCorporateAction[];
@@ -48,6 +52,7 @@ type YahooChartPayload = {
   chart?: {
     result?: Array<{
       timestamp?: number[];
+      meta?: { regularMarketTime?: number; currency?: string };
       indicators?: {
         quote?: Array<Record<string, Array<number | null> | undefined>>;
         adjclose?: Array<{ adjclose?: Array<number | null> }>;
@@ -160,7 +165,8 @@ function yahooEventTimeMs(value: unknown): number | null {
 }
 
 function actionId(action: Omit<YahooCorporateAction, 'id'>): string {
-  const digest = crypto.createHash('sha256').update(JSON.stringify(action)).digest('hex').slice(0, 24);
+  const { currency: _currency, ...identity } = action;
+  const digest = crypto.createHash('sha256').update(JSON.stringify(identity)).digest('hex').slice(0, 24);
   return `yahoo-action-${digest}`;
 }
 
@@ -170,6 +176,7 @@ export function normalizeYahooCorporateActions(payload: YahooChartPayload, symbo
   const instrument = normalizeYahooSymbol(symbolInput);
   if (!result || !instrument) return [];
   const actions: YahooCorporateAction[] = [];
+  const currency = String(result.meta?.currency || '').trim().toUpperCase();
   for (const [key, event] of Object.entries(result.events?.splits || {})) {
     const at = yahooEventTimeMs(event?.date ?? key);
     const numerator = Number(event?.numerator);
@@ -179,14 +186,14 @@ export function normalizeYahooCorporateActions(payload: YahooChartPayload, symbo
       ? numerator / denominator
       : ratio ? Number(ratio[1]) / Number(ratio[2]) : NaN;
     if (!at || !Number.isFinite(factor) || factor <= 0 || factor > 1_000_000) continue;
-    const action = { market: 'stocks' as const, instrument, kind: 'split' as const, effectiveAt: new Date(at).toISOString(), factor, source: 'Yahoo Finance chart events' as const };
+    const action = { market: 'stocks' as const, instrument, kind: 'split' as const, effectiveAt: new Date(at).toISOString(), factor, ...(currency ? { currency } : {}), source: 'Yahoo Finance chart events' as const };
     actions.push({ id: actionId(action), ...action });
   }
   for (const [key, event] of Object.entries(result.events?.dividends || {})) {
     const at = yahooEventTimeMs(event?.date ?? key);
     const amount = Number(event?.amount);
     if (!at || !Number.isFinite(amount) || amount < 0) continue;
-    const action = { market: 'stocks' as const, instrument, kind: 'dividend' as const, effectiveAt: new Date(at).toISOString(), factor: amount, source: 'Yahoo Finance chart events' as const };
+    const action = { market: 'stocks' as const, instrument, kind: 'dividend' as const, effectiveAt: new Date(at).toISOString(), factor: amount, ...(currency ? { currency } : {}), source: 'Yahoo Finance chart events' as const };
     actions.push({ id: actionId(action), ...action });
   }
   return actions.sort((left, right) => left.effectiveAt.localeCompare(right.effectiveAt) || left.kind.localeCompare(right.kind) || left.id.localeCompare(right.id));
@@ -276,6 +283,9 @@ export function createYahooStockHistoryAdapter(): DataSourceAdapter<YahooStockHi
       const corporateActions = normalizeYahooCorporateActions(payload, symbol).filter(action => !bounded || (Date.parse(action.effectiveAt) >= startTime! && Date.parse(action.effectiveAt) < endTime!));
       return {
         bars: config.aggregateDays ? aggregateStockBars(bars, config.aggregateDays) : bars,
+        sourceTime: Number.isFinite(Number(payload?.chart?.result?.[0]?.meta?.regularMarketTime))
+          ? new Date(Number(payload!.chart!.result![0]!.meta!.regularMarketTime) * 1000).toISOString() : null,
+        currency: payload?.chart?.result?.[0]?.meta?.currency?.trim().toUpperCase() || null,
         forwardAdjustedBars,
         forwardAdjustment: { available: Boolean(forwardAdjustedBars), basis: forwardAdjustment.basis, volumeBasis: forwardAdjustment.volumeBasis, reason: forwardAdjustment.reason },
         corporateActions,

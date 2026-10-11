@@ -7,13 +7,47 @@ const vm = require('node:vm');
 const indexHtml = require('./helpers/dashboard-source.cjs').readDashboardSource();
 
 function extractCode(html) {
-  const match = html.match(/function updateThemeButtons[\s\S]*?function toggleTheme\(\) {[\s\S]*?\n}/);
+  const match = html.match(/function applyUiPreferences\(\)[\s\S]*?function toggleTheme\(\) {[\s\S]*?\n}/);
   return match ? match[0] : '';
 }
 
 test('Theme CSS Variables exist', () => {
   assert.match(indexHtml, /\[data-theme="dark"\]\s*\{/);
   assert.match(indexHtml, /\[data-theme="money"\]\s*\{/);
+});
+
+test('UI density and text preferences persist and apply through root attributes', () => {
+  assert.match(indexHtml, /function applyUiPreferences\(\)/);
+  assert.match(indexHtml, /function saveUiPreference\(key, value\)/);
+  assert.match(indexHtml, /id="ui-density"/);
+  assert.match(indexHtml, /id="ui-text-size"/);
+  assert.match(indexHtml, /data-ui-density="compact"/);
+  assert.match(indexHtml, /data-ui-text="large"/);
+
+  const start = indexHtml.indexOf('function applyUiPreferences()');
+  const end = indexHtml.indexOf('function updateThemeButtons', start);
+  const code = indexHtml.slice(start, end);
+  const context = {
+    localStorage: {
+      data: { 'mm-ui-density': 'compact', 'mm-ui-text-size': 'large' },
+      getItem(key) { return this.data[key] || null; },
+      setItem(key, value) { this.data[key] = String(value); },
+    },
+    document: { documentElement: {
+      attributes: {},
+      setAttribute(key, value) { this.attributes[key] = value; },
+      removeAttribute(key) { delete this.attributes[key]; },
+    } },
+  };
+  vm.createContext(context);
+  vm.runInContext(code + 'applyUiPreferences()', context);
+  assert.equal(context.document.documentElement.attributes['data-ui-density'], 'compact');
+  assert.equal(context.document.documentElement.attributes['data-ui-text'], 'large');
+  context.localStorage.data['mm-ui-density'] = 'invalid';
+  context.localStorage.data['mm-ui-text-size'] = 'invalid';
+  vm.runInContext('applyUiPreferences()', context);
+  assert.equal(context.document.documentElement.attributes['data-ui-density'], undefined);
+  assert.equal(context.document.documentElement.attributes['data-ui-text'], undefined);
 });
 
 test('Theme toggle logic: 3 states loop, old values, icon sync', () => {

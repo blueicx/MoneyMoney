@@ -432,6 +432,16 @@ async function main() {
     assert.ok(lazyAssetRequests.some(url => /workspace-events/.test(url)), 'the event timeline module should load only when its workspace is opened');
     await page.evaluate(() => setMarketScope('overview'));
     await auditThemeControls(page);
+    await page.evaluate(() => showTab('settings'));
+    await page.locator('#ui-density').waitFor({ state: 'visible', timeout: 10_000 });
+    await page.locator('#ui-density').selectOption('compact');
+    await page.locator('#ui-text-size').selectOption('large');
+    assert.equal(await page.locator('html').getAttribute('data-ui-density'), 'compact');
+    assert.equal(await page.locator('html').getAttribute('data-ui-text'), 'large');
+    assert.equal(await page.evaluate(() => localStorage.getItem('mm-ui-density')), 'compact');
+    assert.equal(await page.evaluate(() => localStorage.getItem('mm-ui-text-size')), 'large');
+    await page.locator('#ui-density').selectOption('comfortable');
+    await page.locator('#ui-text-size').selectOption('normal');
     await page.evaluate(() => { setMarketScope('prediction'); setMarketScope('stocks'); });
     await page.waitForTimeout(500);
     assert.ok(await page.locator('#workspace-sidebar-content [data-workspace-id="guru-holdings"]').count(), 'a late prediction navigation response must not overwrite the stocks menu');
@@ -648,6 +658,7 @@ async function main() {
     assert.equal(alertFeedback, 'useful');
     await page.evaluate(() => showTab('settings'));
     await page.waitForFunction(() => document.querySelector('#source-slo-panel')?.textContent?.includes('接口成功率与实际数据覆盖'), null, { timeout: 10_000 });
+    await page.waitForFunction(() => document.querySelector('#source-slo-panel')?.textContent?.includes('连续空结果 2'), null, { timeout: 15_000 });
     assert.match(await page.locator('#source-slo-panel').innerText(), /连续空结果 2/);
     await page.setViewportSize({ width: 390, height: 844 });
     assert.equal(await page.locator('#center-workspace').isVisible(), true);

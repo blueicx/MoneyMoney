@@ -258,7 +258,7 @@ test('data lake persists stock corporate actions and provider contracts with mar
 test('corporate action first-observed time is immutable to later refetches while verified publication time can be added', () => {
   const { root, catalog } = tempCatalog();
   try {
-    const base = { id: 'observed-split', market: 'stocks', instrument: 'AAPL', kind: 'split', effectiveAt: '2026-09-21T00:00:00.000Z', factor: 2, source: 'Yahoo Finance chart events' };
+    const base = { id: 'observed-split', market: 'stocks', instrument: 'AAPL', kind: 'split', effectiveAt: '2026-09-21T00:00:00.000Z', factor: 2, source: 'Yahoo Finance chart events', currency: 'USD' };
     catalog.saveCorporateAction({ ...base, observedAt: '2026-10-02T00:00:00.000Z' });
     catalog.saveCorporateAction({ ...base, observedAt: '2026-10-03T00:00:00.000Z' });
     const updated = catalog.saveCorporateAction({ ...base, observedAt: '2026-10-03T00:00:00.000Z', publishedAt: '2026-09-10T00:00:00.000Z' });
@@ -266,6 +266,7 @@ test('corporate action first-observed time is immutable to later refetches while
     const stored = catalog.listCorporateActions('stocks', 'AAPL')[0];
     assert.equal(stored.observedAt, '2026-10-02T00:00:00.000Z');
     assert.equal(stored.publishedAt, '2026-09-10T00:00:00.000Z');
+    assert.equal(stored.currency, 'USD');
   } finally { catalog.close(); fs.rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -284,6 +285,7 @@ test('corporate-action observed timestamp migrates an existing catalog schema wi
     const existing = catalog.listCorporateActions('stocks', 'AAPL')[0];
     assert.equal(existing.id, 'legacy-action');
     assert.equal(existing.observedAt, undefined);
+    assert.equal(existing.currency, undefined);
     const added = catalog.saveCorporateAction({ id: 'new-action', market: 'stocks', instrument: 'AAPL', kind: 'split', effectiveAt: '2026-09-22T00:00:00.000Z', factor: 2, source: 'new-source', observedAt: '2026-10-09T00:00:00.000Z' });
     assert.equal(added.observedAt, '2026-10-09T00:00:00.000Z');
     assert.equal(catalog.listCorporateActions('stocks', 'AAPL').length, 2);

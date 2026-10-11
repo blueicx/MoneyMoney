@@ -152,6 +152,21 @@ test('Yahoo history adapter carries unverified price basis and corporate-action 
   assert.ok(result.fetchedAt);
 });
 
+test('Yahoo history exposes only the provider-reported regular market timestamp as source time', async (t) => {
+  const originalFetch = global.fetch;
+  t.after(() => { global.fetch = originalFetch; });
+  const sourceEpoch = 1781107200;
+  global.fetch = async () => ({ ok: true, json: async () => ({ chart: { result: [{
+    meta: { regularMarketTime: sourceEpoch, currency: 'USD' },
+    timestamp: [sourceEpoch],
+    indicators: { quote: [{ open: [10], high: [11], low: [9], close: [10.5], volume: [100] }] },
+    events: { dividends: { [sourceEpoch]: { date: sourceEpoch, amount: 0.25 } } },
+  }] } }) });
+  const result = await createYahooStockHistoryAdapter().fetch({ symbol: 'AAPL', period: '1d' });
+  assert.equal(result.data.sourceTime, new Date(sourceEpoch * 1000).toISOString());
+  assert.equal(result.data.corporateActions[0].currency, 'USD');
+});
+
 test('Yahoo history keeps source OHLC and Adj Close-derived OHLC as separate series', async (t) => {
   const originalFetch = global.fetch;
   t.after(() => { global.fetch = originalFetch; });

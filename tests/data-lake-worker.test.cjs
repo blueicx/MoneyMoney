@@ -55,7 +55,7 @@ test('stock backfill archives observed corporate actions and never labels Yahoo 
             data: {
               bars: [{ time: Date.parse('2026-09-21T00:00:00.000Z'), open: 50, high: 55, low: 49, close: 54, volume: 10 }],
               adjustment: 'unknown',
-              corporateActions: [{ id: 'yahoo-split-aapl', market: 'stocks', instrument: 'AAPL', kind: 'split', effectiveAt: '2026-09-21T00:00:00.000Z', factor: 2, source: 'Yahoo Finance chart events' }],
+              corporateActions: [{ id: 'yahoo-split-aapl', market: 'stocks', instrument: 'AAPL', kind: 'split', effectiveAt: '2026-09-21T00:00:00.000Z', factor: 2, currency: 'USD', source: 'Yahoo Finance chart events' }],
             },
             source: 'yahoo-finance-history', fetchedAt: observedAt, expiresAt: observedAt, latencyMs: 1, status: 'live',
           }),
@@ -69,6 +69,7 @@ test('stock backfill archives observed corporate actions and never labels Yahoo 
     assert.equal(action.id, 'yahoo-split-aapl');
     assert.equal(action.observedAt, observedAt);
     assert.equal(action.publishedAt, undefined);
+    assert.equal(action.currency, 'USD');
     const history = await catalog.queryBarsAsOf({ market: 'stocks', instrument: 'AAPL', timeframe: '1d', asOf: '2026-10-10T00:00:00.000Z' });
     assert.equal(history.adjustment, 'unknown');
   } finally { catalog.close(); fs.rmSync(root, { recursive: true, force: true }); }

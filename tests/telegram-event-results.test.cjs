@@ -232,3 +232,34 @@ test('result detail keeps the actual-result source, safe official URL, retry sta
  assert.doesNotMatch(formatEventResultDetail(detail),/<AAPL>/);
  assert.equal(monitor.detail('another-chat',row.id),null);
 });
+
+test('result coverage diagnoses stale countdown-only tracking without treating it as a published result',()=>{
+ const {summarizeTelegramResultCoverage}=require('../src/features/telegram-event-results'),now=Date.parse('2026-10-11T12:00:00Z');
+ const rows=[{id:'waiting-old',event:{title:'Old release',date:'2026-10-10T08:00:00Z',kind:'macro'},status:'sent',kind:'waiting',resultStatus:'pending',nextCheckAt:now-3*3600000,actual:null,resultSource:'BLS'},
+  {id:'published',event:{title:'Published',date:'2026-10-11T10:00:00Z',kind:'earnings'},status:'sent',kind:'result',resultStatus:'published',actual:'1.2',nextCheckAt:now+3600000}];
+ const summary=summarizeTelegramResultCoverage(rows,now);
+ assert.equal(summary.total,2);assert.equal(summary.published,1);assert.equal(summary.waiting,1);
+ assert.equal(summary.stuckCountdowns.length,1);assert.equal(summary.stuckCountdowns[0].id,'waiting-old');
+ assert.equal(summary.stuckCountdowns[0].actual,null);assert.equal(summary.stuckCountdowns[0].actionable,true);
+});
+
+test('server periodically audits stuck Telegram result countdowns and deduplicates audit incidents',()=>{
+  const source=require('node:fs').readFileSync(require('node:path').join(__dirname,'../src/web/server.ts'),'utf8');
+  assert.match(source,/TELEGRAM_RESULT_COVERAGE_AUDIT_KEY/);
+  assert.match(source,/recordTelegramResultCoverageAudit\(stateStore, rows\)/);
+  assert.match(source,/auditTelegramResultCoverage\(\)/);
+  assert.match(source,/setInterval\(\(\)\s*=>\s*\{\s*auditTelegramResultCoverage\(\)/s);
+});
+
+test('coverage audit records a stuck incident once, scopes duplicate event ids by chat, and records recovery',()=>{
+ const {recordTelegramResultCoverageAudit}=require('../src/features/telegram-event-results');
+ const values=new Map(),audits=[],store={get:k=>structuredClone(values.get(k)||null),set:(k,v)=>values.set(k,structuredClone(v)),appendAudit:row=>audits.push(row)};
+ const now=Date.parse('2026-10-11T12:00:00Z'),row={id:'same-id',event:{title:'Old release',date:'2026-10-10T08:00:00Z',kind:'macro'},status:'sent',kind:'waiting',resultStatus:'pending',nextCheckAt:now-3*3600000,actual:null};
+ const stuck=[{...row,chatId:'chat-a'},{...row,chatId:'chat-b'}];
+ let result=recordTelegramResultCoverageAudit(store,stuck,now);
+ assert.equal(result.stuckCountdowns.length,2);assert.deepEqual(result.stuckCountdowns.map(x=>x.chatId).sort(),['chat-a','chat-b']);
+ assert.equal(audits.length,1);assert.equal(audits[0].action,'telegram_result_coverage_stuck');
+ recordTelegramResultCoverageAudit(store,stuck,now+60000);assert.equal(audits.length,1);
+ result=recordTelegramResultCoverageAudit(store,[],now+120000);assert.equal(result.audit.stuckCount,0);
+ assert.equal(audits.length,2);assert.equal(audits[1].action,'telegram_result_coverage_recovered');
+});

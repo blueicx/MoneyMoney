@@ -34,6 +34,27 @@ function safeNewsText(value) {
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
   }[ch]));
 }
+const mmPerformanceSamples = { chart: [], workspace: [], maxSamples: 60 };
+function recordMmPerformance(kind, name, durationMs) {
+  if (!mmPerformanceSamples[kind] || !Number.isFinite(durationMs)) return;
+  const rows = mmPerformanceSamples[kind];
+  rows.push({ name: String(name), durationMs: Math.max(0, Math.round(durationMs * 100) / 100), at: new Date().toISOString() });
+  if (rows.length > mmPerformanceSamples.maxSamples) rows.splice(0, rows.length - mmPerformanceSamples.maxSamples);
+}
+window.MoneyMoneyPerformance = {
+  record: recordMmPerformance,
+  snapshot() {
+    const navigation = performance.getEntriesByType?.('navigation')?.[0];
+    const paint = performance.getEntriesByType?.('paint') || [];
+    return {
+      navigationTiming: navigation ? { domInteractiveMs: Math.round(navigation.domInteractive), domContentLoadedMs: Math.round(navigation.domContentLoadedEventEnd), loadMs: Math.round(navigation.loadEventEnd) } : null,
+      paint: Object.fromEntries(paint.map(entry => [entry.name, Math.round(entry.startTime)])),
+      chart: mmPerformanceSamples.chart.slice(),
+      workspace: mmPerformanceSamples.workspace.slice(),
+      maxSamples: mmPerformanceSamples.maxSamples,
+    };
+  },
+};
 let advisorLoading = false;
 async function loadRiskPatrol(run = false) {
   const el = document.getElementById('risk-patrol-panel');
@@ -786,6 +807,27 @@ async function loadAiRunnerHistory(id, button) {
     const payload = await res.json();
     if (!res.ok || !payload.success) throw new Error(payload.error || '决策历史不可用');
     const rows = payload.data || [];
+    let qualityPanel = '';
+    try {
+      const qualityResponse = await fetch(`/api/ai-runners/${encodeURIComponent(id)}/quality`, { cache: 'no-store' });
+      const qualityPayload = await qualityResponse.json();
+      if (!qualityResponse.ok || !qualityPayload.success) throw new Error(qualityPayload.reason || qualityPayload.error || '质量统计暂不可用');
+      const quality = qualityPayload.data || {};
+      const matured = quality.matured || {};
+      const percent = value => value == null || !Number.isFinite(Number(value)) ? '—' : `${(Number(value) * 100).toFixed(1)}%`;
+      const versions = Array.isArray(matured.modelVersionGroups) ? matured.modelVersionGroups : [];
+      qualityPanel = `<section style="margin:8px 0 12px;padding:10px;border:1px solid var(--border);border-radius:10px;background:linear-gradient(135deg,var(--glass-highlight),var(--bg-secondary));color:var(--text-secondary);font-size:11px;">
+        <strong style="color:var(--text);">AI 质量与前向结果</strong>
+        <div style="margin-top:5px;">模型调用 ${Number(quality.modelCalls || 0)} · 失败 ${Number(quality.failedModelCalls || 0)} · 跳过 ${Number(quality.skippedModelCalls || 0)} · 平均延迟 ${quality.latency?.averageMs == null ? '—' : `${Math.round(quality.latency.averageMs)} ms`} · P95 ${quality.latency?.p95Ms == null ? '—' : `${Math.round(quality.latency.p95Ms)} ms`} · 未关联建议 ${Number(quality.unlinkedDecisions || 0)}</div>
+        <div style="margin-top:4px;">已成熟并明确关联的平仓 ${Number(matured.count || 0)} 笔${matured.calibrationAvailable ? ` · 置信度校准 Brier ${Number(matured.brierScore).toFixed(3)} · 胜率 ${percent(matured.winRate)}` : ` · ${safeNewsText(matured.reason || '至少 20 笔后才显示置信度校准和胜率')}`}</div>
+        ${versions.length ? versions.map(group => `<div style="margin-top:5px;padding-top:5px;border-top:1px solid var(--border);"><strong style="color:var(--text);">${safeNewsText(group.strategyVersion)} · ${safeNewsText(group.modelVersion)}</strong> · ${Number(group.count || 0)} 笔${group.brierScore == null ? ' · 分组样本不足，不显示校准值' : ` · Brier ${Number(group.brierScore).toFixed(3)} · 胜率 ${percent(group.winRate)}`}</div>`).join('') : ''}
+        ${qualityPayload.reason ? `<div style="margin-top:4px;color:var(--yellow);">${safeNewsText(qualityPayload.reason)}</div>` : ''}
+        ${qualityPayload.historyTruncated ? '<div style="margin-top:4px;color:var(--yellow);">历史记录已达到保留上限，统计仅覆盖当前保留记录。</div>' : ''}
+        <div style="margin-top:4px;">仅按显式订单血缘评估已成熟平仓样本；不构成策略排名或收益承诺。</div>
+      </section>`;
+    } catch (qualityError) {
+      qualityPanel = `<section style="margin:8px 0 12px;padding:10px;border:1px solid var(--border);border-radius:10px;background:var(--bg-secondary);color:var(--text-secondary);font-size:11px;">AI 质量统计暂不可用：${safeNewsText(qualityError?.message || '读取失败')}</section>`;
+    }
     const attribution = payload.attribution || {};
     const attributionRows = Array.isArray(attribution.strategies) ? attribution.strategies : [];
     const selectionAttributionPanel = renderAiRunnerSelectionAttribution(payload.selectionAttribution || {});
@@ -795,7 +837,7 @@ async function loadAiRunnerHistory(id, button) {
       ${attributionRows.length ? attributionRows.map(group => `<div style="margin-top:6px;padding-top:6px;border-top:1px solid var(--border);"><strong style="color:var(--text);">${safeNewsText(group.instrument)} · ${safeNewsText(group.strategy)} @ ${safeNewsText(group.strategyVersion)}</strong><div>已实现报价盈亏：${group.realizedQuotePnl == null ? '未知' : safeNewsText(Number(group.realizedQuotePnl).toFixed(4))} · 记录费用字段：${group.recordedFeesUsd == null ? '不完整' : safeNewsText(Number(group.recordedFeesUsd).toFixed(4))} · 记录滑点字段：${group.recordedSlippageUsd == null ? '不完整' : safeNewsText(Number(group.recordedSlippageUsd).toFixed(4))}</div><div>${safeNewsText(group.reason || '')}</div></div>`).join('') : `<div style="margin-top:5px;">${safeNewsText(attribution.reason || '当前没有可归因的模拟成交')}</div>`}
       ${(attribution.warnings || []).map(reason => `<div style="margin-top:4px;color:var(--yellow);">提示：${safeNewsText(reason)}</div>`).join('')}
     </section>`;
-    host.innerHTML = selectionAttributionPanel + attributionPanel + (rows.length ? rows.map(item => `
+    host.innerHTML = qualityPanel + selectionAttributionPanel + attributionPanel + (rows.length ? rows.map(item => `
       <div style="border-top:1px solid var(--border);padding:8px 4px;color:var(--text-secondary);font-size:11px;">
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;"><strong style="color:var(--text);">${safeNewsText(item.action)} · ${safeNewsText(item.instrument)}</strong><span>${safeNewsText(item.dataStatus)}${item.source ? ` · ${safeNewsText(item.source)}` : ''}</span><span>${safeNewsText(item.at)}</span></div>
         <div style="margin-top:4px;color:var(--text);">${safeNewsText(item.reason || '')}</div>
@@ -1854,7 +1896,7 @@ function renderSettingsForm(s) {
         </label>`;
   }).join('');
   document.getElementById('settings-form').innerHTML =
-  formHtml + '<div style="height:1px;background:var(--border);margin:16px 0;"></div>' + toggles +
+  renderUiPreferencesForm() + formHtml + '<div style="height:1px;background:var(--border);margin:16px 0;"></div>' + toggles +
   "<button class=\"tab\" style=\"margin-top:12px;\" onclick=\"resetSettings()\">\u21A9 \u6062\u590D\u9ED8\u8BA4\u8BBE\u7F6E</button>";
 }
 function renderAiSettingsForm(ai) {
@@ -1918,9 +1960,11 @@ function renderTelegramSettingsForm(tg) {
     '<button class="tab" onclick="testTelegramSettings()">🔌 手动发送测试消息</button>' +
     '<span id="telegram-settings-result" style="font-size:11px;color:var(--text-secondary);"></span></div>' +
     '<div id="telegram-test-delivery-history" style="font-size:11px;color:var(--text-secondary);margin-top:8px;">正在读取最近测试投递…</div>' +
+    '<div id="telegram-result-coverage" style="font-size:11px;color:var(--text-secondary);margin-top:8px;">正在读取事件结果与来源状态…</div>' +
     '<div style="font-size:11px;color:var(--text-secondary);line-height:1.6;margin-top:10px;">Token 使用密码框输入，服务器只返回配置状态，不会回显密钥。保存后机器人会自动重新加载。</div>' +
     '</div>';
   void loadTelegramTestDeliveryHistory();
+  void loadTelegramResultCoverage();
 }
 async function saveTelegramSettings() {
   const body = { telegramPollingEnabled: document.getElementById('telegram-polling-enabled').checked };
@@ -1983,6 +2027,32 @@ async function loadTelegramTestDeliveryHistory() {
     host.textContent = `最近测试投递：${labels[latest.status] || latest.status} · ${latest.completedAt || latest.attemptedAt} · ${latest.reason || '无补充说明'}`;
   } catch (error) {
     host.textContent = `最近测试投递状态不可用：${error.message || '读取失败'}`;
+  }
+}
+async function loadTelegramResultCoverage() {
+  const host = document.getElementById('telegram-result-coverage');
+  if (!host) return;
+  if (window.mm_isGuest || window.mm_isLoggedIn !== true) { host.textContent = '结果跟踪诊断仅管理员可见。'; return; }
+  host.textContent = '正在读取事件结果与来源状态…';
+  try {
+    const response = await fetch('/api/telegram/results/coverage', { cache: 'no-store' });
+    const payload = await response.json();
+    if (!response.ok || !payload.success) throw new Error(payload.reason || payload.error || '结果跟踪诊断不可用');
+    const data = payload.data || {}, recent = Array.isArray(data.recent) ? data.recent.slice(0, 8) : [];
+    const labels = { published: '已发布', revised: '已修订', pending: '等待结果', waiting: '等待结果', unavailable: '来源不可用', unsupported: '不支持', unverifiable: '无法核验', stopped: '已停止', failed: '投递失败', sent: '已发送', acknowledged: '已确认' };
+    const fmt = value => value && Number.isFinite(Date.parse(String(value))) ? new Date(value).toLocaleString() : '未提供';
+    const sources = Object.entries(data.bySource || {}).map(([source, count]) => `${safeNewsText(source)} ${Number(count)}`).join(' · ') || '暂无来源记录';
+    const stuck = (data.stuckCountdowns || []).slice(0, 5).map(row => `<div style="padding:7px 0;border-top:1px solid var(--border);"><b style="color:var(--yellow);">仍在等待核验</b> · ${safeNewsText(row.kind)} · 下次检查 ${safeNewsText(fmt(row.nextCheckAt))}${row.hoursOverdue != null ? ` · 已超时 ${Number(row.hoursOverdue)} 小时` : ''}<div>${safeNewsText(row.reason || '实际结果尚未取得')}</div></div>`).join('');
+    const rows = recent.map(row => {
+      const state = labels[row.resultStatus] || safeNewsText(row.resultStatus);
+      const delivery = labels[row.deliveryStatus] || safeNewsText(row.deliveryStatus);
+      const links = (row.evidenceRefs || []).flatMap(value => { try { const url = new URL(String(value)); return ['https:', 'http:'].includes(url.protocol) ? [`<a href="${safeNewsText(url.href)}" target="_blank" rel="noopener noreferrer">来源证据 ↗</a>`] : []; } catch { return []; } }).join(' · ');
+      return `<div style="padding:7px 0;border-top:1px solid var(--border);"><b>${safeNewsText(row.title || row.kind)}</b> · ${safeNewsText(state)} · 投递${safeNewsText(delivery)}<div>事件 ${safeNewsText(row.eventDate || '时间未知')} · 来源 ${safeNewsText(row.source || '未记录')} · 实际值 ${safeNewsText(row.actual || '尚未核验')}</div><div>发布时间 ${safeNewsText(fmt(row.publishedAt))} · 抓取 ${safeNewsText(fmt(row.retrievedAt))} · 下次检查 ${safeNewsText(fmt(row.nextCheckAt))}</div>${row.reason || row.error ? `<div style="color:var(--text-secondary);">${safeNewsText(row.reason || row.error)}</div>` : ''}${links ? `<div>${links}</div>` : ''}</div>`;
+    }).join('');
+    const audit = payload.audit || {};
+    host.innerHTML = `<section class="glass-card" style="padding:12px;margin-top:10px;"><div style="display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap;"><strong style="color:var(--text);">Telegram 结果跟踪诊断</strong><button class="tab" type="button" onclick="loadTelegramResultCoverage()">刷新</button></div><div style="margin-top:6px;">跟踪 ${Number(data.total || 0)} · 等待 ${Number(data.waiting || 0)} · 已发布 ${Number(data.published || 0)} · 修订 ${Number(data.revised || 0)} · 来源不可用/不支持 ${Number(data.unavailable || 0)} · 投递失败 ${Number(data.failedDeliveries || 0)}</div><div style="margin-top:4px;">来源覆盖：${sources}</div><div style="margin-top:4px;">自动抽检 ${safeNewsText(fmt(audit.checkedAt))} · 长期等待 ${Number(audit.stuckCount || 0)} 项${audit.fingerprint ? ` · 状态指纹 ${safeNewsText(String(audit.fingerprint).slice(0, 12))}` : ''}</div>${stuck}${rows ? `<details style="margin-top:7px;"><summary style="cursor:pointer;">最近结果、等待状态与证据（${recent.length}）</summary>${rows}</details>` : `<div style="margin-top:6px;color:var(--text-secondary);">${safeNewsText(payload.reason || '尚无事件结果跟踪记录')}</div>`}<div style="margin-top:6px;font-size:10px;color:var(--text-secondary);">只显示来源确认的实际值；倒计时、预期值及上期值不会冒充结果。</div></section>`;
+  } catch (error) {
+    host.textContent = `Telegram 结果跟踪诊断不可用：${error.message || '读取失败'}`;
   }
 }
 async function saveAiSettings(chain) {
@@ -2271,8 +2341,18 @@ function setCryptoChartPattern(name, enabled) {
   try { localStorage.setItem(cryptoChartOverlayStorageKey(), JSON.stringify(cryptoChartOverlayConfig)); } catch (e) {}
   if (bnKlineData.length) drawCandles(document.getElementById('bn-candlestick'), bnKlineData);
 }
-function buildCryptoStrategySignals(bars) {
-  return window.MoneyChartAnalysis?.detectStrategySignals(bars, cryptoChartStrategyConfig) || [];
+function buildCryptoStrategySignals(bars, live = false) {
+  const analysis = window.MoneyChartAnalysis;
+  const signals = analysis?.detectStrategySignals(bars, cryptoChartStrategyConfig) || [];
+  const canvas = document.getElementById('bn-candlestick');
+  const metadata = canvas?.moneySourceMetadata || {};
+  const sourceTime = Number(metadata.sourceTime);
+  const sourceFresh = metadata.connection === 'live' && Number.isFinite(sourceTime) && Date.now() - sourceTime >= -5000 && Date.now() - sourceTime <= 60_000;
+  return analysis?.buildStrategyChartPoints?.({
+    bars, signals, market: 'crypto', instrument: `crypto:binance:${bnCurrentSymbol}`, timeframe: bnCurrentInterval,
+    source: metadata.source || 'Binance Spot Kline WebSocket', sourceTime: metadata.sourceTime, live, sourceFresh,
+    currentBarClosed: bars[bars.length - 1]?.closed === true,
+  }) || signals;
 }
 function drawCandles(canvas, klines) {
   if (document.hidden) return;
@@ -2306,7 +2386,7 @@ function drawCandles(canvas, klines) {
   loadCryptoChartStrategyConfig();
   loadCryptoChartOverlayConfig();
   if (cryptoChartOverlayConfig.supportResistance) void loadCryptoSupportResistance();
-  const strategySignals = buildCryptoStrategySignals(klines);
+  const strategySignals = buildCryptoStrategySignals(klines, !window.cryptoMoneyKLine?.timer && canvas.moneySourceMetadata?.connection === 'live');
   const cryptoPatterns = cryptoChartOverlayConfig.patterns
     ? (window.MoneyChartAnalysis?.detectCandlestickPatterns(klines) || []).filter(item => cryptoChartOverlayConfig.patternTypes?.[item.type] !== false)
     : [];
@@ -2400,10 +2480,13 @@ function drawCandles(canvas, klines) {
     const anchor = signal.side === 'buy' ? bar.low : bar.high;
     const y = padT + chartH - ((anchor - minP) / range) * chartH + (signal.side === 'buy' ? 14 : -14);
     const color = signal.side === 'buy' ? green : red;
-    ctx.fillStyle = color; ctx.beginPath();
+    ctx.fillStyle = color; ctx.strokeStyle = color; ctx.lineWidth = 1.5; ctx.beginPath();
     if (signal.side === 'buy') { ctx.moveTo(x, y - 7); ctx.lineTo(x - 5, y + 3); ctx.lineTo(x + 5, y + 3); }
     else { ctx.moveTo(x, y + 7); ctx.lineTo(x - 5, y - 3); ctx.lineTo(x + 5, y - 3); }
-    ctx.closePath(); ctx.fill();
+    ctx.closePath();
+    if (signal.status === 'forming') { ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--bg-secondary')?.trim() || '#111827'; ctx.fill(); ctx.stroke(); }
+    else ctx.fill();
+    ctx.lineWidth = 1;
     ctx.fillStyle = color; ctx.font = 'bold 9px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = signal.side === 'buy' ? 'top' : 'bottom';
     ctx.fillText(signal.label, x, signal.side === 'buy' ? y + 5 : y - 5);
   });
@@ -2527,7 +2610,7 @@ async function loadBinanceKlines(options = {}) {
       return;
     }
     bnKlineData = live && window.MoneyTradingChart?.mergeHistory ? window.MoneyTradingChart.mergeHistory(bnKlineData,data.data) : data.data;
-    canvas.moneySourceMetadata={connection:'snapshot',sourceTime:data.sourceTime?Date.parse(data.sourceTime):null};
+    canvas.moneySourceMetadata={connection:'snapshot',sourceTime:data.sourceTime?Date.parse(data.sourceTime):null,retrievedAt:Date.now(),dataStatus:data.dataStatus||'unknown',source:data.source||'Binance Public K线'};
     if (live) window.MoneyLiveKline?.note('crypto', 'REST 降级快照 · ' + (data.dataStatus || '状态未知') + ' · 来源时间 ' + (data.updatedAt ? formatChartTime(data.updatedAt) : '未知'));
     drawCandles(canvas, bnKlineData);
     const rsiCanvas = document.getElementById('bn-rsi');
@@ -5627,9 +5710,22 @@ function setStockChartPattern(name, enabled) {
     else drawStockKline(document.getElementById('stock-kline'), stockChartKlines);
   }
 }
-function buildStockStrategySignals(bars) {
+function buildStockStrategySignals(bars, live = false) {
   const analysis = window.MoneyChartAnalysis;
-  return analysis?.detectStrategySignals(bars, stockChartOverlayConfig.strategies || {}) || [];
+  const signals = analysis?.detectStrategySignals(bars, stockChartOverlayConfig.strategies || {}) || [];
+  const metadata = document.getElementById('stock-kline')?.moneySourceMetadata || {};
+  const sourceTime = Number(metadata.sourceTime);
+  const sourceFresh = Number.isFinite(sourceTime) && Date.now() - sourceTime >= -5000 && Date.now() - sourceTime <= 90_000
+    && ['live', 'delayed'].includes(String(metadata.dataStatus || '').toLowerCase());
+  const rawInstrument = String(currentStockApiSymbol || currentStockSymbol).replace(/^us/i, '').toUpperCase();
+  const instrument = /^(SH|SZ|BJ)\d{6}$/.test(rawInstrument)
+    ? `stock:cn:${rawInstrument}`
+    : /^[A-Z][A-Z0-9.-]{0,14}$/.test(rawInstrument) ? `stock:us:${rawInstrument}` : '';
+  return analysis?.buildStrategyChartPoints?.({
+    bars, signals, market: 'stocks', instrument,
+    timeframe: currentStockKlinePeriod, source: metadata.source || '股票行情来源', sourceTime: metadata.sourceTime,
+    live, sourceFresh, currentBarClosed: bars[bars.length - 1]?.closed === true,
+  }) || signals;
 }
 function renderChartSignalList(targetId, signals, emptyText) {
   const el = document.getElementById(targetId);
@@ -5643,7 +5739,11 @@ function renderChartSignalList(targetId, signals, emptyText) {
     const time = signal.time ? (targetId === 'stock-chart-signals' ? formatStockKlineTime(signal.time) : new Date(signal.time).toLocaleDateString('zh-CN', { month:'numeric', day:'numeric' })) : '--';
     const price = Number(signal.price);
     const priceText = Number.isFinite(price) ? (price >= 1000 ? price.toFixed(0) : price.toFixed(2)) : '--';
-    return `<span class="chart-signal-item ${signal.side === 'buy' ? 'buy' : 'sell'}" title="${stockEscapeHtml(signal.reason || '')}">${signal.side === 'buy' ? '▲' : '▼'} ${stockEscapeHtml(signal.label)} · ${time} · ${priceText}</span>`;
+    const state = signal.status === 'forming' ? '形成中' : '已确认';
+    const sourceTime = signal.sourceTime ? formatChartTime(signal.sourceTime) : '来源时间未提供';
+    const source = signal.source || '来源未知';
+    const title = [signal.reason, `来源：${source}`, `来源时间：${sourceTime}`, `状态：${state}`, `策略版本：${signal.strategyVersion || '未知'}`].filter(Boolean).join(' · ');
+    return `<span class="chart-signal-item ${signal.side === 'buy' ? 'buy' : 'sell'} ${signal.status === 'forming' ? 'forming' : 'confirmed'}" title="${stockEscapeHtml(title)}" data-signal-status="${signal.status === 'forming' ? 'forming' : 'confirmed'}">${signal.status === 'forming' ? '◯' : '●'} ${signal.side === 'buy' ? '买' : '卖'} · ${stockEscapeHtml(signal.label)} · ${time} · ${priceText} · ${state}</span>`;
   }).join('');
 }
 function renderChartPatternList(targetId, patterns, emptyText) {
@@ -6294,7 +6394,7 @@ async function performStockKlineLoad(symbol, name, apiSymbol, options = {}) {
     currentStockKlineReason = '';
     const freshness = window.MoneyChartAnalysis?.chartDataStatusLabel?.(d) || '数据状态未知';
     stockChartExchangeTimezone = d.timezone || stockChartExchangeTimezone;
-    document.getElementById('stock-kline').moneySourceMetadata={connection:'snapshot',sourceTime:d.sourceTime?Date.parse(d.sourceTime):null,adjustment:d.adjustment||{actual:'unknown',conversionEnabled:false,reason:'来源未声明复权口径，转换不可用'},coverage:d.coverage};
+    document.getElementById('stock-kline').moneySourceMetadata={connection:'snapshot',sourceTime:d.sourceTime?Date.parse(d.sourceTime):null,retrievedAt:Date.now(),dataStatus:d.dataStatus||'unknown',source:d.source||'股票行情来源',adjustment:d.adjustment||{actual:'unknown',conversionEnabled:false,reason:'来源未声明复权口径，转换不可用'},coverage:d.coverage};
     stockChartIntradaySession = d.session || null;
     const latestBarTime = stockChartKlinesTime(d.data[d.data.length - 1]);
     const actualCoverage = d.session?.dataWindow ? ` · 来源覆盖 ${d.session.dataWindow.firstBarLocalTime}–${d.session.dataWindow.lastBarLocalTime}（${d.session.dataWindow.bars}根；不代表完整交易时段）` : '';
@@ -6374,7 +6474,7 @@ function drawStockKline(canvas, klines) {
     renderChartSignalList('stock-chart-signals', [], '当前周期未触发所选策略信号');
     return;
   }
-  const overlays = window.MoneyChartAnalysis.buildChartOverlays({ bars: klines, signals: buildStockStrategySignals(klines), config: stockChartOverlayConfig });
+  const overlays = window.MoneyChartAnalysis.buildChartOverlays({ bars: klines, signals: buildStockStrategySignals(klines, tradingActive), config: stockChartOverlayConfig });
   renderMovingAverageValues('stock-chart-ma-values', klines, [5, 10, 20]);
   const replayStatus = document.getElementById('stock-chart-replay-status');
   if (replayStatus) replayStatus.textContent = `${visibleCount}/${fullKlines.length}`;
@@ -6487,10 +6587,13 @@ function drawStockKline(canvas, klines) {
     const bar = klines[signal.index]; if (!bar) return;
     const x = xCenter(signal.index), y = signal.side === 'buy' ? yPrice(bar.low) + 14 : yPrice(bar.high) - 14;
     const color = signal.side === 'buy' ? '#22c55e' : '#ef4444';
-    ctx.fillStyle = color; ctx.beginPath();
+    ctx.fillStyle = color; ctx.strokeStyle = color; ctx.lineWidth = 1.5; ctx.beginPath();
     if (signal.side === 'buy') { ctx.moveTo(x, y - 8); ctx.lineTo(x - 6, y + 3); ctx.lineTo(x + 6, y + 3); }
     else { ctx.moveTo(x, y + 8); ctx.lineTo(x - 6, y - 3); ctx.lineTo(x + 6, y - 3); }
-    ctx.closePath(); ctx.fill();
+    ctx.closePath();
+    if (signal.status === 'forming') { ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--bg-secondary')?.trim() || '#111827'; ctx.fill(); ctx.stroke(); }
+    else ctx.fill();
+    ctx.lineWidth = 1;
     ctx.font = 'bold 9px Inter, system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = signal.side === 'buy' ? 'top' : 'bottom';
     ctx.fillText(signal.label, x, signal.side === 'buy' ? y + 5 : y - 5);
   });
@@ -9227,6 +9330,49 @@ document.addEventListener('keydown', event => {
   if (event.key === 'Enter') { event.preventDefault(); runGlobalSearchItem(globalSearchState.active); }
 });
 // --- Grouped Navigation ---
+function applyUiPreferences() {
+  const root = document.documentElement;
+  let density = 'comfortable', textSize = 'normal';
+  try {
+    density = localStorage.getItem('mm-ui-density') || density;
+    textSize = localStorage.getItem('mm-ui-text-size') || textSize;
+  } catch { /* Keep accessible defaults when storage is unavailable. */ }
+  if (['comfortable', 'compact'].includes(density)) root.setAttribute('data-ui-density', density);
+  else root.removeAttribute('data-ui-density');
+  if (['normal', 'large'].includes(textSize)) root.setAttribute('data-ui-text', textSize);
+  else root.removeAttribute('data-ui-text');
+  return { density, textSize };
+}
+
+function saveUiPreference(key, value) {
+  const allowed = key === 'mm-ui-density' ? ['comfortable', 'compact'] : key === 'mm-ui-text-size' ? ['normal', 'large'] : [];
+  if (!allowed.includes(value)) return false;
+  try { localStorage.setItem(key, value); } catch { return false; }
+  applyUiPreferences();
+  showToast('显示偏好已保存', 'success', 1400);
+  return true;
+}
+
+function renderUiPreferencesForm() {
+  let { density, textSize } = applyUiPreferences();
+  if (!['comfortable', 'compact'].includes(density)) density = 'comfortable';
+  if (!['normal', 'large'].includes(textSize)) textSize = 'normal';
+  return `<div class="glass-card ui-preferences-card" aria-labelledby="ui-preferences-heading">
+    <strong id="ui-preferences-heading">显示偏好</strong>
+    <div class="ui-preferences-grid">
+      <label for="ui-density">布局密度<select id="ui-density" onchange="saveUiPreference('mm-ui-density', this.value)">
+        <option value="comfortable" ${density === 'comfortable' ? 'selected' : ''}>舒适</option>
+        <option value="compact" ${density === 'compact' ? 'selected' : ''}>紧凑</option>
+      </select></label>
+      <label for="ui-text-size">文字大小<select id="ui-text-size" onchange="saveUiPreference('mm-ui-text-size', this.value)">
+        <option value="normal" ${textSize === 'normal' ? 'selected' : ''}>标准</option>
+        <option value="large" ${textSize === 'large' ? 'selected' : ''}>较大</option>
+      </select></label>
+    </div>
+    <span class="ui-preferences-hint">只影响当前浏览器；主题颜色仍由顶部主题按钮控制。</span>
+  </div>`;
+}
+
 function updateThemeButtons(theme) {
   const icon = theme === 'money' ? '🪙' : (theme === 'dark' ? '🌙' : '☀️');
   const title = theme === 'money' ? '纸醉金迷' : (theme === 'dark' ? '深色' : '浅色');
@@ -9252,6 +9398,7 @@ function initTheme() {
   }
   localStorage.setItem('mm-theme', current);
   localStorage.setItem('theme', current);
+  applyUiPreferences();
   updateThemeButtons(current);
 }
 
@@ -10486,6 +10633,7 @@ async function openUnifiedInstrument(instrument) {
   }
 }
 function showTab(tab, clicked, options = {}) {
+  const workspaceStartedAt = performance.now();
   if (window.mm_isGuest && GUEST_ADMIN_TABS.has(tab)) {
     if (typeof window.showToast === 'function') window.showToast('访客模式仅支持只读浏览', 'error');
     return;
@@ -10537,6 +10685,7 @@ if (targetTab === 'journal') loadJournal();
   if (targetTab === 'journal') loadReviewNotes();
   if (targetTab === 'research') loadResearchWorkspace();
   if (targetTab === 'ops') loadOpsConsole();
+  recordMmPerformance('workspace', targetTab, performance.now() - workspaceStartedAt);
 }
 // --- Cross-platform Prediction Radar ---
 function riskLevelColor(level) {
@@ -11874,6 +12023,16 @@ async function startDashboard() {
     loadNewsTicker();
     if (activeMarketScope === 'overview') { loadMarketOverview(); loadResearchBriefing(); }
   }
+}
+for (const [name, original] of [['drawCandles', drawCandles], ['drawStockKline', drawStockKline]]) {
+  const measured = function (...args) {
+    if (document.hidden) return original.apply(this, args);
+    const startedAt = performance.now();
+    try { return original.apply(this, args); }
+    finally { recordMmPerformance('chart', name, performance.now() - startedAt); }
+  };
+  if (name === 'drawCandles') drawCandles = measured;
+  else drawStockKline = measured;
 }
 window.addEventListener('mm-workspace-modules-ready', event => {
   if (event.detail?.group !== 'charts') return;

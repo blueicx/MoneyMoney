@@ -61,6 +61,56 @@
     [data-theme="money"] {
       color-scheme: dark;
     }
+    html { font-size: 16px; }
+    html[data-ui-text="large"] { font-size: 18px; }
+    body { font-size: 1rem; }
+    html[data-ui-text="large"] :is([style*="font-size:9px"], [style*="font-size: 9px"]) { font-size:11px !important; }
+    html[data-ui-text="large"] :is([style*="font-size:10px"], [style*="font-size: 10px"]) { font-size:12px !important; }
+    html[data-ui-text="large"] :is([style*="font-size:10.5px"], [style*="font-size: 10.5px"]) { font-size:12.5px !important; }
+    html[data-ui-text="large"] :is([style*="font-size:11px"], [style*="font-size: 11px"]) { font-size:13px !important; }
+    html[data-ui-text="large"] :is([style*="font-size:11.5px"], [style*="font-size: 11.5px"]) { font-size:13.5px !important; }
+    html[data-ui-text="large"] :is([style*="font-size:12px"], [style*="font-size: 12px"]) { font-size:14px !important; }
+    html[data-ui-text="large"] :is([style*="font-size:12.5px"], [style*="font-size: 12.5px"]) { font-size:14.5px !important; }
+    html[data-ui-text="large"] :is([style*="font-size:13px"], [style*="font-size: 13px"]) { font-size:15px !important; }
+    html[data-ui-text="large"] :is([style*="font-size:14px"], [style*="font-size: 14px"]) { font-size:16px !important; }
+    html[data-ui-text="large"] :is([style*="font-size:15px"], [style*="font-size: 15px"]) { font-size:17px !important; }
+    html[data-ui-text="large"] :is([style*="font-size:16px"], [style*="font-size: 16px"]) { font-size:18px !important; }
+    html[data-ui-text="large"] :is([style*="font-size:18px"], [style*="font-size: 18px"]) { font-size:20px !important; }
+    html[data-ui-text="large"] :is([style*="font-size:20px"], [style*="font-size: 20px"]) { font-size:22px !important; }
+    html[data-ui-text="large"] :is([style*="font-size:22px"], [style*="font-size: 22px"]) { font-size:24px !important; }
+    html[data-ui-text="large"] :is(.tab, .section-title, .data-table td, .chain-table td) { font-size:15px !important; }
+    html[data-ui-density="comfortable"] .tab,
+    html[data-ui-density="comfortable"] .ui-preferences-card select {
+      min-height: 40px;
+    }
+    html[data-ui-density="compact"] .tab {
+      min-height: 30px !important;
+      padding: 5px 9px !important;
+    }
+    html[data-ui-density="compact"] .glass-card { padding: 12px !important; }
+    html[data-ui-density="compact"] .data-table th,
+    html[data-ui-density="compact"] .data-table td,
+    html[data-ui-density="compact"] .chain-table th,
+    html[data-ui-density="compact"] .chain-table td { padding: 7px 9px !important; }
+    .ui-preferences-card {
+      display: grid;
+      gap: 10px;
+      padding: 14px;
+      margin: 0 0 18px;
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      background: linear-gradient(135deg, var(--glass-highlight), var(--bg-card));
+      color: var(--text);
+    }
+    .ui-preferences-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
+    .ui-preferences-grid label { display:grid; gap:5px; color:var(--text-secondary); font-size:12px; }
+    .ui-preferences-grid select { min-height:36px; padding:6px 9px; border:1px solid var(--border); border-radius:8px; background:var(--bg-secondary); color:var(--text); }
+    .ui-preferences-hint { color:var(--text-secondary); font-size:11px; line-height:1.5; }
+    @media (max-width: 640px) {
+      html[data-ui-density="comfortable"] .tab,
+      html[data-ui-density="comfortable"] .ui-preferences-card select { min-height:44px; }
+      .ui-preferences-grid { grid-template-columns:1fr; }
+    }
     html {
       background: var(--bg);
     }
@@ -429,6 +479,8 @@
     .chart-signal-item { display:inline-flex; align-items:center; gap:5px; border:1px solid var(--border); border-radius:7px; padding:4px 7px; font-size:10px; background:var(--bg-secondary); }
     .chart-signal-item.buy { color:var(--green); }
     .chart-signal-item.sell { color:var(--red); }
+    .chart-signal-item.forming { border-style:dashed; background:color-mix(in srgb,var(--bg-secondary) 72%,transparent); }
+    .chart-signal-item.confirmed { border-style:solid; }
     .chart-signal-empty { color:var(--text-secondary); font-size:11px; }
     .chart-pattern-marker { position:relative; }
     .chart-pattern-marker:hover, .chart-pattern-marker:focus { outline:none; z-index:10; }

@@ -6,6 +6,10 @@
     return (last && bar.time === last.time ? rows.slice(0, -1).concat(bar) : rows.concat(bar)).slice(-2000);
   }
   function canUpdate(c) { return !!c.visible && ['stocks', 'crypto'].includes(c.market) && !c.asOf && !c.date && !c.replay; }
+  function shouldPoll(c, state, now = Date.now()) {
+    return !!c?.visible && !!state?.key && now >= state.nextPoll &&
+      (c.market === 'stocks' || (c.market === 'crypto' && now - state.lastPush > 20000));
+  }
   let source = null, key = '', generation = 0, busy = false, lastPush = 0, nextPoll = 0, abort = null;
   const enabled = { stocks: true, crypto: true };
   function context() {
@@ -41,7 +45,7 @@
     source = new EventSource('/api/kline-stream?market=crypto&instrument=' + encodeURIComponent('crypto:binance:' + c.symbol) + '&interval=' + encodeURIComponent(c.interval));
     source.addEventListener('state', event => {
       if (version !== generation) return;
-      try { const data = JSON.parse(event.data); note(c.market, data.reason || data.connection); const canvas=document.getElementById('bn-candlestick'); if(canvas){canvas.moneySourceMetadata={...canvas.moneySourceMetadata,connection:data.connection,sourceTime:data.updatedAt?Date.parse(data.updatedAt):canvas.moneySourceMetadata?.sourceTime};window.MoneyTradingChart?.redraw(canvas);} } catch { /* Ignore malformed transport frames. */ }
+      try { const data = JSON.parse(event.data); note(c.market, data.reason || data.connection); const canvas=document.getElementById('bn-candlestick'); if(canvas){canvas.moneySourceMetadata={...canvas.moneySourceMetadata,connection:data.connection,source:data.source||canvas.moneySourceMetadata?.source||'Binance Spot Kline WebSocket',sourceTime:data.updatedAt?Date.parse(data.updatedAt):canvas.moneySourceMetadata?.sourceTime};window.MoneyTradingChart?.redraw(canvas);} } catch { /* Ignore malformed transport frames. */ }
     });
     source.addEventListener('kline', event => {
       if (version !== generation || !canUpdate(context())) return;
@@ -53,7 +57,7 @@
         if (!old || bar.time - old.time > minutes * 60000) { note(c.market, '历史缺口：等待预算内 REST 同步，未补造蜡烛'); return; }
         const rows = mergeBar(bnKlineData, bar); if (!rows) return;
         bnKlineData = rows; lastPush = Date.now();
-        document.getElementById('bn-candlestick').moneySourceMetadata={connection:'live',sourceTime:Number.isFinite(data.eventTime)?data.eventTime:null};
+        document.getElementById('bn-candlestick').moneySourceMetadata={...document.getElementById('bn-candlestick').moneySourceMetadata,connection:'live',source:'Binance Spot Kline WebSocket',sourceTime:Number.isFinite(data.eventTime)?data.eventTime:null};
         drawCandles(document.getElementById('bn-candlestick'), rows);
         const rsi = document.getElementById('bn-rsi'), macd = document.getElementById('bn-macd');
         if (rsi) drawRSI(rsi, rows); if (macd) drawMACD(macd, rows);
@@ -74,9 +78,14 @@
       const status = document.createElement('span'); status.id = 'mm-live-status-' + market; status.setAttribute('aria-live', 'polite'); panel.append(button, status); card.prepend(panel);
     }
     document.addEventListener('visibilitychange', sync); window.addEventListener('mm-workspace-context', sync); window.addEventListener('pagehide', stop);
-    setInterval(() => { sync(); const c = context(); if (key && Date.now() >= nextPoll && (c.market === 'stocks' || Date.now() - lastPush > 20000)) { nextPoll = Date.now() + 30000; void poll(c); } }, 1000);
+    setInterval(() => {
+      if (document.hidden) return;
+      sync();
+      const c = context(), now = Date.now();
+      if (shouldPoll(c, { key, nextPoll, lastPush }, now)) { nextPoll = now + 30000; void poll(c); }
+    }, 5000);
     sync();
   }
-  window.MoneyLiveKline = { mergeBar, canUpdate, sync, stop, note };
+  window.MoneyLiveKline = { mergeBar, canUpdate, shouldPoll, sync, stop, note };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mount); else mount();
 })();

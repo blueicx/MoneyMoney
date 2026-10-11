@@ -123,6 +123,21 @@ async function main() {
       return { initial, updated, final: bnKlineData.length, status: document.getElementById('mm-live-status-crypto').textContent };
     }, start);
     assert.equal(push.updated, 103); assert.equal(push.final, push.initial + 1); assert.match(push.status, /蜡烛形成中/);
+    const strategyLifecycle=await page.evaluate(start=>{
+      const canvas=document.getElementById('bn-candlestick'),previous={rows:bnKlineData,metadata:canvas.moneySourceMetadata,config:{...cryptoChartStrategyConfig},timer:window.cryptoMoneyKLine};
+      const strategyBars=Array.from({length:31},(_,index)=>{const close=index<29?100:index===29?90:130;return{time:start-(30-index)*300000,open:close,high:close+1,low:close-1,close,volume:100,closed:false};});
+      cryptoChartStrategyConfig={maCross:true,rsiReversal:false,bollinger:false,volumeBreakout:false};localStorage.setItem(cryptoChartStorageKey(),JSON.stringify(cryptoChartStrategyConfig));
+      bnKlineData=strategyBars;canvas.moneySourceMetadata={connection:'live',sourceTime:Date.now(),dataStatus:'live',source:'Isolated strategy fixture'};window.cryptoMoneyKLine={timer:null};drawCandles(canvas,bnKlineData);
+      const forming={count:document.querySelectorAll('#bn-chart-signals [data-signal-status="forming"]').length,text:document.getElementById('bn-chart-signals').textContent,title:document.querySelector('#bn-chart-signals [data-signal-status="forming"]')?.title};
+      bnKlineData[30]={...bnKlineData[30],open:85,high:86,low:84,close:85};drawCandles(canvas,bnKlineData);const removed=document.querySelectorAll('#bn-chart-signals [data-signal-status="forming"],#bn-chart-signals [data-signal-status="confirmed"]').length;
+      bnKlineData[30]={...bnKlineData[30],open:100,high:131,low:99,close:130};canvas.moneySourceMetadata.sourceTime=Date.now()-120000;drawCandles(canvas,bnKlineData);const stale=document.querySelectorAll('#bn-chart-signals [data-signal-status="forming"],#bn-chart-signals [data-signal-status="confirmed"]').length;
+      canvas.moneySourceMetadata.sourceTime=Date.now();bnKlineData[30]={...bnKlineData[30],closed:true};drawCandles(canvas,bnKlineData);const confirmed={count:document.querySelectorAll('#bn-chart-signals [data-signal-status="confirmed"]').length,text:document.getElementById('bn-chart-signals').textContent};
+      bnKlineData=previous.rows;canvas.moneySourceMetadata=previous.metadata;cryptoChartStrategyConfig=previous.config;window.cryptoMoneyKLine=previous.timer;drawCandles(canvas,bnKlineData);
+      return{forming,removed,stale,confirmed};
+    },start);
+    assert.equal(strategyLifecycle.forming.count,1,'live strategy point must be shown as forming');assert.match(strategyLifecycle.forming.text,/形成中/);assert.match(strategyLifecycle.forming.title,/来源：Isolated strategy fixture/);assert.match(strategyLifecycle.forming.title,/策略版本：chart-strategy-v1/);
+    assert.equal(strategyLifecycle.removed,0,'a forming marker must be removed when its live condition no longer holds');assert.equal(strategyLifecycle.stale,0,'stale source data must not keep a forming strategy marker');
+    assert.equal(strategyLifecycle.confirmed.count,1,'the still-valid signal becomes confirmed when the provider closes its candle');assert.match(strategyLifecycle.confirmed.text,/已确认/);
     const overlay=page.locator('#crypto-chart-card .mm-trading-crosshair');await overlay.scrollIntoViewIfNeeded();
     const bounds=await overlay.boundingBox();await page.mouse.move(bounds.x+bounds.width*.45,bounds.y+80);await page.mouse.down();await page.mouse.move(bounds.x+bounds.width*.75,bounds.y+80,{steps:5});await page.mouse.up();
     await page.locator('#crypto-chart-card .mm-trading-latest').waitFor({state:'visible'});

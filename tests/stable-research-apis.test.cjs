@@ -96,6 +96,7 @@ test('K-line time machine reads persisted asOf snapshots without live fallback',
   const stockRoute = serverSource.slice(serverSource.indexOf("app.get('/api/stock/kline'"), serverSource.indexOf("app.get('/api/diagnostics'"));
   assert.match(stockRoute, /asOf/);
   assert.match(stockRoute, /queryBarsAsOf\(/);
+  assert.match(stockRoute, /sourceTime:\s*history\?\.sourceTime/);
   assert.match(stockRoute, /不回退|historical|历史/);
 });
 
