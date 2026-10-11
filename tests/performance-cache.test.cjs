@@ -12,8 +12,10 @@ test('Performance cache prevents duplicate requests and handles SWR', async () =
   ]);
   assert.strictEqual(callCount, 1, 'Concurrent requests should be deduplicated');
   assert.deepStrictEqual(res1.data, res2.data);
+  assert.equal(res1.cacheHit, false, 'the request that populated the cache is not a cache hit');
   const fresh = await cache.fetch('scope1:source1:key1', fetcher, { ttl: 100 });
   assert.equal(fresh.status, 'fresh');
+  assert.equal(fresh.cacheHit, true, 'a fresh cache response must be distinguishable from an upstream fetch');
   assert.equal(callCount, 1, 'Fresh cache hits should not call upstream');
   assert.match(createCacheEtag(fresh.data), /^"[0-9a-f]+"$/);
 });
@@ -27,6 +29,7 @@ test('Performance cache serves stale data while refreshing once', async () => {
   await new Promise(resolve => setTimeout(resolve, 60));
   const stale = await cache.fetch('stocks:nasdaq:AAPL', fetcher, { ttl: 50, staleTtl: 100 });
   assert.equal(stale.status, 'stale');
+  assert.equal(stale.cacheHit, true);
   assert.deepStrictEqual(stale.data, { version: 1 });
   let refreshed;
   for (let attempt = 0; attempt < 20; attempt += 1) {
@@ -37,6 +40,35 @@ test('Performance cache serves stale data while refreshing once', async () => {
   assert.equal(refreshed.status, 'fresh');
   assert.deepStrictEqual(refreshed.data, { version: 2 });
   assert.equal(callCount, 2);
+});
+
+test('Performance cache bounds entries and evicts the least recently used settled value', async () => {
+  const { createPerformanceCache } = await import('../dist/features/performance-cache.js');
+  const cache = createPerformanceCache({ maxEntries: 2 });
+  let calls = 0;
+  const load = key => cache.fetch(key, async () => ({ key, call: ++calls }), { ttl: 1000 });
+  await load('a');
+  await load('b');
+  await load('a'); // touch a; b becomes least recently used
+  await load('c');
+  const a = await load('a');
+  const b = await load('b');
+  assert.equal(a.cacheHit, true);
+  assert.equal(b.cacheHit, false);
+  assert.equal(calls, 4);
+});
+
+test('stale refresh failures are absorbed and exposed on the next cached response', async () => {
+  const { createPerformanceCache } = await import('../dist/features/performance-cache.js');
+  const cache = createPerformanceCache();
+  await cache.fetch('ticker', async () => ({ price: 100 }), { ttl: 5, staleTtl: 500 });
+  await new Promise(resolve => setTimeout(resolve, 10));
+  const stale = await cache.fetch('ticker', async () => { throw new Error('refresh offline'); }, { ttl: 5, staleTtl: 500 });
+  assert.equal(stale.status, 'stale');
+  await new Promise(resolve => setTimeout(resolve, 10));
+  const observed = await cache.fetch('ticker', async () => ({ price: 101 }), { ttl: 5, staleTtl: 500 });
+  assert.equal(observed.status, 'stale');
+  assert.match(observed.error.message, /refresh offline/);
 });
 
 test('Performance cache reports an expired refresh failure', async () => {

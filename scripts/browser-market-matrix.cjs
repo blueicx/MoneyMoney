@@ -536,6 +536,12 @@ async function main() {
     assert.ok(selected);
     await page.waitForFunction(symbol => document.querySelector('#stock-chart-title')?.textContent?.includes(symbol), selected, { timeout: 10_000 });
     await page.waitForFunction(() => document.querySelector('#stock-kline')?.style.visibility === 'visible', null, { timeout: 10_000 });
+    const chartLayoutBounds = await page.evaluate(() => ({
+      card: document.querySelector('#stock-chart-card')?.getBoundingClientRect().width,
+      chart: document.querySelector('[data-stock-chart-region="chart"]')?.getBoundingClientRect().width,
+      canvas: document.querySelector('#stock-kline')?.getBoundingClientRect().width,
+    }));
+    assert.ok(chartLayoutBounds.chart >= 360, `B layout must keep a usable central chart at this viewport: ${JSON.stringify(chartLayoutBounds)}`);
     assert.match(await page.locator('#stock-chart-data-status').innerText(), /历史时点数据/);
     assert.match(await page.locator('#stock-chart-data-status').innerText(), /Browser acceptance fixture/);
     await page.locator('[data-kline-period="15m"]').click();
@@ -569,7 +575,20 @@ async function main() {
     assert.ok(klineRequests.some(item => item.period === '1h' && item.symbol === 'usAAPL'), 'companion chart should use the selected stock in its own period');
     const companion = page.locator('#stock-kline-companion');
     await companion.click({ position: { x: 105, y: 110 } });
-    await page.waitForFunction(() => document.querySelector('[data-chart-candle-date]')?.value === '2026-09-22', null, { timeout: 10_000 });
+    await page.waitForFunction(() => document.querySelector('[data-chart-candle-date]')?.value === '2026-09-22', null, { timeout: 10_000 }).catch(async error => {
+      console.error(JSON.stringify(await page.evaluate(() => {
+        const canvas = document.querySelector('#stock-kline-companion');
+        const rect = canvas?.getBoundingClientRect();
+        return {
+          selectedDate: document.querySelector('[data-chart-candle-date]')?.value,
+          selectionText: document.querySelector('#stock-chart-candle-selection')?.textContent,
+          companionStatus: document.querySelector('[data-stock-chart-companion-status]')?.textContent,
+          canvas: rect && { x: rect.x, y: rect.y, width: rect.width, height: rect.height, backingWidth: canvas.width, backingHeight: canvas.height },
+          hitTarget: rect && document.elementFromPoint(rect.x + 105, rect.y + 110)?.outerHTML?.slice(0, 240),
+        };
+      })));
+      throw error;
+    });
     await page.locator('[data-chart-companion-mode]').selectOption('benchmark');
     await page.waitForFunction(() => document.querySelector('[data-stock-chart-companion-status]')?.textContent?.includes('SPY基准'), null, { timeout: 10_000 });
     assert.ok(klineRequests.some(item => item.api === 'SPY' && item.symbol === 'usSPY'), 'benchmark chart must route to the stock benchmark only');

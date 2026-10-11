@@ -20,6 +20,7 @@ function chartHarness(fetcher, url = 'http://localhost/') {
   const canvas = window.document.getElementById('stock-kline');
   canvas.getContext = () => ({ setTransform() {}, clearRect() {} });
   window.fetch = fetcher;
+  window.loadStockChartEventRail = () => {};
   for (const name of ['bindStockKlineSelection', 'updateStockKlineFocusControl', 'loadStockChartOverlayConfig', 'drawStockKline']) window[name] = () => {};
   for (const name of ['renderChartSignalList', 'renderChartPatternList', 'renderChartStructureList']) window[name] = (id, items, reason) => { window.document.getElementById(id).textContent = reason || ''; };
   window.renderChartPatternMarkers = id => { window.document.getElementById(id).textContent = ''; };

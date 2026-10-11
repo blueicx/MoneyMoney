@@ -656,28 +656,42 @@
                 <button class="tab" type="button" data-chart-replay="next" onclick="stepStockChartReplay('next')">›</button>
                 <span id="stock-chart-replay-status" class="stock-chart-replay-status" aria-live="polite"></span>
               </div>
-              <div id="stock-chart-ma-values" class="chart-ma-values" aria-live="polite"></div>
-              <div id="stock-chart-empty" class="empty-tip" role="status" aria-live="polite" hidden>
-                <div data-kline-empty-reason></div>
-                <button class="tab" type="button" data-kline-retry onclick="loadStockKline()">重试K线</button>
-                <button class="tab" type="button" data-kline-exit-asof onclick="clearStockKlineAsOf()">退出时点，查看普通行情</button>
+              <div id="stock-chart-workspace-b" class="mm-stock-chart-workspace" data-layout="B" aria-label="事件时间轴、K线与证据工作区">
+                <aside class="mm-stock-chart-region mm-stock-chart-events" data-stock-chart-region="events" aria-label="当前标的事件时间轴">
+                  <header><strong>事件时间轴</strong><button class="tab" type="button" data-stock-chart-events-refresh onclick="loadStockChartEventRail(true)" aria-label="刷新事件时间轴">刷新</button></header>
+                  <div id="stock-chart-event-status" class="mm-chart-region-status" role="status" aria-live="polite">等待当前标的</div>
+                  <div id="stock-chart-event-rail" class="mm-chart-event-rail" aria-live="polite"><div class="empty-tip">选择股票后加载对应事件</div></div>
+                </aside>
+                <section class="mm-stock-chart-region mm-stock-chart-center" data-stock-chart-region="chart" aria-label="股票K线">
+                  <div id="stock-chart-ma-values" class="chart-ma-values" aria-live="polite"></div>
+                  <div id="stock-chart-empty" class="empty-tip" role="status" aria-live="polite" hidden>
+                    <div data-kline-empty-reason></div>
+                    <button class="tab" type="button" data-kline-retry onclick="loadStockKline()">重试K线</button>
+                    <button class="tab" type="button" data-kline-exit-asof onclick="clearStockKlineAsOf()">退出时点，查看普通行情</button>
+                  </div>
+                  <div class="stock-chart-stage">
+                    <canvas id="stock-kline" width="640" height="360" style="width:100%;height:340px;display:block;"></canvas>
+                    <div id="stock-chart-patterns" class="stock-chart-marker-layer" aria-hidden="true"></div>
+                    <div id="stock-chart-event-markers" class="stock-chart-event-markers" aria-label="K线事件标记"></div>
+                  </div>
+                  <section class="stock-chart-companion-panel" data-stock-chart-companion hidden aria-label="同步双图工作区">
+                    <div class="stock-chart-companion-toolbar">
+                      <strong>同步双图</strong>
+                      <label>视图 <select data-chart-companion-mode onchange="setStockChartCompanionMode(this.value)"><option value="same-symbol">同标的·不同周期</option><option value="benchmark">与 SPY 对照</option></select></label>
+                      <label>周期 <select data-chart-companion-period onchange="setStockChartCompanionPeriod(this.value)"><option value="5m">5分</option><option value="15m">15分</option><option value="1h" selected>1小时</option><option value="1d">日线</option><option value="1y">年线</option></select></label>
+                      <span data-stock-chart-companion-status aria-live="polite">等待加载</span>
+                    </div>
+                    <div class="stock-chart-companion-stage"><canvas id="stock-kline-companion" width="640" height="280" role="img" aria-label="同步的股票对照K线图" tabindex="0"></canvas></div>
+                  </section>
+                </section>
+                <aside class="mm-stock-chart-region mm-stock-chart-evidence" data-stock-chart-region="evidence" aria-label="K线证据与策略解释">
+                  <header><strong>证据与策略</strong><span id="stock-chart-evidence-status" class="mm-chart-region-status">选择事件或信号查看</span></header>
+                  <div id="stock-chart-evidence-detail" class="mm-chart-evidence-detail" aria-live="polite">点击事件、策略点位或形态，可查看对应时间、来源和说明。</div>
+                  <section><h4>策略点位</h4><div id="stock-chart-signals" class="chart-signal-list" aria-live="polite"></div></section>
+                  <section><h4>蜡烛形态</h4><div id="stock-chart-pattern-list" class="chart-pattern-list" aria-live="polite"></div></section>
+                  <section><h4>结构标记</h4><div id="stock-chart-structure-list" class="chart-structure-list" aria-live="polite"></div></section>
+                </aside>
               </div>
-              <div class="stock-chart-stage" style="position:relative;">
-                <canvas id="stock-kline" width="640" height="360" style="width:100%;height:340px;display:block;"></canvas>
-                <div id="stock-chart-patterns" style="position:absolute; inset:0; pointer-events:none; overflow:visible;"></div>
-              </div>
-              <div id="stock-chart-signals" class="chart-signal-list" aria-live="polite"></div>
-              <div id="stock-chart-pattern-list" class="chart-pattern-list" aria-live="polite"></div>
-              <div id="stock-chart-structure-list" class="chart-structure-list" aria-live="polite"></div>
-              <section class="stock-chart-companion-panel" data-stock-chart-companion hidden aria-label="同步双图工作区">
-                <div class="stock-chart-companion-toolbar">
-                  <strong>同步双图</strong>
-                  <label>视图 <select data-chart-companion-mode onchange="setStockChartCompanionMode(this.value)"><option value="same-symbol">同标的·不同周期</option><option value="benchmark">与 SPY 对照</option></select></label>
-                  <label>周期 <select data-chart-companion-period onchange="setStockChartCompanionPeriod(this.value)"><option value="5m">5分</option><option value="15m">15分</option><option value="1h" selected>1小时</option><option value="1d">日线</option><option value="1y">年线</option></select></label>
-                  <span data-stock-chart-companion-status aria-live="polite">等待加载</span>
-                </div>
-                <div class="stock-chart-companion-stage"><canvas id="stock-kline-companion" width="640" height="280" role="img" aria-label="同步的股票对照K线图" tabindex="0"></canvas></div>
-              </section>
             </div>
             <div style="display:flex;justify-content:flex-end;align-items:center;margin:4px 0 10px;">
               <button class="tab active" type="button" onclick="loadStockQuotes()">🔄 刷新行情</button>

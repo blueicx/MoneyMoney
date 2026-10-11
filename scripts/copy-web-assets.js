@@ -48,7 +48,7 @@ const modules = {
 const asyncWorkspaceGroups = [
   ['overview', /^(?:loadMarketOverview|loadCrossAssetCorrelation|loadResearchBriefing|loadCommandCenter)$/],
   ['research', /^(?:loadDecisionIntelligence|runBacktest|compareBacktests|runMonteCarlo|loadMarketResearch|runEventStudyUi)$/],
-  ['charts', /^(?:performStockKlineLoad|loadEarlierStockKline|loadStockChartCompanion|loadBinanceKlines|loadBinancePrices|loadBinanceDepth|loadBinanceTrades)$/],
+  ['charts', /^(?:performStockKlineLoad|loadEarlierStockKline|loadStockChartCompanion|loadStockChartEventRail|loadBinanceKlines|loadBinancePrices|loadBinanceDepth|loadBinanceTrades)$/],
   ['stocks', /^(?:loadGlobalMacroSpot|loadInsiderRadar|loadInstitutionalOwnership|loadAnalystConsensus|loadFundamentalQuality|loadShortInterest|loadEarningsCalendar|loadCotRadar|loadMarketScreener|loadStockSearch|loadStockWatchlistLibrary)$/],
   ['options', /^loadOptions$/],
   ['crypto', /^(?:loadFundingCarry|loadOrderFlowLiquidity|loadStablecoinLiquidity|loadPerpetualCrowding|loadBitcoinOnchain|loadDefiTvl|loadDefiProtocols|loadDefiYields|loadBinanceDashboard|loadBinancePortfolio|loadCryptoNews)$/],
@@ -59,7 +59,7 @@ const asyncWorkspaceGroups = [
   ['ops', /^(?:loadSourceSloPanel|loadOpsConsole|loadSourceHealth|loadMacroIndicators|loadNews|loadMacroCalendar|loadTelegramTestDeliveryHistory|loadTelegramSettingsForm|testTelegramSettings|saveTelegramSettings|loadTreasuryYields|loadMarketSentiment|runGlobalSearchNow|loadAlertDeliveryFeedback)$/],
 ];
 const syncWorkspaceGroups = [
-  ['charts', /^(?:loadStockKline|stockKlineRequestKey|runStockKlineSingleFlight|drawCandles|drawStockKline|drawMACD|drawRSI|drawDepthChart|drawStockChartCompanion|renderChartPatternMarkers|renderChartPatternList|renderChartStructureList|updateStockKlineFocusControl|setStockKlineViewState|focusStockKlineDate|enterStockIntraday)$/],
+  ['charts', /^(?:loadStockKline|stockKlineRequestKey|runStockKlineSingleFlight|drawCandles|drawStockKline|drawMACD|drawRSI|drawDepthChart|drawStockChartCompanion|renderChartPatternMarkers|renderChartPatternList|renderChartStructureList|renderStockChartEventRail|stockChartEventInstrumentId|showStockChartEvidence|focusStockChartTimestamp|redrawStockChartEventMarkers|renderChartSignalList|updateStockKlineFocusControl|setStockKlineViewState|focusStockKlineDate|enterStockIntraday)$/],
   ['stocks', /^(?:renderGlobalMacroSpot|renderAnalystConsensus|renderFundamentalQuality|renderMarketBreadth|renderInsiderRadar|renderInstitutionalOwnership|renderShortInterest|renderMarketScreener|renderInstrumentDetail)$/],
   ['overview', /^fetchMarketOverviewJson$/],
   ['options', /^(?:renderOptionChain|renderOptionStrategies|renderOptionPayoffBuilder)$/],

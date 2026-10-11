@@ -10,6 +10,7 @@ export interface CacheEntry<T> {
   data: T;
   status: 'fresh' | 'stale' | 'expired' | 'error';
   updatedAt: number;
+  cacheHit: boolean;
   error?: any;
 }
 
@@ -23,9 +24,30 @@ export function createCacheEtag(value: unknown): string {
   return `"${(hash >>> 0).toString(16)}"`;
 }
 
-export function createPerformanceCache() {
-  const store = new Map<string, { value: any, updatedAt: number, expiresAt: number, staleAt: number }>();
+export function createPerformanceCache(options: { maxEntries?: number } = {}) {
+  const maxEntries = Number.isSafeInteger(options.maxEntries) && Number(options.maxEntries) > 0 ? Number(options.maxEntries) : Infinity;
+  const store = new Map<string, { value: any, updatedAt: number, expiresAt: number, staleAt: number, error?: unknown }>();
   const pending = new Map<string, Promise<any>>();
+
+  function prune() {
+    while (store.size > maxEntries) {
+      const oldest = [...store.keys()].find(key => !pending.has(key));
+      if (!oldest) break;
+      store.delete(oldest);
+    }
+  }
+
+  function write(cacheKey: string, entry: { value: any, updatedAt: number, expiresAt: number, staleAt: number, error?: unknown }) {
+    store.delete(cacheKey);
+    store.set(cacheKey, entry);
+    prune();
+  }
+
+  function touch<T>(cacheKey: string, entry: T): T {
+    store.delete(cacheKey);
+    store.set(cacheKey, entry as any);
+    return entry;
+  }
 
   function scopedKey(key: string, options: CacheOptions): string {
     return `${options.scope || 'global'}:${options.source || 'unknown'}:${key}`;
@@ -53,27 +75,32 @@ export function createPerformanceCache() {
     
     if (cached) {
       if (now < cached.expiresAt) {
-        return { data: cached.value, status: 'fresh', updatedAt: cached.updatedAt };
+        touch(cacheKey, cached);
+        return { data: cached.value, status: 'fresh', updatedAt: cached.updatedAt, cacheHit: true, ...(cached.error ? { error: cached.error } : {}) };
       }
       if (options.staleTtl && now < cached.staleAt) {
         if (!pending.has(cacheKey)) {
           const p = fetchWithTimeout(fetcher, options.timeoutMs).then(data => {
             const updatedAt = Date.now();
-            store.set(cacheKey, { value: data, updatedAt, expiresAt: updatedAt + options.ttl, staleAt: updatedAt + options.ttl + options.staleTtl! });
-          }).finally(() => pending.delete(cacheKey));
+            write(cacheKey, { value: data, updatedAt, expiresAt: updatedAt + options.ttl, staleAt: updatedAt + options.ttl + options.staleTtl! });
+          }).catch(error => {
+            const current = store.get(cacheKey);
+            if (current) write(cacheKey, { ...current, error });
+          }).finally(() => { pending.delete(cacheKey); prune(); });
           pending.set(cacheKey, p);
         }
-        return { data: cached.value, status: 'stale', updatedAt: cached.updatedAt };
+        touch(cacheKey, cached);
+        return { data: cached.value, status: 'stale', updatedAt: cached.updatedAt, cacheHit: true, ...(cached.error ? { error: cached.error } : {}) };
       }
     }
 
     if (pending.has(cacheKey)) {
       try {
         const data = await pending.get(cacheKey);
-        return { data, status: 'fresh', updatedAt: Date.now() };
+        return { data, status: 'fresh', updatedAt: Date.now(), cacheHit: false };
       } catch (err) {
-        if (cached) return { data: cached.value, status: 'expired', updatedAt: cached.updatedAt, error: err };
-        throw err;
+        if (cached) return { data: cached.value, status: 'expired', updatedAt: cached.updatedAt, cacheHit: true, error: err };
+        return { data: null as any, status: 'error', updatedAt: Date.now(), cacheHit: false, error: err };
       }
     }
 
@@ -82,13 +109,14 @@ export function createPerformanceCache() {
     try {
       const data = await p;
       const updatedAt = Date.now();
-      store.set(cacheKey, { value: data, updatedAt, expiresAt: updatedAt + options.ttl, staleAt: updatedAt + options.ttl + (options.staleTtl || 0) });
-      return { data, status: 'fresh', updatedAt };
+      write(cacheKey, { value: data, updatedAt, expiresAt: updatedAt + options.ttl, staleAt: updatedAt + options.ttl + (options.staleTtl || 0) });
+      return { data, status: 'fresh', updatedAt, cacheHit: false };
     } catch (err) {
-      if (cached) return { data: cached.value, status: 'expired', updatedAt: cached.updatedAt, error: err };
-      return { data: null as any, status: 'error', updatedAt: Date.now(), error: err };
+      if (cached) return { data: cached.value, status: 'expired', updatedAt: cached.updatedAt, cacheHit: true, error: err };
+      return { data: null as any, status: 'error', updatedAt: Date.now(), cacheHit: false, error: err };
     } finally {
       pending.delete(cacheKey);
+      prune();
     }
   }
   return { fetch };

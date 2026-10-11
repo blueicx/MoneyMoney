@@ -472,6 +472,33 @@
     .stock-chart-replay-label { margin-left:auto; color:var(--yellow); font-weight:700; }
     .stock-chart-replay-status { min-width:68px; text-align:right; font-variant-numeric:tabular-nums; }
     .stock-chart-stage { position:relative; min-height:340px; }
+    #stock-chart-card { container-name:stock-chart-card; container-type:inline-size; }
+    #stock-chart-workspace-b { display:grid; grid-template-columns:minmax(170px,.72fr) minmax(420px,2.15fr) minmax(250px,.9fr); gap:10px; align-items:start; min-width:0; }
+    #stock-chart-workspace-b .mm-stock-chart-region { min-width:0; padding:10px; border:1px solid var(--border); border-radius:11px; background:var(--bg-card); color:var(--text); }
+    #stock-chart-workspace-b .mm-stock-chart-region > header { display:flex; align-items:center; justify-content:space-between; gap:7px; margin-bottom:8px; }
+    #stock-chart-workspace-b .mm-stock-chart-region > header strong { font-size:12px; }
+    #stock-chart-workspace-b .mm-chart-region-status { color:var(--text-secondary); font-size:10px; line-height:1.45; }
+    .mm-chart-event-rail { display:grid; gap:6px; margin-top:7px; max-height:min(64vh,680px); overflow:auto; overscroll-behavior:contain; }
+    .mm-chart-event-item { display:block; width:100%; padding:8px; border:1px solid var(--border); border-radius:9px; background:var(--bg-secondary); color:var(--text); text-align:left; }
+    .mm-chart-event-item[aria-current="true"] { border-color:var(--purple); box-shadow:inset 2px 0 0 var(--purple); }
+    .mm-chart-event-item strong,.mm-chart-event-item small { display:block; overflow-wrap:anywhere; }
+    .mm-chart-event-item strong { font-size:10px; line-height:1.4; }
+    .mm-chart-event-item small { margin-top:4px; color:var(--text-secondary); font-size:9px; line-height:1.4; }
+    .mm-chart-event-item a { display:inline-block; margin-top:5px; font-size:10px; }
+    .mm-stock-chart-center { overflow:hidden; }
+    .mm-stock-chart-center .stock-chart-stage { min-width:0; }
+    .mm-stock-chart-evidence { max-height:min(74vh,800px); overflow:auto; overscroll-behavior:contain; }
+    .mm-stock-chart-evidence > section { padding-top:9px; margin-top:9px; border-top:1px solid var(--border); }
+    .mm-stock-chart-evidence h4 { margin:0 0 6px; font-size:10px; color:var(--text-secondary); }
+    .mm-chart-evidence-detail { padding:8px; border:1px solid var(--border); border-radius:9px; background:var(--bg-secondary); color:var(--text); font-size:10px; line-height:1.5; overflow-wrap:anywhere; }
+    .mm-chart-evidence-detail a { display:inline-flex; margin-top:5px; }
+    .stock-chart-marker-layer { position:absolute; inset:0; pointer-events:none; overflow:visible; }
+    .stock-chart-event-markers { position:absolute; inset:0; pointer-events:none; overflow:hidden; }
+    .stock-chart-event-marker { position:absolute; pointer-events:auto; transform:translateX(-50%); width:22px; min-height:22px; padding:0; border-radius:50%; border-color:var(--yellow); background:var(--bg-card); color:var(--yellow); font-size:10px; font-weight:800; }
+    #stock-chart-workspace-b .chart-signal-list { display:grid; gap:5px; margin-top:0; min-height:20px; }
+    .chart-signal-item { width:100%; min-height:30px; justify-content:flex-start; flex-wrap:wrap; text-align:left; }
+    .chart-pattern-list,.chart-structure-list { margin-top:0; }
+    .chart-signal-item:focus-visible,.mm-chart-event-item:focus-visible,.stock-chart-event-marker:focus-visible { outline:2px solid var(--purple); outline-offset:2px; }
     .chart-strategy-controls { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin:0 0 8px; font-size:11px; color:var(--text-secondary); }
     .chart-strategy-controls label { display:inline-flex; align-items:center; gap:4px; cursor:pointer; white-space:nowrap; }
     .chart-strategy-controls input { accent-color:var(--purple); }
@@ -509,9 +536,40 @@
     .chart-structure-item.bullish strong { color:var(--green); }
     .chart-structure-item.bearish strong { color:var(--red); }
     .chart-structure-item.neutral strong { color:var(--yellow); }
+    .chart-structure-item[role="button"] { cursor:pointer; }
+    .chart-structure-item[role="button"]:focus-visible { outline:2px solid var(--purple); outline-offset:2px; }
     .chart-ma-values { display:flex; gap:8px 12px; flex-wrap:wrap; margin:0 0 8px; font-size:10px; font-variant-numeric:tabular-nums; }
     .chart-ma-value { font-weight:800; white-space:nowrap; }
+    @media (max-width: 1100px) {
+      #stock-chart-workspace-b { grid-template-columns:minmax(155px,.8fr) minmax(0,2fr); }
+      #stock-chart-workspace-b .mm-stock-chart-evidence { grid-column:1 / -1; max-height:none; }
+      #stock-chart-workspace-b .mm-stock-chart-evidence > section { display:inline-block; vertical-align:top; width:32%; margin-right:1%; }
+    }
+    @media (max-width: 768px) {
+      #stock-chart-workspace-b { grid-template-columns:minmax(0,1fr); }
+      #stock-chart-workspace-b .mm-stock-chart-center { order:1; }
+      #stock-chart-workspace-b .mm-stock-chart-events { order:2; }
+      #stock-chart-workspace-b .mm-stock-chart-evidence { order:3; grid-column:auto; }
+      #stock-chart-workspace-b .mm-stock-chart-events { max-height:260px; overflow:hidden; }
+      #stock-chart-workspace-b .mm-chart-event-rail { max-height:190px; }
+      #stock-chart-workspace-b .mm-stock-chart-evidence > section { display:block; width:auto; margin-right:0; }
+      #stock-chart-workspace-b .chart-signal-item,.mm-chart-event-item { min-height:42px; }
+    }
     @media (max-width: 600px) { .chart-pattern-tooltip { width:180px; font-size:10px; padding:8px; } }
+    @container stock-chart-card (max-width: 1080px) {
+      #stock-chart-workspace-b { grid-template-columns:minmax(155px,.8fr) minmax(0,2fr); }
+      #stock-chart-workspace-b .mm-stock-chart-evidence { grid-column:1 / -1; max-height:none; }
+      #stock-chart-workspace-b .mm-stock-chart-evidence > section { display:inline-block; vertical-align:top; width:32%; margin-right:1%; }
+    }
+    @container stock-chart-card (max-width: 680px) {
+      #stock-chart-workspace-b { grid-template-columns:minmax(0,1fr); }
+      #stock-chart-workspace-b .mm-stock-chart-center { order:1; }
+      #stock-chart-workspace-b .mm-stock-chart-events { order:2; max-height:260px; overflow:hidden; }
+      #stock-chart-workspace-b .mm-stock-chart-evidence { order:3; grid-column:auto; }
+      #stock-chart-workspace-b .mm-chart-event-rail { max-height:190px; }
+      #stock-chart-workspace-b .mm-stock-chart-evidence > section { display:block; width:auto; margin-right:0; }
+      #stock-chart-workspace-b .chart-signal-item,.mm-chart-event-item { min-height:42px; }
+    }
     .market-library-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:7px; }
     .market-instrument-library { display:block; }
     .workspace-dashboard-cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:8px; margin:-6px 0 16px; }
@@ -2220,9 +2278,15 @@
     body[data-chart-fullscreen] .chart-card-fullscreen { visibility: visible; }
     body[data-chart-fullscreen] .chart-card-fullscreen .chart-fullscreen-button { background: var(--purple); color: #fff; }
     body[data-chart-fullscreen="stocks"] #stock-kline { height: max(420px, calc(100vh - 270px)) !important; }
+    body[data-chart-fullscreen="stocks"] #stock-chart-workspace-b { grid-template-columns:minmax(170px,.7fr) minmax(0,2fr) minmax(230px,.85fr); align-items:stretch; }
+    body[data-chart-fullscreen="stocks"] #stock-chart-workspace-b .mm-stock-chart-region { max-height:calc(100vh - 175px); overflow:auto; }
     body[data-chart-fullscreen="crypto"] #bn-candlestick { height: max(420px, calc(100vh - 360px)) !important; }
     @media (max-width: 768px) {
       .chart-card-fullscreen { padding: 12px !important; }
+      body[data-chart-fullscreen="stocks"] #stock-chart-workspace-b { grid-template-columns:minmax(0,1fr); }
+      body[data-chart-fullscreen="stocks"] #stock-chart-workspace-b .mm-stock-chart-center { order:1; }
+      body[data-chart-fullscreen="stocks"] #stock-chart-workspace-b .mm-stock-chart-events { order:2; }
+      body[data-chart-fullscreen="stocks"] #stock-chart-workspace-b .mm-stock-chart-evidence { order:3; }
       .stock-chart-companion-stage { height: 220px; }
       .stock-chart-companion-toolbar [data-stock-chart-companion-status] { width: 100%; margin-left: 0; }
     }

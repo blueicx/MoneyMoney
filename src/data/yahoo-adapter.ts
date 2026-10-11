@@ -50,6 +50,7 @@ export interface YahooStockHistory {
 
 type YahooChartPayload = {
   chart?: {
+    error?: { description?: string } | null;
     result?: Array<{
       timestamp?: number[];
       meta?: { regularMarketTime?: number; currency?: string };
@@ -199,6 +200,8 @@ export function normalizeYahooCorporateActions(payload: YahooChartPayload, symbo
   return actions.sort((left, right) => left.effectiveAt.localeCompare(right.effectiveAt) || left.kind.localeCompare(right.kind) || left.id.localeCompare(right.id));
 }
 
+const YAHOO_CHART_HOST_TIMEOUT_MS = 2_500;
+
 async function fetchYahooChartPayload(input: unknown, signal: AbortSignal): Promise<{ payload: YahooChartPayload; symbol: string; period: keyof typeof STOCK_KLINE_PERIODS; startTime?: number; endTime?: number }> {
   const source = (input || {}) as { symbol?: string; period?: string; startTime?: number; endTime?: number };
   const symbol = normalizeYahooSymbol(String(source.symbol || ''));
@@ -210,19 +213,43 @@ async function fetchYahooChartPayload(input: unknown, signal: AbortSignal): Prom
   if (bounded && (!Number.isSafeInteger(source.startTime) || !Number.isSafeInteger(source.endTime) || Number(source.startTime) <= 0 || Number(source.endTime) <= Number(source.startTime) || Number(source.endTime) > Date.now())) throw Error('Invalid Yahoo time window');
   if (bounded && config.aggregateDays) throw Error('Multi-day aggregate pagination requires a fixed aggregation anchor; unsupported time window');
   const headers = { 'User-Agent': 'Mozilla/5.0 MoneyMoney/1.0' };
-  let response: Response | undefined;
+  let payload: YahooChartPayload | undefined;
   let lastError: unknown;
   for (const host of ['query1.finance.yahoo.com', 'query2.finance.yahoo.com']) {
+    if (signal.aborted) throw signal.reason || new Error('Yahoo Finance request was cancelled');
+    const attemptController = new AbortController();
+    const abortParent = () => attemptController.abort(signal.reason || new Error('Yahoo Finance request was cancelled'));
+    signal.addEventListener('abort', abortParent, { once: true });
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      attemptController.abort(new Error(`Yahoo Finance ${host} timed out`));
+    }, YAHOO_CHART_HOST_TIMEOUT_MS);
     try {
       const bounds = bounded ? `period1=${Math.floor(source.startTime! / 1000)}&period2=${Math.ceil(source.endTime! / 1000)}` : `range=${encodeURIComponent(config.range)}`;
       const url = `https://${host}/v8/finance/chart/${encodeURIComponent(symbol)}?interval=${encodeURIComponent(config.interval)}&${bounds}&events=div%2Csplits&includeAdjustedClose=true`;
-      response = await fetch(url, { signal, headers });
-      if (response.ok) break;
-      lastError = new Error(`Yahoo Finance API failed with status: ${response.status}`);
-    } catch (error) { lastError = error; }
+      const response = await fetch(url, { signal: attemptController.signal, headers });
+      if (!response.ok) {
+        lastError = new Error(`Yahoo Finance ${host} failed with status: ${response.status}`);
+        continue;
+      }
+      const candidate = await response.json() as YahooChartPayload;
+      if (!candidate?.chart?.result?.[0]?.timestamp?.length || !candidate.chart.result[0].indicators?.quote?.[0]) {
+        lastError = new Error(candidate?.chart?.error?.description || `Yahoo Finance ${host} returned no usable chart payload`);
+        continue;
+      }
+      payload = candidate;
+      break;
+    } catch (error) {
+      if (signal.aborted) throw signal.reason || error;
+      lastError = timedOut ? new Error(`Yahoo Finance ${host} request timed out`) : error;
+    } finally {
+      clearTimeout(timer);
+      signal.removeEventListener('abort', abortParent);
+    }
   }
-  if (!response?.ok) throw lastError || new Error('Yahoo Finance API failed');
-  return { payload: await response.json() as YahooChartPayload, symbol, period, ...(bounded ? { startTime: source.startTime, endTime: source.endTime } : {}) };
+  if (!payload) throw lastError || new Error('Yahoo Finance API failed');
+  return { payload, symbol, period, ...(bounded ? { startTime: source.startTime, endTime: source.endTime } : {}) };
 }
 
 export function createYahooStockAdapter(): DataSourceAdapter<StockQuote> {

@@ -135,6 +135,49 @@ test('Yahoo stock kline adapter preserves mainland stock exchange mapping', asyn
   assert.match(requestedUrl, /chart\/600519\.SS/);
 });
 
+test('Yahoo history retries the second same-provider host after the first host times out', async (t) => {
+  const originalFetch = global.fetch;
+  t.after(() => { global.fetch = originalFetch; });
+  const calls = [];
+  global.fetch = async (url, options = {}) => {
+    calls.push({ url: String(url), signal: options.signal });
+    if (calls.length === 1) {
+      return new Promise((_, reject) => options.signal.addEventListener('abort', () => reject(new Error('first Yahoo host timed out')), { once: true }));
+    }
+    return {
+      ok: true,
+      json: async () => ({ chart: { result: [{
+        timestamp: [10],
+        indicators: { quote: [{ open: [1], high: [2], low: [1], close: [2], volume: [1] }] },
+      }] } }),
+    };
+  };
+  const result = await createYahooStockHistoryAdapter().fetch({ symbol: 'AAPL', period: '1d' });
+  assert.equal(result.status, 'live');
+  assert.equal(calls.length, 2, 'the adapter should try both Yahoo endpoints');
+  assert.match(calls[0].url, /query1\.finance\.yahoo\.com/);
+  assert.match(calls[1].url, /query2\.finance\.yahoo\.com/);
+  assert.notEqual(calls[0].signal, calls[1].signal, 'each endpoint attempt needs an independent timeout signal');
+  assert.equal(calls[1].signal.aborted, false, 'the first attempt timeout must not poison the fallback');
+});
+
+test('Yahoo history falls through when the first host answers without a chart payload', async (t) => {
+  const originalFetch = global.fetch;
+  t.after(() => { global.fetch = originalFetch; });
+  const urls = [];
+  global.fetch = async url => {
+    urls.push(String(url));
+    return { ok: true, json: async () => urls.length === 1
+      ? ({ chart: { result: null, error: { description: 'temporarily unavailable' } } })
+      : ({ chart: { result: [{ timestamp: [10], indicators: { quote: [{ open: [1], high: [2], low: [1], close: [2], volume: [1] }] } }] } }) };
+  };
+  const result = await createYahooStockHistoryAdapter().fetch({ symbol: 'AAPL', period: '1d' });
+  assert.equal(result.status, 'live');
+  assert.equal(urls.length, 2);
+  assert.match(urls[0], /query1\.finance\.yahoo\.com/);
+  assert.match(urls[1], /query2\.finance\.yahoo\.com/);
+});
+
 test('Yahoo history adapter carries unverified price basis and corporate-action evidence', async (t) => {
   const originalFetch = global.fetch;
   t.after(() => { global.fetch = originalFetch; });

@@ -29,7 +29,8 @@ import { createLiveKlineRouter } from './live-kline-routes';
 
 import { getRuntimeTelegramConfig, parseChatIds, runtimeSecrets } from '../config/runtime-secrets';
 import { api } from '../api';
-import { createCacheEtag, globalCache } from '../features/performance-cache';
+import { createCacheEtag, createPerformanceCache, globalCache } from '../features/performance-cache';
+import { isCacheableLatestStockChart, stockKlineDisplayCacheKey } from '../features/stock-kline-display-cache';
 
 import { tradingEngine } from '../trading';
 
@@ -3007,6 +3008,7 @@ app.get('/api/stock/market-breadth', async (_req, res) => {
 // --- Stock K-line ---
 
 const stockKlineAdapters = new Map<string, ReturnType<typeof createYahooStockKlineAdapter>>();
+const stockKlineDisplayCache = createPerformanceCache({ maxEntries: 64 });
 const telegramCryptoKlineAdapters = new Map<string, ReturnType<typeof createBinanceKlineAdapter>>();
 function getStockKlineAdapter(period: string, symbol: string) {
   const key = `${period}:${symbol}`;
@@ -3014,6 +3016,7 @@ function getStockKlineAdapter(period: string, symbol: string) {
   if (!adapter) {
     adapter = createYahooStockKlineAdapter();
     stockKlineAdapters.set(key, adapter);
+    while (stockKlineAdapters.size > 64) stockKlineAdapters.delete(stockKlineAdapters.keys().next().value!);
   }
   return adapter;
 }
@@ -3078,21 +3081,46 @@ app.get('/api/stock/kline', async (req, res) => {
       });
     }
     const adapter = getStockKlineAdapter(effectivePeriod, requestedSymbol);
-    const snapshot = await adapter.fetchHistory({ symbol: requestedSymbol, period: effectivePeriod,...(page?{startTime:page.startTime,endTime:page.endTime+1}:initialWindow?{startTime:initialWindow.startTime,endTime:initialWindow.endTime}:{}) });
+    const historyRequest = { symbol: requestedSymbol, period: effectivePeriod,...(page?{startTime:page.startTime,endTime:page.endTime+1}:initialWindow?{startTime:initialWindow.startTime,endTime:initialWindow.endTime}:{}) };
+    const cacheableLiveChart = isCacheableLatestStockChart({ chartWindow: req.query.chartWindow, asOf, date: tradingDate, before: req.query.before, adjustment });
+    const displayCacheEntry = cacheableLiveChart
+      ? await stockKlineDisplayCache.fetch(stockKlineDisplayCacheKey(requestedSymbol, effectivePeriod, initialWindow), async () => {
+          const fresh = await adapter.fetchHistory(historyRequest);
+          if (!fresh.data?.bars?.length) throw new Error(fresh.error || 'Yahoo Finance 当前没有可缓存K线');
+          return fresh;
+        }, { scope: 'stocks', source: 'yahoo-finance-history', ttl: 15_000, staleTtl: 120_000, timeoutMs: 7_000 })
+      : null;
+    const snapshot = displayCacheEntry?.status === 'expired' ? null
+      : displayCacheEntry?.data || (cacheableLiveChart ? null : await adapter.fetchHistory(historyRequest));
+    if (!snapshot) {
+      const reason = displayCacheEntry?.error instanceof Error ? displayCacheEntry.error.message : '股票K线来源暂时不可用';
+      return res.json({ success: false, data: null, market: 'stocks', instrument: requestedSymbol, timeframe: effectivePeriod, dataStatus: 'unavailable', source: 'Yahoo Finance 历史K线', updatedAt: new Date().toISOString(), reason });
+    }
+    const fetchedAtMs = Date.parse(snapshot.fetchedAt);
+    const sourceAgeMs = Number.isFinite(fetchedAtMs) ? Math.max(0, Date.now() - fetchedAtMs) : Infinity;
+    const responseDataStatus = displayCacheEntry?.status === 'expired'
+      ? 'unavailable'
+      : displayCacheEntry?.cacheHit || snapshot.status === 'stale' || (snapshot.status === 'live' && sourceAgeMs > 30_000)
+        ? 'cached'
+        : snapshot.status;
+    const displayCacheReason = displayCacheEntry?.error
+      ? `缓存行情 · 来源刷新失败：${String(displayCacheEntry.error instanceof Error ? displayCacheEntry.error.message : displayCacheEntry.error)}`
+      : displayCacheEntry?.status === 'stale' ? '显示受限范围内的缓存快照；正在后台刷新来源'
+        : displayCacheEntry?.cacheHit ? '显示受限范围内的缓存快照；来源时间单独标示' : undefined;
     const updatedAt = snapshot.fetchedAt || new Date().toISOString();
     const history=snapshot.data;
     const sourceBars=history?.bars||null;
     const forwardAvailable=!page&&Boolean(history?.forwardAdjustment.available&&history.forwardAdjustedBars?.length);
     const forwardReason=page?'来源历史分页无法保证统一 Adj Close 参考基准；前复权不可用':history?.forwardAdjustment.reason||'Yahoo 未返回完整 Adj Close 对齐序列；前复权不可用';
     if (!sourceBars?.length) {
-      return res.json({ success: false, data: null, dataStatus: snapshot.status, source: snapshot.source, updatedAt, reason: snapshot.error || `暂无${periodConfig.label}股票K线数据` });
+      return res.json({ success: false, data: null, dataStatus: responseDataStatus, source: snapshot.source, updatedAt, reason: displayCacheReason || snapshot.error || `暂无${periodConfig.label}股票K线数据` });
     }
     const bars=adjustment==='forward'?(forwardAvailable?history?.forwardAdjustedBars||null:null):sourceBars;
     if (adjustment==='forward'&&!forwardAvailable) {
       return res.status(422).json({success:false,data:null,market:'stocks',instrument:requestedSymbol,timeframe:effectivePeriod,dataStatus:'unsupported',source:snapshot.source,updatedAt,adjustment:{requested:adjustment,actual:history?.adjustment||'unknown',available:['source'],conversionEnabled:false,reason:forwardReason},reason:forwardReason});
     }
     if (!bars?.length) {
-      return res.json({ success: false, data: null, dataStatus: snapshot.status, source: snapshot.source, updatedAt, reason: snapshot.error || `暂无${periodConfig.label}股票K线数据` });
+      return res.json({ success: false, data: null, dataStatus: responseDataStatus, source: snapshot.source, updatedAt, reason: displayCacheReason || snapshot.error || `暂无${periodConfig.label}股票K线数据` });
     }
     if (tradingDate) {
       const timezone = resolveStockExchangeTimeZone(requestedSymbol);
@@ -3100,7 +3128,7 @@ app.get('/api/stock/kline', async (req, res) => {
       return res.json({ success: session.bars.length > 0, data: session.bars,...stockChartDisclosure(session.bars,adjustment,history?.adjustment,{forwardReason}), dataStatus: session.bars.length ? snapshot.status : 'empty', market: 'stocks', instrument: requestedSymbol, timeframe: effectivePeriod, date: tradingDate, timezone, session, source: snapshot.source, sourceTime: history?.sourceTime || null, updatedAt, reason: session.bars.length ? undefined : `来源 ${snapshot.source} 当前覆盖 ${session.availableDateRange ? `${session.availableDateRange.from} 至 ${session.availableDateRange.to}` : '暂无可用交易日'}；未提供 ${tradingDate} 的 ${effectivePeriod} 日内数据` });
     }
     const selectedBars=page?bars.slice(-page.limit):initialWindow?bars.slice(-initialWindow.limit):bars;
-    res.json({ success: true,market:'stocks',instrument:requestedSymbol,timeframe:effectivePeriod, data: selectedBars,...stockChartDisclosure(selectedBars,adjustment,history?.adjustment,{forwardAvailable,forwardReason,volumeBasis:history?.forwardAdjustment.volumeBasis}), history:{nextBefore:selectedBars[0]?.time??null,requestedWindow:page??initialWindow??null,hasEarlier:null},dataStatus: klinePageStatus(snapshot.status,!!page), source: snapshot.source, sourceTime: history?.sourceTime || null, updatedAt, timezone: resolveStockExchangeTimeZone(requestedSymbol), reason: snapshot.error || undefined });
+    res.json({ success: true,market:'stocks',instrument:requestedSymbol,timeframe:effectivePeriod,data:selectedBars,...stockChartDisclosure(selectedBars,adjustment,history?.adjustment,{forwardAvailable,forwardReason,volumeBasis:history?.forwardAdjustment.volumeBasis}),history:{nextBefore:selectedBars[0]?.time??null,requestedWindow:page??initialWindow??null,hasEarlier:null},dataStatus:klinePageStatus(responseDataStatus,!!page),source:snapshot.source,sourceTime:history?.sourceTime||null,updatedAt,timezone:resolveStockExchangeTimeZone(requestedSymbol),reason:displayCacheReason||snapshot.error||undefined,cache:displayCacheEntry?.cacheHit?{state:'cached',capturedAt:new Date(displayCacheEntry.updatedAt).toISOString(),sourceFetchedAt:updatedAt,ageMs:Math.max(0,Date.now()-displayCacheEntry.updatedAt),refreshing:displayCacheEntry.status==='stale'}:undefined});
   } catch (e: any) {
     res.json({
       success: false,

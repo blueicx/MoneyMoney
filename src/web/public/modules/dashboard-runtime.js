@@ -5778,6 +5778,183 @@ function buildStockStrategySignals(bars, live = false) {
     live, sourceFresh, currentBarClosed: bars[bars.length - 1]?.closed === true,
   }) || signals;
 }
+function stockChartEventInstrumentId() {
+  const raw = String(currentStockSymbol || '').trim().replace(/^stock:[^:]+:/i, '').replace(/^us(?=[A-Z])/, '').toUpperCase();
+  if (!raw) return '';
+  if (/^(?:SH|SZ|BJ)?\d{6}$/.test(raw)) return `stock:cn:${raw}`;
+  return `stock:us:${raw}`;
+}
+function renderStockChartEventRail(payload) {
+  const host = document.getElementById('stock-chart-event-rail');
+  const status = document.getElementById('stock-chart-event-status');
+  if (!host) return;
+  const asOfTime = stockChartAsOf ? Date.parse(stockChartAsOf) : null;
+  const sourceItems = Array.isArray(payload?.data) ? payload.data : [];
+  const eligible = sourceItems.filter(item => {
+    if (!Number.isFinite(asOfTime)) return true;
+    const published = Date.parse(String(item?.publishedAt || ''));
+    return Number.isFinite(published) && published <= asOfTime;
+  }).sort((left, right) => Date.parse(String(right?.publishedAt || right?.occurredAt || right?.at || 0)) - Date.parse(String(left?.publishedAt || left?.occurredAt || left?.at || 0))).slice(0, 40);
+  window.mmStockChartEvents = eligible;
+  const statuses = payload?.sourceStatus || {};
+  const statusSummary = Object.entries(statuses).map(([name, value]) => `${name} ${value}`).join(' · ');
+  if (status) status.textContent = `${payload?.dataStatus || 'unknown'}${statusSummary ? ` · ${statusSummary}` : ''}${stockChartAsOf ? ` · 截至 ${stockChartAsOf.slice(0, 10)}` : ''}`;
+  if (!eligible.length) {
+    host.innerHTML = `<div class="empty-tip">${stockEscapeHtml(payload?.reason || (Number.isFinite(asOfTime) ? '该历史时点之前没有具备发布时间的事件' : '当前标的暂无可核验事件'))}</div>`;
+    document.getElementById('stock-chart-event-markers')?.replaceChildren();
+    return;
+  }
+  host.innerHTML = eligible.map((item, index) => {
+    const title = stockEscapeHtml(item.title || item.headline || '未命名事件');
+    const sourceName = typeof item.source === 'string' ? item.source : item.source?.name || item.sourceName || '来源未提供';
+    const sourceUrl = typeof item.source === 'object' ? item.source?.url : item.sourceUrl;
+    let safeUrl = '';
+    try { const parsed = new URL(String(sourceUrl || '')); if (['https:', 'http:'].includes(parsed.protocol)) safeUrl = parsed.href; } catch {}
+    const stamp = item.publishedAt || item.occurredAt || item.at || item.date || '';
+    const time = stamp ? formatChartTime(stamp) : '时间未提供';
+    return `<article class="mm-chart-event-card"><button type="button" class="mm-chart-event-item" data-chart-event-id="${stockEscapeHtml(item.id || index)}" data-chart-event-index="${index}" aria-current="false"><strong>${title}</strong><small>${stockEscapeHtml(item.kind || '事件')} · ${stockEscapeHtml(time)} · ${stockEscapeHtml(sourceName)}</small></button>${safeUrl ? `<a href="${stockEscapeHtml(safeUrl)}" target="_blank" rel="noopener noreferrer">查看来源 ↗</a>` : '<small>来源链接未提供</small>'}</article>`;
+  }).join('');
+  const markers = document.getElementById('stock-chart-event-markers');
+  if (markers) markers.replaceChildren();
+  if (!host.dataset.chartEventBound) {
+    host.dataset.chartEventBound = 'true';
+    host.addEventListener('click', event => {
+      const button = event.target?.closest?.('[data-chart-event-index]');
+      if (!button) return;
+      const item = window.mmStockChartEvents?.[Number(button.dataset.chartEventIndex)];
+      if (!item) return;
+      host.querySelectorAll('[data-chart-event-index]').forEach(row => row.setAttribute('aria-current', String(row === button)));
+      showStockChartEvidence(item, 'event');
+      focusStockChartTimestamp(item.occurredAt || item.publishedAt || item.at || item.date);
+    });
+  }
+}
+async function loadStockChartEventRail(force = false) {
+  const host = document.getElementById('stock-chart-event-rail');
+  if (!host) return;
+  const instrument = stockChartEventInstrumentId();
+  const key = `${instrument}|${stockChartAsOf || 'latest'}`;
+  const state = window.mmStockChartEventRailState || (window.mmStockChartEventRailState = { key: '', controller: null, loadedAt: 0, retryAt: 0 });
+  if (!instrument) { renderStockChartEventRail({ data: [], dataStatus: 'empty', reason: '当前没有选中的股票标的' }); return; }
+  const changedKey = state.key !== key;
+  if (!force && state.key === key && (state.controller || (state.loadedAt && Date.now() - state.loadedAt < 60_000) || Date.now() < state.retryAt)) return;
+  state.controller?.abort();
+  const controller = new AbortController();
+  state.controller = controller;
+  if (changedKey) {
+    state.loadedAt = 0; state.retryAt = 0;
+    window.mmStockChartEvents = [];
+    window.mmStockChartEventKey = '';
+    document.getElementById('stock-chart-event-markers')?.replaceChildren();
+    const detail = document.getElementById('stock-chart-evidence-detail');
+    if (detail) detail.textContent = '选择事件、策略点位或形态，可查看对应时间、来源和说明。';
+  }
+  state.key = key;
+  const status = document.getElementById('stock-chart-event-status');
+  if (status) status.textContent = '正在读取该标的事件与证据…';
+  if (!window.mmStockChartEvents?.length || window.mmStockChartEventKey !== key) host.innerHTML = '<div class="empty-tip">正在加载当前标的事件…</div>';
+  try {
+    const query = new URLSearchParams({ market: 'stocks', instrument });
+    const response = await fetch(`/api/events/entities?${query.toString()}`, { signal: controller.signal, cache: 'no-store' });
+    const payload = await response.json();
+    if (!response.ok || payload?.success === false) throw new Error(payload?.reason || '事件来源不可用');
+    if (state.controller !== controller || controller.signal.aborted || state.key !== key) return;
+    window.mmStockChartEventKey = key;
+    state.loadedAt = Date.now();
+    state.retryAt = 0;
+    renderStockChartEventRail(payload);
+    if (status && payload?.reason && !payload.data?.length) status.textContent = payload.reason;
+    redrawStockChartEventMarkers();
+  } catch (error) {
+    if (error?.name === 'AbortError' || state.controller !== controller) return;
+    state.retryAt = Date.now() + 15_000;
+    renderStockChartEventRail({ data: [], dataStatus: 'unavailable', reason: `事件来源不可用：${error?.message || '请求失败'}` });
+  } finally {
+    if (state.controller === controller) state.controller = null;
+  }
+}
+function focusStockChartTimestamp(value) {
+  const timestamp = Date.parse(String(value || ''));
+  if (!Number.isFinite(timestamp) || !stockChartKlines?.length) return false;
+  let date = '';
+  try { date = new Intl.DateTimeFormat('en-CA', { timeZone: stockChartExchangeTimezone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(timestamp)); }
+  catch { date = new Date(timestamp).toISOString().slice(0, 10); }
+  const focused = focusStockKlineDate(date);
+  if (focused == null) {
+    const status = document.getElementById('stock-chart-evidence-status');
+    if (status) status.textContent = `事件已选中；${date} 不在当前K线窗口，需加载更早数据`;
+    return false;
+  }
+  return true;
+}
+function showStockChartEvidence(item, kind = 'event') {
+  const host = document.getElementById('stock-chart-evidence-detail');
+  const status = document.getElementById('stock-chart-evidence-status');
+  if (!host || !item) return;
+  const sourceName = typeof item.source === 'string' ? item.source : item.source?.name || item.sourceName || item.source || '来源未提供';
+  const sourceUrl = typeof item.source === 'object' ? item.source?.url : item.sourceUrl;
+  let safeUrl = '';
+  try { const parsed = new URL(String(sourceUrl || '')); if (['https:', 'http:'].includes(parsed.protocol)) safeUrl = parsed.href; } catch {}
+  const time = item.publishedAt || item.occurredAt || item.time || item.at || item.date;
+  const direction = item.direction === 'bullish' || item.side === 'buy' ? '看涨/买入' : item.direction === 'bearish' || item.side === 'sell' ? '看跌/卖出' : '';
+  const state = item.status === 'forming' ? '形成中' : item.status === 'confirmed' ? '已确认' : item.status === 'invalidated' ? '已失效' : '';
+  const details = [direction ? `方向：${direction}` : '', state ? `状态：${state}` : '', item.confidence ? `置信度：${item.confidence}` : '', item.reason, item.condition, item.meaning, item.disclaimer, item.dataStatus ? `数据状态：${item.dataStatus}` : '', item.strategyVersion ? `策略版本：${item.strategyVersion}` : ''].filter(Boolean);
+  const price = Number(item.price ?? item.triggerPrice);
+  if (Number.isFinite(price)) details.unshift(`触发价格：${formatChartPrice(price)}`);
+  const ohlc = ['open', 'high', 'low', 'close'].map(key => Number(item[key]));
+  if (ohlc.every(Number.isFinite)) details.push(`OHLC：${ohlc.map(value => formatChartPrice(value)).join(' / ')}`);
+  if (Number.isFinite(Number(item.volume))) details.push(`成交量：${formatChartPrice(Number(item.volume))}`);
+  host.innerHTML = `<strong>${stockEscapeHtml(item.title || item.label || item.headline || (kind === 'signal' ? '策略点位' : '图表证据'))}</strong><div>${stockEscapeHtml(time ? formatChartTime(time) : '时间未提供')} · ${stockEscapeHtml(sourceName)}</div>${details.map(line => `<div>${stockEscapeHtml(line)}</div>`).join('')}${safeUrl ? `<a href="${stockEscapeHtml(safeUrl)}" target="_blank" rel="noopener noreferrer">查看原始证据 ↗</a>` : ''}`;
+  if (status) status.textContent = kind === 'signal' ? '策略研究信号 · 不构成订单' : '来源证据';
+}
+function redrawStockChartEventMarkers() {
+  const host = document.getElementById('stock-chart-event-markers');
+  const canvas = document.getElementById('stock-kline');
+  if (!host || !canvas || !stockChartKlines?.length) { host?.replaceChildren(); return; }
+  const rect = canvas.getBoundingClientRect();
+  const width = rect.width || canvas.clientWidth || 0;
+  if (!width) return;
+  const visibleCount = Math.max(0, Math.min(stockChartKlines.length, stockKlineVisibleCount()));
+  const bars = stockChartKlines.slice(0, visibleCount);
+  const dayKey = value => {
+    const at = Date.parse(String(value || ''));
+    if (!Number.isFinite(at)) return '';
+    try { return new Intl.DateTimeFormat('en-CA', { timeZone: stockChartExchangeTimezone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(at)); }
+    catch { return new Date(at).toISOString().slice(0, 10); }
+  };
+  const firstDate = dayKey(bars[0]?.time), lastDate = dayKey(bars[bars.length - 1]?.time);
+  const intraday = ['1m', '5m', '15m', '1h'].includes(String(currentStockKlinePeriod || '').toLowerCase());
+  const intervalMs = ({ '1m': 60_000, '5m': 300_000, '15m': 900_000, '1h': 3_600_000 })[String(currentStockKlinePeriod || '').toLowerCase()] || 0;
+  const matches = (window.mmStockChartEvents || []).map((item, index) => {
+    const eventTime = Date.parse(String(item.occurredAt || item.publishedAt || item.at || item.date || ''));
+    const date = dayKey(eventTime);
+    let barIndex = -1;
+    if (intraday && Number.isFinite(eventTime) && bars.length) {
+      let distance = Infinity;
+      bars.forEach((bar, index) => {
+        const delta = Math.abs(Number(bar.time) - eventTime);
+        if (dayKey(bar.time) === date && delta < distance) { distance = delta; barIndex = index; }
+      });
+      if (distance > intervalMs * 2) barIndex = -1;
+    } else barIndex = bars.findIndex(bar => dayKey(bar.time) === date);
+    return { item, index, date, barIndex };
+  }).filter(row => row.date && row.date >= firstDate && row.date <= lastDate && row.barIndex >= 0);
+  host.replaceChildren();
+  const lanes = new Map();
+  matches.slice(0, 24).forEach(({ item, index, date, barIndex }) => {
+    const lane = lanes.get(date) || 0; lanes.set(date, lane + 1);
+    const button = document.createElement('button');
+    button.type = 'button'; button.className = 'stock-chart-event-marker'; button.dataset.chartEventIndex = String(index);
+    button.style.left = `${Math.max(0, Math.min(100, ((58 + (barIndex + .5) * Math.max(0, width - 146) / Math.max(1, bars.length)) / width) * 100))}%`;
+    button.dataset.chartEventId = String(item.id || index);
+    button.style.top = `${6 + lane * 23}px`;
+    button.textContent = item.kind === 'news' ? 'N' : 'E';
+    button.title = `${item.title || '事件'} · ${date}`;
+    button.setAttribute('aria-label', `定位事件：${item.title || '未命名事件'}，${date}`);
+    button.addEventListener('click', () => { showStockChartEvidence(item, 'event'); focusStockChartTimestamp(item.occurredAt || item.publishedAt || item.at || item.date); });
+    host.appendChild(button);
+  });
+}
 function renderChartSignalList(targetId, signals, emptyText) {
   const el = document.getElementById(targetId);
   if (!el) return;
@@ -5794,8 +5971,19 @@ function renderChartSignalList(targetId, signals, emptyText) {
     const sourceTime = signal.sourceTime ? formatChartTime(signal.sourceTime) : '来源时间未提供';
     const source = signal.source || '来源未知';
     const title = [signal.reason, `来源：${source}`, `来源时间：${sourceTime}`, `状态：${state}`, `策略版本：${signal.strategyVersion || '未知'}`].filter(Boolean).join(' · ');
-    return `<span class="chart-signal-item ${signal.side === 'buy' ? 'buy' : 'sell'} ${signal.status === 'forming' ? 'forming' : 'confirmed'}" title="${stockEscapeHtml(title)}" data-signal-status="${signal.status === 'forming' ? 'forming' : 'confirmed'}">${signal.status === 'forming' ? '◯' : '●'} ${signal.side === 'buy' ? '买' : '卖'} · ${stockEscapeHtml(signal.label)} · ${time} · ${priceText} · ${state}</span>`;
+    return `<button type="button" class="chart-signal-item ${signal.side === 'buy' ? 'buy' : 'sell'} ${signal.status === 'forming' ? 'forming' : 'confirmed'}" title="${stockEscapeHtml(title)}" data-signal-status="${signal.status === 'forming' ? 'forming' : 'confirmed'}">${signal.status === 'forming' ? '◯' : '●'} ${signal.side === 'buy' ? '买' : '卖'} · ${stockEscapeHtml(signal.label)} · ${time} · ${priceText} · ${state}</button>`;
   }).join('');
+  if (targetId === 'stock-chart-signals') el.querySelectorAll('.chart-signal-item').forEach((button, index) => button.addEventListener('click', () => {
+    const signal = recent[index];
+    if (!signal) return;
+    showStockChartEvidence({ ...signal, title: `${signal.side === 'buy' ? '买入' : '卖出'} · ${signal.label}`, triggerPrice: signal.price }, 'signal');
+    const targetIndex = Number.isInteger(Number(signal.index)) ? Number(signal.index) : stockChartKlines.findIndex(bar => Number(bar.time) === Number(signal.time));
+    if (targetIndex >= 0 && targetIndex < stockChartKlines.length) {
+      stockChartReplayIndex = targetIndex;
+      if (window.stockMoneyKLine?.setReplayCursor) window.stockMoneyKLine.setReplayCursor(targetIndex);
+      else drawStockKline(document.getElementById('stock-kline'), stockChartKlines);
+    }
+  }));
 }
 function renderChartPatternList(targetId, patterns, emptyText) {
   const el = document.getElementById(targetId);
@@ -5820,6 +6008,8 @@ function renderChartPatternList(targetId, patterns, emptyText) {
     el.querySelectorAll('[data-pattern-index]').forEach(item => item.addEventListener('click', () => {
       const index = Number(item.dataset.patternIndex);
       if (!Number.isInteger(index) || !stockChartKlines.length) return;
+      const pattern = recent.find(row => Number(row.index) === index);
+      if (pattern) showStockChartEvidence({ ...pattern, title: pattern.label, source: document.getElementById('stock-kline')?.moneySourceMetadata?.source || '股票K线来源' }, 'pattern');
       stockChartReplayIndex = Math.max(0, Math.min(stockChartKlines.length - 1, index));
       if (window.stockMoneyKLine?.setReplayCursor) window.stockMoneyKLine.setReplayCursor(stockChartReplayIndex);
       else drawStockKline(document.getElementById('stock-kline'), stockChartKlines);
@@ -5833,23 +6023,38 @@ function renderChartStructureList(targetId, structures, chan, emptyText) {
   (structures || []).slice(-6).forEach(item => items.push({
     label: item.label || (item.type === 'swing-high' ? '摆动高点' : '摆动低点'),
     direction: item.direction || 'neutral', time: item.time, confidence: item.confidence,
-    price: item.price, status: item.status, condition: item.condition, meaning: item.meaning, disclaimer: item.disclaimer,
+    price: item.price, status: item.status, index: item.index, condition: item.condition, meaning: item.meaning, disclaimer: item.disclaimer,
   }));
   (chan?.tradePoints || []).slice(-6).forEach(item => items.push({
     label: `${item.type === 1 ? '一' : item.type === 2 ? '二' : item.type === 3 ? '三' : ''}类${item.side === 'buy' ? '买点' : '卖点'}`,
     direction: item.side === 'buy' ? 'bullish' : 'bearish', time: item.time, confidence: item.confidence,
-    price: item.price, status: item.status,
+    price: item.price, status: item.status, index: item.index,
     condition: item.status === 'confirmed' ? '结构已确认' : '结构仍在准备中', meaning: item.meaning,
     disclaimer: item.disclaimer,
   }));
   if (!items.length) { el.innerHTML = `<span class="chart-signal-empty">${stockEscapeHtml(emptyText)}</span>`; return; }
-  el.innerHTML = '<div class="chart-pattern-controls-title">结构说明</div>' + items.reverse().map(item => {
+  const recent = items.reverse();
+  el.innerHTML = '<div class="chart-pattern-controls-title">结构说明</div>' + recent.map((item, index) => {
     const direction = item.direction === 'bullish' ? '看涨' : item.direction === 'bearish' ? '看跌' : '中性';
     const time = item.time ? (targetId === 'stock-chart-structure-list' ? formatStockKlineTime(item.time) : new Date(item.time).toLocaleDateString('zh-CN', { month:'numeric', day:'numeric' })) : '--';
     const statusLabel = item.status === 'confirmed' ? '已确认' : item.status === 'invalidated' ? '已失效' : '准备中';
     const priceText = Number.isFinite(Number(item.price)) ? ` · 点位 ${stockEscapeHtml(formatChartPrice(item.price))}` : '';
-    return `<article class="chart-structure-item ${stockEscapeHtml(item.direction || 'neutral')}"><strong>${stockEscapeHtml(item.label)} · ${direction}</strong><div class="chart-pattern-item-meta">${time}${priceText} · 确认状态 ${statusLabel} · 置信度 ${stockEscapeHtml(item.confidence || '未知')} · ${stockEscapeHtml(item.condition || '条件未知')}</div><div><b>通常含义：</b>${stockEscapeHtml(item.meaning || '暂无说明')}</div><div class="chart-pattern-item-meta">${stockEscapeHtml(item.disclaimer || '结构仅供研究参考，不构成交易指令。')}</div></article>`;
+    return `<article class="chart-structure-item ${stockEscapeHtml(item.direction || 'neutral')}" data-chart-structure-index="${index}" tabindex="0" role="button"><strong>${stockEscapeHtml(item.label)} · ${direction}</strong><div class="chart-pattern-item-meta">${time}${priceText} · 确认状态 ${statusLabel} · 置信度 ${stockEscapeHtml(item.confidence || '未知')} · ${stockEscapeHtml(item.condition || '条件未知')}</div><div><b>通常含义：</b>${stockEscapeHtml(item.meaning || '暂无说明')}</div><div class="chart-pattern-item-meta">${stockEscapeHtml(item.disclaimer || '结构仅供研究参考，不构成交易指令。')}</div></article>`;
   }).join('');
+  el.querySelectorAll('[data-chart-structure-index]').forEach(row => {
+    const select = () => {
+      const item = recent[Number(row.dataset.chartStructureIndex)];
+      if (!item) return;
+      showStockChartEvidence({ ...item, title: item.label, source: document.getElementById('stock-kline')?.moneySourceMetadata?.source || '股票K线结构分析' }, 'structure');
+      const index = Number(item.index);
+      if (Number.isInteger(index) && index >= 0 && index < stockChartKlines.length) {
+        stockChartReplayIndex = index;
+        if (window.stockMoneyKLine?.setReplayCursor) window.stockMoneyKLine.setReplayCursor(index);
+      }
+    };
+    row.addEventListener('click', select);
+    row.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); select(); } });
+  });
 }
 function renderChartPatternMarkers(targetId, patterns, getPosition) {
   const layer = document.getElementById(targetId);
@@ -6431,6 +6636,7 @@ async function performStockKlineLoad(symbol, name, apiSymbol, options = {}) {
   if (symbol) currentStockSymbol = symbol;
   if (name) currentStockName = name;
   if (apiSymbol !== undefined) currentStockApiSymbol = apiSymbol || '';
+  if (!live) void loadStockChartEventRail();
   const requestedAdjustment = stockChartAsOf || stockChartIntradayDate ? 'source' : stockChartAdjustment;
   syncStockKlineAsOfControl();
   if (!live) {
@@ -6494,6 +6700,7 @@ async function performStockKlineLoad(symbol, name, apiSymbol, options = {}) {
       stockChartFocusEnabled = false;
       updateStockKlineFocusControl();
       renderChartPatternMarkers('stock-chart-patterns', [], () => null);
+      document.getElementById('stock-chart-event-markers')?.replaceChildren();
       renderChartPatternList('stock-chart-pattern-list', [], currentStockKlineReason);
       renderChartSignalList('stock-chart-signals', [], '');
       return;
@@ -6756,6 +6963,7 @@ function drawStockKline(canvas, klines) {
   renderChartPatternList('stock-chart-pattern-list', overlays.patterns, '当前周期未识别到所选蜡烛形态');
   renderChartStructureList('stock-chart-structure-list', overlays.structures, overlays.chan, '当前周期未识别到结构标记');
   window.MoneyTradingChart?.decorate(canvas,{...canvas.moneySourceMetadata,identity:currentStockSymbol+'|'+currentStockKlinePeriod,canvas,full:replayKlines,rows:klines,interval:currentStockKlinePeriod,exchangeTimeZone:stockChartExchangeTimezone,ma:[5,10,20],volumeUnit:'股',interactive:tradingActive,loadEarlier:!stockChartAsOf&&!stockChartIntradayDate&&stockChartAdjustment==='source'&&['1m','5m','15m','1h','1d'].includes(currentStockKlinePeriod)?loadEarlierStockKline:undefined,onAdjustmentChange:value=>{if(!['source','forward'].includes(value)||stockChartAsOf||stockChartIntradayDate)return;stockChartAdjustment=value;loadStockKline();},geometry:{W,H,padL,padR,padT,priceH,minP,maxP},redraw:()=>drawStockKline(canvas,stockChartKlines)});
+  redrawStockChartEventMarkers();
 }
 // --- DeFi Data ---
 async function loadDefiData() {

@@ -25,12 +25,15 @@ test('stock chart bootstrap is capped at 300 and keeps enough source history for
  assert.equal(stockKlineChartInitialWindow('3d',{enabled:true,adjustment:'source'},now),undefined,'non-paginatable aggregate periods retain their existing range');
  assert.throws(()=>stockKlineChartInitialWindow('1d',{enabled:true,adjustment:'source'},NaN),/时间/);
 });
-test('only the opt-in stock chart route applies the bootstrap window and bounds the response without changing source status',()=>{
+test('only the opt-in stock chart route applies the bootstrap window and labels cache hits without weakening source status',()=>{
  const server=fs.readFileSync('src/web/server.ts','utf8'),start=server.indexOf("app.get('/api/stock/kline'"),end=server.indexOf("app.use('/api/stocks/guru-holdings'",start),route=server.slice(start,end);
  assert.match(route,/stockKlineChartInitialWindow\(effectivePeriod/);
  assert.match(route,/enabled:req\.query\.chartWindow==='1'/);
  assert.match(route,/asOf:Boolean\(asOf\).*tradingDate:Boolean\(tradingDate\).*paginated:Boolean\(page\).*adjustment/);
  assert.match(route,/page\?\{startTime:page\.startTime,endTime:page\.endTime\+1\}:initialWindow\?\{startTime:initialWindow\.startTime,endTime:initialWindow\.endTime\}/);
  assert.match(route,/initialWindow\?bars\.slice\(-initialWindow\.limit\)/);
- assert.match(route,/dataStatus:\s*klinePageStatus\(snapshot\.status,!!page\)/,'initial chart loading must keep the original source status');
+ assert.match(route,/cacheableLiveChart\s*=\s*isCacheableLatestStockChart/,'only an explicit latest chart request may use the display cache');
+ assert.match(route,/responseDataStatus\s*=\s*displayCacheEntry\?\.status\s*===\s*'expired'/,'expired cached chart data must fail closed');
+ assert.match(route,/dataStatus:klinePageStatus\(responseDataStatus,!!page\)/,'cache hits must be reported as cached, not as live source data');
+ assert.match(route,/sourceTime:history\?\.sourceTime\|\|null/,'source timestamp must remain visible separately from cache capture time');
 });
