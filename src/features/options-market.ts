@@ -16,6 +16,7 @@ export interface OptionRow {
   volume: number;
   volumeUsd: number;
   openInterest: number;
+  quoteTime?: string;
   delta?: number;
   gammaExposureUsd?: number;
   quoteQuality?: OptionQuoteQuality;
@@ -64,8 +65,9 @@ export interface OptionPayoffAnalysis {
 }
 
 /** Estimate expiration payoff from verified two-sided quotes; this never places orders. */
-export function calculateOptionPayoff(input: { spot: number; multiplier: number; legs: OptionPayoffLeg[] }): OptionPayoffAnalysis {
+export function calculateOptionPayoff(input: { spot: number; multiplier: number; legs: OptionPayoffLeg[]; nowMs?: number }): OptionPayoffAnalysis {
   const { spot, multiplier, legs } = input;
+  const nowMs = Number.isFinite(input.nowMs) ? Number(input.nowMs) : Date.now();
   if (!Number.isFinite(spot) || spot <= 0) throw new Error('标的现价必须为正数');
   if (!Number.isInteger(multiplier) || multiplier < 1 || multiplier > 100_000) throw new Error('合约乘数必须为 1–100000 的整数');
   if (!Array.isArray(legs) || legs.length < 2 || legs.length > 4) throw new Error('多腿试算需要 2–4 条期权腿');
@@ -73,6 +75,16 @@ export function calculateOptionPayoff(input: { spot: number; multiplier: number;
   if (legs.some(leg => leg.row.quoteQuality?.status !== 'quoted' || !Number.isFinite(leg.row.bidPrice) || !Number.isFinite(leg.row.askPrice) || leg.row.bidPrice <= 0 || leg.row.askPrice < leg.row.bidPrice)) throw new Error('多腿试算只接受双边有效报价');
   const expiries = new Set(legs.map(leg => leg.row.expiryMs).filter((value): value is number => Number.isFinite(value)));
   if (expiries.size !== 1 || legs.some(leg => !Number.isFinite(leg.row.expiryMs))) throw new Error('多腿试算必须使用同一到期日');
+  if (legs.some(leg => leg.row.expiryMs! <= nowMs)) throw new Error('所选期权到期日已过，不能进行当前报价的到期试算');
+  for (const leg of legs) {
+    const quoteTime = Date.parse(String(leg.row.quoteTime || ''));
+    if (!Number.isFinite(quoteTime)) throw new Error(`合约 ${leg.row.instrumentName || '(空)'} 缺少有效报价抓取时间`);
+    if (quoteTime > nowMs + 60_000) throw new Error(`合约 ${leg.row.instrumentName || '(空)'} 报价时间来自未来`);
+    if (nowMs - quoteTime > 5 * 60_000) throw new Error(`合约 ${leg.row.instrumentName || '(空)'} 报价时间超过 5 分钟，请刷新期权链`);
+    if (!String(leg.row.instrumentName || '').trim() || !Number.isFinite(leg.row.strike) || leg.row.strike <= 0 || !['call', 'put'].includes(leg.row.optionType)) {
+      throw new Error('期权合约身份、行权价或看涨/看跌类型无效');
+    }
+  }
 
   const scale = (leg: OptionPayoffLeg) => leg.contracts * multiplier;
   const premiumPerUnit = (leg: OptionPayoffLeg) => leg.action === 'buy' ? -leg.row.askPrice : leg.row.bidPrice;

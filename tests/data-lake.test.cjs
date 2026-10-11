@@ -41,7 +41,7 @@ test('real options-chain snapshots are daily partitioned, quota-counted, source-
     const input = {
       market: 'options', instrument: 'option:cboe:AAPL', underlyingMarket: 'stocks', source: 'CBOE Delayed Quotes',
       fetchedAt: '2026-09-27T14:00:00.000Z', mode: 'daily', timezone: 'America/New_York',
-      snapshot: { source: 'CBOE Delayed Quotes', market: 'us_equity', asset: 'AAPL', fetchedAt: '2026-09-27T14:00:00.000Z', expiries: [{ rows: [{ instrumentName: 'AAPL260930C00100000', strike: 100, optionType: 'call', impliedVolPct: 23, volume: 4, openInterest: 30 }] }] },
+      snapshot: { source: 'CBOE Delayed Quotes', market: 'us_equity', asset: 'AAPL', fetchedAt: '2026-09-27T14:00:00.000Z', expiries: [{ expiryMs: Date.UTC(2026, 8, 30, 20), rows: [{ instrumentName: 'AAPL260930C00100000', strike: 100, optionType: 'call', impliedVolPct: 23, volume: 4, openInterest: 30 }] }] },
     };
     const first = catalog.saveOptionsChainSnapshot(input);
     const sameDay = catalog.saveOptionsChainSnapshot(input);
@@ -52,6 +52,7 @@ test('real options-chain snapshots are daily partitioned, quota-counted, source-
     assert.equal(catalog.listCoverage('options', 'option:cboe:AAPL', 'snapshot')[0].rowCount, 2);
     assert.equal(catalog.getDiagnostics().byDataset['options-chain-snapshots'], 2);
     assert.throws(() => catalog.saveOptionsChainSnapshot({ ...input, source: 'Fabricated History', snapshot: { ...input.snapshot, source: 'Fabricated History' } }), /unsupported options provider/i);
+    assert.throws(() => catalog.saveOptionsChainSnapshot({ ...input, mode: 'manual', snapshot: { ...input.snapshot, expiries: [{ ...input.snapshot.expiries[0], rows: [{ ...input.snapshot.expiries[0].rows[0], instrumentName: 'MSFT260930C00100000' }] }] } }), /contract.*identity|期权合约身份/i);
   } finally { catalog.close(); fs.rmSync(root, { recursive: true, force: true }); }
 });
 

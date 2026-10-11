@@ -5470,13 +5470,18 @@ function renderOptionPayoffBuilder(expiry) {
   }
   const options = rows.map(row => `<option value="${stockEscapeHtml(row.instrumentName)}">${row.optionType === 'call' ? 'Call' : 'Put'} ${Number(row.strike).toLocaleString()} · 买 ${row.askPrice} / 卖 ${row.bidPrice} · ${stockEscapeHtml(row.instrumentName)}</option>`).join('');
   const legs = [0,1,2,3].map(index => `<div class="option-payoff-leg" data-payoff-leg="${index}"><label><input type="checkbox" data-leg-enabled ${index < 2 ? 'checked' : ''}> 腿 ${index+1}</label><select data-contract ${index >= 2 ? 'disabled' : ''} aria-label="期权合约腿 ${index+1}">${options}</select><select data-action ${index >= 2 ? 'disabled' : ''} aria-label="买卖方向"><option value="buy">买入（按卖价）</option><option value="sell" ${index === 1 ? 'selected' : ''}>卖出（按买价）</option></select><input data-quantity type="number" min="1" max="100" step="1" value="1" ${index >= 2 ? 'disabled' : ''} aria-label="合约数量"></div>`).join('');
-  host.innerHTML = `<section class="option-payoff"><div><h3>多腿到期损益试算</h3><p>同一到期日、仅使用当前 CBOE 双边有效报价；这是到期情景分析，不会创建订单。</p></div><div class="option-payoff-legs">${legs}</div><label class="option-payoff-multiplier">每份合约乘数（股） <input data-multiplier type="number" min="1" max="100000" step="1" value="100"></label><button type="button" data-calculate>计算到期损益</button><div data-result role="status">报价来源 ${stockEscapeHtml(optionsSnapshot.source)} · ${stockEscapeHtml(optionsSnapshot.fetchedAt)} · 买单按卖价、卖单按买价。</div><small>乘数 100 是常见标准美股合约假设，不适用于特殊交割/调整合约；不含费用、滑点、提前行权或指派风险。请自行核对合约规格。</small></section>`;
+  host.innerHTML = `<section class="option-payoff"><div><h3>多腿到期损益试算</h3><p>同一到期日、仅使用当前 CBOE 双边有效报价；这是到期情景分析，不会创建订单。</p></div><div class="option-payoff-legs">${legs}</div><label class="option-payoff-multiplier">每份合约乘数（股） <input data-multiplier type="number" min="1" max="100000" step="1" value="" placeholder="先核实规格"></label><button type="button" data-calculate>计算到期损益</button><div data-result role="status">报价来源 ${stockEscapeHtml(optionsSnapshot.source)} · ${stockEscapeHtml(optionsSnapshot.fetchedAt)} · 买单按卖价、卖单按买价。</div><small>调整/特殊交割合约的乘数可能不同；请以该合约规格核实并填写乘数。未核实前不计算金额；结果不含费用、滑点、提前行权或指派风险。</small></section>`;
   host.querySelectorAll('[data-leg-enabled]').forEach(check => check.addEventListener('change', () => {
     const row = check.closest('[data-payoff-leg]');
     row.querySelectorAll('[data-contract],[data-action],[data-quantity]').forEach(control => { control.disabled = !check.checked; });
   }));
   host.querySelector('[data-calculate]').addEventListener('click', async event => {
     const button = event.currentTarget, result = host.querySelector('[data-result]');
+    const multiplier = Number(host.querySelector('[data-multiplier]').value);
+    if (!Number.isInteger(multiplier) || multiplier < 1 || multiplier > 100_000) {
+      result.textContent = '请先核实当前合约乘数并填写 1–100000 的整数；未核实前不显示损益。';
+      return;
+    }
     const selectedLegs = [...host.querySelectorAll('[data-payoff-leg]')].filter(row => row.querySelector('[data-leg-enabled]').checked).map(row => ({
       instrumentName: row.querySelector('[data-contract]').value,
       action: row.querySelector('[data-action]').value,
@@ -5484,7 +5489,7 @@ function renderOptionPayoffBuilder(expiry) {
     }));
     button.disabled = true; result.textContent = '正在以来源当前报价计算…';
     try {
-      const response = await fetch('/api/options/payoff', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ symbol:optionsSnapshot.asset, expiryMs:expiry.expiryMs, multiplier:Number(host.querySelector('[data-multiplier]').value), legs:selectedLegs }) });
+      const response = await fetch('/api/options/payoff', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ symbol:optionsSnapshot.asset, expiryMs:expiry.expiryMs, multiplier, legs:selectedLegs }) });
       const payload = await response.json();
       if (!response.ok || !payload.success) throw new Error(payload.reason || '试算失败');
       const data = payload.data;

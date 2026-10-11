@@ -56,6 +56,41 @@ function parseCheckpoint(value: unknown): BackfillCheckpoint {
   } catch { return { rowsWritten: 0, partitionsCommitted: 0 }; }
 }
 
+function validateOptionsChainIdentity(instrument: string, source: OptionsChainSnapshotInput['source'], asset: string, expiries: any[]): void {
+  const monthIndex: Record<string, number> = { JAN: 0, FEB: 1, MAR: 2, APR: 3, MAY: 4, JUN: 5, JUL: 6, AUG: 7, SEP: 8, OCT: 9, NOV: 10, DEC: 11 };
+  for (const expiry of expiries) {
+    if (!Number.isFinite(expiry?.expiryMs)) throw new Error('option chain expiry is missing or invalid');
+    const expiryDay = new Date(Number(expiry.expiryMs)).toISOString().slice(0, 10);
+    for (const row of Array.isArray(expiry.rows) ? expiry.rows : []) {
+      const name = String(row?.instrumentName || '').toUpperCase();
+      const optionType = row?.optionType;
+      const strike = Number(row?.strike);
+      if (!Number.isFinite(strike) || strike <= 0 || !['call', 'put'].includes(optionType)) {
+        throw new Error(`option contract identity is incomplete: ${name || '(empty)'}`);
+      }
+      if (source === 'CBOE Delayed Quotes') {
+        const match = /^([A-Z0-9.]{1,6})(\d{6})([CP])(\d{8})$/.exec(name);
+        if (!match || match[1] !== asset || match[2].slice(0, 2) !== expiryDay.slice(2, 4)
+          || match[2].slice(2, 4) !== expiryDay.slice(5, 7) || match[2].slice(4, 6) !== expiryDay.slice(8, 10)
+          || (match[3] === 'C' ? 'call' : 'put') !== optionType || Math.abs(Number(match[4]) / 1_000 - strike) > 0.0005) {
+          throw new Error(`option contract identity does not match ${instrument}: ${name || '(empty)'}`);
+        }
+      } else {
+        const match = /^(BTC|ETH)-(\d{1,2})(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)(\d{2})-(\d+(?:\.\d+)?)-([CP])$/.exec(name);
+        if (!match || match[1] !== asset || (match[6] === 'C' ? 'call' : 'put') !== optionType
+          || Math.abs(Number(match[5]) - strike) > 0.0005) {
+          throw new Error(`option contract identity does not match ${instrument}: ${name || '(empty)'}`);
+        }
+        const contractDate = new Date(Date.UTC(2000 + Number(match[4]), monthIndex[match[3]], Number(match[2])));
+        const contractDay = contractDate.toISOString().slice(0, 10);
+        if (contractDate.getUTCDate() !== Number(match[2]) || contractDay !== expiryDay) {
+          throw new Error(`option contract expiry does not match snapshot: ${name}`);
+        }
+      }
+    }
+  }
+}
+
 function validateInstrument(market: MarketId, instrument: string): void {
   if (!instrument || !IDENTIFIER.test(instrument)) throw new Error('invalid instrument identity');
   const stock = /^[A-Z][A-Z0-9.]{0,9}$/.test(instrument);
@@ -429,6 +464,9 @@ export class DataLakeCatalog {
     if (!Number.isFinite(fetchedAt.getTime()) || new Date(input.snapshot.fetchedAt).getTime() !== fetchedAt.getTime()) throw new Error('options snapshot fetch time is invalid');
     const expectedAsset = input.instrument.split(':').at(-1)!.toUpperCase();
     if (String(input.snapshot.asset).toUpperCase() !== expectedAsset) throw new Error('options snapshot asset does not match instrument');
+    const expectedSnapshotMarket = isEquity ? 'us_equity' : 'crypto';
+    if (input.snapshot.market !== expectedSnapshotMarket) throw new Error('options snapshot underlying market does not match its source and instrument');
+    validateOptionsChainIdentity(input.instrument, input.source, expectedAsset, input.snapshot.expiries);
     const timeZone = input.timezone || (isEquity ? 'America/New_York' : 'UTC');
     try { new Intl.DateTimeFormat('en', { timeZone }).format(fetchedAt); } catch { throw new Error('invalid options snapshot timezone'); }
     const tradeDate = new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(fetchedAt);
