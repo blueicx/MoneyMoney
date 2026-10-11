@@ -117,6 +117,17 @@ test('aggregated values are capped at the latest common core observation, never 
   assert.notEqual(result.sourceUpdatedAt, result.retrievedAt);
 });
 
+test('same calendar date is not treated as a synchronized observation when source timestamps differ', () => {
+  const charts = validCharts();
+  charts['market-cap'] = { points: points(60, 500).map(point => ({ ...point, x: point.x + 60 * 60_000 })) };
+  const result = buildBitcoinOnchainRadar(charts, '2026-10-12T02:00:00.000Z');
+
+  assert.equal(result.sourceUpdatedAt, null);
+  assert.equal(result.signal, 'unavailable');
+  assert.equal(result.regimeBoost, null);
+  assert.match(result.reason, /没有可核验的共同观测时点/);
+});
+
 test('one upstream chart exception remains a partial result and records retrieval time', async () => {
   const result = await getBitcoinOnchainRadar({
     fetchChart: async chart => {

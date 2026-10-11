@@ -308,7 +308,7 @@ export function buildBitcoinOnchainRadar(
       points = points.filter(point => point.x <= commonTimestamp);
       if (points[points.length - 1]?.x !== commonTimestamp) {
         status.dataStatus = 'partial';
-        status.reason = '截至共同样本日没有同日记录；为避免跨日拼接，该指标未纳入本次比较';
+        status.reason = '截至共同截止时点没有同时间戳记录；为避免时间错配，该指标未纳入本次比较';
         continue;
       }
     }
@@ -374,9 +374,9 @@ export function buildBitcoinOnchainRadar(
   const reasons = statuses
     .filter(status => status.dataStatus !== 'historical')
     .map(status => `${status.labelZh}：${status.reason || status.dataStatus}`);
-  if (coreAvailable && commonTimestamp === null) reasons.push('核心序列没有可核验的共同样本日，未生成综合判断');
-  else if (commonTimestamp !== null && nvtHistoryCount < MIN_HISTORY_POINTS) reasons.push(`NVT同日历史只有${nvtHistoryCount}个有效样本，未生成综合判断`);
-  if (!signalReady && !reasons.length) reasons.push('综合判断所需核心字段或同日历史不足，未生成方向结论');
+  if (coreAvailable && commonTimestamp === null) reasons.push('核心序列没有可核验的共同观测时点，未生成综合判断');
+  else if (commonTimestamp !== null && nvtHistoryCount < MIN_HISTORY_POINTS) reasons.push(`NVT可对齐历史只有${nvtHistoryCount}个有效样本，未生成综合判断`);
+  if (!signalReady && !reasons.length) reasons.push('综合判断所需核心字段或可对齐历史不足，未生成方向结论');
 
   const allAvailable = statuses.every(status => status.dataStatus === 'historical')
     && signalReady
