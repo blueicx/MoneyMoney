@@ -20,7 +20,7 @@ import { getEventRisk, type EventRiskResult } from './event-risk';
 import { getStablecoinLiquidity, type StablecoinLiquidityResult } from './stablecoin-liquidity';
 import { getCotRadar, type CotRadarResult } from './cftc-positioning';
 import { getPerpetualCrowding, type PerpetualCrowdingResult } from './perpetual-crowding';
-import { getOrderFlowLiquidityRadar, type OrderFlowLiquidityResult } from './order-flow-liquidity';
+import { getOrderFlowLiquidityRadar, isOrderFlowMarketBiasEligible, type OrderFlowLiquidityResult } from './order-flow-liquidity';
 import { getShortInterestRadar, getShortInterestSnapshot, type ShortInterestRadar } from './short-interest';
 import { getMarketBreadthSnapshot, type MarketBreadthSnapshot } from './market-breadth';
 import {
@@ -1201,7 +1201,8 @@ async function buildContext(
   const liquidityBoost = stablecoinLiquidity?.regimeBoost ?? 0;
   const cotBoost = cotPositioning?.regimeBoost ?? 0;
   const derivativesBoost = perpetualCrowding?.regimeBoost ?? 0;
-  const orderFlowBoost = orderFlowLiquidity?.regimeBoost ?? 0;
+  const orderFlowComplete = isOrderFlowMarketBiasEligible(orderFlowLiquidity);
+  const orderFlowBoost = orderFlowComplete ? orderFlowLiquidity?.regimeBoost ?? 0 : 0;
   const onchainBoost = bitcoinOnchain?.regimeBoost ?? 0;
   const correlationBoost = crossAssetCorrelation?.regimeBoost ?? 0;
   const shortInterestBoost = shortInterest?.regimeBoost ?? 0;
@@ -1324,9 +1325,11 @@ async function buildContext(
     }
   }
 
-  if (orderFlowLiquidity) {
-    if (orderFlowLiquidity.confirmedOutflowCount >= 2
-      || (orderFlowLiquidity.averageNetFlowSharePct <= -5 && orderFlowLiquidity.averageBookImbalancePct <= -10)) {
+  if (orderFlowLiquidity && orderFlowComplete) {
+    const averageNetFlow = orderFlowLiquidity.averageNetFlowSharePct;
+    const averageBookImbalance = orderFlowLiquidity.averageBookImbalancePct;
+    if (orderFlowLiquidity.confirmedOutflowCount !== null && orderFlowLiquidity.confirmedOutflowCount >= 2
+      || (averageNetFlow !== null && averageBookImbalance !== null && averageNetFlow <= -5 && averageBookImbalance <= -10)) {
       cautionFlags.push({
         id: 'order-flow-outflow',
         severity: 'medium',
@@ -1335,7 +1338,7 @@ async function buildContext(
         adviceZh: '短线抛压更实，追多前等止跌；有利润的仓位先保护，不要逆势补仓。',
         source: `${orderFlowLiquidity.summaryZh} · ${orderFlowLiquidity.advisorBiasZh}`,
       });
-    } else if (orderFlowLiquidity.conflictingCount >= 3) {
+    } else if (orderFlowLiquidity.conflictingCount !== null && orderFlowLiquidity.conflictingCount >= 3) {
       cautionFlags.push({
         id: 'order-flow-conflict',
         severity: 'medium',
@@ -1344,7 +1347,7 @@ async function buildContext(
         adviceZh: '成交方向和挂单结构不一致，容易双向扫损；缩小仓位或等待信号收敛。',
         source: orderFlowLiquidity.summaryZh,
       });
-    } else if (orderFlowLiquidity.confirmedInflowCount >= 2) {
+    } else if (orderFlowLiquidity.confirmedInflowCount !== null && orderFlowLiquidity.confirmedInflowCount >= 2) {
       cautionFlags.push({
         id: 'order-flow-inflow',
         severity: 'info',

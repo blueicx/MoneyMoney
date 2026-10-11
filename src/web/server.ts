@@ -3349,9 +3349,12 @@ async function captureMarketHistoryEvidence(market: MarketId, instrument: string
         const data = await getOrderFlowLiquidityRadar();
         const requestedBase = parts[2].toUpperCase().replace(/(?:USDT|USDC)$/, '');
         const row = data.rows.find(row => row.symbol.toUpperCase() === requestedBase);
-        if (!row) throw new Error('当前 Binance 来源未覆盖该标的');
-        fields = { bidDepthUsd: row.bidUsd, askDepthUsd: row.askUsd, spreadPct: row.spreadBps / 100, price: row.price, pair: parts[2].toUpperCase() };
-        source = data.source; observedAt = data.generatedAt; sourceUrl = 'https://www.binance.com';
+        if (!row) {
+          const symbolFailure = data.failures.find(item => item.symbol === requestedBase);
+          throw new Error(symbolFailure?.reason || '当前主动资金流雷达固定币种池未覆盖该标的');
+        }
+        fields = { bidDepthUsd: row.bidUsd, askDepthUsd: row.askUsd, spreadPct: row.spreadBps / 100, price: row.price, pair: parts[2].toUpperCase(), dataStatus: row.dataStatus, klineObservedAt: row.klineObservedAt, klineTimeBasis: row.klineTimeBasis, klineRetrievedAt: row.klineRetrievedAt, depthSourceTime: row.depthSourceTime, depthRetrievedAt: row.depthRetrievedAt };
+        source = data.source; observedAt = row.klineObservedAt; sourceUrl = 'https://data-api.binance.vision/api/v3/depth';
       } else {
         const data = await getPerpetualCrowding();
         const row = data.rows.find(row => row.contract.toUpperCase() === parts[2].toUpperCase());
@@ -4019,9 +4022,21 @@ app.get('/api/perpetual-crowding', async (_req, res) => {
 
 app.get('/api/order-flow-liquidity', async (_req, res) => {
   try {
-    res.json({ success: true, data: await getOrderFlowLiquidityRadar() });
+    const data = await getOrderFlowLiquidityRadar();
+    res.json({
+      success: true,
+      market: data.market,
+      instrument: null,
+      dataStatus: data.dataStatus,
+      source: data.source,
+      updatedAt: data.updatedAt,
+      sourceUpdatedAt: data.sourceUpdatedAt,
+      reason: data.reason,
+      evidenceRefs: data.evidenceRefs,
+      data,
+    });
   } catch (e: any) {
-    res.json({ success: false, error: e.message, data: null });
+    res.status(503).json({ success: false, market: 'crypto', instrument: null, dataStatus: 'unavailable', error: e.message, reason: e.message, updatedAt: null, source: 'Binance public spot order-flow and depth', evidenceRefs: [], data: null });
   }
 });
 

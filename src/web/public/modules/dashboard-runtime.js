@@ -5129,8 +5129,26 @@ async function loadOrderFlowLiquidity() {
   try {
     const res = await fetch('/api/order-flow-liquidity');
     const payload = await res.json();
-    if (!payload.success || !payload.data?.rows?.length) throw new Error(payload.error || 'no data');
+    if (!payload.success || !payload.data) {
+      const reason = payload.reason || payload.error || '主动资金流来源未返回数据';
+      el.innerHTML = `<div class="empty-tip">来源不可用：${safeNewsText(reason)}</div>`;
+      return;
+    }
     const d = payload.data;
+    const statusLabels = { delayed: 'REST 快照', cached: '缓存快照', partial: '部分来源成功', unavailable: '来源不可用' };
+    const formatRadarTime = value => Number.isFinite(Date.parse(value))
+      ? new Date(value).toLocaleString('zh-CN')
+      : '时间未知';
+    if (!Array.isArray(d.rows) || !d.rows.length) {
+      const reason = d.reason || payload.reason || '当前没有可用的币种与盘口数据';
+      el.innerHTML = `
+        <div class="empty-tip" role="status">
+          <strong>${safeNewsText(statusLabels[d.dataStatus] || '暂无数据')}</strong>
+          <div style="margin-top:5px;">${safeNewsText(reason)}</div>
+          <small style="display:block;margin-top:5px;">${safeNewsText(d.source || payload.source || 'Binance 公共现货来源')} · 抓取时间 ${safeNewsText(formatRadarTime(d.updatedAt || payload.updatedAt))}</small>
+        </div>`;
+      return;
+    }
     const compactUsd = value => '$' + Intl.NumberFormat('en', {
       notation: 'compact', maximumFractionDigits: 1,
     }).format(Math.max(0, value));
@@ -5159,18 +5177,38 @@ async function loadOrderFlowLiquidity() {
           <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(125px,1fr));gap:6px;margin-top:9px;">
             ${facts.map(fact => `<div style="background:var(--bg-secondary);border-radius:8px;padding:7px;font-size:10.5px;line-height:1.35;">${safeNewsText(fact)}</div>`).join('')}
           </div>
+          <small style="display:block;margin-top:7px;color:var(--text-secondary);line-height:1.45;">
+            1小时K线开盘 ${safeNewsText(formatRadarTime(row.klineObservedAt))} · K线抓取 ${safeNewsText(formatRadarTime(row.klineRetrievedAt))}<br>
+            盘口抓取 ${safeNewsText(formatRadarTime(row.depthRetrievedAt))} · 来源未提供盘口源端时间
+          </small>
           <div style="font-size:11px;color:var(--text-secondary);line-height:1.45;margin-top:8px;">${safeNewsText(row.adviceZh)}</div>
         </div>`;
     }).join('');
+    const complete = d.dataStatus === 'delayed' || d.dataStatus === 'cached';
+    const aggregate = complete && Number.isFinite(d.regimeBoost)
+      ? `<strong style="color:${d.regimeBoost >= 0 ? 'var(--green)' : 'var(--red)'};">环境加分 ${d.regimeBoost > 0 ? '+' : ''}${safeNewsText(d.regimeBoost)}</strong>`
+      : '<strong style="color:var(--text-secondary);">全市场综合加分暂不计算</strong>';
+    const failures = Array.isArray(d.failures) && d.failures.length
+      ? `<div role="status" style="border:1px solid var(--border);background:var(--bg-secondary);border-radius:9px;padding:8px 10px;margin:0 0 8px;color:var(--text-secondary);font-size:11px;line-height:1.5;">
+          ${safeNewsText(d.reason || d.failures.map(item => `${item.symbol}: ${item.reason}`).join('；'))}
+        </div>`
+      : '';
     el.innerHTML = `
+      <div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:7px;color:var(--text-secondary);font-size:11px;">
+        <span>${safeNewsText(statusLabels[d.dataStatus] || '状态未知')} · 覆盖 ${safeNewsText(d.availableSymbols)}/${safeNewsText(d.expectedSymbols)} 个币种</span>
+        <span>抓取于 ${safeNewsText(formatRadarTime(d.updatedAt || payload.updatedAt))}</span>
+      </div>
+      ${failures}
       <div style="font-size:11px;color:var(--text-secondary);margin-bottom:8px;line-height:1.45;">
-        ${safeNewsText(d.summaryZh)} · 建议：${safeNewsText(d.advisorBiasZh)}
-        <strong style="color:${d.regimeBoost >= 0 ? 'var(--green)' : 'var(--red)'};">环境加分 ${d.regimeBoost > 0 ? '+' : ''}${safeNewsText(d.regimeBoost)}</strong>
+        ${safeNewsText(d.summaryZh)} ${complete ? `· 建议：${safeNewsText(d.advisorBiasZh)}` : ''} ${aggregate}
       </div>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:8px;">${cards}</div>
-      <small style="display:block;margin-top:8px;color:var(--text-secondary);">来源：Binance 公共现货 K 线主动买入额 + 实时盘口 · 更新于 ${new Date(d.generatedAt).toLocaleTimeString('zh-CN')}</small>`;
+      <small style="display:block;margin-top:8px;color:var(--text-secondary);line-height:1.45;">
+        来源：Binance 公共现货1小时K线主动买入额 + 盘口快照。K线时间为该小时开盘时间，盘口时间为本地抓取时间（非交易所时间）。
+        ${Array.isArray(d.evidenceRefs) ? d.evidenceRefs.map(url => `<a href="${safeNewsText(url)}" target="_blank" rel="noopener noreferrer">来源接口 ↗</a>`).join(' · ') : ''}
+      </small>`;
   } catch (e) {
-    el.innerHTML = '<div class="empty-tip">主动资金流与盘口雷达暂时不可用，稍后会自动重试。</div>';
+    el.innerHTML = `<div class="empty-tip" role="status">主动资金流与盘口雷达请求失败：${safeNewsText(e?.message || '未知错误')}</div>`;
   }
 }
 async function loadCotRadar() {
