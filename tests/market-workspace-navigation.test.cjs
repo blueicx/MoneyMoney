@@ -10,6 +10,27 @@ function ids(scope) {
   return resolveWorkspaceNavigation(scope).flatMap(group => group.items.map(item => item.id));
 }
 
+test('the market registry accounts for all 30 shared and market-specific workspaces', () => {
+  const expected = [
+    'overview', 'stock-quotes', 'crypto-quotes', 'events', 'radar', 'analysis', 'backtest', 'screener',
+    'watchlist', 'positions', 'risk', 'decision-intelligence', 'research-lab', 'action-center', 'breadth',
+    'insider', 'institutional', 'guru-holdings', 'analyst', 'fundamentals', 'short-interest', 'option-chain',
+    'volatility', 'greeks', 'funding-rate', 'open-interest', 'on-chain', 'order-flow', 'contracts', 'prediction-radar',
+  ].sort();
+  const registered = new Set(['overview', 'stocks', 'options', 'crypto', 'prediction', 'watchlist'].flatMap(ids));
+  registered.add('watchlist');
+  registered.add('positions');
+
+  assert.deepEqual([...registered].sort(), expected);
+  for (const scope of ['overview', 'stocks', 'options', 'crypto', 'prediction', 'watchlist']) {
+    for (const id of ids(scope)) assert.equal(isWorkspaceAllowed(scope, id), true, `${scope}/${id} is listed but rejected`);
+  }
+  for (const scope of ['overview', 'stocks', 'options', 'crypto', 'prediction', 'watchlist']) {
+    assert.equal(isWorkspaceAllowed(scope, 'watchlist'), true, `${scope} must retain the shared watchlist workspace`);
+    assert.equal(isWorkspaceAllowed(scope, 'positions'), true, `${scope} must retain the shared positions workspace`);
+  }
+});
+
 test('股票左栏包含研究功能但不包含虚拟币和预测市场专属功能', () => {
   const stockIds = ids('stocks');
 

@@ -10334,13 +10334,6 @@ function scopeAllowsView(declared) {
   const scopes = String(declared || '').split(/[\s,|]+/).filter(Boolean);
   return scopes.includes('all') || scopes.includes('common') || scopes.includes(activeMarketScope);
 }
-const EXCLUSIVE_WORKSPACE_IDS = new Set([
-  'contracts',
-  'stock-quotes', 'crypto-quotes', 'events', 'breadth', 'insider', 'institutional', 'guru-holdings', 'analyst', 'fundamentals', 'short-interest', 'screener',
-  'option-chain', 'volatility', 'greeks', 'funding-rate', 'open-interest', 'on-chain', 'order-flow',
-  'prediction-radar', 'decision-intelligence',
-  'research-lab', 'action-center',
-]);
 function workspaceIdsForNode(node) {
   return String(node?.dataset?.workspaceIds || node?.dataset?.workspaceId || '')
     .split(/[\s,|]+/).filter(Boolean);
@@ -10350,10 +10343,11 @@ function workspaceAllowsView(node) {
   const ids = workspaceIdsForNode(node);
   return ids.length === 0 || ids.includes(activeWorkspaceId);
 }
+const legacyWorkspaceVisibility = new WeakMap();
 function applyWorkspaceView() {
   const shell = document.getElementById('market-workspace-shell');
   if (shell) shell.dataset.workspace = activeWorkspaceId;
-  const exclusive = EXCLUSIVE_WORKSPACE_IDS.has(activeWorkspaceId);
+  const exclusive = activeWorkspaceId !== 'overview';
   document.querySelectorAll('[data-workspace-id], [data-workspace-ids]').forEach(node => {
     const visible = (!node.dataset.marketScopes || scopeAllowsView(node.dataset.marketScopes)) && workspaceAllowsView(node);
     const flatPanel = exclusive
@@ -10370,8 +10364,16 @@ function applyWorkspaceView() {
     const tab = document.getElementById(tabId);
     if (!tab) return;
     tab.querySelectorAll(':scope > *').forEach(node => {
-      if (!exclusive || node.matches('.section-title, #market-scope-empty, [data-workspace-id], [data-workspace-ids]')) return;
-      node.hidden = true;
+      if (node.matches('.section-title, #market-scope-empty, [data-workspace-id], [data-workspace-ids]')) return;
+      if (exclusive) {
+        if (!legacyWorkspaceVisibility.has(node)) legacyWorkspaceVisibility.set(node, node.hidden);
+        node.hidden = true;
+        node.classList.add('workspace-hidden');
+      } else if (node.classList.contains('workspace-hidden')) {
+        node.hidden = Boolean(legacyWorkspaceVisibility.get(node)) || node.classList.contains('scope-hidden');
+        legacyWorkspaceVisibility.delete(node);
+        node.classList.remove('workspace-hidden');
+      }
     });
   });
 }
