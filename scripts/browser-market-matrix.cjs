@@ -501,6 +501,10 @@ async function main() {
     assert.match(await page.locator('#options-updated').innerText(), /不等于合约逐笔报价时间/);
     const payoffBuilder = page.locator('#option-payoff-builder');
     await payoffBuilder.getByRole('button', { name: '计算到期损益' }).click();
+    assert.match(await payoffBuilder.locator('[data-result]').innerText(), /先核实.*乘数/);
+    assert.equal(optionPayoffRequest, null, 'payoff must not reach the API before the contract multiplier is explicitly verified');
+    await payoffBuilder.locator('[data-multiplier]').fill('100');
+    await payoffBuilder.getByRole('button', { name: '计算到期损益' }).click();
     await page.waitForFunction(() => document.querySelector('#option-payoff-builder [data-result]')?.textContent.includes('净权利金'));
     assert.equal(optionPayoffRequest.symbol, 'SPY');
     assert.equal(optionPayoffRequest.legs.length, 2);
