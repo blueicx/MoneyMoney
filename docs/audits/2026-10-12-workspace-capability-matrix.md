@@ -100,3 +100,10 @@
 - 当前接入字段没有可验证的费率观测时点映射；`sourceUpdatedAt` 明确为空，`fetchedAt` 仅代表 MoneyMoney 请求时间，结果状态为部分数据/时间未验证，不冒称源端实时。页面分别呈现覆盖数、缓存状态、取回时间与未验证时点。
 - 页面上的全量等权均值是各合约当前周期费率的原始均值，不是按周期归一后的年化比较；标签明确提示这一点。交易助手只有在精确覆盖 BTC、ETH、BNB、SOL 且四者均有相同有效 `funding_interval` 秒数时才计算拥挤度。覆盖不足或周期不一致/缺失时指标为 `null`、显示警告，且不产生多空拥挤风险提示。
 - `tests/market-sentiment-quality.test.cjs` 覆盖零费率、非法字段、非永续过滤、limit 不影响均值、完整/不足的主流覆盖、空/无效来源状态、缓存复用、页面来源失败隔离和助手接线。
+
+## 2026-10-12 增量复核：SEC 财报结果原文绑定
+
+- 结果发布前不仅验证 SEC HTTPS 域名，还将 archive 路径中的申报人 CIK 和完整 accession 与结果记录的 accession 逐项匹配；拒绝非 SEC 主机、凭据/端口、查询/片段变体、错误 CIK、错误 accession 及不安全路径段。
+- 精确 accession 的 SEC archive 索引页仍可作为来源链接，以兼容 SEC 返回的记录没有 primary document URL 的情况；不得把同域其他公司的申报页冒充该股票证据。
+- `tests/telegram-result-adapters.test.cjs` 覆盖正确文档、正确 archive 索引、CIK/accession 错配、查询参数和空 user-info URL。此次根因由该测试在修复前复现，修复后定向测试通过。
+- 这是本地来源身份契约验证，不代表对 SEC 当前在线可用率、某一真实财报字段或生产 Telegram 投递做了在线验证。

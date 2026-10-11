@@ -63,6 +63,19 @@ test('SEC 8-K earnings release is accepted only with the same tracked stock, rep
  assert.equal((await lookupTrackedResult(event,{secEarnings:async()=>({...filing,form:'8-K/A',accessionNumber:'bad'})})).status,'unsupported');
 });
 
+test('SEC earnings link must identify the exact filer CIK and accession',async()=>{
+ const {lookupTrackedResult}=moduleUnderTest();
+ const event={kind:'earnings',market:'stocks',instrument:'stock:us:AAPL',symbol:'AAPL',reportPeriodEnd:'2026-06-30',title:'AAPL earnings',date:'2026-08-01T16:00:00.000Z'};
+ const filing={symbol:'AAPL',reportPeriodEnd:'2026-06-30',acceptedAt:'2026-08-01T17:30:00.000Z',form:'8-K',accessionNumber:'0000320193-26-000111',epsUsdPerShare:1.45,revenueUsd:91000000000,sourceUrl:'https://www.sec.gov/Archives/edgar/data/320193/000032019326000111/aapl-earnings-release.htm'};
+ const lookup=async sourceUrl=>lookupTrackedResult(event,{secEarnings:async()=>({...filing,sourceUrl})});
+ assert.equal((await lookup(filing.sourceUrl)).status,'published');
+ assert.equal((await lookup('https://www.sec.gov/Archives/edgar/data/320193/000032019326000111/')).status,'published','the exact SEC accession index is valid evidence when no primary document URL is available');
+ assert.equal((await lookup('https://www.sec.gov/Archives/edgar/data/789019/000032019326000111/aapl-earnings-release.htm')).status,'unsupported','a different SEC filer must not be presented as AAPL evidence');
+ assert.equal((await lookup('https://www.sec.gov/Archives/edgar/data/320193/000032019326000999/aapl-earnings-release.htm')).status,'unsupported','the archive accession must match the reported accession');
+ assert.equal((await lookup('https://www.sec.gov/Archives/edgar/data/320193/000032019326000111/aapl-earnings-release.htm?accession=other')).status,'unsupported','query variants must not obscure the linked filing identity');
+ assert.equal((await lookup('https://@www.sec.gov/Archives/edgar/data/320193/000032019326000111/aapl-earnings-release.htm')).status,'unsupported','empty user-info syntax must not be accepted as an official source URL');
+});
+
 test('event result command provides per-item details and validates the signed chat-bound callback payload',()=>{
  const server=fs.readFileSync('src/web/server.ts','utf8');
  const command=server.slice(server.indexOf('eventresults: ({ chatId })'),server.indexOf('inbox: ({chatId})'));

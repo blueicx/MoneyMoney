@@ -38,8 +38,24 @@ function dollars(value:number):string {
   return new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',maximumFractionDigits:0}).format(value);
 }
 
-function validSecUrl(value:string):boolean {
-  try { const url=new URL(value);return url.protocol==='https:'&&(url.hostname==='sec.gov'||url.hostname.endsWith('.sec.gov')); } catch { return false; }
+function secFilingUrlMatchesAccession(value:string,accessionNumber:string):boolean {
+  const accession=accessionNumber.match(/^(\d{10})-(\d{2})-(\d{6})$/);
+  if(!accession)return false;
+  try {
+    if(!/^https:\/\/(?:www\.)?sec\.gov\/[^?#]*$/i.test(value))return false;
+    const url=new URL(value);
+    if(url.protocol!=='https:'||!['sec.gov','www.sec.gov'].includes(url.hostname)||url.username||url.password||url.port||url.search||url.hash)return false;
+    const archive=url.pathname.match(/^\/Archives\/edgar\/data\/(\d{1,10})\/(\d{18})(?:\/(.*))?$/);
+    if(!archive||BigInt(archive[1])===BigInt(0)||BigInt(archive[1])!==BigInt(accession[1])||archive[2]!==accessionNumber.replace(/-/g,''))return false;
+    if(archive[3]===undefined||archive[3]==='')return true;
+    if(/%(?:2f|5c)/i.test(archive[3]))return false;
+    return archive[3].split('/').every(segment=>{
+      if(!segment)return false;
+      let decoded:string;
+      try { decoded=decodeURIComponent(segment); } catch { return false; }
+      return decoded!=='.'&&decoded!=='..'&&!decoded.includes('/')&&!decoded.includes('\\')&&!/[\u0000-\u001f\u007f]/.test(decoded);
+    });
+  } catch { return false; }
 }
 
 /** Same durable result monitor and existing business repositories, no inferred outcomes. */
@@ -68,7 +84,7 @@ export async function lookupTrackedResult(event:EventRecord,ports:ResultPorts):P
     const actual=await ports.secEarnings(symbol,event.reportPeriodEnd!,event.date);
     if(!actual)return {actual:null,status:'pending',source:'SEC EDGAR',reason:'SEC 尚无该报告期、该股票的可核验 8-K/10-Q/10-K 实际数据；继续等待，不用预期值代替'};
     const acceptedAt=Date.parse(actual.acceptedAt),eventDay=Date.parse(`${event.date.slice(0,10)}T00:00:00.000Z`);
-    if(actual.symbol!==symbol||actual.reportPeriodEnd!==event.reportPeriodEnd||!['8-K','8-K/A','10-Q','10-Q/A','10-K','10-K/A'].includes(actual.form)||!/^\d{10}-\d{2}-\d{6}$/.test(actual.accessionNumber)||!Number.isFinite(acceptedAt)||!Number.isFinite(eventDay)||acceptedAt<eventDay||!validSecUrl(actual.sourceUrl))return unsupported('SEC 申报身份、报告期、时间或原文链接不一致');
+    if(actual.symbol!==symbol||actual.reportPeriodEnd!==event.reportPeriodEnd||!['8-K','8-K/A','10-Q','10-Q/A','10-K','10-K/A'].includes(actual.form)||!/^\d{10}-\d{2}-\d{6}$/.test(actual.accessionNumber)||!Number.isFinite(acceptedAt)||!Number.isFinite(eventDay)||acceptedAt<eventDay||!secFilingUrlMatchesAccession(actual.sourceUrl,actual.accessionNumber))return unsupported('SEC 申报身份、报告期、时间或原文链接不一致');
     const values:string[]=[];
     if(actual.epsUsdPerShare!==null&&Number.isFinite(actual.epsUsdPerShare))values.push(`SEC GAAP EPS ${new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',minimumFractionDigits:2,maximumFractionDigits:4}).format(actual.epsUsdPerShare)}`);
     if(actual.revenueUsd!==null&&Number.isFinite(actual.revenueUsd))values.push(`营收 ${dollars(actual.revenueUsd)}`);
