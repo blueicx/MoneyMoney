@@ -5484,18 +5484,21 @@ function renderOptionChain() {
   const atmStrike = [...new Set(expiry.rows.map(row => row.strike))].reduce((best, strike) => Math.abs(strike-spot) < Math.abs(best-spot) ? strike : best, strikes[0] ?? spot);
   const quote = optionsSnapshot.quote;
   const gex = expiry.netGammaExposureUsd;
+  const incompleteMetrics = Object.entries(expiry.dataQuality || {}).filter(([, coverage]) => coverage.status !== 'complete')
+    .map(([field, coverage]) => `${({openInterest:'OI',volume:'成交量',impliedVolatility:'IV',gammaExposure:'GEX'})[field] || field} ${coverage.available}/${coverage.total}`);
   const gexHint = expiry.callWallStrike && expiry.putWallStrike
     ? `Call Wall ${expiry.callWallStrike.toLocaleString()} / Put Wall ${expiry.putWallStrike.toLocaleString()}`
-    : 'CBOE Gamma/OI 推导';
+    : (expiry.dataQuality?.gammaExposure?.status === 'complete' ? 'CBOE Gamma/OI 推导' : '来源未完整提供 Gamma/OI');
   summaryEl.innerHTML =
     optionMetricCard(optionsSnapshot.asset + ' 现价', '$' + spot.toLocaleString(undefined, {maximumFractionDigits: 2})) +
     optionMetricCard('标的日变', quote ? (quote.changePercent >= 0 ? '+' : '') + quote.changePercent.toFixed(2) + '%' : '--',
       quote ? `30D IV ${quote.iv30Pct ? quote.iv30Pct.toFixed(2) + '%' : '--'}` : 'Deribit 加密期权') +
-    optionMetricCard(optionsSnapshot.market === 'us_equity' ? '近12期 PCR' : '全周期 PCR', optionsSnapshot.totalPutCallOIRatio ? optionsSnapshot.totalPutCallOIRatio.toFixed(2) : '--') +
-    optionMetricCard('本到期 PCR', expiry.putCallOIRatio ? expiry.putCallOIRatio.toFixed(2) : '--') +
-    optionMetricCard('最大痛点', expiry.maxPainStrike ? '$' + expiry.maxPainStrike.toLocaleString() : '--') +
-    optionMetricCard('Call/Put OI', compactUsd(expiry.callOpenInterest) + ' / ' + compactUsd(expiry.putOpenInterest), `成交 ${compactUsd(expiry.callVolume)} / ${compactUsd(expiry.putVolume)}`) +
-    optionMetricCard('净 GEX / 1%', gex == null ? '--' : compactUsd(gex), gexHint);
+    optionMetricCard(optionsSnapshot.market === 'us_equity' ? '近12期 PCR' : '全周期 PCR', optionsSnapshot.totalPutCallOIRatio == null ? '--' : optionsSnapshot.totalPutCallOIRatio.toFixed(2)) +
+    optionMetricCard('本到期 PCR', expiry.putCallOIRatio == null ? '--' : expiry.putCallOIRatio.toFixed(2)) +
+    optionMetricCard('最大痛点', expiry.maxPainStrike == null ? '--' : '$' + expiry.maxPainStrike.toLocaleString()) +
+    optionMetricCard('Call/Put OI', optionMetric(expiry.callOpenInterest) + ' / ' + optionMetric(expiry.putOpenInterest), `成交 ${optionMetric(expiry.callVolume)} / ${optionMetric(expiry.putVolume)}`) +
+    optionMetricCard('净 GEX / 1%', gex == null ? '--' : compactUsd(gex), gexHint) +
+    (incompleteMetrics.length ? optionMetricCard('字段覆盖', '存在缺项', incompleteMetrics.join(' · ')) : '');
   renderOptionStrategies(expiry);
   updatedEl.textContent = optionsSnapshot.source + ' · 抓取于 ' + new Date(optionsSnapshot.fetchedAt).toLocaleTimeString('zh-CN') + ' · 抓取时间不等于合约逐笔报价时间';
   const cell = (row, field, prefix='') => row ? `<td>${prefix}${row[field]}</td>` : '<td>--</td>';
@@ -5517,19 +5520,22 @@ function renderOptionChain() {
             return `<td style="color:${color}" title="${refs}；只是盘口参考，不保证成交">${quality.label}</td>`;
           };
           const spread = row => `<td>${row?.spreadPct == null ? '--' : row.spreadPct.toFixed(1) + '%'}</td>`;
-          const premium = row => row ? '$' + row.premiumUsd.toLocaleString(undefined,{maximumFractionDigits:2}) : '--';
-          const iv = row => row && row.impliedVolPct ? row.impliedVolPct.toFixed(1) : '--';
+          const premium = row => !row || row.premiumUsd == null ? '--' : '$' + row.premiumUsd.toLocaleString(undefined,{maximumFractionDigits:2});
+          const iv = row => !row || row.impliedVolPct == null ? '--' : row.impliedVolPct.toFixed(1);
           const delta = row => row && row.delta != null ? row.delta.toFixed(2) : '--';
           const classes = [strike === atmStrike ? 'atm' : '', strike === expiry.maxPainStrike ? 'max-pain' : ''].join(' ').trim();
           return `<tr class="${classes}">
-            <td>${call ? compactUsd(call.openInterest) : '--'}</td><td>${call ? compactUsd(call.volume) : '--'}</td><td>${iv(call)}</td><td>${delta(call)}</td><td>${bidAsk(call)}</td>${spread(call)}${quoteQuality(call)}<td>${premium(call)}</td>
+            <td>${call ? optionMetric(call.openInterest) : '--'}</td><td>${call ? optionMetric(call.volume) : '--'}</td><td>${iv(call)}</td><td>${delta(call)}</td><td>${bidAsk(call)}</td>${spread(call)}${quoteQuality(call)}<td>${premium(call)}</td>
             <td class="strike-cell">${strike.toLocaleString()}${strike === atmStrike ? '<small style="display:block;font-weight:500;">ATM</small>' : ''}</td>
-            <td>${premium(put)}</td>${quoteQuality(put)}${spread(put)}<td>${bidAsk(put)}</td><td>${delta(put)}</td><td>${iv(put)}</td><td>${put ? compactUsd(put.volume) : '--'}</td><td>${put ? compactUsd(put.openInterest) : '--'}</td>
+            <td>${premium(put)}</td>${quoteQuality(put)}${spread(put)}<td>${bidAsk(put)}</td><td>${delta(put)}</td><td>${iv(put)}</td><td>${put ? optionMetric(put.volume) : '--'}</td><td>${put ? optionMetric(put.openInterest) : '--'}</td>
           </tr>`;
         }).join('')}
       </tbody>
     </table></div>`;
   renderOptionPayoffBuilder(expiry);
+}
+function optionMetric(value) {
+  return value == null || !Number.isFinite(Number(value)) ? '--' : compactUsd(value);
 }
 function renderOptionPayoffBuilder(expiry) {
   const host = document.getElementById('option-payoff-builder');
@@ -5538,7 +5544,7 @@ function renderOptionPayoffBuilder(expiry) {
     host.innerHTML = '<section class="option-payoff"><h3>多腿到期损益试算</h3><p>Deribit 合约结算单位与乘数元数据当前未完成核验，因此不显示可能误导的加密期权组合金额。</p></section>';
     return;
   }
-  const rows = expiry.rows.filter(row => row.quoteQuality?.status === 'quoted' && row.bidPrice > 0 && row.askPrice >= row.bidPrice)
+  const rows = expiry.rows.filter(row => ['quoted','metrics-incomplete'].includes(row.quoteQuality?.status) && row.bidPrice > 0 && row.askPrice >= row.bidPrice)
     .sort((a,b) => Math.abs(a.strike-optionsSnapshot.spot)-Math.abs(b.strike-optionsSnapshot.spot) || a.strike-b.strike || a.optionType.localeCompare(b.optionType))
     .slice(0,180).sort((a,b) => a.strike-b.strike || a.optionType.localeCompare(b.optionType));
   if (rows.length < 2) {
@@ -5581,7 +5587,8 @@ function renderOptionStrategies(expiry) {
   if (!el) return;
   const ideas = expiry.strategyIdeas || [];
   if (!ideas.length) {
-    el.innerHTML = '<div class="empty-tip">当前期权链数据不足，暂时无法生成策略观察。</div>';
+    const reason = expiry.strategyIdeasStatus?.reason || '当前期权链数据不足，暂时无法生成策略观察。';
+    el.innerHTML = `<div class="empty-tip">${stockEscapeHtml(reason)}</div>`;
     return;
   }
   const cards = ideas.map(function(idea) {

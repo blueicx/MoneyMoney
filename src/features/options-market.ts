@@ -7,23 +7,23 @@ export interface OptionRow {
   instrumentName: string;
   strike: number;
   optionType: 'call' | 'put';
-  markPrice: number;
-  premiumUsd: number;
-  impliedVolPct: number;
+  markPrice: number | null;
+  premiumUsd: number | null;
+  impliedVolPct: number | null;
   bidPrice: number;
   askPrice: number;
   spreadPct: number | null;
-  volume: number;
-  volumeUsd: number;
-  openInterest: number;
+  volume: number | null;
+  volumeUsd: number | null;
+  openInterest: number | null;
   quoteTime?: string;
   delta?: number;
-  gammaExposureUsd?: number;
+  gammaExposureUsd?: number | null;
   quoteQuality?: OptionQuoteQuality;
 }
 
 export interface OptionQuoteQuality {
-  status: 'quoted' | 'low-liquidity' | 'wide-spread' | 'unquoted';
+  status: 'quoted' | 'low-liquidity' | 'wide-spread' | 'metrics-incomplete' | 'unquoted';
   label: string;
   referenceAsk: number | null;
   referenceBid: number | null;
@@ -39,10 +39,26 @@ export function assessOptionQuoteQuality(row: Pick<OptionRow, 'bidPrice' | 'askP
   if (Number.isFinite(spread) && spread > 25) {
     return { status: 'wide-spread', label: '价差过宽', referenceAsk: ask, referenceBid: bid };
   }
-  if ((Number.isFinite(spread) && spread > 10) || (Number(row.volume) <= 0 && Number(row.openInterest) <= 0)) {
+  if (row.volume == null || row.openInterest == null) {
+    return { status: 'metrics-incomplete', label: '流动性字段缺失', referenceAsk: ask, referenceBid: bid };
+  }
+  if ((Number.isFinite(spread) && spread > 10) || (row.volume <= 0 && row.openInterest <= 0)) {
     return { status: 'low-liquidity', label: '流动性证据不足', referenceAsk: ask, referenceBid: bid };
   }
   return { status: 'quoted', label: '双边报价可见', referenceAsk: ask, referenceBid: bid };
+}
+
+export interface OptionMetricCoverage {
+  available: number;
+  total: number;
+  status: 'complete' | 'partial' | 'unavailable';
+}
+
+export interface OptionExpiryDataQuality {
+  openInterest: OptionMetricCoverage;
+  volume: OptionMetricCoverage;
+  impliedVolatility: OptionMetricCoverage;
+  gammaExposure: OptionMetricCoverage;
 }
 
 export interface OptionPayoffLeg {
@@ -72,7 +88,7 @@ export function calculateOptionPayoff(input: { spot: number; multiplier: number;
   if (!Number.isInteger(multiplier) || multiplier < 1 || multiplier > 100_000) throw new Error('合约乘数必须为 1–100000 的整数');
   if (!Array.isArray(legs) || legs.length < 2 || legs.length > 4) throw new Error('多腿试算需要 2–4 条期权腿');
   if (legs.some(leg => !['buy', 'sell'].includes(leg.action) || !Number.isInteger(leg.contracts) || leg.contracts < 1 || leg.contracts > 100)) throw new Error('腿方向或合约数量无效');
-  if (legs.some(leg => leg.row.quoteQuality?.status !== 'quoted' || !Number.isFinite(leg.row.bidPrice) || !Number.isFinite(leg.row.askPrice) || leg.row.bidPrice <= 0 || leg.row.askPrice < leg.row.bidPrice)) throw new Error('多腿试算只接受双边有效报价');
+  if (legs.some(leg => !['quoted', 'metrics-incomplete'].includes(leg.row.quoteQuality?.status || '') || !Number.isFinite(leg.row.bidPrice) || !Number.isFinite(leg.row.askPrice) || leg.row.bidPrice <= 0 || leg.row.askPrice < leg.row.bidPrice)) throw new Error('多腿试算只接受双边有效报价');
   const expiries = new Set(legs.map(leg => leg.row.expiryMs).filter((value): value is number => Number.isFinite(value)));
   if (expiries.size !== 1 || legs.some(leg => !Number.isFinite(leg.row.expiryMs))) throw new Error('多腿试算必须使用同一到期日');
   if (legs.some(leg => leg.row.expiryMs! <= nowMs)) throw new Error('所选期权到期日已过，不能进行当前报价的到期试算');
@@ -139,17 +155,19 @@ export interface OptionExpiry {
   label: string;
   daysToExpiry: number;
   rows: OptionRow[];
-  callOpenInterest: number;
-  putOpenInterest: number;
-  callVolume: number;
-  putVolume: number;
+  callOpenInterest: number | null;
+  putOpenInterest: number | null;
+  callVolume: number | null;
+  putVolume: number | null;
   putCallOIRatio: number | null;
   putCallVolumeRatio: number | null;
   maxPainStrike: number | null;
-  netGammaExposureUsd?: number;
+  netGammaExposureUsd?: number | null;
   callWallStrike?: number | null;
   putWallStrike?: number | null;
   strategyIdeas: OptionStrategyIdea[];
+  strategyIdeasStatus: { status: 'available' | 'unavailable'; reason: string | null };
+  dataQuality: OptionExpiryDataQuality;
 }
 
 export interface OptionStrategyIdea {
@@ -175,13 +193,13 @@ export interface OptionsSnapshot {
   asset: string;
   fetchedAt: string;
   spot: number;
-  totalCallOpenInterest: number;
-  totalPutOpenInterest: number;
+  totalCallOpenInterest: number | null;
+  totalPutOpenInterest: number | null;
   totalPutCallOIRatio: number | null;
   quote?: {
     change: number;
     changePercent: number;
-    volume: number;
+    volume: number | null;
     iv30Pct?: number;
     bid?: number;
     ask?: number;
@@ -205,6 +223,35 @@ function num(value: any, fallback = 0): number {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+function optionalNum(value: any): number | null {
+  if (value == null || value === '') return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function completeSum<T>(rows: T[], read: (row: T) => number | null | undefined): number | null {
+  if (!rows.length) return null;
+  let sum = 0;
+  for (const row of rows) {
+    const value = read(row);
+    if (value == null || !Number.isFinite(value)) return null;
+    sum += value;
+  }
+  return sum;
+}
+
+function metricCoverage(rows: OptionRow[], read: (row: OptionRow) => number | null | undefined): OptionMetricCoverage {
+  const available = rows.filter(row => {
+    const value = read(row);
+    return value != null && Number.isFinite(value);
+  }).length;
+  return {
+    available,
+    total: rows.length,
+    status: available === 0 ? 'unavailable' : available === rows.length ? 'complete' : 'partial',
+  };
+}
+
 async function fetchResult(url: string): Promise<any> {
   const response = await fetch(url, {
      headers: { 'User-Agent': 'Mozilla/5.0 MoneyMoney/1.0' },
@@ -226,6 +273,7 @@ function expiryLabel(expiryMs: number): string {
 }
 
 function calculateMaxPain(rows: OptionRow[]): number | null {
+  if (!rows.length || rows.some(row => row.openInterest == null)) return null;
   const strikes = [...new Set(rows.map(row => row.strike))].sort((a, b) => a - b);
   if (!strikes.length) return null;
 
@@ -237,7 +285,7 @@ function calculateMaxPain(rows: OptionRow[]): number | null {
       const intrinsic = row.optionType === 'call'
         ? Math.max(0, settlement - row.strike)
         : Math.max(0, row.strike - settlement);
-      pain += intrinsic * row.openInterest;
+      pain += intrinsic * row.openInterest!;
     }
     if (pain < bestPain) {
       bestPain = pain;
@@ -248,7 +296,7 @@ function calculateMaxPain(rows: OptionRow[]): number | null {
 }
 
 function gammaAt(rows: OptionRow[], strike: number | null): number {
-  return strike == null ? 0 : Math.abs(rows.find(row => row.strike === strike)?.gammaExposureUsd || 0);
+  return strike == null ? 0 : Math.abs(rows.find(row => row.strike === strike)?.gammaExposureUsd ?? 0);
 }
 
 function nearestStrike(rows: OptionRow[], optionType: 'call' | 'put', spot: number): number | null {
@@ -283,6 +331,21 @@ function strikeBeyond(
     Math.abs(row.strike - target) < Math.abs(best - target) ? row.strike : best, candidates[0].strike);
 }
 
+function strategyIdeasAvailability(rows: OptionRow[], spot: number): OptionExpiry['strategyIdeasStatus'] {
+  const calls = rows.filter(row => row.optionType === 'call');
+  const puts = rows.filter(row => row.optionType === 'put');
+  if (!calls.length || !puts.length) return { status: 'unavailable', reason: '缺少 Call 或 Put 合约，无法形成双边策略观察。' };
+  if (rows.some(row => row.openInterest == null)) {
+    return { status: 'unavailable', reason: 'OI 字段存在缺失；PCR、最大痛点及依赖它们的策略评分已停用。' };
+  }
+  const atmCall = calls.find(row => row.strike === nearestStrike(calls, 'call', spot));
+  const atmPut = puts.find(row => row.strike === nearestStrike(puts, 'put', spot));
+  if (atmCall?.impliedVolPct == null || atmPut?.impliedVolPct == null) {
+    return { status: 'unavailable', reason: 'ATM Call/Put 隐含波动率不完整；依赖 IV 的策略评分已停用。' };
+  }
+  return { status: 'available', reason: null };
+}
+
 function pct(value: number, digits = 2): string {
   return `${value > 0 ? '+' : ''}${value.toFixed(digits)}%`;
 }
@@ -297,23 +360,21 @@ function buildStrategyIdeas(
 ): OptionStrategyIdea[] {
   const calls = rows.filter(row => row.optionType === 'call');
   const puts = rows.filter(row => row.optionType === 'put');
-  if (!calls.length || !puts.length) return [];
+  if (strategyIdeasAvailability(rows, spot).status !== 'available') return [];
 
-  const callOI = calls.reduce((sum, row) => sum + row.openInterest, 0);
-  const putOI = puts.reduce((sum, row) => sum + row.openInterest, 0);
-  const callVolume = calls.reduce((sum, row) => sum + row.volume, 0);
-  const putVolume = puts.reduce((sum, row) => sum + row.volume, 0);
+  const callOI = completeSum(calls, row => row.openInterest)!;
+  const putOI = completeSum(puts, row => row.openInterest)!;
+  const callVolume = completeSum(calls, row => row.volume);
+  const putVolume = completeSum(puts, row => row.volume);
   const pcr = callOI > 0 ? putOI / callOI : null;
-  const volumePcr = callVolume > 0 ? putVolume / callVolume : null;
-  const maxPain = calculateMaxPain(rows);
-  const maxPainDistancePct = maxPain ? ((maxPain - spot) / spot) * 100 : 0;
+  const volumePcr = callVolume != null && putVolume != null && callVolume > 0 ? putVolume / callVolume : null;
+  const maxPain = calculateMaxPain(rows)!;
+  const maxPainDistancePct = maxPain == null ? 0 : ((maxPain - spot) / spot) * 100;
   const atmCallStrike = nearestStrike(calls, 'call', spot);
   const atmPutStrike = nearestStrike(puts, 'put', spot);
   const atmCall = calls.find(row => row.strike === atmCallStrike);
   const atmPut = puts.find(row => row.strike === atmPutStrike);
-  const atmIv = atmCall && atmPut && atmCall.impliedVolPct > 0 && atmPut.impliedVolPct > 0
-    ? (atmCall.impliedVolPct + atmPut.impliedVolPct) / 2
-    : Math.max(atmCall?.impliedVolPct || 0, atmPut?.impliedVolPct || 0);
+  const atmIv = (atmCall!.impliedVolPct! + atmPut!.impliedVolPct!) / 2;
   const positiveGex = (netGammaExposureUsd || 0) > 0;
   const negativeGex = (netGammaExposureUsd || 0) < 0;
   const daysToExpiry = Math.max(0, Math.round((expiryMs - Date.now()) / 86_400_000));
@@ -326,7 +387,7 @@ function buildStrategyIdeas(
   const fmt = (value: number | null | undefined) => value == null ? '--' : value.toLocaleString(undefined, { maximumFractionDigits: 2 });
 
   const pcrText = pcr == null ? '无' : pcr.toFixed(2);
-  const volumePcrText = volumePcr == null ? '无' : volumePcr.toFixed(2);
+  const volumePcrText = volumePcr == null ? '来源字段缺失或 Call 成交量为 0' : volumePcr.toFixed(2);
   const commonRisk = [
     `ATM 隐含波动率约 ${atmIv.toFixed(1)}%；期权买方要先跨过时间价值损耗。`,
     `距离到期 ${daysToExpiry} 天，临近到期 Gamma 和流动性变化会更快。`,
@@ -461,11 +522,17 @@ function buildStrategyIdeas(
 function buildExpiry(expiryMs: number, rows: OptionRow[], spot: number): OptionExpiry {
   const calls = rows.filter(row => row.optionType === 'call');
   const puts = rows.filter(row => row.optionType === 'put');
-  const callOI = calls.reduce((sum, row) => sum + row.openInterest, 0);
-  const putOI = puts.reduce((sum, row) => sum + row.openInterest, 0);
-  const callVolume = calls.reduce((sum, row) => sum + row.volume, 0);
-  const putVolume = puts.reduce((sum, row) => sum + row.volume, 0);
-  const hasGamma = rows.some(row => row.gammaExposureUsd != null);
+  const callOI = completeSum(calls, row => row.openInterest);
+  const putOI = completeSum(puts, row => row.openInterest);
+  const callVolume = completeSum(calls, row => row.volume);
+  const putVolume = completeSum(puts, row => row.volume);
+  const dataQuality: OptionExpiryDataQuality = {
+    openInterest: metricCoverage(rows, row => row.openInterest),
+    volume: metricCoverage(rows, row => row.volume),
+    impliedVolatility: metricCoverage(rows, row => row.impliedVolPct),
+    gammaExposure: metricCoverage(rows, row => row.gammaExposureUsd),
+  };
+  const hasGamma = dataQuality.gammaExposure.status === 'complete';
   const callWall = hasGamma
     ? calls.reduce<number | null>((best, row) =>
         (row.gammaExposureUsd || 0) > gammaAt(calls, best) ? row.strike : best, null)
@@ -475,8 +542,9 @@ function buildExpiry(expiryMs: number, rows: OptionRow[], spot: number): OptionE
         Math.abs(row.gammaExposureUsd || 0) > gammaAt(puts, best) ? row.strike : best, null)
     : null;
   const netGammaExposureUsd = hasGamma
-    ? rows.reduce((sum, row) => sum + (row.gammaExposureUsd || 0), 0)
+    ? completeSum(rows, row => row.gammaExposureUsd) ?? undefined
     : undefined;
+  const strategyIdeasStatus = strategyIdeasAvailability(rows, spot);
 
   return {
     expiryMs,
@@ -487,20 +555,22 @@ function buildExpiry(expiryMs: number, rows: OptionRow[], spot: number): OptionE
     putOpenInterest: putOI,
     callVolume,
     putVolume,
-    putCallOIRatio: callOI > 0 ? putOI / callOI : null,
-    putCallVolumeRatio: callVolume > 0 ? putVolume / callVolume : null,
+    putCallOIRatio: callOI != null && putOI != null && callOI > 0 ? putOI / callOI : null,
+    putCallVolumeRatio: callVolume != null && putVolume != null && callVolume > 0 ? putVolume / callVolume : null,
     maxPainStrike: calculateMaxPain(rows),
     netGammaExposureUsd,
     callWallStrike: callWall,
     putWallStrike: putWall,
-    strategyIdeas: buildStrategyIdeas(
+    strategyIdeas: strategyIdeasStatus.status === 'available' ? buildStrategyIdeas(
       rows,
       spot,
       expiryMs,
       callWall,
       putWall,
       netGammaExposureUsd,
-    ),
+    ) : [],
+    strategyIdeasStatus,
+    dataQuality,
   };
 }
 
@@ -512,23 +582,26 @@ function toOptionRow(item: any, spot: number): OptionRow | null {
   const rawStrike = num(item.strike, NaN);
   const strike = Number.isFinite(rawStrike) ? rawStrike : num(parts[2]);
   const type = (parts[3] || '').toUpperCase() === 'P' ? 'put' : 'call';
-  const markPriceBtc = num(item.mark_price);
-  const bid = num(item.bid_price);
-  const ask = num(item.ask_price);
+  const markPriceBtc = optionalNum(item.mark_price);
+  const bid = optionalNum(item.bid_price) ?? 0;
+  const ask = optionalNum(item.ask_price) ?? 0;
+  const volume = optionalNum(item.volume);
+  const openInterest = optionalNum(item.open_interest);
+  const impliedVolPct = optionalNum(item.mark_iv);
   const spreadPct = bid > 0 && ask >= bid ? ((ask - bid) / ((ask + bid) / 2)) * 100 : null;
   return {
     instrumentName: name,
     strike,
     optionType: type,
     markPrice: markPriceBtc,
-    premiumUsd: markPriceBtc * spot,
-    impliedVolPct: num(item.mark_iv),
-    bidPrice: item.bid_price == null ? 0 : bid,
-    askPrice: item.ask_price == null ? 0 : ask,
+    premiumUsd: markPriceBtc == null ? null : markPriceBtc * spot,
+    impliedVolPct,
+    bidPrice: bid,
+    askPrice: ask,
     spreadPct,
-    volume: num(item.volume),
-    volumeUsd: num(item.volume_usd),
-    openInterest: num(item.open_interest),
+    volume,
+    volumeUsd: optionalNum(item.volume_usd) ?? (volume == null || markPriceBtc == null ? null : volume * markPriceBtc * spot),
+    openInterest,
   };
 }
 
@@ -573,8 +646,8 @@ export async function getOptionsSnapshot(rawAsset: string): Promise<OptionsSnaps
   const spot = Number(index?.price) || num(summaries.find((item: any) => item.underlying_price)?.underlying_price);
   if (!spot) throw new Error('无法读取标的指数价格');
   const expiries = buildDeribitExpiries(instruments || [], summaries || [], asset, spot);
-  const totalCallOpenInterest = expiries.reduce((sum, expiry) => sum + expiry.callOpenInterest, 0);
-  const totalPutOpenInterest = expiries.reduce((sum, expiry) => sum + expiry.putOpenInterest, 0);
+  const totalCallOpenInterest = completeSum(expiries, expiry => expiry.callOpenInterest);
+  const totalPutOpenInterest = completeSum(expiries, expiry => expiry.putOpenInterest);
   const value: OptionsSnapshot = {
     source: 'Deribit Public API',
     market: 'crypto',
@@ -583,7 +656,8 @@ export async function getOptionsSnapshot(rawAsset: string): Promise<OptionsSnaps
     spot,
     totalCallOpenInterest,
     totalPutOpenInterest,
-    totalPutCallOIRatio: totalCallOpenInterest > 0 ? totalPutOpenInterest / totalCallOpenInterest : null,
+    totalPutCallOIRatio: totalCallOpenInterest != null && totalPutOpenInterest != null && totalCallOpenInterest > 0
+      ? totalPutOpenInterest / totalCallOpenInterest : null,
     expiries,
   };
   snapshotCache.set(asset, { ts: Date.now(), value });
@@ -614,11 +688,11 @@ function parseCboeOptionSymbol(value: string) {
   };
 }
 
-function cboePremium(item: any): number {
-  const bid = num(item.bid);
-  const ask = num(item.ask);
+function cboePremium(item: any): number | null {
+  const bid = optionalNum(item.bid) ?? 0;
+  const ask = optionalNum(item.ask) ?? 0;
   if (bid > 0 && ask > 0) return (bid + ask) / 2;
-  return num(item.last_trade_price) || num(item.theo) || num(item.prev_day_close);
+  return optionalNum(item.last_trade_price) ?? optionalNum(item.theo) ?? optionalNum(item.prev_day_close);
 }
 
 function buildCboeExpiries(options: any[], spot: number): OptionExpiry[] {
@@ -626,34 +700,38 @@ function buildCboeExpiries(options: any[], spot: number): OptionExpiry[] {
   for (const item of options) {
     const parsed = parseCboeOptionSymbol(String(item.option || ''));
     if (!parsed) continue;
-    const openInterest = num(item.open_interest);
-    const volume = num(item.volume);
+    const openInterest = optionalNum(item.open_interest);
+    const volume = optionalNum(item.volume);
     const bid = num(item.bid);
     const ask = num(item.ask);
-    const last = num(item.last_trade_price);
+    const last = optionalNum(item.last_trade_price);
     // CBOE returns many empty strikes for giants such as SPY; keep the chain readable.
-    if (!openInterest && !volume && !bid && !ask && !last) continue;
+    if (!(openInterest ?? 0) && !(volume ?? 0) && !bid && !ask && !(last ?? 0)) continue;
 
     const mark = cboePremium(item);
     const spreadPct = bid > 0 && ask >= bid ? ((ask - bid) / ((ask + bid) / 2)) * 100 : null;
-    const gamma = num(item.gamma);
+    const gamma = optionalNum(item.gamma);
     // First-order dollar gamma for a 1% underlying move. Calls are dealer-positive
     // and puts dealer-negative in this common approximation.
-    const gammaExposureUsd = gamma > 0 && openInterest > 0
-      ? gamma * openInterest * CONTRACT_MULTIPLIER * spot * spot * 0.01 * (parsed.optionType === 'call' ? 1 : -1)
-      : 0;
+    const gammaExposureUsd = gamma == null
+      ? null
+      : gamma === 0
+        ? 0
+        : openInterest == null
+          ? null
+          : gamma * openInterest * CONTRACT_MULTIPLIER * spot * spot * 0.01 * (parsed.optionType === 'call' ? 1 : -1);
     const row: OptionRow = {
       instrumentName: String(item.option),
       strike: parsed.strike,
       optionType: parsed.optionType,
       markPrice: mark,
       premiumUsd: mark,
-      impliedVolPct: num(item.iv) * 100,
+      impliedVolPct: optionalNum(item.iv) == null ? null : optionalNum(item.iv)! * 100,
       bidPrice: bid,
       askPrice: ask,
       spreadPct,
       volume,
-      volumeUsd: volume * mark * CONTRACT_MULTIPLIER,
+      volumeUsd: volume == null || mark == null ? null : volume * mark * CONTRACT_MULTIPLIER,
       openInterest,
       delta: item.delta == null ? undefined : num(item.delta),
       gammaExposureUsd,
@@ -690,8 +768,8 @@ export async function getEquityOptionsSnapshot(rawSymbol: string): Promise<Optio
 
   const expiries = buildCboeExpiries(data.options, Number(data.current_price));
   if (!expiries.length) throw new Error(`${symbol} 暂无有持仓或报价的期权链`);
-  const totalCallOpenInterest = expiries.reduce((sum, expiry) => sum + expiry.callOpenInterest, 0);
-  const totalPutOpenInterest = expiries.reduce((sum, expiry) => sum + expiry.putOpenInterest, 0);
+  const totalCallOpenInterest = completeSum(expiries, expiry => expiry.callOpenInterest);
+  const totalPutOpenInterest = completeSum(expiries, expiry => expiry.putOpenInterest);
   const value: OptionsSnapshot = {
     source: 'CBOE Delayed Quotes',
     market: 'us_equity',
@@ -700,11 +778,12 @@ export async function getEquityOptionsSnapshot(rawSymbol: string): Promise<Optio
     spot: Number(data.current_price),
     totalCallOpenInterest,
     totalPutOpenInterest,
-    totalPutCallOIRatio: totalCallOpenInterest > 0 ? totalPutOpenInterest / totalCallOpenInterest : null,
+    totalPutCallOIRatio: totalCallOpenInterest != null && totalPutOpenInterest != null && totalCallOpenInterest > 0
+      ? totalPutOpenInterest / totalCallOpenInterest : null,
     quote: {
       change: num(data.price_change),
       changePercent: num(data.price_change_percent),
-      volume: num(data.volume),
+      volume: optionalNum(data.volume),
       iv30Pct: data.iv30 == null ? undefined : num(data.iv30),
       bid: data.bid == null ? undefined : num(data.bid),
       ask: data.ask == null ? undefined : num(data.ask),

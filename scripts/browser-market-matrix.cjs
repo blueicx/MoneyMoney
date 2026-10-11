@@ -332,14 +332,15 @@ async function main() {
     });
     await page.route('**/api/equity-options/**', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data: {
       market: 'us_equity', asset: 'SPY', source: 'CBOE browser fixture', fetchedAt: '2026-09-27T08:00:00.000Z', spot: 500,
-      totalCallOpenInterest: 1000, totalPutOpenInterest: 900, totalPutCallOIRatio: 0.9,
+      totalCallOpenInterest: null, totalPutOpenInterest: null, totalPutCallOIRatio: null,
       quote: { change: 1, changePercent: 0.2, volume: 10000, iv30Pct: 18 },
       expiries: [{ expiryMs: Date.parse('2026-10-16T00:00:00.000Z'), label: '2026-10-16', daysToExpiry: 19,
         rows: [
           { instrumentName: 'SPY-C-500', strike: 500, optionType: 'call', markPrice: 2, premiumUsd: 200, impliedVolPct: 18, bidPrice: 1.9, askPrice: 2.1, spreadPct: 10, volume: 200, volumeUsd: 40000, openInterest: 800, delta: 0.5, quoteQuality: { status: 'quoted', label: '双边报价可见', referenceAsk: 2.1, referenceBid: 1.9 } },
           { instrumentName: 'SPY-C-510', strike: 510, optionType: 'call', markPrice: 1.1, premiumUsd: 110, impliedVolPct: 19, bidPrice: 1, askPrice: 1.2, spreadPct: 18.2, volume: 120, volumeUsd: 13200, openInterest: 400, delta: 0.32, quoteQuality: { status: 'quoted', label: '双边报价可见', referenceAsk: 1.2, referenceBid: 1 } },
           { instrumentName: 'SPY-P-500', strike: 500, optionType: 'put', markPrice: 3, premiumUsd: 300, impliedVolPct: 22, bidPrice: 1, askPrice: 2, spreadPct: 66.7, volume: 1, volumeUsd: 300, openInterest: 2, delta: -0.5, quoteQuality: { status: 'wide-spread', label: '价差过宽', referenceAsk: 2, referenceBid: 1 } },
-        ], callOpenInterest: 800, putOpenInterest: 2, callVolume: 200, putVolume: 1, putCallOIRatio: 0.01, putCallVolumeRatio: 0.005, maxPainStrike: 500, strategyIdeas: [] }],
+          { instrumentName: 'SPY-P-1000', strike: 1000, optionType: 'put', markPrice: null, premiumUsd: null, impliedVolPct: null, bidPrice: 1, askPrice: 1.1, spreadPct: 9.5, volume: null, volumeUsd: null, openInterest: null, delta: -0.2, quoteQuality: { status: 'metrics-incomplete', label: '流动性字段缺失', referenceAsk: 1.1, referenceBid: 1 } },
+        ], callOpenInterest: null, putOpenInterest: null, callVolume: null, putVolume: null, putCallOIRatio: null, putCallVolumeRatio: null, maxPainStrike: null, strategyIdeas: [], strategyIdeasStatus: { status: 'unavailable', reason: 'OI 字段存在缺失；PCR、最大痛点及依赖它们的策略评分已停用。' }, dataQuality: { openInterest: { available: 3, total: 4, status: 'partial' }, volume: { available: 3, total: 4, status: 'partial' }, impliedVolatility: { available: 3, total: 4, status: 'partial' }, gammaExposure: { available: 3, total: 4, status: 'partial' } } }],
     } }) }));
     await page.route('**/api/options/payoff', route => {
       optionPayoffRequest = route.request().postDataJSON();
@@ -498,6 +499,12 @@ async function main() {
     await page.locator('#option-chain table').waitFor({ state: 'visible', timeout: 15_000 });
     assert.match(await page.locator('#option-chain').innerText(), /双边报价可见/);
     assert.match(await page.locator('#option-chain').innerText(), /价差过宽/);
+    assert.match(await page.locator('#option-chain').innerText(), /流动性字段缺失/);
+    assert.match(await page.locator('#options-summary').innerText(), /OI 3\/4/);
+    assert.match(await page.locator('#option-strategies').innerText(), /OI 字段存在缺失/);
+    const missingMetricRow = page.locator('#option-chain tbody tr').filter({ hasText: '1,000' });
+    assert.equal((await missingMetricRow.locator('td').nth(16).innerText()).trim(), '--', 'missing OI should render as unknown, not zero');
+    assert.equal((await missingMetricRow.locator('td').nth(15).innerText()).trim(), '--', 'missing volume should render as unknown, not zero');
     assert.match(await page.locator('#options-updated').innerText(), /不等于合约逐笔报价时间/);
     const payoffBuilder = page.locator('#option-payoff-builder');
     await payoffBuilder.getByRole('button', { name: '计算到期损益' }).click();

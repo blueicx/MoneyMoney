@@ -927,7 +927,7 @@ async function loadScopedScreenerRows(scope: ScreenerScope): Promise<Record<stri
     return settled.flatMap(result => {
       if (result.status !== 'fulfilled') return [];
       const snapshot = result.value;
-      return [{ id: `option:cboe:${snapshot.asset}`, symbol: snapshot.asset, title: `${snapshot.asset} 期权`, price: snapshot.spot, changePct: snapshot.quote?.changePercent ?? null, impliedVolPct: snapshot.quote?.iv30Pct ?? null, openInterest: snapshot.totalCallOpenInterest + snapshot.totalPutOpenInterest, putCallOIRatio: snapshot.totalPutCallOIRatio, dataTime: snapshot.fetchedAt, source: snapshot.source, _sourceIncomplete:settled.some(item => item.status === 'rejected') }];
+      return [{ id: `option:cboe:${snapshot.asset}`, symbol: snapshot.asset, title: `${snapshot.asset} 期权`, price: snapshot.spot, changePct: snapshot.quote?.changePercent ?? null, impliedVolPct: snapshot.quote?.iv30Pct ?? null, openInterest: snapshot.totalCallOpenInterest == null || snapshot.totalPutOpenInterest == null ? null : snapshot.totalCallOpenInterest + snapshot.totalPutOpenInterest, putCallOIRatio: snapshot.totalPutCallOIRatio, dataTime: snapshot.fetchedAt, source: snapshot.source, _sourceIncomplete:settled.some(item => item.status === 'rejected') }];
     });
   }
   if (scope === 'crypto') {
@@ -2131,7 +2131,7 @@ app.get('/api/instruments/compare', async (req, res) => {
       if (!item) throw new Error('标的 ID 无效');
       if (scope === 'options') {
         const snapshot = await getEquityOptionsSnapshot(item.symbol);
-        return { id: item.id, type: 'option' as const, symbol: item.symbol, title: `${item.symbol} 期权`, quote: { price: snapshot.spot, changePct: snapshot.quote?.changePercent ?? null, openInterest: snapshot.totalCallOpenInterest + snapshot.totalPutOpenInterest }, dataTime: snapshot.fetchedAt, sourceStatus: { source: snapshot.source } };
+        return { id: item.id, type: 'option' as const, symbol: item.symbol, title: `${item.symbol} 期权`, quote: { price: snapshot.spot, changePct: snapshot.quote?.changePercent ?? null, openInterest: snapshot.totalCallOpenInterest == null || snapshot.totalPutOpenInterest == null ? null : snapshot.totalCallOpenInterest + snapshot.totalPutOpenInterest }, dataTime: snapshot.fetchedAt, sourceStatus: { source: snapshot.source } };
       }
       const ref = normalizeInstrumentRef({ type: item.type === 'option' ? 'stock' : item.type, venue: item.venue, symbol: item.symbol, title: item.symbol, aliases: [], marketId: scope === 'prediction' ? item.symbol : undefined });
       const overview = await unifiedInstrumentService.overview(ref);

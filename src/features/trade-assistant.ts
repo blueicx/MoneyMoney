@@ -957,7 +957,7 @@ function optionPremium(
   strike: number,
 ): number | null {
   const row = rows.find(item => item.optionType === optionType && item.strike === strike);
-  return row && row.premiumUsd > 0 ? row.premiumUsd : null;
+  return row && row.premiumUsd != null && row.premiumUsd > 0 ? row.premiumUsd : null;
 }
 
 function buildOptionSignal(

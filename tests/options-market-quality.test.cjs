@@ -2,7 +2,61 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const vm = require('node:vm');
 const { JSDOM } = require('jsdom');
-const { assessOptionQuoteQuality, calculateOptionPayoff } = require('../dist/features/options-market.js');
+const { assessOptionQuoteQuality, calculateOptionPayoff, getEquityOptionsSnapshot } = require('../dist/features/options-market.js');
+
+test('missing option OI remains unknown, blocks dependent aggregates and preserves source-confirmed zero', async () => {
+  const originalFetch = global.fetch;
+  global.fetch = async () => ({
+    ok: true,
+    json: async () => ({ data: {
+      current_price: 100,
+      options: [
+        { option: 'TEST261218C00100000', bid: 1, ask: 1.2, volume: 0, iv: 0.25, gamma: 0.1 },
+        { option: 'TEST261218P00100000', bid: 1, ask: 1.2, volume: 0, open_interest: 0, iv: 0.3, gamma: 0.1 },
+      ],
+    } }),
+  });
+  try {
+    const snapshot = await getEquityOptionsSnapshot('TEST');
+    const expiry = snapshot.expiries[0];
+    assert.equal(expiry.callOpenInterest, null, 'missing call OI must not become a real zero');
+    assert.equal(expiry.putOpenInterest, 0, 'an explicit source zero must remain zero');
+    assert.equal(expiry.putCallOIRatio, null, 'PCR must be unavailable when either side is incomplete');
+    assert.equal(expiry.maxPainStrike, null, 'max pain must not aggregate an incomplete OI chain');
+    assert.equal(snapshot.totalCallOpenInterest, null, 'the cross-expiry aggregate must remain unknown');
+    assert.equal(snapshot.totalPutOpenInterest, 0, 'known zero aggregate must remain zero');
+    assert.equal(expiry.callVolume, 0, 'explicit zero volume is valid');
+    assert.equal(expiry.strategyIdeas.length, 0, 'scores depending on incomplete OI must be withheld');
+    assert.match(expiry.strategyIdeasStatus.reason, /OI/);
+    assert.equal(expiry.dataQuality.openInterest.status, 'partial');
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('missing ATM IV with complete OI withholds IV-dependent strategy scores', async () => {
+  const originalFetch = global.fetch;
+  global.fetch = async () => ({
+    ok: true,
+    json: async () => ({ data: {
+      current_price: 100,
+      options: [
+        { option: 'TSTS261218C00100000', bid: 1, ask: 1.2, volume: 4, open_interest: 10, gamma: 0.1 },
+        { option: 'TSTS261218P00100000', bid: 1, ask: 1.2, volume: 5, open_interest: 12, iv: 0.3, gamma: 0.1 },
+      ],
+    } }),
+  });
+  try {
+    const snapshot = await getEquityOptionsSnapshot('TSTS');
+    const expiry = snapshot.expiries[0];
+    assert.equal(expiry.dataQuality.openInterest.status, 'complete');
+    assert.equal(expiry.dataQuality.impliedVolatility.status, 'partial');
+    assert.equal(expiry.strategyIdeas.length, 0);
+    assert.match(expiry.strategyIdeasStatus.reason, /隐含波动率/);
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
 
 test('option quote quality distinguishes executable two-sided prices, wide spreads and missing quotes', () => {
   assert.deepEqual(assessOptionQuoteQuality({ bidPrice: 1.9, askPrice: 2.1, spreadPct: 10, volume: 20, openInterest: 100 }), {
@@ -10,6 +64,28 @@ test('option quote quality distinguishes executable two-sided prices, wide sprea
   });
   assert.equal(assessOptionQuoteQuality({ bidPrice: 1, askPrice: 2, spreadPct: 66.67, volume: 1, openInterest: 2 }).status, 'wide-spread');
   assert.equal(assessOptionQuoteQuality({ bidPrice: 0, askPrice: 0, spreadPct: null, volume: 0, openInterest: 0 }).status, 'unquoted');
+  assert.equal(assessOptionQuoteQuality({ bidPrice: 1, askPrice: 1.1, spreadPct: 9.5, volume: null, openInterest: 10 }).status, 'metrics-incomplete');
+});
+
+test('option metric rendering shows unknown as unavailable but keeps a confirmed zero visible', () => {
+  const source = require('./helpers/dashboard-source.cjs').readDashboardSource();
+  const helper = source.match(/function optionMetric\(value\) \{[\s\S]*?\n\}/)?.[0];
+  assert.ok(helper, 'option metrics should use an explicit null-aware formatter');
+  const context = { compactUsd: value => `$${Number(value).toFixed(2)}` };
+  vm.runInNewContext(`${helper}; globalThis.result = [optionMetric(null), optionMetric(0)];`, context);
+  assert.deepEqual(Array.from(context.result), ['--', '$0.00']);
+});
+
+test('option payoff remains available from fresh two-sided quotes when nonessential OI or volume fields are missing', () => {
+  const nowMs = Date.now();
+  const row = { instrumentName: 'SPY261218C00100000', strike: 100, optionType: 'call', bidPrice: 1, askPrice: 1.1,
+    quoteQuality: { status: 'metrics-incomplete' }, expiryMs: nowMs + 86_400_000, quoteTime: new Date(nowMs).toISOString() };
+  const result = calculateOptionPayoff({ spot: 100, multiplier: 100, nowMs, legs: [
+    { row, action: 'buy', contracts: 1 },
+    { row: { ...row, instrumentName: 'SPY261218P00100000', optionType: 'put' }, action: 'sell', contracts: 1 },
+  ] });
+  assert.equal(result.executionEnabled, false);
+  assert.equal(result.netPremiumUsd, 10);
 });
 
 test('option payoff uses verified bid/ask sides and computes capped vertical-spread risk', () => {
