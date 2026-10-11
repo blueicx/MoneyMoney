@@ -43,6 +43,34 @@ test('scheduler records only safe backup status messages, never child output pat
   assert.doesNotMatch(records.at(-1).message, /C:\\private/);
 });
 
+test('scheduler exposes verified database and snapshot sizes without persisting filesystem paths', async () => {
+  const records = [];
+  const store = { acquireLease: () => true, refreshLease: () => true, releaseLease: () => true };
+  const summary = {
+    format: 1,
+    status: 'verified',
+    snapshot: '2026-10-10T12-00-00-000Z',
+    databaseBytes: { 'moneymoney.sqlite': 1048576, 'research.db': 524288 },
+    snapshotBytes: 3145728,
+    fileCount: 6,
+    lakeFileCount: 2,
+  };
+  const scheduler = new StateBackupScheduler({
+    store, owner: 'safe-summary-test', clock: () => Date.parse('2026-10-10T12:00:00.000Z'),
+    getLastSuccessAt: () => null,
+    runBackup: async () => `State backup verified: ${JSON.stringify(summary)}`,
+    recordRun: record => records.push(record),
+  });
+
+  const result = await scheduler.runNow();
+  assert.equal(result.status, 'SUCCESS');
+  assert.match(result.message, /moneymoney\.sqlite.*1\.0 MiB/);
+  assert.match(result.message, /research\.db.*0\.5 MiB/);
+  assert.match(result.message, /快照.*3\.0 MiB/);
+  assert.match(records[0].message, /6 个文件/);
+  assert.doesNotMatch(result.message, /[A-Z]:\\|\/opt\//);
+});
+
 test('separate scheduler instances share the SQLite lease and do not run duplicate backups', async (t) => {
   assert.equal(typeof StateBackupScheduler, 'function', 'state backup scheduler must be registered');
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'moneymoney-backup-scheduler-'));

@@ -125,17 +125,24 @@ const median = values => [...values].sort((a, b) => a - b)[Math.floor(values.len
             && document.getElementById('stock-chart-card')?.getAttribute('aria-busy') !== 'true'
             && !!window.MoneyTradingChart, 'chart-settled')
             .catch(error => reportWaitFailure('chart-settled', error));
-          const result = await page.evaluate(shellReadyMs => {
+          const chartReadyMs = await page.evaluate(() => performance.now());
+          if (requests.some(request => request.pathname === '/api/stock/indices')) {
+            await waitForPageCondition(page, () => performance.getEntriesByType('resource').some(row => {
+              try { return new URL(row.name).pathname === '/api/stock/indices' && row.responseEnd > 0; } catch { return false; }
+            }), 'stock-indices-settled').catch(error => reportWaitFailure('stock-indices-settled', error));
+            await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 0)));
+          }
+          const result = await page.evaluate((shellReadyMs, chartReadyMs) => {
             const resources = performance.getEntriesByType('resource');
             const js = resources.filter(row => /\.js(?:\?|$)/.test(row.name));
             const navigation = performance.getEntriesByType('navigation')[0];
-            return { shellReadyMs, chartReadyMs: performance.now(), chartState: document.getElementById('stock-chart-card')?.dataset.klineState,
+            return { shellReadyMs, chartReadyMs, chartState: document.getElementById('stock-chart-card')?.dataset.klineState,
               chartMessage: document.getElementById('stock-chart-card')?.innerText.slice(0, 500) || '',
               bytes: resources.reduce((sum, row) => sum + row.transferSize, 0), jsBytes: js.reduce((sum, row) => sum + row.transferSize, 0),
               jsResources: js.map(row => ({ path: new URL(row.name).pathname, startTime: row.startTime, duration: row.duration, transferSize: row.transferSize })),
               domContentLoadedMs: navigation?.domContentLoadedEventEnd || null,
               };
-          }, shellReadyMs);
+          }, shellReadyMs, chartReadyMs);
           result.apiRequestDetails = [...requests];
           result.apiTimings = [...apiTimings];
           result.apiRequests = requests.map(request => request.pathname);

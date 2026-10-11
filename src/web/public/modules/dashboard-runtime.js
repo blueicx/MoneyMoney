@@ -3507,7 +3507,7 @@ async function loadStockIndices(signal) {
     }).join('');
   } catch(e) { if (e.name !== 'AbortError') console.warn('股票指数加载失败', e); }
 }
-async function loadStockQuotes() {
+async function loadStockQuotes({ refreshChart = true } = {}) {
   if (currentStockDashboardController) currentStockDashboardController.abort();
   const controller = new AbortController();
   currentStockDashboardController = controller;
@@ -3515,7 +3515,7 @@ async function loadStockQuotes() {
   try {
     await Promise.allSettled([loadStockIndices(signal)]);
     const selectedSymbol = window._stockSelectedSymbol || currentInstrumentId || 'AAPL';
-    if (!signal.aborted && ['stocks', 'overview', 'watchlist'].includes(activeMarketScope)) selectStockSymbol(selectedSymbol, stockNameForSymbol(selectedSymbol), undefined, { refreshRelated: false });
+    if (refreshChart && !signal.aborted && ['stocks', 'overview', 'watchlist'].includes(activeMarketScope)) selectStockSymbol(selectedSymbol, stockNameForSymbol(selectedSymbol), undefined, { refreshRelated: false });
   } finally {
     if (currentStockDashboardController === controller) currentStockDashboardController = null;
   }
@@ -8973,7 +8973,7 @@ function scopedStockLoaders(key) {
       : key === 'stocks-macro' ? [loadMacroIndicators, loadStablecoinLiquidity, loadEconomicIndicators, loadTreasuryYields]
         : key === 'stocks-calendar' ? [loadEarningsCalendar, loadMacroCalendar, loadMarketSentiment, loadCotRadar] : [];
   }
-  if (key === 'stocks-market') return activeMarketScope === 'overview' ? [loadStockQuotes, loadGlobalMetrics, loadMacroCalendar] : activeMarketScope === 'stocks' ? [loadStockQuotes] : [];
+  if (key === 'stocks-market') return activeMarketScope === 'overview' ? [loadStockQuotes, loadGlobalMetrics, loadMacroCalendar] : activeMarketScope === 'stocks' ? [() => loadStockQuotes({ refreshChart: !(activeWorkspaceId === 'stock-quotes' && currentInstrumentId) })] : [];
   if (key === 'stocks-macro') return activeMarketScope === 'crypto' ? [loadMacroIndicators, loadStablecoinLiquidity] : activeMarketScope === 'overview' ? [loadMacroIndicators, loadStablecoinLiquidity, loadEconomicIndicators, loadTreasuryYields] : ['stocks', 'options'].includes(activeMarketScope) ? [loadMacroIndicators, loadEconomicIndicators, loadTreasuryYields] : [];
   if (key === 'stocks-calendar') return activeMarketScope === 'crypto' ? [loadMarketSentiment] : ['stocks', 'options'].includes(activeMarketScope) ? [loadEarningsCalendar, loadMacroCalendar, loadCotRadar] : activeMarketScope === 'overview' ? [loadEarningsCalendar, loadMacroCalendar, loadMarketSentiment, loadCotRadar] : [];
   if (key === 'stocks-defi') return ['crypto', 'overview'].includes(activeMarketScope) ? STOCK_SECTION_LOADERS[key] : [];

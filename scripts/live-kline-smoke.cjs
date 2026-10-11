@@ -22,13 +22,21 @@ async function main() {
     let requests = 0;
     const olderRows=Array.from({length:20},(_,i)=>({...rows[0],time:rows[0].time-(20-i)*300000}));let historyRequests=0;
     await page.route('**/api/stock/kline?**', route => { requests++;const query=new URL(route.request().url()).searchParams,paged=query.has('before');if(paged)historyRequests++; return route.fulfill({ json: { success: true,market:'stocks',instrument:query.get('api')||query.get('symbol'),timeframe:query.get('period'), data:paged?olderRows:rows, source: 'Isolated chart fixture, not market data', updatedAt: new Date().toISOString(), dataStatus: 'delayed' } }); });
+    await page.route('**/api/stock/indices', async route => {
+      await new Promise(resolve => setTimeout(resolve, 700));
+      return route.fulfill({ json: { success: true, data: [{ name: 'Isolated index fixture', price: 100, changePct: 0.1 }] } });
+    });
     await page.route('**/api/binance/klines?**', route => {const query=new URL(route.request().url()).searchParams,paged=query.has('before');if(paged)historyRequests++;return route.fulfill({ json: { success: true,market:'crypto',instrument:'crypto:binance:'+query.get('symbol'),timeframe:query.get('interval'), data:paged?olderRows:rows, source: 'Isolated chart fixture', updatedAt: new Date().toISOString(), dataStatus: 'delayed' } });});
     await page.goto(base + '/login'); await page.fill('#username', 'live-fixture-owner'); await page.fill('#password', 'isolated-live-fixture-password');
     await Promise.all([page.waitForURL(url => url.pathname === '/'), page.click('#submitBtn')]);
     await page.waitForFunction(() => window.mm_isLoggedIn);
     await page.waitForFunction(() => window.mm_dashboardCoreReady === true && typeof window.setMarketScope === 'function', null, { timeout: 15_000 });
     assert.equal(await page.evaluate(() => !!window.MoneyLiveKline), false, 'the live chart transport should remain unloaded before entering a chart workspace');
-    await page.evaluate(async () => { setMarketScope('stocks'); openWorkspace('stock-quotes'); await loadStockKline('usAAPL', 'Apple', ''); });
+    const delayedIndexResponse = page.waitForResponse(response => new URL(response.url()).pathname === '/api/stock/indices');
+    await page.evaluate(async () => { setMarketScope('stocks'); setWorkspaceInstrument('stock:us:AAPL'); openWorkspace('stock-quotes'); await loadStockKline('usAAPL', 'Apple', ''); });
+    await delayedIndexResponse;
+    await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 0)));
+    assert.equal(requests, 1, 'late index-card completion must not reload an already-open instrument K-line');
     await page.locator('#stock-chart-card').waitFor({ state: 'visible' });
     await page.waitForFunction(() => window.MoneyLiveKline && window.MoneyTradingChart);
     await page.waitForFunction(() => stockChartKlines.length > 10 && document.getElementById('stock-chart-card').getAttribute('aria-busy') !== 'true').catch(async error => {

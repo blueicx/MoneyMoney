@@ -107,3 +107,10 @@ test('WAL巡检 has a configurable safe default and is scheduled, stoppable, and
   assert.match(route, /if \(!adminOnly\(req, res\)\) return/);
   assert.match(route, /sqliteWalHealthScheduler\.runNow\(\)/);
 });
+
+test('automation jobs compatibility route exposes verified backup status without granting guest access', () => {
+  const server = fs.readFileSync(path.join(process.cwd(), 'src/web/server.ts'), 'utf8');
+  assert.match(server, /app\.get\('\/api\/automation\/jobs'/);
+  const { isGuestRequestAllowed } = require('../dist/web/auth');
+  assert.equal(isGuestRequestAllowed('GET', '/automation/jobs'), false, 'backup size and job history remain private to administrators');
+});

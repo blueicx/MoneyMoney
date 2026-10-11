@@ -209,8 +209,44 @@ export function createSQLiteWalHealthScheduler(options: Omit<SQLiteWalHealthSche
 
 export type StateBackupRunStatus = 'SUCCESS' | 'FAILED' | 'SKIPPED' | 'BUSY';
 export interface StateBackupRunResult { status: StateBackupRunStatus; message: string; finishedAt?: string; }
+interface VerifiedStateBackupSummary {
+  snapshot: string;
+  databaseBytes: Partial<Record<'moneymoney.sqlite' | 'research.db', number>>;
+  snapshotBytes: number;
+  fileCount: number;
+  lakeFileCount: number;
+}
 type BackupLeaseStore = Pick<SQLiteStateStore, 'acquireLease' | 'refreshLease' | 'releaseLease'>;
 type BackupRunRecord = Omit<AutomationRun, 'id' | 'jobId' | 'durationMs'> & { durationMs?: number };
+
+function parseVerifiedBackupSummary(output: string): VerifiedStateBackupSummary | null {
+  const line = output.split(/\r?\n/).reverse().find(item => item.startsWith('State backup verified: '));
+  if (!line) return null;
+  try {
+    const value = JSON.parse(line.slice('State backup verified: '.length));
+    const snapshot = String(value.snapshot || '');
+    const databaseBytes = value.databaseBytes;
+    if (value.format !== 1 || value.status !== 'verified'
+      || !/^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z$/.test(snapshot)
+      || !databaseBytes || typeof databaseBytes !== 'object' || Array.isArray(databaseBytes)
+      || !Number.isSafeInteger(value.snapshotBytes) || value.snapshotBytes < 0
+      || !Number.isSafeInteger(value.fileCount) || value.fileCount < 1
+      || !Number.isSafeInteger(value.lakeFileCount) || value.lakeFileCount < 0
+      || Object.keys(databaseBytes).some(name => !['moneymoney.sqlite', 'research.db'].includes(name)
+        || !Number.isSafeInteger(databaseBytes[name]) || databaseBytes[name] < 0)) return null;
+    return { snapshot, databaseBytes, snapshotBytes: value.snapshotBytes, fileCount: value.fileCount, lakeFileCount: value.lakeFileCount };
+  } catch { return null; }
+}
+
+function formatBackupBytes(bytes: number): string { return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`; }
+
+function formatVerifiedBackupMessage(summary: VerifiedStateBackupSummary | null): string {
+  if (!summary) return '一致性快照已创建并通过校验';
+  const databases = Object.entries(summary.databaseBytes)
+    .map(([name, bytes]) => `${name} ${formatBackupBytes(bytes!)}`)
+    .join('、') || '未发现 SQLite 数据库文件';
+  return `一致性快照已创建并通过校验；数据库：${databases}；快照数据 ${formatBackupBytes(summary.snapshotBytes)}（${summary.fileCount} 个文件，数据湖 ${summary.lakeFileCount} 个文件）；快照 ${summary.snapshot}`;
+}
 
 export function stateBackupDue(lastSuccessAt: string | null, now = Date.now(), intervalMs = 24 * 60 * 60_000): boolean {
   if (!Number.isFinite(now) || !Number.isFinite(intervalMs) || intervalMs <= 0) return true;
@@ -293,10 +329,10 @@ export class StateBackupScheduler {
         controller.abort(new Error('备份租约已丢失'));
       }, 15_000);
       heartbeat.unref?.();
-      await this.options.runBackup(controller.signal);
+      const output = await this.options.runBackup(controller.signal);
       if (leaseLost) throw new Error('备份租约已丢失；不记录为成功');
       const finishedAt = new Date(this.clock()).toISOString();
-      const message = '一致性快照已创建并通过校验';
+      const message = formatVerifiedBackupMessage(parseVerifiedBackupSummary(output));
       this.options.recordRun({ status: 'SUCCESS', message, startedAt, finishedAt });
       return { status: 'SUCCESS', message, finishedAt };
     } catch (error) {

@@ -44,6 +44,49 @@ test('stock workspace bootstrap avoids command, macro, event and research fetche
   } finally { dom.window.close(); }
 });
 
+test('stock quote section refreshes index cards without scheduling a late chart refresh', () => {
+  const dom = new JSDOM(source, { url: 'http://localhost/', runScripts: 'outside-only' });
+  const w = dom.window;
+  const calls = [];
+  w.eval("var activeMarketScope='stocks',activeWorkspaceId='stock-quotes',currentInstrumentId='stock:us:AAPL';");
+  w.loadStockQuotes = options => calls.push(options);
+  w.eval(sourceFunction('scopedStockLoaders'));
+  try {
+    for (const load of w.scopedStockLoaders('stocks-market')) load();
+    assert.deepEqual(calls.map(options => options?.refreshChart), [false], 'the quote section should refresh its indices but leave the already-loaded chart alone');
+  } finally { dom.window.close(); }
+});
+
+test('index-only stock quote refresh still loads indices but does not reload the selected stock chart', async () => {
+  const dom = new JSDOM(source, { url: 'http://localhost/', runScripts: 'outside-only' });
+  const w = dom.window;
+  const calls = [];
+  w.eval("var currentStockDashboardController=null,activeMarketScope='stocks',activeWorkspaceId='stock-quotes',currentInstrumentId='AAPL';window._stockSelectedSymbol='AAPL';");
+  w.loadStockIndices = async () => calls.push('indices');
+  w.stockNameForSymbol = symbol => symbol;
+  w.selectStockSymbol = () => calls.push('chart');
+  w.eval(sourceFunction('loadStockQuotes'));
+  try {
+    await w.loadStockQuotes({ refreshChart: false });
+    assert.deepEqual(calls, ['indices'], 'an index response must not trigger selectStockSymbol and a duplicate K-line request');
+  } finally { dom.window.close(); }
+});
+
+test('stock quote refresh still selects the default instrument when no chart context exists', async () => {
+  const dom = new JSDOM(source, { url: 'http://localhost/', runScripts: 'outside-only' });
+  const w = dom.window;
+  const calls = [];
+  w.eval("var currentStockDashboardController=null,activeMarketScope='stocks',activeWorkspaceId='stock-quotes',currentInstrumentId=null;window._stockSelectedSymbol='';");
+  w.loadStockIndices = async () => calls.push('indices');
+  w.stockNameForSymbol = symbol => symbol;
+  w.selectStockSymbol = symbol => calls.push(symbol);
+  w.eval(sourceFunction('loadStockQuotes'));
+  try {
+    await w.loadStockQuotes();
+    assert.deepEqual(calls, ['indices', 'AAPL'], 'a workspace without a selected instrument must still initialize its default chart');
+  } finally { dom.window.close(); }
+});
+
 test('changing markets does not eagerly load the event timeline workspace', () => {
   const dom = new JSDOM(source, { url: 'http://localhost/', runScripts: 'outside-only' });
   const w = dom.window;
@@ -416,6 +459,11 @@ test('loading benchmark uses an isolated real-data page and waits for a settled 
   assert.match(benchmark, /MONEYMONEY_BENCHMARK_NETWORK/,
     'the benchmark must separate natural-network diagnostics from the controlled weak-network run');
   assert.ok(benchmark.includes('apiRequestCounts[pathname], 1'), 'the benchmark fails if stock startup duplicates scoped data requests');
+  assert.match(benchmark, /stock-indices-settled/,
+    'the benchmark must wait for the slower index card before deciding whether a late callback restarted the chart');
+  const liveKlineSmoke = fs.readFileSync('scripts/live-kline-smoke.cjs', 'utf8');
+  assert.match(liveKlineSmoke, /setTimeout\(resolve, 700\)/);
+  assert.match(liveKlineSmoke, /late index-card completion must not reload an already-open instrument K-line/);
   assert.match(benchmark, /for \(const sample of \[cold, warm\]\)/,
     'duplicate request checks must cover both cold and warm page navigations');
   assert.match(benchmark, /apiRequestDetails/,

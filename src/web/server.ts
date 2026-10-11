@@ -9519,10 +9519,12 @@ app.post('/api/ai-runners/tick', express.json(), async (req, res) => {
 
 // --- Automation Operations ---
 
-app.get('/api/ops', (_req, res) => {
+const automationJobsHandler = (_req: express.Request, res: express.Response) => {
   const jobs = getAutomationJobs();
   res.json({ success: true, data: { jobs, overview: getAutomationOverview() } });
-});
+};
+app.get('/api/ops', automationJobsHandler);
+app.get('/api/automation/jobs', automationJobsHandler);
 
 async function runAutomationJob(jobId: string): Promise<{ message: string }> {
   switch (jobId) {

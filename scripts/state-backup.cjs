@@ -106,7 +106,18 @@ async function backup() {
   fs.writeFileSync(path.join(target, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
   verifyBackupForRetention(target);
   pruneVerifiedBackups(retentionCount());
-  process.stdout.write(`State backup created: ${target}\n`);
+  const databaseBytes = Object.fromEntries(Object.keys(databases).map(name => [name, fs.statSync(path.join(target, name)).size]));
+  const snapshotBytes = files.reduce((sum, name) => sum + fs.statSync(path.join(target, name)).size, 0);
+  const summary = {
+    format: 1,
+    status: 'verified',
+    snapshot: path.basename(target),
+    databaseBytes,
+    snapshotBytes,
+    fileCount: files.length,
+    lakeFileCount: files.filter(name => name.startsWith('lake/')).length,
+  };
+  process.stdout.write(`State backup verified: ${JSON.stringify(summary)}\n`);
 }
 
 function verifyBackupForRetention(sourceRoot) {

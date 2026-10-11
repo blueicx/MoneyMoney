@@ -62,8 +62,16 @@ test('backup includes consistent SQLite databases, runtime JSON and lake files; 
   const env = { ...process.env, MONEYMONEY_DATA_DIR: dataRoot };
   const backup = spawnSync(process.execPath, ['scripts/state-backup.cjs'], { cwd: process.cwd(), env, encoding: 'utf8' });
   assert.equal(backup.status, 0, backup.stderr || backup.stdout);
-  const backupPath = backup.stdout.match(/State backup created: (.+)\s*$/m)?.[1];
-  assert.ok(backupPath, backup.stdout);
+  const summaryMatch = backup.stdout.match(/^State backup verified: (.+)$/m);
+  assert.ok(summaryMatch, backup.stdout);
+  const summary = JSON.parse(summaryMatch[1]);
+  assert.equal(summary.status, 'verified');
+  assert.equal(summary.databaseBytes['moneymoney.sqlite'], fs.statSync(path.join(dataRoot, 'backups', summary.snapshot, 'moneymoney.sqlite')).size);
+  assert.equal(summary.databaseBytes['research.db'], fs.statSync(path.join(dataRoot, 'backups', summary.snapshot, 'research.db')).size);
+  assert.ok(summary.snapshotBytes > summary.databaseBytes['moneymoney.sqlite']);
+  assert.equal(summary.lakeFileCount, 2);
+  assert.equal(backup.stdout.includes(dataRoot), false, 'worker output must not expose an absolute data path');
+  const backupPath = path.join(dataRoot, 'backups', summary.snapshot);
   const manifest = JSON.parse(fs.readFileSync(path.join(backupPath, 'manifest.json'), 'utf8'));
   assert.equal(manifest.files['lake/stocks/large-bars.parquet'], crypto.createHash('sha256').update(largeLakeFile).digest('hex'));
   for (const name of ['moneymoney.sqlite', 'research.db', 'telegram-state.json', 'lake/stocks/bars.parquet', 'manifest.json']) {

@@ -161,8 +161,10 @@ test('collapsed instrument library keeps a visible expand control', () => {
 
 test('restored stock context is not overwritten by the default AAPL loader', () => {
   assert.match(html, /restoreWorkspaceContextFromUrl\(\)[\s\S]*currentInstrumentId = String\(params\.get\('instrument'\)/);
-  assert.match(html, /function loadStockQuotes\(\)[\s\S]*const selectedSymbol = window\._stockSelectedSymbol \|\| currentInstrumentId \|\| 'AAPL'/);
-  assert.match(html, /loadStockQuotes\(\)[\s\S]*selectStockSymbol\(selectedSymbol, stockNameForSymbol\(selectedSymbol\)/);
+  assert.match(html, /function loadStockQuotes\(\{\s*refreshChart = true\s*\} = \{\}\)[\s\S]*const selectedSymbol = window\._stockSelectedSymbol \|\| currentInstrumentId \|\| 'AAPL'/);
+  assert.match(html, /if \(refreshChart && !signal\.aborted[\s\S]*selectStockSymbol\(selectedSymbol, stockNameForSymbol\(selectedSymbol\)/);
+  assert.match(html, /activeWorkspaceId === 'stock-quotes' && currentInstrumentId/,
+    'restored stock-chart context must refresh index cards without reloading the selected chart');
   assert.match(html, /restoreWorkspaceContextFromUrl\(\)[\s\S]*const restoredSymbol = currentInstrumentId\.replace\(\/\^stock:us:\/i, ''\)\.replace\(\/\^us\/i, ''\)\.toUpperCase\(\)[\s\S]*window\._stockSelectedSymbol = restoredSymbol/);
 });
 
