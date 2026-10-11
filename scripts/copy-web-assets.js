@@ -42,24 +42,26 @@ function emit(name, body, extension) {
 // Extract declarations only, keeping state in its existing global scope. Classic
 // scripts intentionally preserve legacy inline handlers and cross-module state.
 const modules = {
-  guru: [], research: [], ai: [], charts: [], comparison: [],
+  guru: [], research: [], ai: [], charts: [], comparison: [], overview: [],
   stocks: [], options: [], crypto: [], prediction: [], portfolio: [], trading: [], events: [], ops: [],
 };
 const asyncWorkspaceGroups = [
+  ['overview', /^(?:loadMarketOverview|loadCrossAssetCorrelation|loadResearchBriefing|loadCommandCenter)$/],
   ['research', /^(?:loadDecisionIntelligence|runBacktest|compareBacktests|runMonteCarlo|loadMarketResearch|runEventStudyUi)$/],
-  ['charts', /^(?:loadStockKline|loadEarlierStockKline|loadStockChartCompanion|loadBinanceKlines|loadBinancePrices|loadBinanceDepth|loadBinanceTrades)$/],
-  ['stocks', /^(?:loadInsiderRadar|loadInstitutionalOwnership|loadAnalystConsensus|loadFundamentalQuality|loadShortInterest|loadEarningsCalendar|loadCotRadar|loadMarketScreener|loadStockSearch|loadStockWatchlistLibrary)$/],
+  ['charts', /^(?:performStockKlineLoad|loadEarlierStockKline|loadStockChartCompanion|loadBinanceKlines|loadBinancePrices|loadBinanceDepth|loadBinanceTrades)$/],
+  ['stocks', /^(?:loadGlobalMacroSpot|loadInsiderRadar|loadInstitutionalOwnership|loadAnalystConsensus|loadFundamentalQuality|loadShortInterest|loadEarningsCalendar|loadCotRadar|loadMarketScreener|loadStockSearch|loadStockWatchlistLibrary)$/],
   ['options', /^loadOptions$/],
   ['crypto', /^(?:loadFundingCarry|loadOrderFlowLiquidity|loadStablecoinLiquidity|loadPerpetualCrowding|loadBitcoinOnchain|loadDefiTvl|loadDefiProtocols|loadDefiYields|loadBinanceDashboard|loadBinancePortfolio|loadCryptoNews)$/],
   ['prediction', /^(?:loadPredictionRadar|loadForecastLab|loadMarketCompare|loadCalibration|togglePredictionSettlement|togglePredictionHistory)$/],
   ['portfolio', /^(?:loadPaperPortfolio|loadPortfolioRisk|loadScopedPaperPortfolio|loadPaperDriftStatus|loadOrders|loadPositions|loadPortfolioSnapshotHistory|loadDecisionPortfolioAttribution|loadPortfolioSummary|comparePortfolioSnapshotHistory|submitSellOrder|openSellModal)$/],
   ['trading', /^(?:loadTradeAssistant|loadAnalysis|loadRiskPatrol|preflightAssetBacktest|refreshBacktestCandidateFreshness)$/],
   ['events', /^(?:loadMarketTimeline|loadEventCalendar)$/],
-  ['ops', /^(?:loadSourceSloPanel|loadOpsConsole|loadSourceHealth|loadMacroIndicators|loadNews|loadMacroCalendar|loadTelegramTestDeliveryHistory|loadTelegramSettingsForm|testTelegramSettings|saveTelegramSettings|loadTreasuryYields|loadMarketSentiment|loadCrossAssetCorrelation|runGlobalSearchNow|loadAlertDeliveryFeedback)$/],
+  ['ops', /^(?:loadSourceSloPanel|loadOpsConsole|loadSourceHealth|loadMacroIndicators|loadNews|loadMacroCalendar|loadTelegramTestDeliveryHistory|loadTelegramSettingsForm|testTelegramSettings|saveTelegramSettings|loadTreasuryYields|loadMarketSentiment|runGlobalSearchNow|loadAlertDeliveryFeedback)$/],
 ];
 const syncWorkspaceGroups = [
-  ['charts', /^(?:drawCandles|drawStockKline|drawMACD|drawRSI|drawDepthChart|drawStockChartCompanion|renderChartPatternMarkers|renderChartPatternList|renderChartStructureList|updateStockKlineFocusControl|setStockKlineViewState|focusStockKlineDate|enterStockIntraday)$/],
-  ['stocks', /^(?:renderAnalystConsensus|renderFundamentalQuality|renderMarketBreadth|renderInsiderRadar|renderInstitutionalOwnership|renderShortInterest|renderMarketScreener|renderInstrumentDetail)$/],
+  ['charts', /^(?:loadStockKline|stockKlineRequestKey|runStockKlineSingleFlight|drawCandles|drawStockKline|drawMACD|drawRSI|drawDepthChart|drawStockChartCompanion|renderChartPatternMarkers|renderChartPatternList|renderChartStructureList|updateStockKlineFocusControl|setStockKlineViewState|focusStockKlineDate|enterStockIntraday)$/],
+  ['stocks', /^(?:renderGlobalMacroSpot|renderAnalystConsensus|renderFundamentalQuality|renderMarketBreadth|renderInsiderRadar|renderInstitutionalOwnership|renderShortInterest|renderMarketScreener|renderInstrumentDetail)$/],
+  ['overview', /^fetchMarketOverviewJson$/],
   ['options', /^(?:renderOptionChain|renderOptionStrategies)$/],
   ['crypto', /^(?:renderDefiYieldQuality)$/],
   ['prediction', /^(?:renderOutcomes|radarMarketCard|renderForecastLab|renderPredictionRadar|renderPredictionLibraryQuick|predictionSparkline|forecastLabGroupTable|renderPredictionSizingResult|selectPredictionLibraryEvent)$/],
@@ -89,9 +91,37 @@ function splitWorkspaces(code) {
 
 let html = fs.readFileSync(path.join(source, 'index.html'), 'utf8');
 html = expandDashboardRuntime(html, source);
+const lazyScripts = /<script\b[^>]*src="\/(?:chart-analysis|live-kline|trading-chart|interactive-history|guru-replay|workflow-polish|action-research-workspace|professional-research|automatic-comparison|contracts-workspace)\.js[^"\s]*"[^>]*><\/script>/g;
+html = html.replace(lazyScripts, '');
 let number = 0;
+const dashboardStartupParts = [];
+let collectingDashboardStartup = false;
+const dashboardStartupPlaceholder = '<!--__MONEYMONEY_DASHBOARD_STARTUP_BOOTSTRAP__-->';
+let dashboardStartupPartNumber = 0;
 html = html.replace(/<style\b[^>]*>([\s\S]*?)<\/style>/gi, (_, css) => `<link rel="stylesheet" href="${emit(`dashboard-style-${++number}`, css, 'css')}">`);
 html = html.replace(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi, (tag, attributes, code) => {
+  const isDashboardRuntime = /\bdata-dashboard-runtime\b/.test(attributes);
+  const src = attributes.match(/\bsrc\s*=\s*["']([^"']+)["']/i)?.[1];
+  if (isDashboardRuntime) {
+    collectingDashboardStartup = true;
+    dashboardStartupParts.push({ name: 'dashboard-startup-runtime', code: splitWorkspaces(code) });
+    return dashboardStartupPlaceholder;
+  }
+  if (collectingDashboardStartup) {
+    if (src) {
+      const pathname = src.startsWith('/') ? src.split(/[?#]/, 1)[0] : '';
+      const file = pathname ? path.join(source, pathname.slice(1)) : '';
+      if (!file || !fs.existsSync(file)) return tag;
+      const name = `dashboard-startup-${path.basename(pathname).replace(/\.js$/i, '')}`;
+      dashboardStartupParts.push({ name, code: fs.readFileSync(file, 'utf8') });
+      return '';
+    }
+    if (code.trim()) dashboardStartupParts.push({
+      name: `dashboard-startup-inline-${++dashboardStartupPartNumber}`,
+      code: splitWorkspaces(code),
+    });
+    return '';
+  }
   if (/\bsrc\s*=/.test(attributes) || Buffer.byteLength(code) < 1500) return tag;
   const deferredAttributes = /\b(?:async|defer)\b/i.test(attributes) ? attributes : `${attributes} defer`;
   return `<script${deferredAttributes} src="${emit(`dashboard-${++number}`, splitWorkspaces(code), 'js')}"></script>`;
@@ -109,13 +139,22 @@ modules.charts.push(
   fs.readFileSync(path.join(source, 'trading-chart.js'), 'utf8'),
 );
 modules.comparison.push(fs.readFileSync(path.join(source, 'automatic-comparison.js'), 'utf8'));
+if (!dashboardStartupParts.length) throw new Error('Dashboard startup runtime was not collected');
+const dashboardStartupUrls = dashboardStartupParts.map(part => emit(part.name, part.code, 'js'));
+const dashboardBootstrap = `(function(){\n'use strict';\nlet started=false;\nfunction loadScript(src){return new Promise((resolve,reject)=>{const script=document.createElement('script');script.src=src;script.async=true;script.dataset.dashboardStartup='true';script.onload=resolve;script.onerror=()=>reject(new Error('页面功能脚本加载失败'));document.head.append(script);});}\nfunction showFailure(){const banner=document.getElementById('network-status-banner');if(banner){banner.hidden=false;banner.textContent='页面功能脚本加载失败，请刷新重试';}else console.error('MoneyMoney dashboard startup bundle failed to load');}\nasync function start(){\n  if(started)return;started=true;\n  let authReady=window.mm_authReady;\n  if(!authReady||typeof authReady.then!=='function') await new Promise(resolve=>{\n    const ready=()=>resolve();\n    window.addEventListener('mm-auth-client-ready',ready,{once:true});\n    if(document.readyState==='complete') ready(); else window.addEventListener('load',ready,{once:true});\n  });\n  authReady=window.mm_authReady;\n  if(authReady&&typeof authReady.then==='function') await Promise.resolve(authReady).catch(()=>null);\n  try{\n    const sources=${JSON.stringify(dashboardStartupUrls)};\n    if(sources.length) await loadScript(sources[0]);\n    if(window.mm_dashboardReady) await Promise.resolve(window.mm_dashboardReady).catch(()=>null);\n    for(const src of sources.slice(1)) await loadScript(src);\n    window.dispatchEvent(new CustomEvent('mm-dashboard-runtime-loaded'));\n  }catch(error){showFailure();}\n}\nvoid start();\n})();`;
+const dashboardBootstrapReady = dashboardBootstrap.replace(
+  'if(window.mm_dashboardReady) await Promise.resolve(window.mm_dashboardReady).catch(()=>null);',
+  "if(window.mm_dashboardReady) await Promise.resolve(window.mm_dashboardReady).catch(()=>null);window.mm_dashboardCoreReady=true;window.dispatchEvent(new Event('mm-dashboard-core-ready'));",
+);
+const dashboardBootstrapUrl = emit('dashboard-startup-bootstrap', dashboardBootstrapReady, 'js');
+html = html.replace(dashboardStartupPlaceholder, `<script defer src="${dashboardBootstrapUrl}"></script>`);
+if (html.includes(dashboardStartupPlaceholder)) throw new Error('Dashboard startup bootstrap placeholder was not replaced');
 const moduleUrls = Object.fromEntries(Object.entries(modules).map(([group, code]) => [group, emit(`workspace-${group}`, code.join('\n'), 'js')]));
 moduleUrls.contracts = emit('workspace-contracts', fs.readFileSync(path.join(source, 'contracts-workspace.js')), 'js');
 const styleUrls = {
   research: emit('workspace-research-style', fs.readFileSync(path.join(source, 'action-research-workspace.css')), 'css'),
   contracts: emit('workspace-contracts-style', fs.readFileSync(path.join(source, 'contracts-workspace.css')), 'css'),
 };
-html = html.replace(/<script\b[^>]*src="\/(?:chart-analysis|live-kline|trading-chart|interactive-history|guru-replay|workflow-polish|action-research-workspace|professional-research|automatic-comparison|contracts-workspace)\.js[^"\s]*"[^>]*><\/script>/g, '');
 html = html.replace(/<link\b[^>]*href="\/(?:action-research-workspace|contracts-workspace)\.css[^"\s]*"[^>]*>/g, '');
 
 const fingerprinted = new Map();
@@ -144,4 +183,4 @@ for (const page of ['index.html', 'login.html']) {
   fs.writeFileSync(file + '.gz', zlib.gzipSync(content, { level: 9 }));
   fs.writeFileSync(file + '.br', zlib.brotliCompressSync(content));
 }
-console.log(`Web assets built: ${Object.keys(manifest).length} hashed/precompressed resources; market, research, AI and contracts load on demand`);
+console.log(`Web assets built: ${Object.keys(manifest).length} hashed/precompressed resources; overview, market, research, AI and contracts load on demand`);

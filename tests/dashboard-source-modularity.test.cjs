@@ -46,8 +46,10 @@ test('runtime expansion treats JavaScript replacement tokens as literal source',
   assert.equal(expanded.includes(marker), false, 'source marker must be replaced exactly once');
   assert.equal(
     Buffer.byteLength(expanded),
-    Buffer.byteLength(html) - Buffer.byteLength(marker) + Buffer.byteLength('<script></script>') + Buffer.byteLength(runtime),
+    Buffer.byteLength(html) - Buffer.byteLength(marker) + Buffer.byteLength('<script data-dashboard-runtime="true"></script>') + Buffer.byteLength(runtime),
   );
+  assert.match(expanded, /<script data-dashboard-runtime="true">[\s\S]*?<\/script>/,
+    'the expanded runtime keeps a marker for the asset builder without relying on replacement-string tokens');
 });
 
 test('legacy source assertions can inspect the complete entry without changing the shipped HTML', () => {

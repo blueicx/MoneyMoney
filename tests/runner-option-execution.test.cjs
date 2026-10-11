@@ -165,6 +165,9 @@ test('a runner accepts only an exact Deribit contract and links long-only paper 
  account=accountStore.getRunnerAccount(runner.accountId);
  assert.equal(account.positions.length,0);
  assert.equal(account.orders[1].instrumentId,`option:deribit:${name}`);
+ const closedPosition=getAiRunners().find(item=>item.id===runner.id).positions.find(item=>item.id===openPosition.id);
+ assert.equal(closedPosition.entryOrderId,account.orders[1].id,'closed position must retain its exact opening fill id');
+ assert.equal(closedPosition.exitOrderId,account.orders[0].id,'closed position must retain its exact closing fill id');
 });
 
 test('runner open and close reject a valid quote belonging to a different frozen option contract',()=>{

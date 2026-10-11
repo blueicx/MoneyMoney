@@ -14,6 +14,20 @@ test('support and resistance line layout maps only real in-range provider levels
  let strokes=0;const ctx={save(){},restore(){},setLineDash(){},beginPath(){},moveTo(){},lineTo(){},stroke(){strokes++;},fillText(){}};
  assert.equal(c.drawSupportResistance(ctx,lines,geometry),2);assert.equal(strokes,2);assert.equal(c.supportResistanceLineLayout(data,{...geometry,maxP:90,minP:110}).length,0);
 });
+test('support and resistance lines read active theme colors on every draw',()=>{
+ let theme='light';
+ const scope={window:{},document:{readyState:'loading',addEventListener(){}},getComputedStyle:()=>({getPropertyValue:name=>({
+  light:{'--green':'#087f5b','--red':'#c92a2a'},
+  money:{'--green':'#43d9a3','--red':'#ff7485'},
+ }[theme][name]||'')})};
+ vm.runInNewContext(fs.readFileSync('src/web/public/trading-chart.js','utf8'),scope);
+ const lines=[{type:'support',price:100,y:100},{type:'resistance',price:110,y:90}],geometry={W:400,padL:20,padR:20,padT:0,priceH:180};
+ const colors=[];const ctx={canvas:{},save(){},restore(){},setLineDash(){},beginPath(){},moveTo(){},lineTo(){},stroke(){colors.push(this.strokeStyle);},fillText(){}};
+ scope.window.MoneyTradingChart.drawSupportResistance(ctx,lines,geometry);
+ assert.deepEqual(colors,['#087f5b','#c92a2a']);
+ theme='money';scope.window.MoneyTradingChart.drawSupportResistance(ctx,lines,geometry);
+ assert.deepEqual(colors.slice(2),['#43d9a3','#ff7485']);
+});
 test('history control is explicit and serial, and late completion cannot overwrite another chart context',async()=>{
  const {JSDOM}=require('jsdom'),dom=new JSDOM('<div><canvas></canvas></div>',{runScripts:'outside-only',pretendToBeVisual:true}),w=dom.window;w.HTMLCanvasElement.prototype.getContext=()=>new Proxy({},{get:()=>()=>{}});let calls=0,finish;
  try{w.eval(fs.readFileSync('src/web/public/trading-chart.js','utf8'));const canvas=w.document.querySelector('canvas');const options={identity:'AAPL|5m',interval:'5m',loadEarlier:()=>{calls++;return new Promise(resolve=>finish=resolve);}};w.MoneyTradingChart.render(canvas,rows,options);

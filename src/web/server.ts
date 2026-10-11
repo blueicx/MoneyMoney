@@ -91,7 +91,7 @@ import { klinePageWindow, klinePageStatus } from '../features/kline-page-window'
 import { contractCapacity, compareContractSnapshots } from '../features/contract-comparison';
 import { compareAiRunnerReports } from '../features/ai-runner-comparison';
 import { createAiRunnerComparison, getAiRunnerComparison, validateAiRunnerComparison, validateScheduledAiRunnerComparison, buildAiRunnerComparisonSample, saveAiRunnerComparisonSample, listAiRunnerComparisonSamples, replayAiRunnerComparisonSample, type AiRunnerComparisonSample } from '../features/ai-runner-comparison-group';
-import { portfolioAttribution, aiRunnerPortfolioAttribution } from '../features/portfolio-attribution';
+import { portfolioAttribution, aiRunnerPortfolioAttribution, aiRunnerSelectionAttribution } from '../features/portfolio-attribution';
 import { getFundingCarryRadar } from '../features/funding-carry';
 import { getOrderFlowLiquidityRadar } from '../features/order-flow-liquidity';
 import { getBitcoinOnchainRadar } from '../features/bitcoin-onchain';
@@ -9479,8 +9479,11 @@ app.get('/api/ai-runners/:id/history', (req, res) => {
   if (!runner) return res.status(404).json({ success: false, error: '未找到跑单' });
   const page = listAiRunnerHistory(runner.id, typeof req.query.cursor === 'string' ? req.query.cursor : undefined, Number(req.query.limit || 50));
   const accountId = runner.accountId || `ai-runner:${runner.id}`;
-  const attribution = aiRunnerPortfolioAttribution(runner.universe?.market || 'stocks', runner.id, unifiedPaperLedgerStore.getRunnerAccount(accountId));
-  res.json({ success: true, data: page.data, nextCursor: page.nextCursor, runnerId: runner.id, attribution, dataStatus: page.data.length ? 'historical' : 'empty', reason: page.data.length ? undefined : '暂无跑单决策记录' });
+  const account = unifiedPaperLedgerStore.getRunnerAccount(accountId);
+  const market = runner.universe?.market || 'stocks';
+  const attribution = aiRunnerPortfolioAttribution(market, runner.id, account);
+  const selectionAttribution = aiRunnerSelectionAttribution(market, runner, account);
+  res.json({ success: true, data: page.data, nextCursor: page.nextCursor, runnerId: runner.id, attribution, selectionAttribution, dataStatus: page.data.length ? 'historical' : 'empty', reason: page.data.length ? undefined : '暂无跑单决策记录' });
 });
 
 app.post('/api/ai-runners/:id/tick', express.json(), async (req, res) => {

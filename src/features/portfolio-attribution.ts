@@ -65,3 +65,190 @@ export function aiRunnerPortfolioAttribution(market: MarketId, runnerId: string,
   if (excludedOrderCount) warnings.push(`${excludedOrderCount} 笔订单未显式关联到该跑单账户，已排除，未按时间猜配`);
   return { ...result, runnerId, accountId, excludedOrderCount, warnings: [...new Set(warnings)] };
 }
+
+export interface AiRunnerSelectionAttributionRunner {
+  id: string;
+  budgetUsd: number;
+  positions?: readonly {
+    id: string;
+    status: 'OPEN' | 'CLOSED';
+    instrumentId?: string;
+    entryOrderId?: string;
+    exitOrderId?: string;
+    entryPrice: number;
+    exitPrice?: number;
+    quantity: number;
+    entryTime: string;
+    exitTime?: string;
+    pnlUsd?: number;
+    contractMultiplier?: number;
+    entryFeeUsd?: number;
+    entrySlippageUsd?: number;
+    exitFeeUsd?: number;
+    exitSlippageUsd?: number;
+  }[];
+  universe?: {
+    kind: 'single' | 'watchlist';
+    market: MarketId;
+    hash: string;
+    instruments: readonly { venue: string; symbolOrMarketId: string }[];
+  };
+  benchmarks?: Record<string, {
+    market: MarketId;
+    instrument: string;
+    startPrice: number;
+    currentPrice: number;
+    allocationUsd: number;
+    observedAt: string;
+    updatedAt: string;
+    source?: string;
+  }>;
+}
+
+/**
+ * A deliberately small, auditable decomposition for multi-stock runners.
+ * "Selection" is the frozen universe's equal-weight buy-and-hold result;
+ * "configuration" is realized, cost-adjusted account PnL less that baseline.
+ * It is not Brinson attribution and is withheld unless every closed position is
+ * linked to exact ledger fills and the benchmark interval ends at the closes.
+ */
+export function aiRunnerSelectionAttribution(
+  market: MarketId,
+  runner: AiRunnerSelectionAttributionRunner,
+  account: UnifiedPaperRunnerAccount | null,
+  maxQuoteSkewMs = 120_000,
+) {
+  const unavailable = (status: 'unsupported' | 'unavailable', reason: string) => ({
+    status, reason, netPnlUsd: null, selectionPnlUsd: null, configurationPnlUsd: null,
+    universeHash: runner.universe?.hash || null, baselineAt: null, asOf: null,
+    sources: [] as string[], method: '非标准 Brinson：已平仓净盈亏 + 冻结自选等权持有基准',
+  });
+  if (market !== 'stocks') return unavailable('unsupported', '当前只对美股多标的跑单提供等权基准分解；其他市场不套用股票口径');
+  const universe = runner.universe;
+  if (!universe || universe.market !== 'stocks' || universe.kind !== 'watchlist' || universe.instruments.length < 2) {
+    return unavailable('unsupported', '该跑单不是至少包含两个标的的冻结美股自选组');
+  }
+  if (!universe.hash || !runner.id.trim() || !Number.isFinite(runner.budgetUsd) || runner.budgetUsd <= 0) {
+    return unavailable('unavailable', '冻结标的哈希或账户预算缺失，不能建立可复现归因');
+  }
+  const symbols = universe.instruments.map(item => String(item.symbolOrMarketId || '').trim().toUpperCase());
+  if (universe.instruments.some(item => item.venue !== 'Stocks') || symbols.some(symbol => !symbol) || new Set(symbols).size !== symbols.length) {
+    return unavailable('unavailable', '冻结自选存在无效或重复股票身份');
+  }
+  if (!account || account.runnerId !== runner.id || account.accountId !== `ai-runner:${runner.id}`) {
+    return unavailable('unavailable', '独立模拟账户缺失或归属与跑单不一致');
+  }
+  if (!Number.isFinite(account.startingCash) || !Number.isFinite(account.cash) || Math.abs(account.startingCash - runner.budgetUsd) > 0.01) {
+    return unavailable('unavailable', '账户初始资金与冻结跑单预算不一致');
+  }
+  if (!Array.isArray(account.positions) || !Array.isArray(account.orders)) {
+    return unavailable('unavailable', '模拟账户持仓或成交账本字段不完整');
+  }
+  if (!Array.isArray(runner.positions) || runner.positions.length === 0) {
+    return unavailable('unavailable', '跑单没有可核验的已平仓仓位记录');
+  }
+  if (runner.positions.some(position => position.status !== 'CLOSED') || account.positions.length > 0) {
+    return unavailable('unavailable', '跑单仍有未平仓持仓；为避免浮盈混入，只统计全部平仓后的已实现归因');
+  }
+  if (runner.positions.some(position => !position.entryOrderId || !position.exitOrderId)) {
+    return unavailable('unavailable', '旧仓位缺少入场或退出订单 ID，不能按时间猜测配对');
+  }
+  const benchmarks = runner.benchmarks || {};
+  const rows = symbols.map(symbol => benchmarks[symbol]);
+  if (rows.some(row => !row)) return unavailable('unavailable', '冻结自选尚未全部取得有效基准报价');
+  const validRows = rows as NonNullable<(typeof rows)[number]>[];
+  const nowMs = Date.now();
+  if (Object.keys(benchmarks).length !== symbols.length || validRows.some((row, index) =>
+    row.market !== 'stocks' || typeof row.instrument !== 'string' || row.instrument.toUpperCase() !== symbols[index]
+      || !Number.isFinite(row.startPrice) || row.startPrice <= 0 || !Number.isFinite(row.currentPrice) || row.currentPrice <= 0
+      || !Number.isFinite(row.allocationUsd) || !Number.isFinite(Date.parse(row.observedAt)) || !Number.isFinite(Date.parse(row.updatedAt))
+      || Date.parse(row.observedAt) > Date.parse(row.updatedAt)
+      || Date.parse(row.observedAt) > nowMs || Date.parse(row.updatedAt) > nowMs)) {
+    return unavailable('unavailable', '基准报价身份、价格或时间字段不完整，或报价时间来自未来');
+  }
+  const baselineTimes = validRows.map(row => Date.parse(row.observedAt));
+  const updateTimes = validRows.map(row => Date.parse(row.updatedAt));
+  const baselineAtMs = Math.max(...baselineTimes);
+  const asOfMs = Math.max(...updateTimes);
+  if (Math.max(...baselineTimes) - Math.min(...baselineTimes) > maxQuoteSkewMs
+    || Math.max(...updateTimes) - Math.min(...updateTimes) > maxQuoteSkewMs) {
+    return unavailable('unavailable', '冻结自选基准报价时间不一致，超过两分钟，不能进行同区间比较');
+  }
+  if (validRows.some(row => Math.abs(row.allocationUsd - account.startingCash / symbols.length) > 0.01)) {
+    return unavailable('unavailable', '等权基准配置与跑单初始资金不一致');
+  }
+  const allowedIds = new Set(symbols.map(symbol => `stock:us:${symbol}`));
+  const ordersById = new Map<string, UnifiedPaperOrder>();
+  for (const order of account.orders) {
+    if (!order.id || ordersById.has(order.id) || order.runnerId !== runner.id || order.accountId !== account.accountId
+      || order.instrumentType !== 'stock' || !allowedIds.has(order.instrumentId)
+      || !['BUY', 'SELL'].includes(order.side)
+      || !Number.isFinite(order.price) || order.price <= 0 || !Number.isFinite(order.quantity) || order.quantity <= 0
+      || (order.contractMultiplier != null && order.contractMultiplier !== 1)
+      || !Number.isFinite(Date.parse(order.timestamp)) || Date.parse(order.timestamp) < baselineAtMs || Date.parse(order.timestamp) > nowMs
+      || !Number.isFinite(order.feeUsd) || !Number.isFinite(order.slippageUsd)) {
+      return unavailable('unavailable', '成交身份、价格、时间、费用或滑点不完整，不能进行已实现归因');
+    }
+    ordersById.set(order.id, order);
+  }
+  if (account.orders.length !== runner.positions.length * 2) {
+    return unavailable('unavailable', '账本成交数量与已平仓仓位记录不一致');
+  }
+  let realizedNet = 0;
+  let latestCloseMs = 0;
+  const consumedOrderIds = new Set<string>();
+  for (const position of runner.positions) {
+    const instrumentId = String(position.instrumentId || '');
+    const entry = ordersById.get(position.entryOrderId!);
+    const exit = ordersById.get(position.exitOrderId!);
+    const entryAt = Date.parse(position.entryTime);
+    const exitAt = Date.parse(String(position.exitTime || ''));
+    if (!allowedIds.has(instrumentId) || !entry || !exit || consumedOrderIds.has(entry.id!) || consumedOrderIds.has(exit.id!)
+      || entry.side !== 'BUY' || exit.side !== 'SELL' || entry.instrumentId !== instrumentId || exit.instrumentId !== instrumentId
+      || !Number.isFinite(position.entryPrice) || !Number.isFinite(position.exitPrice) || !Number.isFinite(position.quantity) || position.quantity <= 0
+      || (position.contractMultiplier != null && position.contractMultiplier !== 1)
+      || typeof position.pnlUsd !== 'number' || !Number.isFinite(position.pnlUsd) || !Number.isFinite(entryAt) || !Number.isFinite(exitAt) || exitAt < entryAt
+      || entry.timestamp !== position.entryTime || exit.timestamp !== position.exitTime
+      || entry.price !== position.entryPrice || exit.price !== position.exitPrice || entry.quantity !== position.quantity || exit.quantity !== position.quantity
+      || typeof exit.pnlUsd !== 'number' || !Number.isFinite(exit.pnlUsd) || Math.abs(exit.pnlUsd - position.pnlUsd) > 0.01
+      || Math.abs(position.pnlUsd - (position.exitPrice! - position.entryPrice) * position.quantity) > 0.01
+      || Math.abs(Number(entry.feeUsd) - Number(position.entryFeeUsd)) > 0.01 || Math.abs(Number(entry.slippageUsd) - Number(position.entrySlippageUsd)) > 0.01
+      || Math.abs(Number(exit.feeUsd) - Number(position.exitFeeUsd)) > 0.01 || Math.abs(Number(exit.slippageUsd) - Number(position.exitSlippageUsd)) > 0.01
+      || entryAt < baselineAtMs || exitAt > nowMs) {
+      return unavailable('unavailable', '仓位与入场/退出成交血缘、价格或成本不一致；不会按时间推测');
+    }
+    consumedOrderIds.add(entry.id!);
+    consumedOrderIds.add(exit.id!);
+    latestCloseMs = Math.max(latestCloseMs, exitAt);
+    const costs = Math.abs(entry.feeUsd!) + Math.abs(entry.slippageUsd!) + Math.abs(exit.feeUsd!) + Math.abs(exit.slippageUsd!);
+    realizedNet += position.pnlUsd - costs;
+  }
+  if (consumedOrderIds.size !== ordersById.size) return unavailable('unavailable', '存在未关联到已平仓仓位的账本成交');
+  if (latestCloseMs - asOfMs > maxQuoteSkewMs) {
+    return unavailable('unavailable', '等权基准报价早于最后平仓超过两分钟，无法覆盖已实现账户区间');
+  }
+  if (!Number.isFinite(realizedNet) || Math.abs((account.cash - account.startingCash) - realizedNet) > 0.01) {
+    return unavailable('unavailable', '已平仓成交净盈亏与模拟账户现金变动不一致');
+  }
+  const selectionRaw = validRows.reduce((sum, row) => sum + (account.startingCash / symbols.length) * (row.currentPrice / row.startPrice - 1), 0);
+  const netCents = Math.round(realizedNet * 100);
+  const selectionCents = Math.round(selectionRaw * 100);
+  const configurationCents = netCents - selectionCents;
+  const cents = (value: number) => value / 100;
+  return {
+    status: 'available' as const,
+    reason: '仅统计全部平仓且具备精确订单血缘的成交；已扣除入场与退出费用/滑点，未计入任何未实现盈亏。',
+    method: '非标准 Brinson：已平仓净盈亏=真实出场毛盈亏−入场/出场费用与滑点；选股基准=冻结自选等权持有（不计交易摩擦）；配置差额=已平仓净盈亏−基准。',
+    universeHash: universe.hash,
+    baselineAt: new Date(baselineAtMs).toISOString(),
+    asOf: new Date(asOfMs).toISOString(),
+    quoteSkewMs: Math.max(...updateTimes) - Math.min(...updateTimes),
+    instrumentCount: symbols.length,
+    closedPositionCount: runner.positions.length,
+    netPnlUsd: cents(netCents),
+    selectionPnlUsd: cents(selectionCents),
+    configurationPnlUsd: cents(configurationCents),
+    sources: [...new Set(validRows.map(row => String(row.source || '').trim()).filter(Boolean))].sort(),
+    benchmark: validRows.map(row => ({ instrument: row.instrument, startPrice: row.startPrice, currentPrice: row.currentPrice, observedAt: row.observedAt, updatedAt: row.updatedAt, source: row.source || null })),
+  };
+}

@@ -760,6 +760,23 @@ function syncAiRunnerUniverseHint() {
   if (hint && watchlist) hint.textContent = '自选组会在启动时冻结标的和哈希；运行期间自选变更不会扩展本跑单范围。最多5个同市场标的，默认单标的20%、总投入80%。';
   else syncAiRunnerModeHint();
 }
+function renderAiRunnerSelectionAttribution(data) {
+  const frame = '<section style="margin:8px 0 12px;padding:10px;border:1px solid var(--border);border-radius:10px;background:var(--bg-secondary);color:var(--text-secondary);font-size:11px;"><strong style="color:var(--text);">冻结自选归因</strong>';
+  if (data.status !== 'available') return `${frame}<div data-runner-attribution-chart role="status" style="margin-top:5px;">${safeNewsText(data.reason || '当前数据不足，暂不能拆分')}</div></section>`;
+  const selection = Number(data.selectionPnlUsd);
+  const configuration = Number(data.configurationPnlUsd);
+  const scale = Math.max(Math.abs(selection), Math.abs(configuration), 0.01);
+  const bar = (label, value) => {
+    const width = Math.max(0, Math.min(100, Math.abs(value) / scale * 100));
+    const color = value > 0 ? 'var(--green)' : value < 0 ? 'var(--red)' : 'var(--text-secondary)';
+    const amount = `${value > 0 ? '+' : ''}$${value.toFixed(2)}`;
+    return `<div style="display:grid;grid-template-columns:minmax(170px,1.2fr) minmax(60px,2fr) auto;align-items:center;gap:8px;margin-top:7px;"><span>${label}</span><span aria-hidden="true" style="height:8px;border-radius:99px;background:var(--bg-card);overflow:hidden;"><i style="display:block;width:${width.toFixed(2)}%;height:100%;border-radius:inherit;background:${color};"></i></span><strong style="color:${color};white-space:nowrap;">${amount}</strong></div>`;
+  };
+  const asOf = data.asOf ? safeNewsText(data.asOf) : '未知';
+  const baseline = data.baselineAt ? safeNewsText(data.baselineAt) : '未知';
+  const sources = Array.isArray(data.sources) && data.sources.length ? data.sources.map(safeNewsText).join('、') : '来源未记录';
+  return `${frame}<div data-runner-attribution-chart role="img" aria-label="冻结自选已平仓简化归因，非标准 Brinson" style="margin-top:5px;">${bar('选股基准 · 冻结自选等权持有', selection)}${bar('配置/择时/摩擦差额 · 已平仓净盈亏减基准', configuration)}<div style="margin-top:7px;color:var(--text);">已平仓净盈亏 ${data.netPnlUsd >= 0 ? '+' : ''}$${Number(data.netPnlUsd).toFixed(2)} = 等权基准 + 配置差额</div></div><div style="margin-top:6px;">${safeNewsText(data.method || '')}</div><div style="margin-top:4px;">已平仓仓位 ${Number(data.closedPositionCount || 0)} · 基准起点 ${baseline} · 行情截至 ${asOf} · 报价时间差 ${Number(data.quoteSkewMs || 0)} ms · 来源 ${sources}</div><div style="margin-top:4px;">冻结范围哈希 ${safeNewsText(String(data.universeHash || '').slice(0,16))}；只统计有完整入场/退出成交血缘的已平仓交易，不计未实现盈亏；等权基准不计交易摩擦，不代表标准化绩效归因。</div></section>`;
+}
 async function loadAiRunnerHistory(id, button) {
   const host = document.getElementById(`ai-runner-history-${id}`);
   if (!host) return;
@@ -771,13 +788,14 @@ async function loadAiRunnerHistory(id, button) {
     const rows = payload.data || [];
     const attribution = payload.attribution || {};
     const attributionRows = Array.isArray(attribution.strategies) ? attribution.strategies : [];
+    const selectionAttributionPanel = renderAiRunnerSelectionAttribution(payload.selectionAttribution || {});
     const attributionPanel = `<section style="margin:8px 0 12px;padding:10px;border:1px solid var(--border);border-radius:10px;background:var(--bg-secondary);color:var(--text-secondary);font-size:11px;">
       <strong style="color:var(--text);">跑单成交归因 · 原始报价口径</strong>
       <div style="margin-top:4px;">只统计当前跑单独立账本中明确关联的订单；不折算未知汇率，不把费用缺失按零补齐，也不生成订单。</div>
       ${attributionRows.length ? attributionRows.map(group => `<div style="margin-top:6px;padding-top:6px;border-top:1px solid var(--border);"><strong style="color:var(--text);">${safeNewsText(group.instrument)} · ${safeNewsText(group.strategy)} @ ${safeNewsText(group.strategyVersion)}</strong><div>已实现报价盈亏：${group.realizedQuotePnl == null ? '未知' : safeNewsText(Number(group.realizedQuotePnl).toFixed(4))} · 记录费用字段：${group.recordedFeesUsd == null ? '不完整' : safeNewsText(Number(group.recordedFeesUsd).toFixed(4))} · 记录滑点字段：${group.recordedSlippageUsd == null ? '不完整' : safeNewsText(Number(group.recordedSlippageUsd).toFixed(4))}</div><div>${safeNewsText(group.reason || '')}</div></div>`).join('') : `<div style="margin-top:5px;">${safeNewsText(attribution.reason || '当前没有可归因的模拟成交')}</div>`}
       ${(attribution.warnings || []).map(reason => `<div style="margin-top:4px;color:var(--yellow);">提示：${safeNewsText(reason)}</div>`).join('')}
     </section>`;
-    host.innerHTML = attributionPanel + (rows.length ? rows.map(item => `
+    host.innerHTML = selectionAttributionPanel + attributionPanel + (rows.length ? rows.map(item => `
       <div style="border-top:1px solid var(--border);padding:8px 4px;color:var(--text-secondary);font-size:11px;">
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;"><strong style="color:var(--text);">${safeNewsText(item.action)} · ${safeNewsText(item.instrument)}</strong><span>${safeNewsText(item.dataStatus)}${item.source ? ` · ${safeNewsText(item.source)}` : ''}</span><span>${safeNewsText(item.at)}</span></div>
         <div style="margin-top:4px;color:var(--text);">${safeNewsText(item.reason || '')}</div>
@@ -3185,14 +3203,15 @@ function stockNameForSymbol(symbol) {
   return STOCK_QUICK_SYMBOLS.find(item => item[0] === normalized)?.[1] || normalized;
 }
 let stockLibraryPromise = null;
-async function stockLibraryData(force = false) {
+function stockLibraryData(force = false) {
   if (!force && stockLibraryPromise) return stockLibraryPromise;
-  const auth = await waitForDashboardAuthState();
-  const canReadPrivate = window.mm_isLoggedIn === true && !window.mm_isGuest && privateDashboardSessionReady(auth);
-  stockLibraryPromise = Promise.allSettled([
-    canReadPrivate ? fetch('/api/watchlist', { credentials: 'include', cache: 'no-store' }).then(response => response.json()) : Promise.resolve({ success: true, data: [] }),
-    canReadPrivate ? fetch('/api/paper/positions?scope=stocks', { cache: 'no-store' }).then(response => response.json()) : Promise.resolve(null),
-  ]).then(([watchResult, paperResult]) => {
+  const request = (async () => {
+    const auth = await waitForDashboardAuthState();
+    const canReadPrivate = window.mm_isLoggedIn === true && !window.mm_isGuest && privateDashboardSessionReady(auth);
+    const [watchResult, paperResult] = await Promise.allSettled([
+      canReadPrivate ? fetch('/api/watchlist', { credentials: 'include', cache: 'no-store' }).then(response => response.json()) : Promise.resolve({ success: true, data: [] }),
+      canReadPrivate ? fetch('/api/paper/positions?scope=stocks', { cache: 'no-store' }).then(response => response.json()) : Promise.resolve(null),
+    ]);
     const watchPayload = watchResult.status === 'fulfilled' ? watchResult.value : null;
     const paperPayload = paperResult.status === 'fulfilled' ? paperResult.value : null;
     const watchlist = [...new Set((Array.isArray(watchPayload?.data) ? watchPayload.data : [])
@@ -3207,8 +3226,10 @@ async function stockLibraryData(force = false) {
       return { symbol, name: position.title || stockNameForSymbol(symbol), meta: `模拟持仓 · ${quantity} × ${price.toFixed(4)}` };
     }).filter(Boolean);
     return { watchlist, paper, watchOk: watchPayload?.success !== false, paperOk: canReadPrivate && paperPayload?.success !== false, paperPrivate: !canReadPrivate };
-  });
-  return stockLibraryPromise;
+  })();
+  stockLibraryPromise = request;
+  request.catch(() => { if (stockLibraryPromise === request) stockLibraryPromise = null; });
+  return request;
 }
 function invalidateStockLibrary() { stockLibraryPromise = null; }
 function stockLibraryWorkspaceLabel() {
@@ -5388,6 +5409,7 @@ let stockChartExchangeTimezone = 'America/New_York';
 let stockKlineRequestRevision = 0;
 let stockKlineContextRevision = 0;
 let stockKlineController = null;
+const stockKlineInFlightRequests = new Map();
 let stockChartCompanionOpen = false;
 let stockChartCompanionMode = 'same-symbol';
 let stockChartCompanionPeriod = '1h';
@@ -6155,7 +6177,33 @@ function setStockKlineViewState(state, reason = '') {
     if (replay) replay.textContent = state === 'loading' ? '加载中' : '暂无K线';
   }
 }
-async function loadStockKline(symbol, name, apiSymbol, options = {}) {
+function stockKlineRequestKey(symbol, apiSymbol) {
+  const requestedSymbol = String(symbol || currentStockSymbol || '');
+  const changedSymbol = Boolean(requestedSymbol && requestedSymbol !== currentStockSymbol);
+  let asOf = changedSymbol ? '' : stockChartAsOf;
+  if (changedSymbol) {
+    try { asOf = localStorage.getItem(`moneymoney:kline-as-of:${requestedSymbol}`) || ''; } catch {}
+  }
+  const intradayDate = changedSymbol ? '' : stockChartIntradayDate;
+  const adjustment = changedSymbol || asOf || intradayDate ? 'source' : stockChartAdjustment;
+  const effectiveApiSymbol = apiSymbol !== undefined ? apiSymbol || '' : changedSymbol ? '' : currentStockApiSymbol;
+  return JSON.stringify({ symbol: requestedSymbol, apiSymbol: effectiveApiSymbol, period: currentStockKlinePeriod, asOf, intradayDate, intradayPeriod: intradayDate ? stockChartIntradayPeriod : '', adjustment });
+}
+function runStockKlineSingleFlight(key, operation) {
+  const existing = stockKlineInFlightRequests.get(key);
+  if (existing) return existing;
+  const request = Promise.resolve().then(operation);
+  stockKlineInFlightRequests.set(key, request);
+  const clear = () => { if (stockKlineInFlightRequests.get(key) === request) stockKlineInFlightRequests.delete(key); };
+  request.then(clear, clear);
+  return request;
+}
+function loadStockKline(symbol, name, apiSymbol, options = {}) {
+  if (options.live === true || options.signal) return performStockKlineLoad(symbol, name, apiSymbol, options);
+  const key = stockKlineRequestKey(symbol, apiSymbol);
+  return runStockKlineSingleFlight(key, () => performStockKlineLoad(symbol, name, apiSymbol, options));
+}
+async function performStockKlineLoad(symbol, name, apiSymbol, options = {}) {
   const live = options.live === true;
   if (live && (stockChartAsOf || stockChartIntradayDate || stockChartReplayIndex < stockChartKlines.length - 1 || window.stockMoneyKLine?.timer)) return;
   if (!live) {
@@ -8350,7 +8398,7 @@ async function runOpsJob(jobId) {
   const body = await res.json();
   showToast(body.success ? body.data.message : (body.error || '自动化任务失败'), body.success ? 'success' : 'error', 3500);
   loadOpsConsole();
-  loadCommandCenter();
+  if (activeWorkspaceId === 'overview') loadCommandCenter();
 }
 async function loadAll(retryCount = 0, forceCategories = false) {
   if (!['overview', 'prediction', 'watchlist'].includes(activeMarketScope)) {
@@ -11836,4 +11884,4 @@ window.addEventListener('mm-workspace-modules-ready', event => {
     drawCandles(document.getElementById('bn-candlestick'), bnKlineData);
   }
 });
-startDashboard();
+window.mm_dashboardReady = startDashboard();

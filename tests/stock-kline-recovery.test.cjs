@@ -30,14 +30,14 @@ function chartHarness(fetcher) {
   window.eval(`
     var currentStockSymbol='usAAPL', currentStockName='Apple', currentStockApiSymbol='AAPL.OQ';
     var currentStockKlinePeriod='1d', stockChartAsOf='2026-10-05T23:59:59.999Z', stockChartAsOfRevision=0;
-    var stockKlineRequestRevision=0, stockKlineContextRevision=0, stockKlineController=null, currentStockKlineReason='';
+    var stockKlineRequestRevision=0, stockKlineContextRevision=0, stockKlineController=null, currentStockKlineReason='', stockKlineInFlightRequests=new Map();
     var stockSupportResistanceState={ key:null, status:'idle', data:null, controller:null, retryAt:0, loadedAt:0 };
     var stockChartIntradayDate='', stockChartIntradaySession=null, stockChartDailyContext=null, stockChartCompanionKey='';
     var stockChartFocusIndex=null, stockChartFocusEnabled=false, stockChartRenderedStartIndex=0;
     var stockChartReplayIndex=1, stockChartKlines=[{close:1}], stockChartExchangeTimezone='America/New_York';
     var stockChartCompanionOpen=false, stockChartOverlayConfig={}, activeMarketScope='stocks';
   `);
-  for (const name of ['stockKlineAsOfStorageKey', 'syncStockKlineAsOfControl', 'clearStockKlineAsOf', 'setStockKlineStatus', 'loadUnifiedStockData', 'setStockKlineViewState', 'loadStockKline']) {
+  for (const name of ['stockKlineAsOfStorageKey', 'syncStockKlineAsOfControl', 'clearStockKlineAsOf', 'setStockKlineStatus', 'loadUnifiedStockData', 'setStockKlineViewState', 'stockKlineRequestKey', 'runStockKlineSingleFlight', 'performStockKlineLoad', 'loadStockKline']) {
     if (html.includes(`function ${name}(`)) window.eval(functionSource(name));
   }
   return { window, document: window.document, close: () => dom.window.close() };

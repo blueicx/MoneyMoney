@@ -5,6 +5,38 @@
   const styles = manifest.styles || {};
   const pending = new Map();
   const pendingStyles = new Map();
+  let dashboardAuthGate = null;
+  let dashboardCoreGate = null;
+
+  function waitForDashboardAuth() {
+    if (dashboardAuthGate) return dashboardAuthGate;
+    dashboardAuthGate = (async () => {
+      let authReady = window.mm_authReady;
+      if (!authReady || typeof authReady.then !== 'function') {
+        await new Promise(resolve => {
+          const ready = () => resolve();
+          window.addEventListener('mm-auth-client-ready', ready, { once: true });
+          if (document.readyState === 'complete') ready();
+          else window.addEventListener('load', ready, { once: true });
+        });
+        authReady = window.mm_authReady;
+      }
+      if (authReady && typeof authReady.then === 'function') {
+        await Promise.resolve(authReady).catch(() => null);
+      }
+    })();
+    return dashboardAuthGate;
+  }
+
+  function waitForDashboardCore() {
+    if (window.mm_dashboardCoreReady === true) return Promise.resolve();
+    if (!dashboardCoreGate) {
+      dashboardCoreGate = new Promise(resolve => {
+        window.addEventListener('mm-dashboard-core-ready', resolve, { once: true });
+      });
+    }
+    return dashboardCoreGate;
+  }
 
   function ensureStyle(group) {
     const href = styles[group];
@@ -47,6 +79,11 @@
   function ensure(group) {
     if (pending.has(group)) return pending.get(group);
     const promise = (async () => {
+      // A classic deferred loader can run before the module auth client has
+      // assigned mm_authReady. Wait for DOMContentLoaded in that case, then
+      // await the session check and core dashboard startup before evaluating a workspace bundle.
+      await waitForDashboardAuth();
+      await waitForDashboardCore();
       if (group === 'contracts') await ensure('charts');
       await ensureStyle(group);
       await loadScript(group);
@@ -65,13 +102,33 @@
     },
   };
 
+  function groupsForWorkspace(market, id) {
+    if (id === 'overview') return ['overview'];
+    if (id === 'guru-holdings') return ['guru'];
+    if (id === 'contracts' && market === 'crypto') return ['charts', 'contracts'];
+    if (id === 'events') return ['events'];
+    if (id === 'stock-quotes' && market === 'stocks') return ['charts'];
+    if (id === 'crypto-quotes' && market === 'crypto') return ['charts', 'crypto'];
+    if (['breadth', 'insider', 'institutional', 'analyst', 'fundamentals', 'short-interest'].includes(id) && market === 'stocks') return ['stocks'];
+    if (['option-chain', 'volatility', 'greeks'].includes(id) && market === 'options') return ['options'];
+    if (['funding-rate', 'open-interest', 'on-chain', 'order-flow'].includes(id) && market === 'crypto') return ['crypto'];
+    if (id === 'prediction-radar' && market === 'prediction') return ['prediction'];
+    if (['research-lab', 'action-center', 'decision-intelligence', 'screener', 'backtest', 'risk', 'fundamentals'].includes(id)) return ['research'];
+    if (['watchlist', 'positions', 'paper', 'orders'].includes(id)) return id === 'paper' ? ['portfolio', 'ai'] : ['portfolio'];
+    if (id === 'analysis') return ['trading'];
+    return [];
+  }
+
+  const initialParams = new URLSearchParams(location.search);
+  const initialWorkspace = initialParams.get('workspace');
+  const initialMarket = initialParams.get('market');
+  if (initialWorkspace && !initialParams.has('sharedWorkspace')) {
+    for (const group of groupsForWorkspace(initialMarket, initialWorkspace)) ensure(group).catch(() => {});
+  }
+
   window.addEventListener('mm-workspace-context', event => {
     const id = event.detail?.workspace || '';
     const market = event.detail?.market || '';
-    const group = id === 'guru-holdings' ? 'guru' : id === 'contracts' ? 'contracts'
-      : id === 'events' ? 'events'
-      : (id === 'stock-quotes' && market === 'stocks') || (id === 'crypto-quotes' && market === 'crypto') ? 'charts'
-        : ['research-lab', 'action-center', 'decision-intelligence', 'screener', 'backtest', 'risk', 'fundamentals'].includes(id) ? 'research' : null;
-    if (group) ensure(group).catch(error => window.showToast?.(error.message, 'error'));
+    for (const group of groupsForWorkspace(market, id)) ensure(group).catch(error => window.showToast?.(error.message, 'error'));
   });
 })();

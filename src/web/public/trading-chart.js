@@ -22,8 +22,10 @@
   }
   function drawSupportResistance(ctx,lines,geometry){
     if(!ctx||!Array.isArray(lines)||!geometry)return 0;let drawn=0;
+    const theme=ctx.canvas&&typeof getComputedStyle==='function'?getComputedStyle(ctx.canvas):null;
+    const supportColor=theme?.getPropertyValue('--green').trim()||'#22c55e',resistanceColor=theme?.getPropertyValue('--red').trim()||'#ef4444';
     for(const line of lines){if(!Number.isFinite(line.y)||line.y<geometry.padT||line.y>geometry.padT+geometry.priceH)continue;
-      ctx.save?.();ctx.globalAlpha=.58;ctx.strokeStyle=line.type==='support'?'#22c55e':'#ef4444';ctx.fillStyle=ctx.strokeStyle;ctx.lineWidth=1;ctx.setLineDash([4,4]);ctx.beginPath();ctx.moveTo(geometry.padL,line.y);ctx.lineTo(geometry.W-geometry.padR,line.y);ctx.stroke();ctx.setLineDash([]);ctx.font='10px system-ui';ctx.textAlign='left';ctx.textBaseline='bottom';ctx.fillText((line.type==='support'?'S':'R')+' '+fmt(line.price),geometry.padL+4,line.y-2);ctx.restore?.();drawn++;
+      ctx.save?.();ctx.globalAlpha=.58;ctx.strokeStyle=line.type==='support'?supportColor:resistanceColor;ctx.fillStyle=ctx.strokeStyle;ctx.lineWidth=1;ctx.setLineDash([4,4]);ctx.beginPath();ctx.moveTo(geometry.padL,line.y);ctx.lineTo(geometry.W-geometry.padR,line.y);ctx.stroke();ctx.setLineDash([]);ctx.font='10px system-ui';ctx.textAlign='left';ctx.textBaseline='bottom';ctx.fillText((line.type==='support'?'S':'R')+' '+fmt(line.price),geometry.padL+4,line.y-2);ctx.restore?.();drawn++;
     }
     return drawn;
   }

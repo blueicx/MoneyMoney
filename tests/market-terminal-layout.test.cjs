@@ -54,7 +54,7 @@ test('stock chart exposes user-selectable analysis overlays and replay controls'
 
 test('crypto support/resistance rendering stays inside the crypto chart renderer', () => {
   const stockStateStart = html.indexOf('function setStockKlineViewState(');
-  const stockStateEnd = html.indexOf('async function loadStockKline(', stockStateStart);
+  const stockStateEnd = html.indexOf('async function performStockKlineLoad(', stockStateStart);
   const cryptoDrawStart = html.indexOf('function drawCandles(canvas, klines)');
   const cryptoDrawEnd = html.indexOf('\nlet bnKlineController', cryptoDrawStart);
   assert.ok(stockStateStart >= 0 && stockStateEnd > stockStateStart);
@@ -76,7 +76,7 @@ test('stock support/resistance is hidden outside the current live chart context'
   const stockDrawStart = html.indexOf('function drawStockKline(canvas, klines)');
   const stockDrawEnd = html.indexOf('// --- DeFi Data ---', stockDrawStart);
   const stockStateStart = html.indexOf('function setStockKlineViewState(');
-  const stockStateEnd = html.indexOf('async function loadStockKline(', stockStateStart);
+  const stockStateEnd = html.indexOf('async function performStockKlineLoad(', stockStateStart);
   assert.ok(stockDrawStart >= 0 && stockDrawEnd > stockDrawStart);
   assert.ok(stockStateStart >= 0 && stockStateEnd > stockStateStart);
   const stockDraw = html.slice(stockDrawStart, stockDrawEnd);

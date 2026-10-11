@@ -45,6 +45,7 @@ async function main() {
       page.click('#submitBtn'),
     ]);
     await page.waitForLoadState('domcontentloaded');
+    await page.waitForFunction(() => window.mm_dashboardCoreReady === true && typeof window.loadAiRunners === 'function', null, { timeout: 15_000 });
     const status = await page.evaluate(() => fetch('/api/auth/status').then(response => response.json()));
     assert.equal(status.data.loggedIn, true);
     assert.equal(status.data.role, 'admin');

@@ -13,7 +13,7 @@ function expandDashboardRuntime(html, sourceRoot) {
   const runtime = fs.readFileSync(runtimePath, 'utf8');
   if (!runtime.trim()) throw new Error('Dashboard runtime source is empty');
 
-  return html.replace(matches[0][0], () => `<script>${runtime}</script>`);
+  return html.replace(matches[0][0], () => `<script data-dashboard-runtime="true">${runtime}</script>`);
 }
 
 module.exports = { expandDashboardRuntime };

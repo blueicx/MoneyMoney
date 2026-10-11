@@ -54,6 +54,7 @@ window.mm_authReady = window.fetch('/api/auth/status').then((response) => respon
     location.href = next ? decodeURIComponent(next) : '/';
   }
 }).catch(() => {});
+window.dispatchEvent(new Event('mm-auth-client-ready'));
 
 window.mmLogout = function mmLogout() {
   if (!confirm('确定退出登录？')) return;

@@ -26,6 +26,7 @@ async function main() {
     await page.goto(base + '/login'); await page.fill('#username', 'live-fixture-owner'); await page.fill('#password', 'isolated-live-fixture-password');
     await Promise.all([page.waitForURL(url => url.pathname === '/'), page.click('#submitBtn')]);
     await page.waitForFunction(() => window.mm_isLoggedIn);
+    await page.waitForFunction(() => window.mm_dashboardCoreReady === true && typeof window.setMarketScope === 'function', null, { timeout: 15_000 });
     assert.equal(await page.evaluate(() => !!window.MoneyLiveKline), false, 'the live chart transport should remain unloaded before entering a chart workspace');
     await page.evaluate(async () => { setMarketScope('stocks'); openWorkspace('stock-quotes'); await loadStockKline('usAAPL', 'Apple', ''); });
     await page.locator('#stock-chart-card').waitFor({ state: 'visible' });

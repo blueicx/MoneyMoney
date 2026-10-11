@@ -226,6 +226,8 @@ export interface AiRunnerPosition {
   id: string;
   instrumentId?: string;
   instrument?: AiRunnerInstrumentRef;
+  entryOrderId?: string;
+  exitOrderId?: string;
   side?: 'YES' | 'NO' | 'LONG' | 'SHORT';
   entryPrice: number;
   quantity: number;
@@ -1166,6 +1168,7 @@ export function runnerOpenPosition(
         id: positionId,
         instrumentId: ledgerInstrument.instrumentId,
         instrument,
+        entryOrderId: orderId,
         side: (outcome || 'LONG') as AiRunnerPosition['side'],
         entryPrice, currentPrice: entryPrice, quantity,
         ...(instrument.venue === 'Options' ? { contractMultiplier } : {}),
@@ -1225,6 +1228,7 @@ export function runnerClosePosition(id: string, positionId: string, exitPrice: n
       pnl = parseFloat(grossPnl.toFixed(4));
       pos.exitPrice = exitPrice;
       pos.exitTime = timestamp;
+      pos.exitOrderId = orderId;
       pos.status = 'CLOSED';
       pos.pnlUsd = pnl;
       pos.exitFeeUsd = executionCosts.feeUsd;
