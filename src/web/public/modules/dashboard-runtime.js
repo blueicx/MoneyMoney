@@ -4974,46 +4974,83 @@ async function loadMarketSentiment() {
   if (!fgEl || !frEl) return;
   fgEl.innerHTML = '<div class="skl skl-card"><div class="skl-line"></div></div>';
   frEl.innerHTML = '<div class="skl skl-card"><div class="skl-line"></div></div>';
-  try {
-    const [fgRes, frRes] = await Promise.all([
-      fetch('/api/sentiment/fear-greed'),
-      fetch('/api/funding-rates?limit=10')
-    ]);
-    const [fgPayload, frPayload] = await Promise.all([fgRes.json(), frRes.json()]);
-    if (fgPayload.success && fgPayload.data) {
-      const d = fgPayload.data;
-      const color = d.current.value <= 24 ? '#e74c3c' : d.current.value <= 44 ? '#f39c12' : d.current.value <= 55 ? '#f1c40f' : d.current.value <= 74 ? '#2ecc71' : '#27ae60';
-      fgEl.innerHTML = `
-        <div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap;">
-          <div style="text-align:center;">
-            <div style="font-size:36px;font-weight:800;color:${color};">${d.current.value}</div>
-            <div style="font-size:11px;color:${color};">${d.current.classificationZh}</div>
-          </div>
-          <div style="flex:1;min-width:180px;display:flex;gap:6px;align-items:flex-end;height:48px;">
-            ${d.trend7d.map(t => `<div style="flex:1;background:linear-gradient(to top,${t.value<=44?'#e74c3ccc':'#2ecc71cc'},transparent);border-radius:4px;position:relative;" title="${t.date}: ${t.value}"><span style="position:absolute;top:-14px;left:50%;transform:translateX(-50%);font-size:9px;color:var(--text-secondary);">${t.value}</span></div>`).join('')}
-          </div>
-          <small style="color:var(--text-secondary);">7日趋势</small>
-        </div>`;
-    } else { fgEl.innerHTML = '<div style="color:var(--red);">恐贪指数加载失败</div>'; }
-    if (frPayload.success && frPayload.data?.rows?.length) {
-      const d = frPayload.data;
-      frEl.innerHTML = `
-        <div style="display:flex;gap:8px;margin-bottom:8px;font-size:12px;color:var(--text-secondary);">
-          <span>平均费率 <strong>${d.avgFundingPct > 0 ? '+' : ''}${d.avgFundingPct}%</strong></span>
-          ${d.extremePositive ? `<span>最高做多费 <strong style="color:var(--green)">+${d.extremePositive.fundingRatePct.toFixed(3)}%</strong> ${d.extremePositive.symbol}</span>` : ''}
-          ${d.extremeNegative ? `<span>最低做空费 <strong style="color:var(--red)">${d.extremeNegative.fundingRatePct.toFixed(3)}%</strong> ${d.extremeNegative.symbol}</span>` : ''}
+  const loadJson = async url => {
+    const response = await fetch(url);
+    const payload = await response.json();
+    if (!response.ok && payload?.success !== false) throw new Error(`HTTP ${response.status}`);
+    return payload;
+  };
+  const [fgResult, fundingResult] = await Promise.allSettled([
+    loadJson('/api/sentiment/fear-greed'),
+    loadJson('/api/funding-rates?limit=10'),
+  ]);
+
+  if (fgResult.status === 'fulfilled' && fgResult.value.success
+    && fgResult.value.data?.current && Array.isArray(fgResult.value.data.trend7d)) {
+    const d = fgResult.value.data;
+    const color = d.current.value <= 24 ? '#e74c3c' : d.current.value <= 44 ? '#f39c12' : d.current.value <= 55 ? '#f1c40f' : d.current.value <= 74 ? '#2ecc71' : '#27ae60';
+    fgEl.innerHTML = `
+      <div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap;">
+        <div style="text-align:center;">
+          <div style="font-size:36px;font-weight:800;color:${color};">${d.current.value}</div>
+          <div style="font-size:11px;color:${color};">${safeNewsText(d.current.classificationZh)}</div>
         </div>
-        <div style="display:flex;gap:6px;overflow-x:auto;padding-bottom:4px;">
-          ${d.rows.slice(0, 10).map(r => `
-            <div style="min-width:100px;padding:8px;border-radius:8px;background:var(--bg-card);border:1px solid var(--border);text-align:center;">
-              <div style="font-size:10px;color:var(--text-secondary);">${r.symbol.replace('USDT','')}</div>
-              <div style="font-size:13px;font-weight:700;color:${r.fundingRatePct >= 0 ? 'var(--green)' : 'var(--red)'}">${r.fundingRatePct > 0 ? '+' : ''}${r.fundingRatePct.toFixed(3)}%</div>
-            </div>`).join('')}
-        </div>`;
-    } else { frEl.innerHTML = '<div style="color:var(--red);">资金费率加载失败</div>'; }
-  } catch(e) {
-    if (fgEl) fgEl.innerHTML = '<div style="color:var(--red);">市场情绪数据加载失败</div>';
+        <div style="flex:1;min-width:180px;display:flex;gap:6px;align-items:flex-end;height:48px;">
+          ${d.trend7d.map(t => `<div style="flex:1;background:linear-gradient(to top,${t.value<=44?'#e74c3ccc':'#2ecc71cc'},transparent);border-radius:4px;position:relative;" title="${safeNewsText(t.date)}: ${safeNewsText(t.value)}"><span style="position:absolute;top:-14px;left:50%;transform:translateX(-50%);font-size:9px;color:var(--text-secondary);">${safeNewsText(t.value)}</span></div>`).join('')}
+        </div>
+        <small style="color:var(--text-secondary);">7日趋势</small>
+      </div>`;
+  } else {
+    const reason = fgResult.status === 'rejected'
+      ? fgResult.reason?.message
+      : fgResult.value?.error || (fgResult.value?.success ? '响应格式无效' : '来源暂无数据');
+    fgEl.innerHTML = `<div style="color:var(--red);">恐贪指数来源不可用${reason ? `：${safeNewsText(reason)}` : ''}</div>`;
   }
+
+  if (fundingResult.status !== 'fulfilled' || !fundingResult.value.success || !fundingResult.value.data) {
+    const reason = fundingResult.status === 'rejected' ? fundingResult.reason?.message : fundingResult.value?.error;
+    frEl.innerHTML = `<div style="color:var(--red);">资金费率来源不可用${reason ? `：${safeNewsText(reason)}` : ''}</div>`;
+    return;
+  }
+
+  const d = fundingResult.value.data;
+  const coverage = d.coverage || {};
+  const valid = Number(coverage.validFundingRateCount);
+  const total = Number(coverage.sourceContractCount);
+  const average = Number.isFinite(d.avgFundingPct)
+    ? `${d.avgFundingPct > 0 ? '+' : ''}${Number(d.avgFundingPct).toFixed(4)}%`
+    : '不可计算';
+  const retrievedAt = d.fetchedAt ? safeNewsText(d.fetchedAt) : '未知';
+  const coverageText = Number.isFinite(valid) && Number.isFinite(total) ? `${valid}/${total}` : '未知';
+  const statusText = d.dataStatus === 'empty'
+    ? '来源成功但暂无数据'
+    : d.dataStatus === 'unavailable'
+      ? '来源有响应但数据无效'
+      : d.dataStatus === 'partial'
+        ? '部分数据 / 源端观测时间未验证'
+        : safeNewsText(d.dataStatus || '状态未知');
+  if (d.dataStatus === 'empty' || d.dataStatus === 'unavailable' || !d.rows?.length) {
+    frEl.innerHTML = `<div style="color:${d.dataStatus === 'empty' ? 'var(--text-secondary)' : 'var(--yellow)'};">${statusText}${d.reason ? `：${safeNewsText(d.reason)}` : ''}<div style="margin-top:5px;font-size:10px;">Gate.io · 获取时间 ${retrievedAt}${d.cacheStatus === 'hit' ? ' · 缓存命中' : ''}</div></div>`;
+    return;
+  }
+
+  const reason = d.reason ? `<div style="font-size:10px;color:var(--text-secondary);margin:5px 0;">${safeNewsText(d.reason)}</div>` : '';
+  frEl.innerHTML = `
+    <div style="display:flex;gap:8px;margin-bottom:8px;font-size:12px;color:var(--text-secondary);flex-wrap:wrap;">
+      <span>全量有效 USDT 永续合约当前周期费率等权均值（未按周期归一） <strong>${average}</strong></span>
+      <span>有效费率 <strong>${coverageText}</strong></span>
+      ${d.extremePositive ? `<span>最高正费率 <strong style="color:var(--green)">+${Number(d.extremePositive.fundingRatePct).toFixed(3)}%</strong> ${safeNewsText(d.extremePositive.symbol)}</span>` : ''}
+      ${d.extremeNegative ? `<span>最低负费率 <strong style="color:var(--red)">${Number(d.extremeNegative.fundingRatePct).toFixed(3)}%</strong> ${safeNewsText(d.extremeNegative.symbol)}</span>` : ''}
+    </div>
+    ${reason}
+    <div style="font-size:10px;color:var(--text-secondary);margin-bottom:6px;">${statusText} · Gate.io 接口获取 ${retrievedAt} · 来源观测时间 ${d.sourceUpdatedAt ? safeNewsText(d.sourceUpdatedAt) : '未提供可验证时点'}${d.cacheStatus === 'hit' ? ' · 缓存命中' : ''}</div>
+    <div style="display:flex;gap:6px;overflow-x:auto;padding-bottom:4px;">
+      ${d.rows.slice(0, 10).map(r => `
+        <div style="min-width:100px;padding:8px;border-radius:8px;background:var(--bg-card);border:1px solid var(--border);text-align:center;">
+          <div style="font-size:10px;color:var(--text-secondary);">${safeNewsText(r.symbol.replace('_USDT',''))}</div>
+          <div style="font-size:13px;font-weight:700;color:${r.fundingRatePct >= 0 ? 'var(--green)' : 'var(--red)'}">${r.fundingRatePct > 0 ? '+' : ''}${Number(r.fundingRatePct).toFixed(3)}%</div>
+        </div>`).join('')}
+    </div>`;
 }
 async function loadPerpetualCrowding() {
   const el = document.getElementById('perpetual-crowding');

@@ -9,7 +9,7 @@ import iconv from 'iconv-lite';
 import type { Category } from '../types';
 import { binanceFeed } from './binance';
 import { getEquityOptionsSnapshot, getOptionsSnapshot, type OptionRow } from './options-market';
-import { getFearGreed, getFundingRates } from './market-sentiment';
+import { getFearGreed, getFundingRates, summarizeMajorFundingRates } from './market-sentiment';
 import { getGlobalMacroSpotSnapshot, type GlobalMacroSpotSnapshot } from './global-macro-spot';
 import { getCrossAssetRisk, type CrossAssetRisk, type VolatilityTermStructure } from './cross-asset-risk';
 import { getCrossAssetCorrelationRadar, type CrossAssetCorrelationResult } from './cross-asset-correlation';
@@ -1112,25 +1112,17 @@ async function buildContext(
       }
     : null;
 
-  let fundingBias = '资金费率数据暂不可用';
-  let fundingAvgPct: number | null = null;
-  const fundingRows = fundingResult.status === 'fulfilled' ? fundingResult.value.rows : [];
-  const relevant = ['BTC_USDT', 'ETH_USDT', 'BNB_USDT', 'SOL_USDT']
-    .map(prefix => fundingRows.find(row => String(row.symbol).toUpperCase().startsWith(prefix)))
-    .filter(Boolean) as any[];
-  if (relevant.length) {
-    const average = relevant.reduce((sum, row) => sum + row.fundingRatePct, 0) / relevant.length;
-    fundingAvgPct = average;
-    fundingBias = average > 0.03
-      ? `主要合约资金费率偏高（均值 ${round(average, 3)}%），多头拥挤，谨防回调`
-      : average < -0.01
-        ? `主要合约资金费率偏低（均值 ${round(average, 3)}%），空头压力较重，可能出现反弹`
-        : `主要合约资金费率中性（均值 ${round(average, 3)}%）`;
-  }
-
+  const fundingSummary = summarizeMajorFundingRates(
+    fundingResult.status === 'fulfilled' ? fundingResult.value.majorContracts : [],
+  );
+  const fundingBias = fundingResult.status === 'fulfilled'
+    ? fundingSummary.bias
+    : '资金费率数据暂不可用';
+  const fundingAvgPct = fundingResult.status === 'fulfilled' ? fundingSummary.averagePct : null;
   const warnings: string[] = [];
   if (fearGreedResult.status === 'rejected') warnings.push('恐贪指数暂时不可用');
   if (fundingResult.status === 'rejected') warnings.push('资金费率暂时不可用');
+  else if (fundingSummary.warning) warnings.push(fundingSummary.warning);
   if (crossAssetResult.status === 'rejected') warnings.push('全球指数/VIX 风险雷达暂时不可用');
   if (eventRiskResult.status === 'rejected') warnings.push('宏观事件风险日历暂时不可用');
   if (stablecoinResult.status === 'rejected') warnings.push('稳定币流动性暂时不可用');
@@ -1264,7 +1256,7 @@ async function buildContext(
     });
   }
 
-  if ((fundingAvgPct ?? 0) > 0.03) {
+  if (fundingAvgPct !== null && fundingAvgPct > 0.03) {
     cautionFlags.push({
       id: 'funding-long-crowded',
       severity: 'medium',
@@ -1273,7 +1265,7 @@ async function buildContext(
       adviceZh: '多头成本升高，追高性价比下降；关注回调后低吸或相对强势标的。',
       source: fundingBias,
     });
-  } else if ((fundingAvgPct ?? 0) < -0.01) {
+  } else if (fundingAvgPct !== null && fundingAvgPct < -0.01) {
     cautionFlags.push({
       id: 'funding-short-pressure',
       severity: 'medium',

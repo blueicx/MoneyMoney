@@ -91,3 +91,12 @@
 - 发布提交 `96e1c327357b6f2624dc5215ca2380e9503b76b7` 已推送并部署；生产只读 Chromium canary 覆盖股票、期权、虚拟币、预测市场及 SNDK，全部通过。`moneymoney.service` 为 `active`，健康接口 `mode=view-only`、`storage.ok=true`、`migrationErrors=[]`。
 - 生产 `dist/web/server.js` SHA-256 `5b51b1843de0148149f307b615197f532b4c3f4f784626897f272e04dd712707`、`dist/web/public/index.html` SHA-256 `8ea99c333648bc14377f1a98d3bae2ded963570b923a91649770931f12f57ff3` 与本地产物一致；归档 SHA-256 `ff30e15d20ca90405e108c194e9e2e7cefdcde372291eb4879a27453bba81c8d`。备份与回滚目录分别保留在 `/opt/moneymoney/backups/dist-pre-96e1c32-20261012-defi-yield` 和 `/opt/moneymoney/dist.rollback-96e1c32-20261012-defi-yield`。
 - 正式域名未登录访问 `/api/defi/yield-quality` 返回 401，因此线上 DefiLlama 数据新鲜度未作验证或推断；这不改变本地 API 契约测试结果。
+
+## 2026-10-12 增量复核：资金费率统计口径
+
+- Gate.io USDT 永续列表中的有效费率按严格数值解析；真实 `0` 保留，空值、非数值、无穷值及非 USDT 永续名称排除并计数。成功但无合约、存在合约但全为无效费率、部分字段无效分别返回 `empty`、`unavailable`、`partial`，不把无效字段转成零。
+- 列表显示仍按绝对费率排序并受 `limit` 限制；等权均值、正/负极值及 BTC/ETH/BNB/SOL 精确主流合约数据从完整有效 USDT 永续集合计算，改变 `limit` 不改变统计值。完整集合复用同一个两分钟缓存快照。
+- 年化费率仅在来源提供有效 `funding_interval` 秒数时按该合约周期折算；周期缺失或无效时为 `null`，不再按固定每日一次假设。
+- 当前接入字段没有可验证的费率观测时点映射；`sourceUpdatedAt` 明确为空，`fetchedAt` 仅代表 MoneyMoney 请求时间，结果状态为部分数据/时间未验证，不冒称源端实时。页面分别呈现覆盖数、缓存状态、取回时间与未验证时点。
+- 页面上的全量等权均值是各合约当前周期费率的原始均值，不是按周期归一后的年化比较；标签明确提示这一点。交易助手只有在精确覆盖 BTC、ETH、BNB、SOL 且四者均有相同有效 `funding_interval` 秒数时才计算拥挤度。覆盖不足或周期不一致/缺失时指标为 `null`、显示警告，且不产生多空拥挤风险提示。
+- `tests/market-sentiment-quality.test.cjs` 覆盖零费率、非法字段、非永续过滤、limit 不影响均值、完整/不足的主流覆盖、空/无效来源状态、缓存复用、页面来源失败隔离和助手接线。
