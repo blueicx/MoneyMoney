@@ -27,6 +27,25 @@ async function main() {
       return route.fulfill({ json: { success: true, data: [{ name: 'Isolated index fixture', price: 100, changePct: 0.1 }] } });
     });
     await page.route('**/api/binance/klines?**', route => {const query=new URL(route.request().url()).searchParams,paged=query.has('before');if(paged)historyRequests++;return route.fulfill({ json: { success: true,market:'crypto',instrument:'crypto:binance:'+query.get('symbol'),timeframe:query.get('interval'), data:paged?olderRows:rows, source: 'Isolated chart fixture', updatedAt: new Date().toISOString(), dataStatus: 'delayed' } });});
+    await page.route('**/api/support-resistance?**', route => {
+      const query = new URL(route.request().url()).searchParams;
+      const requestedInstrument = query.get('symbol'), interval = query.get('interval');
+      const instrument = query.get('market') === 'stocks' ? requestedInstrument.replace(/^us/i, '') : requestedInstrument;
+      const envelope = query.get('market') === 'stocks'
+        ? { market: 'stocks', instrument, requestedInstrument, timeframe: interval, dataStatus: 'historical', source: 'Isolated stock support/resistance fixture' }
+        : {};
+      return route.fulfill({ json: {
+        success: true,
+        ...envelope,
+        data: {
+          symbol: instrument,
+          interval,
+          supports: [{ type: 'support', price: 96, touches: 3, strength: 75 }],
+          resistances: [{ type: 'resistance', price: 104, touches: 4, strength: 80 }],
+          fetchedAt: new Date().toISOString(),
+        },
+      } });
+    });
     await page.goto(base + '/login'); await page.fill('#username', 'live-fixture-owner'); await page.fill('#password', 'isolated-live-fixture-password');
     await Promise.all([page.waitForURL(url => url.pathname === '/'), page.click('#submitBtn')]);
     await page.waitForFunction(() => window.mm_isLoggedIn);
@@ -45,6 +64,20 @@ async function main() {
     });
     assert.equal(await page.evaluate(()=>currentStockKlinePeriod),'5m');
     assert.match(await page.locator('#stock-chart-card .mm-trading-readout').innerText(),/开 .*高 .*低 .*收 .*MA5/);
+    await page.evaluate(() => {
+      window.__supportResistanceDraws = [];
+      const draw = window.MoneyTradingChart.drawSupportResistance;
+      window.MoneyTradingChart.drawSupportResistance = (ctx, lines, geometry) => {
+        window.__supportResistanceDraws.push({ canvas: ctx.canvas?.id, prices: lines.map(line => line.price), types: lines.map(line => line.type) });
+        return draw(ctx, lines, geometry);
+      };
+      setStockChartOverlay('supportResistance', true);
+    });
+    await page.waitForFunction(() => stockSupportResistanceState.status === 'success' && stockSupportResistanceState.data?.supports?.length === 1 && stockSupportResistanceState.data?.resistances?.length === 1);
+    await page.evaluate(() => drawStockKline(document.getElementById('stock-kline'), stockChartKlines));
+    const stockSupportOverlay = await page.evaluate(() => window.__supportResistanceDraws.findLast(draw => draw.canvas === 'stock-kline'));
+    assert.deepEqual(stockSupportOverlay?.prices, [96, 104], 'stock chart must project real support/resistance levels through its production render path');
+    assert.deepEqual(stockSupportOverlay?.types, ['support', 'resistance']);
     let paperRequests=0;
     await page.route('**/api/paper/chart-markers?**',route=>{paperRequests++;return route.fulfill({json:{success:true,market:'stocks',instrument:'stock:us:AAPL',dataStatus:'historical',source:'isolated ledger fixture',data:{markers:[{market:'stocks',instrument:'stock:us:AAPL',orderId:'fixture-order',signalId:'fixture-signal',snapshotId:'fixture-snapshot',accountId:'fixture-account',time:rows[60].time+1000,price:101,quantity:1,side:'BUY',feeUsd:.1,slippageUsd:.2}],unlinked:[{orderId:'legacy-order',reason:'未关联：缺少信号 ID'}]}}});});
     assert.equal(paperRequests,0,'unselected paper layer must not request ledger');
@@ -65,10 +98,6 @@ async function main() {
     await page.evaluate(async () => { stepStockChartReplay('next'); stockChartAsOf = '2026-01-01'; MoneyLiveKline.sync(); await loadStockKline(undefined, undefined, undefined, { live: true }); });
     assert.equal(requests, before, 'asOf must block live reads');
     await page.route('**/api/alerts**', route => new URL(route.request().url()).pathname === '/api/alerts' ? route.fulfill({ json: [] }) : route.fallback());
-    await page.route('**/api/support-resistance?**', route => {
-      const query = new URL(route.request().url()).searchParams;
-      return route.fulfill({ json: { success: true, data: { symbol: query.get('symbol'), interval: query.get('interval'), supports: [], resistances: [], fetchedAt: new Date().toISOString() } } });
-    });
     await page.evaluate(() => {
       const original = window.loadAlertsForChart;
       window.__chartAlertLoads = 0;
@@ -81,6 +110,10 @@ async function main() {
     await page.waitForFunction(() => window.__fixtureStreams.some(s => !s.closed && s.url.includes('BTCUSDT')));
     await page.waitForFunction(() => bnCurrentInterval === '5m' && bnKlineData.length === 80 && bnKlineData.at(-1).close === 101);
     await page.waitForFunction(() => window.__chartAlertLoads === 0 && cryptoSupportResistanceState.status === 'success' && cryptoSupportResistanceState.key === 'BTCUSDT|5m');
+    await page.evaluate(() => drawCandles(document.getElementById('bn-candlestick'), bnKlineData));
+    const cryptoSupportOverlay = await page.evaluate(() => window.__supportResistanceDraws.findLast(draw => draw.canvas === 'bn-candlestick'));
+    assert.deepEqual(cryptoSupportOverlay?.prices, [96, 104], 'crypto chart must project real support/resistance levels through its production render path');
+    assert.deepEqual(cryptoSupportOverlay?.types, ['support', 'resistance']);
     await page.evaluate(() => setCryptoChartOverlay('supportResistance', false));
     const push = await page.evaluate(start => {
       const stream = window.__fixtureStreams.findLast(s => !s.closed);
