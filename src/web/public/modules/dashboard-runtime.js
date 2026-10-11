@@ -3768,7 +3768,7 @@ async function loadFundamentalQuality(symbol, name) {
     document.querySelectorAll('#fundamentals-quick .tab').forEach(button => {
       button.classList.toggle('active', button.textContent.trim() === currentFundamentalSymbol);
     });
-    renderFundamentalQuality(payload.data);
+    renderFundamentalQuality(payload.data, payload);
   } catch (e) {
     if (token !== fundamentalsRequestToken) return;
     const message = e?.message || '数据源暂时不可用';
@@ -3805,7 +3805,33 @@ function workspaceExternalHref(value) {
   const raw = String(value || '').trim();
   return /^https?:\/\//i.test(raw) ? safeNewsText(raw) : '';
 }
-function renderFundamentalQuality(data) {
+function formatStockResearchTimestamp(value) {
+  if (!value) return '来源未提供';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '时间未核验';
+  return new Intl.DateTimeFormat('zh-CN', {
+    timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', hour12: false,
+  }).format(date) + ' 北京时间';
+}
+function stockResearchFreshnessMarkup(freshness, fallback = {}) {
+  const meta = { ...fallback, ...(freshness || {}) };
+  const status = ['delayed', 'historical', 'partial', 'unavailable', 'failed', 'empty'].includes(meta.dataStatus)
+    ? meta.dataStatus : 'partial';
+  const statusLabel = {
+    delayed: '延迟数据', historical: '历史数据', partial: '部分成功',
+    unavailable: '来源不可用', failed: '请求失败', empty: '暂无记录',
+  }[status];
+  const sourceAt = meta.sourceUpdatedAt ?? meta.updatedAt ?? null;
+  const extraSources = Array.isArray(meta.supplementalSources) ? meta.supplementalSources : [];
+  return `<div data-stock-research-freshness="${status}" style="margin-top:8px;padding:8px 10px;border:1px solid var(--border);border-radius:9px;background:color-mix(in srgb,var(--bg-secondary) 72%,transparent);font-size:10.5px;line-height:1.5;color:var(--text-secondary);">
+    <div style="display:flex;flex-wrap:wrap;align-items:center;gap:7px;"><span class="data-status-badge" data-status-state="${status}">${statusLabel}</span><span>来源：${safeNewsText(meta.source || '来源未标注')}</span></div>
+    <div style="display:flex;flex-wrap:wrap;gap:4px 14px;margin-top:4px;"><span>来源时点：${safeNewsText(formatStockResearchTimestamp(sourceAt))}</span><span>MoneyMoney 抓取：${safeNewsText(formatStockResearchTimestamp(meta.retrievedAt))}</span></div>
+    ${extraSources.map(item => `<div style="margin-top:3px;">${safeNewsText(item.field)}来源：${safeNewsText(item.source)} · 来源时点：${safeNewsText(formatStockResearchTimestamp(item.updatedAt))}${item.reason ? ` · ${safeNewsText(item.reason)}` : ''}</div>`).join('')}
+    ${meta.reason ? `<div style="margin-top:3px;">${safeNewsText(meta.reason)}</div>` : ''}
+  </div>`;
+}
+function renderFundamentalQuality(data, freshness) {
   const el = document.getElementById('fundamental-radar');
   if (!el) return;
   const m = data.metrics || {};
@@ -3863,6 +3889,7 @@ function renderFundamentalQuality(data) {
           <div style="font-weight:800;font-size:14px;">${safeNewsText(data.companyName)}</div>
           <small style="color:var(--text-secondary);display:block;margin-top:3px;">${safeNewsText(data.symbol)} · ${periodBasis === 'TTM' ? 'TTM截至' : '财年截止'} ${safeNewsText(data.fiscalPeriodEnd)} · 最近相关申报 ${safeNewsText(data.reportFiledAt)}</small>
           <small style="color:var(--text-secondary);display:block;margin-top:3px;">规则汇总评分，不是历史命中率、收益概率或未来表现。</small>
+          ${stockResearchFreshnessMarkup(freshness, { dataStatus: 'historical', source: 'SEC EDGAR XBRL companyfacts', sourceUpdatedAt: data.reportFiledAt, retrievedAt: data.retrievedAt || data.updatedAt, reason: '财务指标对应已提交的 SEC 报告期，不代表当前季度的实时经营情况。' })}
         </div>
         ${workspaceInlineRefresh('loadFundamentalQuality()', '刷新')}
         <span class="workspace-signal-badge" title="规则汇总评分，不是命中率、收益概率或未来表现" style="color:white;background:${scoreColor};border-radius:99px;padding:5px 10px;font-size:11px;flex-shrink:0;">${score}/100 · ${safeNewsText(data.signalZh)}</span>
@@ -4132,13 +4159,13 @@ async function loadShortInterest(symbol, name) {
     document.querySelectorAll('#short-interest-quick .tab').forEach(button => {
       button.classList.toggle('active', button.textContent.trim() === currentShortSymbol);
     });
-    renderShortInterest(payload.data);
+    renderShortInterest(payload.data, payload);
   } catch (e) {
     if (token !== shortInterestRequestToken) return;
     el.innerHTML = '<div class="empty-tip">' + stockEscapeHtml(currentShortSymbol) + ' 暂无可读的 Nasdaq 空头利息，或数据暂时不可用。</div>';
   }
 }
-function renderShortInterest(data) {
+function renderShortInterest(data, freshness) {
   const el = document.getElementById('short-interest-radar');
   if (!el) return;
   const color = data.signal === 'covering' ? 'var(--green)' :
@@ -4176,6 +4203,7 @@ function renderShortInterest(data) {
         <span class="workspace-signal-badge" style="color:white;background:${color};border-radius:99px;padding:5px 10px;font-size:11px;flex-shrink:0;">${safeNewsText(data.signalZh)}</span>
       </div>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(105px,1fr));gap:7px;margin-top:11px;">${cards}</div>
+      ${stockResearchFreshnessMarkup(freshness, { dataStatus: 'historical', source: data.source || 'Nasdaq public short interest', sourceUpdatedAt: data.latest?.settlementDate, retrievedAt: data.retrievedAt, reason: '空头利息按结算周期发布，通常约半月更新，不是实时持仓。' })}
       ${historyRows ? `
         <div style="overflow-x:auto;margin-top:11px;border:1px solid var(--border);border-radius:10px;">
           <table style="width:100%;border-collapse:collapse;font-size:11px;min-width:430px;">
@@ -4632,13 +4660,13 @@ async function loadAnalystConsensus(symbol, name) {
     document.querySelectorAll('#analyst-quick .tab').forEach(button => {
       button.classList.toggle('active', button.textContent.trim() === currentAnalystSymbol);
     });
-    renderAnalystConsensus(payload.data);
+    renderAnalystConsensus(payload.data, payload);
   } catch (e) {
     if (token !== analystRequestToken) return;
     el.innerHTML = '<div class="empty-tip">' + stockEscapeHtml(currentAnalystSymbol) + ' 暂无可读的分析师共识；ETF 或新上市公司可能没有足够覆盖。</div>';
   }
 }
-function renderAnalystConsensus(data) {
+function renderAnalystConsensus(data, freshness) {
   const el = document.getElementById('analyst-radar');
   if (!el) return;
   const color = data.signal === 'strong-buy' ? 'var(--green)' :
@@ -4716,6 +4744,7 @@ function renderAnalystConsensus(data) {
           <small style="color:var(--text-secondary);display:block;margin-top:3px;">
             ${safeNewsText(data.symbol)} · 现价 $${Number(data.currentPrice).toFixed(2)} · 更新 ${safeNewsText(data.latestUpdated)}
           </small>
+          ${stockResearchFreshnessMarkup(freshness, { dataStatus: 'delayed', source: data.source || 'StockAnalysis public analyst consensus', sourceUpdatedAt: data.latestUpdated, retrievedAt: data.retrievedAt, reason: '评级与目标价按公开来源发布时间更新，不是实时数据；现价来源单独列示。', supplementalSources: [{ field: '现价', source: data.priceSource || '公开报价源', updatedAt: data.priceUpdatedAt, reason: data.priceUpdatedAt ? null : '报价响应未返回可独立核验的来源时点。' }] })}
         </div>
         ${workspaceInlineRefresh('loadAnalystConsensus()', '刷新')}
         <span class="workspace-signal-badge" style="color:white;background:${color};border-radius:99px;padding:5px 10px;font-size:11px;flex-shrink:0;">${safeNewsText(data.consensusZh)}</span>

@@ -51,6 +51,7 @@ export interface FundamentalRadarResult {
   cik: string;
   companyName: string;
   updatedAt: string;
+  retrievedAt: string;
   fiscalPeriodEnd: string;
   periodBasis: 'TTM' | 'Annual';
   reportFiledAt: string;
@@ -582,12 +583,14 @@ function buildResult(symbol: string, facts: CompanyFacts): FundamentalRadarResul
   const signal = buildFundamentalSignal(score, metrics, dataAgeDays, periodBasis);
   const factors = buildFundamentalFactors(metrics, score, dataAgeDays);
   const cik = String(facts.cik || '');
+  const retrievedAt = new Date().toISOString();
 
   return {
     symbol: symbol.toUpperCase(),
     cik,
     companyName: facts.entityName || symbol.toUpperCase(),
-    updatedAt: new Date().toISOString(),
+    updatedAt: retrievedAt,
+    retrievedAt,
     fiscalPeriodEnd,
     periodBasis: ttm ? 'TTM' : 'Annual',
     reportFiledAt,

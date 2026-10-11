@@ -53,3 +53,11 @@
 - 修复后 `node --test tests/market-workspace-navigation.test.cjs tests/workspace-exclusive-runtime.test.cjs`：11 项通过。
 - 新测试覆盖注册表 30 个 ID（包括不在生成式菜单的 `watchlist`/`positions`）、所有导航上下文中的市场/工作区所有权，以及从专属工作区返回总览时隐藏状态恢复。
 - 尚未进行浏览器生产数据在线抽检；后续领域批次按本矩阵的“后续核验”逐项补足，不能将本表当作实时上游 SLA 证明。
+
+## 2026-10-12 增量复核：股票研究数据时点
+
+- 分析师共识、SEC 基本面和 Nasdaq 空头利息接口统一返回 `dataStatus/source/updatedAt/sourceUpdatedAt/retrievedAt/reason`；`updatedAt` 指向可核验的源时点，抓取时刻单独放在 `retrievedAt`。
+- 来源未提供有效时点时返回 `partial` 和明确原因，不以抓取时刻替代。分析师现价的报价来源与共识来源分开列示；报价响应没有可核验源时间时明确显示未知。
+- 三个股票面板共用主题变量驱动的 freshness 展示；状态区分延迟、历史、部分成功、不可用、失败和空结果。
+- `tests/stock-research-freshness.test.cjs` 覆盖来源/抓取时点分离、缺失时点、报价来源隔离、三个卡片接线及三主题渲染。
+- 本次验证的是代码契约和本地页面渲染，不代表已在线核验 StockAnalysis、SEC 或 Nasdaq 的当前上游可用率。

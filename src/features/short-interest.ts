@@ -32,6 +32,7 @@ export interface ShortInterestSnapshot {
   adviceZh: string;
   confidence: number;
   source: string;
+  retrievedAt: string;
 }
 
 export interface ShortInterestRadar {
@@ -89,7 +90,7 @@ function percentile(values: number[], value: number): number {
   return clamp((values.filter(item => item <= value).length / values.length) * 100, 0, 100);
 }
 
-function classify(snapshot: Omit<ShortInterestSnapshot, 'signal' | 'signalZh' | 'adviceZh' | 'confidence' | 'source'>): Pick<
+function classify(snapshot: Omit<ShortInterestSnapshot, 'signal' | 'signalZh' | 'adviceZh' | 'confidence' | 'source' | 'retrievedAt'>): Pick<
   ShortInterestSnapshot,
   'signal' | 'signalZh' | 'adviceZh' | 'confidence'
 > {
@@ -197,6 +198,7 @@ async function requestSnapshot(symbol: string): Promise<ShortInterestSnapshot> {
     ...partial,
     ...classify(partial),
     source: 'Nasdaq public short interest',
+    retrievedAt: new Date().toISOString(),
   };
 }
 

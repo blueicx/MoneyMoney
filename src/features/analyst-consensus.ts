@@ -86,6 +86,9 @@ export interface AnalystConsensusSnapshot {
   history: AnalystRatingPeriod[];
   latestUpdated: string;
   dataAgeDays: number;
+  retrievedAt: string;
+  priceSource: string;
+  priceUpdatedAt: string | null;
   signal: AnalystConsensusSignal;
   signalZh: string;
   adviceZh: string;
@@ -529,8 +532,10 @@ async function requestSnapshot(symbolInput: string): Promise<AnalystConsensusSna
 
   const company = extractCompany(rawHtml, symbol);
   let quote: { price: number; officialName: string };
+  let priceSource = 'StockAnalysis public page quote fallback';
   try {
     quote = await fetchTencentQuote(symbol);
+    priceSource = 'Tencent Finance public quote';
   } catch {
     const price = pageFallbackPrice(rawHtml);
     if (!(price > 0)) throw new Error('现价暂时不可用');
@@ -589,6 +594,11 @@ async function requestSnapshot(symbolInput: string): Promise<AnalystConsensusSna
     history: [...recommendations, period].slice(-13),
     latestUpdated,
     dataAgeDays,
+    retrievedAt: new Date().toISOString(),
+    priceSource,
+    // Tencent's public quote response used here does not provide a timestamp
+    // that this adapter can independently verify.
+    priceUpdatedAt: null,
     source: 'StockAnalysis public analyst consensus',
   };
 

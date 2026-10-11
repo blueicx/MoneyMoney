@@ -75,6 +75,7 @@ import { getInsiderRadar } from '../features/insider-transactions';
 import { getAnalystConsensusSnapshot } from '../features/analyst-consensus';
 import { getFundamentalQuality } from '../features/fundamental-quality';
 import { getShortInterestSnapshot } from '../features/short-interest';
+import { buildStockResearchFreshnessEnvelope } from '../features/stock-research-freshness';
 import { getMarketBreadthSnapshot } from '../features/market-breadth';
 import { getInstitutionalOwnershipSnapshot } from '../features/institutional-ownership';
 import { createGuruHoldingsRouter } from '../features/guru-holdings-router';
@@ -2967,7 +2968,15 @@ app.get('/api/stock/insider/:symbol', async (req, res) => {
 
 app.get('/api/stock/analyst/:symbol', async (req, res) => {
   try {
-    res.json({ success: true, data: await getAnalystConsensusSnapshot(String(req.params.symbol || '')) });
+    const data = await getAnalystConsensusSnapshot(String(req.params.symbol || ''));
+    res.json(buildStockResearchFreshnessEnvelope({
+      kind: 'analyst', symbol: data.symbol, sourceUpdatedAt: data.latestUpdated,
+      retrievedAt: data.retrievedAt, data,
+      supplementalSources: [{
+        field: '现价', source: data.priceSource, updatedAt: data.priceUpdatedAt,
+        reason: data.priceUpdatedAt ? null : '报价响应未返回可独立核验的来源时点。',
+      }],
+    }));
   } catch (e: any) {
     res.status(404).json({ success: false, error: e.message, data: null });
   }
@@ -2975,7 +2984,11 @@ app.get('/api/stock/analyst/:symbol', async (req, res) => {
 
 app.get('/api/stock/fundamentals/:symbol', async (req, res) => {
   try {
-    res.json({ success: true, data: await getFundamentalQuality(String(req.params.symbol || '')) });
+    const data = await getFundamentalQuality(String(req.params.symbol || ''));
+    res.json(buildStockResearchFreshnessEnvelope({
+      kind: 'fundamentals', symbol: data.symbol, sourceUpdatedAt: data.reportFiledAt,
+      retrievedAt: data.retrievedAt, data,
+    }));
   } catch (e: any) {
     res.status(404).json({ success: false, error: e.message, data: null });
   }
@@ -2983,7 +2996,11 @@ app.get('/api/stock/fundamentals/:symbol', async (req, res) => {
 
 app.get('/api/stock/short-interest/:symbol', async (req, res) => {
   try {
-    res.json({ success: true, data: await getShortInterestSnapshot(String(req.params.symbol || '')) });
+    const data = await getShortInterestSnapshot(String(req.params.symbol || ''));
+    res.json(buildStockResearchFreshnessEnvelope({
+      kind: 'short-interest', symbol: data.symbol, sourceUpdatedAt: data.latest.settlementDate,
+      retrievedAt: data.retrievedAt, data,
+    }));
   } catch (e: any) {
     res.status(404).json({ success: false, error: e.message, data: null });
   }
