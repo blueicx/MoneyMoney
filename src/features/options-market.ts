@@ -338,6 +338,9 @@ function strategyIdeasAvailability(rows: OptionRow[], spot: number): OptionExpir
   if (rows.some(row => row.openInterest == null)) {
     return { status: 'unavailable', reason: 'OI 字段存在缺失；PCR、最大痛点及依赖它们的策略评分已停用。' };
   }
+  if (rows.some(row => row.gammaExposureUsd == null)) {
+    return { status: 'unavailable', reason: 'Gamma/GEX 字段存在缺失；依赖它的策略评分已停用。' };
+  }
   const atmCall = calls.find(row => row.strike === nearestStrike(calls, 'call', spot));
   const atmPut = puts.find(row => row.strike === nearestStrike(puts, 'put', spot));
   if (atmCall?.impliedVolPct == null || atmPut?.impliedVolPct == null) {

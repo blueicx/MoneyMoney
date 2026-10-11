@@ -58,6 +58,31 @@ test('missing ATM IV with complete OI withholds IV-dependent strategy scores', a
   }
 });
 
+test('missing Gamma with complete OI and ATM IV withholds GEX-dependent strategy scores', async () => {
+  const originalFetch = global.fetch;
+  global.fetch = async () => ({
+    ok: true,
+    json: async () => ({ data: {
+      current_price: 100,
+      options: [
+        { option: 'GEXM261218C00100000', bid: 1, ask: 1.2, volume: 4, open_interest: 10, iv: 0.25 },
+        { option: 'GEXM261218P00100000', bid: 1, ask: 1.2, volume: 5, open_interest: 12, iv: 0.3, gamma: 0.1 },
+      ],
+    } }),
+  });
+  try {
+    const snapshot = await getEquityOptionsSnapshot('GEXM');
+    const expiry = snapshot.expiries[0];
+    assert.equal(expiry.dataQuality.openInterest.status, 'complete');
+    assert.equal(expiry.dataQuality.impliedVolatility.status, 'complete');
+    assert.equal(expiry.dataQuality.gammaExposure.status, 'partial');
+    assert.equal(expiry.strategyIdeas.length, 0);
+    assert.match(expiry.strategyIdeasStatus.reason, /Gamma|GEX/);
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
 test('option quote quality distinguishes executable two-sided prices, wide spreads and missing quotes', () => {
   assert.deepEqual(assessOptionQuoteQuality({ bidPrice: 1.9, askPrice: 2.1, spreadPct: 10, volume: 20, openInterest: 100 }), {
     status: 'quoted', label: '双边报价可见', referenceAsk: 2.1, referenceBid: 1.9,
