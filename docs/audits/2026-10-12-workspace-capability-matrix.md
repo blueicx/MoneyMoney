@@ -88,3 +88,6 @@
 - 现有收益卡片展示来源、抓取时间、来源更新时间未验证和真实空/失败原因；不新增卡片或改主题布局。
 - `tests/yield-quality-data-quality.test.cjs` 覆盖未知风险属性、非法趋势值、缺失池身份、空响应/坏响应/请求失败/恢复、缓存、API状态码、逐池缺项提示及 HTML 转义。
 - 本次为本地契约验证；未核验 DefiLlama 当前线上可用率，也不将其数据称为实时。
+- 发布提交 `96e1c327357b6f2624dc5215ca2380e9503b76b7` 已推送并部署；生产只读 Chromium canary 覆盖股票、期权、虚拟币、预测市场及 SNDK，全部通过。`moneymoney.service` 为 `active`，健康接口 `mode=view-only`、`storage.ok=true`、`migrationErrors=[]`。
+- 生产 `dist/web/server.js` SHA-256 `5b51b1843de0148149f307b615197f532b4c3f4f784626897f272e04dd712707`、`dist/web/public/index.html` SHA-256 `8ea99c333648bc14377f1a98d3bae2ded963570b923a91649770931f12f57ff3` 与本地产物一致；归档 SHA-256 `ff30e15d20ca90405e108c194e9e2e7cefdcde372291eb4879a27453bba81c8d`。备份与回滚目录分别保留在 `/opt/moneymoney/backups/dist-pre-96e1c32-20261012-defi-yield` 和 `/opt/moneymoney/dist.rollback-96e1c32-20261012-defi-yield`。
+- 正式域名未登录访问 `/api/defi/yield-quality` 返回 401，因此线上 DefiLlama 数据新鲜度未作验证或推断；这不改变本地 API 契约测试结果。
