@@ -14,8 +14,8 @@ function functionSource(name) {
   return html.slice(start, end);
 }
 
-function chartHarness(fetcher) {
-  const dom = new JSDOM(html, { url: 'http://localhost/', runScripts: 'outside-only' });
+function chartHarness(fetcher, url = 'http://localhost/') {
+  const dom = new JSDOM(html, { url, runScripts: 'outside-only' });
   const window = dom.window;
   const canvas = window.document.getElementById('stock-kline');
   canvas.getContext = () => ({ setTransform() {}, clearRect() {} });
@@ -38,9 +38,10 @@ function chartHarness(fetcher) {
     var stockChartCompanionOpen=false, stockChartOverlayConfig={}, activeMarketScope='stocks', stockChartAdjustment='source';
   `);
   if (html.includes('function markMmPerformanceStage(')) window.eval(functionSource('markMmPerformanceStage'));
-  for (const name of ['stockKlineAsOfStorageKey', 'syncStockKlineAsOfControl', 'clearStockKlineAsOf', 'setStockKlineStatus', 'loadUnifiedStockData', 'setStockKlineViewState', 'stockKlineRequestKey', 'runStockKlineSingleFlight', 'performStockKlineLoad', 'loadStockKline']) {
+  for (const name of ['stockKlineAsOfStorageKey', 'syncStockKlineAsOfControl', 'clearStockKlineAsOf', 'setStockKlineStatus', 'loadUnifiedStockData', 'setStockKlineViewState', 'stockKlineRequestKey', 'stockKlineUrl', 'bindStockKlineWorkspaceLifecycle', 'runStockKlineSingleFlight', 'performStockKlineLoad', 'loadStockKline']) {
     if (html.includes(`function ${name}(`)) window.eval(functionSource(name));
   }
+  window.bindStockKlineWorkspaceLifecycle?.();
   return { window, document: window.document, close: () => dom.window.close() };
 }
 const empty = { success: false, data: null, dataStatus: 'unavailable', source: 'local lake', reason: '没有在 asOf 时点之前发布的数据分区' };
@@ -59,6 +60,179 @@ test('stock chart request, response, and visible render stages are measured in o
     const rendered = marks.indexOf('moneymoney:stock-kline-first-render');
     assert.ok(request >= 0 && responseParsed > request && rendered > responseParsed, `unexpected chart stages: ${marks.join(', ')}`);
   } finally { h.close(); }
+});
+
+test('stock K-line URL builder keeps live, historical, intraday and adjusted contexts distinct', () => {
+  const h = chartHarness(async () => response(empty));
+  try {
+    const ordinary = h.window.stockKlineUrl('usAAPL', '1d', '', { adjustment: 'source' });
+    assert.equal(ordinary, '/api/stock/kline?symbol=usAAPL&period=1d&interval=1d&adjustment=source&chartWindow=1');
+    const historical = new URL(h.window.stockKlineUrl('usAAPL', '1d', '', {
+      asOf: '2026-10-05T23:59:59.999Z', adjustment: 'forward',
+    }), 'http://localhost');
+    assert.equal(historical.searchParams.get('adjustment'), 'source');
+    assert.equal(historical.searchParams.get('asOf'), '2026-10-05T23:59:59.999Z');
+    assert.equal(historical.searchParams.has('chartWindow'), false);
+    const intraday = new URL(h.window.stockKlineUrl('usAAPL', '5m', 'AAPL.OQ', {
+      intradayDate: '2026-10-05', intradayPeriod: '5m', adjustment: 'forward',
+    }), 'http://localhost');
+    assert.equal(intraday.searchParams.get('adjustment'), 'source');
+    assert.equal(intraday.searchParams.get('date'), '2026-10-05');
+    assert.equal(intraday.searchParams.get('intradayPeriod'), '5m');
+    assert.equal(intraday.searchParams.get('api'), 'AAPL.OQ');
+    assert.equal(intraday.searchParams.has('chartWindow'), false);
+    const adjusted = new URL(h.window.stockKlineUrl('usAAPL', '1d', '', { adjustment: 'forward' }), 'http://localhost');
+    assert.equal(adjusted.searchParams.get('adjustment'), 'forward');
+    assert.equal(adjusted.searchParams.has('chartWindow'), false);
+  } finally { h.close(); }
+});
+
+test('stock chart consumes one matching prefetched response instead of issuing a duplicate request', async () => {
+  let fetchCalls = 0;
+  let takeCalls = 0;
+  let takenUrl = '';
+  const h = chartHarness(async () => { fetchCalls++; return response(empty); });
+  try {
+    h.window.stockChartAsOf = '';
+    h.window.currentStockSymbol = 'usAAPL';
+    h.window.currentStockKlinePeriod = '1d';
+    h.window.stockChartAdjustment = 'source';
+    h.window.MoneyStockKlinePrefetch = {
+      take(url) {
+        takeCalls++;
+        takenUrl = url;
+        return {
+          promise: Promise.resolve({ ok: true, status: 200, body: {
+            success: true, market: 'stocks', instrument: 'usAAPL', timeframe: '1d',
+            data: [{ time: 1, open: 10, high: 12, low: 9, close: 11, volume: 1 }],
+            dataStatus: 'live', source: 'prefetch fixture', updatedAt: '2026-10-11T00:00:00Z',
+          } }),
+          abort() {},
+        };
+      },
+      invalidate() {},
+    };
+    await h.window.loadStockKline();
+    assert.equal(fetchCalls, 0);
+    assert.equal(takeCalls, 1);
+    assert.equal(new URL(takenUrl, 'http://localhost').searchParams.get('symbol'), 'usAAPL');
+    assert.equal(new URL(takenUrl, 'http://localhost').searchParams.get('period'), '1d');
+    assert.equal(h.window.stockChartKlines[0].close, 11);
+    assert.match(h.document.querySelector('[data-kline-status]').textContent, /prefetch fixture/);
+  } finally { h.close(); }
+});
+
+test('stock chart does not consume a prefetched payload for another instrument', async () => {
+  const fetchedUrls = [];
+  let takeCalls = 0;
+  const h = chartHarness(async url => {
+    fetchedUrls.push(url);
+    return response({ success: true, market: 'stocks', instrument: 'usSNDK', timeframe: '1d',
+      data: [{ time: 2, open: 20, high: 22, low: 19, close: 21, volume: 2 }], dataStatus: 'live', source: 'SNDK fixture' });
+  });
+  try {
+    h.window.stockChartAsOf = '';
+    h.window.currentStockSymbol = 'usSNDK';
+    h.window.currentStockKlinePeriod = '1d';
+    h.window.stockChartAdjustment = 'source';
+    h.window.MoneyStockKlinePrefetch = { take() { takeCalls++; return null; }, invalidate() {} };
+    await h.window.loadStockKline();
+    assert.equal(takeCalls, 1);
+    assert.equal(new URL(fetchedUrls[0], 'http://localhost').searchParams.get('symbol'), 'usSNDK');
+    assert.equal(h.window.stockChartKlines[0].close, 21);
+  } finally { h.close(); }
+});
+
+test('stock chart rejects a successful prefetched response with mismatched identity', async () => {
+  let ordinaryFetchCalls = 0;
+  const h = chartHarness(async () => { ordinaryFetchCalls++; return response(empty); });
+  try {
+    h.window.stockChartAsOf = '';
+    h.window.currentStockSymbol = 'usAAPL';
+    h.window.currentStockKlinePeriod = '1d';
+    h.window.stockChartAdjustment = 'source';
+    h.window.MoneyStockKlinePrefetch = {
+      take() {
+        return { promise: Promise.resolve({ ok: true, status: 200, body: {
+          success: true, market: 'stocks', instrument: 'usSNDK', timeframe: '1d',
+          data: [{ time: 1, open: 10, high: 12, low: 9, close: 11, volume: 1 }],
+        } }), abort() {} };
+      },
+      invalidate() {},
+    };
+    await h.window.loadStockKline();
+    assert.equal(ordinaryFetchCalls, 0, 'a bad prefetched identity must fail closed, not cause an immediate second request');
+    assert.equal(h.window.stockChartKlines.length, 0);
+    assert.equal(h.document.getElementById('stock-chart-card').dataset.klineState, 'failed');
+    assert.match(h.document.querySelector('[data-kline-status]').textContent, /标的或周期不匹配/);
+  } finally { h.close(); }
+});
+
+test('stock chart preserves structured empty reasons from prefetched HTTP errors without retrying', async () => {
+  let ordinaryFetchCalls = 0;
+  const h = chartHarness(async () => { ordinaryFetchCalls++; return response(empty); });
+  try {
+    h.window.stockChartAsOf = '';
+    h.window.currentStockSymbol = 'usAAPL';
+    h.window.currentStockKlinePeriod = '1d';
+    h.window.stockChartAdjustment = 'source';
+    h.window.MoneyStockKlinePrefetch = {
+      take() { return { promise: Promise.resolve({ ok: false, status: 422, body: {
+        success: false, data: null, dataStatus: 'empty', reason: '该时点之前没有已发布分区',
+      } }), abort() {} }; },
+      invalidate() {},
+    };
+    await h.window.loadStockKline();
+    assert.equal(ordinaryFetchCalls, 0);
+    assert.equal(h.document.getElementById('stock-chart-card').dataset.klineState, 'empty');
+    assert.equal(h.document.querySelector('[data-kline-status]').textContent, '该时点之前没有已发布分区');
+  } finally { h.close(); }
+});
+
+test('stock chart aborts a consumed prefetch when leaving the stock quotes workspace', async () => {
+  let resolvePrefetch;
+  let abortCalls = 0;
+  const h = chartHarness(async () => response(empty));
+  try {
+    h.window.stockChartAsOf = '';
+    h.window.currentStockSymbol = 'usAAPL';
+    h.window.currentStockKlinePeriod = '1d';
+    h.window.stockChartAdjustment = 'source';
+    h.window.MoneyStockKlinePrefetch = {
+      take() {
+        return {
+          promise: new Promise(resolve => { resolvePrefetch = resolve; }),
+          abort() { abortCalls++; resolvePrefetch({ ok: false, status: 0, body: null, error: new Error('aborted') }); },
+        };
+      },
+      invalidate() {},
+    };
+    const loading = h.window.loadStockKline();
+    await new Promise(resolve => setImmediate(resolve));
+    h.window.dispatchEvent(new h.window.CustomEvent('mm-workspace-context', {
+      detail: { market: 'stocks', workspace: 'events', instrument: 'stock:us:AAPL' },
+    }));
+    await loading;
+    assert.equal(abortCalls, 1);
+    assert.equal(h.window.stockChartKlines.length, 0, 'aborted chart data must not be rendered');
+  } finally { h.close(); }
+});
+
+test('stock chart restores only supported timeframe values from its deep link', () => {
+  for (const [timeframe, expected] of [['1d', '1d'], ['5m', '5m'], ['invalid', '5m']]) {
+    const h = chartHarness(async () => response(empty), `http://localhost/?market=stocks&workspace=stock-quotes&instrument=stock%3Aus%3AAAPL&timeframe=${timeframe}`);
+    try {
+      h.window.currentStockKlinePeriod = '5m';
+      h.window.workspaceNavigationState = new Map([['stocks', { groups: [{ items: [{ id: 'stock-quotes' }] }] }]]);
+      h.window.workspaceFallbackNavigation = () => [];
+      h.window.defaultWorkspaceForMarketScope = () => 'stock-quotes';
+      h.window.stockInstrumentId = symbol => `stock:us:${symbol}`;
+      h.window.workspaceContext = { scope: 'overview', workspace: 'overview', instrument: null };
+      h.window.eval(functionSource('restoreWorkspaceContextFromUrl'));
+      h.window.restoreWorkspaceContextFromUrl();
+      assert.equal(h.window.currentStockKlinePeriod, expected);
+    } finally { h.close(); }
+  }
 });
 
 test('changing stock clears an unsaved cutoff and the previous provider code', async () => {

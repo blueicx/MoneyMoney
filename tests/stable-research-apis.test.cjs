@@ -105,13 +105,15 @@ test('stock K-line UI exposes an explicit data time machine control', () => {
   assert.match(html, /data-chart-as-of/);
   assert.match(html, /applyStockKlineAsOf/);
   assert.match(html, /clearStockKlineAsOf/);
-  assert.match(html, /[?&]asOf=/);
+  assert.match(html, /function stockKlineUrl\(/);
+  assert.match(html, /query\.set\('asOf', asOf\)/);
 });
 
 test('stock K-line sends the selected adjustment while forcing source basis for time-machine and intraday views', () => {
   const html = require('./helpers/dashboard-source.cjs').readDashboardSource();
   assert.match(html, /const requestedAdjustment = stockChartAsOf \|\| stockChartIntradayDate \? 'source' : stockChartAdjustment/);
-  assert.match(html, /adjustmentQuery = '&adjustment='/);
+  assert.match(html, /const adjustment = asOf \|\| intradayDate \? 'source' : String\(state\.adjustment \|\| 'source'\)/);
+  assert.match(html, /adjustment,/);
   assert.match(html, /onAdjustmentChange:value=>/);
   assert.match(html, /stockChartAdjustment==='source'/);
 });

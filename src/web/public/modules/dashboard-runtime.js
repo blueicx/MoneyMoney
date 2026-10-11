@@ -6254,6 +6254,7 @@ function setStockKlinePeriod(period) {
   const nextPeriod = String(period || '1d').toLowerCase();
   if (stockChartIntradayDate && ['1m', '5m', '15m'].includes(nextPeriod)) return setStockIntradayPeriod(nextPeriod);
   if (stockChartIntradayDate) { stockChartIntradayDate = ''; stockChartIntradaySession = null; stockChartDailyContext = null; }
+  if (nextPeriod !== currentStockKlinePeriod) window.MoneyStockKlinePrefetch?.invalidate();
   if (nextPeriod !== currentStockKlinePeriod) stockChartAdjustment = 'source';
   currentStockKlinePeriod = nextPeriod;
   clearStockKlineFocus();
@@ -6340,6 +6341,42 @@ function stockKlineRequestKey(symbol, apiSymbol) {
   const effectiveApiSymbol = apiSymbol !== undefined ? apiSymbol || '' : changedSymbol ? '' : currentStockApiSymbol;
   return JSON.stringify({ symbol: requestedSymbol, apiSymbol: effectiveApiSymbol, period: currentStockKlinePeriod, asOf, intradayDate, intradayPeriod: intradayDate ? stockChartIntradayPeriod : '', adjustment });
 }
+function stockKlineUrl(symbol, period, apiSymbol, state = {}) {
+  const asOf = String(state.asOf || '');
+  const intradayDate = String(state.intradayDate || '');
+  const adjustment = asOf || intradayDate ? 'source' : String(state.adjustment || 'source');
+  const query = new URLSearchParams({
+    symbol: String(symbol || ''),
+    period: String(period || ''),
+    interval: String(period || ''),
+    adjustment,
+  });
+  if (asOf) query.set('asOf', asOf);
+  if (intradayDate) {
+    query.set('date', intradayDate);
+    query.set('intradayPeriod', String(state.intradayPeriod || '5m'));
+  }
+  if (!asOf && !intradayDate && adjustment === 'source' && ['1m', '5m', '15m', '1h', '1d'].includes(String(period || ''))) query.set('chartWindow', '1');
+  if (apiSymbol) query.set('api', String(apiSymbol));
+  return `/api/stock/kline?${query.toString()}`;
+}
+function bindStockKlineWorkspaceLifecycle() {
+  if (window.__mmStockKlineWorkspaceLifecycleBound) return;
+  window.__mmStockKlineWorkspaceLifecycleBound = true;
+  window.addEventListener('mm-workspace-context', event => {
+    const context = event.detail || {};
+    const active = context.market === 'stocks' && context.workspace === 'stock-quotes';
+    const selected = String(context.instrument || '').replace(/^stock:us:/i, '').replace(/^us/i, '').toUpperCase();
+    const current = String(currentStockSymbol || '').replace(/^stock:us:/i, '').replace(/^us/i, '').toUpperCase();
+    if (active && selected === current) return;
+    stockKlineContextRevision++;
+    stockKlineRequestRevision++;
+    stockKlineController?.abort();
+    window.MoneyLiveKline?.stop();
+    if (!active) window.MoneyStockKlinePrefetch?.invalidate();
+  });
+}
+bindStockKlineWorkspaceLifecycle();
 function runStockKlineSingleFlight(key, operation) {
   const existing = stockKlineInFlightRequests.get(key);
   if (existing) return existing;
@@ -6414,15 +6451,31 @@ async function performStockKlineLoad(symbol, name, apiSymbol, options = {}) {
       setStockKlineStatus(`正在加载 ${stockChartIntradayDate ? `${stockChartIntradayDate} ${currentStockKlinePeriod}` : currentStockKlinePeriod}；旧周期图形暂时隐藏…`);
       setStockKlineViewState('loading', `正在加载 ${currentStockName} · ${currentStockKlinePeriod}${stockChartAsOf ? ' · 历史时点' : ''}…`);
     }
-    const asOfQuery = stockChartAsOf ? '&asOf=' + encodeURIComponent(stockChartAsOf) : '';
-    const dateQuery = stockChartIntradayDate ? '&date=' + encodeURIComponent(stockChartIntradayDate) + '&intradayPeriod=' + encodeURIComponent(stockChartIntradayPeriod) : '';
-    const adjustmentQuery = '&adjustment=' + encodeURIComponent(requestedAdjustment);
-    const chartWindowQuery = !stockChartAsOf && !stockChartIntradayDate && requestedAdjustment === 'source' && ['1m','5m','15m','1h','1d'].includes(currentStockKlinePeriod) ? '&chartWindow=1' : '';
+    const url = stockKlineUrl(currentStockSymbol, currentStockKlinePeriod, currentStockApiSymbol, {
+      asOf: stockChartAsOf,
+      intradayDate: stockChartIntradayDate,
+      intradayPeriod: stockChartIntradayPeriod,
+      adjustment: requestedAdjustment,
+    });
+    const prefetched = !live ? window.MoneyStockKlinePrefetch?.take(url) : null;
+    if (prefetched) controller.signal.addEventListener('abort', prefetched.abort, { once: true });
     markMmPerformanceStage('stock-kline-request-start');
-    const res = await fetch('/api/stock/kline?symbol=' + encodeURIComponent(currentStockSymbol) + '&period=' + encodeURIComponent(currentStockKlinePeriod) + '&interval=' + encodeURIComponent(currentStockKlinePeriod) + adjustmentQuery + asOfQuery + dateQuery + chartWindowQuery + (currentStockApiSymbol ? '&api=' + encodeURIComponent(currentStockApiSymbol) : ''), { signal: controller.signal });
-    const d = await res.json();
+    const outcome = prefetched
+      ? await prefetched.promise
+      : await fetch(url, { signal: controller.signal }).then(async response => ({ ok: response.ok, status: response.status, body: await response.json() }));
+    if (outcome.error) throw outcome.error;
+    if (!outcome.ok && outcome.body?.success) throw new Error('股票K线来源返回异常 HTTP 状态');
+    const d = outcome.body;
+    if (!d || typeof d !== 'object') throw new Error('股票K线来源返回无效响应');
     markMmPerformanceStage('stock-kline-response-parsed');
-    if (requestRevision !== stockKlineRequestRevision) return;
+    if (requestRevision !== stockKlineRequestRevision || controller.signal.aborted) return;
+    if (prefetched && d.success) {
+      const normalizeInstrument = value => String(value || '').replace(/^stock:us:/i, '').replace(/^us/i, '').toUpperCase();
+      if (d.market !== 'stocks' || normalizeInstrument(d.instrument) !== normalizeInstrument(currentStockSymbol)
+        || String(d.timeframe || '').toLowerCase() !== String(currentStockKlinePeriod).toLowerCase()) {
+        throw new Error('预取的股票K线标的或周期不匹配，已拒绝显示');
+      }
+    }
     if (live && (controller.signal.aborted || stockChartAsOf || stockChartIntradayDate || stockChartReplayIndex < stockChartKlines.length - 1 || window.stockMoneyKLine?.timer)) return;
     if (!live) loadUnifiedStockData(currentStockSymbol, d);
     if (!d.success || !d.data || !d.data.length) {
@@ -6470,7 +6523,7 @@ async function performStockKlineLoad(symbol, name, apiSymbol, options = {}) {
   } catch(e) {
     if (requestRevision !== stockKlineRequestRevision || controller.signal.aborted) return;
     if (live) { window.MoneyLiveKline?.note('stocks', '来源不可用 · 保留最后快照（缓存）'); return; }
-    currentStockKlineReason = '股票K线来源不可用，请稍后重试';
+    currentStockKlineReason = String(e?.message || '').includes('标的或周期不匹配') ? e.message : '股票K线来源不可用，请稍后重试';
     if (stockChartOverlayConfig.supportResistance) updateStockSupportResistanceStatus('K线来源不可用，暂不能计算支撑/阻力');
     setStockKlineStatus(currentStockKlineReason);
     setStockKlineViewState('failed', currentStockKlineReason);
@@ -9579,6 +9632,14 @@ function restoreWorkspaceContextFromUrl() {
   const allowed = (workspaceNavigationState.get(activeMarketScope)?.groups || workspaceFallbackNavigation(activeMarketScope))
     .some(group => group.items.some(item => item.id === requestedWorkspace));
   activeWorkspaceId = allowed ? requestedWorkspace : defaultWorkspaceForMarketScope(activeMarketScope);
+  if (activeMarketScope === 'stocks' && activeWorkspaceId === 'stock-quotes') {
+    const requestedPeriod = String(params.get('timeframe') || '').trim().toLowerCase();
+    const supportedPeriods = ['1m', '5m', '15m', '1h', '1d', '3d', '5d', '60d', '120d', '1y', '5y'];
+    currentStockKlinePeriod = supportedPeriods.includes(requestedPeriod) ? requestedPeriod : '5m';
+    document.querySelectorAll('.stock-kline-period').forEach(button => {
+      button.classList.toggle('active', button.dataset.klinePeriod === currentStockKlinePeriod);
+    });
+  }
   currentInstrumentId = String(params.get('instrument') || '').trim() || null;
   if (activeMarketScope === 'stocks' && currentInstrumentId) {
     const restoredSymbol = currentInstrumentId.replace(/^stock:us:/i, '').replace(/^us/i, '').toUpperCase();

@@ -6,8 +6,80 @@
   const pending = new Map();
   const pendingStyles = new Map();
   const preloadedScripts = new Set();
+  const stockKlinePeriods = new Set(['1m', '5m', '15m', '1h', '1d', '3d', '5d', '60d', '120d', '1y', '5y']);
+  const pendingStockKlines = new Map();
+  let initialStockKlineRequest = null;
+  let initialStockKlinePrefetchStarted = false;
   let dashboardAuthGate = null;
   let dashboardCoreGate = null;
+
+  function normalizeStockKlinePeriod(value) {
+    const period = String(value || '').trim().toLowerCase();
+    return stockKlinePeriods.has(period) ? period : '5m';
+  }
+
+  function initialStockKlineRequestFromLocation() {
+    const params = new URLSearchParams(location.search);
+    if (params.get('market') !== 'stocks' || params.get('workspace') !== 'stock-quotes'
+      || params.has('sharedWorkspace') || ['asOf', 'focusDate', 'date'].some(key => params.has(key))) return null;
+    const raw = String(params.get('instrument') || '').trim();
+    if (!raw) return null;
+    const symbol = raw.replace(/^stock:us:/i, '').replace(/^us/i, '').toUpperCase();
+    if (!/^[A-Z][A-Z0-9.-]{0,9}$/.test(symbol)) return null;
+    try {
+      if (localStorage.getItem(`moneymoney:kline-as-of:us${symbol}`)) return null;
+    } catch {}
+    const period = normalizeStockKlinePeriod(params.get('timeframe'));
+    const query = new URLSearchParams({ symbol: `us${symbol}`, period, interval: period, adjustment: 'source' });
+    if (['1m', '5m', '15m', '1h', '1d'].includes(period)) query.set('chartWindow', '1');
+    return { instrument: `stock:us:${symbol}`, symbol: `us${symbol}`, period, url: `/api/stock/kline?${query}` };
+  }
+
+  window.MoneyStockKlinePrefetch = {
+    normalizePeriod: normalizeStockKlinePeriod,
+    start(url) {
+      const key = String(url);
+      const existing = pendingStockKlines.get(key);
+      if (existing) return existing.promise;
+      const controller = new AbortController();
+      const promise = fetch(key, { credentials: 'include', cache: 'no-store', signal: controller.signal })
+        .then(async response => ({ ok: response.ok, status: response.status, body: await response.json() }))
+        .catch(error => ({ ok: false, status: 0, body: null, error }));
+      pendingStockKlines.set(key, { controller, promise });
+      return promise;
+    },
+    take(url) {
+      const entry = pendingStockKlines.get(String(url));
+      if (!entry) return null;
+      pendingStockKlines.delete(String(url));
+      return { promise: entry.promise, abort: () => entry.controller.abort() };
+    },
+    invalidate() {
+      for (const entry of pendingStockKlines.values()) entry.controller.abort();
+      pendingStockKlines.clear();
+      initialStockKlineRequest = null;
+    },
+  };
+
+  window.addEventListener('mm-workspace-context', event => {
+    if (!initialStockKlineRequest) return;
+    const context = event.detail || {};
+    const instrument = String(context.instrument || '').trim().toUpperCase();
+    if (context.market !== 'stocks' || context.workspace !== 'stock-quotes'
+      || instrument !== initialStockKlineRequest.instrument.toUpperCase()) {
+      window.MoneyStockKlinePrefetch.invalidate();
+    }
+  });
+
+  function prefetchInitialStockKline() {
+    if (initialStockKlinePrefetchStarted) return;
+    initialStockKlinePrefetchStarted = true;
+    if (typeof fetch !== 'function') return;
+    initialStockKlineRequest = initialStockKlineRequestFromLocation();
+    if (!initialStockKlineRequest) return;
+    markMmPerformanceStage('stock-kline-prefetch-start');
+    window.MoneyStockKlinePrefetch.start(initialStockKlineRequest.url);
+  }
 
   function markMmPerformanceStage(name) {
     if (window.__MM_PERFORMANCE_TRACE__ === true && window.performance?.mark) {
@@ -128,7 +200,10 @@
       // await the session check and core dashboard startup before evaluating a workspace bundle.
       await waitForDashboardAuth();
       markMmPerformanceStage('auth-ready');
-      if (shouldPreloadInitialStockChart(group)) preloadScript(group);
+      if (shouldPreloadInitialStockChart(group)) {
+        preloadScript(group);
+        prefetchInitialStockKline();
+      }
       await waitForDashboardCore();
       if (group === 'contracts') await ensure('charts');
       await ensureStyle(group);

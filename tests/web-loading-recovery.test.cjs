@@ -307,6 +307,86 @@ test('an explicit workspace deep link waits for auth and core dashboard readines
   }, 'shared snapshots choose their own restored context');
 });
 
+test('authenticated stock chart deep links prefetch exactly their current symbol and timeframe before core readiness', async () => {
+  const loader = fs.readFileSync(path.join('src', 'web', 'public', 'modules', 'workspace-loader.js'), 'utf8')
+    .replace('__WORKSPACE_MANIFEST__', JSON.stringify({ modules: { charts: '/assets/workspace-charts.fixture.js' }, styles: {} }));
+  const dom = new JSDOM('<!doctype html><html><head></head><body></body></html>', {
+    url: 'http://localhost/?market=stocks&workspace=stock-quotes&instrument=stock%3Aus%3AAAPL&timeframe=1d',
+    runScripts: 'outside-only',
+  });
+  let resolveAuth;
+  let resolveKline;
+  const requests = [];
+  dom.window.fetch = (url, options) => {
+    requests.push([String(url), options]);
+    return new Promise(resolve => { resolveKline = resolve; });
+  };
+  dom.window.mm_authReady = new Promise(resolve => { resolveAuth = resolve; });
+  try {
+    dom.window.eval(loader);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.equal(requests.filter(([url]) => url.startsWith('/api/stock/kline')).length, 0,
+      'K-line request must wait for auth');
+    resolveAuth({ loggedIn: true });
+    await new Promise(resolve => setTimeout(resolve, 0));
+    const klineRequests = requests.filter(([url]) => url.startsWith('/api/stock/kline'));
+    assert.equal(klineRequests.length, 1, 'the current chart should start one request before core readiness');
+    const [url, options] = klineRequests[0];
+    const query = new URL(url, 'http://localhost').searchParams;
+    assert.equal(query.get('symbol'), 'usAAPL');
+    assert.equal(query.get('period'), '1d');
+    assert.equal(query.get('interval'), '1d');
+    assert.equal(options.credentials, 'include');
+    assert.equal(options.cache, 'no-store');
+    resolveKline({ ok: true, status: 200, json: async () => ({ success: false, reason: 'test response' }) });
+    await new Promise(resolve => setTimeout(resolve, 0));
+    const handoff = dom.window.MoneyStockKlinePrefetch.take(url);
+    assert.ok(handoff, 'the chart can take the already-started response');
+    assert.equal((await handoff.promise).body.reason, 'test response');
+    assert.equal(dom.window.MoneyStockKlinePrefetch.take(url), null, 'the response is consumable only once');
+    assert.equal(dom.window.document.querySelector('script[data-workspace-group="charts"]'), null,
+      'the prefetch may overlap core startup but must not execute the chart bundle');
+  } finally { dom.window.close(); }
+});
+
+test('stock K-line prefetch excludes ambiguous, shared, historical, and non-chart contexts', async () => {
+  const loader = fs.readFileSync(path.join('src', 'web', 'public', 'modules', 'workspace-loader.js'), 'utf8')
+    .replace('__WORKSPACE_MANIFEST__', JSON.stringify({ modules: { charts: '/assets/workspace-charts.fixture.js', events: '/assets/events.js' }, styles: {} }));
+  const run = async (url, savedAsOf = '') => {
+    const dom = new JSDOM('<!doctype html><html><head></head><body></body></html>', { url, runScripts: 'outside-only' });
+    let resolveAuth;
+    const requests = [];
+    dom.window.fetch = (value, options) => { requests.push([String(value), options]); return new Promise(() => {}); };
+    if (savedAsOf) dom.window.localStorage.setItem('moneymoney:kline-as-of:usAAPL', savedAsOf);
+    dom.window.mm_authReady = new Promise(resolve => { resolveAuth = resolve; });
+    dom.window.eval(loader);
+    resolveAuth({ loggedIn: true });
+    await new Promise(resolve => setTimeout(resolve, 0));
+    const result = requests.filter(([value]) => value.startsWith('/api/stock/kline'));
+    dom.window.close();
+    return result;
+  };
+  const base = 'http://localhost/?market=stocks&workspace=stock-quotes&instrument=stock%3Aus%3AAAPL';
+  for (const suffix of ['', '&timeframe=invalid']) {
+    const result = await run(base + suffix);
+    assert.equal(result.length, 1);
+    assert.equal(new URL(result[0][0], 'http://localhost').searchParams.get('period'), '5m');
+  }
+  const excluded = [
+    'http://localhost/?market=stocks&workspace=stock-quotes',
+    base + '&sharedWorkspace=public-1',
+    base + '&asOf=2026-10-01T00%3A00%3A00Z',
+    base + '&focusDate=2026-10-01',
+    base + '&date=2026-10-01',
+    'http://localhost/?market=stocks&workspace=events&instrument=stock%3Aus%3AAAPL',
+    'http://localhost/?market=crypto&workspace=stock-quotes&instrument=BTCUSDT',
+    'http://localhost/?market=stocks&workspace=stock-quotes&instrument=bad%2Fsymbol',
+  ];
+  for (const url of excluded) assert.equal((await run(url)).length, 0, `must not prefetch ${url}`);
+  assert.equal((await run(base, '2026-10-01T23:59:59.999Z')).length, 0,
+    'a locally restored asOf context must not receive ordinary live bars');
+});
+
 test('the workspace loader waits through deferred auth-client execution when its promise is not assigned yet', async () => {
   const loader = fs.readFileSync(path.join('src', 'web', 'public', 'modules', 'workspace-loader.js'), 'utf8')
     .replace('__WORKSPACE_MANIFEST__', JSON.stringify({ modules: { charts: '/assets/workspace-charts.fixture.js' }, styles: {} }));
@@ -343,11 +423,12 @@ test('workspace startup stages are marked only when browser performance tracing 
   const loader = fs.readFileSync(path.join('src', 'web', 'public', 'modules', 'workspace-loader.js'), 'utf8')
     .replace('__WORKSPACE_MANIFEST__', JSON.stringify({ modules: { charts: '/assets/workspace-charts.fixture.js' }, styles: {} }));
   const dom = new JSDOM('<!doctype html><html><head></head><body></body></html>', {
-    url: 'http://localhost/?market=stocks&workspace=stock-quotes', runScripts: 'outside-only',
+    url: 'http://localhost/?market=stocks&workspace=stock-quotes&instrument=usAAPL', runScripts: 'outside-only',
   });
   let resolveAuth;
   const performanceMarks = [];
   try {
+    dom.window.fetch = () => new Promise(() => {});
     dom.window.__MM_PERFORMANCE_TRACE__ = true;
     Object.defineProperty(dom.window.performance, 'mark', { configurable: true, value: name => performanceMarks.push({ name }) });
     Object.defineProperty(dom.window.performance, 'getEntriesByType', { configurable: true, value: type => type === 'mark' ? performanceMarks : [] });
@@ -358,8 +439,10 @@ test('workspace startup stages are marked only when browser performance tracing 
     const beforeCore = performanceMarks.map(entry => entry.name);
     assert.ok(beforeCore.includes('moneymoney:auth-ready'));
     assert.ok(beforeCore.includes('moneymoney:chart-preload-start'));
+    assert.ok(beforeCore.includes('moneymoney:stock-kline-prefetch-start'));
     assert.ok(beforeCore.indexOf('moneymoney:auth-ready') < beforeCore.indexOf('moneymoney:chart-preload-start'));
-    assert.equal(beforeCore.includes('moneymoney:dashboard-core-ready'), false);
+    assert.equal(beforeCore.includes('moneymoney:dashboard-core-ready'), false,
+      'the prefetch must already have started while core startup is still pending');
     dom.window.dispatchEvent(new dom.window.Event('mm-dashboard-core-ready'));
     await new Promise(resolve => setTimeout(resolve, 0));
     const chartScript = dom.window.document.querySelector('script[data-workspace-group="charts"]');
@@ -590,6 +673,10 @@ test('loading benchmark uses an isolated real-data page and waits for a settled 
   assert.match(benchmark, /MONEYMONEY_BENCHMARK_NETWORK/,
     'the benchmark must separate natural-network diagnostics from the controlled weak-network run');
   assert.ok(benchmark.includes('apiRequestCounts[pathname], 1'), 'the benchmark fails if stock startup duplicates scoped data requests');
+  assert.match(benchmark, /stock-kline-prefetch-start/,
+    'the browser benchmark verifies the authenticated request starts before core readiness');
+  assert.match(benchmark, /prefetchStart\.atMs < coreReady\.atMs/);
+  assert.match(benchmark, /timeframe=1d/);
   assert.match(benchmark, /stock-indices-settled/,
     'the benchmark must wait for the slower index card before deciding whether a late callback restarted the chart');
   const liveKlineSmoke = fs.readFileSync('scripts/live-kline-smoke.cjs', 'utf8');

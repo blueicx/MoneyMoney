@@ -167,7 +167,9 @@ const median = values => [...values].sort((a, b) => a - b)[Math.floor(values.len
           console.log(`benchmark sample start: viewport=${viewport.width} run=${run + 1} mode=${temperature}`);
           requests.length = 0;
           apiTimings.length = 0;
-          await page.goto(base + '/?market=stocks&workspace=stock-quotes&instrument=AAPL', { waitUntil: 'commit' });
+          klineResponseMetadata.length = 0;
+          klineResponseTasks.length = 0;
+          await page.goto(base + '/?market=stocks&workspace=stock-quotes&instrument=AAPL&timeframe=1d', { waitUntil: 'commit' });
           console.log(`benchmark navigation committed: viewport=${viewport.width} run=${run + 1} mode=${temperature}`);
           await waitForPageCondition(page, () => !!window.mm_authReady && window.mm_isLoggedIn === true
             && document.getElementById('market-workspace-shell')?.dataset.marketScope === 'stocks'
@@ -239,6 +241,14 @@ const median = values => [...values].sort((a, b) => a - b)[Math.floor(values.len
           result.apiRequests = requests.map(request => request.pathname);
           result.apiRequestCounts = Object.fromEntries([...new Set(result.apiRequests)].map(path => [path, result.apiRequests.filter(request => request === path).length]));
           assert.ok(result.apiRequests.includes('/api/stock/kline'), 'chart readiness must follow the scoped K-line request');
+          const prefetchStart = result.phaseMarks.find(mark => mark.name === 'moneymoney:stock-kline-prefetch-start');
+          const coreReady = result.phaseMarks.find(mark => mark.name === 'moneymoney:dashboard-core-ready');
+          assert.ok(prefetchStart && coreReady && prefetchStart.atMs < coreReady.atMs,
+            'the authenticated K-line request must start before dashboard core readiness');
+          const chartRequest = requests.find(request => request.pathname === '/api/stock/kline');
+          assert.equal(new URL(chartRequest.url, base).searchParams.get('period'), '1d',
+            'the prefetched request must match the deep-linked chart timeframe');
+          result.prefetchStartedBeforeCore = true;
           console.log(`benchmark sample ready: viewport=${viewport.width} run=${run + 1} mode=${temperature} chart=${Math.round(result.chartReadyMs)}ms`);
           samples.push({ viewport: viewport.width, run, temperature, ...result });
         }

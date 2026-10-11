@@ -98,7 +98,9 @@ describe('K-Line Upgrade & Advanced Capabilities', () => {
     assert.equal(toolbar.querySelectorAll('[data-kline-range]').length, 0, 'Range must not be a second selector');
     assert.ok(toolbar.querySelector('[data-chart-fullscreen="stocks"]'));
     assert.match(html, /setStockKlinePeriod\(['"]5m['"]\)/);
-    assert.match(html, /interval='?\s*\+?\s*encodeURIComponent\(currentStockKlinePeriod\)/);
+    assert.match(html, /function stockKlineUrl\(/);
+    assert.match(html, /interval:\s*String\(period \|\| ''\)/,
+      'the shared URL builder must send the selected period as the API interval');
     assert.doesNotMatch(html, /setStockKlineRange\(/);
   });
 
