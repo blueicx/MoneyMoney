@@ -208,6 +208,7 @@ export function createGuruHoldingsRouter(
             previousShares: holder.previousShares,
             shareDelta: holder.shareDelta,
             change: holder.change,
+            reason: holder.reason || null,
             sourceUrl: /^https:\/\//i.test(holder.sourceUrl) ? holder.sourceUrl : null,
             previousSourceUrl: /^https:\/\//i.test(String(holder.previousSourceUrl || '')) ? holder.previousSourceUrl : null,
           })),

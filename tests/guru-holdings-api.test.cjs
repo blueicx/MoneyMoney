@@ -156,7 +156,7 @@ test('自选13F变化只读取已核验的美股身份并保留机构和报告�
           manager: { cik: '1067983', filingName: 'Berkshire Hathaway Inc.', personAssociation: 'Warren Buffett' },
           reportPeriod: '2026-06-30', filedAt: '2026-08-14', sourceUrl: 'https://www.sec.gov/Archives/aapl-current',
           previousReportPeriod: '2026-03-31', previousFiledAt: '2026-05-15', previousSourceUrl: 'https://www.sec.gov/Archives/aapl-previous',
-          shares: 100, previousShares: 80, shareDelta: 20, change: 'increased',
+          shares: 100, previousShares: 80, shareDelta: null, change: 'unavailable', reason: '报告期非相邻或无法核验，持仓变化不可比较。',
         }],
       });
       return envelope({ instrument: symbol, dataStatus: 'unavailable', mapping: null, holders: [], reason: '没有已核验的 CUSIP/类别映射' });
@@ -175,7 +175,9 @@ test('自选13F变化只读取已核验的美股身份并保留机构和报告�
     const row = payload.symbols[0].holders[0];
     assert.equal(row.previousReportPeriod, '2026-03-31');
     assert.equal(row.reportPeriod, '2026-06-30');
-    assert.equal(row.shareDelta, 20);
+    assert.equal(row.shareDelta, null);
+    assert.equal(row.change, 'unavailable');
+    assert.match(row.reason, /报告期非相邻/);
     assert.equal(row.sourceUrl, 'https://www.sec.gov/Archives/aapl-current');
     assert.equal('totalShares' in payload, false);
     assert.equal('aggregateShares' in payload, false);

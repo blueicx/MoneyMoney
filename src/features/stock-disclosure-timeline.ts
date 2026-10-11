@@ -9,6 +9,9 @@ export interface Form4TimelineTrade {
   ownerName: string;
   ownerTitleZh?: string;
   action: 'BUY' | 'SELL' | 'OTHER';
+  securityType?: 'stock' | 'derivative';
+  securityTitle?: string;
+  underlyingSecurityTitle?: string;
   shares: number;
   priceUsd: number;
   sourceUrl?: string;
@@ -24,6 +27,7 @@ export interface Form13FTimelineChange {
   shares?: number | null;
   shareDelta?: number | null;
   change: DisclosureChange;
+  reason?: string;
   sourceUrl?: string;
 }
 
@@ -73,6 +77,7 @@ function form13fChangeText(row: Form13FTimelineChange): string | null {
   if (row.change === 'increased') return `增持${deltaText ? ` ${deltaText}` : ''}`;
   if (row.change === 'reduced') return `减持${deltaText ? ` ${deltaText}` : ''}`;
   if (row.change === 'not-disclosed') return '上一报告期有披露，本期未披露（不等于清仓）';
+  if (row.change === 'unavailable') return `持仓变化不可比较：${String(row.reason || '缺少可比报告期或身份信息')}`;
   return null;
 }
 
@@ -100,17 +105,20 @@ export function mergeStockDisclosureTimeline(input: StockDisclosureTimelineInput
     const transactionDate = filedAt && isoAtOrBefore(trade.transactionDate, Date.parse(filedAt));
     const url = officialSecUrl(trade.sourceUrl);
     if (!filedAt || !transactionDate || !url) continue;
+    const derivative = trade.securityType === 'derivative';
     const action = trade.action === 'BUY' ? '买入' : '卖出';
     const price = Number(trade.priceUsd);
     const details = [
       `交易日 ${transactionDate.slice(0, 10)}`,
-      `${formatShares(trade.shares)} 股`,
-      Number.isFinite(price) && price > 0 ? `约 $${price.toFixed(2)}` : '',
+      derivative ? `申报数量 ${formatShares(trade.shares)} 份` : `${formatShares(trade.shares)} 股`,
+      derivative ? String(trade.securityTitle || '衍生证券申报') : '',
+      derivative && trade.underlyingSecurityTitle ? `标的 ${String(trade.underlyingSecurityTitle)}` : '',
+      !derivative && Number.isFinite(price) && price > 0 ? `约 $${price.toFixed(2)}` : '',
       String(trade.ownerTitleZh || '').trim(),
     ].filter(Boolean).join(' · ');
     items.push({
       kind: 'event', at: filedAt, occurredAt: filedAt, publishedAt: filedAt, retrievedAt: form4RetrievedAt,
-      title: `内部人${action} · ${String(trade.ownerName || '申报人').trim()} · ${details}`,
+      title: `${derivative ? '内部人衍生证券申报' : `内部人${action}`} · ${String(trade.ownerName || '申报人').trim()} · ${details}`,
       source: 'SEC EDGAR Form 4', url, scope: 'stocks', instrumentId: input.instrument,
     });
   }

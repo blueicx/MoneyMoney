@@ -60,6 +60,7 @@ export interface GuruHoldingChange {
   currentShares: number | null;
   shareDelta: number | null;
   change: GuruHoldingChangeKind;
+  reason?: string;
 }
 
 export interface Guru13FCoverPage {
@@ -104,6 +105,7 @@ export interface GuruStockHolderRow {
   previousShares: number | null;
   shareDelta: number | null;
   change: GuruHoldingChangeKind;
+  reason?: string;
 }
 
 export interface GuruStockHoldersSnapshot {
@@ -130,6 +132,7 @@ export interface GuruConsensusManagerRow {
   previousShares: number | null;
   shareDelta: number | null;
   change: GuruHoldingChangeKind;
+  reason?: string;
 }
 
 export interface GuruConsensusRow {
@@ -216,6 +219,37 @@ function parseNonNegativeNumber(value: string | null, label: string): number {
 
 function positionIdentity(position: Pick<Guru13FPosition, 'cusip' | 'classTitle' | 'putCall'>): string {
   return [String(position.cusip || '').trim().toUpperCase(), String(position.classTitle || '').trim().toUpperCase(), String(position.putCall || '').trim().toUpperCase()].join('\u0000');
+}
+
+function quarterIndex(reportPeriod: string | null | undefined): number | null {
+  const match = /^(\d{4})-(03-31|06-30|09-30|12-31)$/.exec(String(reportPeriod || ''));
+  if (!match) return null;
+  const year = Number(match[1]);
+  const quarter = ({ '03-31': 1, '06-30': 2, '09-30': 3, '12-31': 4 } as const)[match[2] as '03-31' | '06-30' | '09-30' | '12-31'];
+  return year * 4 + quarter - 1;
+}
+
+function reportPeriodComparisonReason(previous: Guru13FReport | null, current: Guru13FReport | null): string | null {
+  if (!previous || !current || (!previous.reportPeriod && !current.reportPeriod)) return null;
+  const previousQuarter = quarterIndex(previous.reportPeriod);
+  const currentQuarter = quarterIndex(current.reportPeriod);
+  return previousQuarter != null && currentQuarter != null && currentQuarter - previousQuarter === 1
+    ? null
+    : '报告期非相邻或无法核验，持仓变化不可比较。';
+}
+
+function unavailableChanges(current: Guru13FReport, reason: string): GuruHoldingChange[] {
+  return current.positions.map(position => ({
+    issuerName: position.issuerName,
+    classTitle: position.classTitle,
+    cusip: position.cusip,
+    putCall: position.putCall,
+    previousShares: null,
+    currentShares: position.shares,
+    shareDelta: null,
+    change: 'unavailable',
+    reason,
+  }));
 }
 
 function hasDuplicateIdentities(positions: Guru13FPosition[]): boolean {
@@ -332,41 +366,16 @@ export function apply13FAmendment(base: Guru13FReport, amendment: Guru13FReport)
 export function compare13FReports(previous: Guru13FReport | null, current: Guru13FReport): GuruHoldingChange[] {
   if (current.comparisonAvailable === false || current.amendmentType === 'UNKNOWN'
     || (previous && (previous.comparisonAvailable === false || previous.amendmentType === 'UNKNOWN'))) {
-    return current.positions.map(position => ({
-      issuerName: position.issuerName,
-      classTitle: position.classTitle,
-      cusip: position.cusip,
-      putCall: position.putCall,
-      previousShares: null,
-      currentShares: position.shares,
-      shareDelta: null,
-      change: 'unavailable',
-    }));
+    return unavailableChanges(current, '报告包含无法安全比较的修订或证券身份信息。');
   }
 
   if (!previous) {
-    return current.positions.map(position => ({
-      issuerName: position.issuerName,
-      classTitle: position.classTitle,
-      cusip: position.cusip,
-      putCall: position.putCall,
-      previousShares: null,
-      currentShares: position.shares,
-      shareDelta: null,
-      change: 'unavailable',
-    }));
+    return unavailableChanges(current, '缺少前一期报告，持仓变化不可比较。');
   }
+  const periodReason = reportPeriodComparisonReason(previous, current);
+  if (periodReason) return unavailableChanges(current, periodReason);
   if (hasDuplicateIdentities(previous.positions) || hasDuplicateIdentities(current.positions)) {
-    return current.positions.map(position => ({
-      issuerName: position.issuerName,
-      classTitle: position.classTitle,
-      cusip: position.cusip,
-      putCall: position.putCall,
-      previousShares: null,
-      currentShares: position.shares,
-      shareDelta: null,
-      change: 'unavailable',
-    }));
+    return unavailableChanges(current, '同一报告存在重复证券身份，持仓变化不可比较。');
   }
 
   const previousByIdentity = new Map(previous.positions.map(position => [positionIdentity(position), position]));
@@ -424,6 +433,7 @@ export function aggregateGuruConsensus(
         previousShares: change.previousShares,
         shareDelta: change.shareDelta,
         change: change.change,
+        ...(change.reason ? { reason: change.reason } : {}),
       });
     }
   }
@@ -527,6 +537,8 @@ export function createGuruHoldingsService(overrides: Partial<GuruHoldingsService
     const reports = effectiveGuruReports(savedReports);
     const latestReport = reports[0] || null;
     const previousReport = reports[1] || null;
+    const changes = latestReport ? compare13FReports(previousReport, latestReport) : [];
+    const reportPeriodIssue = reportPeriodComparisonReason(previousReport, latestReport);
     const state = store.get<GuruRefreshState>(guruStatusKey(cik));
     const updatedAt = latestReport?.fetchedAt || state?.checkedAt || null;
     const isFresh = cacheIsFresh(updatedAt, now().getTime());
@@ -553,6 +565,9 @@ export function createGuruHoldingsService(overrides: Partial<GuruHoldingsService
       reason = latestReport.comparisonAvailable === false
         ? '当前期包含无法安全合并的 13F 修订，持仓变化不可比较。'
         : '申报金额单位无法确认，已隐藏市值权重。';
+    } else if (reportPeriodIssue) {
+      dataStatus = 'partial';
+      reason = reportPeriodIssue;
     } else {
       dataStatus = 'cached';
     }
@@ -568,7 +583,7 @@ export function createGuruHoldingsService(overrides: Partial<GuruHoldingsService
       manager: managerDefinition(cik, latestReport?.managerName || null),
       latestReport,
       previousReport,
-      changes: latestReport ? compare13FReports(previousReport, latestReport) : [],
+      changes,
       caveats: GURU_POSITION_CAVEATS.slice(),
     };
   }
@@ -713,23 +728,29 @@ export function createGuruHoldingsService(overrides: Partial<GuruHoldingsService
           previousShares: previousPosition?.shares ?? null,
           shareDelta: change.shareDelta,
           change: change.change,
+          ...(change.reason ? { reason: change.reason } : {}),
         });
       }
     }
     holders.sort((a, b) => (b.shares || 0) - (a.shares || 0) || a.manager.filingName.localeCompare(b.manager.filingName));
     const statusRank: Record<GuruHoldingsDataStatus, number> = { cached: 0, empty: 1, delayed: 2, partial: 3, unavailable: 4 };
     const worstStatus = snapshots.map(item => item.dataStatus).sort((a, b) => statusRank[b] - statusRank[a])[0] || 'unavailable';
+    const hasIncomparableRows = holders.some(row => Boolean(row.reason));
     const dataStatus: GuruHoldingsDataStatus = holders.length
-      ? (worstStatus === 'cached' ? 'cached' : worstStatus === 'delayed' ? 'delayed' : 'partial')
+      ? (hasIncomparableRows || worstStatus === 'partial' || worstStatus === 'unavailable' ? 'partial' : worstStatus === 'delayed' ? 'delayed' : 'cached')
       : snapshots.some(item => item.latestReport)
-        ? (worstStatus === 'delayed' ? 'delayed' : 'empty')
+        ? (worstStatus === 'delayed' ? 'delayed' : worstStatus === 'partial' ? 'partial' : 'empty')
         : snapshots.every(item => item.dataStatus === 'empty') ? 'empty' : 'unavailable';
     const updatedAt = snapshots.map(item => item.updatedAt).filter((value): value is string => !!value).sort().at(-1) || null;
     const reason = holders.length
-      ? (dataStatus === 'partial' ? '部分申报主体的数据不可用或修订类型不明；表中仅列出可核验的披露。' : dataStatus === 'delayed' ? '结果来自超过 24 小时未检查的 SEC 缓存。' : null)
+      ? (dataStatus === 'partial'
+        ? holders.find(row => row.reason)?.reason || snapshots.find(item => item.reason)?.reason || '部分申报主体的数据不可用或修订类型不明；表中仅列出可核验的披露。'
+        : dataStatus === 'delayed' ? '结果来自超过 24 小时未检查的 SEC 缓存。' : null)
       : dataStatus === 'empty'
         ? '已读取所选 13F 报告，但当前报告未披露该 CUSIP/类别；这不等同于清仓。'
-        : '没有可用的 SEC 13F 快照；请检查来源状态或由管理员刷新。';
+        : dataStatus === 'partial'
+          ? snapshots.find(item => item.reason)?.reason || '报告期不可比较，未计算持仓变化。'
+          : '没有可用的 SEC 13F 快照；请检查来源状态或由管理员刷新。';
     return {
       market: 'stocks', instrument: symbol, dataStatus, source: GURU_SOURCE, updatedAt, reason,
       evidenceRefs: [...new Set(holders.map(row => row.sourceUrl).filter(Boolean))],

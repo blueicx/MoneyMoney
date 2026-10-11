@@ -17,6 +17,9 @@ export interface InsiderTrade {
   priceUsd: number;
   valueUsd: number;
   plan10b5: boolean;
+  securityType?: 'stock' | 'derivative';
+  securityTitle?: string;
+  underlyingSecurityTitle?: string;
   sourceUrl?: string;
 }
 
@@ -32,6 +35,7 @@ export interface InsiderRadarResult {
   dataStatus: 'live' | 'partial' | 'empty' | 'unavailable';
   reason: string | null;
   transactions: InsiderTrade[];
+  derivativeTransactions?: number;
   ownerCount: number;
   buyCount: number;
   sellCount: number;
@@ -66,6 +70,7 @@ function xmlText(block: string, tag: string): string {
   if (!match) return '';
   return match[1]
     .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1')
+    .replace(/<[^>]*>/g, '')
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
     .replace(/&quot;/g, '"')
@@ -135,10 +140,10 @@ interface SubmissionsPayload {
   };
 }
 
-function parseTransactions(xml: string, filedAt: string, sourceUrl?: string): InsiderTrade[] {
-  const tableMatch = xml.match(/<nonDerivativeTable>([\s\S]*?)<\/nonDerivativeTable>/i);
+function parseTransactionTable(xml: string, tableName: 'nonDerivativeTable' | 'derivativeTable', rowName: 'nonDerivativeTransaction' | 'derivativeTransaction', filedAt: string, sourceUrl?: string): InsiderTrade[] {
+  const tableMatch = xml.match(new RegExp(`<${tableName}\\b[^>]*>([\\s\\S]*?)<\\/${tableName}\\s*>`, 'i'));
   if (!tableMatch) return [];
-
+  const securityType = tableName === 'derivativeTable' ? 'derivative' : 'stock';
   const ownerName = xmlText(xml, 'rptOwnerName');
   const officerTitle = xmlText(xml, 'officerTitle');
   const relationships = [
@@ -150,10 +155,10 @@ function parseTransactions(xml: string, filedAt: string, sourceUrl?: string): In
   const plan = /<aff10b5One>\s*true\s*<\/aff10b5One>/i.test(xml) ||
     /rule 10b5-1/i.test(xml);
 
-  const segments = tableMatch[1].split(/<nonDerivativeTransaction>/i).slice(1);
+  const segments = tableMatch[1].split(new RegExp(`<${rowName}\\b[^>]*>`, 'i')).slice(1);
   const trades: InsiderTrade[] = [];
   for (const rawSegment of segments) {
-    const segment = rawSegment.split(/<\/nonDerivativeTransaction>/i)[0];
+    const segment = rawSegment.split(new RegExp(`<\\/${rowName}\\s*>`, 'i'))[0];
     const dateBlock = segment.match(/<transactionDate>([\s\S]*?)<\/transactionDate>/i)?.[1] || '';
     const codingBlock = segment.match(/<transactionCoding>([\s\S]*?)<\/transactionCoding>/i)?.[1] || '';
     const sharesBlock = segment.match(/<transactionShares>([\s\S]*?)<\/transactionShares>/i)?.[1] || '';
@@ -165,7 +170,7 @@ function parseTransactions(xml: string, filedAt: string, sourceUrl?: string): In
     const ad = xmlText(adBlock, 'value').toUpperCase();
     const action = ad === 'A' ? 'BUY' : ad === 'D' ? 'SELL' : 'OTHER';
 
-    if (!shares || !['BUY', 'SELL'].includes(action)) continue;
+    if (!shares || (securityType === 'stock' && !['BUY', 'SELL'].includes(action))) continue;
 
     trades.push({
       filedAt,
@@ -175,13 +180,25 @@ function parseTransactions(xml: string, filedAt: string, sourceUrl?: string): In
       action: action as InsiderTrade['action'],
       code: xmlText(codingBlock, 'transactionCode').toUpperCase(),
       shares: round(shares, 0),
-      priceUsd: round(price, 4),
-      valueUsd: round(shares * price, 0),
+      priceUsd: securityType === 'derivative' ? 0 : round(price, 4),
+      valueUsd: securityType === 'derivative' ? 0 : round(shares * price, 0),
       plan10b5: plan,
+      securityType,
+      securityTitle: xmlText(segment, 'securityTitle') || undefined,
+      ...(securityType === 'derivative' && xmlText(segment, 'underlyingSecurityTitle')
+        ? { underlyingSecurityTitle: xmlText(segment, 'underlyingSecurityTitle') } : {}),
       ...(sourceUrl ? { sourceUrl } : {}),
     });
   }
   return trades;
+}
+
+export function parseForm4Transactions(xml: string, filedAt: string, sourceUrl?: string): InsiderTrade[] {
+  if (typeof xml !== 'string') return [];
+  return [
+    ...parseTransactionTable(xml, 'nonDerivativeTable', 'nonDerivativeTransaction', filedAt, sourceUrl),
+    ...parseTransactionTable(xml, 'derivativeTable', 'derivativeTransaction', filedAt, sourceUrl),
+  ];
 }
 
 function buildSummary(
@@ -193,17 +210,20 @@ function buildSummary(
   'ownerCount' | 'buyCount' | 'sellCount' | 'buyValueUsd' | 'sellValueUsd' |
   'netValueUsd' | 'planSellRatio' | 'confidence' | 'signalZh' | 'adviceZh'
 > {
-  const owners = new Set(transactions.map(trade => trade.ownerName));
-  const buys = transactions.filter(trade => trade.action === 'BUY');
-  const sells = transactions.filter(trade => trade.action === 'SELL');
+  const commonStockTransactions = transactions.filter(trade => trade.securityType !== 'derivative');
+  const owners = new Set(commonStockTransactions.map(trade => trade.ownerName));
+  const buys = commonStockTransactions.filter(trade => trade.action === 'BUY');
+  const sells = commonStockTransactions.filter(trade => trade.action === 'SELL');
   const buyValue = buys.reduce((sum, trade) => sum + trade.valueUsd, 0);
   const sellValue = sells.reduce((sum, trade) => sum + trade.valueUsd, 0);
   const netValue = buyValue - sellValue;
   const plannedSells = sells.filter(trade => trade.plan10b5).length;
   const planSellRatio = sells.length ? plannedSells / sells.length : 0;
 
-  let signalZh = '内部人买卖相对平衡';
-  let adviceZh = '没有明显一边倒的官方申报信号；仍应把技术面、基本面和财报时间放在一起判断。';
+  let signalZh = commonStockTransactions.length ? '内部人买卖相对平衡' : '暂无直接普通股买卖样本';
+  let adviceZh = commonStockTransactions.length
+    ? '没有明显一边倒的官方申报信号；仍应把技术面、基本面和财报时间放在一起判断。'
+    : '衍生证券申报单独展示，不计入普通股买卖净额。';
   if (sellValue >= 2_000_000 && sells.length >= 3 && netValue < 0) {
     signalZh = '内部人卖出偏多';
     adviceZh = planSellRatio >= 0.6
@@ -316,7 +336,7 @@ export async function getInsiderRadar(symbolInput: string): Promise<InsiderRadar
         try {
           const sourceUrl = `https://www.sec.gov/Archives/edgar/data/${Number(record.cik)}/${noDash}/${encodeURIComponent(candidate)}`;
           const xml = await fetchText(sourceUrl);
-          if (/<ownershipDocument/i.test(xml)) return parseTransactions(xml, entry.filingDate, sourceUrl);
+          if (/<ownershipDocument/i.test(xml)) return parseForm4Transactions(xml, entry.filingDate, sourceUrl);
           lastError = new Error(`Unexpected Form 4 payload: ${candidate}`);
         } catch (error) {
           lastError = error;
@@ -346,6 +366,7 @@ export async function getInsiderRadar(symbolInput: string): Promise<InsiderRadar
     failedFilings,
     ...coverage,
     transactions: transactions.slice(0, 12),
+    derivativeTransactions: transactions.filter(trade => trade.securityType === 'derivative').length,
     ...summary,
     sources: ['SEC EDGAR Form 4', 'SEC Company Tickers'],
   };

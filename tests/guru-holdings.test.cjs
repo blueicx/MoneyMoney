@@ -97,6 +97,47 @@ test('quarter comparison uses disclosed shares, not changing market value', () =
   assert.equal(row.shareDelta, 20);
 });
 
+test('13F share changes are unavailable when an intervening quarter report is missing', () => {
+  const previous = { reportPeriod: '2026-03-31', positions: [{ cusip: '037833100', classTitle: 'COM', shares: 100 }] };
+  const current = { reportPeriod: '2026-09-30', positions: [{ cusip: '037833100', classTitle: 'COM', shares: 120 }] };
+  const row = compare13FReports(previous, current)[0];
+
+  assert.equal(row.change, 'unavailable');
+  assert.equal(row.shareDelta, null);
+  assert.match(row.reason, /报告期.*非相邻/);
+});
+
+test('stock-holder service preserves a non-adjacent report warning instead of publishing a delta', async () => {
+  const cik = '0001067983';
+  const now = new Date('2026-10-01T00:00:00.000Z');
+  const prior = {
+    cik, accession: '0001067983-26-000001', reportPeriod: '2026-03-31', filedAt: '2026-05-14', form: '13F-HR',
+    sourceUrl: 'https://www.sec.gov/Archives/edgar/data/1067983/000106798326000001/',
+    fetchedAt: now.toISOString(), contentHash: 'sha256:q1', reportedValueUnit: 'usd',
+    positions: [{ issuerName: 'APPLE INC', classTitle: 'COM', cusip: '037833100', shares: 100, reportedValue: 20_000, reportedValueUsd: 20_000, putCall: null, investmentDiscretion: 'SOLE' }],
+  };
+  const current = {
+    ...prior, accession: '0001067983-26-000003', reportPeriod: '2026-09-30', filedAt: '2026-10-01',
+    sourceUrl: 'https://www.sec.gov/Archives/edgar/data/1067983/000106798326000003/',
+    contentHash: 'sha256:q3', positions: [{ ...prior.positions[0], shares: 120, reportedValue: 24_000, reportedValueUsd: 24_000 }],
+  };
+  const service = createGuruHoldingsService({
+    repository: { listGuru13FReports: queryCik => queryCik === cik ? [current, prior] : [] },
+    stateStore: { get: () => null, set() {}, acquireLease: () => true, releaseLease: () => true },
+    now: () => now,
+  });
+
+  const snapshot = service.getGuruManagerSnapshot(cik);
+  const holders = await service.getGuruStockHolders('AAPL', [cik]);
+
+  assert.equal(snapshot.dataStatus, 'partial');
+  assert.match(snapshot.reason, /报告期.*非相邻/);
+  assert.equal(holders.dataStatus, 'partial');
+  assert.equal(holders.holders[0].shareDelta, null);
+  assert.equal(holders.holders[0].change, 'unavailable');
+  assert.match(holders.holders[0].reason, /报告期.*非相邻/);
+});
+
 test('13F consensus groups only the same report period and exact security identity', () => {
   const reports = [
     { manager: { cik: '0001067983', filingName: 'Berkshire' }, report: {

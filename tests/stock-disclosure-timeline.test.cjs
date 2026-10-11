@@ -19,6 +19,31 @@ test('Form 4 timeline events are positioned at public filing time and keep trans
   assert.equal(result.sourceStatus.secForm4, 'ok');
 });
 
+test('derivative Form 4 timeline rows are not mislabeled as common-stock purchases', () => {
+  const result = mergeStockDisclosureTimeline({
+    market: 'stocks', instrument: 'stock:us:MU', retrievedAt: now, baseItems: [],
+    form4: [{ securityType: 'derivative', securityTitle: 'Stock Option (right to buy)', filedAt: '2026-09-28', transactionDate: '2026-09-25', ownerName: 'Jane Doe', action: 'BUY', shares: 20, priceUsd: 0, sourceUrl: 'https://www.sec.gov/Archives/edgar/data/1/0001/form4.xml' }],
+    form4Status: 'ok', form4Reason: null, form13f: [], form13fStatus: 'ok', form13fReason: null,
+  });
+  assert.equal(result.items.length, 1);
+  assert.match(result.items[0].title, /衍生证券申报/);
+  assert.match(result.items[0].title, /Stock Option/);
+  assert.doesNotMatch(result.items[0].title, /内部人买入/);
+});
+
+test('unavailable 13F comparisons remain visible with their report-period reason', () => {
+  const result = mergeStockDisclosureTimeline({
+    market: 'stocks', instrument: 'stock:us:AAPL', retrievedAt: now, baseItems: [], form4: [], form4Status: 'empty',
+    form13f: [{ mapped: true, managerName: 'Fund A', reportPeriod: '2026-09-30', filedAt: '2026-10-01', change: 'unavailable', reason: '报告期非相邻或无法核验，持仓变化不可比较。', sourceUrl: 'https://www.sec.gov/Archives/edgar/data/2/0002/info.htm' }],
+    form13fStatus: 'partial', form13fReason: '报告期非相邻或无法核验，持仓变化不可比较。',
+  });
+
+  assert.equal(result.items.length, 1);
+  assert.match(result.items[0].title, /持仓变化不可比较/);
+  assert.match(result.items[0].title, /非相邻/);
+  assert.equal(result.sourceStatus.sec13f, 'partial');
+});
+
 test('13F changes remain per-manager disclosures and never imply that non-disclosure means liquidation', () => {
   const result = mergeStockDisclosureTimeline({
     market: 'stocks', instrument: 'stock:us:AAPL', retrievedAt: now, baseItems: [], form4: [], form4Status: 'ok', form4Reason: null,

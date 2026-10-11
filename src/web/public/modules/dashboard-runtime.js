@@ -3695,12 +3695,16 @@ function renderInsiderRadar(data) {
   const availabilityLabel = ({ partial: '部分申报原文不可用', unavailable: 'SEC Form 4 来源不可用', empty: '暂无可解析记录' })[data.dataStatus] || '';
   const availabilityColor = data.dataStatus === 'unavailable' ? 'var(--red)' : '#b7791f';
   const transactions = Array.isArray(data.transactions) ? data.transactions : [];
+  const stockTransactions = transactions.filter(trade => trade.securityType !== 'derivative');
   const hasActivity = transactions.length > 0;
+  const hasStockActivity = stockTransactions.length > 0;
   const rows = transactions.map(trade => {
+    const derivative = trade.securityType === 'derivative';
     const buy = trade.action === 'BUY';
-    const color = trade.action === 'OTHER' ? 'var(--text-secondary)' : buy ? 'var(--green)' : 'var(--red)';
-    const label = trade.action === 'BUY' ? '买入' : trade.action === 'SELL' ? '卖出' : '其他';
-    const price = trade.priceUsd > 0 ? ' @ $' + trade.priceUsd.toFixed(2) : '';
+    const color = derivative || trade.action === 'OTHER' ? 'var(--text-secondary)' : buy ? 'var(--green)' : 'var(--red)';
+    const label = derivative ? `衍生证券申报（${trade.action === 'BUY' ? '取得' : trade.action === 'SELL' ? '处置' : '其他'}）` : trade.action === 'BUY' ? '买入' : trade.action === 'SELL' ? '卖出' : '其他';
+    const price = !derivative && trade.priceUsd > 0 ? ' @ $' + trade.priceUsd.toFixed(2) : '';
+    const security = derivative ? ` · ${trade.securityTitle || '衍生证券'}${trade.underlyingSecurityTitle ? `（标的：${trade.underlyingSecurityTitle}）` : ''}` : '';
     let filingLink = '';
     try {
       const url = new URL(String(trade.sourceUrl || ''));
@@ -3710,15 +3714,15 @@ function renderInsiderRadar(data) {
     } catch (_) {}
     return '<div style="padding:10px 0;border-top:1px solid var(--border);display:flex;gap:10px;align-items:flex-start;justify-content:space-between;">' +
       '<div style="min-width:0;"><div style="font-weight:700;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + stockEscapeHtml(trade.ownerName) + '">' +
-        stockEscapeHtml(trade.ownerName) + '</div>' +
+      stockEscapeHtml(trade.ownerName) + '</div>' +
       '<div style="font-size:10.5px;color:var(--text-secondary);margin-top:3px;line-height:1.4;">' +
-        stockEscapeHtml(trade.ownerTitleZh) + ' · ' + stockEscapeHtml(trade.transactionDate) +
+        stockEscapeHtml(trade.ownerTitleZh) + ' · ' + stockEscapeHtml(trade.transactionDate) + stockEscapeHtml(security) +
         (trade.plan10b5 ? ' · <span title="Rule 10b5-1 预设计划">预设计划</span>' : '') +
         (filingLink ? ' · ' + filingLink : '') +
       '</div></div>' +
       '<div style="flex-shrink:0;text-align:right;"><span style="font-weight:800;color:' + color + ';">' + label + '</span>' +
-      '<div style="font-size:10.5px;color:var(--text-secondary);margin-top:2px;">' + trade.shares.toLocaleString() + ' 股' + stockEscapeHtml(price) +
-      (trade.valueUsd > 0 ? '<br>$' + compactUsd(trade.valueUsd) : '') + '</div></div></div>';
+      '<div style="font-size:10.5px;color:var(--text-secondary);margin-top:2px;">' + trade.shares.toLocaleString() + (derivative ? ' 份（申报单位）' : ' 股') + stockEscapeHtml(price) +
+      (!derivative && trade.valueUsd > 0 ? '<br>$' + compactUsd(trade.valueUsd) : '') + '</div></div></div>';
   }).join('');
   el.innerHTML = `
     <div style="background:var(--bg-card);border-radius:12px;padding:14px;border:1px solid var(--border);">
@@ -3728,18 +3732,18 @@ function renderInsiderRadar(data) {
           <div style="font-size:11px;color:var(--text-secondary);margin-top:3px;">${safeNewsText(data.symbol)} · 近 ${data.windowDays} 天 · 扫描 ${data.scannedFilings} 份 Form 4</div>
         </div>
         ${workspaceInlineRefresh('loadInsiderRadar()', '刷新')}
-        <span class="workspace-signal-badge" style="color:white;background:${availabilityLabel ? availabilityColor : signalColor};border-radius:99px;padding:5px 9px;font-size:10.5px;flex-shrink:0;">${safeNewsText(availabilityLabel || data.signalZh)}</span>
+        <span class="workspace-signal-badge" style="color:${availabilityLabel || hasStockActivity ? 'white' : 'var(--text-secondary)'};background:${availabilityLabel ? availabilityColor : hasStockActivity ? signalColor : 'var(--bg-secondary)'};border-radius:99px;padding:5px 9px;font-size:10.5px;flex-shrink:0;">${safeNewsText(availabilityLabel || (hasStockActivity ? data.signalZh : '暂无直接普通股买卖'))}</span>
       </div>
       ${data.reason && hasActivity ? `<div style="margin-top:8px;padding:8px 10px;border-radius:9px;background:color-mix(in srgb,${availabilityColor} 9%,transparent);color:${availabilityColor};font-size:11px;line-height:1.45;">${safeNewsText(data.reason)}</div>` : ''}
-      ${hasActivity ? `<div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:12px;">
+      ${hasStockActivity ? `<div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:12px;">
         <div style="background:var(--bg-secondary);border-radius:10px;padding:9px;"><div style="font-size:10px;color:var(--text-secondary);">买入</div><strong style="color:var(--green);">$${compactUsd(data.buyValueUsd)}</strong><div style="font-size:10px;color:var(--text-secondary);">${data.buyCount} 笔</div></div>
         <div style="background:var(--bg-secondary);border-radius:10px;padding:9px;"><div style="font-size:10px;color:var(--text-secondary);">卖出</div><strong style="color:var(--red);">$${compactUsd(data.sellValueUsd)}</strong><div style="font-size:10px;color:var(--text-secondary);">${data.sellCount} 笔 · 计划 ${planPct}%</div></div>
         <div style="background:var(--bg-secondary);border-radius:10px;padding:9px;"><div style="font-size:10px;color:var(--text-secondary);">净额</div><strong style="color:${positive ? 'var(--green)' : 'var(--red)'};">$${compactUsd(data.netValueUsd)}</strong><div style="font-size:10px;color:var(--text-secondary);">${data.ownerCount} 位内部人</div></div>
       </div>` : ''}
-      ${hasActivity ? `<div style="margin-top:10px;padding:10px;border-radius:10px;background:color-mix(in srgb,${signalColor} 8%,transparent);font-size:11px;color:var(--text-primary);line-height:1.5;">
+      ${hasStockActivity ? `<div style="margin-top:10px;padding:10px;border-radius:10px;background:color-mix(in srgb,${signalColor} 8%,transparent);font-size:11px;color:var(--text-primary);line-height:1.5;">
         <strong>解读：</strong>${safeNewsText(data.adviceZh)}<br><span style="font-size:10px;color:var(--text-secondary);">信号置信度 ${data.confidence}/100；官方申报有延迟。</span>
       </div>` : ''}
-      ${hasActivity ? '<div style="margin-top:6px;">' + rows + '</div>' : `<div style="margin-top:10px;padding:10px;border-radius:9px;background:var(--bg-secondary);color:var(--text-secondary);font-size:12px;line-height:1.5;">${safeNewsText(data.reason || '窗口内没有可解析的非衍生品买卖记录。')}</div>`}
+      ${hasActivity ? `${hasStockActivity ? '' : '<div style="margin-top:10px;padding:10px;border-radius:9px;background:var(--bg-secondary);color:var(--text-secondary);font-size:12px;line-height:1.5;">发现衍生证券申报；与普通股买卖分开显示，不计入普通股买卖净额。</div>'}<div style="margin-top:6px;">${rows}</div>` : `<div style="margin-top:10px;padding:10px;border-radius:9px;background:var(--bg-secondary);color:var(--text-secondary);font-size:12px;line-height:1.5;">${safeNewsText(data.reason || '窗口内没有可解析的直接普通股买卖记录。')}</div>`}
       <div style="margin-top:8px;font-size:10.5px;color:var(--text-secondary);line-height:1.45;">来源：SEC EDGAR Form 4。内部人出售常与薪酬、税务和分散化有关，不能单独作为卖出依据；不构成投资建议。</div>
     </div>
   `;
@@ -4591,7 +4595,10 @@ function renderGuruStockHolders(payload) {
   const rows = holders.map((row, index) => {
     const href = guruSecureSecUrl(row.sourceUrl);
     const manager = row.manager || {};
-    return `<tr><td style="padding:8px;border-top:1px solid var(--border);"><button type="button" class="link-button" data-guru-cik="${marketResearchEscape(manager.cik)}" onclick="openGuruManagerFromHolder(this.dataset.guruCik)">${marketResearchEscape(manager.personAssociation || manager.filingName || 'SEC 申报主体')}</button><small style="display:block;color:var(--text-secondary);">${marketResearchEscape(manager.filingName || '')}</small></td><td style="padding:8px;border-top:1px solid var(--border);">${marketResearchEscape(row.reportPeriod || '未知')}<small style="display:block;color:var(--text-secondary);">申报 ${marketResearchEscape(row.filedAt || '未知')}</small></td><td style="padding:8px;border-top:1px solid var(--border);text-align:right;">${row.shares == null ? '—' : Number(row.shares).toLocaleString()}</td><td style="padding:8px;border-top:1px solid var(--border);text-align:right;">${row.shareDelta == null ? '—' : `${row.shareDelta > 0 ? '+' : ''}${Number(row.shareDelta).toLocaleString()}`}<small style="display:block;color:var(--text-secondary);">${marketResearchEscape(guruChangeLabel(row.change))}</small></td><td style="padding:8px;border-top:1px solid var(--border);text-align:right;">${row.reportedValueUsd == null ? '—' : '$' + Number(row.reportedValueUsd).toLocaleString(undefined, { maximumFractionDigits: 0 })}${row.portfolioWeightPct == null ? '' : `<small style="display:block;color:var(--text-secondary);">13F披露权重 ${Number(row.portfolioWeightPct).toFixed(2)}%</small>`}</td><td style="padding:8px;border-top:1px solid var(--border);">${href ? `<a href="${marketResearchEscape(href)}" target="_blank" rel="noopener noreferrer">SEC 原文 ↗</a>` : '原文不可用'}</td></tr>`;
+    const comparisonReason = row.reason
+      ? `<small style="display:block;color:var(--text-secondary);max-width:220px;">${marketResearchEscape(row.reason)}</small>`
+      : '';
+    return `<tr><td style="padding:8px;border-top:1px solid var(--border);"><button type="button" class="link-button" data-guru-cik="${marketResearchEscape(manager.cik)}" onclick="openGuruManagerFromHolder(this.dataset.guruCik)">${marketResearchEscape(manager.personAssociation || manager.filingName || 'SEC 申报主体')}</button><small style="display:block;color:var(--text-secondary);">${marketResearchEscape(manager.filingName || '')}</small></td><td style="padding:8px;border-top:1px solid var(--border);">${marketResearchEscape(row.reportPeriod || '未知')}<small style="display:block;color:var(--text-secondary);">申报 ${marketResearchEscape(row.filedAt || '未知')}</small></td><td style="padding:8px;border-top:1px solid var(--border);text-align:right;">${row.shares == null ? '—' : Number(row.shares).toLocaleString()}</td><td style="padding:8px;border-top:1px solid var(--border);text-align:right;">${row.shareDelta == null ? '—' : `${row.shareDelta > 0 ? '+' : ''}${Number(row.shareDelta).toLocaleString()}`}<small style="display:block;color:var(--text-secondary);">${marketResearchEscape(guruChangeLabel(row.change))}</small>${comparisonReason}</td><td style="padding:8px;border-top:1px solid var(--border);text-align:right;">${row.reportedValueUsd == null ? '—' : '$' + Number(row.reportedValueUsd).toLocaleString(undefined, { maximumFractionDigits: 0 })}${row.portfolioWeightPct == null ? '' : `<small style="display:block;color:var(--text-secondary);">13F披露权重 ${Number(row.portfolioWeightPct).toFixed(2)}%</small>`}</td><td style="padding:8px;border-top:1px solid var(--border);">${href ? `<a href="${marketResearchEscape(href)}" target="_blank" rel="noopener noreferrer">SEC 原文 ↗</a>` : '原文不可用'}</td></tr>`;
   }).join('');
   host.innerHTML = `<div style="margin-bottom:9px;display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;"><strong>${marketResearchEscape(payload.instrument || guruCurrentStockSymbol)} · SEC 13F 披露持有人</strong><button type="button" class="btn btn-secondary" onclick="setGuruHoldingsView('managers')">← 投资人视角</button></div>${mapping ? `<div style="font-size:11px;color:var(--text-secondary);margin-bottom:8px;">证券映射：${marketResearchEscape(mapping.issuerName)} · CUSIP ${marketResearchEscape(mapping.cusip)} · ${marketResearchEscape(mapping.classTitle)}</div>` : ''}${rows ? `<div style="overflow:auto;border:1px solid var(--border);border-radius:10px;"><table style="width:100%;min-width:690px;border-collapse:collapse;font-size:11px;"><thead><tr style="background:var(--bg-secondary);color:var(--text-secondary);"><th style="text-align:left;padding:8px;">申报主体</th><th style="text-align:left;padding:8px;">报告期 / 申报日</th><th style="text-align:right;padding:8px;">股数</th><th style="text-align:right;padding:8px;">股数变化</th><th style="text-align:right;padding:8px;">申报市值</th><th style="text-align:left;padding:8px;">原文</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<div class="empty-tip">${marketResearchEscape(payload.reason || (payload.dataStatus === 'empty' ? '来源成功，但所选报告未披露该证券；不代表清仓。' : '当前没有可用的 SEC 持仓快照。'))}</div>`}<div style="font-size:10.5px;color:var(--text-secondary);line-height:1.5;margin-top:8px;">${(payload.caveats || []).map(note => marketResearchEscape(note)).join(' ')}</div>`;
 }

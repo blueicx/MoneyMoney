@@ -66,3 +66,15 @@ test('insider transaction source links reject non-SEC and non-HTTPS URLs', () =>
   assert.doesNotMatch(result, /href="javascript:/);
   assert.doesNotMatch(result, /SEC 原文 ↗/);
 });
+
+test('derivative Form 4 rows are labeled separately and never presented as common-stock net buying', () => {
+  const result = render({
+    ...noData,
+    dataStatus: 'live', reason: null,
+    transactions: [{ securityType: 'derivative', securityTitle: 'Stock Option (right to buy)', underlyingSecurityTitle: 'Common Stock', action: 'BUY', ownerName: 'Jane Doe', ownerTitleZh: '高管·CFO', transactionDate: '2026-09-25', shares: 20, priceUsd: 0, valueUsd: 0, plan10b5: false, sourceUrl: 'https://www.sec.gov/Archives/edgar/data/1/0001/form4.xml' }],
+  });
+  assert.match(result, /衍生证券申报/);
+  assert.match(result, /Stock Option/);
+  assert.match(result, /不计入普通股买卖净额/);
+  assert.doesNotMatch(result, /信号置信度|买入偏积极|<div[^>]*>净额<\/div>/);
+});

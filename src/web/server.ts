@@ -3796,7 +3796,7 @@ async function loadStockEventTimeline(ref: ReturnType<typeof eventInstrumentRef>
       mapped: Boolean(form13f?.mapping), managerName: row.manager.filingName,
       reportPeriod: row.reportPeriod, filedAt: row.filedAt,
       previousReportPeriod: row.previousReportPeriod, previousShares: row.previousShares,
-      shares: row.shares, shareDelta: row.shareDelta, change: row.change, sourceUrl: row.sourceUrl,
+      shares: row.shares, shareDelta: row.shareDelta, change: row.change, reason: row.reason, sourceUrl: row.sourceUrl,
     })),
     form13fStatus: form13f?.dataStatus || 'unavailable',
     form13fReason: form13f?.reason || (form13fResult.status === 'rejected' ? String(form13fResult.reason instanceof Error ? form13fResult.reason.message : form13fResult.reason) : null),
