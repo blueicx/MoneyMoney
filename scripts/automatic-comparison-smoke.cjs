@@ -25,6 +25,7 @@ async function main(){let browser;try{
  const post=async(route,data)=>{const r=await page.request.post(base+route,{headers,data});return {status:r.status(),body:await r.json()};};
  for(const id of ['stock:us:AAPL','stock:us:MU','stock:us:SNDK','stock:us:SPY','stock:us:MSFT','stock:us:NVDA','crypto:binance:BTCUSDT','option:cboe:AAPL:20261016:C:100'])assert.equal((await post('/api/watchlist',{instrumentId:id})).status,200);
  const csrf=await page.request.post(base+'/api/ai-runners/comparisons/automatic/rebuild',{data:{market:'stocks'}});assert.equal(csrf.status(),403);
+ const defaultsCsrf=await page.request.post(base+'/api/ai-runners/comparisons/automatic/defaults',{data:{market:'crypto'}});assert.equal(defaultsCsrf.status(),403);
  const randomNoKey=await post('/api/ai-runners/comparisons/automatic/rebuild',{market:'stocks',modelSelection:'random-free'});assert.equal(randomNoKey.status,400);assert.match(randomNoKey.body.reason,/未配置 OpenRouter/);
  const unsupportedRandom=await post('/api/ai-runners/comparisons/automatic/rebuild',{market:'options',modelSelection:'random-free'});assert.equal(unsupportedRandom.status,422);assert.match(unsupportedRandom.body.reason,/期权/);
  const created=await post('/api/ai-runners/comparisons/automatic/rebuild',{market:'stocks',pinned:['stock:us:NVDA'],model:'fixture/fixed-model'});
@@ -35,6 +36,23 @@ async function main(){let browser;try{
  assert.ok(all.filter(r=>ids.includes(r.id)).every(r=>r.budgetUsd===1000&&r.status==='STOPPED'&&r.model==='fixture/fixed-model'));
  assert.equal(new Set(all.filter(r=>ids.includes(r.id)).map(r=>r.accountId)).size,3);
  assert.equal(JSON.stringify(all.find(r=>r.id===sentinel.id), (key,value)=>key==='summary'?undefined:value),before,'existing independent runner unchanged');
+ const defaultCrypto=await post('/api/ai-runners/comparisons/automatic/defaults',{market:'crypto'});
+ assert.equal(defaultCrypto.status,201,JSON.stringify(defaultCrypto.body));
+ assert.deepEqual(defaultCrypto.body.instruments.map(row=>row.symbolOrMarketId),['BTCUSDT','ETHUSDT']);
+ assert.equal(defaultCrypto.body.data.paused,true,'新默认组即使全局调度关闭也必须暂停');
+ assert.match(defaultCrypto.body.reason,/未调用模型、未消耗额度、未下单/);
+ const cryptoGroupId=defaultCrypto.body.data.groupId;
+ const cryptoGroup=(await (await page.request.get(base+'/api/ai-runners/comparisons/'+cryptoGroupId)).json()).data;
+ const afterDefault=(await (await page.request.get(base+'/api/ai-runners')).json()).data;
+ const cryptoRunners=afterDefault.filter(row=>cryptoGroup.runnerIds.includes(row.id));
+ assert.equal(cryptoRunners.length,3);assert.ok(cryptoRunners.every(row=>row.budgetUsd===1000&&row.status==='STOPPED'&&row.model==='fixture/fixed-model'));
+ assert.equal(new Set(cryptoRunners.map(row=>row.accountId)).size,3);
+ assert.equal(cryptoRunners[0].universe.sourceWatchlistId,'defaults:crypto:v1');
+ assert.equal(JSON.stringify(afterDefault.find(row=>row.id===sentinel.id),(key,value)=>key==='summary'?undefined:value),before,'默认池创建不能改动现有独立跑单');
+ const duplicateDefault=await post('/api/ai-runners/comparisons/automatic/defaults',{market:'crypto'});
+ assert.equal(duplicateDefault.status,409);assert.equal(duplicateDefault.body.data.groupId,cryptoGroupId,'重复默认池请求不能覆盖当前组');
+ const unsupportedPrediction=await post('/api/ai-runners/comparisons/automatic/defaults',{market:'prediction'});
+ assert.equal(unsupportedPrediction.status,422);assert.match(unsupportedPrediction.body.reason,/结算规则/);
  const enable=await post('/api/ai-runners/comparisons/automatic/control',{enabled:true});assert.equal(enable.status,400,'no model configuration => cannot enable');
  const manual=await post('/api/ai-runners/comparisons/'+firstGroup+'/tick',{idempotencyKey:'blocked-manual'});assert.equal(manual.status,400);assert.match(manual.body.reason,/全局整点/);
  const options=await post('/api/ai-runners/comparisons/automatic/rebuild',{market:'options',model:'fixture/fixed-model'});assert.equal(options.status,422);assert.match(options.body.excluded[0].reason,/期权/);
@@ -55,6 +73,7 @@ async function main(){let browser;try{
  const status=(await (await page.request.get(base+'/api/ai-runners/comparisons/automatic')).json());assert.equal(status.data.enabled,false);assert.equal(status.budget.issued,0);assert.equal(status.budget.reserved,0);assert.ok(status.data.archived.some(r=>r.groupId===firstGroup));
  const guest=await browser.newPage();await guest.goto(base+'/login');await Promise.all([guest.waitForURL(u=>u.pathname==='/'),guest.click('#guestBtn')]);
  assert.equal((await guest.request.get(base+'/api/ai-runners/comparisons/automatic')).status(),403);
+ assert.equal((await guest.request.post(base+'/api/ai-runners/comparisons/automatic/defaults',{data:{market:'crypto'}})).status(),403);
  assert.equal((await guest.request.post(base+'/api/ai-runners/comparisons/automatic/control',{data:{enabled:true}})).status(),403);
  assert.deepEqual(errors,[]);console.log(JSON.stringify({success:true,marketFiltering:true,threeThemes:themes,independentRunnerUnchanged:true,modelRequests:0,automaticEnabled:false,archivedGroup:firstGroup,privateEndpoints:true}));
  }finally{await browser?.close();child.kill();await new Promise(r=>child.once('exit',r));console.log('Isolated fixture retained: '+dir);}}

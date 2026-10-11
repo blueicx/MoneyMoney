@@ -8659,6 +8659,7 @@ import {ComparisonModelBudget} from '../features/ai-comparison-budget';
 import {ComparisonScheduler, COMPARISON_MARKETS, type AutomaticComparisonRound, type ComparisonMarket} from '../features/ai-comparison-scheduler';
 import {selectComparisonWatchlist} from '../features/ai-comparison-watchlist';
 import {fetchRandomOpenRouterFreeModel} from '../features/openrouter-random-model';
+import {resolveDefaultComparisonPool} from '../features/ai-comparison-default-pools';
 const comparisonModelBudget=new ComparisonModelBudget(stateStore);
 const comparisonScheduler=new ComparisonScheduler(stateStore);
 app.get('/api/ai-runners/comparisons/automatic',(req,res)=>{
@@ -8666,6 +8667,57 @@ app.get('/api/ai-runners/comparisons/automatic',(req,res)=>{
   try{res.json({success:true,data:comparisonScheduler.list(),budget:comparisonModelBudget.summary(),featureEnabled:config.aiPaperTradingEnabled,
     reason:'独立对照调度；每小时全局最多一轮。现有自主跑单不受此开关或额度影响。'});}
   catch(error:any){res.status(503).json({success:false,reason:error.message});}
+});
+app.post('/api/ai-runners/comparisons/automatic/defaults',express.json(),async(req,res)=>{
+  if(!adminOnly(req,res))return;
+  if(!config.aiPaperTradingEnabled)return res.status(403).json({success:false,reason:'AI模拟能力关闭；未创建默认对照组'});
+  let market:ComparisonMarket;
+  try{
+    market=req.body?.market as ComparisonMarket;
+    if(!COMPARISON_MARKETS.includes(market))throw new Error('请选择明确市场');
+    const current=comparisonScheduler.list().groups.find(group=>group.market===market);
+    if(current)return res.status(409).json({success:false,reason:'该市场已有冻结对照组；默认池创建不会覆盖或归档现有组',data:current});
+
+    const pool=await resolveDefaultComparisonPool(market,{
+      getOptionsSnapshot:asset=>getOptionsSnapshot(asset),
+      verifyOptionQuote:name=>fetchDeribitOptionExecutionQuote(name,{maxAgeMs:120_000}),
+    });
+    if(pool.status==='unsupported'||!pool.instruments.length){
+      return res.status(422).json({success:false,dataStatus:pool.status==='unsupported'?'unsupported':'unavailable',reason:pool.reason,excluded:pool.excluded,evidence:pool.evidence});
+    }
+
+    const runtime=getAiRuntimeConfig('openrouter'),modelSelection=String(req.body?.modelSelection||'fixed');
+    let model='';
+    if(modelSelection==='random-free'){
+      if(!runtime.configured)throw new Error('未配置 OpenRouter；不能随机选择并固定免费模型');
+      if(runtime.apiUrl!=='https://openrouter.ai/api/v1/chat/completions')throw new Error('随机选型仅支持 OpenRouter 官方接口');
+      model=await fetchRandomOpenRouterFreeModel(runtime.apiKey);
+    }else if(modelSelection==='fixed'){
+      const requested=String(req.body?.model||'').trim();
+      const existingModel=comparisonScheduler.list().groups.find(group=>group.model && !['openrouter/free','openrouter/auto'].includes(group.model))?.model;
+      model=requested||existingModel||(runtime.configured?runtime.model:'');
+      if(!model||['openrouter/free','openrouter/auto'].includes(model))throw new Error('请提供具体模型 ID，或先配置一个可复用的固定模型；不能使用动态路由');
+    }else throw new Error('模型选择模式无效');
+
+    const owner=crypto.randomUUID(),leaseKey=`ai-comparison-default-pool:${market}`,now=Date.now();
+    const created=stateStore.transaction(()=>{
+      if(!stateStore.acquireLease(leaseKey,owner,now,60_000))throw Object.assign(new Error('该市场默认对照组正在创建，请稍后重试'),{httpStatus:409});
+      try{
+        const existing=comparisonScheduler.list().groups.find(group=>group.market===market);
+        if(existing)throw Object.assign(new Error('该市场已有冻结对照组；默认池创建不会覆盖或归档现有组'),{httpStatus:409});
+        const first=pool.instruments[0];
+        const group=createAiRunnerComparison(first.venue,first.symbolOrMarketId,first.title||first.symbolOrMarketId,1000,{},
+          {seed:42,model,universe:{kind:'watchlist',sourceWatchlistId:pool.sourceWatchlistId,instruments:pool.instruments}});
+        const scheduled=comparisonScheduler.register({market,groupId:group.id,model,instruments:pool.instruments.map(row=>row.symbolOrMarketId),excluded:pool.excluded});
+        // New default groups are always explicitly paused, even when the global scheduler is disabled.
+        const paused=comparisonScheduler.pause(market,true);
+        return {group,scheduled:paused};
+      }finally{stateStore.releaseLease(leaseKey,owner);}
+    });
+    stateStore.appendAudit({id:crypto.randomUUID(),action:'ai_comparison_default_pool_created',detail:market+' '+created.group.id+'；标的='+pool.instruments.map(row=>row.symbolOrMarketId).join(',')+'；各账户1000虚拟USD；已暂停；未调用模型或下单'});
+    res.status(201).json({success:true,data:created.scheduled,group:created.group,accounts:created.group.runnerIds,instruments:pool.instruments,
+      evidence:pool.evidence,excluded:pool.excluded,reason:`${pool.reason}；三个独立模拟账户各1000虚拟USD；固定模型 ${model}；新组保持暂停，未调用模型、未消耗额度、未下单。`});
+  }catch(error:any){res.status(error?.httpStatus||400).json({success:false,dataStatus:'unavailable',reason:error?.message||'默认对照组创建失败'});}
 });
 app.post('/api/ai-runners/comparisons/automatic/rebuild',express.json(),async(req,res)=>{
   if(!adminOnly(req,res))return;
