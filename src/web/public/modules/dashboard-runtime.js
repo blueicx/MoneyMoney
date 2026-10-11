@@ -2199,8 +2199,6 @@ let bnCurrentSymbol = 'BTCUSDT';
 let bnCurrentInterval = '5m';
 let bnKlineData = [];
 let cryptoChartOverlayConfig = { patterns: false, supportResistance: true, patternTypes: {} };
-const cryptoSupportResistanceCache = new Map();
-const cryptoSupportResistanceState = { key: null, status: 'idle', data: null, controller: null, retryAt: 0 };
 function bnSetSymbol(sym) {
     if (activeMarketScope !== "crypto") return;
   if (bnCurrentSymbol !== sym) {
@@ -2291,55 +2289,38 @@ function setCryptoChartOverlay(name, enabled) {
   cryptoChartOverlayConfig[name] = Boolean(enabled);
   try { localStorage.setItem(cryptoChartOverlayStorageKey(), JSON.stringify(cryptoChartOverlayConfig)); } catch (e) {}
   if (name === 'supportResistance') {
-    if (enabled) void loadCryptoSupportResistance(true);
-    else { cryptoSupportResistanceState.controller?.abort(); cryptoSupportResistanceState.key = null; cryptoSupportResistanceState.status = 'idle'; cryptoSupportResistanceState.data = null; updateCryptoSupportResistanceStatus(''); }
+    if (!enabled) updateCryptoSupportResistanceStatus('');
   }
   if (bnKlineData.length) drawCandles(document.getElementById('bn-candlestick'), bnKlineData);
 }
-function updateCryptoSupportResistanceStatus(message, retry = false) {
+function updateCryptoSupportResistanceStatus(message) {
   const host = document.getElementById('crypto-sr-status');
   if (!host) return;
   host.replaceChildren();
   host.hidden = !message;
   if (!message) return;
   const label = document.createElement('span'); label.textContent = message; host.append(label);
-  if (retry) { const button = document.createElement('button'); button.type = 'button'; button.className = 'tf-btn'; button.textContent = '重试'; button.onclick = () => void loadCryptoSupportResistance(true); host.append(button); }
 }
-async function loadCryptoSupportResistance(force = false) {
-  if (!cryptoChartOverlayConfig.supportResistance) return;
-  const symbol = bnCurrentSymbol, interval = bnCurrentInterval, key = `${symbol}|${interval}`;
-  const scope = document.getElementById('market-workspace-shell')?.dataset.marketScope;
-  if (scope && scope !== 'crypto') return;
-  const cached = cryptoSupportResistanceCache.get(key);
-  if (!force && cached && Date.now() - cached.cachedAt < 120_000) {
-    cryptoSupportResistanceState.key = key; cryptoSupportResistanceState.status = 'success'; cryptoSupportResistanceState.data = cached.data;
-    updateCryptoSupportResistanceStatus(`支撑/阻力：${cached.data.supports.length + cached.data.resistances.length} 条 · Binance ${interval} K线 · ${cached.data.fetchedAt || '时间未知'}`);
-    return;
-  }
-  if (!force && cryptoSupportResistanceState.key === key && (cryptoSupportResistanceState.status === 'loading' || cryptoSupportResistanceState.status === 'success' || Date.now() < cryptoSupportResistanceState.retryAt)) return;
-  cryptoSupportResistanceState.controller?.abort();
-  const controller = new AbortController(); cryptoSupportResistanceState.controller = controller;
-  cryptoSupportResistanceState.key = key; cryptoSupportResistanceState.status = 'loading'; cryptoSupportResistanceState.data = null;
-  updateCryptoSupportResistanceStatus(`支撑/阻力：正在读取 Binance ${interval} K线…`);
-  try {
-    const response = await fetch('/api/support-resistance?' + new URLSearchParams({ symbol, interval }), { signal: controller.signal });
-    const body = await response.json();
-    if (controller.signal.aborted || cryptoSupportResistanceState.key !== key || symbol !== bnCurrentSymbol || interval !== bnCurrentInterval) return;
-    const activeScope = document.getElementById('market-workspace-shell')?.dataset.marketScope;
-    if (activeScope && activeScope !== 'crypto') { cryptoSupportResistanceState.key = null; cryptoSupportResistanceState.status = 'idle'; return; }
-    const data = body?.data;
-    if (!response.ok || !body?.success || data?.symbol !== symbol || data?.interval !== interval || !Array.isArray(data.supports) || !Array.isArray(data.resistances)) throw new Error(body?.reason || body?.error || '来源不可用或标的/周期不匹配');
-    cryptoSupportResistanceState.status = 'success'; cryptoSupportResistanceState.data = data; cryptoSupportResistanceState.retryAt = 0;
-    cryptoSupportResistanceCache.set(key, { data, cachedAt: Date.now() });
-    if (cryptoSupportResistanceCache.size > 24) cryptoSupportResistanceCache.delete(cryptoSupportResistanceCache.keys().next().value);
-    const count = data.supports.length + data.resistances.length;
-    updateCryptoSupportResistanceStatus(count ? `支撑/阻力：${count} 条 · Binance ${interval} K线 · ${data.fetchedAt || '时间未知'}` : `Binance ${interval} K线来源正常；当前区间未识别到支撑/阻力`);
-  } catch (error) {
-    if (error?.name === 'AbortError' || cryptoSupportResistanceState.key !== key) return;
-    cryptoSupportResistanceState.status = 'failed'; cryptoSupportResistanceState.data = null; cryptoSupportResistanceState.retryAt = Date.now() + 30_000;
-    updateCryptoSupportResistanceStatus(`支撑/阻力不可用：${String(error?.message || '请求失败').slice(0, 120)}`, true);
-  }
-  if (cryptoSupportResistanceState.key === key && cryptoSupportResistanceState.data && bnKlineData.length) drawCandles(document.getElementById('bn-candlestick'), bnKlineData);
+function pivotLevelSummary(result) {
+  const format = value => Number(value).toLocaleString('zh-CN', { maximumFractionDigits: 8 });
+  const supports = (result?.supports || []).map(level => format(level.price));
+  const resistances = (result?.resistances || []).map(level => format(level.price));
+  return `支撑 ${supports.join('、') || '暂无'} / 阻力 ${resistances.join('、') || '暂无'}`;
+}
+function pivotSourceSummary(canvas, fallback) {
+  const metadata = canvas?.moneySourceMetadata || {};
+  const source = String(metadata.source || fallback);
+  const sourceTime = Number(metadata.sourceTime);
+  return `${source} · 数据状态 ${String(metadata.dataStatus || 'unknown')}${Number.isFinite(sourceTime) && sourceTime > 0 ? ` · 来源时间 ${formatChartTime(sourceTime)}` : ' · 来源时间未知'}`;
+}
+function updateCryptoPivotStatus(bars, result) {
+  const canvas = document.getElementById('bn-candlestick');
+  const source = pivotSourceSummary(canvas, '当前虚拟币K线来源');
+  const count = (result?.supports?.length || 0) + (result?.resistances?.length || 0);
+  updateCryptoSupportResistanceStatus(count
+    ? `${bnCurrentSymbol} · ${bnCurrentInterval} · 已确认 Pivot ${count} 条（${pivotLevelSummary(result)}）· ${source} · 右侧3根完成后由下一根确认 · 不使用未来K线`
+    : `${bnCurrentSymbol} · ${bnCurrentInterval} · ${result?.reason || '当前K线不足，暂无已确认 Pivot'} · ${source}`);
+  return result;
 }
 function setCryptoChartPattern(name, enabled) {
   cryptoChartOverlayConfig.patternTypes[name] = Boolean(enabled);
@@ -2382,15 +2363,18 @@ function drawCandles(canvas, klines) {
   const textColor = cs.getPropertyValue('--text-secondary')?.trim() || '#888';
   const green = '#22c55e', red = '#ef4444';
   ctx.clearRect(0, 0, W, H);
+  loadCryptoChartStrategyConfig();
+  loadCryptoChartOverlayConfig();
   if (!klines.length) {
+    if (cryptoChartOverlayConfig.supportResistance) updateCryptoPivotStatus([], window.MoneyTradingChart?.pivotLevels([], { lookback: 3 }));
+    else updateCryptoSupportResistanceStatus('');
     renderChartPatternMarkers('bn-chart-patterns', [], () => null);
     renderChartPatternList('bn-chart-pattern-list', [], '当前周期未识别到所选蜡烛形态');
     renderMovingAverageValues('bn-chart-ma-values', [], [7, 25]);
     return;
   }
-  loadCryptoChartStrategyConfig();
-  loadCryptoChartOverlayConfig();
-  if (cryptoChartOverlayConfig.supportResistance) void loadCryptoSupportResistance();
+  const pivotData = cryptoChartOverlayConfig.supportResistance
+    ? updateCryptoPivotStatus(tradingFull, window.MoneyTradingChart?.pivotLevels(tradingFull, { lookback: 3 })) : null;
   const strategySignals = buildCryptoStrategySignals(klines, !window.cryptoMoneyKLine?.timer && canvas.moneySourceMetadata?.connection === 'live');
   const cryptoPatterns = cryptoChartOverlayConfig.patterns
     ? (window.MoneyChartAnalysis?.detectCandlestickPatterns(klines) || []).filter(item => cryptoChartOverlayConfig.patternTypes?.[item.type] !== false)
@@ -2551,10 +2535,9 @@ function calcBollinger(data, period = 20, multiplier = 2) {
       ctx.fillText(priceLabel, W - padR - labelWidth + 4, y + 4);
     }
   }
-  if (cryptoChartOverlayConfig.supportResistance && cryptoSupportResistanceState.status === 'success'
-    && cryptoSupportResistanceState.key === `${bnCurrentSymbol}|${bnCurrentInterval}` && cryptoSupportResistanceState.data) {
+  if (cryptoChartOverlayConfig.supportResistance && pivotData) {
     const geometry = { W, H, padL, padR, padT, priceH: chartH, minP, maxP };
-    const lines = window.MoneyTradingChart?.supportResistanceLineLayout(cryptoSupportResistanceState.data, geometry) || [];
+    const lines = window.MoneyTradingChart?.supportResistanceLineLayout(pivotData, geometry) || [];
     window.MoneyTradingChart?.drawSupportResistance(ctx, lines, geometry);
   }
   // Price Alert Lines
@@ -5690,8 +5673,6 @@ try {
   if (['5m', '15m', '1h', '1d', '1y'].includes(savedCompanion.period)) stockChartCompanionPeriod = savedCompanion.period;
 } catch (e) {}
 let stockChartOverlayConfig = window.MoneyChartAnalysis?.normalizeOverlayConfig({ strategies:{ maCross:true, rsiReversal:false, bollinger:false, volumeBreakout:false } }) || { signals:true, patterns:false, structures:false, volume:true, indicators:{ ma:true, boll:false, macd:false }, strategies:{ maCross:true, rsiReversal:false, bollinger:false, volumeBreakout:false }, patternTypes:{}, maxLabels:80 };
-const stockSupportResistanceCache = new Map();
-const stockSupportResistanceState = { key: null, status: 'idle', data: null, controller: null, retryAt: 0, loadedAt: 0 };
 let cryptoChartStrategyConfig = { maCross:true, rsiReversal:false, bollinger:false, volumeBreakout:false };
 var INLINE_CANDLE_PATTERN_CATALOG = [
   ['doji','十字星'], ['hammer','锤头线'], ['hanging-man','上吊线'], ['shooting-star','流星线'], ['long-shadow','长影线'],
@@ -5772,101 +5753,33 @@ function loadStockChartOverlayConfig() {
   });
   syncChartPatternControls(stockChartOverlayConfig, 'stock');
 }
-function stockSupportResistanceKey() {
-  return `${currentStockSymbol}|${currentStockApiSymbol || currentStockSymbol}|${currentStockKlinePeriod}|${stockChartAdjustment}`;
-}
-function stockSupportResistanceViewAvailable() {
-  const scope = document.getElementById('market-workspace-shell')?.dataset.marketScope || activeMarketScope;
-  return scope === 'stocks' && !stockChartAsOf && !stockChartIntradayDate && !stockChartFocusEnabled
-    && !window.stockMoneyKLine?.timer && stockChartReplayIndex >= stockChartKlines.length - 1;
-}
-function updateStockSupportResistanceStatus(message, retry = false) {
+function updateStockSupportResistanceStatus(message) {
   const host = document.getElementById('stock-sr-status');
   if (!host) return;
-  const signature = `${message}\u001f${retry}`;
+  const signature = String(message || '');
   if (host.dataset.statusSignature === signature) return;
   host.dataset.statusSignature = signature;
   host.replaceChildren();
   host.hidden = !message;
   if (!message) return;
   const label = document.createElement('span'); label.textContent = message; host.append(label);
-  if (retry) {
-    const button = document.createElement('button'); button.type = 'button'; button.className = 'tab'; button.textContent = '重试';
-    button.onclick = () => void loadStockSupportResistance(true); host.append(button);
-  }
 }
-async function loadStockSupportResistance(force = false) {
-  if (!stockChartOverlayConfig.supportResistance) return;
-  const host = document.getElementById('stock-sr-status');
-  if (!stockSupportResistanceViewAvailable()) {
-    updateStockSupportResistanceStatus('当前图表不是最新行情视图，支撑/阻力暂隐藏');
-    return;
-  }
-  const symbol = currentStockApiSymbol || currentStockSymbol;
-  const interval = currentStockKlinePeriod;
-  const adjustment = stockChartAdjustment;
-  const key = stockSupportResistanceKey();
-  if (!symbol || stockChartKlines.length < 30) {
-    updateStockSupportResistanceStatus('当前来源历史K线不足30根，无法计算支撑/阻力');
-    return;
-  }
-  const cached = stockSupportResistanceCache.get(key);
-  if (!force && cached && Date.now() - cached.cachedAt < 120_000) {
-    stockSupportResistanceState.key = key; stockSupportResistanceState.status = 'success';
-    stockSupportResistanceState.data = cached.data; stockSupportResistanceState.loadedAt = cached.cachedAt;
-    updateStockSupportResistanceStatus(`${cached.data.supports.length + cached.data.resistances.length} 条 · ${cached.source} · 缓存历史K线 · ${cached.updatedAt || '时间未知'}`);
-    if (stockChartKlines.length) drawStockKline(document.getElementById('stock-kline'), stockChartKlines);
-    return;
-  }
-  if (!force && stockSupportResistanceState.key === key && stockSupportResistanceState.status === 'success'
-    && Date.now() - stockSupportResistanceState.loadedAt < 120_000) return;
-  if (!force && stockSupportResistanceState.key === key && (stockSupportResistanceState.status === 'loading' || Date.now() < stockSupportResistanceState.retryAt)) return;
-  stockSupportResistanceState.controller?.abort();
-  const controller = new AbortController(); stockSupportResistanceState.controller = controller;
-  stockSupportResistanceState.key = key; stockSupportResistanceState.status = 'loading'; stockSupportResistanceState.data = null;
-  updateStockSupportResistanceStatus(`正在读取 ${symbol} · ${interval} 历史K线…`);
-  try {
-    const query = new URLSearchParams({ market: 'stocks', symbol, interval, adjustment });
-    const response = await fetch('/api/support-resistance?' + query, { signal: controller.signal });
-    const body = await response.json();
-    if (controller.signal.aborted || stockSupportResistanceState.key !== key || key !== stockSupportResistanceKey()) return;
-    if (!stockSupportResistanceViewAvailable()) {
-      stockSupportResistanceState.status = 'idle'; stockSupportResistanceState.data = null;
-      updateStockSupportResistanceStatus('当前图表不是最新行情视图，支撑/阻力暂隐藏'); return;
-    }
-    const data = body?.data;
-    if (!response.ok || !body?.success || body.market !== 'stocks' || body.requestedInstrument !== symbol
-      || body.timeframe !== interval || !data || data.symbol !== body.instrument || data.interval !== interval
-      || !Array.isArray(data.supports) || !Array.isArray(data.resistances)) {
-      throw new Error(body?.reason || body?.error || '历史来源不可用或标的/周期不匹配');
-    }
-    const source = String(body.source || '股票历史K线');
-    const updatedAt = String(body.updatedAt || data.fetchedAt || '时间未知');
-    stockSupportResistanceState.status = 'success'; stockSupportResistanceState.data = data;
-    stockSupportResistanceState.loadedAt = Date.now(); stockSupportResistanceState.retryAt = 0;
-    stockSupportResistanceCache.set(key, { data, source, updatedAt, cachedAt: stockSupportResistanceState.loadedAt });
-    if (stockSupportResistanceCache.size > 24) stockSupportResistanceCache.delete(stockSupportResistanceCache.keys().next().value);
-    const count = data.supports.length + data.resistances.length;
-    updateStockSupportResistanceStatus(count ? `${count} 条 · ${source} · ${body.dataStatus || 'historical'} · ${formatChartTime(updatedAt)}` : `${source} 历史数据可用；当前覆盖区间未识别到支撑/阻力`);
-    if (stockSupportResistanceState.key === key && stockChartKlines.length) drawStockKline(document.getElementById('stock-kline'), stockChartKlines);
-  } catch (error) {
-    if (error?.name === 'AbortError' || stockSupportResistanceState.key !== key) return;
-    stockSupportResistanceState.status = 'failed'; stockSupportResistanceState.data = null;
-    stockSupportResistanceState.retryAt = Date.now() + 30_000;
-    updateStockSupportResistanceStatus(`支撑/阻力不可用：${String(error?.message || '请求失败').slice(0, 120)}`, true);
-  }
+function updateStockPivotStatus(bars) {
+  const pivots = window.MoneyTradingChart?.pivotLevels(bars, { lookback: 3 });
+  const count = (pivots?.supports?.length || 0) + (pivots?.resistances?.length || 0);
+  const source = pivotSourceSummary(document.getElementById('stock-kline'), '当前股票K线来源');
+  const context = stockChartAsOf ? ` · 历史截至 ${stockChartAsOf.slice(0, 10)}` : stockChartIntradayDate ? ` · 日内 ${stockChartIntradayDate}` : stockChartReplayIndex < stockChartKlines.length - 1 ? ' · Replay 当前步' : '';
+  updateStockSupportResistanceStatus(count
+    ? `${currentStockSymbol} · ${currentStockKlinePeriod} · 已确认 Pivot ${count} 条（${pivotLevelSummary(pivots)}）· ${source}${context} · 右侧3根完成后由下一根确认 · 不使用未来K线`
+    : `${currentStockSymbol} · ${currentStockKlinePeriod} · ${pivots?.reason || '当前K线不足，暂无已确认 Pivot'} · ${source}${context}`);
+  return pivots;
 }
 function setStockChartOverlay(name, enabled) {
   if (['ma', 'boll', 'macd'].includes(name)) stockChartOverlayConfig.indicators[name] = Boolean(enabled);
   else stockChartOverlayConfig[name] = Boolean(enabled);
   try { localStorage.setItem(stockChartStorageKey(), JSON.stringify(stockChartOverlayConfig)); } catch (e) {}
   if (name === 'supportResistance') {
-    if (enabled) void loadStockSupportResistance(true);
-    else {
-      stockSupportResistanceState.controller?.abort(); stockSupportResistanceState.key = null;
-      stockSupportResistanceState.status = 'idle'; stockSupportResistanceState.data = null;
-      updateStockSupportResistanceStatus('');
-    }
+    if (!enabled) updateStockSupportResistanceStatus('');
     if (stockChartKlines.length) drawStockKline(document.getElementById('stock-kline'), stockChartKlines);
     return;
   }
@@ -6734,10 +6647,7 @@ async function performStockKlineLoad(symbol, name, apiSymbol, options = {}) {
   if (live && (stockChartAsOf || stockChartIntradayDate || stockChartReplayIndex < stockChartKlines.length - 1 || window.stockMoneyKLine?.timer)) return;
   if (!live) {
     stockKlineContextRevision++; window.MoneyLiveKline?.stop();
-    stockSupportResistanceState.controller?.abort();
-    stockSupportResistanceState.key = null; stockSupportResistanceState.status = 'idle';
-    stockSupportResistanceState.data = null; stockSupportResistanceState.loadedAt = 0;
-    if (stockChartOverlayConfig.supportResistance) updateStockSupportResistanceStatus('K线上下文更新中，支撑/阻力待刷新');
+    if (stockChartOverlayConfig.supportResistance) updateStockSupportResistanceStatus('K线上下文更新中，等待当前K线计算 Pivot');
   }
   const requestRevision = ++stockKlineRequestRevision;
   if (stockKlineController) stockKlineController.abort();
@@ -6854,7 +6764,6 @@ async function performStockKlineLoad(symbol, name, apiSymbol, options = {}) {
     if (!live) loadStockChartOverlayConfig();
     if (window.stockMoneyKLine?.update) window.stockMoneyKLine.update(stockChartKlines, { resetReplay: true });
     else drawStockKline(canvas, stockChartKlines);
-    if (stockChartOverlayConfig.supportResistance) void loadStockSupportResistance();
     if (!live && stockChartCompanionOpen) loadStockChartCompanion();
     if (!live && !document.getElementById('mm-stock-multi-chart')?.hidden) window.MoneyMoneyExperience?.loadMultiChart?.();
     canvas.style.visibility = 'visible';
@@ -6897,16 +6806,7 @@ function drawStockKline(canvas, klines) {
   const replayKlines = fullKlines.slice(0, visibleCount);
   const selectedIndex = Number.isInteger(stockChartFocusIndex) && stockChartFocusIndex < replayKlines.length ? stockChartFocusIndex : null;
   const tradingActive = !stockChartFocusEnabled && !stockChartAsOf && !stockChartIntradayDate && stockChartReplayIndex >= stockChartKlines.length-1 && visibleCount === fullKlines.length && !window.stockMoneyKLine?.timer;
-  if (stockChartOverlayConfig.supportResistance) {
-    if (tradingActive) {
-      const key = stockSupportResistanceKey();
-      if (stockSupportResistanceState.key !== key || stockSupportResistanceState.status === 'idle'
-        || (stockSupportResistanceState.status === 'failed' && Date.now() >= stockSupportResistanceState.retryAt)
-        || (stockSupportResistanceState.status === 'success' && Date.now() - stockSupportResistanceState.loadedAt >= 120_000)) {
-        void loadStockSupportResistance();
-      }
-    } else updateStockSupportResistanceStatus('当前图表不是最新行情视图，支撑/阻力暂隐藏');
-  }
+  const pivotData = stockChartOverlayConfig.supportResistance ? updateStockPivotStatus(replayKlines) : null;
   const tradingWindow = tradingActive ? window.MoneyTradingChart?.select(canvas,replayKlines,currentStockSymbol+'|'+currentStockKlinePeriod) : null;
   const focusStart = stockChartFocusEnabled && selectedIndex != null ? getStockKlineFocusStart(replayKlines.length, selectedIndex) : (tradingWindow?.start || 0);
   stockChartRenderedStartIndex = focusStart;
@@ -7025,10 +6925,9 @@ function drawStockKline(canvas, klines) {
       ctx.stroke(); ctx.setLineDash([]);
     });
   });
-  if (stockChartOverlayConfig.supportResistance && tradingActive && stockSupportResistanceState.status === 'success'
-    && stockSupportResistanceState.key === stockSupportResistanceKey() && stockSupportResistanceState.data) {
+  if (stockChartOverlayConfig.supportResistance && pivotData) {
     const geometry = { W, H, padL, padR, padT, priceH, minP, maxP };
-    const lines = window.MoneyTradingChart?.supportResistanceLineLayout(stockSupportResistanceState.data, geometry) || [];
+    const lines = window.MoneyTradingChart?.supportResistanceLineLayout(pivotData, geometry) || [];
     window.MoneyTradingChart?.drawSupportResistance(ctx, lines, geometry);
   }
   overlays.signals.forEach(signal => {

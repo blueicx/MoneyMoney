@@ -20,6 +20,44 @@
       .map(row=>{const price=Number(row.price),key=row.type+':'+price;if(seen.has(key))return null;seen.add(key);return {type:row.type,price,y:top+(max-price)/(max-min)*height,touches:Number.isFinite(Number(row.touches))?Math.max(0,Math.floor(Number(row.touches))):0,strength:Number.isFinite(Number(row.strength))?Math.max(0,Math.min(100,Number(row.strength))):null};})
       .filter(Boolean).sort((a,b)=>Math.abs(a.price-(min+max)/2)-Math.abs(b.price-(min+max)/2)).slice(0,8);
   }
+  function pivotLevels(input,options={}){
+    const lookback=Math.max(2,Math.min(10,Math.floor(Number(options.lookback)||3))),tolerancePct=Math.max(.01,Math.min(3,Number(options.tolerancePct)||.35));
+    const rawAsOf=options.asOf,asOf=rawAsOf==null?Infinity:(typeof rawAsOf==='number'?rawAsOf:Date.parse(String(rawAsOf)));
+    const empty={supports:[],resistances:[],pivots:[],currentPrice:null,asOf:null,lookback,reason:'confirmed Pivot data is insufficient'};
+    if(!Array.isArray(input)||!Number.isFinite(asOf)&&asOf!==Infinity)return {...empty,reason:'invalid asOf'};
+    const source=asOf===Infinity?input:input.filter(row=>Number(row?.time)<=asOf);
+    const bars=source.slice(-500).map(row=>({time:Number(row?.time),open:Number(row?.open),high:Number(row?.high),low:Number(row?.low),close:Number(row?.close),volume:Number(row?.volume??0)}));
+    if(bars.some((row,index)=>![row.time,row.open,row.high,row.low,row.close,row.volume].every(Number.isFinite)||row.time<=0||row.low<=0||row.volume<0||row.high<Math.max(row.open,row.close,row.low)||row.low>Math.min(row.open,row.close,row.high)||(index>0&&row.time<=bars[index-1].time)))return {...empty,reason:'invalid or unordered OHLCV'};
+    const pivots=[];
+    // The right-hand window is not sufficient by itself: one later bar must
+    // exist, proving that its final candle has closed before confirmation.
+    const confirmedThrough=bars.length-2;
+    for(let index=lookback;index+lookback<=confirmedThrough;index++){
+      let high=true,low=true;
+      for(let offset=index-lookback;offset<=index+lookback;offset++){
+        if(offset===index)continue;
+        if(bars[offset].high>=bars[index].high)high=false;
+        if(bars[offset].low<=bars[index].low)low=false;
+      }
+      if(high)pivots.push({type:'resistance',price:bars[index].high,pivotTime:bars[index].time,confirmedAt:bars[index+lookback+1].time,index,confirmedIndex:index+lookback,volume:bars[index].volume});
+      if(low)pivots.push({type:'support',price:bars[index].low,pivotTime:bars[index].time,confirmedAt:bars[index+lookback+1].time,index,confirmedIndex:index+lookback,volume:bars[index].volume});
+    }
+    const currentPrice=bars.at(-1)?.close??null;if(currentPrice==null)return {...empty,reason:'confirmed Pivot data is insufficient'};
+    const span=Math.max(bars.at(-1).time-bars[0].time,1),maxVolume=Math.max(1,...bars.map(row=>row.volume));
+    const levelsFor=type=>{
+      const groups=[];
+      pivots.filter(point=>point.type===type).sort((a,b)=>a.price-b.price).forEach(point=>{
+        const group=groups.at(-1),average=group?group.points.reduce((sum,item)=>sum+item.price,0)/group.points.length:0;
+        if(group&&Math.abs(point.price-average)/average*100<=tolerancePct)group.points.push(point);else groups.push({points:[point]});
+      });
+      return groups.map(group=>{
+        const points=group.points,price=points.reduce((sum,item)=>sum+item.price,0)/points.length,last=points.reduce((best,item)=>item.pivotTime>best.pivotTime?item:best,points[0]);
+        const freshness=Math.max(0,1-(bars.at(-1).time-last.pivotTime)/span),volume=Math.min(1,points.reduce((sum,item)=>sum+item.volume,0)/maxVolume);
+        return {type,price:Number(price.toFixed(8)),touches:points.length,lastTouchTime:last.pivotTime,lastConfirmedAt:last.confirmedAt,strength:Math.min(100,Math.round(points.length*12+freshness*28+volume*20)),distancePct:Number(((price-currentPrice)/currentPrice*100).toFixed(2)),pivots:points.map(({pivotTime,confirmedAt,price:pivotPrice,index,confirmedIndex})=>({pivotTime,confirmedAt,price:pivotPrice,index,confirmedIndex}))};
+      }).filter(level=>type==='support'?level.price<=currentPrice:level.price>=currentPrice).sort((a,b)=>b.strength-a.strength).slice(0,5);
+    };
+    return {supports:levelsFor('support'),resistances:levelsFor('resistance'),pivots,currentPrice,asOf:bars.at(-1).time,lookback,reason:pivots.length?'': '当前图表历史内未找到已确认 Pivot'};
+  }
   function drawSupportResistance(ctx,lines,geometry){
     if(!ctx||!Array.isArray(lines)||!geometry)return 0;let drawn=0;
     const theme=ctx.canvas&&typeof getComputedStyle==='function'?getComputedStyle(ctx.canvas):null;
@@ -204,7 +242,7 @@
     decorate(canvas,{...options,canvas,full,rows,interval:options.interval,volumeUnit:options.volumeUnit,ma:[5,10,30,60],maColors:['#ffad00','#18bf78','#29b6f6','#a778ff'],interactive:true,geometry:{W,H,padL,padR,padT,priceH,minP,maxP},redraw:()=>render(canvas,full,options)});
     options.onViewport?.({rows,geometry:{W,H,padL,padR,padT,priceH,minP,maxP}});
   }
-  window.MoneyTradingChart={createView,windowFor,pan,latest,zoom,countdown,select,decorate,clear,render,statusFor,restoreView,scheduleFrame,scalePrice,resetPrice,priceRange,supportResistanceLineLayout,drawSupportResistance,paperMarkersFor,mergeHistory,verifyPaperEvidenceEnvelope,verifyPaperExecutionEvidenceEnvelope,formatPaperExecutionEvidence};
+  window.MoneyTradingChart={createView,windowFor,pan,latest,zoom,countdown,select,decorate,clear,render,statusFor,restoreView,scheduleFrame,scalePrice,resetPrice,priceRange,pivotLevels,supportResistanceLineLayout,drawSupportResistance,paperMarkersFor,mergeHistory,verifyPaperEvidenceEnvelope,verifyPaperExecutionEvidenceEnvelope,formatPaperExecutionEvidence};
   window.MoneyTradingChart.redraw=canvas=>mounts.get(canvas)?.info?.redraw();
   function whenDomReady(callback) {
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', callback, { once: true });

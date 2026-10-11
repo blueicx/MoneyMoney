@@ -14,6 +14,7 @@ export interface SrLevel {
   price: number;
   touches: number;
   lastTouchTime: string;
+  lastConfirmedAt: string;
   strength: number; // 0-100 composite score
   distancePct: number; // % away from current price (signed)
 }
@@ -61,6 +62,7 @@ export function supportResistanceRecencyScore(lastTouchTime: number, historyStar
 interface SwingPoint {
   price: number;
   time: number;
+  confirmedAt: number;
   volume: number;
   index: number;
 }
@@ -76,7 +78,9 @@ function findSwings(
   const swingHighs: SwingPoint[] = [];
   const swingLows: SwingPoint[] = [];
 
-  for (let i = lookback; i < highs.length - lookback; i++) {
+  // Keep the final input candle out of the confirmation window. A following
+  // bar proves the right-most pivot candle has closed before publishing it.
+  for (let i = lookback; i + lookback < highs.length - 1; i++) {
     let isHigh = true;
     let isLow = true;
     for (let j = i - lookback; j <= i + lookback; j++) {
@@ -84,8 +88,9 @@ function findSwings(
       if (highs[j] >= highs[i]) isHigh = false;
       if (lows[j] <= lows[i]) isLow = false;
     }
-    if (isHigh) swingHighs.push({ price: highs[i], time: times[i], volume: volumes[i], index: i });
-    if (isLow) swingLows.push({ price: lows[i], time: times[i], volume: volumes[i], index: i });
+    const confirmedAt = times[i + lookback + 1];
+    if (isHigh) swingHighs.push({ price: highs[i], time: times[i], confirmedAt, volume: volumes[i], index: i });
+    if (isLow) swingLows.push({ price: lows[i], time: times[i], confirmedAt, volume: volumes[i], index: i });
   }
 
   return { highs: swingHighs, lows: swingLows };
@@ -96,11 +101,11 @@ function findSwings(
  * Two points belong to the same zone if within tolerance% of each other.
  */
 function clusterLevels(points: SwingPoint[], currentPrice: number, tolerancePct = 0.35): Array<{
-  price: number; touches: number; lastTouchTime: number; totalVolume: number;
+  price: number; touches: number; lastTouchTime: number; lastConfirmedAt: number; totalVolume: number;
 }> {
   if (points.length === 0) return [];
   const sorted = [...points].sort((a, b) => a.price - b.price);
-  const clusters: Array<{ prices: number[]; times: number[]; volumes: number[] }> = [];
+  const clusters: Array<{ prices: number[]; times: number[]; confirmedAt: number[]; volumes: number[] }> = [];
 
   for (const p of sorted) {
     const last = clusters[clusters.length - 1];
@@ -109,17 +114,19 @@ function clusterLevels(points: SwingPoint[], currentPrice: number, tolerancePct 
       if (Math.abs(p.price - avgPrice) / avgPrice * 100 <= tolerancePct) {
         last.prices.push(p.price);
         last.times.push(p.time);
+        last.confirmedAt.push(p.confirmedAt);
         last.volumes.push(p.volume);
         continue;
       }
     }
-    clusters.push({ prices: [p.price], times: [p.time], volumes: [p.volume] });
+    clusters.push({ prices: [p.price], times: [p.time], confirmedAt: [p.confirmedAt], volumes: [p.volume] });
   }
 
   return clusters.map(c => ({
     price: Math.round(c.prices.reduce((s, v) => s + v, 0) / c.prices.length * 10000) / 10000,
     touches: c.prices.length,
     lastTouchTime: Math.max(...c.times),
+    lastConfirmedAt: Math.max(...c.confirmedAt),
     totalVolume: c.volumes.reduce((s, v) => s + v, 0),
   }));
 }
@@ -167,6 +174,7 @@ export function analyzeSupportResistance(symbol: string, interval: string, input
         price: level.price,
         touches: level.touches,
         lastTouchTime: new Date(level.lastTouchTime).toISOString(),
+        lastConfirmedAt: new Date(level.lastConfirmedAt).toISOString(),
         strength: Math.min(100, Math.round(touchScore + recencyScore + recentBonus + volScore + proximityScore)),
         distancePct: Math.round(((level.price - currentPrice) / currentPrice * 100) * 100) / 100,
       };

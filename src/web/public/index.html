@@ -452,7 +452,7 @@
               <label><input type="checkbox" data-crypto-strategy="volumeBreakout" onchange="setCryptoChartStrategy('volumeBreakout', this.checked)"> 放量突破</label>
               <label><input type="checkbox" data-crypto-overlay="patterns" onchange="setCryptoChartOverlay('patterns', this.checked)"> 蜡烛形态</label>
               <label><input type="checkbox" data-crypto-overlay="supportResistance" onchange="setCryptoChartOverlay('supportResistance', this.checked)"> 支撑/阻力</label>
-              <span id="crypto-sr-status" hidden style="align-items:center;gap:6px;color:var(--text-secondary);font-size:11px;"></span>
+              <span id="crypto-sr-status" aria-live="polite" hidden style="align-items:center;gap:6px;color:var(--text-secondary);font-size:11px;"></span>
               <div id="crypto-chart-pattern-controls" class="chart-pattern-controls" aria-label="逐项蜡烛形态开关"><span class="chart-pattern-controls-title">逐项形态</span><label><input type="checkbox" data-chart-pattern="doji" data-chart-pattern-scope="crypto"> 十字星</label></div>
             </div>
             <div id="bn-chart-ma-values" class="chart-ma-values" aria-live="polite"></div>

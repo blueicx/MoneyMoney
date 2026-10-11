@@ -14,6 +14,21 @@ test('support and resistance line layout maps only real in-range provider levels
  let strokes=0;const ctx={save(){},restore(){},setLineDash(){},beginPath(){},moveTo(){},lineTo(){},stroke(){strokes++;},fillText(){}};
  assert.equal(c.drawSupportResistance(ctx,lines,geometry),2);assert.equal(strokes,2);assert.equal(c.supportResistanceLineLayout(data,{...geometry,maxP:90,minP:110}).length,0);
 });
+test('pivot levels appear only after the right confirmation window is closed and never use bars beyond asOf',()=>{
+ const c=load();assert.equal(typeof c.pivotLevels,'function','chart-local confirmed Pivot analysis missing');
+ const bars=Array.from({length:12},(_,i)=>({time:(i+1)*60_000,open:100,high:101,low:99,close:100,volume:10}));
+ bars[3].high=110;bars[8].low=90;
+ const lookback=2;
+ assert.equal(c.pivotLevels(bars.slice(0,6),{lookback}).resistances.length,0,'a pivot with its final right-side bar but no later close confirmation must remain hidden');
+ const confirmed=c.pivotLevels(bars,{lookback});
+ const resistance=confirmed.resistances.find(level=>level.price===110);
+ assert.ok(resistance,'the completed resistance Pivot should be available');
+ assert.equal(resistance.pivots[0].pivotTime,bars[3].time);
+ assert.equal(resistance.pivots[0].confirmedAt,bars[6].time,'confirmation is dated when the next bar proves the right-side candle has closed');
+ assert.equal(c.pivotLevels(bars,{lookback,asOf:bars[5].time}).resistances.length,0,'asOf cannot borrow later bars to confirm a pivot');
+ assert.equal(c.pivotLevels(bars,{lookback,asOf:bars[6].time}).resistances.some(level=>level.price===110),true);
+ assert.equal(confirmed.supports.some(level=>level.price===90),true);
+});
 test('support and resistance lines read active theme colors on every draw',()=>{
  let theme='light';
  const scope={window:{},document:{readyState:'loading',addEventListener(){}},getComputedStyle:()=>({getPropertyValue:name=>({

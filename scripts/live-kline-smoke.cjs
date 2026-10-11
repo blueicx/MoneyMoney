@@ -18,8 +18,10 @@ async function main() {
       window.EventSource = class extends EventTarget { constructor(url) { super(); this.url = url; this.closed = false; window.__fixtureStreams.push(this); } close() { this.closed = true; } };
     });
     const start = Math.floor(Date.now() / 300000) * 300000;
-    const rows = Array.from({ length: 80 }, (_, i) => ({ time: start - (79 - i) * 300000, open: 100, high: 105, low: 95, close: 101, volume: 5 }));
-    let requests = 0;const stockKlineQueries=[];
+    const rows = Array.from({ length: 80 }, (_, i) => ({ time: start - (79 - i) * 300000, open: 100, high: 101, low: 99, close: 100, volume: 5 }));
+    rows[30].high = 110;
+    rows[50].low = 90;
+    let requests = 0, supportRequests = 0;const stockKlineQueries=[];
     const olderRows=Array.from({length:20},(_,i)=>({...rows[0],time:rows[0].time-(20-i)*300000}));let historyRequests=0;
     await page.route('**/api/stock/kline?**', route => { requests++;const query=new URL(route.request().url()).searchParams;stockKlineQueries.push(query.toString());const paged=query.has('before');if(paged)historyRequests++; return route.fulfill({ json: { success: true,market:'stocks',instrument:query.get('api')||query.get('symbol'),timeframe:query.get('period'), data:paged?olderRows:rows, source: 'Isolated chart fixture, not market data', updatedAt: new Date().toISOString(), dataStatus: 'delayed' } }); });
     await page.route('**/api/stock/indices', async route => {
@@ -27,25 +29,7 @@ async function main() {
       return route.fulfill({ json: { success: true, data: [{ name: 'Isolated index fixture', price: 100, changePct: 0.1 }] } });
     });
     await page.route('**/api/binance/klines?**', route => {const query=new URL(route.request().url()).searchParams,paged=query.has('before');if(paged)historyRequests++;return route.fulfill({ json: { success: true,market:'crypto',instrument:'crypto:binance:'+query.get('symbol'),timeframe:query.get('interval'), data:paged?olderRows:rows, source: 'Isolated chart fixture', updatedAt: new Date().toISOString(), dataStatus: 'delayed' } });});
-    await page.route('**/api/support-resistance?**', route => {
-      const query = new URL(route.request().url()).searchParams;
-      const requestedInstrument = query.get('symbol'), interval = query.get('interval');
-      const instrument = query.get('market') === 'stocks' ? requestedInstrument.replace(/^us/i, '') : requestedInstrument;
-      const envelope = query.get('market') === 'stocks'
-        ? { market: 'stocks', instrument, requestedInstrument, timeframe: interval, dataStatus: 'historical', source: 'Isolated stock support/resistance fixture' }
-        : {};
-      return route.fulfill({ json: {
-        success: true,
-        ...envelope,
-        data: {
-          symbol: instrument,
-          interval,
-          supports: [{ type: 'support', price: 96, touches: 3, strength: 75 }],
-          resistances: [{ type: 'resistance', price: 104, touches: 4, strength: 80 }],
-          fetchedAt: new Date().toISOString(),
-        },
-      } });
-    });
+    await page.route('**/api/support-resistance?**', route => { supportRequests++; return route.fulfill({ status: 410, json: { success: false, reason: 'chart Pivot must not use a second data source' } }); });
     await page.goto(base + '/login'); await page.fill('#username', 'live-fixture-owner'); await page.fill('#password', 'isolated-live-fixture-password');
     await Promise.all([page.waitForURL(url => url.pathname === '/'), page.click('#submitBtn')]);
     await page.waitForFunction(() => window.mm_isLoggedIn);
@@ -74,11 +58,22 @@ async function main() {
       };
       setStockChartOverlay('supportResistance', true);
     });
-    await page.waitForFunction(() => stockSupportResistanceState.status === 'success' && stockSupportResistanceState.data?.supports?.length === 1 && stockSupportResistanceState.data?.resistances?.length === 1);
     await page.evaluate(() => drawStockKline(document.getElementById('stock-kline'), stockChartKlines));
     const stockSupportOverlay = await page.evaluate(() => window.__supportResistanceDraws.findLast(draw => draw.canvas === 'stock-kline'));
-    assert.deepEqual(stockSupportOverlay?.prices, [96, 104], 'stock chart must project real support/resistance levels through its production render path');
+    assert.deepEqual(stockSupportOverlay?.prices, [90, 110], 'stock chart must project confirmed pivots from its selected K-line dataset');
     assert.deepEqual(stockSupportOverlay?.types, ['support', 'resistance']);
+    assert.match(await page.locator('#stock-sr-status').innerText(), /已确认 Pivot 2 条（支撑 90 \/ 阻力 110）.*不使用未来K线/);
+    assert.match(await page.locator('#stock-sr-status').innerText(), /来源时间/);
+    const replayPivot = await page.evaluate(() => {
+      stockChartReplayIndex = 33; drawStockKline(document.getElementById('stock-kline'), stockChartKlines);
+      const beforeConfirmation = window.__supportResistanceDraws.findLast(draw => draw.canvas === 'stock-kline')?.prices || [];
+      stockChartReplayIndex = 34; drawStockKline(document.getElementById('stock-kline'), stockChartKlines);
+      const afterConfirmation = window.__supportResistanceDraws.findLast(draw => draw.canvas === 'stock-kline')?.prices || [];
+      stockChartReplayIndex = stockChartKlines.length - 1; drawStockKline(document.getElementById('stock-kline'), stockChartKlines);
+      return { beforeConfirmation, afterConfirmation };
+    });
+    assert.equal(replayPivot.beforeConfirmation.includes(110), false, 'Replay must not reveal a pivot before the extra closed bar confirms it');
+    assert.equal(replayPivot.afterConfirmation.includes(110), true, 'Replay must reveal the pivot when its confirmation bar is reached');
     let paperRequests=0;
     await page.route('**/api/paper/chart-markers?**',route=>{paperRequests++;return route.fulfill({json:{success:true,market:'stocks',instrument:'stock:us:AAPL',dataStatus:'historical',source:'isolated ledger fixture',data:{markers:[{market:'stocks',instrument:'stock:us:AAPL',orderId:'fixture-order',signalId:'fixture-signal',snapshotId:'fixture-snapshot',accountId:'fixture-account',time:rows[60].time+1000,price:101,quantity:1,side:'BUY',feeUsd:.1,slippageUsd:.2}],unlinked:[{orderId:'legacy-order',reason:'未关联：缺少信号 ID'}]}}});});
     assert.equal(paperRequests,0,'unselected paper layer must not request ledger');
@@ -110,12 +105,16 @@ async function main() {
     });
     await page.evaluate(async () => { stockChartAsOf = ''; setMarketScope('crypto'); openWorkspace('crypto-quotes'); bnCurrentSymbol = 'BTCUSDT'; bnCurrentInterval = '5m'; await loadBinanceKlines(); MoneyLiveKline.sync(); });
     await page.waitForFunction(() => window.__fixtureStreams.some(s => !s.closed && s.url.includes('BTCUSDT')));
-    await page.waitForFunction(() => bnCurrentInterval === '5m' && bnKlineData.length === 80 && bnKlineData.at(-1).close === 101);
-    await page.waitForFunction(() => window.__chartAlertLoads === 0 && cryptoSupportResistanceState.status === 'success' && cryptoSupportResistanceState.key === 'BTCUSDT|5m');
+    await page.waitForFunction(() => bnCurrentInterval === '5m' && bnKlineData.length === 80 && bnKlineData.at(-1).close === 100);
+    await page.waitForFunction(() => window.__chartAlertLoads === 0 && bnKlineData.length === 80);
+    await page.evaluate(() => setCryptoChartOverlay('supportResistance', true));
     await page.evaluate(() => drawCandles(document.getElementById('bn-candlestick'), bnKlineData));
     const cryptoSupportOverlay = await page.evaluate(() => window.__supportResistanceDraws.findLast(draw => draw.canvas === 'bn-candlestick'));
-    assert.deepEqual(cryptoSupportOverlay?.prices, [96, 104], 'crypto chart must project real support/resistance levels through its production render path');
+    assert.deepEqual(cryptoSupportOverlay?.prices, [90, 110], 'crypto chart must project confirmed pivots from its selected K-line dataset');
     assert.deepEqual(cryptoSupportOverlay?.types, ['support', 'resistance']);
+    assert.match(await page.locator('#crypto-sr-status').innerText(), /已确认 Pivot 2 条（支撑 90 \/ 阻力 110）.*不使用未来K线/);
+    assert.match(await page.locator('#crypto-sr-status').innerText(), /数据状态 delayed.*来源时间/);
+    assert.equal(supportRequests, 0, 'stock and crypto chart overlays must not fetch a second support/resistance dataset');
     await page.evaluate(() => setCryptoChartOverlay('supportResistance', false));
     const push = await page.evaluate(start => {
       const stream = window.__fixtureStreams.findLast(s => !s.closed);
@@ -219,7 +218,8 @@ async function main() {
     await page.evaluate(() => { setMarketScope('options'); MoneyLiveKline.sync(); }); assert.equal(await page.evaluate(() => window.__fixtureStreams.every(s => s.closed)), true);
     const guest = await browser.newPage(); await guest.goto(base + '/login'); await Promise.all([guest.waitForURL(url => url.pathname === '/'), guest.click('#guestBtn')]);
     assert.equal(await guest.evaluate(() => fetch('/api/kline-stream?market=crypto&instrument=BTCUSDT&interval=5m').then(r => r.status)), 403);
-    assert.deepEqual(errors, []); console.log(JSON.stringify({ ok: true, transportFixtureOnly: true, focus, push, performance, themes, dataDirectory: data }));
+    assert.equal(supportRequests, 0, 'chart overlays must remain derived from chart-scoped bars through workspace changes');
+    assert.deepEqual(errors, []); console.log(JSON.stringify({ ok: true, transportFixtureOnly: true, supportRequests, replayPivot, focus, push, performance, themes, dataDirectory: data }));
   } finally { await browser?.close(); child.kill(); }
 }
 main().catch(e => { console.error(e); process.exitCode = 1; });

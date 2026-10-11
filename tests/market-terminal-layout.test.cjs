@@ -72,20 +72,28 @@ test('crypto support/resistance rendering stays inside the crypto chart renderer
   assert.match(endpoint, /market !== 'crypto'[\s\S]*?不会跨市场回退/);
 });
 
-test('stock support/resistance is hidden outside the current live chart context', () => {
+test('stock and crypto Pivot overlays derive from chart-scoped bars in history and replay without an extra source request', () => {
   const stockDrawStart = html.indexOf('function drawStockKline(canvas, klines)');
   const stockDrawEnd = html.indexOf('// --- DeFi Data ---', stockDrawStart);
   const stockStateStart = html.indexOf('function setStockKlineViewState(');
   const stockStateEnd = html.indexOf('async function performStockKlineLoad(', stockStateStart);
+  const cryptoDrawStart = html.indexOf('function drawCandles(canvas, klines)');
+  const cryptoDrawEnd = html.indexOf('\nlet bnKlineController', cryptoDrawStart);
   assert.ok(stockDrawStart >= 0 && stockDrawEnd > stockDrawStart);
   assert.ok(stockStateStart >= 0 && stockStateEnd > stockStateStart);
+  assert.ok(cryptoDrawStart >= 0 && cryptoDrawEnd > cryptoDrawStart);
   const stockDraw = html.slice(stockDrawStart, stockDrawEnd);
-  assert.match(stockDraw, /stockChartOverlayConfig\.supportResistance\s*&&\s*tradingActive/,
-    'levels from current data must not be projected into historical, focused, or replay views');
-  assert.match(stockDraw, /stockSupportResistanceState/);
-  assert.match(stockDraw, /当前图表不是最新行情视图，支撑\/阻力暂隐藏/);
-  assert.match(html, /function stockSupportResistanceViewAvailable\(\)[\s\S]*stockChartAsOf[\s\S]*stockChartIntradayDate[\s\S]*stockChartFocusEnabled[\s\S]*stockChartReplayIndex/,
-    'date focus, time travel and replay must suppress levels computed with later bars');
+  assert.match(stockDraw, /updateStockPivotStatus\(replayKlines\)/,
+    'asOf and replay must calculate levels only from the already bounded chart history');
+  assert.match(stockDraw, /stockChartOverlayConfig\.supportResistance\s*&&\s*pivotData/);
+  assert.match(html, /function updateStockPivotStatus\(bars\)[\s\S]*?pivotLevels\(bars,\s*\{\s*lookback:\s*3\s*\}\)/);
+  assert.match(html.slice(cryptoDrawStart, cryptoDrawEnd), /pivotLevels\(tradingFull,\s*\{\s*lookback:\s*3\s*\}\)/,
+    'crypto levels must share the selected market feed and remain stable when the visible viewport is zoomed');
+  assert.match(html, /id="crypto-sr-status" aria-live="polite"/);
+  assert.match(html, /function pivotLevelSummary\(result\)[\s\S]*?支撑 \$\{supports\.join\('、'\) \|\| '暂无'\} \/ 阻力 \$\{resistances\.join\('、'\) \|\| '暂无'\}/,
+    'the explanation must list the exact levels rendered by the shared Pivot result');
+  assert.doesNotMatch(stockDraw + html.slice(cryptoDrawStart, cryptoDrawEnd), /fetch\('\/api\/support-resistance\?/,
+    'chart overlays must not fetch a second, potentially future-leaking history source');
   assert.doesNotMatch(html.slice(stockStateStart, stockStateEnd), /cryptoSupportResistanceState|\bW, H, padL, padR, padT\b/);
 });
 
