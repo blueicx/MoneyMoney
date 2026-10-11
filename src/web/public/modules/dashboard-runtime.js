@@ -7289,18 +7289,28 @@ async function loadDefiYields() {
   try {
     const res = await fetch('/api/defi/yield-quality');
     const d = await res.json();
-    if (!d.success || !d.data?.top?.length) throw new Error(d.error || 'no data');
+    if (!d.success || !d.data) throw new Error(d.reason || d.error || '收益质量来源不可用');
     window._defiYieldData = d.data;
     if (!window._defiYieldFilter) window._defiYieldFilter = 'all';
     renderDefiYieldQuality();
   } catch(e) {
-    el.innerHTML = '<div style="color:var(--red);font-size:12px;">收益质量雷达加载失败</div>';
+    const reason = e instanceof Error ? e.message : String(e);
+    el.innerHTML = `<div style="color:var(--red);font-size:12px;">${safeNewsText(reason || '收益质量来源不可用')}</div>`;
   }
 }
 function renderDefiYieldQuality() {
   const el = document.getElementById('defi-yields');
   const data = window._defiYieldData;
   if (!el || !data) return;
+  const sourceName = data.source || data.sources?.join('、') || '来源未知';
+  const retrievedMs = Date.parse(data.retrievedAt || '');
+  const retrievedLabel = Number.isFinite(retrievedMs)
+    ? new Date(retrievedMs).toLocaleString('zh-CN', { hour12: false })
+    : '未知';
+  const statusLabel = data.dataStatus === 'cached' ? '缓存数据' : data.dataStatus === 'empty' ? '暂无可评估记录' : '部分数据';
+  const sourceTimeLabel = data.sourceUpdatedAt
+    ? `来源时间 ${safeNewsText(data.sourceUpdatedAt)}`
+    : '来源更新时间未验证';
   const filters = [
     { key: 'all', label: '全部', count: data.top.length },
     { key: '保守', label: '保守', count: data.conservative },
@@ -7337,6 +7347,7 @@ function renderDefiYieldQuality() {
         ${p.impermanentLossRisk ? '<span style="color:var(--red);">无常损失</span>' : ''}
       </div>
       <div style="margin-top:5px;font-size:10.5px;color:var(--text-secondary);line-height:1.45;">${safeNewsText(p.adviceZh)}</div>
+      ${p.qualityWarnings?.length ? `<div style="margin-top:4px;font-size:10px;color:var(--text-secondary);line-height:1.4;">数据缺项：${p.qualityWarnings.map(safeNewsText).join('；')}</div>` : ''}
     </div>
   `).join('');
   el.innerHTML = `
@@ -7345,12 +7356,14 @@ function renderDefiYieldQuality() {
         <div style="min-width:0;">
           <div style="font-weight:800;font-size:13px;">${safeNewsText(data.signalZh)}</div>
           <div style="font-size:11px;color:var(--text-secondary);margin-top:3px;">扫描 ${data.scanned} 个池 · 符合质量门槛 ${data.eligible} 个</div>
+          <div style="font-size:10px;color:var(--text-secondary);margin-top:3px;">${safeNewsText(sourceName)} · ${statusLabel} · 抓取时间 ${safeNewsText(retrievedLabel)} · ${sourceTimeLabel}</div>
         </div>
         <span style="font-size:10px;padding:4px 8px;border-radius:99px;background:var(--bg-secondary);color:var(--text-secondary);">风险调整 APY</span>
       </div>
       <div style="margin:9px 0;font-size:11px;color:var(--text-secondary);line-height:1.5;">${safeNewsText(data.adviceZh)}</div>
+      ${data.reason ? `<div style="margin:-4px 0 8px;font-size:10.5px;color:var(--text-secondary);line-height:1.45;">${safeNewsText(data.reason)}</div>` : ''}
       <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:4px;">${filterHtml}</div>
-      ${rowsHtml || '<div style="padding:12px 0;color:var(--text-secondary);font-size:12px;">该风险级别暂无符合门槛的池子。</div>'}
+      ${rowsHtml || `<div style="padding:12px 0;color:var(--text-secondary);font-size:12px;">${data.dataStatus === 'empty' ? '来源成功，但暂无符合筛选门槛的池子。' : '该风险级别暂无符合门槛的池子。'}</div>`}
       <div style="margin-top:9px;font-size:10.5px;color:var(--text-secondary);line-height:1.5;">评分使用 TVL、稳定币标记、无常损失、敞口、30日均值、7日趋势和激励依赖；智能合约、桥接、托管与费用风险仍需自行核对。</div>
     </div>
   `;

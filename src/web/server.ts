@@ -69,7 +69,7 @@ import { calculateOptionPayoff, getEquityOptionsSnapshot, getOptionsSnapshot } f
 import { fetchDeribitOptionExecutionQuote, parseDeribitOptionInstrumentName } from '../features/runner-deribit-options';
 import { getMacroCalendar, getGlobalCryptoMetrics } from '../features/external-market-data';
 import { getStablecoinLiquidity } from '../features/stablecoin-liquidity';
-import { getYieldQuality } from '../features/yield-quality';
+import { getYieldQuality, yieldQualityHttpResponse } from '../features/yield-quality';
 import { getCotRadar } from '../features/cftc-positioning';
 import { getInsiderRadar } from '../features/insider-transactions';
 import { getAnalystConsensusSnapshot } from '../features/analyst-consensus';
@@ -4475,9 +4475,25 @@ app.get('/api/defi/yields', async (req, res) => {
 
 app.get('/api/defi/yield-quality', async (_req, res) => {
   try {
-    res.json({ success: true, data: await getYieldQuality() });
+    const result = await getYieldQuality();
+    const response = yieldQualityHttpResponse(result);
+    res.status(response.status).json(response.body);
   } catch (e: any) {
-    res.json({ success: false, error: e.message, data: null });
+    const reason = e instanceof Error ? e.message : String(e);
+    res.status(503).json({
+      success: false,
+      market: 'crypto',
+      instrument: null,
+      dataStatus: 'unavailable',
+      source: 'DefiLlama Yields Pools',
+      sourceUpdatedAt: null,
+      retrievedAt: new Date().toISOString(),
+      updatedAt: null,
+      reason,
+      error: reason,
+      evidenceRefs: ['https://yields.llama.fi/pools'],
+      data: null,
+    });
   }
 });
 
