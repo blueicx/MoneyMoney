@@ -5,8 +5,42 @@
   const styles = manifest.styles || {};
   const pending = new Map();
   const pendingStyles = new Map();
+  const preloadedScripts = new Set();
   let dashboardAuthGate = null;
   let dashboardCoreGate = null;
+
+  function markMmPerformanceStage(name) {
+    if (window.__MM_PERFORMANCE_TRACE__ === true && window.performance?.mark) {
+      window.performance.mark(`moneymoney:${name}`);
+    }
+  }
+
+  function shouldPreloadInitialStockChart(group) {
+    if (group !== 'charts') return false;
+    const params = new URLSearchParams(location.search);
+    return params.get('market') === 'stocks'
+      && params.get('workspace') === 'stock-quotes'
+      && !params.has('sharedWorkspace');
+  }
+
+  function preloadScript(group) {
+    const src = modules[group];
+    if (!src || preloadedScripts.has(src)) return;
+    preloadedScripts.add(src);
+    const link = document.createElement('link');
+    link.rel = 'preload';
+    link.setAttribute('as', 'script');
+    link.href = src;
+    link.dataset.workspacePreload = group;
+    if (group === 'charts') markMmPerformanceStage('chart-preload-start');
+    link.onload = () => { if (group === 'charts') markMmPerformanceStage('chart-preload-ready'); };
+    link.onerror = () => {
+      link.remove();
+      preloadedScripts.delete(src);
+      if (group === 'charts') markMmPerformanceStage('chart-preload-failed');
+    };
+    document.head.append(link);
+  }
 
   function waitForDashboardAuth() {
     if (dashboardAuthGate) return dashboardAuthGate;
@@ -29,10 +63,16 @@
   }
 
   function waitForDashboardCore() {
-    if (window.mm_dashboardCoreReady === true) return Promise.resolve();
+    if (window.mm_dashboardCoreReady === true) {
+      markMmPerformanceStage('dashboard-core-ready');
+      return Promise.resolve();
+    }
     if (!dashboardCoreGate) {
       dashboardCoreGate = new Promise(resolve => {
-        window.addEventListener('mm-dashboard-core-ready', resolve, { once: true });
+        window.addEventListener('mm-dashboard-core-ready', () => {
+          markMmPerformanceStage('dashboard-core-ready');
+          resolve();
+        }, { once: true });
       });
     }
     return dashboardCoreGate;
@@ -62,12 +102,16 @@
   function loadScript(group) {
     const src = modules[group];
     if (!src) return Promise.reject(new Error('没有配置此工作区资源'));
+    if (group === 'charts') markMmPerformanceStage('chart-module-start');
     return new Promise((resolve, reject) => {
       const script = document.createElement('script');
       script.src = src;
       script.async = true;
       script.dataset.workspaceGroup = group;
-      script.onload = resolve;
+      script.onload = () => {
+        if (group === 'charts') markMmPerformanceStage('chart-module-ready');
+        resolve();
+      };
       script.onerror = () => {
         script.remove();
         reject(new Error('工作区加载失败，请重试'));
@@ -83,6 +127,8 @@
       // assigned mm_authReady. Wait for DOMContentLoaded in that case, then
       // await the session check and core dashboard startup before evaluating a workspace bundle.
       await waitForDashboardAuth();
+      markMmPerformanceStage('auth-ready');
+      if (shouldPreloadInitialStockChart(group)) preloadScript(group);
       await waitForDashboardCore();
       if (group === 'contracts') await ensure('charts');
       await ensureStyle(group);

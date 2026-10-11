@@ -37,6 +37,7 @@ function chartHarness(fetcher) {
     var stockChartReplayIndex=1, stockChartKlines=[{close:1}], stockChartExchangeTimezone='America/New_York';
     var stockChartCompanionOpen=false, stockChartOverlayConfig={}, activeMarketScope='stocks', stockChartAdjustment='source';
   `);
+  if (html.includes('function markMmPerformanceStage(')) window.eval(functionSource('markMmPerformanceStage'));
   for (const name of ['stockKlineAsOfStorageKey', 'syncStockKlineAsOfControl', 'clearStockKlineAsOf', 'setStockKlineStatus', 'loadUnifiedStockData', 'setStockKlineViewState', 'stockKlineRequestKey', 'runStockKlineSingleFlight', 'performStockKlineLoad', 'loadStockKline']) {
     if (html.includes(`function ${name}(`)) window.eval(functionSource(name));
   }
@@ -44,6 +45,21 @@ function chartHarness(fetcher) {
 }
 const empty = { success: false, data: null, dataStatus: 'unavailable', source: 'local lake', reason: '没有在 asOf 时点之前发布的数据分区' };
 const response = body => ({ ok: true, json: async () => body });
+
+test('stock chart request, response, and visible render stages are measured in order', async () => {
+  assert.ok(html.includes('function markMmPerformanceStage('), 'dashboard should expose a gated performance stage helper');
+  const h = chartHarness(async () => response({ success: true, data: [{ time: 1, open: 10, high: 12, low: 9, close: 11, volume: 1 }], dataStatus: 'live', source: 'fixture' }));
+  const marks = [];
+  try {
+    h.window.__MM_PERFORMANCE_TRACE__ = true;
+    Object.defineProperty(h.window.performance, 'mark', { configurable: true, value: name => marks.push(name) });
+    await h.window.loadStockKline();
+    const request = marks.indexOf('moneymoney:stock-kline-request-start');
+    const responseParsed = marks.indexOf('moneymoney:stock-kline-response-parsed');
+    const rendered = marks.indexOf('moneymoney:stock-kline-first-render');
+    assert.ok(request >= 0 && responseParsed > request && rendered > responseParsed, `unexpected chart stages: ${marks.join(', ')}`);
+  } finally { h.close(); }
+});
 
 test('changing stock clears an unsaved cutoff and the previous provider code', async () => {
   let url;

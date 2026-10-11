@@ -15,6 +15,8 @@ const cpuRate = process.env.MONEYMONEY_BENCHMARK_CPU_RATE === undefined ? 4 : Nu
 if (!Number.isFinite(cpuRate) || cpuRate < 0 || cpuRate > 8) throw new Error('MONEYMONEY_BENCHMARK_CPU_RATE must be a number from 0 to 8; 0 disables CPU throttling');
 const networkProfile = process.env.MONEYMONEY_BENCHMARK_NETWORK || 'weak';
 if (!['weak', 'none'].includes(networkProfile)) throw new Error('MONEYMONEY_BENCHMARK_NETWORK must be weak or none');
+const gateAuxiliaryRequests = process.env.MONEYMONEY_BENCHMARK_GATE_AUX === '1';
+const auxiliaryPaths = ['/api/stock/indices', '/api/watchlist', '/api/paper/positions'];
 const allViewports = [{ width: 1440, height: 900 }, { width: 390, height: 844 }];
 const requestedViewport = process.env.MONEYMONEY_BENCHMARK_VIEWPORT;
 const benchmarkViewports = requestedViewport === 'desktop' ? [allViewports[0]]
@@ -54,6 +56,13 @@ const child = spawn(process.execPath, [path.join(appRoot, 'dist', 'web', 'server
 const median = values => [...values].sort((a, b) => a - b)[Math.floor(values.length / 2)];
 (async () => {
   let browser;
+  const pendingAuxiliaryReleases = new Set();
+  const releaseAuxiliaryRequests = async () => {
+    const pending = [...pendingAuxiliaryReleases];
+    await Promise.allSettled(pending.map(async gate => {
+      try { await gate.release(); } finally { pendingAuxiliaryReleases.delete(gate); }
+    }));
+  };
   try {
     let healthy = false;
     for (let i = 0; i < 80; i++) {
@@ -86,7 +95,26 @@ const median = values => [...values].sort((a, b) => a - b)[Math.floor(values.len
         const apiRequestStartedAt = new WeakMap();
         const pageErrors = [];
         const responses = [];
+        const klineResponseMetadata = [];
+        const klineResponseTasks = [];
         const failedRequests = [];
+        await page.addInitScript(() => { window.__MM_PERFORMANCE_TRACE__ = true; });
+        if (gateAuxiliaryRequests) {
+          for (const pathname of auxiliaryPaths) {
+            await page.route(`**${pathname}*`, route => new Promise(resolve => {
+              let released = false;
+              const gate = {
+                pathname,
+                release: async () => {
+                  if (released) return;
+                  released = true;
+                  try { await route.continue(); } finally { resolve(); }
+                },
+              };
+              pendingAuxiliaryReleases.add(gate);
+            }));
+          }
+        }
         const reportWaitFailure = async (phase, error) => {
           let authStatusProbe = null;
           const controller = new AbortController();
@@ -116,6 +144,16 @@ const median = values => [...values].sort((a, b) => a - b)[Math.floor(values.len
         page.on('response', response => {
           const url = new URL(response.url());
           if (url.pathname.startsWith('/api/')) responses.push({ pathname: url.pathname, status: response.status() });
+          if (url.pathname === '/api/stock/kline') {
+            klineResponseTasks.push(response.json().then(body => klineResponseMetadata.push({
+              status: response.status(),
+              dataStatus: body?.dataStatus || null,
+              source: body?.source || null,
+              reason: body?.reason || body?.error || null,
+              updatedAt: body?.updatedAt || null,
+              recordCount: Array.isArray(body?.data) ? body.data.length : 0,
+            })).catch(() => klineResponseMetadata.push({ status: response.status(), dataStatus: 'unreadable', recordCount: 0 })));
+          }
         });
         page.on('pageerror', error => pageErrors.push(error.message));
         page.on('requestfailed', request => failedRequests.push({ url: request.url(), error: request.failure()?.errorText || 'unknown' }));
@@ -142,6 +180,26 @@ const median = values => [...values].sort((a, b) => a - b)[Math.floor(values.len
             && !!window.MoneyTradingChart, 'chart-settled')
             .catch(error => reportWaitFailure('chart-settled', error));
           const chartReadyMs = await page.evaluate(() => performance.now());
+          await Promise.allSettled(klineResponseTasks);
+          const auxiliaryPendingAtChart = auxiliaryPaths.map(pathname => ({
+            pathname,
+            requestStarted: requests.some(request => request.pathname === pathname),
+            responsePending: [...pendingAuxiliaryReleases].some(gate => gate.pathname === pathname),
+          }));
+          if (gateAuxiliaryRequests) {
+            assert.ok(auxiliaryPendingAtChart.some(row => row.responsePending),
+              'chart must settle while at least one stock auxiliary response is still held');
+          }
+          const chartResult = await page.evaluate(() => {
+            const resources = performance.getEntriesByType('resource');
+            return {
+              phaseMarks: performance.getEntriesByType('mark').filter(entry => entry.name.startsWith('moneymoney:'))
+                .map(entry => ({ name: entry.name, atMs: Math.round(entry.startTime * 100) / 100 })),
+              chartBundleResources: resources.filter(row => new URL(row.name).pathname.includes('/workspace-charts.'))
+                .map(row => ({ startTime: row.startTime, responseEnd: row.responseEnd, duration: row.duration, transferSize: row.transferSize })),
+            };
+          });
+          await releaseAuxiliaryRequests();
           if (requests.some(request => request.pathname === '/api/stock/indices')) {
             await waitForPageCondition(page, () => performance.getEntriesByType('resource').some(row => {
               try { return new URL(row.name).pathname === '/api/stock/indices' && row.responseEnd > 0; } catch { return false; }
@@ -172,6 +230,10 @@ const median = values => [...values].sort((a, b) => a - b)[Math.floor(values.len
               domContentLoadedMs: navigation?.domContentLoadedEventEnd || null,
               };
           }, { shellReadyMs, chartReadyMs });
+          result.phaseMarks = chartResult.phaseMarks;
+          result.chartBundleResources = chartResult.chartBundleResources;
+          result.klineResponseMetadata = [...klineResponseMetadata];
+          result.auxiliaryPendingAtChart = auxiliaryPendingAtChart;
           result.apiRequestDetails = [...requests];
           result.apiTimings = [...apiTimings];
           result.apiRequests = requests.map(request => request.pathname);
@@ -188,14 +250,15 @@ const median = values => [...values].sort((a, b) => a - b)[Math.floor(values.len
     for (const viewport of benchmarkViewports.map(item => item.width)) for (let run = 0; run < benchmarkRunCount; run++) {
       const cold = samples.find(row => row.viewport === viewport && row.run === run && row.temperature === 'cold');
       const warm = samples.find(row => row.viewport === viewport && row.run === run && row.temperature === 'warm');
-      assert.ok(warm.jsBytes < cold.jsBytes * .2, 'warm hashed scripts must hit browser cache');
+      if (!gateAuxiliaryRequests) assert.ok(warm.jsBytes < cold.jsBytes * .2, 'warm hashed scripts must hit browser cache');
       for (const sample of [cold, warm]) for (const pathname of ['/api/stock/kline', '/api/watchlist', '/api/paper/positions']) {
         assert.equal(sample.apiRequestCounts[pathname], 1,
           `${pathname} must be requested once during ${sample.temperature} stock-chart navigation; observed: ${JSON.stringify(sample.apiRequestDetails.filter(request => request.pathname === pathname))}`);
       }
     }
-    console.log(JSON.stringify({ data: 'real application providers; source status and reason captured per sample', cpuRate, networkProfile, latencyMs: networkProfile === 'weak' ? 80 : 0, downloadKbps: networkProfile === 'weak' ? 750 : null, samples, medians: benchmarkViewports.flatMap(viewport => ['cold', 'warm'].map(temperature => { const group = samples.filter(row => row.viewport === viewport.width && row.temperature === temperature); return { viewport: viewport.width, temperature, shellReadyMs: median(group.map(row => row.shellReadyMs)), chartReadyMs: median(group.map(row => row.chartReadyMs)), jsBytes: median(group.map(row => row.jsBytes)), compatibilityRequestStartSpreadMs: median(group.map(row => row.dashboardStartupCompatibility.requestStartSpreadMs)), compatibilityDownloadSpanMs: median(group.map(row => row.dashboardStartupCompatibility.downloadSpanMs)) }; })) }, null, 2));
+    console.log(JSON.stringify({ data: 'real application providers; source status and reason captured per sample', gateAuxiliaryRequests, cpuRate, networkProfile, latencyMs: networkProfile === 'weak' ? 80 : 0, downloadKbps: networkProfile === 'weak' ? 750 : null, samples, medians: benchmarkViewports.flatMap(viewport => ['cold', 'warm'].map(temperature => { const group = samples.filter(row => row.viewport === viewport.width && row.temperature === temperature); return { viewport: viewport.width, temperature, shellReadyMs: median(group.map(row => row.shellReadyMs)), chartReadyMs: median(group.map(row => row.chartReadyMs)), jsBytes: median(group.map(row => row.jsBytes)), compatibilityRequestStartSpreadMs: median(group.map(row => row.dashboardStartupCompatibility.requestStartSpreadMs)), compatibilityDownloadSpanMs: median(group.map(row => row.dashboardStartupCompatibility.downloadSpanMs)) }; })) }, null, 2));
   } finally {
+    await releaseAuxiliaryRequests();
     try {
       if (browser) await browser.close();
     } finally {

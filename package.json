@@ -32,6 +32,7 @@
     "smoke:prediction-library": "node scripts/prediction-library-timeout-smoke.cjs",
     "smoke:production": "node scripts/production-readonly-canary.cjs",
     "smoke:auth": "node scripts/browser-auth-smoke.cjs",
+    "smoke:chart-path": "node scripts/web-loading-benchmark.cjs",
     "smoke:professional": "node scripts/professional-research-smoke.cjs",
     "smoke:live-kline": "node scripts/live-kline-smoke.cjs",
     "smoke:automatic-comparison": "node scripts/automatic-comparison-smoke.cjs",

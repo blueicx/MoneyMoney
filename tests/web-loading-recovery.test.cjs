@@ -37,10 +37,50 @@ test('stock workspace bootstrap avoids command, macro, event and research fetche
   w.restoreSharedWorkspaceFromUrl = async () => {};
   for (const name of ['initTheme', 'restoreWorkspaceContextFromUrl', 'syncWorkspaceContextUrl', 'renderNavigationState', 'initializeDashboardCollapses', 'restoreLastDashboardTab', 'renderChartPatternControls']) w[name] = () => {};
   for (const name of ['loadActiveWorkspaceInstrument', 'loadAll', 'loadCommandCenter', 'loadNewsTicker', 'loadMarketTimeline', 'loadMarketOverview', 'loadResearchBriefing']) w[name] = () => loads.push(name);
+  w.eval(sourceFunction('markMmPerformanceStage'));
   w.eval(sourceFunction('startDashboard'));
   try {
     await w.startDashboard();
     for (const name of ['loadAll', 'loadCommandCenter', 'loadMarketTimeline', 'loadMarketOverview', 'loadResearchBriefing']) assert.equal(loads.includes(name), false, `${name} is not part of stock chart startup`);
+  } finally { dom.window.close(); }
+});
+
+test('dashboard startup marks auth and restored context before loading the selected instrument', async () => {
+  assert.ok(source.includes('function markMmPerformanceStage('), 'the dashboard needs a gated stage marker helper');
+  const dom = new JSDOM(source, { url: 'http://localhost/', runScripts: 'outside-only' });
+  const w = dom.window;
+  const marks = [];
+  w.__MM_PERFORMANCE_TRACE__ = true;
+  Object.defineProperty(w.performance, 'mark', { configurable: true, value: name => marks.push({ name }) });
+  Object.defineProperty(w.performance, 'getEntriesByType', { configurable: true, value: type => type === 'mark' ? marks : [] });
+  w.eval(sourceFunction('markMmPerformanceStage'));
+  w.eval("var activeMarketScope='stocks',activeWorkspaceId='stock-quotes',currentInstrumentId='AAPL';");
+  w.readInitialMarketScope = () => 'stocks';
+  w.waitForDashboardAuthState = async () => ({ authenticated: true });
+  w.restoreSharedWorkspaceFromUrl = async () => {};
+  const calls = [];
+  for (const name of ['initTheme', 'restoreWorkspaceContextFromUrl', 'renderNavigationState', 'initializeDashboardCollapses', 'restoreLastDashboardTab', 'syncWorkspaceContextUrl', 'renderChartPatternControls']) w[name] = () => {};
+  w.loadActiveWorkspaceInstrument = () => { calls.push('instrument'); return true; };
+  try {
+    w.eval(sourceFunction('startDashboard'));
+    await w.startDashboard();
+    const names = marks.map(entry => entry.name);
+    const start = names.indexOf('moneymoney:dashboard-start');
+    const auth = names.indexOf('moneymoney:dashboard-auth-ready');
+    const context = names.indexOf('moneymoney:dashboard-context-ready');
+    assert.ok(start >= 0 && auth > start && context > auth, `unexpected startup stages: ${names.join(', ')}`);
+    assert.deepEqual(calls, ['instrument']);
+  } finally { dom.window.close(); }
+});
+
+test('dashboard performance stage markers are silent by default', () => {
+  const dom = new JSDOM(source, { url: 'http://localhost/', runScripts: 'outside-only' });
+  const marks = [];
+  try {
+    Object.defineProperty(dom.window.performance, 'mark', { configurable: true, value: name => marks.push(name) });
+    dom.window.eval(sourceFunction('markMmPerformanceStage'));
+    dom.window.markMmPerformanceStage('not-enabled');
+    assert.deepEqual(marks, [], 'normal page views should not create chart stage telemetry');
   } finally { dom.window.close(); }
 });
 
@@ -124,6 +164,7 @@ test('opening an event deep link loads its timeline even without a selected inst
   for (const name of ['initTheme', 'restoreWorkspaceContextFromUrl', 'syncWorkspaceContextUrl', 'renderNavigationState', 'initializeDashboardCollapses', 'restoreLastDashboardTab', 'renderChartPatternControls']) w[name] = () => {};
   w.loadMarketTimeline = () => loads.push('events');
   w.eval(sourceFunction('loadEventTimelineWorkspace'));
+  w.eval(sourceFunction('markMmPerformanceStage'));
   w.eval(sourceFunction('startDashboard'));
   try {
     await w.startDashboard();
@@ -232,24 +273,38 @@ test('an explicit workspace deep link waits for auth and core dashboard readines
     .replace('__WORKSPACE_MANIFEST__', JSON.stringify({ modules: { charts: '/assets/workspace-charts.fixture.js', events: '/assets/workspace-events.fixture.js' }, styles: {} }));
   const loadGroups = async url => {
     const dom = new JSDOM('<!doctype html><html><head></head><body></body></html>', { url, runScripts: 'outside-only' });
+    const snapshot = () => ({
+      preload: [...dom.window.document.querySelectorAll('link[data-workspace-preload]')].map(link => link.dataset.workspacePreload),
+      scripts: [...dom.window.document.querySelectorAll('script[data-workspace-group]')].map(script => script.dataset.workspaceGroup),
+    });
     let resolveAuth;
     dom.window.mm_authReady = new Promise(resolve => { resolveAuth = resolve; });
     dom.window.eval(loader);
     await new Promise(resolve => setTimeout(resolve, 0));
-    const beforeAuth = [...dom.window.document.querySelectorAll('script[data-workspace-group]')].map(script => script.dataset.workspaceGroup);
+    const beforeAuth = snapshot();
     resolveAuth({ loggedIn: true });
     await new Promise(resolve => setTimeout(resolve, 0));
-    const afterAuth = [...dom.window.document.querySelectorAll('script[data-workspace-group]')].map(script => script.dataset.workspaceGroup);
+    const afterAuth = snapshot();
     dom.window.dispatchEvent(new dom.window.Event('mm-dashboard-core-ready'));
     await new Promise(resolve => setTimeout(resolve, 0));
-    const afterCoreReady = [...dom.window.document.querySelectorAll('script[data-workspace-group]')].map(script => script.dataset.workspaceGroup);
+    const afterCoreReady = snapshot();
     dom.window.close();
     return { beforeAuth, afterAuth, afterCoreReady };
   };
-  assert.deepEqual(await loadGroups('http://localhost/?market=stocks&workspace=stock-quotes&instrument=AAPL'), { beforeAuth: [], afterAuth: [], afterCoreReady: ['charts'] });
-  assert.deepEqual(await loadGroups('http://localhost/?market=stocks&workspace=events'), { beforeAuth: [], afterAuth: [], afterCoreReady: ['events'] });
-  assert.deepEqual(await loadGroups('http://localhost/'), { beforeAuth: [], afterAuth: [], afterCoreReady: [] }, 'default entry must not download a guessed workspace');
-  assert.deepEqual(await loadGroups('http://localhost/?market=stocks&workspace=stock-quotes&sharedWorkspace=public-1'), { beforeAuth: [], afterAuth: [], afterCoreReady: [] }, 'shared snapshots choose their own restored context');
+  assert.deepEqual(await loadGroups('http://localhost/?market=stocks&workspace=stock-quotes&instrument=AAPL'), {
+    beforeAuth: { preload: [], scripts: [] },
+    afterAuth: { preload: ['charts'], scripts: [] },
+    afterCoreReady: { preload: ['charts'], scripts: ['charts'] },
+  });
+  assert.deepEqual(await loadGroups('http://localhost/?market=stocks&workspace=events'), {
+    beforeAuth: { preload: [], scripts: [] }, afterAuth: { preload: [], scripts: [] }, afterCoreReady: { preload: [], scripts: ['events'] },
+  });
+  assert.deepEqual(await loadGroups('http://localhost/'), {
+    beforeAuth: { preload: [], scripts: [] }, afterAuth: { preload: [], scripts: [] }, afterCoreReady: { preload: [], scripts: [] },
+  }, 'default entry must not download a guessed workspace');
+  assert.deepEqual(await loadGroups('http://localhost/?market=stocks&workspace=stock-quotes&sharedWorkspace=public-1'), {
+    beforeAuth: { preload: [], scripts: [] }, afterAuth: { preload: [], scripts: [] }, afterCoreReady: { preload: [], scripts: [] },
+  }, 'shared snapshots choose their own restored context');
 });
 
 test('the workspace loader waits through deferred auth-client execution when its promise is not assigned yet', async () => {
@@ -270,13 +325,51 @@ test('the workspace loader waits through deferred auth-client execution when its
     await new Promise(resolve => setTimeout(resolve, 0));
     assert.equal(dom.window.document.querySelector('script[data-workspace-group="charts"]'), null,
       'the bundle must wait for the auth status request as well as DOM readiness');
+    assert.equal(dom.window.document.querySelector('link[data-workspace-preload="charts"]'), null,
+      'chart code must not be fetched before auth settles');
     resolveAuth({ loggedIn: true });
     await new Promise(resolve => setTimeout(resolve, 0));
     assert.equal(dom.window.document.querySelector('script[data-workspace-group="charts"]'), null,
       'the bundle must also wait for the core dashboard to finish bootstrapping');
+    assert.ok(dom.window.document.querySelector('link[rel="preload"][as="script"][data-workspace-preload="charts"]'),
+      'the public chart bundle should preload after auth while core startup continues');
     dom.window.dispatchEvent(new dom.window.Event('mm-dashboard-core-ready'));
     await new Promise(resolve => setTimeout(resolve, 0));
     assert.ok(dom.window.document.querySelector('script[data-workspace-group="charts"]'));
+  } finally { dom.window.close(); }
+});
+
+test('workspace startup stages are marked only when browser performance tracing is enabled', async () => {
+  const loader = fs.readFileSync(path.join('src', 'web', 'public', 'modules', 'workspace-loader.js'), 'utf8')
+    .replace('__WORKSPACE_MANIFEST__', JSON.stringify({ modules: { charts: '/assets/workspace-charts.fixture.js' }, styles: {} }));
+  const dom = new JSDOM('<!doctype html><html><head></head><body></body></html>', {
+    url: 'http://localhost/?market=stocks&workspace=stock-quotes', runScripts: 'outside-only',
+  });
+  let resolveAuth;
+  const performanceMarks = [];
+  try {
+    dom.window.__MM_PERFORMANCE_TRACE__ = true;
+    Object.defineProperty(dom.window.performance, 'mark', { configurable: true, value: name => performanceMarks.push({ name }) });
+    Object.defineProperty(dom.window.performance, 'getEntriesByType', { configurable: true, value: type => type === 'mark' ? performanceMarks : [] });
+    dom.window.mm_authReady = new Promise(resolve => { resolveAuth = resolve; });
+    dom.window.eval(loader);
+    resolveAuth({ loggedIn: true });
+    await new Promise(resolve => setTimeout(resolve, 0));
+    const beforeCore = performanceMarks.map(entry => entry.name);
+    assert.ok(beforeCore.includes('moneymoney:auth-ready'));
+    assert.ok(beforeCore.includes('moneymoney:chart-preload-start'));
+    assert.ok(beforeCore.indexOf('moneymoney:auth-ready') < beforeCore.indexOf('moneymoney:chart-preload-start'));
+    assert.equal(beforeCore.includes('moneymoney:dashboard-core-ready'), false);
+    dom.window.dispatchEvent(new dom.window.Event('mm-dashboard-core-ready'));
+    await new Promise(resolve => setTimeout(resolve, 0));
+    const chartScript = dom.window.document.querySelector('script[data-workspace-group="charts"]');
+    assert.ok(chartScript);
+    const afterCore = performanceMarks.map(entry => entry.name);
+    assert.ok(afterCore.includes('moneymoney:dashboard-core-ready'));
+    assert.ok(afterCore.includes('moneymoney:chart-module-start'));
+    chartScript.onload();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.ok(performanceMarks.some(entry => entry.name === 'moneymoney:chart-module-ready'));
   } finally { dom.window.close(); }
 });
 
@@ -452,8 +545,14 @@ test('hashed dashboard entry scripts defer and feature bundles stay behind the l
 
 test('loading benchmark uses an isolated real-data page and waits for a settled stock K-line state', () => {
   const benchmark = fs.readFileSync('scripts/web-loading-benchmark.cjs', 'utf8');
-  assert.doesNotMatch(benchmark, /Fetch\.enable|Fetch\.requestPaused|page\.route\(/,
-    'the benchmark must not intercept sources or disable browser cache');
+  assert.doesNotMatch(benchmark, /Fetch\.enable|Fetch\.requestPaused/,
+    'the benchmark must not use CDP request interception or disable browser cache');
+  assert.match(benchmark, /MONEYMONEY_BENCHMARK_GATE_AUX/,
+    'a separate opt-in run should gate non-chart APIs while measuring the critical path');
+  assert.match(benchmark, /if\s*\(gateAuxiliaryRequests\)[\s\S]*?page\.route\(/,
+    'route interception must only run when the explicit diagnostic gate is enabled');
+  assert.match(benchmark, /pendingAuxiliaryReleases[\s\S]*?finally[\s\S]*?release/,
+    'every intercepted auxiliary response must be released during cleanup');
   assert.doesNotMatch(benchmark, /window\.fetch\s*=/,
     'the benchmark must not change dashboard fetch behavior');
   assert.doesNotMatch(benchmark, /PerformanceObserver/,
@@ -465,6 +564,9 @@ test('loading benchmark uses an isolated real-data page and waits for a settled 
   assert.match(benchmark, /\['ready', 'empty', 'failed'\]/,
     'the timing result should include a rendered chart or an explicit source result');
   assert.match(benchmark, /chartReadyMs/);
+  assert.match(benchmark, /phaseMarks/);
+  assert.match(benchmark, /klineResponseMetadata/);
+  assert.match(benchmark, /auxiliaryPendingAtChart/);
   assert.match(benchmark, /\.catch\(error => reportWaitFailure\('workspace-ready', error\)\)/);
   assert.match(benchmark, /\.catch\(error => reportWaitFailure\('chart-settled', error\)\)/);
   const failureReporter = benchmark.slice(benchmark.indexOf('const reportWaitFailure ='), benchmark.indexOf("page.on('request'"));
@@ -518,6 +620,8 @@ test('loading benchmark uses an isolated real-data page and waits for a settled 
   assert.match(benchmark, /fs\.rmSync\(root,\s*\{\s*recursive:\s*true,\s*force:\s*true\s*\}\)/,
     'the benchmark must clean only the isolated root it created');
   assert.match(benchmark, /MONEYMONEY_BENCHMARK_ROOT/);
+  const packageJson = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+  assert.equal(packageJson.scripts['smoke:chart-path'], 'node scripts/web-loading-benchmark.cjs');
 });
 
 test('loading benchmark failure diagnostics probe the protected navigation route with the benchmark session', () => {

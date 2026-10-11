@@ -35,6 +35,11 @@ function safeNewsText(value) {
   }[ch]));
 }
 const mmPerformanceSamples = { chart: [], workspace: [], maxSamples: 60 };
+function markMmPerformanceStage(name) {
+  if (window.__MM_PERFORMANCE_TRACE__ === true && window.performance?.mark) {
+    window.performance.mark(`moneymoney:${name}`);
+  }
+}
 function recordMmPerformance(kind, name, durationMs) {
   if (!mmPerformanceSamples[kind] || !Number.isFinite(durationMs)) return;
   const rows = mmPerformanceSamples[kind];
@@ -6413,8 +6418,10 @@ async function performStockKlineLoad(symbol, name, apiSymbol, options = {}) {
     const dateQuery = stockChartIntradayDate ? '&date=' + encodeURIComponent(stockChartIntradayDate) + '&intradayPeriod=' + encodeURIComponent(stockChartIntradayPeriod) : '';
     const adjustmentQuery = '&adjustment=' + encodeURIComponent(requestedAdjustment);
     const chartWindowQuery = !stockChartAsOf && !stockChartIntradayDate && requestedAdjustment === 'source' && ['1m','5m','15m','1h','1d'].includes(currentStockKlinePeriod) ? '&chartWindow=1' : '';
+    markMmPerformanceStage('stock-kline-request-start');
     const res = await fetch('/api/stock/kline?symbol=' + encodeURIComponent(currentStockSymbol) + '&period=' + encodeURIComponent(currentStockKlinePeriod) + '&interval=' + encodeURIComponent(currentStockKlinePeriod) + adjustmentQuery + asOfQuery + dateQuery + chartWindowQuery + (currentStockApiSymbol ? '&api=' + encodeURIComponent(currentStockApiSymbol) : ''), { signal: controller.signal });
     const d = await res.json();
+    markMmPerformanceStage('stock-kline-response-parsed');
     if (requestRevision !== stockKlineRequestRevision) return;
     if (live && (controller.signal.aborted || stockChartAsOf || stockChartIntradayDate || stockChartReplayIndex < stockChartKlines.length - 1 || window.stockMoneyKLine?.timer)) return;
     if (!live) loadUnifiedStockData(currentStockSymbol, d);
@@ -6458,6 +6465,7 @@ async function performStockKlineLoad(symbol, name, apiSymbol, options = {}) {
     if (!live && stockChartCompanionOpen) loadStockChartCompanion();
     if (!live && !document.getElementById('mm-stock-multi-chart')?.hidden) window.MoneyMoneyExperience?.loadMultiChart?.();
     canvas.style.visibility = 'visible';
+    markMmPerformanceStage('stock-kline-first-render');
     if (live) window.MoneyLiveKline?.note('stocks', '每 30 秒读取来源快照 · ' + freshness + ' · 不代表交易所实时');
   } catch(e) {
     if (requestRevision !== stockKlineRequestRevision || controller.signal.aborted) return;
@@ -12055,7 +12063,9 @@ function restoreLastDashboardTab() {
   showTab(defaultTabForMarketScope(activeMarketScope), null, { scopeAlreadySynced: true });
 }
 async function startDashboard() {
+  markMmPerformanceStage('dashboard-start');
   await waitForDashboardAuthState();
+  markMmPerformanceStage('dashboard-auth-ready');
   initTheme();
   activeMarketScope = readInitialMarketScope();
   restoreWorkspaceContextFromUrl();
@@ -12064,6 +12074,7 @@ async function startDashboard() {
   await restoreSharedWorkspaceFromUrl();
   restoreLastDashboardTab();
   syncWorkspaceContextUrl();
+  markMmPerformanceStage('dashboard-context-ready');
   if (activeWorkspaceId === 'events') loadEventTimelineWorkspace();
   else if (currentInstrumentId) loadActiveWorkspaceInstrument();
   renderChartPatternControls();
