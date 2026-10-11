@@ -472,6 +472,16 @@ test('loading benchmark uses an isolated real-data page and waits for a settled 
     'the benchmark must distinguish upstream API latency from browser startup and rendering');
   assert.match(benchmark, /requestfinished/,
     'API duration should include the response body transfer, not only response headers');
+  assert.match(benchmark, /page\.evaluate\(\(\{\s*shellReadyMs\s*,\s*chartReadyMs\s*\}\)\s*=>/,
+    'the benchmark should pass timing values as one Playwright evaluate argument');
+  assert.match(benchmark, /\},\s*\{\s*shellReadyMs\s*,\s*chartReadyMs\s*\}\);/,
+    'Playwright evaluate accepts one serialized argument object');
+  assert.doesNotMatch(benchmark, /\},\s*shellReadyMs\s*,\s*chartReadyMs\s*\);/,
+    'multiple positional evaluate arguments fail on the current Playwright API');
+  assert.match(benchmark, /await stopBenchmarkChild\(child\)/,
+    'the isolated server must exit before the benchmark removes its temporary database');
+  assert.match(benchmark, /fs\.rmSync\(root,\s*\{\s*recursive:\s*true,\s*force:\s*true\s*\}\)/,
+    'the benchmark must clean only the isolated root it created');
   assert.match(benchmark, /MONEYMONEY_BENCHMARK_ROOT/);
 });
 

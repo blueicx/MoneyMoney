@@ -30,6 +30,22 @@ function waitForPageCondition(page, predicate, phase) {
   });
   return Promise.race([pageWait, nodeWait]).finally(() => clearTimeout(watchdog));
 }
+function stopBenchmarkChild(child) {
+  if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve();
+  return new Promise(resolve => {
+    let hardKill;
+    const finish = () => {
+      clearTimeout(hardKill);
+      resolve();
+    };
+    child.once('exit', finish);
+    child.kill('SIGINT');
+    hardKill = setTimeout(() => {
+      if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+    }, 1500);
+    hardKill.unref();
+  });
+}
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'mm-load-benchmark-'));
 const child = spawn(process.execPath, [path.join(appRoot, 'dist', 'web', 'server.js')], {
   cwd: appRoot, stdio: 'ignore',
@@ -132,7 +148,7 @@ const median = values => [...values].sort((a, b) => a - b)[Math.floor(values.len
             }), 'stock-indices-settled').catch(error => reportWaitFailure('stock-indices-settled', error));
             await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 0)));
           }
-          const result = await page.evaluate((shellReadyMs, chartReadyMs) => {
+          const result = await page.evaluate(({ shellReadyMs, chartReadyMs }) => {
             const resources = performance.getEntriesByType('resource');
             const js = resources.filter(row => /\.js(?:\?|$)/.test(row.name));
             const navigation = performance.getEntriesByType('navigation')[0];
@@ -142,7 +158,7 @@ const median = values => [...values].sort((a, b) => a - b)[Math.floor(values.len
               jsResources: js.map(row => ({ path: new URL(row.name).pathname, startTime: row.startTime, duration: row.duration, transferSize: row.transferSize })),
               domContentLoadedMs: navigation?.domContentLoadedEventEnd || null,
               };
-          }, shellReadyMs, chartReadyMs);
+          }, { shellReadyMs, chartReadyMs });
           result.apiRequestDetails = [...requests];
           result.apiTimings = [...apiTimings];
           result.apiRequests = requests.map(request => request.pathname);
@@ -167,7 +183,14 @@ const median = values => [...values].sort((a, b) => a - b)[Math.floor(values.len
     }
     console.log(JSON.stringify({ data: 'real application providers; source status and reason captured per sample', cpuRate, networkProfile, latencyMs: networkProfile === 'weak' ? 80 : 0, downloadKbps: networkProfile === 'weak' ? 750 : null, samples, medians: benchmarkViewports.flatMap(viewport => ['cold', 'warm'].map(temperature => { const group = samples.filter(row => row.viewport === viewport.width && row.temperature === temperature); return { viewport: viewport.width, temperature, shellReadyMs: median(group.map(row => row.shellReadyMs)), chartReadyMs: median(group.map(row => row.chartReadyMs)), jsBytes: median(group.map(row => row.jsBytes)) }; })) }, null, 2));
   } finally {
-    if (browser) await browser.close();
-    child.kill('SIGINT'); setTimeout(() => child.kill('SIGKILL'), 1500).unref();
+    try {
+      if (browser) await browser.close();
+    } finally {
+      try {
+        await stopBenchmarkChild(child);
+      } finally {
+        fs.rmSync(root, { recursive: true, force: true });
+      }
+    }
   }
 })().catch(error => { console.error(error); process.exitCode = 1; });
