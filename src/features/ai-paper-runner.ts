@@ -839,6 +839,17 @@ export function validateAiRunnerModelIntent(
   };
 }
 
+function runnerContractMultiplier(position: Pick<AiRunnerPosition, 'contractMultiplier'>): number {
+  const multiplier = position.contractMultiplier;
+  return multiplier == null ? 1 : Number.isFinite(multiplier) && multiplier > 0 ? multiplier : Number.POSITIVE_INFINITY;
+}
+
+export function calculateRunnerOpenExposureUsd(runner: Pick<AiRunner, 'positions'>, instrumentId?: string): number {
+  return runner.positions
+    .filter(position => position.status === 'OPEN' && (!instrumentId || position.instrumentId === instrumentId))
+    .reduce((sum, position) => sum + position.entryPrice * position.quantity * runnerContractMultiplier(position), 0);
+}
+
 function normalizeRunner(runner: AiRunner): AiRunner {
   const accountId = runner.accountId || `ai-runner:${runner.id}`;
   const account = runner.accountId ? unifiedPaperLedgerStore.getRunnerAccount(accountId) : null;
@@ -847,12 +858,14 @@ function normalizeRunner(runner: AiRunner): AiRunner {
     const instrument = position.instrument || { venue: runner.venue, symbolOrMarketId: runner.symbolOrMarketId };
     const ledgerIdentity = toLedgerInstrument(instrument.venue, instrument.symbolOrMarketId);
     const outcome = instrument.venue === 'Predict.fun' ? (position.side === 'NO' ? 'NO' : 'YES') : '';
-    const key = `${ledgerIdentity.instrumentId}:${outcome}`;
+    const multiplier = position.contractMultiplier == null ? 'legacy-unit' : String(position.contractMultiplier);
+    const key = `${ledgerIdentity.instrumentId}:${outcome}:${multiplier}`;
     expectedOpen.set(key, (expectedOpen.get(key) || 0) + Number(position.quantity || 0));
   }
   const actualOpen = new Map<string, number>();
   for (const position of account?.positions || []) {
-    const key = `${position.instrumentId}:${position.instrumentType === 'prediction' ? position.outcome || '' : ''}`;
+    const multiplier = position.contractMultiplier == null ? 'legacy-unit' : String(position.contractMultiplier);
+    const key = `${position.instrumentId}:${position.instrumentType === 'prediction' ? position.outcome || '' : ''}:${multiplier}`;
     actualOpen.set(key, (actualOpen.get(key) || 0) + Number(position.quantity || 0));
   }
   const tradesLinked = Array.isArray(runner.trades) && runner.trades.every(trade => Boolean(trade.orderId && account?.orders.some(order => order.id === trade.orderId)));
@@ -891,13 +904,9 @@ export function evaluateRunnerOpen(runner: AiRunner, cost: number, at = new Date
   if (!Number.isFinite(cost) || cost <= 0) return { allowed: false, reason: '订单金额无效' };
   if (cost > runner.cashUsd) return { allowed: false, reason: '策略可用余额不足' };
   if (cost > runner.policy.maxTradeUsd) return { allowed: false, reason: '超过策略单笔限额' };
-  const committedBudget = runner.positions
-    .filter(position => position.status === 'OPEN')
-    .reduce((sum, position) => sum + position.entryPrice * position.quantity, 0);
+  const committedBudget = calculateRunnerOpenExposureUsd(runner);
   if (runner.universe?.kind === 'watchlist' && instrumentId) {
-    const instrumentExposure = runner.positions
-      .filter(position => position.status === 'OPEN' && position.instrumentId === instrumentId)
-      .reduce((sum, position) => sum + position.entryPrice * position.quantity, 0);
+    const instrumentExposure = calculateRunnerOpenExposureUsd(runner, instrumentId);
     if (instrumentExposure + cost > (runner.policy.maxPerInstrumentUsd ?? runner.policy.maxTradeUsd)) return { allowed: false, reason: '超过单标的投入上限' };
   }
   if (runner.universe?.kind === 'watchlist' && committedBudget + cost > (runner.policy.maxInvestedUsd ?? runner.policy.maxBudgetUsd)) return { allowed: false, reason: '超过组合总投入上限' };
@@ -1031,7 +1040,7 @@ export function updateAiRunnerMarketState(id: string, input: AiRunnerMarketState
           position.markStatus = (selectedQuote?.dataStatus || selectedQuote?.status || effectiveStatus) as AiRunnerPosition['markStatus'];
           position.markSource = selectedQuote?.source || input.source;
           position.markUpdatedAt = selectedQuote?.updatedAt || input.dataAt;
-          const unrealized = (markPrice - position.entryPrice) * position.quantity;
+          const unrealized = (markPrice - position.entryPrice) * position.quantity * runnerContractMultiplier(position);
           position.maxFavorablePnlUsd = Math.max(Number(position.maxFavorablePnlUsd || 0), unrealized, 0);
           position.maxAdversePnlUsd = Math.min(Number(position.maxAdversePnlUsd || 0), unrealized, 0);
           prices.set(scope === 'prediction' ? `${instrumentId}:${position.side === 'NO' ? 'NO' : 'YES'}` : instrumentId, markPrice);
@@ -1094,11 +1103,11 @@ export function updateAiRunnerMarketState(id: string, input: AiRunnerMarketState
       }
     }
     const open = runner.positions.filter(position => position.status === 'OPEN');
-    const equity = runner.cashUsd + open.reduce((sum, position) => sum + Number(position.currentPrice ?? position.entryPrice) * position.quantity, 0);
+    const equity = runner.cashUsd + open.reduce((sum, position) => sum + Number(position.currentPrice ?? position.entryPrice) * position.quantity * runnerContractMultiplier(position), 0);
     runner.peakEquityUsd = Math.max(Number(runner.peakEquityUsd || runner.budgetUsd), equity);
     const drawdownPct = runner.peakEquityUsd > 0 ? Math.max(0, (runner.peakEquityUsd - equity) / runner.peakEquityUsd * 100) : 0;
     const realizedPnlUsd = runner.positions.filter(position => position.status === 'CLOSED').reduce((sum, position) => sum + Number(position.pnlUsd || 0), 0);
-    const unrealizedPnlUsd = open.reduce((sum, position) => sum + (Number(position.currentPrice ?? position.entryPrice) - position.entryPrice) * position.quantity, 0);
+    const unrealizedPnlUsd = open.reduce((sum, position) => sum + (Number(position.currentPrice ?? position.entryPrice) - position.entryPrice) * position.quantity * runnerContractMultiplier(position), 0);
     const feeSlippageUsd = runner.trades.reduce((sum, trade) => sum + Math.abs(Number(trade.feeUsd) || 0) + Math.abs(Number(trade.slippageUsd) || 0), 0);
     const spreadCostUsd = runner.trades.reduce((sum, trade) => sum + Math.abs(Number(trade.spreadUsd) || 0), 0);
     const point: AiRunnerEquityPoint = {
@@ -1315,7 +1324,7 @@ export function runnerClosePosition(id: string, positionId: string, exitPrice: n
           + Number(item.exitFeeUsd || 0) + Number(item.exitSlippageUsd || 0);
         return sum + (Number(item.pnlUsd) || 0) - totalCosts;
       }, 0);
-      const equity = account.cash + account.positions.reduce((sum, item) => sum + item.currentPrice * item.quantity, 0);
+      const equity = account.cash + account.positions.reduce((sum, item) => sum + item.currentPrice * item.quantity * runnerContractMultiplier(item), 0);
       r.peakEquityUsd = Math.max(r.peakEquityUsd, equity);
       if (r.peakEquityUsd > 0 && ((r.peakEquityUsd - equity) / r.peakEquityUsd) * 100 >= r.policy.maxDrawdownPct) {
         r.status = 'STOPPED';
@@ -1413,13 +1422,13 @@ export function summarizeRunner(runner: AiRunner, currentPrice?: number): AiRunn
   const unrealizedPnl = open.reduce((sum, position) => {
     const mark = currentPrice != null && position.instrumentId === toLedgerInstrument(runner.venue, runner.symbolOrMarketId).instrumentId
       ? currentPrice : Number(position.currentPrice ?? position.entryPrice);
-    return sum + (mark - position.entryPrice) * position.quantity;
+    return sum + (mark - position.entryPrice) * position.quantity * runnerContractMultiplier(position);
   }, 0);
   const wins = closed.filter(p => (p.pnlUsd || 0) > 0).length;
   const equity = runner.cashUsd + open.reduce((sum, position) => {
     const mark = currentPrice != null && position.instrumentId === toLedgerInstrument(runner.venue, runner.symbolOrMarketId).instrumentId
       ? currentPrice : Number(position.currentPrice ?? position.entryPrice);
-    return sum + mark * position.quantity;
+    return sum + mark * position.quantity * runnerContractMultiplier(position);
   }, 0);
   const costs = runner.trades.reduce((sum, trade) => sum + Math.abs(Number(trade.feeUsd) || 0) + Math.abs(Number(trade.slippageUsd) || 0), 0);
   const spreadCost = runner.trades.reduce((sum, trade) => sum + Math.abs(Number(trade.spreadUsd) || 0), 0);

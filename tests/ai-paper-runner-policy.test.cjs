@@ -1,6 +1,6 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const { evaluateRunnerOpen } = require('../dist/features/ai-paper-runner');
+const { evaluateRunnerOpen, summarizeRunner, calculateRunnerOpenExposureUsd } = require('../dist/features/ai-paper-runner');
 
 const baseRunner = {
   status: 'RUNNING', cashUsd: 100, lastActionAt: undefined,
@@ -54,4 +54,30 @@ test('AI runner watchlist policy enforces per-instrument exposure separately fro
   assert.equal(evaluateRunnerOpen(watchlist, 101, new Date('2026-10-05T00:00:00Z'), 'stock:us:NVDA').allowed, true);
   const nearCap = { ...watchlist, positions: [...watchlist.positions, { status: 'OPEN', entryPrice: 650, quantity: 1, instrumentId: 'stock:us:NVDA' }] };
   assert.equal(evaluateRunnerOpen(nearCap, 51, new Date('2026-10-05T00:00:00Z'), 'stock:us:MSFT').reason, '超过组合总投入上限');
+});
+
+test('option contract multipliers count toward per-instrument and portfolio exposure limits', () => {
+  const option = {
+    ...baseRunner,
+    cashUsd: 1000,
+    universe: { kind: 'watchlist' },
+    policy: { ...baseRunner.policy, maxTradeUsd: 250, maxBudgetUsd: 500, maxPositions: 5, maxInvestedUsd: 250, maxPerInstrumentUsd: 250 },
+    positions: [{ status: 'OPEN', entryPrice: 2, quantity: 1, contractMultiplier: 100, instrumentId: 'option:deribit:BTC-19OCT26-65000-C' }],
+  };
+  assert.equal(evaluateRunnerOpen(option, 80, new Date('2026-10-05T00:00:00Z'), 'option:deribit:BTC-19OCT26-65000-C').reason, '超过单标的投入上限');
+  assert.equal(evaluateRunnerOpen(option, 80, new Date('2026-10-05T00:00:00Z'), 'option:deribit:ETH-19OCT26-4000-C').reason, '超过组合总投入上限');
+  assert.equal(calculateRunnerOpenExposureUsd(option), 200);
+  assert.equal(calculateRunnerOpenExposureUsd(option, 'option:deribit:BTC-19OCT26-65000-C'), 200);
+});
+
+test('runner summary values option equity and unrealized PnL in contract notional units', () => {
+  const summary = summarizeRunner({
+    id: 'option-summary', venue: 'Options', symbolOrMarketId: 'BTC-19OCT26-65000-C', title: 'BTC call',
+    budgetUsd: 1000, cashUsd: 800, status: 'RUNNING', createdAt: '2026-10-05T00:00:00.000Z',
+    positions: [{ status: 'OPEN', entryPrice: 2, currentPrice: 3, quantity: 1, contractMultiplier: 100 }],
+    trades: [], peakEquityUsd: 1000, policy: { ...baseRunner.policy }, accountId: 'ai-runner:missing-option-summary',
+  });
+  assert.equal(summary.unrealizedPnlUsd, 100);
+  assert.equal(summary.equityUsd, 1100);
+  assert.equal(summary.unrealizedPct, 50);
 });

@@ -8753,6 +8753,7 @@ app.get('/api/paper/trades', (req, res) => {
 import {
   createAiRunner, stopAiRunner, getAiRunners,
   runnerOpenPosition, runnerClosePosition,
+  calculateRunnerOpenExposureUsd,
   summarizeRunner, updateAiRunnerPolicy, updateAiRunnerRouting, selectRunnerStockQuote, selectControlledStockQuote, pauseAiRunner, resumeAiRunner, resetAiRunnerCircuit,
   evaluateRunnerOpen, resolveRunnerFill, evaluateRunnerQuoteGate, calculateRunnerExecutionCosts,
   sizeDeribitOptionPaperOrder,
@@ -9651,10 +9652,10 @@ function executePreparedRunnerTick(prepared: PreparedAiRunnerTick): { actions: A
       if (existing) { record.action = 'REJECTED'; record.reason = '该标的已有未平仓头寸'; continue; }
       if (snapshot.market === 'options' && side !== 'LONG') { record.action = 'REJECTED'; record.reason = '期权模拟仅允许买入持有的有限损失方向'; continue; }
       const perInstrumentRemaining = runner.universe?.kind === 'watchlist'
-        ? Math.max(0, (runner.policy.maxPerInstrumentUsd ?? runner.policy.maxTradeUsd) - runner.positions.filter(position => position.status === 'OPEN' && position.instrumentId === runnerLedgerInstrumentId(ref)).reduce((sum, position) => sum + position.entryPrice * position.quantity, 0))
+        ? Math.max(0, (runner.policy.maxPerInstrumentUsd ?? runner.policy.maxTradeUsd) - calculateRunnerOpenExposureUsd(runner, runnerLedgerInstrumentId(ref)))
         : runner.policy.maxTradeUsd;
       const totalRemaining = runner.universe?.kind === 'watchlist'
-        ? Math.max(0, (runner.policy.maxInvestedUsd ?? runner.policy.maxBudgetUsd) - runner.positions.filter(position => position.status === 'OPEN').reduce((sum, position) => sum + position.entryPrice * position.quantity, 0))
+        ? Math.max(0, (runner.policy.maxInvestedUsd ?? runner.policy.maxBudgetUsd) - calculateRunnerOpenExposureUsd(runner))
         : runner.policy.maxTradeUsd;
       const target = Math.min(runner.cashUsd * 0.95, runner.policy.maxTradeUsd, perInstrumentRemaining, totalRemaining);
       const costMultiplier = 1 + (Number(runner.policy.feeRateBps) + Number(runner.policy.additionalSlippageBps)) / 10_000;

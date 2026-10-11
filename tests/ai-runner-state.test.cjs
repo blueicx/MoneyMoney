@@ -48,6 +48,30 @@ test('runner valuation persists fresh marks and preserves the last mark when quo
   assert.equal(saved.equityHistory.length, 2);
 });
 
+test('runner mark-to-market applies a stored option contract multiplier to equity and MFE/MAE', () => {
+  const instrument = 'BTC-19OCT26-65000-C';
+  const runner = createAiRunner('Options', instrument, 'BTC call', 1000);
+  const at = '2026-10-10T00:00:00.000Z';
+  const seeded = getAiRunners().map(item => item.id === runner.id ? {
+    ...item,
+    cashUsd: 800,
+    positions: [{
+      id: 'synthetic-option-position', instrumentId: `option:deribit:${instrument}`,
+      instrument: { venue: 'Options', symbolOrMarketId: instrument },
+      entryPrice: 2, currentPrice: 2, quantity: 1, contractMultiplier: 100,
+      entryTime: at, markStatus: 'delayed', status: 'OPEN',
+    }],
+  } : item);
+  stateStore.set('ai-paper-runners', seeded, 1);
+  updateAiRunnerMarketState(runner.id, {
+    market: 'options', status: 'live', source: 'fixture quote', dataAt: at, prices: { [instrument]: 3 },
+  }, new Date(at));
+  const saved = getAiRunners().find(item => item.id === runner.id);
+  assert.equal(saved.positions[0].maxFavorablePnlUsd, 100);
+  assert.equal(saved.equityHistory.at(-1).equityUsd, 1100);
+  assert.equal(saved.equityHistory.at(-1).unrealizedPnlUsd, 100);
+});
+
 test('AI call quota is durably consumed before a model request can fail', () => {
   const runner = createAiRunner('Binance', 'ETHUSDT', 'Ethereum', 100, undefined, { mode: 'ai-review' });
   const calledAt = new Date().toISOString();
@@ -202,6 +226,19 @@ test('legacy runner records without a verifiable isolated ledger remain read-onl
   const legacy = getAiRunners()[0];
   assert.equal(legacy.executionState, 'legacy-readonly');
   assert.equal(require('../dist/features/unified-paper-trading').unifiedPaperLedgerStore.getRunnerAccount(legacy.accountId), null);
+});
+
+test('runner mirror contract multiplier must match the immutable isolated ledger before execution is trusted', () => {
+  const runner = createAiRunner('Stocks', 'AAPL', 'Apple', 1000);
+  const at = new Date().toISOString();
+  const quote = { market: 'stocks', status: 'live', price: 10, bestBid: 9.9, bestAsk: 10, fetchedAt: at, source: 'fixture quote' };
+  assert.equal(runnerOpenPosition(runner.id, 10, 1, 'LONG', 'test', undefined, { quote, source: quote.source, dataAt: at }), true);
+  const baseline = getAiRunners().find(item => item.id === runner.id);
+  assert.equal(baseline.executionState, 'ready', 'matching mirror and ledger are the trusted baseline');
+  stateStore.set('ai-paper-runners', getAiRunners().map(item => item.id === runner.id
+    ? { ...item, positions: item.positions.map(position => ({ ...position, contractMultiplier: 100 })) }
+    : item), 1);
+  assert.equal(getAiRunners().find(item => item.id === runner.id).executionState, 'legacy-readonly');
 });
 
 test('prediction runner does not present an untyped YES probability as a side-neutral holding benchmark', () => {
