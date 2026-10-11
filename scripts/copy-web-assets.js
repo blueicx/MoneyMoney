@@ -142,7 +142,12 @@ modules.comparison.push(fs.readFileSync(path.join(source, 'automatic-comparison.
 if (!dashboardStartupParts.length) throw new Error('Dashboard startup runtime was not collected');
 const dashboardStartupUrls = dashboardStartupParts.map(part => emit(part.name, part.code, 'js'));
 const dashboardBootstrap = `(function(){\n'use strict';\nlet started=false;\nfunction loadScript(src){return new Promise((resolve,reject)=>{const script=document.createElement('script');script.src=src;script.async=true;script.dataset.dashboardStartup='true';script.onload=resolve;script.onerror=()=>reject(new Error('页面功能脚本加载失败'));document.head.append(script);});}\nfunction showFailure(){const banner=document.getElementById('network-status-banner');if(banner){banner.hidden=false;banner.textContent='页面功能脚本加载失败，请刷新重试';}else console.error('MoneyMoney dashboard startup bundle failed to load');}\nasync function start(){\n  if(started)return;started=true;\n  let authReady=window.mm_authReady;\n  if(!authReady||typeof authReady.then!=='function') await new Promise(resolve=>{\n    const ready=()=>resolve();\n    window.addEventListener('mm-auth-client-ready',ready,{once:true});\n    if(document.readyState==='complete') ready(); else window.addEventListener('load',ready,{once:true});\n  });\n  authReady=window.mm_authReady;\n  if(authReady&&typeof authReady.then==='function') await Promise.resolve(authReady).catch(()=>null);\n  try{\n    const sources=${JSON.stringify(dashboardStartupUrls)};\n    if(sources.length) await loadScript(sources[0]);\n    if(window.mm_dashboardReady) await Promise.resolve(window.mm_dashboardReady).catch(()=>null);\n    for(const src of sources.slice(1)) await loadScript(src);\n    window.dispatchEvent(new CustomEvent('mm-dashboard-runtime-loaded'));\n  }catch(error){showFailure();}\n}\nvoid start();\n})();`;
-const dashboardBootstrapReady = dashboardBootstrap.replace(
+const dashboardBootstrapParallel = dashboardBootstrap
+  .replace('function loadScript(src){', 'function loadScript(src,ordered=false){')
+  .replace('script.async=true;', 'script.async=ordered?false:true;')
+  .replace('for(const src of sources.slice(1)) await loadScript(src);', 'await Promise.all(sources.slice(1).map(src=>loadScript(src,true)));');
+if (dashboardBootstrapParallel === dashboardBootstrap) throw new Error('Dashboard ordered startup loader was not generated');
+const dashboardBootstrapReady = dashboardBootstrapParallel.replace(
   'if(window.mm_dashboardReady) await Promise.resolve(window.mm_dashboardReady).catch(()=>null);',
   "if(window.mm_dashboardReady) await Promise.resolve(window.mm_dashboardReady).catch(()=>null);window.mm_dashboardCoreReady=true;window.dispatchEvent(new Event('mm-dashboard-core-ready'));",
 );

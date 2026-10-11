@@ -404,16 +404,17 @@ app.get('/api/workspace/navigation', (req, res) => {
   return res.json({ success: true, scope, groups: resolveWorkspaceNavigation(scope) });
 });
 
+async function loadStockIndicesData(): Promise<any[]> {
+  return getFreshExternal<any[]>('stockIndices', CACHE_TTL, async () => {
+    const text = await fetchTencentText('https://qt.gtimg.cn/q=sh000001,sz399001,hkHSI,usDJI,usIXIC,usINX');
+    return sanitizeUsQuoteNames(text.split(';').map(row => parseTencentStock(row.trim())).filter(Boolean));
+  });
+}
+
 async function dashboardStockIndices(): Promise<DashboardProviderResult> {
   try {
-    let data = getCached('stockIndices');
-    let fetchedAt = responseCache.get('stockIndices')?.ts || null;
-    if (!Array.isArray(data)) {
-      const text = await fetchTencentText('https://qt.gtimg.cn/q=sh000001,sz399001,hkHSI,usDJI,usIXIC,usINX');
-      data = await sanitizeUsQuoteNames(text.split(';').map(row => parseTencentStock(row.trim())).filter(Boolean));
-      if (data.length) setCached('stockIndices', data);
-      fetchedAt = responseCache.get('stockIndices')?.ts || Date.now();
-    }
+    const data = await loadStockIndicesData();
+    const fetchedAt = responseCache.get('stockIndices')?.ts || Date.now();
     const rows = (Array.isArray(data) ? data : []).filter((row: any) => Number(row.price) > 0);
     return {
       market: 'stocks', source: 'Tencent Finance', fetchedAt: fetchedAt ? new Date(fetchedAt).toISOString() : null,
@@ -2775,18 +2776,7 @@ app.get('/api/stock/quotes', async (req, res) => {
 
 app.get('/api/stock/indices', async (req, res) => {
   try {
-    const cached = getCached('stockIndices');
-    if (cached) return res.json({ success: true, data: cached });
-
-    // Major indices
-    const indices = 'sh000001,sz399001,hkHSI,usDJI,usIXIC,usINX';
-    const url = `https://qt.gtimg.cn/q=${indices}`;
-    const text = await fetchTencentText(url);
-    const stocks = await sanitizeUsQuoteNames(text.split(';')
-      .map(s => parseTencentStock(s.trim()))
-      .filter(Boolean));
-
-    if (stocks.length) setCached('stockIndices', stocks);
+    const stocks = await loadStockIndicesData();
     res.json({ success: true, data: stocks });
   } catch (e: any) {
     res.json({ success: false, error: e.message });

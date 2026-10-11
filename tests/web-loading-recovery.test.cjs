@@ -313,9 +313,16 @@ test('the large dashboard startup bundle is fetched only after the auth client s
   assert.match(bootstrap, /window\.mm_dashboardReady\) await Promise\.resolve\(window\.mm_dashboardReady\)/,
     'ordered compatibility scripts should wait for the core dashboard initialization');
   const coreReadyIndex = bootstrap.indexOf("window.mm_dashboardCoreReady=true;window.dispatchEvent(new Event('mm-dashboard-core-ready'));");
-  const compatibilityScriptsIndex = bootstrap.indexOf('for(const src of sources.slice(1)) await loadScript(src);');
+  const compatibilityScriptsIndex = bootstrap.indexOf('Promise.all(sources.slice(1).map(src=>loadScript(src,true)))');
   assert.ok(coreReadyIndex >= 0 && coreReadyIndex < compatibilityScriptsIndex,
-    'lazy workspace preloads must be released after core dashboard initialization, before compatibility scripts');
+    'compatibility scripts must start after core dashboard initialization');
+  assert.match(bootstrap, /script\.async=ordered\?false:true/,
+    'dynamic compatibility scripts must execute in insertion order while their downloads overlap');
+  assert.doesNotMatch(bootstrap, /for\(const src of sources\.slice\(1\)\) await loadScript\(src\)/,
+    'compatibility downloads must not form a serial network waterfall');
+  const runtimeLoadedIndex = bootstrap.indexOf("window.dispatchEvent(new CustomEvent('mm-dashboard-runtime-loaded'))");
+  assert.ok(runtimeLoadedIndex > compatibilityScriptsIndex,
+    'the runtime-loaded event must remain after every compatibility script has loaded');
   const runtimeRef = Object.keys(manifest).find(reference => reference.includes('/dashboard-startup-runtime.'));
   assert.ok(runtimeRef, 'the main runtime should be emitted as a separately hashed resource');
   const runtime = fs.readFileSync(path.join(root, runtimeRef), 'utf8');
@@ -325,6 +332,28 @@ test('the large dashboard startup bundle is fetched only after the auth client s
     .map(reference => fs.readFileSync(path.join(root, reference), 'utf8')).join('\n');
   assert.match(startup, /window\.MoneyMoneyChartBridge/,
     'legacy chart bridge code must remain in the ordered startup sequence');
+});
+
+test('dashboard and stock-index API share one cached single-flight upstream loader', () => {
+  const server = fs.readFileSync(path.join('src', 'web', 'server.ts'), 'utf8');
+  const loaderStart = server.indexOf('async function loadStockIndicesData()');
+  const providerStart = server.indexOf('async function dashboardStockIndices()');
+  const providerEnd = server.indexOf('\nfunction dashboardOptionsCoverage()', providerStart);
+  const routeStart = server.indexOf("app.get('/api/stock/indices'");
+  const routeEnd = server.indexOf('\nfunction fastStockSearch(', routeStart);
+  assert.ok(loaderStart >= 0 && providerStart > loaderStart && providerEnd > providerStart && routeStart > providerEnd && routeEnd > routeStart,
+    'the shared stock-index loader and both consumers should be present');
+  const loader = server.slice(loaderStart, providerStart);
+  const provider = server.slice(providerStart, providerEnd);
+  const route = server.slice(routeStart, routeEnd);
+  assert.match(loader, /getFreshExternal(?:<[^>]+>)?\('stockIndices',\s*CACHE_TTL,/,
+    'the shared loader must use the existing cache and in-flight request coalescer');
+  assert.match(provider, /await loadStockIndicesData\(\)/,
+    'the dashboard provider must use the shared loader');
+  assert.match(route, /await loadStockIndicesData\(\)/,
+    'the HTTP route must use the same shared loader');
+  assert.equal((server.match(/qt\.gtimg\.cn\/q=sh000001,sz399001,hkHSI,usDJI,usIXIC,usINX/g) || []).length, 1,
+    'the upstream index URL must have a single implementation');
 });
 
 test('overview HTML does not eagerly request chart, research, comparison, or contract workspaces', () => {
@@ -472,6 +501,12 @@ test('loading benchmark uses an isolated real-data page and waits for a settled 
     'the benchmark must distinguish upstream API latency from browser startup and rendering');
   assert.match(benchmark, /requestfinished/,
     'API duration should include the response body transfer, not only response headers');
+  assert.match(benchmark, /dashboardStartupCompatibility\s*:/,
+    'the report must expose startup compatibility asset timing separately');
+  assert.match(benchmark, /requestStartSpreadMs/,
+    'the report must show whether compatibility asset downloads started together');
+  assert.match(benchmark, /resourceCount\s*:/);
+  assert.match(benchmark, /transferBytes\s*:/);
   assert.match(benchmark, /page\.evaluate\(\(\{\s*shellReadyMs\s*,\s*chartReadyMs\s*\}\)\s*=>/,
     'the benchmark should pass timing values as one Playwright evaluate argument');
   assert.match(benchmark, /\},\s*\{\s*shellReadyMs\s*,\s*chartReadyMs\s*\}\);/,

@@ -151,11 +151,24 @@ const median = values => [...values].sort((a, b) => a - b)[Math.floor(values.len
           const result = await page.evaluate(({ shellReadyMs, chartReadyMs }) => {
             const resources = performance.getEntriesByType('resource');
             const js = resources.filter(row => /\.js(?:\?|$)/.test(row.name));
+            const startupCompatibility = js.filter(row => {
+              const pathname = new URL(row.name).pathname;
+              return pathname.includes('/dashboard-startup-') && !pathname.includes('dashboard-startup-bootstrap.')
+                && !pathname.includes('dashboard-startup-runtime.');
+            });
+            const startupStarts = startupCompatibility.map(row => row.startTime);
+            const startupEnds = startupCompatibility.map(row => row.responseEnd);
             const navigation = performance.getEntriesByType('navigation')[0];
             return { shellReadyMs, chartReadyMs, chartState: document.getElementById('stock-chart-card')?.dataset.klineState,
               chartMessage: document.getElementById('stock-chart-card')?.innerText.slice(0, 500) || '',
               bytes: resources.reduce((sum, row) => sum + row.transferSize, 0), jsBytes: js.reduce((sum, row) => sum + row.transferSize, 0),
               jsResources: js.map(row => ({ path: new URL(row.name).pathname, startTime: row.startTime, duration: row.duration, transferSize: row.transferSize })),
+              dashboardStartupCompatibility: {
+                resourceCount: startupCompatibility.length,
+                transferBytes: startupCompatibility.reduce((sum, row) => sum + row.transferSize, 0),
+                requestStartSpreadMs: startupStarts.length > 1 ? Math.max(...startupStarts) - Math.min(...startupStarts) : 0,
+                downloadSpanMs: startupStarts.length ? Math.max(...startupEnds) - Math.min(...startupStarts) : 0,
+              },
               domContentLoadedMs: navigation?.domContentLoadedEventEnd || null,
               };
           }, { shellReadyMs, chartReadyMs });
@@ -181,7 +194,7 @@ const median = values => [...values].sort((a, b) => a - b)[Math.floor(values.len
           `${pathname} must be requested once during ${sample.temperature} stock-chart navigation; observed: ${JSON.stringify(sample.apiRequestDetails.filter(request => request.pathname === pathname))}`);
       }
     }
-    console.log(JSON.stringify({ data: 'real application providers; source status and reason captured per sample', cpuRate, networkProfile, latencyMs: networkProfile === 'weak' ? 80 : 0, downloadKbps: networkProfile === 'weak' ? 750 : null, samples, medians: benchmarkViewports.flatMap(viewport => ['cold', 'warm'].map(temperature => { const group = samples.filter(row => row.viewport === viewport.width && row.temperature === temperature); return { viewport: viewport.width, temperature, shellReadyMs: median(group.map(row => row.shellReadyMs)), chartReadyMs: median(group.map(row => row.chartReadyMs)), jsBytes: median(group.map(row => row.jsBytes)) }; })) }, null, 2));
+    console.log(JSON.stringify({ data: 'real application providers; source status and reason captured per sample', cpuRate, networkProfile, latencyMs: networkProfile === 'weak' ? 80 : 0, downloadKbps: networkProfile === 'weak' ? 750 : null, samples, medians: benchmarkViewports.flatMap(viewport => ['cold', 'warm'].map(temperature => { const group = samples.filter(row => row.viewport === viewport.width && row.temperature === temperature); return { viewport: viewport.width, temperature, shellReadyMs: median(group.map(row => row.shellReadyMs)), chartReadyMs: median(group.map(row => row.chartReadyMs)), jsBytes: median(group.map(row => row.jsBytes)), compatibilityRequestStartSpreadMs: median(group.map(row => row.dashboardStartupCompatibility.requestStartSpreadMs)), compatibilityDownloadSpanMs: median(group.map(row => row.dashboardStartupCompatibility.downloadSpanMs)) }; })) }, null, 2));
   } finally {
     try {
       if (browser) await browser.close();
