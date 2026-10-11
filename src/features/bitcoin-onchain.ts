@@ -358,7 +358,7 @@ export function buildBitcoinOnchainRadar(
   let regimeBoost: number | null = null;
   let signal: BitcoinOnchainResult['signal'] = 'unavailable';
   let signalZh = '链上综合判断不可用';
-  let advisorBiasZh = '关键来源、同日样本或历史长度不足，暂不输出综合方向判断。';
+  let advisorBiasZh = '关键来源、可对齐观测时点或历史长度不足，暂不输出综合方向判断。';
   if (signalReady) {
     const rawScore = activityScore! * 0.45 + securityScore! * 0.35 + (100 - nvtPercentile52w!) * 0.20 - 50;
     regimeBoost = round(clamp(rawScore * 0.12, -5, 5), 2);

@@ -165,15 +165,15 @@ test('on-chain UI separates source observation time from MoneyMoney retrieval an
       retrievedAt: '2026-10-12T03:00:00.000Z',
       generatedAt: '2026-10-12T03:00:00.000Z',
       asOfAt: '2026-10-10T00:00:00.000Z',
-      signal: 'neutral',
-      signalZh: '链上活动中性',
+      signal: 'unavailable',
+      signalZh: '链上综合判断不可用',
       summaryZh: '源时点摘要',
-      advisorBiasZh: '暂无额外方向',
-      regimeBoost: 0,
-      nvtRatio: 25,
-      nvtPercentile52w: 40,
-      activityScore: 52,
-      securityScore: 50,
+      advisorBiasZh: '暂不输出综合方向',
+      regimeBoost: null,
+      nvtRatio: null,
+      nvtPercentile52w: null,
+      activityScore: null,
+      securityScore: null,
       metrics: [{ key: 'activeAddresses', labelZh: '活跃地址', value: 120, displayZh: '120', sourceUpdatedAt: '2026-10-10T00:00:00.000Z', sampleCount: 60, change7dPct: 1, change30dPct: 2, percentile52w: 50 }],
     },
   }) });
@@ -186,6 +186,8 @@ test('on-chain UI separates source observation time from MoneyMoney retrieval an
     assert.match(panel.textContent, /矿工收入：来源成功响应，但未返回记录/);
     assert.match(panel.textContent, /来源数据截至/);
     assert.match(panel.textContent, /MoneyMoney 抓取于/);
+    assert.match(panel.textContent, /时间可对齐历史样本不足/);
+    assert.doesNotMatch(panel.textContent, /同日历史样本不足|同日样本/);
     assert.match(panel.innerHTML, /var\(--text-secondary\)/);
     assert.match(panel.innerHTML, /var\(--bg-card\)/);
   }

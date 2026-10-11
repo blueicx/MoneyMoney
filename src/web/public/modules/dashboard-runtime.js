@@ -5251,7 +5251,7 @@ async function loadBitcoinOnchain() {
     }).join('');
     el.innerHTML = `
       <div style="display:flex;gap:8px;flex-wrap:wrap;font-size:11px;color:var(--text-secondary);margin-bottom:8px;">
-        <span>NVT ${d.nvtRatio === null ? '暂无' : safeNewsText(d.nvtRatio)}${d.nvtPercentile52w === null ? '（同日历史样本不足，暂无分位）' : `（52周第 ${safeNewsText(d.nvtPercentile52w)}% 分位）`}</span>
+        <span>NVT ${d.nvtRatio === null ? '暂无' : safeNewsText(d.nvtRatio)}${d.nvtPercentile52w === null ? '（时间可对齐历史样本不足，暂无分位）' : `（52周第 ${safeNewsText(d.nvtPercentile52w)}% 分位）`}</span>
         <span>活跃分 ${d.activityScore === null ? '暂无' : safeNewsText(d.activityScore)}</span>
         <span>安全分 ${d.securityScore === null ? '暂无' : safeNewsText(d.securityScore)}</span>
       </div>
