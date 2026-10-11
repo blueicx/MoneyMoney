@@ -8708,13 +8708,13 @@ app.post('/api/ai-runners/comparisons/automatic/defaults',express.json(),async(r
         const first=pool.instruments[0];
         const group=createAiRunnerComparison(first.venue,first.symbolOrMarketId,first.title||first.symbolOrMarketId,1000,{},
           {seed:42,model,universe:{kind:'watchlist',sourceWatchlistId:pool.sourceWatchlistId,instruments:pool.instruments}});
-        const scheduled=comparisonScheduler.register({market,groupId:group.id,model,instruments:pool.instruments.map(row=>row.symbolOrMarketId),excluded:pool.excluded});
+        const scheduled=comparisonScheduler.register({market,groupId:group.id,model,modelSelection,instruments:pool.instruments.map(row=>row.symbolOrMarketId),excluded:pool.excluded});
         // New default groups are always explicitly paused, even when the global scheduler is disabled.
         const paused=comparisonScheduler.pause(market,true);
         return {group,scheduled:paused};
       }finally{stateStore.releaseLease(leaseKey,owner);}
     });
-    stateStore.appendAudit({id:crypto.randomUUID(),action:'ai_comparison_default_pool_created',detail:market+' '+created.group.id+'；标的='+pool.instruments.map(row=>row.symbolOrMarketId).join(',')+'；各账户1000虚拟USD；已暂停；未调用模型或下单'});
+    stateStore.appendAudit({id:crypto.randomUUID(),action:'ai_comparison_default_pool_created',detail:market+' '+created.group.id+'；模型选择来源='+modelSelection+'；固定模型='+model+'；标的='+pool.instruments.map(row=>row.symbolOrMarketId).join(',')+'；各账户1000虚拟USD；已暂停；未调用模型或下单'});
     res.status(201).json({success:true,data:created.scheduled,group:created.group,accounts:created.group.runnerIds,instruments:pool.instruments,
       evidence:pool.evidence,excluded:pool.excluded,reason:`${pool.reason}；三个独立模拟账户各1000虚拟USD；固定模型 ${model}；新组保持暂停，未调用模型、未消耗额度、未下单。`});
   }catch(error:any){res.status(error?.httpStatus||400).json({success:false,dataStatus:'unavailable',reason:error?.message||'默认对照组创建失败'});}
@@ -8761,10 +8761,10 @@ app.post('/api/ai-runners/comparisons/automatic/rebuild',express.json(),async(re
     const data=stateStore.transaction(()=>{
       const group=createAiRunnerComparison(first.venue,first.symbolOrMarketId,first.title || first.symbolOrMarketId,1000,{},
         {seed:42,model,universe:{kind:'watchlist',sourceWatchlistId:'admin',instruments:selected.instruments}});
-      return comparisonScheduler.register({market,groupId:group.id,model,instruments:selected.instruments.map(ref=>ref.symbolOrMarketId),
+      return comparisonScheduler.register({market,groupId:group.id,model,modelSelection,instruments:selected.instruments.map(ref=>ref.symbolOrMarketId),
         excluded:selected.excluded.map(row=>row.instrument+'：'+row.reason)});
     });
-    stateStore.appendAudit({id:crypto.randomUUID(),action:'ai_comparison_auto_rebuilt',detail:market+' '+data.groupId+'；旧账户及历史保留；未调用模型'});
+    stateStore.appendAudit({id:crypto.randomUUID(),action:'ai_comparison_auto_rebuilt',detail:market+' '+data.groupId+'；模型选择来源='+modelSelection+'；固定模型='+model+'；旧账户及历史保留；未调用模型'});
     res.json({success:true,data,excluded:selected.excluded,reason:`已冻结管理员自选；三个独立账户各1000虚拟USD；模型 ${model} 已冻结，尚未执行。重建旧组必须人工恢复。`});
   }catch(error:any){res.status(400).json({success:false,reason:error.message});}
 });

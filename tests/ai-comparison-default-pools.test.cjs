@@ -146,3 +146,23 @@ test('default pool creation is a separate admin-only endpoint that refuses exist
   assert.doesNotMatch(route, /comparisonScheduler\.(?:setEnabled|pause)\([^)]*false/, '创建不得自动启用调度或恢复市场');
   assert.match(route, /status:\s*['"]paused['"]|paused:\s*true|register\(/, '路由必须保留调度器的安全暂停策略');
 });
+
+test('default pool endpoint persists and audits whether the fixed model was selected randomly or explicitly', () => {
+  const server = fs.readFileSync(path.join(__dirname, '../src/web/server.ts'), 'utf8');
+  const start = server.indexOf("app.post('/api/ai-runners/comparisons/automatic/defaults'");
+  const end = server.indexOf("app.post('/api/ai-runners/comparisons/automatic/rebuild'", start);
+  const route = server.slice(start, end);
+  assert.match(route, /comparisonScheduler\.register\(\{\s*market,\s*groupId:group\.id,\s*model,\s*modelSelection,/s,
+    '调度器必须持久保存实际使用的随机/固定选择模式');
+  assert.match(route, /ai_comparison_default_pool_created[\s\S]*modelSelection/,
+    '创建审计记录必须包含模型选择来源');
+});
+
+test('manual comparison rebuild persists the selected model provenance too', () => {
+  const server = fs.readFileSync(path.join(__dirname, '../src/web/server.ts'), 'utf8');
+  const start = server.indexOf("app.post('/api/ai-runners/comparisons/automatic/rebuild'");
+  const end = server.indexOf("app.post('/api/ai-runners/comparisons/automatic/control'", start);
+  const route = server.slice(start, end);
+  assert.match(route, /comparisonScheduler\.register\(\{[\s\S]*?modelSelection,/,
+    '重建冻结组必须保留实际模型选择模式');
+});

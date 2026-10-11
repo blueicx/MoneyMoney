@@ -6,6 +6,8 @@ export const COMPARISON_MARKETS = ['stocks', 'options', 'crypto', 'prediction'] 
 export type ComparisonMarket = typeof COMPARISON_MARKETS[number];
 export interface AutomaticComparisonGroup {
   market: ComparisonMarket; groupId: string; model: string; instruments: string[]; excluded: string[];
+  /** Selection procedure is part of the frozen record; legacy groups are normalized to unknown. */
+  modelSelection?: 'fixed' | 'random-free' | 'unknown';
   paused: boolean; generation: number; cursor: number; createdAt: string;
 }
 export interface AutomaticComparisonRound {
@@ -33,10 +35,19 @@ export class ComparisonScheduler {
       || (state.lastHour !== null && !Number.isSafeInteger(state.lastHour))
       || new Set(state.groups.map(g => g.market)).size !== state.groups.length
       || state.groups.some(g => !COMPARISON_MARKETS.includes(g.market) || !g.groupId || !g.model || typeof g.paused !== 'boolean'
+        || (g.modelSelection !== undefined && !['fixed', 'random-free', 'unknown'].includes(g.modelSelection))
         || !Number.isSafeInteger(g.generation) || !Number.isSafeInteger(g.cursor) || !Array.isArray(g.instruments) || !g.instruments.length || g.instruments.length > 5)) {
       throw new Error('自动对照状态无法核验，停止调度');
     }
-    return state;
+    if (state.archived.some(g => g.modelSelection !== undefined && !['fixed', 'random-free', 'unknown'].includes(g.modelSelection))) {
+      throw new Error('自动对照归档模型来源无法核验，停止调度');
+    }
+    // Old persisted rows lack provenance. Surface that uncertainty explicitly; never infer from model ID.
+    return {
+      ...state,
+      groups: state.groups.map(group => ({ ...group, modelSelection: group.modelSelection ?? 'unknown' })),
+      archived: state.archived.map(group => ({ ...group, modelSelection: group.modelSelection ?? 'unknown' })),
+    };
   }
   private healthy() { if (!this.store.health.ok) throw new Error('自动对照存储不可用'); }
   private atomic<T>(work: (state: SchedulerState) => T): T {
@@ -49,16 +60,17 @@ export class ComparisonScheduler {
     });
   }
   list() { return this.read(); }
-  register(input: { market: ComparisonMarket; groupId: string; model: string; instruments: string[]; excluded?: string[] }, now = Date.now()) {
+  register(input: { market: ComparisonMarket; groupId: string; model: string; modelSelection?: 'fixed' | 'random-free'; instruments: string[]; excluded?: string[] }, now = Date.now()) {
     if (!COMPARISON_MARKETS.includes(input.market)) throw new Error('自动对照市场无效');
     if (!input.model?.trim() || input.model.length > 160) throw new Error('自动对照必须固定有效模型');
+    if (input.modelSelection != null && !['fixed', 'random-free'].includes(input.modelSelection)) throw new Error('模型选择来源无效');
     if (!input.groupId || !Number.isFinite(now)) throw new Error('自动对照配置无效');
     if (!Array.isArray(input.instruments) || input.instruments.length < 1 || input.instruments.length > 5
       || input.instruments.some(id => typeof id !== 'string' || !id.trim()) || new Set(input.instruments).size !== input.instruments.length) throw new Error('冻结标的必须为1–5个不同身份');
     return this.atomic(state => {
       const old = state.groups.find(g => g.market === input.market);
       if (old) state.archived.unshift({ ...old, paused: true });
-      const group: AutomaticComparisonGroup = { ...input, instruments: [...input.instruments], excluded: [...(input.excluded ?? [])],
+      const group: AutomaticComparisonGroup = { ...input, modelSelection: input.modelSelection ?? 'unknown', instruments: [...input.instruments], excluded: [...(input.excluded ?? [])],
         paused: true, generation: (old?.generation ?? 0) + 1, cursor: 0, createdAt: new Date(now).toISOString() };
       state.groups = [...state.groups.filter(g => g.market !== input.market), group];
       // Initial registration is eligible after global enable; rebuild requires explicit resume.

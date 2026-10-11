@@ -9,6 +9,8 @@ dataLakeCatalog.registerInstrument({type:'crypto',venue:'binance',symbol:'BTCUSD
 dataLakeCatalog.registerInstrument({type:'option',venue:'cboe',symbol:'AAPL:20261016:C:100'});
 const sentinel=createAiRunner('Stocks','MU','Existing isolated runner',1000,{}, {mode:'ai-autonomous-paper',startPaused:true});
 const before=JSON.stringify(getAiRunners().find(row=>row.id===sentinel.id));
+stateStore.set('ai-comparison-scheduler',{version:1,enabled:false,notBefore:0,lastHour:null,marketCursor:0,
+ groups:[{market:'options',groupId:'legacy-options',model:'legacy/fixed-id',instruments:['ETH-30OCT26-2500-C'],excluded:[],paused:true,generation:1,cursor:0,createdAt:'2026-10-01T00:00:00.000Z'}],archived:[],history:[]});
 dataLakeCatalog.close();stateStore.close();
 const base='http://127.0.0.1:3198';
 const child=spawn(process.execPath,['dist/web/server.js'],{cwd:root,stdio:'ignore',env:{...process.env,MONEYMONEY_DATA_DIR:dir,APP_HOST:'127.0.0.1',APP_PORT:'3198',MONEYMONEY_LOGIN_USER:'smoke-owner',MONEYMONEY_LOGIN_PASS:'isolated-smoke-password',MONEYMONEY_JWT_SECRET:'isolated-auto-comparison-1234567890',TELEGRAM_NETWORK_ENABLED:'false',TELEGRAM_POLLING_ENABLED:'false',TELEGRAM_BOT_TOKEN:'',TELEGRAM_CHAT_ID:'',TELEGRAM_ALLOWED_CHAT_IDS:'',TELEGRAM_ADMIN_CHAT_IDS:'',OPENROUTER_API_KEY:'',GROQ_API_KEY:'',WECOM_WEBHOOK_URL:'',BARK_DEVICE_KEY:'',MONEYMONEY_DISCORD_WEBHOOK_URL:'',MONEYMONEY_LARK_WEBHOOK_URL:'',MONEYMONEY_JSON_WEBHOOK_URL:'',AI_PAPER_TRADING_ENABLED:'true',MONEYMONEY_DISABLE_HISTORY_CAPTURE:'true',PRIVATE_KEY:'',API_KEY:''}});
@@ -36,16 +38,19 @@ async function main(){let browser;try{
  assert.ok(all.filter(r=>ids.includes(r.id)).every(r=>r.budgetUsd===1000&&r.status==='STOPPED'&&r.model==='fixture/fixed-model'));
  assert.equal(new Set(all.filter(r=>ids.includes(r.id)).map(r=>r.accountId)).size,3);
  assert.equal(JSON.stringify(all.find(r=>r.id===sentinel.id), (key,value)=>key==='summary'?undefined:value),before,'existing independent runner unchanged');
- const defaultCrypto=await post('/api/ai-runners/comparisons/automatic/defaults',{market:'crypto'});
+ const defaultCrypto=await post('/api/ai-runners/comparisons/automatic/defaults',{market:'crypto',modelSelection:'fixed'});
  assert.equal(defaultCrypto.status,201,JSON.stringify(defaultCrypto.body));
  assert.deepEqual(defaultCrypto.body.instruments.map(row=>row.symbolOrMarketId),['BTCUSDT','ETHUSDT']);
  assert.equal(defaultCrypto.body.data.paused,true,'新默认组即使全局调度关闭也必须暂停');
+ assert.equal(defaultCrypto.body.data.modelSelection,'fixed','默认池应持久记录明确模型来源');
  assert.match(defaultCrypto.body.reason,/未调用模型、未消耗额度、未下单/);
  const cryptoGroupId=defaultCrypto.body.data.groupId;
+ const scheduledCrypto=(await (await page.request.get(base+'/api/ai-runners/comparisons/automatic')).json()).data.groups.find(row=>row.market==='crypto');
+ assert.equal(scheduledCrypto.modelSelection,'fixed','状态接口应返回持久化后的模型选择来源');
  const cryptoGroup=(await (await page.request.get(base+'/api/ai-runners/comparisons/'+cryptoGroupId)).json()).data;
  const afterDefault=(await (await page.request.get(base+'/api/ai-runners')).json()).data;
  const cryptoRunners=afterDefault.filter(row=>cryptoGroup.runnerIds.includes(row.id));
- assert.equal(cryptoRunners.length,3);assert.ok(cryptoRunners.every(row=>row.budgetUsd===1000&&row.status==='STOPPED'&&row.model==='fixture/fixed-model'));
+ assert.equal(cryptoRunners.length,3);assert.ok(cryptoRunners.every(row=>row.budgetUsd===1000&&row.status==='STOPPED'&&row.model===defaultCrypto.body.data.model));
  assert.equal(new Set(cryptoRunners.map(row=>row.accountId)).size,3);
  assert.equal(cryptoRunners[0].universe.sourceWatchlistId,'defaults:crypto:v1');
  assert.equal(JSON.stringify(afterDefault.find(row=>row.id===sentinel.id),(key,value)=>key==='summary'?undefined:value),before,'默认池创建不能改动现有独立跑单');
@@ -60,6 +65,7 @@ async function main(){let browser;try{
  await page.evaluate(()=>{setMarketScope('stocks');showTab('paper');});
  const panel=page.locator('#mm-automatic-comparison');await panel.waitFor({state:'visible'});await page.waitForFunction(()=>document.getElementById('mm-automatic-comparison')?.textContent.includes('NVDA'));
  assert.ok(!(await panel.innerText()).includes('BTCUSDT'));
+ assert.ok((await panel.innerText()).includes('模型来源：手动指定后冻结'),'管理员界面应展示模型来源');
  const themes=[];for(const theme of ['light','dark','money']){
    await page.evaluate(theme=>{if(theme==='light')document.documentElement.removeAttribute('data-theme');else document.documentElement.setAttribute('data-theme',theme);},theme);
    await page.waitForTimeout(250);
@@ -69,6 +75,8 @@ async function main(){let browser;try{
  await page.setViewportSize({width:390,height:844});assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+2),'mobile no horizontal overflow');
  await page.evaluate(()=>{setMarketScope('crypto');showTab('paper');});await page.waitForFunction(()=>document.getElementById('mm-automatic-comparison')?.textContent.includes('BTCUSDT'));
  assert.ok(!(await panel.innerText()).includes('NVDA'));
+ await page.evaluate(()=>{setMarketScope('options');showTab('paper');});await page.waitForFunction(()=>document.getElementById('mm-automatic-comparison')?.textContent.includes('历史来源未记录'));
+ assert.ok((await panel.innerText()).includes('模型来源：历史来源未记录（不推断）'),'旧组不得从模型名称猜测选择来源');
  const rebuilt=await post('/api/ai-runners/comparisons/automatic/rebuild',{market:'stocks',model:'fixture/fixed-model'});assert.equal(rebuilt.status,200);assert.equal(rebuilt.body.data.paused,true);
  const status=(await (await page.request.get(base+'/api/ai-runners/comparisons/automatic')).json());assert.equal(status.data.enabled,false);assert.equal(status.budget.issued,0);assert.equal(status.budget.reserved,0);assert.ok(status.data.archived.some(r=>r.groupId===firstGroup));
  const guest=await browser.newPage();await guest.goto(base+'/login');await Promise.all([guest.waitForURL(u=>u.pathname==='/'),guest.click('#guestBtn')]);

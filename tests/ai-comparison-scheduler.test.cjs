@@ -15,6 +15,26 @@ function fixture() {
 function register(s, market, ids = ['A', 'B']) {
   return s.register({ market, groupId: 'group-' + market, model: 'fixed/model', instruments: ids, excluded: ['capacity-extra'] }, now);
 }
+test('automatic comparison persists the model selection provenance for new groups', () => {
+  const f = fixture(); try {
+    const random = f.first.register({ market: 'crypto', groupId: 'random-pool', model: 'provider/free-model', modelSelection: 'random-free', instruments: ['BTCUSDT'] }, now);
+    const fixed = f.first.register({ market: 'stocks', groupId: 'fixed-pool', model: 'provider/model', modelSelection: 'fixed', instruments: ['AAPL'] }, now);
+    assert.equal(random.modelSelection, 'random-free');
+    assert.equal(f.second.list().groups.find(row => row.market === 'crypto').modelSelection, 'random-free');
+    assert.equal(fixed.modelSelection, 'fixed');
+    assert.equal(f.second.list().groups.find(row => row.market === 'stocks').modelSelection, 'fixed');
+  } finally { f.close(); }
+});
+test('legacy automatic groups without provenance are reported unknown rather than guessed fixed', () => {
+  const f = fixture(); try {
+    const legacy = { market: 'stocks', groupId: 'legacy', model: 'provider/model', instruments: ['AAPL'], excluded: [], paused: true, generation: 1, cursor: 0, createdAt: new Date(now).toISOString() };
+    f.a.set('ai-comparison-scheduler', { version: 1, enabled: false, notBefore: 0, lastHour: null, marketCursor: 0,
+      groups: [legacy], archived: [{ ...legacy, groupId: 'legacy-archived' }], history: [] });
+    assert.equal(f.first.list().groups[0].modelSelection, 'unknown');
+    assert.equal(f.first.list().archived[0].modelSelection, 'unknown');
+    assert.equal(f.a.get('ai-comparison-scheduler').groups[0].modelSelection, undefined, '读取兼容旧记录不能偷偷回写业务状态');
+  } finally { f.close(); }
+});
 test('automatic comparison defaults off and starts only at next whole hour; two connections cannot claim twice', () => {
   const f = fixture(); try {
     register(f.first, 'stocks'); assert.equal(f.first.claim('worker-a', now), null);
@@ -72,6 +92,11 @@ test('invalid, empty or changed model configuration and corrupt state fail close
     assert.throws(() => register(f.first, 'unknown'), /市场/);
     assert.throws(() => register(f.first, 'stocks', []), /标的/);
     assert.throws(() => f.first.register({ market: 'stocks', groupId: 'g', model: '', instruments: ['A'] }, now), /模型/);
+    assert.throws(() => f.first.register({ market: 'stocks', groupId: 'g', model: 'fixed/model', modelSelection: 'dynamic', instruments: ['A'] }, now), /来源/);
+    f.a.set('ai-comparison-scheduler', { version: 1, enabled: false, notBefore: 0, lastHour: null, marketCursor: 0,
+      groups: [{ market: 'stocks', groupId: 'g', model: 'fixed/model', modelSelection: 'dynamic', instruments: ['A'], excluded: [], paused: true, generation: 1, cursor: 0, createdAt: new Date(now).toISOString() }],
+      archived: [], history: [] });
+    assert.throws(() => f.first.list(), /无法核验/);
     f.a.set('ai-comparison-scheduler', { version: 999 });
     assert.throws(() => f.first.setEnabled(true, now), /无法核验/);
   } finally { f.close(); }

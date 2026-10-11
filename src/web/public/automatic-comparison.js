@@ -1,6 +1,7 @@
 (() => {
   'use strict';
   const names = { stocks:'股票',options:'期权',crypto:'虚拟币',prediction:'预测市场' };
+  const modelSources = { 'random-free':'目录随机抽选后冻结', fixed:'手动指定后冻结', unknown:'历史来源未记录（不推断）' };
   let controller, version = 0;
   const escape = value => String(value ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
   function headers() {
@@ -31,7 +32,7 @@
         <div class="backtest-toolbar"><span>全局调度：${state.enabled ? '已启用' : '关闭'} · 每小时最多一轮 · UTC共享剩余额度 ${payload.budget.remaining}/24</span>
         <button type="button" class="tab" data-global>${state.enabled ? '暂停全部对照' : '启用整点调度'}</button><button type="button" class="tab" data-rebuild>${group ? '按当前自选重建' : '冻结当前自选建立对照'}</button>
         ${group ? `<button type="button" class="tab" data-pause>${group.paused ? '恢复此市场' : '暂停此市场'}</button><button type="button" class="tab" data-report>比较三个账户</button>` : ''}<button type="button" class="tab" data-refresh>刷新状态</button></div>
-        <p>${group ? `冻结标的：${group.instruments.map(escape).join(' / ')} · 本组冻结模型 ${escape(group.model)} · ${group.paused ? '此市场已暂停' : '等待轮转'}` : '尚未创建对照；只选管理员已核验自选，最多5个，不跨市场补位。'}</p>
+        <p>${group ? `冻结标的：${group.instruments.map(escape).join(' / ')} · 本组冻结模型 ${escape(group.model)} · 模型来源：${escape(modelSources[group.modelSelection] || modelSources.unknown)} · ${group.paused ? '此市场已暂停' : '等待轮转'}` : '尚未创建对照；只选管理员已核验自选，最多5个，不跨市场补位。'}</p>
         ${group?.excluded?.length ? `<details><summary>未纳入的自选及原因</summary>${group.excluded.map(row => `<p>${escape(row)}</p>`).join('')}</details>` : ''}
         <p class="empty-tip">随机只在建组时发生：从 OpenRouter 当前免费文本模型目录选一个具体模型并冻结，三账户共用；目录不可用时不建组。恢复后最早下个整点；来源过期或能力不足整轮等待，不调用模型。低于20笔平仓不提供可靠胜率或排名。失败请求不退还额度。</p>
         <div data-auto-status role="status"></div><ol>${last.map(row => `<li>${escape(row.at)} · ${escape(row.instrument)} · ${escape({running:'执行中',completed:'已记录',waiting:'等待',failed:'失败',cancelled:'已取消'}[row.status] || row.status)} · ${escape(row.reason || '')}</li>`).join('') || '<li>暂无轮次记录</li>'}</ol>`;
