@@ -5218,13 +5218,19 @@ async function loadBitcoinOnchain() {
   const el = document.getElementById('bitcoin-onchain');
   if (!el) return;
   el.innerHTML = '<div class="skl skl-card"><div class="skl-line"></div><div class="skl-line w60"></div></div>';
+  let responseStatus = 'unavailable';
   try {
     const res = await fetch('/api/bitcoin-onchain');
     const payload = await res.json();
-    if (!payload.success || !payload.data?.metrics?.length) throw new Error(payload.error || 'no data');
+    responseStatus = payload.dataStatus || payload.data?.dataStatus || responseStatus;
+    if (!payload.data) throw new Error(payload.reason || payload.error || '链上数据源没有返回结果');
     const d = payload.data;
+    const dataStatus = d.dataStatus || payload.dataStatus || 'unavailable';
+    const statusReason = d.reason || payload.reason || null;
     const signalColor = d.signal === 'healthy' ? 'var(--green)' : d.signal === 'cooling' ? 'var(--red)' : 'var(--text-secondary)';
-    const cards = d.metrics.map(metric => {
+    const statusLabel = ({ historical: '历史数据', partial: '部分成功', empty: '暂无数据', unavailable: '来源不可用' })[dataStatus] || '状态未知';
+    const formatOnchainTime = value => Number.isFinite(Date.parse(value)) ? new Date(value).toLocaleString('zh-CN') : '未知';
+    const cards = (Array.isArray(d.metrics) ? d.metrics : []).map(metric => {
       const chip = (label, value) => value === null || value === undefined
         ? ''
         : `<span style="background:var(--bg-secondary);border-radius:99px;padding:3px 7px;font-size:10px;">${safeNewsText(label)} ${value > 0 ? '+' : ''}${Number(value).toFixed(1)}%</span>`;
@@ -5240,21 +5246,25 @@ async function loadBitcoinOnchain() {
             ${chip('30日', metric.change30dPct)}
             <span style="background:var(--bg-secondary);border-radius:99px;padding:3px 7px;font-size:10px;">52周第 ${safeNewsText(metric.percentile52w)}% 分位</span>
           </div>
+          <small style="display:block;margin-top:7px;color:var(--text-secondary);">来源样本：${safeNewsText(formatOnchainTime(metric.sourceUpdatedAt))} · ${safeNewsText(metric.sampleCount)} 个有效点</small>
         </div>`;
     }).join('');
     el.innerHTML = `
       <div style="display:flex;gap:8px;flex-wrap:wrap;font-size:11px;color:var(--text-secondary);margin-bottom:8px;">
-        <span>NVT ${safeNewsText(d.nvtRatio)}（52周第 ${safeNewsText(d.nvtPercentile52w)}% 分位）</span>
-        <span>活跃分 ${safeNewsText(d.activityScore)}</span>
-        <span>安全分 ${safeNewsText(d.securityScore)}</span>
+        <span>NVT ${d.nvtRatio === null ? '暂无' : safeNewsText(d.nvtRatio)}${d.nvtPercentile52w === null ? '（同日历史样本不足，暂无分位）' : `（52周第 ${safeNewsText(d.nvtPercentile52w)}% 分位）`}</span>
+        <span>活跃分 ${d.activityScore === null ? '暂无' : safeNewsText(d.activityScore)}</span>
+        <span>安全分 ${d.securityScore === null ? '暂无' : safeNewsText(d.securityScore)}</span>
       </div>
       <div style="font-size:12px;line-height:1.55;margin-bottom:9px;">
-        ${safeNewsText(d.summaryZh)}<br>建议：${safeNewsText(d.advisorBiasZh)} <strong style="color:${signalColor};">环境加分 ${d.regimeBoost > 0 ? '+' : ''}${safeNewsText(d.regimeBoost)}</strong>
+        ${safeNewsText(d.summaryZh)}<br>建议：${safeNewsText(d.advisorBiasZh)} <strong style="color:${signalColor};">${d.regimeBoost == null ? '环境加分 暂不计算' : `环境加分 ${d.regimeBoost > 0 ? '+' : ''}${safeNewsText(d.regimeBoost)}`}</strong>
       </div>
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:8px;">${cards}</div>
-      <small style="display:block;margin-top:8px;color:var(--text-secondary);">来源：Blockchain.com 公共图表 · 更新于 ${new Date(d.generatedAt).toLocaleTimeString('zh-CN')}</small>`;
+      ${cards && statusReason ? `<div class="empty-tip" data-onchain-data-status="${safeNewsText(dataStatus)}">${safeNewsText(statusReason)}</div>` : ''}
+      ${cards ? `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:8px;">${cards}</div>` : `<div class="empty-tip" data-onchain-data-status="${safeNewsText(dataStatus)}">${safeNewsText(statusReason || '暂无达到样本要求的链上指标')}</div>`}
+      <small style="display:block;margin-top:8px;color:var(--text-secondary);">状态：${safeNewsText(statusLabel)} · 来源：${safeNewsText(d.source || payload.source || 'Blockchain.com Public Charts')} · 来源数据截至：${safeNewsText(d.sourceUpdatedAt ? formatOnchainTime(d.sourceUpdatedAt) : '各指标日期见卡片')} · MoneyMoney 抓取于：${safeNewsText(formatOnchainTime(d.retrievedAt || d.generatedAt || payload.retrievedAt))}</small>`;
   } catch (e) {
-    el.innerHTML = '<div class="empty-tip">比特币链上雷达暂时不可用，稍后会自动重试。</div>';
+    const reason = e instanceof Error ? e.message : String(e || '链上数据请求失败');
+    const statusLabel = ({ historical: '历史数据', partial: '部分成功', empty: '暂无数据', unavailable: '来源不可用' })[responseStatus] || '状态未知';
+    el.innerHTML = `<div class="empty-tip" data-onchain-data-status="${safeNewsText(responseStatus)}">比特币链上雷达${safeNewsText(statusLabel)}：${safeNewsText(reason)}</div>`;
   }
 }
 async function loadCrossAssetCorrelation() {

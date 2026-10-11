@@ -4027,9 +4027,34 @@ app.get('/api/order-flow-liquidity', async (_req, res) => {
 
 app.get('/api/bitcoin-onchain', async (_req, res) => {
   try {
-    res.json({ success: true, data: await getBitcoinOnchainRadar() });
+    const data = await getBitcoinOnchainRadar();
+    res.json({
+      success: data.metrics.length > 0,
+      market: data.market,
+      instrument: data.instrument,
+      dataStatus: data.dataStatus,
+      source: data.source,
+      sourceUpdatedAt: data.sourceUpdatedAt,
+      updatedAt: data.sourceUpdatedAt,
+      retrievedAt: data.retrievedAt,
+      reason: data.reason,
+      evidenceRefs: data.evidenceRefs,
+      data,
+    });
   } catch (e: any) {
-    res.json({ success: false, error: e.message, data: null });
+    res.json({
+      success: false,
+      market: 'crypto',
+      instrument: 'BTC',
+      dataStatus: 'unavailable',
+      source: 'Blockchain.com Public Charts',
+      sourceUpdatedAt: null,
+      updatedAt: null,
+      retrievedAt: new Date().toISOString(),
+      reason: e.message || '比特币链上数据请求失败',
+      evidenceRefs: [],
+      data: null,
+    });
   }
 });
 
