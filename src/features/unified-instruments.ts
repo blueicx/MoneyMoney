@@ -233,11 +233,35 @@ export function filterEventsForInstrument<T extends Pick<UpcomingEvent, 'id' | '
   });
 }
 
-export function buildInstrumentTimeline(events: UpcomingEvent[], news: NewsItem[], filings: StockFiling[] = []): Array<Record<string, unknown>> {
+export interface InstrumentTimelineRetrievals {
+  newsRetrievedAt?: string | null;
+  filingsRetrievedAt?: string | null;
+}
+
+export function buildInstrumentTimeline(
+  events: UpcomingEvent[],
+  news: NewsItem[],
+  filings: StockFiling[] = [],
+  retrievals: InstrumentTimelineRetrievals = {},
+): Array<Record<string, unknown>> {
   return [
-    ...events.map(event => ({ kind: 'event', at: event.date, occurredAt: event.date, publishedAt: null, title: event.titleZh || event.title, impact: event.impact, result: event.actual ? { actual: event.actual, forecast: event.forecast } : null })),
-    ...news.map(item => ({ kind: 'news', at: item.publishedAt, occurredAt: item.publishedAt, publishedAt: item.publishedAt, title: item.title, source: item.source, url: item.url, sentimentScore: item.sentimentScore ?? null })),
-    ...filings.slice(0, 30).map(filing => ({ kind: 'event', at: filing.acceptedAt || filing.filingDate, occurredAt: filing.acceptedAt || filing.filingDate, publishedAt: filing.acceptedAt || null, title: `SEC ${filing.form} · ${filing.accessionNumber}`, source: 'SEC EDGAR', url: filing.reportUrl || null })),
+    ...events.map(event => ({
+      kind: 'event', at: event.date, occurredAt: event.date, publishedAt: null,
+      retrievedAt: event.retrievedAt || null, title: event.titleZh || event.title,
+      source: event.source || null, sourceUrl: null,
+      impact: event.impact, result: event.actual ? { actual: event.actual, forecast: event.forecast } : null,
+    })),
+    ...news.map(item => ({
+      kind: 'news', at: item.publishedAt, occurredAt: item.publishedAt, publishedAt: item.publishedAt,
+      retrievedAt: retrievals.newsRetrievedAt || null, title: item.title, source: item.source,
+      sourceUrl: item.url || null, url: item.url || null, sentimentScore: item.sentimentScore ?? null,
+    })),
+    ...filings.slice(0, 30).map(filing => ({
+      kind: 'event', at: filing.acceptedAt || filing.filingDate, occurredAt: filing.acceptedAt || filing.filingDate,
+      publishedAt: filing.acceptedAt || null, retrievedAt: retrievals.filingsRetrievedAt || null,
+      title: `SEC ${filing.form} · ${filing.accessionNumber}`, source: 'SEC EDGAR',
+      sourceUrl: filing.reportUrl || null, url: filing.reportUrl || null,
+    })),
   ].sort((a, b) => new Date(String(b.at)).getTime() - new Date(String(a.at)).getTime());
 }
 
@@ -346,6 +370,7 @@ export class UnifiedInstrumentService {
     let marketData: Record<string, unknown> | null = null;
     let klines: unknown[] = [];
     let fetchedAt: string | null = null;
+    let filingsRetrievedAt: string | null = null;
     const sourceStatus: Record<string, InstrumentSourceStatus> = { quote: 'unavailable', market: 'unavailable', klines: 'unavailable', events: 'unavailable', news: 'unavailable', filings: 'unavailable' };
     let filings: StockFiling[] = [];
     let filingsReason: string | undefined;
@@ -387,6 +412,7 @@ export class UnifiedInstrumentService {
         }
         klines = stockData.bars;
         filings = stockData.filings;
+        filingsRetrievedAt = stockData.snapshots.find(item => item.source === 'sec-edgar-submissions')?.fetchedAt || null;
         sourceStatus.quote = stockStatus(stockData.sourceStatus['nasdaq-public-quote']);
         sourceStatus.klines = stockStatus(stockData.sourceStatus['nasdaq-public-history']);
         sourceStatus.filings = stockStatus(stockData.sourceStatus['sec-edgar-submissions']);
@@ -437,7 +463,10 @@ export class UnifiedInstrumentService {
       sections: [], timeline: [], status: overviewDataStatus(sourceStatus),
     };
     base.analysis = await getInstrumentAnalysis(normalized, base);
-    base.timeline = buildInstrumentTimeline(events, news, filings);
+    base.timeline = buildInstrumentTimeline(events, news, filings, {
+      newsRetrievedAt: newsSnapshot?.retrievedAt || null,
+      filingsRetrievedAt,
+    });
     base.sections = buildInstrumentOverviewSections(base);
     overviewCache.set(normalized.id, { at: Date.now(), value: base });
     return base;

@@ -70,11 +70,37 @@ assert.deepEqual(filterEventsForInstrument(eventRows, { type: 'crypto', symbol: 
 const secTimeline = buildInstrumentTimeline([], [], [
   { form: '8-K', accessionNumber: '0001-26-000001', filingDate: '2026-09-20', acceptedAt: '2026-09-20T17:00:00.000Z', reportUrl: 'https://www.sec.gov/example' },
   { form: '10-K', accessionNumber: '0001-26-000002', filingDate: '2026-09-19' },
-]);
+], { filingsRetrievedAt: '2026-09-21T01:00:00.000Z' });
 assert.equal(secTimeline[0].publishedAt, '2026-09-20T17:00:00.000Z');
 assert.equal(secTimeline[0].source, 'SEC EDGAR');
 assert.equal(secTimeline[0].url, 'https://www.sec.gov/example');
+assert.equal(secTimeline[0].sourceUrl, 'https://www.sec.gov/example');
+assert.equal(secTimeline[0].retrievedAt, '2026-09-21T01:00:00.000Z');
 assert.equal(secTimeline[1].publishedAt, null);
+assert.equal(secTimeline[1].retrievedAt, '2026-09-21T01:00:00.000Z');
+assert.equal(secTimeline[1].sourceUrl, null);
+
+const newsTimeline = buildInstrumentTimeline([], [
+  { title: 'AAPL report', source: 'Example News', url: 'https://news.example.test/aapl', publishedAt: '2026-09-20T12:00:00.000Z' },
+], [], { newsRetrievedAt: '2026-09-20T12:05:00.000Z' });
+assert.equal(newsTimeline[0].publishedAt, '2026-09-20T12:00:00.000Z');
+assert.equal(newsTimeline[0].retrievedAt, '2026-09-20T12:05:00.000Z');
+assert.equal(newsTimeline[0].sourceUrl, 'https://news.example.test/aapl');
+assert.equal(newsTimeline[0].url, newsTimeline[0].sourceUrl);
+
+const earningsTimeline = buildInstrumentTimeline([{
+  id: 'earnings-2026-09-20-AAPL', title: 'AAPL 财报', date: '2026-09-20T12:00:00.000Z',
+  source: 'Nasdaq Earnings Calendar', retrievedAt: '2026-09-20T00:10:00.000Z',
+}], [], []);
+assert.equal(earningsTimeline[0].source, 'Nasdaq Earnings Calendar');
+assert.equal(earningsTimeline[0].retrievedAt, '2026-09-20T00:10:00.000Z');
+assert.equal(earningsTimeline[0].sourceUrl, null);
+
+const timelineSource = fs.readFileSync(path.join(__dirname, '../src/features/unified-instruments.ts'), 'utf8');
+assert.match(timelineSource, /newsRetrievedAt:\s*newsSnapshot\?\.retrievedAt/);
+assert.match(timelineSource, /filingsRetrievedAt/);
+assert.match(timelineSource, /sec-edgar-submissions/);
+
 test('timeline coverage keeps source-empty distinct from unavailable and unsupported markets', () => {
   const empty = summarizeTimelineAvailability({
     market: 'stocks', itemCount: 0,

@@ -107,3 +107,11 @@
 - 精确 accession 的 SEC archive 索引页仍可作为来源链接，以兼容 SEC 返回的记录没有 primary document URL 的情况；不得把同域其他公司的申报页冒充该股票证据。
 - `tests/telegram-result-adapters.test.cjs` 覆盖正确文档、正确 archive 索引、CIK/accession 错配、查询参数和空 user-info URL。此次根因由该测试在修复前复现，修复后定向测试通过。
 - 这是本地来源身份契约验证，不代表对 SEC 当前在线可用率、某一真实财报字段或生产 Telegram 投递做了在线验证。
+
+## 2026-10-12 增量复核：统一标的时间线的发布时间与抓取时间
+
+- 新闻条目的 `publishedAt` 保持来源发布时间；时间线另从 Yahoo 新闻快照传递 `retrievedAt`，不再把两类时间混为一谈。
+- SEC 申报的 `publishedAt` 仍取 SEC `acceptedAt`；`retrievedAt` 取对应 `sec-edgar-submissions` 源快照的成功抓取时间，缓存快照沿用其原始成功抓取时间，不使用本次失败尝试时间。
+- 财报日历项保留其 Provider 返回的逐项 `retrievedAt` 与来源名称。当前事件模型没有可核验的原文地址，因此 `sourceUrl` 明确为 `null`，不拼凑 URL。
+- 新闻和 SEC 时间线新增规范 `sourceUrl`，同时保留既有 `url` 字段兼容旧消费者；缺少原文链接时保持 `null`。
+- `tests/unified-instruments.test.cjs` 覆盖来源/抓取时间分离、原文链接别名兼容、事件来源时点及缺少 URL 时不造链接。仅验证本地数据契约；生产真实标的在线时点未在本次声称。
