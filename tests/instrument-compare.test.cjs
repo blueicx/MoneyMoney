@@ -18,6 +18,12 @@ test('comparison enforces the selected market type', () => {
   ]));
 });
 
+test('comparison caps same-market panels at four instruments', () => {
+  const instruments = ['AAPL', 'MSFT', 'NVDA', 'AMZN', 'META'].map((symbol, index) => ({ id: String(index), type: 'stock', symbol }));
+  assert.throws(() => compareInstruments('stocks', instruments), /最多同时比较 4 个标的/);
+  assert.equal(compareInstruments('stocks', instruments.slice(0, 4)).length, 4);
+});
+
 test('comparison creates replayable snapshots', () => {
   const snapshot = createCompareSnapshot('stocks', [
     { id: '1', type: 'stock', symbol: 'AAPL', quote: { price: 150, changePct: 1 } }

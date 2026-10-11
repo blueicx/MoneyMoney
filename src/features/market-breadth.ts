@@ -47,6 +47,7 @@ export interface MarketBreadthSnapshot {
   strongAdvancersPct: number;
   strongDeclinersPct: number;
   totalVolume: number;
+  returnComparison: BreadthReturnComparison;
   sectors: MarketSectorBreadth[];
   leadingSectors: MarketSectorBreadth[];
   laggingSectors: MarketSectorBreadth[];
@@ -62,6 +63,44 @@ export interface MarketBreadthSnapshot {
   advisorBiasZh: string;
   generatedAt: string;
   source: string;
+}
+
+export interface BreadthReturnComparison {
+  equalWeightPct: number | null;
+  equalWeightCount: number;
+  capWeightedPct: number | null;
+  capWeightedCount: number;
+  method: 'equal-weight-and-reconstructed-prior-cap-weight';
+  reason: string | null;
+}
+
+/**
+ * Compare the source's equal-weight cross-section with a cap-weighted estimate.
+ * The denominator uses reconstructed prior market caps so returns are not
+ * accidentally weighted by the post-move capitalization. This is a Nasdaq
+ * screener estimate, not an official index return.
+ */
+export function summarizeBreadthReturns(rows: Array<Pick<MarketBreadthRow, 'changePct' | 'marketCapUsd'>>): BreadthReturnComparison {
+  const valid = rows.filter(row => Number.isFinite(row.changePct) && row.changePct > -100);
+  const equalWeightPct = valid.length ? round(average(valid.map(row => row.changePct))) : null;
+  const weighted = valid.flatMap(row => {
+    const cap = Number(row.marketCapUsd);
+    const previousCap = cap / (1 + row.changePct / 100);
+    return Number.isFinite(cap) && cap > 0 && Number.isFinite(previousCap) && previousCap > 0
+      ? [{ changePct: row.changePct, previousCap }]
+      : [];
+  });
+  const totalPreviousCap = weighted.reduce((sum, row) => sum + row.previousCap, 0);
+  return {
+    equalWeightPct,
+    equalWeightCount: valid.length,
+    capWeightedPct: totalPreviousCap > 0
+      ? round(weighted.reduce((sum, row) => sum + row.changePct * row.previousCap, 0) / totalPreviousCap)
+      : null,
+    capWeightedCount: weighted.length,
+    method: 'equal-weight-and-reconstructed-prior-cap-weight',
+    reason: weighted.length ? null : '当前来源没有可用市值，无法计算市值加权估算',
+  };
 }
 
 const execFileAsync = promisify(execFile);
@@ -298,6 +337,7 @@ async function requestSnapshot(): Promise<MarketBreadthSnapshot> {
     strongAdvancersPct: round(strongAdvancersPct, 1),
     strongDeclinersPct: round(strongDeclinersPct, 1),
     totalVolume: rows.reduce((sum, row) => sum + row.volume, 0),
+    returnComparison: summarizeBreadthReturns(rows),
     sectors,
     leadingSectors: sectors.slice(0, 5),
     laggingSectors: sectors.slice(-5).reverse(),

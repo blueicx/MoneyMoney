@@ -19,6 +19,7 @@ async function main() {
     const page = await context.newPage(), errors = []; page.on('pageerror',error=>errors.push(error.message));
     await page.goto(base+'/login'); await page.fill('#username',user); await page.fill('#password',pass);
     await Promise.all([page.waitForURL(url=>url.pathname==='/'),page.click('#submitBtn')]);
+    await page.waitForFunction(()=>window.mm_dashboardCoreReady===true && window.mm_isLoggedIn===true,null,{timeout:15000});
     const auth = (await (await context.request.get(base+'/api/auth/status')).json()).data;
     const headers = { 'x-csrf-token':auth.csrfToken };
     const diagnostics = await (await context.request.get(base+'/api/diagnostics')).json();
@@ -37,7 +38,7 @@ async function main() {
     const cooled = await post('/api/market-history/capture',{ market:'crypto',instrument:'crypto:binance:BTCUSDT' });
     assert.equal(cooled.data.fetchedAt,now,'cooldown uses newest snapshot, never the oldest');
     assert.match(cooled.reason,/冷却/);
-    await page.evaluate(()=>setMarketScope('watchlist'));
+    await page.evaluate(()=>{setMarketScope('crypto');openWorkspace('action-center');});
     await page.locator('#mm-action-center').waitFor({ state:'visible' });
     assert.equal(await page.locator('[data-mm-watchlist-sort] option[value="pending"]').count(),1);
     assert.equal(await page.locator('[data-mm-watchlist-sort] option[value="upcoming"]').count(),1);
@@ -54,6 +55,12 @@ async function main() {
     await row.locator('[data-snooze]').click(); await row.waitFor({ state:'hidden' });
     await page.check('#mm-action-snoozed'); await row.waitFor({ state:'visible' });
     await row.locator('[data-snooze]').click();
+    await page.click('#mm-action-history-toggle');
+    await page.locator('#mm-action-history-panel').getByText('BTC observed event').first().waitFor({ state:'visible' });
+    assert.match(await page.locator('#mm-action-history-panel').innerText(),/已读|置顶|恢复处理/);
+    const actionHistory = await (await context.request.get(base+'/api/watchlist/action-center/history?market=crypto&itemId='+encodeURIComponent(event.id))).json();
+    assert.ok(actionHistory.data.some(entry=>entry.itemId===event.id),'action history must persist by item and market');
+    assert.equal((await context.request.get(base+'/api/watchlist/action-center/history?market=stocks')).status(),200);
     const experiments=[];
     for (const feeRate of [.001,.002]) {
       const result = await post('/api/research/experiments',{ market:'stocks',workspace:'backtest',instrument:'stock:us:AAPL',timeframe:'1d',dataStatus:'historical',dataSource:'isolated deterministic fixture',dataFrom:'2026-01-01',dataTo:'2026-02-01',strategyId:'momentum',strategyVersion:'v1',feeRate,slippage:.001,seed:10,prices:[100,101,99,102,104,103,106,108],signals:[],split:{ trainSize:4,testSize:2 } });
@@ -73,9 +80,9 @@ async function main() {
     assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth+2),'mobile shell fits viewport');
     const noCsrf = await context.request.patch(base+'/api/watchlist/action-center/'+encodeURIComponent(event.id),{ data:{ read:false } }); assert.equal(noCsrf.status(),403);
     const guestContext=await browser.newContext(); await guestContext.request.post(base+'/api/auth/guest');
-    for (const url of ['/api/watchlist/action-center','/api/research/experiments?market=stocks','/api/research/experiments/compare?ids='+experiments.join(','),'/api/signals/quality?market=stocks','/api/market-history?market=crypto&instrument=crypto:binance:BTCUSDT','/api/diagnostics']) assert.equal((await guestContext.request.get(base+url)).status(),403,url);
+    for (const url of ['/api/watchlist/action-center','/api/watchlist/action-center/history?market=crypto','/api/research/experiments?market=stocks','/api/research/experiments/compare?ids='+experiments.join(','),'/api/signals/quality?market=stocks','/api/market-history?market=crypto&instrument=crypto:binance:BTCUSDT','/api/diagnostics']) assert.equal((await guestContext.request.get(base+url)).status(),403,url);
     await guestContext.close(); assert.deepEqual(errors,[]);
-    console.log('Action/research Chromium smoke passed: real API aggregation, read/pin/snooze persistence, evidence drawer, experiment comparison, mobile, CSRF and guest isolation');
+    console.log('Action/research Chromium smoke passed: real API aggregation, read/pin/snooze history, evidence drawer, experiment comparison, mobile, CSRF and guest isolation');
   } finally {
     if (browser) await browser.close(); child.kill('SIGINT');
     await Promise.race([new Promise(resolve=>child.once('exit',resolve)),new Promise(resolve=>setTimeout(resolve,2000))]);

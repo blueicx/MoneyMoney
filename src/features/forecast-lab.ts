@@ -49,6 +49,33 @@ interface ForecastSample {
   model: number;
   market: number;
   actual: number;
+  horizonGroup: string;
+}
+
+export interface ForecastHorizonGroup {
+  key: 'within-1d' | '1-7d' | 'over-7d' | 'expired' | 'unknown';
+  label: string;
+}
+
+export function forecastHorizonGroup(asOf: string, endDate?: string): ForecastHorizonGroup {
+  const asOfMs = Date.parse(asOf);
+  const endMs = Date.parse(String(endDate || ''));
+  if (!Number.isFinite(asOfMs) || !Number.isFinite(endMs)) return { key: 'unknown', label: '期限未知' };
+  const remainingMs = endMs - asOfMs;
+  if (remainingMs < 0) return { key: 'expired', label: '事件截止后' };
+  if (remainingMs <= 86_400_000) return { key: 'within-1d', label: '1 天内' };
+  if (remainingMs <= 7 * 86_400_000) return { key: '1-7d', label: '1–7 天' };
+  return { key: 'over-7d', label: '超过 7 天' };
+}
+
+export function isPreOutcomeSnapshot(snapshotAt: string, resolvedAt: string, endDate?: string): boolean {
+  const snapshotMs = Date.parse(snapshotAt), resolvedMs = Date.parse(resolvedAt), endMs = Date.parse(String(endDate || ''));
+  if (!Number.isFinite(snapshotMs)) return false;
+  const knownBoundaries = [resolvedMs, endMs].filter(Number.isFinite);
+  // A timestamp at the boundary can be captured after the event became known.
+  // If resolution time is missing, a known event deadline still provides a
+  // conservative cutoff; if neither exists, pre-outcome status is unprovable.
+  return knownBoundaries.length > 0 && knownBoundaries.every(boundary => snapshotMs < boundary);
 }
 
 export interface ForecastMetricSummary {
@@ -91,6 +118,7 @@ export interface ForecastLabReport {
   platforms: ForecastGroupStats[];
   groups: ForecastGroupStats[];
   confidenceGroups: ForecastGroupStats[];
+  horizons: ForecastGroupStats[];
   activeCases: Array<{
     key: string;
     platform: string;
@@ -210,6 +238,9 @@ function buildReport(state: ForecastLabFile): ForecastLabReport {
     const actual = item.outcome === 'YES' ? 1 : item.outcome === 'NO' ? 0 : null;
     if (actual == null) continue;
     for (const snapshot of item.snapshots) {
+      // A probability recorded after the event deadline or after its result was
+      // known must not be counted as a forecast observation.
+      if (!isPreOutcomeSnapshot(snapshot.t, item.resolvedAt, item.endDate)) continue;
       samples.push({
         key: item.key,
         platform: item.platform,
@@ -218,6 +249,7 @@ function buildReport(state: ForecastLabFile): ForecastLabReport {
         model: clampProbability(snapshot.model),
         market: clampProbability(snapshot.market),
         actual,
+        horizonGroup: forecastHorizonGroup(snapshot.t, item.endDate).label,
       });
     }
   }
@@ -331,6 +363,7 @@ function buildReport(state: ForecastLabFile): ForecastLabReport {
     platforms: collectGroups(sample => sample.platform),
     groups: collectGroups(sample => sample.group).slice(0, 10),
     confidenceGroups,
+    horizons: collectGroups(sample => sample.horizonGroup),
     activeCases,
     resolvedCases,
     noteZh: 'Brier 越接近 0 越准；“系统优势”为正表示模型 Brier 低于市场价。复盘样本来自同一事件的多次快照，可能存在相关性，适合看趋势而不是绝对胜率。',

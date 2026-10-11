@@ -44,6 +44,84 @@ export function assessOptionQuoteQuality(row: Pick<OptionRow, 'bidPrice' | 'askP
   return { status: 'quoted', label: '双边报价可见', referenceAsk: ask, referenceBid: bid };
 }
 
+export interface OptionPayoffLeg {
+  row: OptionRow & { expiryMs?: number };
+  action: 'buy' | 'sell';
+  contracts: number;
+}
+
+export interface OptionPayoffAnalysis {
+  netPremiumUsd: number;
+  maxLossUsd: number | null;
+  maxGainUsd: number | null;
+  unboundedLoss: boolean;
+  unboundedGain: boolean;
+  payoffAtSpotUsd: number;
+  breakEvenPrices: number[];
+  curve: Array<{ underlyingPrice: number; pnlUsd: number }>;
+  assumptions: string;
+  executionEnabled: false;
+}
+
+/** Estimate expiration payoff from verified two-sided quotes; this never places orders. */
+export function calculateOptionPayoff(input: { spot: number; multiplier: number; legs: OptionPayoffLeg[] }): OptionPayoffAnalysis {
+  const { spot, multiplier, legs } = input;
+  if (!Number.isFinite(spot) || spot <= 0) throw new Error('标的现价必须为正数');
+  if (!Number.isInteger(multiplier) || multiplier < 1 || multiplier > 100_000) throw new Error('合约乘数必须为 1–100000 的整数');
+  if (!Array.isArray(legs) || legs.length < 2 || legs.length > 4) throw new Error('多腿试算需要 2–4 条期权腿');
+  if (legs.some(leg => !['buy', 'sell'].includes(leg.action) || !Number.isInteger(leg.contracts) || leg.contracts < 1 || leg.contracts > 100)) throw new Error('腿方向或合约数量无效');
+  if (legs.some(leg => leg.row.quoteQuality?.status !== 'quoted' || !Number.isFinite(leg.row.bidPrice) || !Number.isFinite(leg.row.askPrice) || leg.row.bidPrice <= 0 || leg.row.askPrice < leg.row.bidPrice)) throw new Error('多腿试算只接受双边有效报价');
+  const expiries = new Set(legs.map(leg => leg.row.expiryMs).filter((value): value is number => Number.isFinite(value)));
+  if (expiries.size !== 1 || legs.some(leg => !Number.isFinite(leg.row.expiryMs))) throw new Error('多腿试算必须使用同一到期日');
+
+  const scale = (leg: OptionPayoffLeg) => leg.contracts * multiplier;
+  const premiumPerUnit = (leg: OptionPayoffLeg) => leg.action === 'buy' ? -leg.row.askPrice : leg.row.bidPrice;
+  const intrinsic = (leg: OptionPayoffLeg, price: number) => leg.row.optionType === 'call'
+    ? Math.max(0, price - leg.row.strike) : Math.max(0, leg.row.strike - price);
+  const pnlAt = (price: number) => legs.reduce((sum, leg) => {
+    const direction = leg.action === 'buy' ? 1 : -1;
+    return sum + (direction * intrinsic(leg, price) + premiumPerUnit(leg)) * scale(leg);
+  }, 0);
+  const strikes = [...new Set(legs.map(leg => leg.row.strike))].sort((a, b) => a - b);
+  const knots = [...new Set([0, ...strikes, spot])].sort((a, b) => a - b);
+  const values = knots.map(price => ({ underlyingPrice: price, pnlUsd: pnlAt(price) }));
+  const upperCallSlope = legs.filter(leg => leg.row.optionType === 'call')
+    .reduce((sum, leg) => sum + (leg.action === 'buy' ? 1 : -1) * scale(leg), 0);
+  const unboundedGain = upperCallSlope > 0;
+  const unboundedLoss = upperCallSlope < 0;
+  const pnlValues = values.map(point => point.pnlUsd);
+  const minPnl = Math.min(...pnlValues), maxPnl = Math.max(...pnlValues);
+  const roots: number[] = [];
+  for (let i = 0; i < values.length - 1; i++) {
+    const left = values[i], right = values[i + 1];
+    if (left.pnlUsd === 0) roots.push(left.underlyingPrice);
+    if (left.pnlUsd * right.pnlUsd < 0) {
+      roots.push(left.underlyingPrice + (right.underlyingPrice - left.underlyingPrice) * (-left.pnlUsd) / (right.pnlUsd - left.pnlUsd));
+    }
+  }
+  if (values.at(-1)?.pnlUsd === 0) roots.push(values.at(-1)!.underlyingPrice);
+  const last = values.at(-1)!;
+  if (upperCallSlope !== 0) {
+    const root = last.underlyingPrice - last.pnlUsd / upperCallSlope;
+    if (root > last.underlyingPrice) roots.push(root);
+  }
+  const samplePrices = [...new Set([spot * 0.5, spot * 0.8, spot, spot * 1.2, spot * 1.5, ...strikes].filter(price => Number.isFinite(price) && price >= 0))].sort((a, b) => a - b);
+  const curve = samplePrices.map(underlyingPrice => ({ underlyingPrice: Number(underlyingPrice.toFixed(4)), pnlUsd: Number(pnlAt(underlyingPrice).toFixed(2)) }));
+  const netPremiumUsd = legs.reduce((sum, leg) => sum - premiumPerUnit(leg) * scale(leg), 0);
+  return {
+    netPremiumUsd: Number(netPremiumUsd.toFixed(2)),
+    maxLossUsd: unboundedLoss ? null : Number(Math.max(0, -minPnl).toFixed(2)),
+    maxGainUsd: unboundedGain ? null : Number(Math.max(0, maxPnl).toFixed(2)),
+    unboundedLoss,
+    unboundedGain,
+    payoffAtSpotUsd: Number(pnlAt(spot).toFixed(2)),
+    breakEvenPrices: [...new Set(roots.map(value => Number(value.toFixed(4))))].sort((a, b) => a - b),
+    curve,
+    assumptions: `仅为到期损益估算：买入按卖价、卖出按买价；合约乘数 ${multiplier} 由用户确认。未计手续费、滑点、提前行权、指派、特殊交割与保证金规则；不构成成交或投资建议。`,
+    executionEnabled: false,
+  };
+}
+
 export interface OptionExpiry {
   expiryMs: number;
   label: string;

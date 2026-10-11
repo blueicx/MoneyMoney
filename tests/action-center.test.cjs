@@ -22,4 +22,13 @@ test('read/pin/snooze persists by owner and resumes at expiration, invalid snooz
   assert.equal(buildActionCenter([item('a')], { now: at, states: store.states('admin') }).items[0].snoozed, true);
   assert.equal(buildActionCenter([item('a')], { now: '2026-10-03T00:00:00Z', states: store.states('admin') }).items[0].snoozed, false);
   assert.throws(() => store.update('admin', item('a'), { snoozedUntil: 'not-a-date' }, at));
+  const history = store.history('admin', { itemId: 'a' });
+  assert.equal(history.length, 1);
+  assert.equal(history[0].itemId, 'a');
+  assert.equal(history[0].title, 'a', 'history keeps a human-readable item title');
+  assert.equal(history[0].changes.snoozedUntil, '2026-10-02T08:00:00Z');
+  store.update('admin', item('crypto-item', { market: 'crypto', instrument: 'crypto:binance:BTCUSDT' }), { read: true }, at);
+  assert.equal(store.history('admin', { market: 'stocks' }).length, 1);
+  assert.equal(store.history('admin', { market: 'crypto' }).length, 1);
+  assert.equal(store.history('telegram:123').length, 0);
 });

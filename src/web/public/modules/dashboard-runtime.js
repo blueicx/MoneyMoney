@@ -3927,7 +3927,8 @@ function renderMarketBreadth(data) {
     ['上涨占比', data.advancersPct.toFixed(1) + '%'],
     ['下跌占比', data.declinersPct.toFixed(1) + '%'],
     ['涨跌比', data.advanceDeclineRatio.toFixed(2)],
-    ['平均涨跌', signed(data.averageChangePct)],
+    ['等权收益（筛选横截面）', data.returnComparison?.equalWeightPct == null ? '不可用' : signed(data.returnComparison.equalWeightPct)],
+    ['市值加权估算', data.returnComparison?.capWeightedPct == null ? '不可用' : signed(data.returnComparison.capWeightedPct)],
     ['中位涨跌', signed(data.medianChangePct)],
     ['强涨 / 强跌', data.strongAdvancersPct.toFixed(1) + '% / ' + data.strongDeclinersPct.toFixed(1) + '%'],
     ['总成交', compact(data.totalVolume) + ' 股'],
@@ -3963,6 +3964,9 @@ function renderMarketBreadth(data) {
       </div>
       <div style="margin-top:8px;font-size:10.5px;line-height:1.45;color:var(--text-secondary);">${safeNewsText(group.adviceZh)}</div>
     </div>`).join('');
+  const weightingNote = data.returnComparison?.capWeightedPct == null
+    ? (data.returnComparison?.reason || '来源未提供足够市值字段，市值加权估算不可用。')
+    : `等权覆盖 ${data.returnComparison.equalWeightCount} 家；市值加权覆盖 ${data.returnComparison.capWeightedCount} 家。市值权重用当日市值和个股涨跌幅反推前一日市值，仅为 Nasdaq screener 估算，不等同官方指数；当前横截面不含足够历史，跳空、均线覆盖率和创新高/新低统计暂不可用。`;
   const moversTable = `
     <div style="overflow-x:auto;border:1px solid var(--border);border-radius:10px;">
       <table style="width:100%;border-collapse:collapse;font-size:11px;min-width:430px;">
@@ -3987,6 +3991,7 @@ function renderMarketBreadth(data) {
         <span class="workspace-signal-badge" style="color:white;background:${color};border-radius:99px;padding:5px 10px;font-size:11px;flex-shrink:0;">${safeNewsText(data.signalZh)}</span>
       </div>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(108px,1fr));gap:7px;margin-top:11px;">${cards}</div>
+      <div style="margin-top:7px;font-size:10.5px;line-height:1.5;color:var(--text-secondary);">${safeNewsText(weightingNote)}</div>
       <div style="margin-top:11px;padding:10px;border-radius:10px;background:color-mix(in srgb,${color} 8%,transparent);font-size:11px;line-height:1.55;">
         <strong>解读：</strong>${safeNewsText(data.adviceZh)}<br>
         <span style="color:var(--text-secondary);">助手环境加分 ${data.regimeBoost > 0 ? '+' : ''}${data.regimeBoost} · 置信度 ${data.confidence}/100。</span>
@@ -5435,6 +5440,47 @@ function renderOptionChain() {
         }).join('')}
       </tbody>
     </table></div>`;
+  renderOptionPayoffBuilder(expiry);
+}
+function renderOptionPayoffBuilder(expiry) {
+  const host = document.getElementById('option-payoff-builder');
+  if (!host) return;
+  if (optionsSnapshot?.market !== 'us_equity') {
+    host.innerHTML = '<section class="option-payoff"><h3>多腿到期损益试算</h3><p>Deribit 合约结算单位与乘数元数据当前未完成核验，因此不显示可能误导的加密期权组合金额。</p></section>';
+    return;
+  }
+  const rows = expiry.rows.filter(row => row.quoteQuality?.status === 'quoted' && row.bidPrice > 0 && row.askPrice >= row.bidPrice)
+    .sort((a,b) => Math.abs(a.strike-optionsSnapshot.spot)-Math.abs(b.strike-optionsSnapshot.spot) || a.strike-b.strike || a.optionType.localeCompare(b.optionType))
+    .slice(0,180).sort((a,b) => a.strike-b.strike || a.optionType.localeCompare(b.optionType));
+  if (rows.length < 2) {
+    host.innerHTML = '<section class="option-payoff"><h3>多腿到期损益试算</h3><p>当前到期链不足两份双边有效报价，暂不能试算。</p></section>';
+    return;
+  }
+  const options = rows.map(row => `<option value="${stockEscapeHtml(row.instrumentName)}">${row.optionType === 'call' ? 'Call' : 'Put'} ${Number(row.strike).toLocaleString()} · 买 ${row.askPrice} / 卖 ${row.bidPrice} · ${stockEscapeHtml(row.instrumentName)}</option>`).join('');
+  const legs = [0,1,2,3].map(index => `<div class="option-payoff-leg" data-payoff-leg="${index}"><label><input type="checkbox" data-leg-enabled ${index < 2 ? 'checked' : ''}> 腿 ${index+1}</label><select data-contract ${index >= 2 ? 'disabled' : ''} aria-label="期权合约腿 ${index+1}">${options}</select><select data-action ${index >= 2 ? 'disabled' : ''} aria-label="买卖方向"><option value="buy">买入（按卖价）</option><option value="sell" ${index === 1 ? 'selected' : ''}>卖出（按买价）</option></select><input data-quantity type="number" min="1" max="100" step="1" value="1" ${index >= 2 ? 'disabled' : ''} aria-label="合约数量"></div>`).join('');
+  host.innerHTML = `<section class="option-payoff"><div><h3>多腿到期损益试算</h3><p>同一到期日、仅使用当前 CBOE 双边有效报价；这是到期情景分析，不会创建订单。</p></div><div class="option-payoff-legs">${legs}</div><label class="option-payoff-multiplier">每份合约乘数（股） <input data-multiplier type="number" min="1" max="100000" step="1" value="100"></label><button type="button" data-calculate>计算到期损益</button><div data-result role="status">报价来源 ${stockEscapeHtml(optionsSnapshot.source)} · ${stockEscapeHtml(optionsSnapshot.fetchedAt)} · 买单按卖价、卖单按买价。</div><small>乘数 100 是常见标准美股合约假设，不适用于特殊交割/调整合约；不含费用、滑点、提前行权或指派风险。请自行核对合约规格。</small></section>`;
+  host.querySelectorAll('[data-leg-enabled]').forEach(check => check.addEventListener('change', () => {
+    const row = check.closest('[data-payoff-leg]');
+    row.querySelectorAll('[data-contract],[data-action],[data-quantity]').forEach(control => { control.disabled = !check.checked; });
+  }));
+  host.querySelector('[data-calculate]').addEventListener('click', async event => {
+    const button = event.currentTarget, result = host.querySelector('[data-result]');
+    const selectedLegs = [...host.querySelectorAll('[data-payoff-leg]')].filter(row => row.querySelector('[data-leg-enabled]').checked).map(row => ({
+      instrumentName: row.querySelector('[data-contract]').value,
+      action: row.querySelector('[data-action]').value,
+      contracts: Number(row.querySelector('[data-quantity]').value),
+    }));
+    button.disabled = true; result.textContent = '正在以来源当前报价计算…';
+    try {
+      const response = await fetch('/api/options/payoff', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ symbol:optionsSnapshot.asset, expiryMs:expiry.expiryMs, multiplier:Number(host.querySelector('[data-multiplier]').value), legs:selectedLegs }) });
+      const payload = await response.json();
+      if (!response.ok || !payload.success) throw new Error(payload.reason || '试算失败');
+      const data = payload.data;
+      const rowsHtml = data.curve.map(point => `<tr><td>${Number(point.underlyingPrice).toLocaleString()}</td><td style="color:${point.pnlUsd >= 0 ? 'var(--green)' : 'var(--red)'}">${point.pnlUsd >= 0 ? '+' : ''}$${Number(point.pnlUsd).toFixed(2)}</td></tr>`).join('');
+      result.innerHTML = `<div class="option-payoff-metrics"><span>净权利金 ${data.netPremiumUsd >= 0 ? '支出' : '收入'} $${Math.abs(data.netPremiumUsd).toFixed(2)}</span><span>最大亏损 ${data.unboundedLoss ? '理论上无上限' : '$'+Number(data.maxLossUsd).toFixed(2)}</span><span>最大收益 ${data.unboundedGain ? '理论上无上限' : '$'+Number(data.maxGainUsd).toFixed(2)}</span><span>现价到期损益 $${Number(data.payoffAtSpotUsd).toFixed(2)}</span><span>盈亏平衡 ${data.breakEvenPrices.length ? data.breakEvenPrices.join(' / ') : '区间内无交点'}</span></div><table><thead><tr><th>到期标的价</th><th>估算损益</th></tr></thead><tbody>${rowsHtml}</tbody></table><p>${stockEscapeHtml(data.assumptions)}</p><small>来源 ${stockEscapeHtml(payload.source)} · 报价时间 ${stockEscapeHtml(payload.sourceTime)} · 状态 ${stockEscapeHtml(payload.dataStatus)}</small>`;
+    } catch (error) { result.textContent = error.message || '期权试算失败'; }
+    finally { button.disabled = false; }
+  });
 }
 function renderOptionStrategies(expiry) {
   const el = document.getElementById('option-strategies');
@@ -11605,6 +11651,7 @@ function renderForecastLab(d) {
       </div>` : ''}
     ${forecastLabGroupTable('🌐 平台表现', d.platforms)}
     ${forecastLabGroupTable('🏷 分类表现', d.groups)}
+    ${forecastLabGroupTable('⏱ 预测剩余期限表现（每个快照按当时剩余时间归组）', d.horizons)}
     ${forecastLabGroupTable('🎚 信心分组', d.confidenceGroups)}
     <details class="radar-more" style="margin-top:10px;" ${d.evaluatedSamples ? '' : 'open'}>
       <summary>📋 待复盘事件（事件落地后手动确认）</summary>

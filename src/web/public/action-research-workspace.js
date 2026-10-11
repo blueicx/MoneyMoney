@@ -95,6 +95,8 @@
     parent.append(section);
     section.querySelector('h3').textContent='自选行动';
     section.querySelector('.mm-action-tools').insertAdjacentHTML('beforeend','<select id="mm-action-state" aria-label="处理状态"><option value="all">全部状态</option><option value="unread">待处理</option><option value="pinned">已置顶</option></select>');
+    section.querySelector('.mm-action-tools').insertAdjacentHTML('beforeend','<button id="mm-action-history-toggle" type="button">处理历史</button>');
+    document.getElementById('mm-action-status').insertAdjacentHTML('afterend','<div id="mm-action-history-panel" hidden role="status"></div>');
     document.getElementById('mm-action-state').onchange=render;
     const lab=document.createElement('section');lab.id='mm-research-lab';lab.className='mm-action-center';lab.dataset.workspaceId='research-lab';lab.hidden=true;
     lab.innerHTML='<h3>研究实验室</h3><p data-research-context></p><nav class="mm-research-tabs" role="tablist" aria-label="研究内容"><button role="tab" data-research-tab="history">历史快照</button><button role="tab" data-research-tab="experiments">实验比较</button><button role="tab" data-research-tab="comparison">标的比较</button><button role="tab" data-research-tab="forward">前向观察</button></nav>';
@@ -102,7 +104,7 @@
     for(const [i,node] of panels.entries()){node.dataset.researchPanel=i===0 ? 'experiments':'history';node.id='mm-research-'+node.dataset.researchPanel;node.setAttribute('role','tabpanel');lab.append(node);}
     lab.querySelector('#mm-experiment-load').insertAdjacentHTML('beforebegin','<label><input type="checkbox" id="mm-experiment-all">包含同市场其他标的</label>');
     const comparison=document.createElement('section');comparison.dataset.researchPanel='comparison';comparison.id='mm-research-comparison';comparison.setAttribute('role','tabpanel');
-    comparison.innerHTML='<p>从当前市场自选选择 2–6 个标的，使用已发布日线按同日归一化比较。</p><button data-comparison-load>读取当前市场自选</button><div data-comparison-options></div><button data-comparison-run>比较收益曲线</button><div data-comparison-result role="status"></div>';
+    comparison.innerHTML='<p>从当前市场自选选择 2–4 个标的，使用已发布日线按同一日期对齐，移动光标可同步查看缺口和收益。</p><button data-comparison-load>读取当前市场自选</button><div data-comparison-options></div><button data-comparison-run>比较收益曲线</button><div data-comparison-result role="status"></div>';
     lab.append(comparison);parent.append(lab);
     const selectTab=tab=>{for(const button of lab.querySelectorAll('[data-research-tab]')){const selected=button.dataset.researchTab===tab;button.classList.toggle('active',selected);button.setAttribute('aria-selected',String(selected));button.setAttribute('tabindex',selected?'0':'-1');button.setAttribute('aria-controls','mm-research-'+button.dataset.researchTab);}for(const panel of lab.querySelectorAll('[data-research-panel]')){panel.hidden=panel.dataset.researchPanel!==tab;if(panel.tagName==='DETAILS')panel.open=true;}try{localStorage.setItem('mm-research-tab-v1',tab);}catch{}};
     lab.querySelectorAll('[data-research-tab]').forEach((button,index,buttons)=>{button.onclick=()=>selectTab(button.dataset.researchTab);button.onkeydown=event=>{if(['ArrowLeft','ArrowRight'].includes(event.key)){event.preventDefault();const next=buttons[(index+(event.key==='ArrowRight'?1:buttons.length-1))%buttons.length];next.click();next.focus();}};});
@@ -111,13 +113,30 @@
     forward.dataset.researchPanel='forward';forward.id='mm-research-forward';forward.setAttribute('role','tabpanel');lab.append(forward);
     let initial='history';try{initial=localStorage.getItem('mm-research-tab-v1') || initial;}catch{}selectTab(['history','experiments','comparison','forward'].includes(initial)?initial:'history');
     comparison.querySelector('[data-comparison-load]').onclick=async()=>{const host=comparison.querySelector('[data-comparison-options]');try{const market=context().market;if(!markets[market]) throw new Error('请先选择股票、期权、虚拟币或预测市场');const result=await api('/api/workspace/watchlist?scope='+market+'&group=watchlist');host.innerHTML=(result.groups || []).flatMap(group=>group.items).map(row=>`<label><input type="checkbox" value="${esc(row.instrumentId)}">${esc(row.title)}</label>`).join('') || '<p>当前市场暂无自选，请在右侧添加。</p>';}catch(error){host.textContent=error.message;}};
-    comparison.querySelector('[data-comparison-run]').onclick=async()=>{const host=comparison.querySelector('[data-comparison-result]');host.setAttribute('aria-busy','true');try{const ids=[...comparison.querySelectorAll('input:checked')].map(input=>input.value);if(ids.length<2 || ids.length>6)throw new Error('请选择 2–6 个同市场标的');const result=await api('/api/research/price-comparison?'+new URLSearchParams({market:context().market,instruments:ids.join(',')}));host.innerHTML='<p>'+esc(result.reason || '')+'</p><div data-plot></div>'+result.data.series.map(row=>'<p>'+esc(row.instrument+' · '+(row.source || '来源不可用')+' · '+(row.updatedAt || '时间未知')+' · '+(row.reason || row.dataStatus))+'</p>').join('');window.MoneyMoneyHistoryChart.render(host.querySelector('[data-plot]'),result.data.series,{title:'同日起点收益比较',unit:'%',reason:result.reason,onLocate:date=>window.MoneyMoneyWorkflow.locate(date,context().instrument)});window.MoneyMoneyWorkflow.historyTools(host,result.data,()=>comparison.querySelector('[data-comparison-run]').click());}catch(error){host.textContent=error.message;}finally{host.removeAttribute('aria-busy');}};
+    comparison.querySelector('[data-comparison-run]').onclick=async()=>{const host=comparison.querySelector('[data-comparison-result]');host.setAttribute('aria-busy','true');try{const ids=[...comparison.querySelectorAll('input:checked')].map(input=>input.value);if(ids.length<2 || ids.length>4)throw new Error('请选择 2–4 个同市场标的');const result=await api('/api/research/price-comparison?'+new URLSearchParams({market:context().market,instruments:ids.join(',')}));host.innerHTML='<p>'+esc(result.reason || '')+'</p><div data-plot></div>'+result.data.series.map(row=>'<p>'+esc(row.instrument+' · '+(row.source || '来源不可用')+' · '+(row.updatedAt || '时间未知')+' · '+(row.reason || row.dataStatus))+'</p>').join('');window.MoneyMoneyHistoryChart.render(host.querySelector('[data-plot]'),result.data.series,{title:'同日收益比较（日期与十字光标已对齐）',unit:'%',reason:result.reason,onLocate:date=>window.MoneyMoneyWorkflow.locate(date,context().instrument)});window.MoneyMoneyWorkflow.historyTools(host,result.data,()=>comparison.querySelector('[data-comparison-run]').click());}catch(error){host.textContent=error.message;}finally{host.removeAttribute('aria-busy');}};
     forward.querySelector('[data-forward-load]').onclick = async () => {
       const host = forward.querySelector('[data-forward-result]'); host.textContent = '正在读取已发布历史分区…';
       try { const result = await api('/api/signals/forward?market='+forward.querySelector('select').value); host.innerHTML = result.data.length ? result.data.map(row => `<article><h4>${esc(row.strategyId || row.id)} / ${esc(row.strategyVersion || '未关联')} · ${esc(row.timeframe || '')} · ${esc(row.source || '')}</h4><p>${esc(row.instrument)} · MFE ${esc(row.mfePct ?? '不可用')}% · MAE ${esc(row.maePct ?? '不可用')}% · ${esc(row.warning || row.reason || '')}</p><div data-forward-curve="${esc(row.id)}"></div><p>${esc(row.historyReason || '')}</p>${row.experimentId ? `<a href="/api/research/experiments/${encodeURIComponent(row.experimentId)}" target="_blank" rel="noopener noreferrer">关联实验</a>` : '<p>实验未关联</p>'}</article>`).join('') : esc(result.reason); for (const row of result.data) { const target=[...host.querySelectorAll('[data-forward-curve]')].find(node=>node.dataset.forwardCurve===row.id); if (target && row.points.length) drawCurves(target,[{ instrument:row.instrument,label:row.instrument+'（仅已完成K线）',dates:row.points.map(point=>point.at),values:row.points.map(point=>point.returnPct) }]); } } catch (error) { host.textContent=error.message; }
     };
     document.getElementById('mm-action-market').value = pref.market || ''; document.getElementById('mm-action-section').value = pref.section || '';
     document.getElementById('mm-action-refresh').onclick = loadActions;
+    document.getElementById('mm-action-history-toggle').onclick = async event => {
+      const panel = document.getElementById('mm-action-history-panel');
+      panel.hidden = !panel.hidden;
+      if (panel.hidden) return;
+      panel.textContent = '正在读取处理历史…';
+      try {
+        const currentMarket = context().market;
+        const result = await api('/api/watchlist/action-center/history?limit=100' + (markets[currentMarket] ? '&market=' + encodeURIComponent(currentMarket) : ''));
+        panel.innerHTML = result.data.length ? `<div class="mm-action-history">${result.data.map(entry => {
+          const changes = Object.entries(entry.changes || {}).map(([key,value]) => ({
+            read: value ? '标记已读' : '标记未读', pinned: value ? '置顶' : '取消置顶',
+            snoozedUntil: value ? '稍后处理至 ' + value : '恢复处理',
+          }[key])).join('、');
+          return `<article><strong>${esc(entry.title || entry.itemId)}</strong><small>${esc(markets[entry.market] || entry.market)} · ${esc(entry.instrument || '市场记录')} · ${esc(entry.updatedAt)}</small><span>${esc(changes || '状态更新')}</span></article>`;
+        }).join('')}</div>` : `<p>${esc(result.reason || '尚无处理历史')}</p>`;
+      } catch (error) { panel.textContent = error.message; }
+    };
     for (const id of ['mm-action-market','mm-action-section','mm-action-snoozed']) document.getElementById(id).onchange = render;
     document.getElementById('mm-experiment-load').onclick = async () => {
       const host = document.getElementById('mm-experiment-options'); host.textContent = '正在读取…';

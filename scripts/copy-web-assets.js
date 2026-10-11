@@ -62,7 +62,7 @@ const syncWorkspaceGroups = [
   ['charts', /^(?:loadStockKline|stockKlineRequestKey|runStockKlineSingleFlight|drawCandles|drawStockKline|drawMACD|drawRSI|drawDepthChart|drawStockChartCompanion|renderChartPatternMarkers|renderChartPatternList|renderChartStructureList|updateStockKlineFocusControl|setStockKlineViewState|focusStockKlineDate|enterStockIntraday)$/],
   ['stocks', /^(?:renderGlobalMacroSpot|renderAnalystConsensus|renderFundamentalQuality|renderMarketBreadth|renderInsiderRadar|renderInstitutionalOwnership|renderShortInterest|renderMarketScreener|renderInstrumentDetail)$/],
   ['overview', /^fetchMarketOverviewJson$/],
-  ['options', /^(?:renderOptionChain|renderOptionStrategies)$/],
+  ['options', /^(?:renderOptionChain|renderOptionStrategies|renderOptionPayoffBuilder)$/],
   ['crypto', /^(?:renderDefiYieldQuality)$/],
   ['prediction', /^(?:renderOutcomes|radarMarketCard|renderForecastLab|renderPredictionRadar|renderPredictionLibraryQuick|predictionSparkline|forecastLabGroupTable|renderPredictionSizingResult|selectPredictionLibraryEvent)$/],
   ['research', /^(?:renderDecisionPortfolio|renderReviewNotes|renderEventStudyResult|renderDecisionEvidence|renderDecisionEvidenceChanges|renderDecisionSignalQuality)$/],

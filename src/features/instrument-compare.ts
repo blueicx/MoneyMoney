@@ -25,7 +25,7 @@ function expectedType(scope: CompareScope): CompareInstrumentType {
 
 export function compareInstruments(scope: CompareScope, instruments: CompareInstrument[]): ComparedInstrument[] {
   if (!['stocks', 'options', 'crypto', 'prediction'].includes(scope)) throw new Error(`不支持的比较市场: ${scope}`);
-  if (instruments.length > 6) throw new Error('最多同时比较 6 个标的');
+  if (instruments.length > 4) throw new Error('最多同时比较 4 个标的');
   const type = expectedType(scope);
   if (instruments.some(item => item.type !== type)) throw new Error('只能比较同一 market scope 的标的');
   return instruments.map(item => {

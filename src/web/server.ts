@@ -64,7 +64,7 @@ import { binanceFeed, alertManager, anomalyDetector } from '../features/binance'
 import { fetchRunnerBinanceKlines } from '../features/runner-binance-kline';
 import { llmAnalyzer, redditSentiment, whaleMonitor, strategyComparison, tradeJournal } from '../features/ai-social';
 import { binancePortfolio } from '../features/binance-portfolio';
-import { getEquityOptionsSnapshot, getOptionsSnapshot } from '../features/options-market';
+import { calculateOptionPayoff, getEquityOptionsSnapshot, getOptionsSnapshot } from '../features/options-market';
 import { fetchDeribitOptionExecutionQuote, parseDeribitOptionInstrumentName } from '../features/runner-deribit-options';
 import { getMacroCalendar, getGlobalCryptoMetrics } from '../features/external-market-data';
 import { getStablecoinLiquidity } from '../features/stablecoin-liquidity';
@@ -745,6 +745,18 @@ app.get('/api/watchlist/action-center', async (req, res) => {
     return res.json({ success: true, ...result, market: market || 'overview', source: '自选、提醒、筛选、13F与决策记录',
       dataStatus: failures ? 'partial' : result.dataStatus, evidenceRefs: [...new Set(result.items.flatMap(row => row.evidenceRefs))] });
   } catch (error) { return res.status(500).json({ success: false, dataStatus: 'failed', reason: error instanceof Error ? error.message : '行动中心加载失败' }); }
+});
+app.get('/api/watchlist/action-center/history', (req, res) => {
+  if (!adminOnly(req, res)) return;
+  const itemId = String(req.query.itemId || '').trim();
+  if (itemId.length > 200) return res.status(400).json({ success: false, dataStatus: 'failed', reason: '行动记录 ID 无效' });
+  let market: MarketId | undefined;
+  try { market = req.query.market ? decisionMarket(req.query.market) : undefined; }
+  catch (error) { return res.status(400).json({ success: false, dataStatus: 'failed', reason: error instanceof Error ? error.message : '市场无效' }); }
+  const limit = Number(req.query.limit || 100);
+  if (!Number.isInteger(limit) || limit < 1 || limit > 500) return res.status(400).json({ success: false, dataStatus: 'failed', reason: 'limit 必须在 1–500 之间' });
+  const data = actionCenterStore.history('admin', { itemId: itemId || undefined, market, limit });
+  return res.json({ success: true, market: market || 'overview', data, dataStatus: data.length ? 'historical' : 'empty', source: 'SQLite 私人行动处理历史', updatedAt: data[0]?.updatedAt || null, reason: data.length ? null : '当前市场尚无行动处理记录', evidenceRefs: [] });
 });
 app.patch('/api/watchlist/action-center/:id', express.json(), (req, res) => {
   if (!adminOnly(req, res)) return;
@@ -1811,7 +1823,7 @@ app.get('/api/research/price-comparison', async (req, res) => {
   if (!adminOnly(req,res)) return;
   try {
     const market=decisionMarket(req.query.market), instruments=String(req.query.instruments || '').split(',').filter(Boolean);
-    if (instruments.length<2 || instruments.length>6) throw new Error('请选择 2–6 个同市场标的');
+    if (instruments.length<2 || instruments.length>4) throw new Error('请选择 2–4 个同市场标的');
     const data=await assembleHistory(dataLakeCatalog,market,instruments,String(req.query.asOf || new Date().toISOString()),Number(req.query.days || 365));
     res.json(decisionEnvelope({market,data,dataStatus:data.dataStatus as any,source:'已发布日线分区',reason:data.reason || undefined,evidenceRefs:data.evidenceRefs}));
   } catch(error:any) {res.status(400).json({success:false,dataStatus:'failed',reason:error.message});}
@@ -2106,9 +2118,9 @@ function parseCompareId(value: string, scope: CompareScope): { type: CompareInst
 app.get('/api/instruments/compare', async (req, res) => {
   const scope = String(req.query.scope || '') as CompareScope;
   if (!['stocks', 'options', 'crypto', 'prediction'].includes(scope)) return res.status(400).json({ success: false, error: '比较市场无效' });
-  const ids = String(req.query.ids || '').split(',').map(item => item.trim()).filter(Boolean).slice(0, 7);
+  const ids = String(req.query.ids || '').split(',').map(item => item.trim()).filter(Boolean).slice(0, 5);
   if (!ids.length) return res.status(400).json({ success: false, error: '至少提供一个标的 ID' });
-  if (ids.length > 6) return res.status(400).json({ success: false, error: '最多同时比较 6 个标的' });
+  if (ids.length > 4) return res.status(400).json({ success: false, error: '最多同时比较 4 个标的' });
   try {
     const parsed = ids.map(id => parseCompareId(id, scope));
     if (parsed.some(item => !item)) return res.status(400).json({ success: false, error: '标的 ID 无效' });
@@ -3396,6 +3408,33 @@ app.get('/api/equity-options/:symbol', async (req, res) => {
     res.json({ success: true, market: 'options', instrument: `option:cboe:${symbol}`, dataStatus: data.expiries.some(expiry => expiry.rows.length) ? 'delayed' : 'empty', source: data.source, updatedAt: data.fetchedAt, data, snapshotPersistence: persistence, reason: persistence.status === 'saved' ? null : persistence.reason });
   } catch (e: any) {
     res.status(503).json({ success: false, market: 'options', dataStatus: 'unavailable', source: 'CBOE Delayed Quotes', updatedAt: new Date().toISOString(), error: e.message, reason: e.message || 'CBOE 期权来源不可用' });
+  }
+});
+
+app.post('/api/options/payoff', express.json(), async (req, res) => {
+  const symbol = String(req.body?.symbol || '').trim().toUpperCase();
+  const expiryMs = Number(req.body?.expiryMs);
+  const multiplier = Number(req.body?.multiplier);
+  const requestedLegs = req.body?.legs;
+  if (!/^[A-Z][A-Z0-9.]{0,9}$/.test(symbol)) return res.status(400).json({ success: false, market: 'options', dataStatus: 'failed', reason: '只支持明确的 CBOE 美股/ETF 标的代码' });
+  if (!Number.isFinite(expiryMs) || !Array.isArray(requestedLegs) || requestedLegs.length < 2 || requestedLegs.length > 4) return res.status(400).json({ success: false, market: 'options', dataStatus: 'failed', reason: '必须选择同一到期日的 2–4 条期权腿' });
+  try {
+    const snapshot = await getEquityOptionsSnapshot(symbol);
+    const sourceTime = Date.parse(snapshot.fetchedAt);
+    if (!Number.isFinite(sourceTime) || sourceTime > Date.now() + 60_000 || Date.now() - sourceTime > 5 * 60_000) throw new Error('CBOE 报价时间无效或超过 5 分钟；刷新期权链后再试算');
+    const expiry = snapshot.expiries.find(item => item.expiryMs === expiryMs);
+    if (!expiry) throw new Error('当前来源没有该到期日的期权链');
+    const legs = requestedLegs.map((item: any) => {
+      const name = String(item?.instrumentName || '');
+      if (name.length > 80) throw new Error('期权合约身份无效');
+      const row = expiry.rows.find(candidate => candidate.instrumentName === name);
+      if (!row || row.quoteQuality?.status !== 'quoted') throw new Error(`合约 ${name || '(空)'} 不存在于当前到期链或缺少双边有效报价`);
+      return { row: { ...row, expiryMs }, action: item.action, contracts: Number(item.contracts) };
+    });
+    const data = calculateOptionPayoff({ spot: snapshot.spot, multiplier, legs });
+    return res.json({ success: true, market: 'options', instrument: `option:cboe:${symbol}`, timeframe: expiry.label, dataStatus: 'delayed', source: snapshot.source, sourceTime: snapshot.fetchedAt, updatedAt: new Date().toISOString(), reason: '到期情景试算，不是成交回报；仅使用当前来源双边报价', evidenceRefs: [], data });
+  } catch (error) {
+    return res.status(422).json({ success: false, market: 'options', instrument: `option:cboe:${symbol}`, dataStatus: 'unavailable', source: 'CBOE Delayed Quotes', updatedAt: new Date().toISOString(), reason: error instanceof Error ? error.message : '期权试算失败', evidenceRefs: [] });
   }
 });
 
@@ -7664,6 +7703,7 @@ app.get('/api/research/daily-briefing', (req, res) => {
         platforms: [],
         groups: [],
         confidenceGroups: [],
+        horizons: [],
         activeCases: [],
         resolvedCases: [],
         noteZh: ''

@@ -8,6 +8,11 @@ export interface ActionCenterItem {
   eventId?: string; decisionId?: string; signalId?: string; experimentId?: string;
 }
 export interface ActionCenterState { read: boolean; pinned: boolean; snoozedUntil: string | null; updatedAt: string }
+export interface ActionCenterHistoryEntry {
+  id: string; itemId: string; title?: string; market: MarketId; instrument?: string;
+  changes: Partial<Pick<ActionCenterState, 'read' | 'pinned' | 'snoozedUntil'>>;
+  previous: ActionCenterState; next: ActionCenterState; updatedAt: string;
+}
 export class ActionCenterStore {
   constructor(private readonly store: SQLiteStateStore) {}
   states(owner: string): Record<string, ActionCenterState> { return this.store.get(`action-center:states:${owner}`) || {}; }
@@ -18,12 +23,22 @@ export class ActionCenterStore {
     return this.store.transaction(() => {
       const states = this.states(owner);
       const previous = states[item.id] || { read: false, pinned: false, snoozedUntil: null, updatedAt: '' };
+      const effectiveChange = Object.fromEntries(Object.entries(change).filter(([key, value]) => previous[key as keyof ActionCenterState] !== value)) as typeof change;
+      if (!Object.keys(effectiveChange).length) return previous;
       const state: ActionCenterState = { ...previous, ...change, updatedAt: now };
       const entries = Object.entries({ ...states, [item.id]: state }).sort((a,b) => a[1].updatedAt.localeCompare(b[1].updatedAt)).slice(-5000);
       this.store.set(`action-center:states:${owner}`, Object.fromEntries(entries));
+      const history = this.store.get<ActionCenterHistoryEntry[]>(`action-center:history:${owner}`) || [];
+      history.push({ id: `ach_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`, itemId: item.id, title: item.title, market: item.market, instrument: item.instrument, changes: effectiveChange, previous, next: state, updatedAt: now });
+      this.store.set(`action-center:history:${owner}`, history.slice(-5000));
       this.store.appendAudit({ id: `action:${owner}:${item.id}:${now}`, action: 'action_center_update', detail: JSON.stringify({ owner, id: item.id, market: item.market, ...change }), at: now });
       return state;
     });
+  }
+  history(owner: string, options: { itemId?: string; market?: MarketId; limit?: number } = {}): ActionCenterHistoryEntry[] {
+    const limit = Math.max(1, Math.min(500, Math.floor(Number(options.limit) || 100)));
+    const rows = this.store.get<ActionCenterHistoryEntry[]>(`action-center:history:${owner}`) || [];
+    return rows.filter(row => (!options.itemId || row.itemId === options.itemId) && (!options.market || row.market === options.market)).slice(-limit).reverse();
   }
 }
 export function buildActionCenter(input: ActionCenterItem[], options: { market?: MarketId; now?: string; states?: Record<string, ActionCenterState> } = {}) {

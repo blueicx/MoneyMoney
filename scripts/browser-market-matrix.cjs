@@ -217,6 +217,7 @@ async function main() {
       return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, market: 'stocks', dataStatus: 'empty', source: 'Browser acceptance fixture', updatedAt: '2026-09-29T01:00:00.000Z', reason: '验收夹具未提供事件记录。', sourceStatus: {}, data: [] }) });
     });
     let settlementStatus = null;
+    let optionPayoffRequest = null;
     page.on('pageerror', error => pageErrors.push(error.message));
     page.on('response', response => {
       if (response.url().includes('/api/prediction/settlement/')) settlementStatus = response.status();
@@ -336,9 +337,17 @@ async function main() {
       expiries: [{ expiryMs: Date.parse('2026-10-16T00:00:00.000Z'), label: '2026-10-16', daysToExpiry: 19,
         rows: [
           { instrumentName: 'SPY-C-500', strike: 500, optionType: 'call', markPrice: 2, premiumUsd: 200, impliedVolPct: 18, bidPrice: 1.9, askPrice: 2.1, spreadPct: 10, volume: 200, volumeUsd: 40000, openInterest: 800, delta: 0.5, quoteQuality: { status: 'quoted', label: '双边报价可见', referenceAsk: 2.1, referenceBid: 1.9 } },
+          { instrumentName: 'SPY-C-510', strike: 510, optionType: 'call', markPrice: 1.1, premiumUsd: 110, impliedVolPct: 19, bidPrice: 1, askPrice: 1.2, spreadPct: 18.2, volume: 120, volumeUsd: 13200, openInterest: 400, delta: 0.32, quoteQuality: { status: 'quoted', label: '双边报价可见', referenceAsk: 1.2, referenceBid: 1 } },
           { instrumentName: 'SPY-P-500', strike: 500, optionType: 'put', markPrice: 3, premiumUsd: 300, impliedVolPct: 22, bidPrice: 1, askPrice: 2, spreadPct: 66.7, volume: 1, volumeUsd: 300, openInterest: 2, delta: -0.5, quoteQuality: { status: 'wide-spread', label: '价差过宽', referenceAsk: 2, referenceBid: 1 } },
         ], callOpenInterest: 800, putOpenInterest: 2, callVolume: 200, putVolume: 1, putCallOIRatio: 0.01, putCallVolumeRatio: 0.005, maxPainStrike: 500, strategyIdeas: [] }],
     } }) }));
+    await page.route('**/api/options/payoff', route => {
+      optionPayoffRequest = route.request().postDataJSON();
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, market: 'options', source: 'CBOE browser fixture', sourceTime: '2026-09-27T08:00:00.000Z', dataStatus: 'delayed', data: {
+        netPremiumUsd: 110, maxLossUsd: 110, maxGainUsd: 890, unboundedLoss: false, unboundedGain: false, payoffAtSpotUsd: -110, breakEvenPrices: [511.1],
+        curve: [{ underlyingPrice: 500, pnlUsd: -110 }, { underlyingPrice: 510, pnlUsd: -110 }, { underlyingPrice: 520, pnlUsd: 890 }], assumptions: '验收情景；不会创建订单。', executionEnabled: false,
+      } }) });
+    });
     await page.route('**/api/instruments/compare?**', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data: [
       { id: 'stock:us:AAPL', type: 'stock', symbol: 'AAPL', title: 'Apple', quote: { price: 250, changePct: 1.25 }, freshness: { status: 'fresh', fetchedAt: '2026-09-27T08:00:00.000Z' }, sourceStatus: { nasdaq: 'live' } },
       { id: 'stock:us:MSFT', type: 'stock', symbol: 'MSFT', title: 'Microsoft', quote: { price: null, changePct: null }, freshness: { status: 'unavailable', fetchedAt: null }, sourceStatus: { nasdaq: 'unavailable' } },
@@ -490,6 +499,30 @@ async function main() {
     assert.match(await page.locator('#option-chain').innerText(), /双边报价可见/);
     assert.match(await page.locator('#option-chain').innerText(), /价差过宽/);
     assert.match(await page.locator('#options-updated').innerText(), /不等于合约逐笔报价时间/);
+    const payoffBuilder = page.locator('#option-payoff-builder');
+    await payoffBuilder.getByRole('button', { name: '计算到期损益' }).click();
+    await page.waitForFunction(() => document.querySelector('#option-payoff-builder [data-result]')?.textContent.includes('净权利金'));
+    assert.equal(optionPayoffRequest.symbol, 'SPY');
+    assert.equal(optionPayoffRequest.legs.length, 2);
+    assert.deepEqual(optionPayoffRequest.legs.map(leg => leg.action), ['buy', 'sell']);
+    assert.ok(optionPayoffRequest.legs.every(leg => ['SPY-C-500', 'SPY-C-510'].includes(leg.instrumentName)));
+    assert.match(await payoffBuilder.innerText(), /最大亏损 \$110\.00/);
+    const payoffThemeStates = await page.evaluate(() => {
+      const root = document.documentElement, original = root.getAttribute('data-theme');
+      const states = ['light','dark','money'].map(theme => {
+        if (theme === 'light') root.removeAttribute('data-theme'); else root.setAttribute('data-theme', theme);
+        const card = getComputedStyle(document.querySelector('#option-payoff-builder .option-payoff'));
+        const select = getComputedStyle(document.querySelector('#option-payoff-builder [data-contract]'));
+        const input = getComputedStyle(document.querySelector('#option-payoff-builder [data-multiplier]'));
+        const button = getComputedStyle(document.querySelector('#option-payoff-builder [data-calculate]'));
+        return { theme, card:card.backgroundImage, text:card.color, selectRadius:select.borderRadius, inputRadius:input.borderRadius, buttonRadius:button.borderRadius };
+      });
+      if (original == null) root.removeAttribute('data-theme'); else root.setAttribute('data-theme', original);
+      return states;
+    });
+    assert.equal(new Set(payoffThemeStates.map(item => item.card)).size, 3, 'payoff card surface follows all three themes');
+    assert.equal(new Set(payoffThemeStates.map(item => item.text)).size, 3, 'payoff text follows all three themes');
+    assert.ok(payoffThemeStates.every(item => parseFloat(item.selectRadius) >= 6 && parseFloat(item.inputRadius) >= 6 && parseFloat(item.buttonRadius) >= 6));
     captureCryptoWorkspaceRequests = true;
     await page.evaluate(() => setMarketScope('crypto'));
     await page.waitForFunction(() => document.body.dataset.marketScope === 'crypto');
