@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 
 export type SettlementPlatform = 'Kalshi' | 'Polymarket';
-export type SettlementStatus = 'open' | 'closed' | 'settled' | 'unknown' | 'unavailable' | 'unsupported';
+export type SettlementStatus = 'open' | 'closed' | 'disputed' | 'settled' | 'unknown' | 'unavailable' | 'unsupported';
 
 export interface SettlementEvidence {
   market: 'prediction';
@@ -9,6 +9,9 @@ export interface SettlementEvidence {
   platform: SettlementPlatform;
   marketId: string;
   status: SettlementStatus;
+  platformStatus: string | null;
+  announcedResult: 'YES' | 'NO' | null;
+  disputeStatus: 'disputed' | 'arbitrated' | 'not-disputed' | 'unknown';
   result: 'YES' | 'NO' | null;
   rulesText: string | null;
   rulesHash: string | null;
@@ -136,7 +139,8 @@ export function normalizeSettlementEvidence(input: {
   resolutionReason?: string | null;
   capturedAt?: string;
 }): SettlementEvidence {
-  const marketId = String(input.marketId || '').trim();
+  const requestedMarketId = String(input.marketId || '').trim();
+  const marketId = input.platform === 'Kalshi' ? requestedMarketId.toUpperCase() : requestedMarketId;
   const sourceUrl = buildSettlementEndpoint(input.platform, marketId);
   const payload = input.payload || {};
   const rulesText = [payload.rules_primary, payload.description, payload.rules_secondary]
@@ -148,6 +152,10 @@ export function normalizeSettlementEvidence(input: {
   const conditionId = typeof payload.conditionId === 'string' ? payload.conditionId : typeof payload.condition_id === 'string' ? payload.condition_id : null;
   const row = input.platform === 'Polymarket' ? resolutionRow(input.resolutionPayload, conditionId) : null;
   const resolutionStatus = String(row?.status || '').trim().toLowerCase() || null;
+  const platformStatus = rawStatus || resolutionStatus;
+  const wasDisputed = row?.was_disputed === true || ['disputed', 'challenged'].includes(resolutionStatus || '');
+  const wasArbitrated = row?.was_arbitrated === true;
+  const activeDispute = wasDisputed && !wasArbitrated;
   const payoutResult = input.platform === 'Polymarket' && row && ['resolved', 'settled'].includes(resolutionStatus || '')
     ? polymarketPayoutResult(payload.outcomes, row.payouts)
     : null;
@@ -158,7 +166,7 @@ export function normalizeSettlementEvidence(input: {
     ? rawStatus === 'settled'
     : !!((row && ['resolved', 'settled'].includes(resolutionStatus || '') && payoutResult) || explicitResolution);
   const isClosed = payload.closed === true || ['closed', 'settled', 'resolved'].includes(rawStatus) || ['resolved', 'settled'].includes(resolutionStatus || '');
-  const status: SettlementStatus = resolved && result ? 'settled' : isClosed ? 'closed' : rawStatus === 'open' || payload.closed === false ? 'open' : 'unknown';
+  const status: SettlementStatus = activeDispute ? 'disputed' : resolved && result ? 'settled' : isClosed ? 'closed' : rawStatus === 'open' || payload.closed === false ? 'open' : 'unknown';
   const closeAt = validIso(payload.close_time, payload.closeTime, payload.endDate, payload.end_date);
   const determinationAt = validIso(row?.resolved_at, payload.determination_time, payload.determinationTime, payload.resolvedAt, payload.resolved_at, payload.resolutionTime);
   const settlementAt = validIso(payload.settlement_ts, payload.settlementTime, payload.settled_at, row?.settlement_at);
@@ -179,7 +187,9 @@ export function normalizeSettlementEvidence(input: {
   } : null;
   const reason = status === 'closed' && !result
     ? `未提供可核实的最终结果；不会根据概率或收盘价格推断结算。${input.resolutionReason ? ` ${input.resolutionReason}` : ''}`
-    : status === 'settled'
+    : status === 'disputed'
+      ? '官方 resolution 记录存在未完成争议；当前 payout 不作为最终结算结果。'
+      : status === 'settled'
       ? null
       : status === 'open'
         ? '市场仍开放，尚无最终结算结果。'
@@ -188,6 +198,9 @@ export function normalizeSettlementEvidence(input: {
     platform: input.platform,
     marketId,
     status,
+    platformStatus,
+    announcedResult: explicitResult,
+    disputeStatus: wasDisputed ? wasArbitrated ? 'arbitrated' : 'disputed' : row ? 'not-disputed' : 'unknown',
     result: status === 'settled' ? result : null,
     rulesText,
     resolutionSourceUrl,
@@ -205,6 +218,9 @@ export function normalizeSettlementEvidence(input: {
     platform: input.platform,
     marketId,
     status,
+    platformStatus,
+    announcedResult: explicitResult,
+    disputeStatus: wasDisputed ? wasArbitrated ? 'arbitrated' : 'disputed' : row ? 'not-disputed' : 'unknown',
     result: status === 'settled' ? result : null,
     rulesText,
     rulesHash: rulesText ? sha256(rulesText) : null,
@@ -227,6 +243,8 @@ export class PredictionSettlementRepository {
   save(input: SettlementEvidence): SettlementEvidence {
     if (input.market !== 'prediction') throw new Error('settlement evidence must belong to prediction market');
     buildSettlementEndpoint(input.platform, input.marketId);
+    const expectedInstrument = `prediction:${input.platform.toLowerCase()}:${input.platform === 'Kalshi' ? input.marketId.toUpperCase() : input.marketId}`;
+    if (input.instrument !== expectedInstrument) throw new Error('settlement evidence instrument identity does not match platform market id');
     const records = this.store.get<SettlementEvidence[]>(this.key) || [];
     const previous = [...records].reverse().find(item => item.platform === input.platform && item.marketId === input.marketId);
     if (previous?.evidenceHash === input.evidenceHash) return previous;

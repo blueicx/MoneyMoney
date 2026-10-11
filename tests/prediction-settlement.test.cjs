@@ -67,6 +67,14 @@ test('Polymarket payout evidence is not final unless official resolution status 
   assert.notEqual(ambiguous.status, 'settled');
 });
 
+test('prediction announcements, active disputes and final settlements remain distinct states',()=>{
+  const conditionId=`0x${'c'.repeat(64)}`;
+  const announced=normalizeSettlementEvidence({platform:'Polymarket',marketId:'2468',payload:{id:'2468',closed:true,status:'closed',result:'YES',outcomes:'["Yes","No"]'},resolutionPayload:{data:[]}});
+  assert.equal(announced.announcedResult,'YES');assert.equal(announced.result,null);assert.equal(announced.status,'closed');assert.equal(announced.platformStatus,'closed');
+  const disputed=normalizeSettlementEvidence({platform:'Polymarket',marketId:'2468',payload:{id:'2468',conditionId,closed:true,status:'closed',outcomes:'["Yes","No"]'},resolutionPayload:{data:[{condition_id:conditionId,status:'proposed',payouts:[1,0],was_disputed:true}]}});
+  assert.equal(disputed.status,'disputed');assert.equal(disputed.result,null);assert.equal(disputed.disputeStatus,'disputed');assert.equal(disputed.platformStatus,'closed');assert.equal(disputed.resolutionEvidence.status,'proposed');
+});
+
 test('explicit result is accepted but venue, id and endpoint are fixed and validated', () => {
   const evidence = normalizeSettlementEvidence({ platform: 'Polymarket', marketId: '12345', payload: { closed: true, resolved: true, result: 'NO' } });
   assert.equal(evidence.status, 'settled');
@@ -89,6 +97,7 @@ test('settlement repository records rules revisions and keeps venue identities i
   assert.notEqual(first.rulesHash, updated.rulesHash);
   assert.equal(repository.history('Kalshi', 'KXTEST-26').length, 2);
   assert.equal(repository.latest('Polymarket', '987').platform, 'Polymarket');
+  assert.throws(()=>repository.save({...first,instrument:'prediction:kalshi:OTHER-26'}),/identity/i);
 });
 
 test('settlement API and prediction cards expose rules, evidence and explicit unknown state', () => {
@@ -102,5 +111,9 @@ test('settlement API and prediction cards expose rules, evidence and explicit un
   assert.match(server, /resolutionPayload/);
   assert.match(html, /togglePredictionSettlement\(/);
   assert.match(html, /结算规则与证据/);
+  assert.match(html,/平台公布\/报告结果/);
+  assert.match(html,/结果争议中/);
   assert.match(feature, /未提供可核实的最终结果/);
+  assert.match(feature,/announcedResult/);
+  assert.match(server,/sourceStatus:\s*'failed'/);
 });
