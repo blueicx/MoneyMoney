@@ -91,5 +91,15 @@
 1. **零破坏与最小权限变更**：
    - 本次仅替换 `/opt/moneymoney/dist` 产物，未修改 `/etc/moneymoney/moneymoney.env` 环境变量；
    - 未改动 Nginx 配置、TLS 证书、域名解析、VPN 链路及 Telegram Bot 凭据；
-   - 生产 SQLite 数据库（`data/moneymoney.sqlite`、`data/research.db`）、时序数据湖 Parquet 分区及用户自选数据完好保留；
-   - 部署临时上传文件已及时清理，远端保留完整的 `backups/` 与 `dist.rollback-88aa61e-20261007-0435` 备份以备应急。
+- 生产 SQLite 数据库（`data/moneymoney.sqlite`、`data/research.db`）、时序数据湖 Parquet 分区及用户自选数据完好保留；
+- 部署临时上传文件已及时清理，远端保留完整的 `backups/` 与 `dist.rollback-88aa61e-20261007-0435` 备份以备应急。
+
+## 2026-10-12 当前链 IV 期限结构增量发布
+
+- 代码提交：`1b65690465c92db6a4cf447e497d09b1457d434b`，已推送至 `codex/research-closure-all`。
+- 期权链现按同一真实来源快照、同到期日、同执行价配对 Call/Put，并仅接受距现价 3% 内且带有效 IV 与双边报价的近 ATM 合约；逐到期日显示 Call IV、Put IV、均值、Put−Call 差、覆盖率及缺失原因。无效或缺失数据不插值；明确标注这是当前截面，不是历史曲线或预测。
+- 本地验证：`npm run build`、`npm test`、`npm run smoke:web`、`npm run smoke:auth`、`npm run smoke:browser`、`npm run smoke:contracts`、`npm run smoke:experience`、`npm run security:scan` 和 `git diff --check` 均通过。Chromium 矩阵验证期限结构数据渲染、来源/缺失状态、三主题颜色和四市场隔离。
+- 构建产物归档 SHA-256：`36477fd6769401d37618e91a4a16080bb9dde26716cc48edea68664f32011777`。关键文件：`dist/web/server.js` `0c7a3d174e5e939355df44434840fa5cd34394ac6599c88ab79b75a1324969e7`；`dist/web/public/index.html` `8b464efcea8f00fa5dff22bced45acf5cbddfe8aa60aa16062832fb3c93405d8`；启动 JS `44a1f555bbe1cc263b61662c0a18e39efd9c7f205f0286aac26fc939101b5955`；主题 CSS `5c2201558cf0d0dd6ced2cae1ad60b4c926bc8462174c45176729980c984ca50`。
+- VPS 原子发布：备份 `/opt/moneymoney/backups/dist-pre-options-iv-1b65690-20261012`；回滚目录 `/opt/moneymoney/dist.rollback-options-iv-1b65690-20261012`。线上 `/api/health/version` 返回提交 `1b65690465c92db6a4cf447e497d09b1457d434b`，`moneymoney.service` 为 `active`；远端 server、index、启动 JS 和主题 CSS SHA-256 均与本地产物一致。
+- 正式域名 `https://bluetrade.bbroot.com/` 返回登录重定向 `302`，`/login` 返回 `200`；主题 CSS 全量下载 `200`、111054 字节。首次 15 秒限时请求未收完，复测在 5.27 秒完整返回，未发现服务故障。
+- 仅替换 `dist`，未改服务环境、数据库、数据湖、Nginx、TLS 或 Telegram 配置；部署归档与临时脚本已清理。未发送 Telegram 测试消息；未启用或触发真实交易。工作区未跟踪的 `data/research.db` 保持原样且未纳入提交或归档。
