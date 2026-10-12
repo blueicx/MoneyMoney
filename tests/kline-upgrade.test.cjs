@@ -150,6 +150,37 @@ describe('K-Line Upgrade & Advanced Capabilities', () => {
     assert.ok(markers.every(marker => /形态\d+/.test(marker.getAttribute('aria-label'))));
   });
 
+  it('keeps candle-pattern markers inside the visible price plot at every chart edge', () => {
+    const host = document.createElement('div');
+    host.id = 'bounded-pattern-test';
+    document.body.appendChild(host);
+    Object.defineProperties(host, {
+      clientWidth: { configurable: true, value: 180 },
+      clientHeight: { configurable: true, value: 140 },
+    });
+    const patterns = [
+      { label: '上沿', index: 0, time: 1, direction: 'bearish' },
+      { label: '下沿', index: 1, time: 2, direction: 'bullish' },
+    ];
+    window.renderChartPatternMarkers('bounded-pattern-test', patterns, item => ({
+      x: item.index === 0 ? -30 : 240,
+      y: item.index === 0 ? -40 : 200,
+      minX: 12, maxX: 168, minY: 18, maxY: 116,
+    }));
+
+    const markers = [...host.querySelectorAll('.chart-pattern-marker')];
+    assert.equal(markers.length, 2);
+    for (const marker of markers) {
+      const left = Number.parseFloat(marker.style.left);
+      const top = Number.parseFloat(marker.style.top);
+      const width = Number.parseFloat(marker.style.width);
+      const height = Number.parseFloat(marker.style.height);
+      assert.ok(left >= 12 && left + width <= 168, `marker x bounds: ${marker.style.cssText}`);
+      assert.ok(top >= 18 && top + height <= 116, `marker y bounds: ${marker.style.cssText}`);
+      assert.match(marker.getAttribute('aria-label'), /点击查看形态说明/);
+    }
+  });
+
   it('exposes a persisted synchronized secondary stock chart layout', () => {
     assert.ok(document.querySelector('[data-chart-layout-toggle]'));
     assert.ok(document.querySelector('#stock-kline-companion'));

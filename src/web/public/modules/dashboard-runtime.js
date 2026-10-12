@@ -2540,11 +2540,22 @@ function drawCandles(canvas, klines) {
   drawBandLine(bb.upper, 'rgba(59,130,246,.5)');
   drawBandLine(bb.middle, 'rgba(156,163,175,.4)', true);
   drawBandLine(bb.lower, 'rgba(59,130,246,.5)');
-  strategySignals.forEach(signal => {
+  const cryptoPlotW = W - padL - padR;
+  const cryptoMarkerBounds = { left: padL + 3, right: W - padR - 3, top: padT + 7, bottom: padT + chartH - 7 };
+  const clampCryptoMarker = (value, low, high) => Math.max(low, Math.min(high, value));
+  const cryptoLabels = [];
+  const cryptoSignalLanes = new Map();
+  ctx.save();
+  ctx.beginPath(); ctx.rect(padL, padT, cryptoPlotW, chartH); ctx.clip();
+  strategySignals.forEach((signal, signalIndex) => {
     const bar = klines[signal.index]; if (!bar) return;
-    const x = padL + signal.index * cw + cw / 2;
+    const x = clampCryptoMarker(padL + signal.index * cw + cw / 2, cryptoMarkerBounds.left, cryptoMarkerBounds.right);
+    const key = `${signal.index}:${signal.side}`;
+    const lane = cryptoSignalLanes.get(key) || 0;
+    cryptoSignalLanes.set(key, lane + 1);
     const anchor = signal.side === 'buy' ? bar.low : bar.high;
-    const y = padT + chartH - ((anchor - minP) / range) * chartH + (signal.side === 'buy' ? 14 : -14);
+    const rawY = padT + chartH - ((anchor - minP) / range) * chartH + (signal.side === 'buy' ? 14 : -14);
+    const y = clampCryptoMarker(rawY + (signal.side === 'buy' ? -lane : lane) * 9, cryptoMarkerBounds.top, cryptoMarkerBounds.bottom);
     const color = signal.side === 'buy' ? green : red;
     ctx.fillStyle = color; ctx.strokeStyle = color; ctx.lineWidth = 1.5; ctx.beginPath();
     if (signal.side === 'buy') { ctx.moveTo(x, y - 7); ctx.lineTo(x - 5, y + 3); ctx.lineTo(x + 5, y + 3); }
@@ -2552,19 +2563,20 @@ function drawCandles(canvas, klines) {
     ctx.closePath();
     if (signal.status === 'forming') { ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--bg-secondary')?.trim() || '#111827'; ctx.fill(); ctx.stroke(); }
     else ctx.fill();
-    ctx.lineWidth = 1;
-    ctx.fillStyle = color; ctx.font = 'bold 9px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = signal.side === 'buy' ? 'top' : 'bottom';
-    ctx.fillText(signal.label, x, signal.side === 'buy' ? y + 5 : y - 5);
+    ctx.font = 'bold 9px sans-serif';
+    cryptoLabels.push({ id: `crypto-signal-${signalIndex}`, label: signal.label, x, y: clampCryptoMarker(y + (signal.side === 'buy' ? 13 : -13), cryptoMarkerBounds.top, cryptoMarkerBounds.bottom), width: Math.min(ctx.measureText(signal.label).width + 6, Math.max(16, cryptoPlotW - 4)), color });
   });
+  const placedCryptoLabels = window.MoneyChartAnalysis?.layoutMarkerLabels(cryptoLabels, cryptoMarkerBounds, {
+    height: 13, gap: 2, maxLanes: Math.max(1, Math.ceil(chartH / 15)),
+  }) || [];
+  placedCryptoLabels.forEach(item => {
+    if (!item.labelVisible) return;
+    ctx.font = 'bold 9px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.lineWidth = 2; ctx.strokeStyle = 'rgba(12,16,28,.88)'; ctx.strokeText(item.label, item.x, item.y, Math.max(1, item.width - 4));
+    ctx.lineWidth = 1; ctx.fillStyle = item.color; ctx.fillText(item.label, item.x, item.y, Math.max(1, item.width - 4));
+  });
+  ctx.restore();
   renderChartSignalList('bn-chart-signals', strategySignals, '当前周期未触发所选策略信号');
-  renderChartPatternMarkers('bn-chart-patterns', cryptoPatterns, item => {
-    const bar = klines[item.index];
-    if (!bar) return null;
-    const x = padL + item.index * cw + cw / 2;
-    const highY = padT + chartH - ((bar.high - minP) / range) * chartH;
-    const lowY = padT + chartH - ((bar.low - minP) / range) * chartH;
-    return { x, y: item.direction === 'bearish' ? highY - 24 : lowY + 8 };
-  });
   renderChartPatternList('bn-chart-pattern-list', cryptoPatterns, '当前周期未识别到所选蜡烛形态');
   // Legend
   ctx.font = '10px sans-serif';
@@ -2646,6 +2658,17 @@ function calcBollinger(data, period = 20, multiplier = 2) {
     ctx.fillText(lbl, x - 14, H - 25);
   });
   window.MoneyTradingChart?.decorate(canvas, {...canvas.moneySourceMetadata,identity:bnCurrentSymbol+'|'+bnCurrentInterval,canvas,full:tradingFull,rows:klines,interval:bnCurrentInterval,exchangeTimeZone:'UTC',ma:[7,25],volumeUnit:'基础币',interactive:!window.cryptoMoneyKLine?.timer,loadEarlier:loadEarlierCryptoKline,geometry:{W,H,padL,padR,padT,priceH:chartH,minP,maxP},redraw:()=>drawCandles(canvas,bnKlineData)});
+  renderChartPatternMarkers('bn-chart-patterns', cryptoPatterns, item => {
+    const bar = klines[item.index];
+    if (!bar) return null;
+    const x = padL + item.index * cw + cw / 2;
+    const highY = padT + chartH - ((bar.high - minP) / range) * chartH;
+    const lowY = padT + chartH - ((bar.low - minP) / range) * chartH;
+    return {
+      x, y: item.direction === 'bearish' ? highY - 24 : lowY + 8,
+      minX: padL + 2, maxX: W - padR - 2, minY: padT + 2, maxY: padT + chartH - 2,
+    };
+  });
 }
 let bnKlineController = null;
 let bnKlineRequestRevision = 0;
@@ -6344,8 +6367,16 @@ function renderChartPatternMarkers(targetId, patterns, getPosition) {
   const layer = document.getElementById(targetId);
   if (!layer) return;
   layer.innerHTML = '';
-  const positioned = (patterns || []).map((item, index) => ({ item, index, position: getPosition(item) })).filter(entry => entry.position);
+  const positioned = (patterns || []).map((item, index) => ({ item, index, position: getPosition(item) }))
+    .filter(entry => entry.position && Number.isFinite(Number(entry.position.x)) && Number.isFinite(Number(entry.position.y)));
   const chartWidth = layer.clientWidth || layer.parentElement?.clientWidth || 640;
+  const chartHeight = layer.clientHeight || layer.parentElement?.clientHeight || 340;
+  const canvasId = targetId === 'stock-chart-patterns' ? 'stock-kline' : targetId === 'bn-chart-patterns' ? 'bn-candlestick' : '';
+  const chartCanvas = canvasId ? document.getElementById(canvasId) : null;
+  const layerRect = layer.getBoundingClientRect();
+  const canvasRect = chartCanvas?.getBoundingClientRect();
+  const offsetX = canvasRect && layerRect ? canvasRect.left - layerRect.left : 0;
+  const offsetY = canvasRect && layerRect ? canvasRect.top - layerRect.top : 0;
   const compact = positioned.length >= 6 && chartWidth / positioned.length < 55;
   positioned.forEach(({ item, index, position }) => {
     const direction = item.direction === 'bullish' ? '看涨' : item.direction === 'bearish' ? '看跌' : '中性';
@@ -6354,7 +6385,16 @@ function renderChartPatternMarkers(targetId, patterns, getPosition) {
     marker.type = 'button';
     marker.className = 'chart-pattern-marker';
     marker.dataset.displayMode = compact ? 'compact' : 'full';
-    marker.style.cssText = `position:absolute;left:${position.x - (compact ? 10 : 20)}px;top:${Math.max(4, position.y)}px;width:${compact ? 20 : 40}px;text-align:center;background:transparent;border:none;color:${color};font:${compact ? '14px' : '10px'} Inter,system-ui,sans-serif;cursor:pointer;pointer-events:auto;`;
+    const markerWidth = compact ? 20 : 40;
+    const markerHeight = 20;
+    const clamp = (value, min, max) => Math.max(min, Math.min(max, Number(value)));
+    const minLeft = Number.isFinite(Number(position.minX)) ? Number(position.minX) + offsetX : 0;
+    const maxRight = Number.isFinite(Number(position.maxX)) ? Number(position.maxX) + offsetX : chartWidth;
+    const minTop = Number.isFinite(Number(position.minY)) ? Number(position.minY) + offsetY : 4;
+    const maxBottom = Number.isFinite(Number(position.maxY)) ? Number(position.maxY) + offsetY : chartHeight - 4;
+    const left = clamp(Number(position.x) + offsetX - markerWidth / 2, minLeft, Math.max(minLeft, maxRight - markerWidth));
+    const top = clamp(Number(position.y) + offsetY, minTop, Math.max(minTop, maxBottom - markerHeight));
+    marker.style.cssText = `position:absolute;left:${left}px;top:${top}px;width:${markerWidth}px;height:${markerHeight}px;box-sizing:border-box;line-height:20px;padding:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;text-align:center;background:transparent;border:none;color:${color};font:${compact ? '14px' : '10px'} Inter,system-ui,sans-serif;cursor:pointer;pointer-events:auto;`;
     marker.tabIndex = 0;
     marker.textContent = compact ? '◆' : item.label;
     const tooltipId = `${targetId}-tooltip-${item.index}-${index}`;
@@ -6362,7 +6402,7 @@ function renderChartPatternMarkers(targetId, patterns, getPosition) {
     marker.title = `${item.label} · ${direction} · ${targetId === 'stock-chart-patterns' ? formatStockKlineTime(item.time) : formatChartTime(item.time)}`;
     marker.setAttribute('aria-expanded', 'false');
     marker.setAttribute('aria-describedby', tooltipId);
-    if (position.y < 74) marker.classList.add('tooltip-below');
+    if (top < 160) marker.classList.add('tooltip-below');
 
     const tooltip = document.createElement('div');
     tooltip.className = 'chart-pattern-tooltip';
@@ -7168,31 +7208,41 @@ function drawStockKline(canvas, klines) {
     const lines = window.MoneyTradingChart?.supportResistanceLineLayout(pivotData, geometry) || [];
     window.MoneyTradingChart?.drawSupportResistance(ctx, lines, geometry);
   }
-  overlays.signals.forEach(signal => {
+  const plotBottom = padT + priceH;
+  const markerBounds = { left: padL + 3, right: W - padR - 3, top: padT + 7, bottom: plotBottom - 7 };
+  const clampPlot = (value, low, high) => Math.max(low, Math.min(high, value));
+  const chartLabels = [];
+  const signalLanes = new Map();
+  const queueChartLabel = (id, label, x, y, color, font = 'bold 9px Inter, system-ui, sans-serif') => {
+    if (!label) return;
+    ctx.font = font;
+    const width = Math.min(Math.max(16, ctx.measureText(label).width + 6), Math.max(16, plotW - 4));
+    chartLabels.push({ id, label, x, y, width, color, font });
+  };
+  ctx.save();
+  ctx.beginPath(); ctx.rect(padL, padT, plotW, priceH); ctx.clip();
+  overlays.signals.forEach((signal, signalIndex) => {
     const bar = klines[signal.index]; if (!bar) return;
-    const x = xCenter(signal.index), y = signal.side === 'buy' ? yPrice(bar.low) + 14 : yPrice(bar.high) - 14;
+    const x = clampPlot(xCenter(signal.index), markerBounds.left, markerBounds.right);
+    const key = `${signal.index}:${signal.side}`;
+    const lane = signalLanes.get(key) || 0;
+    signalLanes.set(key, lane + 1);
+    const baseY = signal.side === 'buy' ? yPrice(bar.low) + 14 : yPrice(bar.high) - 14;
+    const y = clampPlot(baseY + (signal.side === 'buy' ? -lane : lane) * 9, markerBounds.top, markerBounds.bottom);
     const color = signal.side === 'buy' ? '#22c55e' : '#ef4444';
     ctx.fillStyle = color; ctx.strokeStyle = color; ctx.lineWidth = 1.5; ctx.beginPath();
-    if (signal.side === 'buy') { ctx.moveTo(x, y - 8); ctx.lineTo(x - 6, y + 3); ctx.lineTo(x + 6, y + 3); }
-    else { ctx.moveTo(x, y + 8); ctx.lineTo(x - 6, y - 3); ctx.lineTo(x + 6, y - 3); }
+    if (signal.side === 'buy') { ctx.moveTo(x, y - 7); ctx.lineTo(x - 5, y + 4); ctx.lineTo(x + 5, y + 4); }
+    else { ctx.moveTo(x, y + 7); ctx.lineTo(x - 5, y - 4); ctx.lineTo(x + 5, y - 4); }
     ctx.closePath();
     if (signal.status === 'forming') { ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--bg-secondary')?.trim() || '#111827'; ctx.fill(); ctx.stroke(); }
     else ctx.fill();
-    ctx.lineWidth = 1;
-    ctx.font = 'bold 9px Inter, system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = signal.side === 'buy' ? 'top' : 'bottom';
-    ctx.fillText(signal.label, x, signal.side === 'buy' ? y + 5 : y - 5);
+    queueChartLabel(`signal-${signalIndex}`, signal.label, x, clampPlot(y + (signal.side === 'buy' ? 13 : -13), markerBounds.top, markerBounds.bottom), color);
   });
-  renderChartPatternMarkers('stock-chart-patterns', overlays.patterns, item => {
-    const bar = klines[item.index];
-    if (!bar) return null;
-    return { x: xCenter(item.index), y: item.direction === 'bearish' ? yPrice(bar.high) - 24 : yPrice(bar.low) + 8 };
-  });
-  overlays.structures.forEach(item => {
+  overlays.structures.forEach((item, index) => {
     const bar = klines[item.index]; if (!bar) return;
-    const x = xCenter(item.index), y = item.type === 'swing-high' ? yPrice(bar.high) - 5 : yPrice(bar.low) + 5;
-    ctx.fillStyle = item.direction === 'bullish' ? '#60a5fa' : '#f97316';
-    ctx.font = '9px Inter, system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = item.type === 'swing-high' ? 'bottom' : 'top';
-    ctx.fillText(item.type === 'swing-high' ? 'H' : 'L', x, y);
+    const x = xCenter(item.index), y = item.type === 'swing-high' ? yPrice(bar.high) - 10 : yPrice(bar.low) + 10;
+    const label = item.type === 'swing-high' ? 'H' : 'L';
+    queueChartLabel(`structure-${index}`, label, x, clampPlot(y, markerBounds.top, markerBounds.bottom), item.direction === 'bullish' ? '#60a5fa' : '#f97316', 'bold 9px Inter, system-ui, sans-serif');
   });
   if (overlays.config.structures && overlays.chan) {
     ctx.strokeStyle = '#60a5fa'; ctx.lineWidth = 1.1; ctx.setLineDash([4, 3]);
@@ -7210,13 +7260,24 @@ function drawStockKline(canvas, klines) {
       ctx.fillStyle = 'rgba(96,165,250,.12)'; ctx.strokeStyle = 'rgba(96,165,250,.65)';
       ctx.fillRect(x, top, width, height); ctx.strokeRect(x, top, width, height);
     });
-    overlays.chan.tradePoints.forEach(point => {
+    overlays.chan.tradePoints.forEach((point, index) => {
       const bar = klines[point.index]; if (!bar) return;
-      const x = xCenter(point.index), y = point.side === 'buy' ? yPrice(bar.low) + 25 : yPrice(bar.high) - 25;
-      ctx.fillStyle = point.side === 'buy' ? '#34d399' : '#fb7185'; ctx.font = 'bold 9px Inter, system-ui, sans-serif'; ctx.textAlign = 'center';
-      ctx.fillText(`${point.type}类${point.side === 'buy' ? '买' : '卖'}${point.status === 'confirmed' ? '✓' : '…'}`, x, y);
+      const x = xCenter(point.index), anchor = point.side === 'buy' ? yPrice(bar.low) + 22 : yPrice(bar.high) - 22;
+      const y = clampPlot(anchor, markerBounds.top, markerBounds.bottom);
+      const label = `${point.type}类${point.side === 'buy' ? '买' : '卖'}${point.status === 'confirmed' ? '✓' : '…'}`;
+      queueChartLabel(`chan-${index}`, label, x, y, point.side === 'buy' ? '#34d399' : '#fb7185');
     });
   }
+  const laidOutLabels = window.MoneyChartAnalysis?.layoutMarkerLabels(chartLabels, markerBounds, {
+    height: 13, gap: 2, maxLanes: Math.max(1, Math.ceil(priceH / 15)),
+  }) || [];
+  laidOutLabels.forEach(item => {
+    if (!item.labelVisible) return;
+    ctx.font = item.font; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.lineWidth = 2; ctx.strokeStyle = 'rgba(12,16,28,.88)'; ctx.strokeText(item.label, item.x, item.y, Math.max(1, item.width - 4));
+    ctx.lineWidth = 1; ctx.fillStyle = item.color; ctx.fillText(item.label, item.x, item.y, Math.max(1, item.width - 4));
+  });
+  ctx.restore();
   const first = klines[0], last = klines[klines.length - 1];
   const changePct = ((last.close - first.close) / (first.close || 1)) * 100;
   ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
@@ -7233,6 +7294,14 @@ function drawStockKline(canvas, klines) {
   renderChartPatternList('stock-chart-pattern-list', overlays.patterns, '当前周期未识别到所选蜡烛形态');
   renderChartStructureList('stock-chart-structure-list', overlays.structures, overlays.chan, '当前周期未识别到结构标记');
   window.MoneyTradingChart?.decorate(canvas,{...canvas.moneySourceMetadata,identity:currentStockSymbol+'|'+currentStockKlinePeriod,canvas,full:replayKlines,rows:klines,interval:currentStockKlinePeriod,exchangeTimeZone:stockChartExchangeTimezone,ma:[5,10,20],volumeUnit:'股',interactive:tradingActive,loadEarlier:!stockChartAsOf&&!stockChartIntradayDate&&stockChartAdjustment==='source'&&['1m','5m','15m','1h','1d'].includes(currentStockKlinePeriod)?loadEarlierStockKline:undefined,onAdjustmentChange:value=>{if(!['source','forward'].includes(value)||stockChartAsOf||stockChartIntradayDate)return;stockChartAdjustment=value;loadStockKline();},geometry:{W,H,padL,padR,padT,priceH,minP,maxP},redraw:()=>drawStockKline(canvas,stockChartKlines)});
+  renderChartPatternMarkers('stock-chart-patterns', overlays.patterns, item => {
+    const bar = klines[item.index];
+    if (!bar) return null;
+    return {
+      x: xCenter(item.index), y: item.direction === 'bearish' ? yPrice(bar.high) - 24 : yPrice(bar.low) + 8,
+      minX: padL + 2, maxX: W - padR - 2, minY: padT + 2, maxY: plotBottom - 2,
+    };
+  });
   redrawStockChartEventMarkers();
 }
 // --- DeFi Data ---

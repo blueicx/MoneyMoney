@@ -59,6 +59,45 @@ test('replay actions stay within the available bar range', () => {
   assert.equal(analysis.stepReplay(4, 0, 'next'), -1);
 });
 
+test('chart marker labels stay inside the plot and avoid overlapping when signals cluster', () => {
+  const bounds = { left: 10, right: 110, top: 20, bottom: 80 };
+  const laidOut = analysis.layoutMarkerLabels([
+    { id: 'a', x: 60, y: 50, width: 42, label: '买入' },
+    { id: 'b', x: 60, y: 50, width: 42, label: '突破' },
+    { id: 'c', x: 60, y: 50, width: 42, label: '回撤' },
+  ], bounds, { height: 12, gap: 2 });
+
+  assert.equal(laidOut.length, 3);
+  assert.ok(laidOut.every(item => item.labelVisible));
+  for (const item of laidOut) {
+    assert.ok(item.x - item.width / 2 >= bounds.left);
+    assert.ok(item.x + item.width / 2 <= bounds.right);
+    assert.ok(item.y - item.height / 2 >= bounds.top);
+    assert.ok(item.y + item.height / 2 <= bounds.bottom);
+  }
+  for (let i = 0; i < laidOut.length; i++) {
+    for (let j = i + 1; j < laidOut.length; j++) {
+      const a = laidOut[i], b = laidOut[j];
+      const overlaps = Math.abs(a.x - b.x) < (a.width + b.width) / 2
+        && Math.abs(a.y - b.y) < (a.height + b.height) / 2 + 2;
+      assert.equal(overlaps, false, `${a.id} and ${b.id} labels must not overlap`);
+    }
+  }
+});
+
+test('chart marker label layout hides excess labels instead of moving them outside the plot', () => {
+  const bounds = { left: 0, right: 80, top: 0, bottom: 26 };
+  const laidOut = analysis.layoutMarkerLabels(Array.from({ length: 8 }, (_, index) => ({
+    id: String(index), x: 40, y: 13, width: 70, label: `信号${index}`,
+  })), bounds, { height: 12, gap: 2, maxLanes: 3 });
+
+  assert.ok(laidOut.some(item => !item.labelVisible), 'dense labels should yield to the chart instead of escaping its bounds');
+  assert.ok(laidOut.every(item => !item.labelVisible || (
+    item.x - item.width / 2 >= bounds.left && item.x + item.width / 2 <= bounds.right
+      && item.y - item.height / 2 >= bounds.top && item.y + item.height / 2 <= bounds.bottom
+  )));
+});
+
 test('detects selectable strategy signals with a strategy label and price', () => {
   const series = Array.from({ length: 35 }, (_, index) => {
     const close = index < 20 ? 100 - index * 0.8 : 84 + (index - 20) * 1.5;

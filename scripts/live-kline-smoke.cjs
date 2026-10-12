@@ -49,6 +49,26 @@ async function main() {
     });
     assert.equal(await page.evaluate(()=>currentStockKlinePeriod),'5m');
     assert.match(await page.locator('#stock-chart-card .mm-trading-readout').innerText(),/开 .*高 .*低 .*收 .*MA5/);
+    const patternMarkerBounds=await page.evaluate(()=>{
+      const canvas=document.getElementById('stock-kline'),layer=document.getElementById('stock-chart-patterns');
+      const priceBottom=28+(canvas.clientHeight-28-30)*.72;
+      const bounds={left:60,right:canvas.clientWidth-88,top:30,bottom:priceBottom-2};
+      renderChartPatternMarkers('stock-chart-patterns',[
+        {label:'上沿测试',index:0,time:stockChartKlines[0].time,direction:'bearish'},
+        {label:'下沿测试',index:1,time:stockChartKlines[1].time,direction:'bullish'},
+      ],item=>({x:item.index===0?-500:canvas.clientWidth+500,y:item.index===0?-500:canvas.clientHeight+500,minX:bounds.left,maxX:bounds.right,minY:bounds.top,maxY:bounds.bottom}));
+      const canvasRect=canvas.getBoundingClientRect();
+      return [...layer.querySelectorAll('.chart-pattern-marker')].map(marker=>{
+        const rect=marker.getBoundingClientRect();
+        return {left:rect.left-canvasRect.left,right:rect.right-canvasRect.left,top:rect.top-canvasRect.top,bottom:rect.bottom-canvasRect.top,bounds};
+      });
+    });
+    assert.equal(patternMarkerBounds.length,2,'edge fixture markers should remain available');
+    for(const marker of patternMarkerBounds){
+      assert.ok(marker.left>=marker.bounds.left-0.5&&marker.right<=marker.bounds.right+0.5,`pattern icon escaped horizontal plot bounds: ${JSON.stringify(marker)}`);
+      assert.ok(marker.top>=marker.bounds.top-0.5&&marker.bottom<=marker.bounds.bottom+0.5,`pattern icon escaped vertical price bounds: ${JSON.stringify(marker)}`);
+    }
+    await page.evaluate(()=>drawStockKline(document.getElementById('stock-kline'),stockChartKlines));
     await page.evaluate(() => {
       window.__supportResistanceDraws = [];
       const draw = window.MoneyTradingChart.drawSupportResistance;

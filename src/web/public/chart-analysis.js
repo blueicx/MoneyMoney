@@ -500,6 +500,48 @@
     return current;
   }
 
+  function layoutMarkerLabels(markers = [], bounds = {}, options = {}) {
+    const left = Number(bounds.left), right = Number(bounds.right);
+    const top = Number(bounds.top), bottom = Number(bounds.bottom);
+    if (![left, right, top, bottom].every(Number.isFinite) || right <= left || bottom <= top) {
+      return (Array.isArray(markers) ? markers : []).map(marker => ({ ...marker, labelVisible: false }));
+    }
+    const height = Math.max(1, finite(options.height, 14));
+    const gap = Math.max(0, finite(options.gap, 3));
+    const maxLanes = Math.max(1, Math.floor(finite(options.maxLanes, 24)));
+    const step = height + gap;
+    const minY = top + height / 2;
+    const maxY = bottom - height / 2;
+    const occupied = [];
+    const result = [];
+
+    for (const marker of Array.isArray(markers) ? markers : []) {
+      const requestedWidth = Math.max(1, finite(marker?.width, 1));
+      const width = Math.min(requestedWidth, right - left);
+      const minX = left + width / 2;
+      const maxX = right - width / 2;
+      const x = Math.max(minX, Math.min(maxX, finite(marker?.x, (left + right) / 2)));
+      const desiredY = Math.max(minY, Math.min(maxY, finite(marker?.y, (top + bottom) / 2)));
+      const offsets = [0];
+      for (let lane = 1; lane < maxLanes; lane++) offsets.push(-lane * step, lane * step);
+      let placed = null;
+
+      for (const offset of offsets) {
+        const y = desiredY + offset;
+        if (y < minY || y > maxY) continue;
+        const box = { left: x - width / 2, right: x + width / 2, top: y - height / 2, bottom: y + height / 2 };
+        const collision = occupied.some(other =>
+          box.left < other.right + gap && box.right > other.left - gap
+          && box.top < other.bottom + gap && box.bottom > other.top - gap);
+        if (!collision) { placed = { x, y, ...box }; break; }
+      }
+
+      if (placed) occupied.push(placed);
+      result.push({ ...marker, x, y: placed?.y ?? desiredY, width, height, labelVisible: Boolean(placed) });
+    }
+    return result;
+  }
+
   
   function protectReplayContext(context) {
     const data = Array.isArray(context?.data) ? context.data : [];
@@ -562,5 +604,5 @@
     };
   }
 
-  return { DEFAULT_CONFIG, CANDLE_PATTERN_CATALOG, normalizeOverlayConfig, chartDataStatusLabel, detectCandlestickPatterns, detectStructures, detectChanStructures, detectStrategySignals, buildStrategyChartPoints, movingAverage, bollingerBands, calculateMACD, buildChartOverlays, stepReplay, protectReplayContext, createDrawingTool };
+  return { DEFAULT_CONFIG, CANDLE_PATTERN_CATALOG, normalizeOverlayConfig, chartDataStatusLabel, detectCandlestickPatterns, detectStructures, detectChanStructures, detectStrategySignals, buildStrategyChartPoints, movingAverage, bollingerBands, calculateMACD, buildChartOverlays, stepReplay, layoutMarkerLabels, protectReplayContext, createDrawingTool };
 });
