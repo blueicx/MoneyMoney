@@ -4,6 +4,7 @@
   const markets = { stocks:'股票', options:'期权', crypto:'虚拟币', prediction:'预测市场' };
   const kinds = { changes:'今日变化', upcoming:'未来七天', alert:'待确认提醒', screener:'筛选进出', '13f':'13F 变化', review:'到期复盘' };
   let records = [], controller, lastScope, lastContext='', lifecycleController = new AbortController();
+  const timeForLocation = row => row.scheduledAt || row.occurredAt || row.publishedAt;
   function context() { const shell=document.getElementById('market-workspace-shell');return {market:shell?.dataset.marketScope,workspace:shell?.dataset.workspace,instrument:shell?.dataset.instrument || ''}; }
   const saved = key => { try { return JSON.parse(localStorage.getItem(key) || '{}'); } catch { return {}; } };
   const pref = saved('mm-action-filter-v1');
@@ -16,11 +17,11 @@
     if (!response.ok || body.success === false) throw new Error(body.reason || body.error || `请求失败 ${response.status}`);
     return body;
   }
-  function link(row, workspace) { const params = new URLSearchParams({ market:row.market, workspace }); if (row.instrument) params.set('instrument',row.instrument); const at = row.occurredAt || row.publishedAt; if (at) params.set('asOf', at); return '/?' + params; }
+  function link(row, workspace) { const params = new URLSearchParams({ market:row.market, workspace }); if (row.instrument) params.set('instrument',row.instrument); const at = timeForLocation(row); if (at) params.set('asOf', at); return '/?' + params; }
   function drawer(row,group=records) {
     const overlay = document.createElement('dialog'); overlay.className = 'mm-action-detail';
     const links = [['图表', ({ stocks:'stock-quotes',crypto:'crypto-quotes',options:'option-chain',prediction:'prediction-radar' })[row.market]], ['事件研究','decision-intelligence'], ['决策日记','decision-intelligence']];
-    overlay.innerHTML = `<button type="button" data-close aria-label="关闭详情">关闭</button><h3>${esc(row.title)}</h3><p>${esc(row.summary || row.reason || '')}</p><dl><dt>标的 / 市场</dt><dd>${esc(row.instrument || '当前市场')} · ${esc(markets[row.market])}</dd><dt>来源 / 状态</dt><dd>${esc(row.source)} · ${esc(window.MoneyMoneyWorkflow?.status(row.dataStatus) || row.dataStatus)}</dd><dt>发生 / 发布时间</dt><dd>${esc(row.occurredAt || '未知')} / ${esc(row.publishedAt || '未知')}</dd><dt>抓取时间</dt><dd>${esc(row.observedAt)}</dd><dt>原因</dt><dd>${esc(row.reason || '无')}</dd></dl><nav>${links.map(([label,workspace]) => `<a href="${esc(link(row,workspace))}">${label}</a>`).join(' ')}${row.sourceUrl ? ` <a href="${esc(row.sourceUrl)}" target="_blank" rel="noopener noreferrer">原文</a>` : ''}</nav><h4>证据引用</h4>${row.evidenceRefs.length ? row.evidenceRefs.map(id => `<a href="/api/evidence/${encodeURIComponent(id)}" target="_blank" rel="noopener noreferrer">${esc(id)}</a>`).join('<br>') : '<p>此记录尚无独立证据快照</p>'}`;
+    overlay.innerHTML = `<button type="button" data-close aria-label="关闭详情">关闭</button><h3>${esc(row.title)}</h3><p>${esc(row.summary || row.reason || '')}</p><dl><dt>标的 / 市场</dt><dd>${esc(row.instrument || '当前市场')} · ${esc(markets[row.market])}</dd><dt>来源 / 状态</dt><dd>${esc(row.source)} · ${esc(window.MoneyMoneyWorkflow?.status(row.dataStatus) || row.dataStatus)}</dd><dt>计划时间</dt><dd>${esc(row.scheduledAt || '未知')}</dd><dt>发生时间</dt><dd>${esc(row.occurredAt || '未知')}</dd><dt>发布时间</dt><dd>${esc(row.publishedAt || '未知')}</dd><dt>抓取时间</dt><dd>${esc(row.observedAt)}</dd><dt>原因</dt><dd>${esc(row.reason || '无')}</dd></dl><nav>${links.map(([label,workspace]) => `<a href="${esc(link(row,workspace))}">${label}</a>`).join(' ')}${row.sourceUrl ? ` <a href="${esc(row.sourceUrl)}" target="_blank" rel="noopener noreferrer">原文</a>` : ''}</nav><h4>证据引用</h4>${row.evidenceRefs.length ? row.evidenceRefs.map(id => `<a href="/api/evidence/${encodeURIComponent(id)}" target="_blank" rel="noopener noreferrer">${esc(id)}</a>`).join('<br>') : '<p>此记录尚无独立证据快照</p>'}`;
     const evidenceLinks = [...overlay.querySelectorAll('h4 ~ a')];
     evidenceLinks.forEach((anchor,index) => { const ref = row.evidenceRefs[index]; if (/^https?:\/\//i.test(ref)) anchor.href = ref; });
     for (const anchor of overlay.querySelectorAll('nav a')) {
@@ -32,7 +33,7 @@
           if (anchor.textContent === '事件研究' && (!row.publishedAt || Date.parse(row.publishedAt) > Date.now() || row.occurredAt && Date.parse(row.occurredAt) > Date.now())) throw new Error('事件尚未发生或缺少发布时间，只可建立决策草稿');
           let refs = row.evidenceRefs.filter(id => !/^https?:/i.test(id));
           if (!refs.length) {
-            const result = await api('/api/evidence',{ method:'POST',body:JSON.stringify({ market:row.market,instrument:row.instrument,workspace:'event-intelligence',dataStatus:row.dataStatus,source:{ id:'action-center:'+row.market,name:row.source,url:row.sourceUrl || null },observedAt:row.publishedAt || row.observedAt,fetchedAt:row.observedAt,fields:{ title:row.title,kind:row.kind,publishedAt:row.publishedAt || null,occurredAt:row.occurredAt || null,sourceUrl:row.sourceUrl || null } }) });
+            const result = await api('/api/evidence',{ method:'POST',body:JSON.stringify({ market:row.market,instrument:row.instrument,workspace:'event-intelligence',dataStatus:row.dataStatus,source:{ id:'action-center:'+row.market,name:row.source,url:row.sourceUrl || null },observedAt:row.publishedAt || row.occurredAt || row.observedAt,fetchedAt:row.observedAt,fields:{ title:row.title,kind:row.kind,scheduledAt:row.scheduledAt || null,publishedAt:row.publishedAt || null,occurredAt:row.occurredAt || null,sourceUrl:row.sourceUrl || null } }) });
             refs = [result.data.id];
           }
           window.setMarketScope(row.market); window.setWorkspaceInstrument(row.instrument); window.openWorkspace('decision-intelligence');
@@ -45,7 +46,7 @@
     }
     overlay.querySelector('[data-close]').onclick = () => overlay.close();
     const navigation=document.createElement('nav'),index=group.findIndex(item=>item.id===row.id);navigation.innerHTML='<button type="button" data-detail-previous>上一条</button><span>'+String(index+1)+' / '+group.length+'</span><button type="button" data-detail-next>下一条</button>';overlay.prepend(navigation);for(const [direction,offset] of [['previous',-1],['next',1]]){const button=navigation.querySelector('[data-detail-'+direction+']');button.disabled=!group[index+offset];button.onclick=()=>{overlay.close();drawer(group[index+offset],group);};}overlay.addEventListener('keydown',event=>{if(event.target?.matches('input,textarea,select'))return;if(event.key==='ArrowLeft')navigation.querySelector('[data-detail-previous]').click();if(event.key==='ArrowRight')navigation.querySelector('[data-detail-next]').click();});
-    const chartLink=[...overlay.querySelectorAll('a')].find(anchor=>anchor.textContent==='图表');if(chartLink && row.market==='stocks')chartLink.onclick=async event=>{event.preventDefault();const at=row.occurredAt || row.publishedAt;if(at){overlay.close();await window.MoneyMoneyWorkflow.locate(at,row.instrument);}else window.showToast?.('记录没有确定日期，不能猜测图表位置','info');};
+    const chartLink=[...overlay.querySelectorAll('a')].find(anchor=>anchor.textContent==='图表');if(chartLink && row.market==='stocks')chartLink.onclick=async event=>{event.preventDefault();const at=timeForLocation(row);if(at){overlay.close();await window.MoneyMoneyWorkflow.locate(at,row.instrument);}else window.showToast?.('记录没有确定日期，不能猜测图表位置','info');};
     overlay.addEventListener('close', () => overlay.remove(), { once:true }); document.body.append(overlay); overlay.showModal();
   }
   function render() {
@@ -55,7 +56,7 @@
       if (!row.instrument) continue;
       const item = meta[row.instrument] || { pending:0,upcoming:Infinity,status:0 };
       if (!row.read && !row.snoozed) item.pending++;
-      if (row.section === 'upcoming') item.upcoming=Math.min(item.upcoming,Date.parse(row.occurredAt || row.publishedAt));
+      if (row.section === 'upcoming') item.upcoming=Math.min(item.upcoming,Date.parse(timeForLocation(row)));
       item.status=Math.max(item.status,({ failed:4,unavailable:4,partial:3,cached:2,delayed:1 })[row.dataStatus] || 0);
       meta[row.instrument]=item;
     }
@@ -66,7 +67,7 @@
     const filter=document.getElementById('mm-action-state')?.value || 'all';
     const rows = records.filter(row => (!section || row.section === section) && (!market || row.market === market) && (!row.snoozed || document.getElementById('mm-action-snoozed').checked) && (filter==='all' || filter==='unread' && !row.read || filter==='pinned' && row.pinned));
     const previousScroll = host.scrollTop;
-    host.innerHTML = rows.length ? rows.map(row => `<article class="mm-action-row ${row.read ? 'is-read' : ''}" data-id="${esc(row.id)}"><button type="button" data-detail><strong>${row.pinned ? '📌 ' : ''}${esc(row.title)}</strong><small>${esc(markets[row.market])} · ${esc(row.instrument || '市场记录')} · ${esc(window.MoneyMoneyWorkflow?.status(row.dataStatus) || row.dataStatus)} · ${esc(row.observedAt)}</small><span>${esc(row.summary || row.reason || '')}</span></button><div><button data-read>${row.read ? '标未读' : '已读'}</button><button data-pin>${row.pinned ? '取消置顶' : '置顶'}</button><button data-snooze>${row.snoozed ? '恢复处理' : '稍后一天'}</button></div></article>`).join('') : '<p class="empty-tip">当前筛选暂无可处理记录。来源失败会单独显示，不表示没有事件。</p>';
+    host.innerHTML = rows.length ? rows.map(row => `<article class="mm-action-row ${row.read ? 'is-read' : ''}" data-id="${esc(row.id)}"><button type="button" data-detail><strong>${row.pinned ? '📌 ' : ''}${esc(row.title)}</strong><small>${esc(markets[row.market])} · ${esc(row.instrument || '市场记录')} · ${esc(window.MoneyMoneyWorkflow?.status(row.dataStatus) || row.dataStatus)} · 抓取 ${esc(row.observedAt)}${row.scheduledAt ? ` · 计划 ${esc(row.scheduledAt)}` : ''}</small><span>${esc(row.summary || row.reason || '')}</span></button><div><button data-read>${row.read ? '标未读' : '已读'}</button><button data-pin>${row.pinned ? '取消置顶' : '置顶'}</button><button data-snooze>${row.snoozed ? '恢复处理' : '稍后一天'}</button></div></article>`).join('') : '<p class="empty-tip">当前筛选暂无可处理记录。来源失败会单独显示，不表示没有事件。</p>';
     host.scrollTop = previousScroll;
     for (const article of host.querySelectorAll('article')) {
       const row = records.find(row => row.id === article.dataset.id);

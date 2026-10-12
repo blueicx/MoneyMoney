@@ -21,6 +21,8 @@ export interface UpcomingEvent {
   category: EventCategory;
   categoryLabel: string;
   date: string;
+  /** Planned release/meeting time; this is not proof the event occurred. */
+  scheduledAt?: string;
   impact: EventImpact;
   country: string;
   countryLabel: string;
@@ -397,6 +399,7 @@ function mergeCalendarEvents(input: MergeInput): UpcomingEvent[] {
       category: isCentralBank ? 'central-bank' : 'macro',
       categoryLabel: isCentralBank ? '央行' : '经济数据',
       date: item.date,
+      scheduledAt: item.date,
       impact: normalizeMacroImpact(item.impact),
       country: item.country,
       countryLabel: countryLabel(item.country),
@@ -421,6 +424,7 @@ function mergeCalendarEvents(input: MergeInput): UpcomingEvent[] {
         category: 'earnings',
         categoryLabel: '财报',
         date: date.toISOString(),
+        scheduledAt: date.toISOString(),
         impact: (item.marketCapUsd || 0) >= 50_000_000_000 ? 'high'
           : (item.marketCapUsd || 0) >= 5_000_000_000 ? 'medium' : 'low',
         country: 'US',
@@ -452,6 +456,7 @@ function mergeCalendarEvents(input: MergeInput): UpcomingEvent[] {
       category: 'central-bank',
       categoryLabel: '央行',
       date: date.toISOString(),
+      scheduledAt: date.toISOString(),
       impact: 'high',
       country: 'US',
       countryLabel: '美国',

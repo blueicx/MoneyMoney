@@ -246,13 +246,14 @@ export function buildInstrumentTimeline(
 ): Array<Record<string, unknown>> {
   return [
     ...events.map(event => ({
-      kind: 'event', at: event.date, occurredAt: event.date, publishedAt: null,
+      kind: 'event', at: event.scheduledAt || event.date, scheduledAt: event.scheduledAt || event.date,
+      occurredAt: null, publishedAt: null,
       retrievedAt: event.retrievedAt || null, title: event.titleZh || event.title,
       source: event.source || null, sourceUrl: null,
       impact: event.impact, result: event.actual ? { actual: event.actual, forecast: event.forecast } : null,
     })),
     ...news.map(item => ({
-      kind: 'news', at: item.publishedAt, occurredAt: item.publishedAt, publishedAt: item.publishedAt,
+      kind: 'news', at: item.publishedAt, occurredAt: null, publishedAt: item.publishedAt,
       retrievedAt: retrievals.newsRetrievedAt || null, title: item.title, source: item.source,
       sourceUrl: item.url || null, url: item.url || null, sentimentScore: item.sentimentScore ?? null,
     })),

@@ -12,6 +12,7 @@ export interface MarketChangeRecord {
   summary?: string;
   source?: string;
   sourceUrl?: string;
+  scheduledAt?: string;
   occurredAt?: string;
   publishedAt?: string;
   observedAt: string;

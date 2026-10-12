@@ -602,12 +602,13 @@ async function buildSharedMarketChangeDigest(ids: string[], since: string): Prom
       if (!item.instrument || !marketWatchlist.includes(item.instrument)) continue;
       const title = typeof item.fields.title === 'string' ? item.fields.title : '';
       if (!title || item.workspace !== 'event-intelligence') continue;
-      const publishedAt = typeof item.fields.publishedAt === 'string' ? item.fields.publishedAt : item.observedAt;
+      const publishedAt = typeof item.fields.publishedAt === 'string' ? item.fields.publishedAt : undefined;
       const sourceUrl = typeof item.fields.sourceUrl === 'string' ? item.fields.sourceUrl : item.source.url || undefined;
       const kind = /news|headline/i.test(String(item.fields.kind || '')) ? 'news' : 'event';
       records.push({
         id: `evidence:${item.id}`, dedupeKey: item.id, market, instrument: item.instrument, kind,
         title, summary: item.reason || undefined, source: item.source.name, sourceUrl,
+        scheduledAt: typeof item.fields.scheduledAt === 'string' ? item.fields.scheduledAt : undefined,
         occurredAt: typeof item.fields.occurredAt === 'string' ? item.fields.occurredAt : undefined,
         publishedAt, observedAt: item.observedAt, evidenceRefs: [item.id, ...(sourceUrl ? [sourceUrl] : [])], dataStatus: item.dataStatus,
       });
@@ -697,7 +698,7 @@ async function collectWatchlistActions(ids: string[], suppliedDigest?: MarketCha
   const items: ActionCenterItem[] = digest.map(row => ({
     id: row.id, market: row.market, instrument: row.instrument,
     kind: row.kind === '13f-change' ? '13f' : row.kind === 'price-change' ? 'price' : row.kind.startsWith('source-') ? 'source' : row.kind === 'signal' ? 'signal' : 'event',
-    title: row.title, summary: row.summary, occurredAt: row.occurredAt, publishedAt: row.publishedAt,
+    title: row.title, summary: row.summary, scheduledAt: row.scheduledAt, occurredAt: row.occurredAt, publishedAt: row.publishedAt,
     observedAt: row.observedAt, source: row.source || '未声明来源', sourceUrl: row.sourceUrl,
     dataStatus: row.dataStatus || 'cached', evidenceRefs: row.evidenceRefs || [],
   }));
@@ -724,7 +725,7 @@ async function collectWatchlistActions(ids: string[], suppliedDigest?: MarketCha
       for (const ref of watched.filter(row => row.market === 'stocks')) {
         for (const event of filterEventsForInstrument(calendar.events, { type: 'stock', symbol: ref.symbol || '' })) {
           items.push({ id: `upcoming:${ref.instrument}:${event.id}`, market: 'stocks', instrument: ref.instrument, kind: 'event', title: event.titleZh || event.title,
-            summary: event.detailZh || event.detail, occurredAt: event.date, observedAt: calendar.fetchedAt, source: event.source,
+            summary: event.detailZh || event.detail, scheduledAt: event.scheduledAt || event.date, observedAt: calendar.fetchedAt, source: event.source,
             dataStatus: calendar.sourceStatus?.earnings || (calendar.stale ? 'cached' : 'delayed'), evidenceRefs: [], eventId: event.id,
             reason: calendar.sourceReasons?.earnings });
         }
@@ -5565,9 +5566,9 @@ export function getTelegramCommandHandlers(): Record<string, TelegramCommandHand
       stateStore.set(key,{ at:new Date().toISOString(),scope,items:shown });
       const lines = shown.map((row,index) => {
         const href = buildTelegramDeepLink(telegramPublicBaseUrl(),{ market:row.market,instrument:row.instrument || '',workspace:'action-center' });
-        const chart = row.market==='stocks' && row.instrument ? buildTelegramDeepLink(telegramPublicBaseUrl(),{market:row.market,instrument:row.instrument,workspace:'stock-quotes',timeframe:'1d',focusDate:(row.occurredAt || row.publishedAt || '').slice(0,10)}):null;
+        const chart = row.market==='stocks' && row.instrument ? buildTelegramDeepLink(telegramPublicBaseUrl(),{market:row.market,instrument:row.instrument,workspace:'stock-quotes',timeframe:'1d',focusDate:(row.scheduledAt || row.occurredAt || row.publishedAt || '').slice(0,10)}):null;
         const status=({live:'实时',delayed:'延迟',cached:'缓存',partial:'部分成功',empty:'来源成功但无记录',unavailable:'来源不可用',failed:'请求失败',unsupported:'不支持',historical:'历史数据'} as Record<string,string>)[row.dataStatus] || row.dataStatus;
-        return `${index+1}. ${escapeTelegramHtml(row.title)} · ${escapeTelegramHtml(status)}\n${escapeTelegramHtml(row.source)} · ${escapeTelegramHtml(row.observedAt)}${row.reason ? '\n原因：'+escapeTelegramHtml(row.reason):''}${href ? `\n<a href="${escapeTelegramHtml(href)}">网页与证据</a>` : ''}${chart ? ` · <a href="${escapeTelegramHtml(chart)}">对应日期图表</a>`:''}`;
+        return `${index+1}. ${escapeTelegramHtml(row.title)} · ${escapeTelegramHtml(status)}\n${escapeTelegramHtml(row.source)} · 抓取 ${escapeTelegramHtml(row.observedAt)}${row.scheduledAt ? '\n计划时间：'+escapeTelegramHtml(row.scheduledAt):''}${row.reason ? '\n原因：'+escapeTelegramHtml(row.reason):''}${href ? `\n<a href="${escapeTelegramHtml(href)}">网页与证据</a>` : ''}${chart ? ` · <a href="${escapeTelegramHtml(chart)}">对应日期图表</a>`:''}`;
       });
       const text = ['<b>自选行动中心</b>',...lines,shown.length ? '下方按钮与网页共享状态，15分钟内有效。' : '当前没有待处理条目；来源无记录与来源故障分别展示。'].join('\n');
       const buttons = shown.map((row,index) => ['read','pin','later'].map((action,i) => ({text:`${index+1} ${['已读','置顶','明天处理'][i]}`,callback_data:issueTelegramCallback('action:handle',{scope,id:JSON.stringify([action,row.id]),workspace:'action-center',chatId})})));

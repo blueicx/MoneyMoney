@@ -3,7 +3,7 @@ import { assertMarketContext, type MarketId } from './research-contracts';
 
 export interface ActionCenterItem {
   id: string; market: MarketId; instrument?: string; kind: 'price' | 'event' | 'alert' | 'screener' | '13f' | 'review' | 'signal' | 'source';
-  title: string; summary?: string; occurredAt?: string; publishedAt?: string; observedAt: string;
+  title: string; summary?: string; scheduledAt?: string; occurredAt?: string; publishedAt?: string; observedAt: string;
   source: string; sourceUrl?: string; dataStatus: string; reason?: string; evidenceRefs: string[];
   eventId?: string; decisionId?: string; signalId?: string; experimentId?: string;
 }
@@ -49,15 +49,16 @@ export function buildActionCenter(input: ActionCenterItem[], options: { market?:
     if (options.market && item.market !== options.market) continue;
     try { assertMarketContext({ market: item.market, instrument: item.instrument, workspace: 'action-center' }); } catch { continue; }
     if (!item.id || !item.title || !Number.isFinite(Date.parse(item.observedAt))) continue;
-    const occurred = Date.parse(item.occurredAt || item.publishedAt || item.observedAt);
-    if (occurred > nowMs + 7 * 86400_000) continue;
+    const relevantAt = Date.parse(item.scheduledAt || item.occurredAt || item.publishedAt || item.observedAt);
+    if (relevantAt > nowMs + 7 * 86400_000) continue;
     let sourceUrl: string | undefined;
     try { const url = new URL(item.sourceUrl || ''); if (['https:', 'http:'].includes(url.protocol)) sourceUrl = url.href; } catch {}
     unique.set(item.id, { ...item, sourceUrl });
   }
   const items = [...unique.values()].map(item => {
     const state = options.states?.[item.id] || { read: false, pinned: false, snoozedUntil: null, updatedAt: '' };
-    const section = ['review','alert','screener','13f'].includes(item.kind) ? item.kind : Date.parse(item.occurredAt || item.publishedAt || item.observedAt) > nowMs ? 'upcoming' : 'changes';
+    const relevantAt = Date.parse(item.scheduledAt || item.occurredAt || item.publishedAt || item.observedAt);
+    const section = ['review','alert','screener','13f'].includes(item.kind) ? item.kind : relevantAt > nowMs ? 'upcoming' : 'changes';
     return { ...item, ...state, section, snoozed: Boolean(state.snoozedUntil && Date.parse(state.snoozedUntil) > nowMs) };
   }).sort((a,b) => Number(b.pinned) - Number(a.pinned) || Number(a.read) - Number(b.read) || b.observedAt.localeCompare(a.observedAt));
   return { items, updatedAt: now, counts: { total: items.length, unread: items.filter(x => !x.read && !x.snoozed).length, upcoming: items.filter(x => x.section === 'upcoming').length }, dataStatus: items.length ? 'cached' : 'empty', reason: items.length ? null : '当前自选尚无可处理记录；可查看各标的来源与覆盖情况' };

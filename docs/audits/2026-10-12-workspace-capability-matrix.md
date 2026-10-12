@@ -115,3 +115,11 @@
 - 财报日历项保留其 Provider 返回的逐项 `retrievedAt` 与来源名称。当前事件模型没有可核验的原文地址，因此 `sourceUrl` 明确为 `null`，不拼凑 URL。
 - 新闻和 SEC 时间线新增规范 `sourceUrl`，同时保留既有 `url` 字段兼容旧消费者；缺少原文链接时保持 `null`。
 - `tests/unified-instruments.test.cjs` 覆盖来源/抓取时间分离、原文链接别名兼容、事件来源时点及缺少 URL 时不造链接。仅验证本地数据契约；生产真实标的在线时点未在本次声称。
+
+## 2026-10-12 增量复核：计划时间、发生时间与发布时间
+
+- 宏观、Nasdaq 财报及 FOMC 日历的既有 `date` 保留兼容，并显式映射为 `scheduledAt`；日历没有提供独立可核验的发生/发布时间，因此时间线不再将计划时点写入 `occurredAt` 或 `publishedAt`。
+- 新闻仍以来源 `publishedAt` 定位时间线，但 `occurredAt` 明确为空；文章发布时间不代表其描述事件发生的时间。抓取时间继续使用源快照的 `retrievedAt`。
+- 行动中心以 `scheduledAt` 进行未来窗口筛选、分类及图表定位；卡片和详情分别展示计划、发生、发布与抓取时间。Telegram 摘要同样显式标出计划时间。
+- 事件研究继续只允许具有合格已发布/已发生证据的事件；单有日历计划时间时只能查看日历、图表定位或建立决策草稿，不能据此伪造事件研究入场时点。
+- `tests/event-calendar.test.cjs`、`tests/unified-instruments.test.cjs` 和 `tests/action-center.test.cjs` 覆盖计划时间映射、无虚构发生时间、行动中心归类及网页契约。此项验证的是本地语义契约，不代表日历来源在线准确率或事件真实发生状态。

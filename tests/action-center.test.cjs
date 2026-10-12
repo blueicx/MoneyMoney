@@ -11,6 +11,24 @@ test('action center isolates scope, splits future from occurred events and sanit
   assert.equal(data.items.find(x => x.id === 'next').section, 'upcoming');
   assert.equal(data.items.find(x => x.id === 'unsafe').sourceUrl, undefined);
 });
+test('scheduled calendar items remain upcoming without inventing an occurrence timestamp', () => {
+  const scheduledAt = '2026-10-03T08:00:00.000Z';
+  const data = buildActionCenter([item('scheduled', {
+    occurredAt: undefined, publishedAt: undefined, scheduledAt, observedAt: at, dataStatus: 'delayed',
+  })], { market: 'stocks', now: at });
+  assert.equal(data.items[0].section, 'upcoming');
+  assert.equal(data.items[0].scheduledAt, scheduledAt);
+  assert.equal(data.items[0].occurredAt, undefined);
+});
+test('watchlist event and action-center UI label scheduled time separately from occurrence and publication', () => {
+  const server = fs.readFileSync(path.join(__dirname, '../src/web/server.ts'), 'utf8');
+  const ui = fs.readFileSync(path.join(__dirname, '../src/web/public/action-research-workspace.js'), 'utf8');
+  const actions = server.slice(server.indexOf('async function collectWatchlistActions'), server.indexOf("app.get('/api/watchlist/action-center"));
+  assert.ok(actions.includes('scheduledAt: event.scheduledAt || event.date'));
+  assert.ok(!actions.includes('occurredAt: event.date'));
+  assert.match(ui, /row\.scheduledAt\s*\|\|\s*row\.occurredAt/);
+  assert.match(ui, /计划时间/);
+});
 test('read/pin/snooze persists by owner and resumes at expiration, invalid snooze is rejected', t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mm-actions-'));
   const db = new SQLiteStateStore(path.join(dir, 'state.sqlite'), dir);

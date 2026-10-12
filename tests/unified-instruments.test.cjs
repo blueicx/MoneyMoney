@@ -85,6 +85,8 @@ const newsTimeline = buildInstrumentTimeline([], [
 ], [], { newsRetrievedAt: '2026-09-20T12:05:00.000Z' });
 assert.equal(newsTimeline[0].publishedAt, '2026-09-20T12:00:00.000Z');
 assert.equal(newsTimeline[0].retrievedAt, '2026-09-20T12:05:00.000Z');
+assert.equal(newsTimeline[0].occurredAt, null, 'publication time is not an event occurrence time');
+assert.equal(newsTimeline[0].at, newsTimeline[0].publishedAt, 'legacy timeline position remains publication time');
 assert.equal(newsTimeline[0].sourceUrl, 'https://news.example.test/aapl');
 assert.equal(newsTimeline[0].url, newsTimeline[0].sourceUrl);
 
@@ -94,6 +96,10 @@ const earningsTimeline = buildInstrumentTimeline([{
 }], [], []);
 assert.equal(earningsTimeline[0].source, 'Nasdaq Earnings Calendar');
 assert.equal(earningsTimeline[0].retrievedAt, '2026-09-20T00:10:00.000Z');
+assert.equal(earningsTimeline[0].scheduledAt, '2026-09-20T12:00:00.000Z');
+assert.equal(earningsTimeline[0].occurredAt, null, 'calendar date is a scheduled time, not proof that the event occurred');
+assert.equal(earningsTimeline[0].publishedAt, null);
+assert.equal(earningsTimeline[0].at, earningsTimeline[0].scheduledAt, 'legacy timeline position remains scheduled time');
 assert.equal(earningsTimeline[0].sourceUrl, null);
 
 const timelineSource = fs.readFileSync(path.join(__dirname, '../src/features/unified-instruments.ts'), 'utf8');
