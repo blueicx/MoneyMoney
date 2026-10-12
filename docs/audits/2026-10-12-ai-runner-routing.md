@@ -17,4 +17,13 @@
 - `npm run security:scan` 检查 700 个跟踪文件通过；`git diff --check` 退出码 0。
 - 隔离测试前后，未跟踪的 `data/research.db` SHA-256 均为 `27FD475E523568DAA4CDCABF3146917023335A62AFFE00429BABD721B3B79FD1`。
 - 代码差异审查确认仅涉及 AI 跑单报价选择兼容、共同快照固定来源、路由说明和测试/文档；没有修改账户、预算、自选、模型配置、订单或启停状态。
-- GitHub 推送、VPS 备份/部署、正式域名与远端资源 Hash 核验尚待发布后记录。
+
+## 发布验收（2026-10-12）
+
+- 提交 `9240b4724f5580a341ea4c56877562fe096a62a3` 已推送到 `origin/codex/research-closure-all`。
+- 部署前服务为 `active`；归档包本地与远端 SHA-256 均为 `1980627fe163e4df076a170ae2471d2ce3b7dbbcad876471a922da299668545b`。
+- 通过现有原子部署脚本发布到当前 `/opt/moneymoney`，只操作 `moneymoney.service`。备份目录：`/opt/moneymoney/backups/dist-pre-9240b47-20261012-runner-routing`；回滚目录：`/opt/moneymoney/dist.rollback-9240b47-20261012-runner-routing`。
+- 部署后服务 `active`，`/api/health/live` 返回 `alive`；正式域名 `/api/health/version` 返回目标 commit `9240b4724f5580a341ea4c56877562fe096a62a3`，根路径按预期 302 到登录页。
+- 远端与本地发布资源 Hash 一致：`server.js` `6f800d5a7110799b0d050a8a7b30bc75eeaf1e2928cd53fc5468b3bc7bc68226`；`index.html` `836ffa3853ec0e6eb398c47a5e82287610601984b17b4ed221c795478f3c67b1`；`asset-manifest.json` `721150083dcbfb63a8ebacc6622f1e9ae208e573b7e8b18c14ce532e928ce34c`；`build-info.json` `042148ab2ad6f4b65850ea2c5c0f5b2d9f7c499e02df4be492db9164f7c4d76c`。
+- 正式站点只读 Chromium canary 通过：四市场、SNDK、K 线别名/历史时点、访客私有接口拒绝（403）、右侧库收缩/恢复及手机布局。结算证据在访客权限下正确显示仅支持只读浏览；未尝试管理员访问。运行 canary 时移除 Telegram 凭据环境变量，未发送 Telegram 通知。
+- 未跟踪用户文件 `data/research.db` 发布前后 SHA-256 均为 `27fd475e523568daa4cdcabf3146917023335a62affe00429babd721b3b79fd1`；未纳入提交。没有触发模型请求、Telegram 消息或模拟订单。
