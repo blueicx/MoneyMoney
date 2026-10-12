@@ -77,11 +77,12 @@ interface MergeInput {
 const DISK_CACHE = path.join(DATA_ROOT, 'upcoming-events.cache.json');
 const MEMORY_TTL_MS = 5 * 60_000;
 const MAX_STALE_MS = 3 * 24 * 60 * 60_000;
-// Published Federal Reserve policy-meeting dates. Statement time is represented
-// as 19:00 UTC (2 p.m. Washington, D.C.). Extra years can be appended safely.
+// Published Federal Reserve statement-release dates (the second day of each
+// two-day meeting). Use 2 p.m. America/New_York so daylight-saving changes are
+// represented correctly instead of pinning every announcement to one UTC hour.
 export const FOMC_MEETING_DATES = [
-  '2026-09-15', '2026-10-27', '2026-12-08',
-  '2027-01-26', '2027-03-16', '2027-04-27',
+  '2026-09-16', '2026-10-28', '2026-12-09',
+  '2027-01-27', '2027-03-17', '2027-04-28',
 ];
 
 let memoryCache: { ts: number; value: UpcomingEventCalendar } | null = null;
@@ -448,7 +449,7 @@ function mergeCalendarEvents(input: MergeInput): UpcomingEvent[] {
   }
 
   for (const meetingDate of FOMC_MEETING_DATES) {
-    const date = new Date(`${meetingDate}T19:00:00Z`);
+    const date = usMarketTimeToUtc(meetingDate, 14);
     if (date < start || date >= end) continue;
     events.push({
       id: `fomc-${meetingDate}`,
@@ -469,6 +470,24 @@ function mergeCalendarEvents(input: MergeInput): UpcomingEvent[] {
   }
 
   return events.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+}
+
+/** Correct built-in FOMC rows in a legacy disk cache without changing its stale/source status. */
+export function normalizeCachedFomcSchedule(calendar: UpcomingEventCalendar): UpcomingEventCalendar {
+  const releaseDateByCacheDate = new Map<string, string>();
+  for (const releaseDate of FOMC_MEETING_DATES) {
+    releaseDateByCacheDate.set(releaseDate, releaseDate);
+    releaseDateByCacheDate.set(isoDate(addDays(new Date(`${releaseDate}T00:00:00Z`), -1)), releaseDate);
+  }
+  const events = calendar.events.map(event => {
+    if (event.title !== 'FOMC 利率决议') return event;
+    const cacheDate = event.id.match(/^fomc-(\d{4}-\d{2}-\d{2})$/)?.[1];
+    const releaseDate = cacheDate ? releaseDateByCacheDate.get(cacheDate) : undefined;
+    if (!releaseDate) return event;
+    const scheduledAt = usMarketTimeToUtc(releaseDate, 14).toISOString();
+    return { ...event, id: `fomc-${releaseDate}`, date: scheduledAt, scheduledAt };
+  });
+  return { ...calendar, count: events.length, events };
 }
 
 export function buildUpcomingEvents(input: MergeInput): UpcomingEventCalendar {
@@ -606,7 +625,7 @@ export async function getUpcomingEventCalendar(requestedDays?: number, force = f
       const parsed = JSON.parse(await fs.promises.readFile(DISK_CACHE, 'utf8')) as UpcomingEventCalendar;
       const age = Date.now() - new Date(parsed.fetchedAt).getTime();
       if (Array.isArray(parsed.events) && age >= 0 && age <= MAX_STALE_MS) {
-        const value: UpcomingEventCalendar = {
+        const value = normalizeCachedFomcSchedule({
           ...parsed,
           stale: true,
           sourceStatus: {
@@ -617,7 +636,7 @@ export async function getUpcomingEventCalendar(requestedDays?: number, force = f
             macro: '宏观日历请求失败，使用本地近期缓存',
             earnings: '财报日历请求失败，使用本地近期缓存',
           },
-        };
+        });
         memoryCache = { ts: Date.now(), value };
         return value;
       }

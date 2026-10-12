@@ -1,5 +1,6 @@
 const assert = require('node:assert/strict');
-const { buildUpcomingEvents, classifyCalendarSourceStatus } = require('../dist/features/event-calendar');
+require('ts-node/register/transpile-only');
+const { buildUpcomingEvents, classifyCalendarSourceStatus } = require('../src/features/event-calendar');
 
 assert.deepEqual(classifyCalendarSourceStatus({ macroAvailable: false, macroStale: false, earningsSucceeded: 2, earningsRequested: 7 }), {
   macro: 'unavailable', earnings: 'partial',
@@ -56,5 +57,30 @@ assert.match(result.events[2].detail, /盘后/);
 assert.equal(result.events[2].symbol, 'AAPL');
 assert.equal(result.events[2].reportPeriodEnd, '2026-06-30');
 assert.equal(result.events[2].retrievedAt, '2026-09-14T00:00:00Z', 'earnings events must retain their provider fetch timestamp');
+
+for (const [referenceDate, days, expected] of [
+  ['2026-10-26T00:00:00.000Z', 4, ['2026-10-28T18:00:00.000Z']],
+  ['2026-12-07T00:00:00.000Z', 4, ['2026-12-09T19:00:00.000Z']],
+]) {
+  const upcoming = buildUpcomingEvents({ referenceDate: new Date(referenceDate), days, macro: null, earnings: [] });
+  assert.deepEqual(upcoming.events.filter(event => event.title === 'FOMC 利率决议').map(event => event.date), expected,
+    'FOMC entries must use the final statement day at 2 p.m. America/New_York across DST');
+}
+
+const staleCalendar = {
+  source: 'ForexFactory + Nasdaq + MoneyMoney schedule', fetchedAt: '2026-10-27T12:00:00.000Z',
+  startDate: '2026-10-26', endDate: '2026-11-02', count: 1, warnings: [], stale: true,
+  events: [{
+    id: 'fomc-2026-10-27', title: 'FOMC 利率决议', category: 'central-bank', categoryLabel: '央行',
+    date: '2026-10-27T19:00:00.000Z', scheduledAt: '2026-10-27T19:00:00.000Z', impact: 'high',
+    country: 'US', countryLabel: '美国', detail: '旧缓存公告时间', detailZh: '旧缓存公告时间',
+    forecast: null, previous: null, actual: null, source: 'MoneyMoney schedule',
+  }],
+};
+const normalizedCache = require('../src/features/event-calendar').normalizeCachedFomcSchedule(staleCalendar);
+assert.equal(normalizedCache.events[0].id, 'fomc-2026-10-28');
+assert.equal(normalizedCache.events[0].date, '2026-10-28T18:00:00.000Z', 'stale disk cache must not revive the old meeting-start date/time');
+assert.equal(normalizedCache.events[0].scheduledAt, normalizedCache.events[0].date);
+assert.equal(normalizedCache.stale, true, 'schedule correction must not promote a stale provider cache to fresh');
 
 console.log('upcoming event calendar helpers: all assertions passed');

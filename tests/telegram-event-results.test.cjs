@@ -320,3 +320,48 @@ test('an unpublished FOMC release stays pending and keeps its official source li
   assert.match(result.reason,/尚未发布/);assert.equal(result.url,'https://www.federalreserve.gov/newsevents/pressreleases/monetary20261008a.htm');
  }finally{global.fetch=previousFetch;Date.now=previousNow;}
 });
+
+test('FOMC rate decision publishes only the matching 2 p.m. official statement and exact target range',()=>{
+ const {parseFedFomcDecisionResult}=require('../src/features/telegram-event-results');
+ const event={title:'FOMC 利率决议',date:'2026-09-16T18:00:00.000Z',country:'US'};
+ const html='<p class="article__time">September 16, 2026</p><h3 class="title">Federal Reserve issues FOMC statement</h3><p class="releaseTime">For release at 2:00 p.m. EDT</p><div class="col-xs-12 col-sm-8 col-md-8"><p>The Committee decided to raise the target range for the federal funds rate by 1/4 percentage point to 3-3/4 to 4 percent.</p></div>';
+ const result=parseFedFomcDecisionResult(html,event,'2026-09-16T18:03:00.000Z');
+ assert.equal(result.status,'published');assert.equal(result.actual,'上调 25bp；目标区间 3.75%–4.00%');
+ assert.equal(result.source,'Federal Reserve');assert.equal(result.url,'https://www.federalreserve.gov/newsevents/pressreleases/monetary20260916a.htm');
+ assert.equal(result.publishedAt,event.date);assert.equal(result.retrievedAt,'2026-09-16T18:03:00.000Z');
+ assert.notEqual(parseFedFomcDecisionResult(html,{...event,date:'2026-09-17T18:00:00.000Z'},'2026-09-17T18:03:00.000Z').status,'published','a different release day must not borrow the statement');
+ assert.notEqual(parseFedFomcDecisionResult(html,{...event,country:'EUR'},'2026-09-16T18:03:00.000Z').status,'published','a non-US event must not borrow the Fed decision');
+ assert.notEqual(parseFedFomcDecisionResult(html,{...event,date:'2026-09-16T19:00:00.000Z'},'2026-09-16T19:03:00.000Z').status,'published','an event at the wrong scheduled hour must fail closed');
+ assert.notEqual(parseFedFomcDecisionResult(html.replace('September 16, 2026','September 17, 2026'),event,'2026-09-16T18:03:00.000Z').status,'published','the source article date must match the event');
+ assert.notEqual(parseFedFomcDecisionResult(html.replace('Federal Reserve issues FOMC statement','Minutes of the Federal Open Market Committee'),event,'2026-09-16T18:03:00.000Z').status,'published','minutes are not a rate-decision statement');
+ assert.notEqual(parseFedFomcDecisionResult(html.replace('to 3-3/4 to 4 percent',''),event,'2026-09-16T18:03:00.000Z').status,'published','a decision without a parseable target range must not publish');
+ assert.equal(parseFedFomcDecisionResult(html,event,'2026-09-16T17:59:00.000Z').status,'pending','a pre-release fetch must not publish a result');
+});
+
+test('FOMC rate decision lookup replies with the date-bound official result link; 404 remains pending',async()=>{
+ const {lookupOfficialEventResult,TelegramEventResultMonitor}=require('../src/features/telegram-event-results');
+ const values=new Map(),store={get:k=>structuredClone(values.get(k)||null),set:(k,v)=>values.set(k,structuredClone(v))},calls=[],messages=[];
+ const event={title:'FOMC 利率决议',date:'2026-09-16T18:00:00.000Z',country:'US',impact:'high'};
+ const html='<p class="article__time">September 16, 2026</p><h3 class="title">Federal Reserve issues FOMC statement</h3><p class="releaseTime">For release at 2:00 p.m. EDT</p><p>The Committee decided to raise the target range for the federal funds rate by 1/4 percentage point to 3-3/4 to 4 percent.</p>';
+ const previousFetch=global.fetch,previousNow=Date.now,now=Date.parse('2026-09-16T18:04:00.000Z');Date.now=()=>now;
+ global.fetch=async input=>{const url=String(input);calls.push(url);if(url==='https://www.federalreserve.gov/newsevents/pressreleases/monetary20260916a.htm')return{ok:true,status:200,text:async()=>html};throw new Error('unexpected external request '+url);};
+ try{
+  const result=await lookupOfficialEventResult(event);assert.equal(result.status,'published');assert.equal(result.actual,'上调 25bp；目标区间 3.75%–4.00%');
+  assert.deepEqual(calls,['https://www.federalreserve.gov/newsevents/pressreleases/monetary20260916a.htm']);
+  const monitor=new TelegramEventResultMonitor(store,async()=>result,()=>now);
+  await monitor.run('owner',[event],async text=>{messages.push(text);return 801;});
+  assert.match(messages[0],/上调 25bp；目标区间 3\.75%–4\.00%/);
+  assert.match(messages[0],/<a href="https:\/\/www\.federalreserve\.gov\/newsevents\/pressreleases\/monetary20260916a\.htm">官方原文<\/a>/);
+ }finally{global.fetch=previousFetch;Date.now=previousNow;}
+});
+
+test('unpublished FOMC rate decision stays pending with the official retry URL',async()=>{
+ const {lookupOfficialEventResult}=require('../src/features/telegram-event-results');
+ const previousFetch=global.fetch,previousNow=Date.now;Date.now=()=>Date.parse('2026-10-28T18:03:00.000Z');
+ global.fetch=async()=>({ok:false,status:404,text:async()=>''});
+ try{
+  const result=await lookupOfficialEventResult({title:'FOMC 利率决议',date:'2026-10-28T18:00:00.000Z',country:'US'});
+  assert.equal(result.actual,null);assert.equal(result.status,'pending');assert.equal(result.source,'Federal Reserve');
+  assert.match(result.reason,/尚未发布/);assert.equal(result.url,'https://www.federalreserve.gov/newsevents/pressreleases/monetary20261028a.htm');
+ }finally{global.fetch=previousFetch;Date.now=previousNow;}
+});

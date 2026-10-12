@@ -479,8 +479,108 @@ export function parseFedFomcMinutesResult(releaseHtml: string, event: Pick<Event
   };
 }
 
+const FOMC_RATE_DECISION_TITLES = new Set(['FOMC 利率决议', 'FOMC rate decision', 'Fed Interest Rate Decision']);
+
+function fedRateNumber(value: string): number | null {
+  const normalized = value.trim().replace(/\s+/g, '');
+  const mixed = normalized.match(/^(\d+)-(\d+)\/(\d+)$/);
+  if (mixed) {
+    const whole = Number(mixed[1]), numerator = Number(mixed[2]), denominator = Number(mixed[3]);
+    if (!denominator || numerator >= denominator) return null;
+    return whole + numerator / denominator;
+  }
+  const fraction = normalized.match(/^(\d+)\/(\d+)$/);
+  if (fraction) {
+    const numerator = Number(fraction[1]), denominator = Number(fraction[2]);
+    return denominator ? numerator / denominator : null;
+  }
+  const numeric = Number(normalized);
+  return Number.isFinite(numeric) && numeric >= 0 && numeric <= 100 ? numeric : null;
+}
+
+function fedHtmlText(html: string): string {
+  return html.replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1>/gi, ' ').replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;|&#160;/gi, ' ').replace(/&amp;/gi, '&').replace(/&frac14;|&#188;/gi, '1/4')
+    .replace(/&frac12;|&#189;/gi, '1/2').replace(/&frac34;|&#190;/gi, '3/4')
+    .replace(/&#8211;|&ndash;/gi, '–').replace(/&mdash;|&#8212;/gi, '—').replace(/&#39;|&apos;/gi, "'")
+    .replace(/\s+/g, ' ').trim();
+}
+
+/** Parse only the matching Fed statement's decision and target range; this is not a forecast or a surprise estimate. */
+export function parseFedFomcDecisionResult(releaseHtml: string, event: Pick<EventRecord, 'title' | 'date' | 'country'>, retrievedAt = new Date().toISOString()): Result {
+  const source = 'Federal Reserve';
+  const unavailable = (reason: string, status = 'unavailable', url?: string): Result => ({ actual: null, status, source, reason, ...(url ? { url } : {}) });
+  const eventTitle = event.title.trim();
+  if (!FOMC_RATE_DECISION_TITLES.has(eventTitle) || !['US', 'USD'].includes(String(event.country || '').toUpperCase())) {
+    return unavailable('只支持美国 FOMC 利率决议事件', 'unsupported');
+  }
+  const eventAt = Date.parse(event.date), retrieved = Date.parse(retrievedAt), parts = eventEasternParts(event.date);
+  if (!Number.isFinite(eventAt) || !parts) return unavailable('FOMC 事件日期无效，无法匹配美联储原文');
+  const month = String(new Date(`${parts.month} 1, ${parts.year} UTC`).getUTCMonth() + 1).padStart(2, '0');
+  const url = `https://www.federalreserve.gov/newsevents/pressreleases/monetary${parts.year}${month}${parts.day.padStart(2, '0')}a.htm`;
+  const articleDate = releaseHtml.match(/<p\b[^>]*class=["'][^"']*\barticle__time\b[^"']*["'][^>]*>\s*([^<]+?)\s*<\/p>/i)?.[1]?.trim();
+  const headingHtml = releaseHtml.match(/<h3\b[^>]*class=["'][^"']*\btitle\b[^"']*["'][^>]*>([\s\S]*?)<\/h3>/i)?.[1] || '';
+  const heading = fedHtmlText(headingHtml);
+  const releaseHtmlTime = releaseHtml.match(/<p\b[^>]*class=["'][^"']*\breleaseTime\b[^"']*["'][^>]*>([\s\S]*?)<\/p>/i)?.[1] || '';
+  const releaseTime = fedHtmlText(releaseHtmlTime).match(/For release at\s+2:00\s*p\.m\.\s*(EDT|EST)\b/i)?.[1]?.toUpperCase();
+  const eventZone = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', timeZoneName: 'short' })
+    .formatToParts(new Date(eventAt)).find(part => part.type === 'timeZoneName')?.value?.toUpperCase();
+  const expectedDay = Date.UTC(Number(parts.year), new Date(`${parts.month} 1, ${parts.year} UTC`).getUTCMonth(), Number(parts.day));
+  const articleDay = articleDate ? Date.parse(`${articleDate} UTC`) : NaN;
+  if (!Number.isFinite(articleDay) || articleDay !== expectedDay || heading !== 'Federal Reserve issues FOMC statement') {
+    return unavailable('美联储原文日期或标题与该 FOMC 利率决议不一致', 'unavailable', url);
+  }
+  if (parts.hour !== '14' || parts.minute !== '00' || !releaseTime || releaseTime !== eventZone) {
+    return unavailable('官方原文发布时间与日历事件的美东时区或 2:00 p.m. 时间不一致', 'unavailable', url);
+  }
+  if (!Number.isFinite(retrieved) || retrieved < eventAt) return unavailable('抓取时间早于官方发布时点，继续等待核验', 'pending', url);
+
+  const text = fedHtmlText(releaseHtml);
+  const decision = text.match(/The Committee decided to\s+(raise|increase|lower|reduce|maintain|keep)\s+the target range for the federal funds rate\b([^.]*)\./i);
+  if (!decision) return unavailable('美联储声明中未找到可唯一匹配的利率目标决定', 'pending', url);
+  const tail = decision[2];
+  const range = tail.match(/(?:\bto\s+|\bat\s+)(\d+(?:-\d+\/\d+|\.\d+)?)\s+to\s+(\d+(?:-\d+\/\d+|\.\d+)?)\s+percent\b/i);
+  if (!range) return unavailable('美联储声明中的联邦基金利率目标区间无法解析', 'pending', url);
+  const lower = fedRateNumber(range[1]), upper = fedRateNumber(range[2]);
+  if (lower === null || upper === null || lower > upper) return unavailable('美联储声明中的利率目标区间无效', 'unavailable', url);
+
+  const direction = decision[1].toLowerCase();
+  const directionLabel = ['raise', 'increase'].includes(direction) ? '上调' : ['lower', 'reduce'].includes(direction) ? '下调' : '维持';
+  let change = '';
+  if (directionLabel !== '维持') {
+    const pointChange = tail.match(/\bby\s+(\d+(?:-\d+\/\d+|\.\d+)?|\d+\/\d+)\s+percentage point/i);
+    const basisChange = tail.match(/\bby\s+(\d+(?:\.\d+)?)\s+basis points?\b/i);
+    const amount = pointChange ? fedRateNumber(pointChange[1]) : basisChange ? Number(basisChange[1]) / 100 : null;
+    if (amount === null || !Number.isFinite(amount) || amount <= 0) return unavailable('声明方向可识别，但调整幅度无法从官方原文核验', 'pending', url);
+    change = ` ${Math.round(amount * 100)}bp`;
+  }
+  const actual = `${directionLabel}${change}；目标区间 ${lower.toFixed(2)}%–${upper.toFixed(2)}%`;
+  return {
+    actual, status: 'published', source, url,
+    publishedAt: new Date(eventAt).toISOString(), retrievedAt: new Date(retrieved).toISOString(),
+    reason: '取自与事件日期、2:00 p.m. 美东发布时间及 FOMC 声明标题匹配的美联储原文；仅报告官方决定和目标区间，不代表市场预期差。',
+    evidenceRefs: [url, heading, `目标区间 ${lower.toFixed(2)}%–${upper.toFixed(2)}%`],
+  };
+}
+
 const officialCache = new Map<string, { at: number; html: string }>();
 export async function lookupOfficialEventResult(event: EventRecord): Promise<Result> {
+  if (FOMC_RATE_DECISION_TITLES.has(event.title.trim())) {
+    if (!['US', 'USD'].includes(String(event.country || '').toUpperCase())) return { actual: null, status: 'unsupported', source: 'Federal Reserve', reason: '美联储 FOMC 利率决议只匹配美国事件' };
+    const parts = eventEasternParts(event.date);
+    if (!parts) return { actual: null, status: 'unavailable', source: 'Federal Reserve', reason: 'FOMC 事件日期无效，无法匹配美联储原文' };
+    const month = String(new Date(`${parts.month} 1, ${parts.year} UTC`).getUTCMonth() + 1).padStart(2, '0');
+    const url = `https://www.federalreserve.gov/newsevents/pressreleases/monetary${parts.year}${month}${parts.day.padStart(2, '0')}a.htm`;
+    try {
+      let page = officialCache.get(url);
+      if (!page || Date.now() - page.at > 300000) {
+        const response = await fetch(url, { signal: AbortSignal.timeout(8000), headers: { 'User-Agent': 'MoneyMoney research contact via website' } });
+        if (!response.ok) return { actual: null, status: response.status === 404 ? 'pending' : 'unavailable', source: 'Federal Reserve', reason: response.status === 404 ? '美联储尚未发布该日期的 FOMC 利率决议原文，继续等待' : `美联储原文暂不可用（HTTP ${response.status}）`, url };
+        page = { at: Date.now(), html: await response.text() }; officialCache.set(url, page);
+      }
+      return parseFedFomcDecisionResult(page.html, event, new Date(page.at).toISOString());
+    } catch { return { actual: null, status: 'unavailable', source: 'Federal Reserve', reason: '美联储 FOMC 利率决议原文请求失败，稍后重试', url }; }
+  }
   if (/^FOMC\s+(?:Meeting\s+)?Minutes$/i.test(event.title.trim())) {
     if (event.country !== 'USD') return { actual: null, status: 'unsupported', source: 'Federal Reserve', reason: '美联储 FOMC 纪要只匹配 USD 事件' };
     const parts = eventEasternParts(event.date);

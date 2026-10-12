@@ -44,7 +44,8 @@ const result = buildUpcomingEvents({
 });
 
 const macro = result.events[0];
-const earnings = result.events[3];
+const earnings = result.events.find(event => event.symbol === 'AAPL');
+const swissMacro = result.events.find(event => event.country === 'CHF');
 
 assert.equal(translateMacroTitle('Core PCE Price Index y/y'), '核心个人消费支出(PCE)物价指数 年率');
 assert.match(translateMacroTitle('Fed Chairman Powell Speaks'), /美联储主席/);
@@ -54,6 +55,6 @@ assert.equal(earnings.title, 'AAPL 财报');
 assert.equal(translateCompanyName('Apple Inc.'), '苹果');
 assert.match(earnings.detailZh, /^苹果 · 盘后 · Q4$/);
 assert.equal(earnings.detailNote, 'Apple Inc.');
-assert.equal(result.events[2].countryLabel, '瑞士');
+assert.equal(swissMacro.countryLabel, '瑞士');
 
 console.log('event calendar localization: all assertions passed');
