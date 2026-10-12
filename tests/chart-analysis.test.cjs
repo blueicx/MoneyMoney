@@ -109,6 +109,24 @@ test('detects selectable strategy signals with a strategy label and price', () =
   assert.ok(found.some(item => item.strategy === 'maCross'));
 });
 
+test('keeps long-lookback strategy signals when zooming into a viewport shorter than the lookback', () => {
+  const series = Array.from({ length: 30 }, (_, index) => ({
+    time: index + 1, open: 100, high: index === 25 ? 102 : 101, low: 99,
+    close: index === 25 ? 101 : 100, volume: index === 25 ? 200 : 100,
+  }));
+  const enabled = { maCross: false, volumeBreakout: true };
+  const fullSignals = analysis.detectStrategySignals(series, enabled);
+  const viewportStart = 15;
+  const viewportLength = 15;
+  const visibleSignals = analysis.mapIndexedItemsToViewport(fullSignals, viewportStart, viewportLength);
+
+  assert.deepEqual(analysis.detectStrategySignals(series.slice(viewportStart), enabled), [], 'the zoom window alone has no 20-bar warmup');
+  assert.equal(visibleSignals.length, 1);
+  assert.equal(visibleSignals[0].label, '放量突破买入');
+  assert.equal(visibleSignals[0].index, 10, 'the signal index must be remapped to its visible candle');
+  assert.equal(visibleSignals[0].time, series[25].time);
+});
+
 test('strategy chart points retain scoped evidence and distinguish forming from confirmed candles', () => {
   const input = [
     { time: 100, open: 10, high: 11, low: 9, close: 10.5, volume: 10 },

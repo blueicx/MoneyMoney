@@ -49,6 +49,44 @@ async function main() {
     });
     assert.equal(await page.evaluate(()=>currentStockKlinePeriod),'5m');
     assert.match(await page.locator('#stock-chart-card .mm-trading-readout').innerText(),/开 .*高 .*低 .*收 .*MA5/);
+    const zoomedStrategy = await page.evaluate(() => {
+      const canvas = document.getElementById('stock-kline');
+      const identity = currentStockSymbol + '|' + currentStockKlinePeriod;
+      const previousView = MoneyTradingChart.select(canvas, stockChartKlines, identity).state;
+      const savedView = { count: previousView.count, follow: previousView.follow, anchor: previousView.anchor };
+      const previous = { rows: stockChartKlines, replayIndex: stockChartReplayIndex, focusEnabled: stockChartFocusEnabled, focusIndex: stockChartFocusIndex, config: stockChartOverlayConfig };
+      const expandedRows = Array.from({ length: 30 }, (_, index) => ({
+        time: Date.now() - (29 - index) * 300000,
+        open: 100,
+        high: index === 25 ? 102 : 101,
+        low: 99,
+        close: index === 25 ? 101 : 100,
+        volume: index === 25 ? 200 : 100,
+      }));
+      stockChartKlines = expandedRows;
+      stockChartReplayIndex = expandedRows.length - 1;
+      stockChartFocusEnabled = false;
+      stockChartFocusIndex = null;
+      stockChartAsOf = '';
+      stockChartIntradayDate = '';
+      stockChartOverlayConfig = { ...previous.config, signals: true, patterns: false, structures: false, strategies: { maCross: false, rsiReversal: false, bollinger: false, volumeBreakout: true } };
+      previousView.count = 15;
+      previousView.follow = true;
+      previousView.anchor = null;
+      drawStockKline(canvas, expandedRows);
+      const visibleRows = MoneyTradingChart.select(canvas, expandedRows, identity).rows.length;
+      const signalText = document.getElementById('stock-chart-signals').textContent;
+      stockChartKlines = previous.rows;
+      stockChartReplayIndex = previous.replayIndex;
+      stockChartFocusEnabled = previous.focusEnabled;
+      stockChartFocusIndex = previous.focusIndex;
+      stockChartOverlayConfig = previous.config;
+      Object.assign(previousView, savedView);
+      drawStockKline(canvas, stockChartKlines);
+      return { visibleRows, signalText };
+    });
+    assert.equal(zoomedStrategy.visibleRows,15,'zoom fixture should display fewer than the 20-bar volume warmup period');
+    assert.match(zoomedStrategy.signalText,/放量突破买入/,'volume-breakout signal should be calculated from full history and retained in the zoomed viewport');
     const patternMarkerBounds=await page.evaluate(()=>{
       const canvas=document.getElementById('stock-kline'),layer=document.getElementById('stock-chart-patterns');
       const priceBottom=28+(canvas.clientHeight-28-30)*.72;

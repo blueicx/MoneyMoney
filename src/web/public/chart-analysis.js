@@ -448,6 +448,18 @@
     });
   }
 
+  function mapIndexedItemsToViewport(items = [], startIndex = 0, visibleCount = 0) {
+    const start = Math.max(0, Math.floor(finite(startIndex)));
+    const count = Math.max(0, Math.floor(finite(visibleCount)));
+    const end = start + count;
+    if (!Array.isArray(items) || count === 0) return [];
+    return items.flatMap(item => {
+      const index = Number(item?.index);
+      if (!Number.isInteger(index) || index < start || index >= end) return [];
+      return [{ ...item, index: index - start }];
+    });
+  }
+
   function buildChartOverlays({ bars = [], signals = [], config = {} } = {}) {
     const normalized = bars.map(normalizeBar);
     const options = normalizeOverlayConfig(config);
@@ -604,5 +616,5 @@
     };
   }
 
-  return { DEFAULT_CONFIG, CANDLE_PATTERN_CATALOG, normalizeOverlayConfig, chartDataStatusLabel, detectCandlestickPatterns, detectStructures, detectChanStructures, detectStrategySignals, buildStrategyChartPoints, movingAverage, bollingerBands, calculateMACD, buildChartOverlays, stepReplay, layoutMarkerLabels, protectReplayContext, createDrawingTool };
+  return { DEFAULT_CONFIG, CANDLE_PATTERN_CATALOG, normalizeOverlayConfig, chartDataStatusLabel, detectCandlestickPatterns, detectStructures, detectChanStructures, detectStrategySignals, buildStrategyChartPoints, mapIndexedItemsToViewport, movingAverage, bollingerBands, calculateMACD, buildChartOverlays, stepReplay, layoutMarkerLabels, protectReplayContext, createDrawingTool };
 });

@@ -2452,7 +2452,11 @@ function drawCandles(canvas, klines) {
   }
   const pivotData = cryptoChartOverlayConfig.supportResistance
     ? updateCryptoPivotStatus(tradingFull, window.MoneyTradingChart?.pivotLevels(tradingFull, { lookback: 3 })) : null;
-  const strategySignals = buildCryptoStrategySignals(klines, !window.cryptoMoneyKLine?.timer && canvas.moneySourceMetadata?.connection === 'live');
+  const strategySignals = window.MoneyChartAnalysis?.mapIndexedItemsToViewport?.(
+    buildCryptoStrategySignals(tradingFull, !window.cryptoMoneyKLine?.timer && canvas.moneySourceMetadata?.connection === 'live'),
+    tradingWindow?.start || 0,
+    klines.length,
+  ) || [];
   const cryptoPatterns = cryptoChartOverlayConfig.patterns
     ? (window.MoneyChartAnalysis?.detectCandlestickPatterns(klines) || []).filter(item => cryptoChartOverlayConfig.patternTypes?.[item.type] !== false)
     : [];
@@ -7100,7 +7104,10 @@ function drawStockKline(canvas, klines) {
     renderChartSignalList('stock-chart-signals', [], '当前周期未触发所选策略信号');
     return;
   }
-  const overlays = window.MoneyChartAnalysis.buildChartOverlays({ bars: klines, signals: buildStockStrategySignals(klines, tradingActive), config: stockChartOverlayConfig });
+  const visibleSignals = window.MoneyChartAnalysis.mapIndexedItemsToViewport(
+    buildStockStrategySignals(replayKlines, tradingActive), focusStart, klines.length,
+  );
+  const overlays = window.MoneyChartAnalysis.buildChartOverlays({ bars: klines, signals: visibleSignals, config: stockChartOverlayConfig });
   renderMovingAverageValues('stock-chart-ma-values', klines, [5, 10, 20]);
   const replayStatus = document.getElementById('stock-chart-replay-status');
   if (replayStatus) replayStatus.textContent = `${visibleCount}/${fullKlines.length}`;
