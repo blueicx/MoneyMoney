@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const test = require('node:test');
-const { buildSettlementEndpoint, buildPolymarketResolutionEndpoint, settlementPayloadMatches, normalizeSettlementEvidence, PredictionSettlementRepository } = require('../dist/features/prediction-settlement');
+const { buildSettlementEndpoint, buildPolymarketResolutionEndpoint, settlementPayloadMatches, normalizeSettlementEvidence, PredictionSettlementRepository, buildSettlementTimeline } = require('../dist/features/prediction-settlement');
 
 test('settlement source payload must identify the exact requested venue market', () => {
   assert.equal(settlementPayloadMatches('Kalshi', 'KXTEST-26', { ticker: 'KXTEST-26' }), true);
@@ -116,4 +116,48 @@ test('settlement API and prediction cards expose rules, evidence and explicit un
   assert.match(feature, /未提供可核实的最终结果/);
   assert.match(feature,/announcedResult/);
   assert.match(server,/sourceStatus:\s*'failed'/);
+  assert.match(server,/timeline:buildSettlementTimeline\(evidence,history\)/);
+  assert.match(html,/prediction-settlement-timeline/);
+});
+
+test('settlement timeline distinguishes source-observed announcement, dispute, final result, unknown times and rule revisions',()=>{
+ const evidence=normalizeSettlementEvidence({platform:'Polymarket',marketId:'12345',capturedAt:'2026-09-26T12:00:00Z',payload:{closed:true,status:'closed',result:'YES',close_time:'2026-09-25T12:00:00Z',conditionId:'0x'+'1'.repeat(64),rules_primary:'Original rule'}});
+ const open=buildSettlementTimeline({...evidence,status:'disputed',announcedResult:'YES',disputeStatus:'disputed',result:null,determinationAt:null,settlementAt:null},[
+  {...evidence,capturedAt:'2026-09-25T12:00:00Z',rulesHash:'rule-v1'},
+  {...evidence,capturedAt:'2026-09-26T12:00:00Z',rulesHash:'rule-v2'},
+ ]);
+ assert.deepEqual(open.stages.map(row=>row.key),['close','announcement','dispute','final']);
+ assert.equal(open.stages[0].at,'2026-09-25T12:00:00.000Z');
+ assert.equal(open.stages[1].timeKind,'observed');
+ assert.equal(open.stages[1].at,'2026-09-26T12:00:00.000Z');
+ assert.equal(open.stages[2].status,'disputed');
+ assert.equal(open.stages[2].at,null);
+ assert.equal(open.stages[3].status,'disputed');
+ assert.equal(open.stages[3].at,null);
+ assert.deepEqual(open.ruleRevisions.map(row=>row.hash),['rule-v1','rule-v2']);
+ const settled=buildSettlementTimeline({...evidence,status:'settled',result:'YES',announcedResult:'YES',settlementAt:null},[]);
+ assert.equal(settled.stages[3].status,'settled');
+ assert.equal(settled.stages[3].at,null,'a settled state without settlement timestamp must not get a fabricated timestamp');
+ assert.equal(buildSettlementTimeline({...evidence,status:'closed',result:null,announcedResult:null,disputeStatus:'unknown'},[]).stages[3].status,'unknown');
+});
+
+test('cached settlement fallback includes the same timeline as a fresh response', () => {
+  const server = fs.readFileSync('src/web/server.ts', 'utf8');
+  const start = server.indexOf("app.get('/api/prediction/settlement/:platform/:marketId'");
+  const end = server.indexOf("app.get('/api/contracts/kline'", start);
+  assert.notEqual(start, -1);
+  assert.ok(end > start);
+  const route = server.slice(start, end);
+  assert.match(route, /timeline:buildSettlementTimeline\(evidence,history\)/);
+  assert.match(route, /if\(cached\)[\s\S]*?timeline:buildSettlementTimeline\(cached,history\)/,
+    'cached provider-failure response must preserve the settlement timeline');
+});
+
+test('settlement rule revision URLs are filtered to safe HTTP sources', () => {
+  const evidence = normalizeSettlementEvidence({ platform: 'Kalshi', marketId: 'KXSAFE-26', capturedAt: '2026-09-26T12:00:00Z', payload: { status: 'open' } });
+  const timeline = buildSettlementTimeline(evidence, [
+    { ...evidence, capturedAt: '2026-09-25T12:00:00Z', rulesHash: 'bad', sourceUrl: 'javascript:alert(1)', resolutionSourceUrl: 'data:text/html,unsafe' },
+    { ...evidence, capturedAt: '2026-09-26T12:00:00Z', rulesHash: 'safe', sourceUrl: 'https://example.org/rules' },
+  ]);
+  assert.deepEqual(timeline.ruleRevisions.map(row => row.sourceUrl), [null, 'https://example.org/rules']);
 });

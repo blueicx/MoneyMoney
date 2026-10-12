@@ -809,7 +809,11 @@ function renderAiRunnerSelectionAttribution(data) {
   const asOf = data.asOf ? safeNewsText(data.asOf) : '未知';
   const baseline = data.baselineAt ? safeNewsText(data.baselineAt) : '未知';
   const sources = Array.isArray(data.sources) && data.sources.length ? data.sources.map(safeNewsText).join('、') : '来源未记录';
-  return `${frame}<div data-runner-attribution-chart role="img" aria-label="冻结自选已平仓简化归因，非标准 Brinson" style="margin-top:5px;">${bar('选股基准 · 冻结自选等权持有', selection)}${bar('配置/择时/摩擦差额 · 已平仓净盈亏减基准', configuration)}<div style="margin-top:7px;color:var(--text);">已平仓净盈亏 ${data.netPnlUsd >= 0 ? '+' : ''}$${Number(data.netPnlUsd).toFixed(2)} = 等权基准 + 配置差额</div></div><div style="margin-top:6px;">${safeNewsText(data.method || '')}</div><div style="margin-top:4px;">已平仓仓位 ${Number(data.closedPositionCount || 0)} · 基准起点 ${baseline} · 行情截至 ${asOf} · 报价时间差 ${Number(data.quoteSkewMs || 0)} ms · 来源 ${sources}</div><div style="margin-top:4px;">冻结范围哈希 ${safeNewsText(String(data.universeHash || '').slice(0,16))}；只统计有完整入场/退出成交血缘的已平仓交易，不计未实现盈亏；等权基准不计交易摩擦，不代表标准化绩效归因。</div></section>`;
+  const realized = Number(data.realizedNetPnlUsd ?? data.netPnlUsd);
+  const unrealized = Number(data.unrealizedPnlUsd || 0);
+  const equity = Number(data.equityPnlUsd ?? data.netPnlUsd);
+  const markStatus = ({ live: '实时估值', delayed: '延迟估值', closed: '全部平仓', stale: '估值过期', unavailable: '估值不可用' })[data.markStatus] || '估值状态未知';
+  return `${frame}<div data-runner-attribution-chart role="img" aria-label="冻结自选基准与跑单权益盈亏简化归因，非标准 Brinson" style="margin-top:5px;">${bar('选股基准 · 冻结自选等权持有', selection)}${bar('配置/择时/摩擦差额 · 账户权益盈亏减基准', configuration)}<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;color:var(--text);"><span>已实现净盈亏 <strong>${realized >= 0 ? '+' : ''}$${realized.toFixed(2)}</strong></span><span>未平仓净盈亏 <strong>${unrealized >= 0 ? '+' : ''}$${unrealized.toFixed(2)}</strong></span><span>权益盈亏 <strong>${equity >= 0 ? '+' : ''}$${equity.toFixed(2)}</strong></span></div></div><div style="margin-top:6px;">${safeNewsText(data.method || '')}</div><div style="margin-top:4px;">已平仓 ${Number(data.closedPositionCount || 0)} 笔 · 未平仓 ${Number(data.openPositionCount || 0)} 笔 · ${markStatus} · 基准起点 ${baseline} · 行情截至 ${asOf} · 报价时间差 ${Number(data.quoteSkewMs || 0)} ms · 来源 ${sources}</div><div style="margin-top:4px;">冻结范围哈希 ${safeNewsText(String(data.universeHash || '').slice(0,16))}；已实现与未实现分别展示，未平仓只有来源新鲜且账本一致时纳入权益；等权基准不计交易摩擦，不代表标准化绩效归因。</div></section>`;
 }
 async function loadAiRunnerHistory(id, button) {
   const host = document.getElementById(`ai-runner-history-${id}`);
@@ -850,14 +854,23 @@ async function loadAiRunnerHistory(id, button) {
       ${attributionRows.length ? attributionRows.map(group => `<div style="margin-top:6px;padding-top:6px;border-top:1px solid var(--border);"><strong style="color:var(--text);">${safeNewsText(group.instrument)} · ${safeNewsText(group.strategy)} @ ${safeNewsText(group.strategyVersion)}</strong><div>已实现报价盈亏：${group.realizedQuotePnl == null ? '未知' : safeNewsText(Number(group.realizedQuotePnl).toFixed(4))} · 记录费用字段：${group.recordedFeesUsd == null ? '不完整' : safeNewsText(Number(group.recordedFeesUsd).toFixed(4))} · 记录滑点字段：${group.recordedSlippageUsd == null ? '不完整' : safeNewsText(Number(group.recordedSlippageUsd).toFixed(4))}</div><div>${safeNewsText(group.reason || '')}</div></div>`).join('') : `<div style="margin-top:5px;">${safeNewsText(attribution.reason || '当前没有可归因的模拟成交')}</div>`}
       ${(attribution.warnings || []).map(reason => `<div style="margin-top:4px;color:var(--yellow);">提示：${safeNewsText(reason)}</div>`).join('')}
     </section>`;
-    host.innerHTML = qualityPanel + selectionAttributionPanel + attributionPanel + (rows.length ? rows.map(item => `
+    const renderDecisionRows = filter => {
+      const filtered = rows.filter(item => filter === 'all' || String(item.action || '').toUpperCase() === filter);
+      return filtered.length ? filtered.map(item => `
       <div style="border-top:1px solid var(--border);padding:8px 4px;color:var(--text-secondary);font-size:11px;">
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;"><strong style="color:var(--text);">${safeNewsText(item.action)} · ${safeNewsText(item.instrument)}</strong><span>${safeNewsText(item.dataStatus)}${item.source ? ` · ${safeNewsText(item.source)}` : ''}</span><span>${safeNewsText(item.at)}</span></div>
         <div style="margin-top:4px;color:var(--text);">${safeNewsText(item.reason || '')}</div>
         <div style="margin-top:3px;">${(item.signals || []).map(safeNewsText).join(' · ') || '无触发信号'}${item.snapshotHash ? ` · 快照 ${safeNewsText(item.snapshotHash.slice(0, 16))}` : ''}${item.orderId ? ` · 订单 ${safeNewsText(item.orderId)}` : ''}</div>
         ${(item.evidence || []).map(evidence => `<div style="margin-top:3px;">证据 ${safeNewsText(evidence.dataset)} · ${safeNewsText(evidence.status)} · ${safeNewsText(evidence.source)}${evidence.dataAt ? ` · 数据 ${safeNewsText(evidence.dataAt)}` : ''}${evidence.retrievedAt ? ` · 获取 ${safeNewsText(evidence.retrievedAt)}` : ''}${evidence.reason ? ` · ${safeNewsText(evidence.reason)}` : ''}</div>`).join('')}
         ${(item.riskChecks || []).length ? `<div style="margin-top:3px;">校验：${item.riskChecks.map(check => `${safeNewsText(check.name)} ${check.passed ? '通过' : `拒绝${check.reason ? '（' + safeNewsText(check.reason) + '）' : ''}`}`).join(' · ')}</div>` : ''}
-      </div>`).join('') : '<div style="color:var(--text-secondary);font-size:11px;padding:8px;">暂无跑单决策记录。</div>');
+      </div>`).join('') : `<div style="color:var(--text-secondary);font-size:11px;padding:8px;">${rows.length ? '该筛选下暂无记录。' : '暂无跑单决策记录。'}</div>`;
+    };
+    host.innerHTML = qualityPanel + selectionAttributionPanel + attributionPanel + `<div style="display:flex;justify-content:flex-end;align-items:center;gap:7px;padding:4px 0;"><label for="runner-history-filter-${safeNewsText(id)}" style="font-size:11px;color:var(--text-secondary);">筛选决策</label><select id="runner-history-filter-${safeNewsText(id)}" data-runner-history-filter style="min-height:34px;padding:5px 9px;border:1px solid var(--border);border-radius:8px;background:var(--bg-secondary);color:var(--text);"><option value="all">全部动作</option><option value="BUY">模拟买入</option><option value="SELL">模拟卖出</option><option value="NONE">无动作</option><option value="REVIEW">仅研究建议</option><option value="REJECTED">被风控拒绝</option></select></div><div data-runner-history-rows>${renderDecisionRows('all')}</div>`;
+    const historyFilter = host.querySelector('[data-runner-history-filter]');
+    historyFilter?.addEventListener('change', () => {
+      const rowsHost = host.querySelector('[data-runner-history-rows]');
+      if (rowsHost) rowsHost.innerHTML = renderDecisionRows(historyFilter.value);
+    });
     if (button) button.setAttribute('aria-expanded', 'true');
   } catch (error) {
     host.innerHTML = `<div style="color:var(--yellow);font-size:11px;padding:8px;">${safeNewsText(error?.message || '读取决策失败')}</div>`;
@@ -2092,14 +2105,38 @@ async function loadTelegramResultCoverage() {
       const state = labels[row.resultStatus] || safeNewsText(row.resultStatus);
       const delivery = labels[row.deliveryStatus] || safeNewsText(row.deliveryStatus);
       const links = (row.evidenceRefs || []).flatMap(value => { try { const url = new URL(String(value)); return ['https:', 'http:'].includes(url.protocol) ? [`<a href="${safeNewsText(url.href)}" target="_blank" rel="noopener noreferrer">来源证据 ↗</a>`] : []; } catch { return []; } }).join(' · ');
-      return `<div style="padding:7px 0;border-top:1px solid var(--border);"><b>${safeNewsText(row.title || row.kind)}</b> · ${safeNewsText(state)} · 投递${safeNewsText(delivery)}<div>事件 ${safeNewsText(row.eventDate || '时间未知')} · 来源 ${safeNewsText(row.source || '未记录')} · 实际值 ${safeNewsText(row.actual || '尚未核验')}</div><div>发布时间 ${safeNewsText(fmt(row.publishedAt))} · 抓取 ${safeNewsText(fmt(row.retrievedAt))} · 下次检查 ${safeNewsText(fmt(row.nextCheckAt))}</div>${row.reason || row.error ? `<div style="color:var(--text-secondary);">${safeNewsText(row.reason || row.error)}</div>` : ''}${links ? `<div>${links}</div>` : ''}</div>`;
+      const resultLink = row.resultUrl ? (() => { try { const url = new URL(String(row.resultUrl)); return url.protocol === 'https:' ? `<a href="${safeNewsText(url.href)}" target="_blank" rel="noopener noreferrer">结果原文 ↗</a>` : ''; } catch { return ''; } })() : '';
+      const actionRef = safeNewsText(row.actionRef || '');
+      const canAck = ['sent', 'failed'].includes(String(row.deliveryStatus));
+      const canRetry = ['pending', 'failed'].includes(String(row.deliveryStatus));
+      const actions = `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:5px;">${row.hasOriginalReminder ? '<span style="font-size:10px;color:var(--text-secondary);">↩ 原提醒已关联</span>' : '<span style="font-size:10px;color:var(--text-secondary);">原提醒未关联</span>'}${canAck ? `<button class="tab" type="button" data-result-action="ack" data-result-action-ref="${actionRef}" onclick="handleTelegramResultAction(this)">确认已读</button>` : ''}${canRetry ? `<button class="tab" type="button" data-result-action="retry" data-result-action-ref="${actionRef}" onclick="handleTelegramResultAction(this)">重试投递</button>` : ''}</div>`;
+      return `<article class="glass-card telegram-result-inbox-row" style="padding:9px 10px;margin-top:7px;"><b>${safeNewsText(row.title || row.kind)}</b> · ${safeNewsText(state)} · 投递${safeNewsText(delivery)}<div>事件 ${safeNewsText(row.eventDate || '时间未知')} · 来源 ${safeNewsText(row.source || '未记录')} · 实际值 ${safeNewsText(row.actual || '尚未核验')}</div><div>发布时间 ${safeNewsText(fmt(row.publishedAt))} · 抓取 ${safeNewsText(fmt(row.retrievedAt))} · 下次检查 ${safeNewsText(fmt(row.nextCheckAt))}</div>${row.reason || row.error ? `<div style="color:var(--text-secondary);">${safeNewsText(row.reason || row.error)}</div>` : ''}${resultLink || links ? `<div>${[resultLink, links].filter(Boolean).join(' · ')}</div>` : ''}${actions}</article>`;
     }).join('');
     const audit = payload.audit || {};
-    host.innerHTML = `<section class="glass-card" style="padding:12px;margin-top:10px;"><div style="display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap;"><strong style="color:var(--text);">Telegram 结果跟踪诊断</strong><button class="tab" type="button" onclick="loadTelegramResultCoverage()">刷新</button></div><div style="margin-top:6px;">跟踪 ${Number(data.total || 0)} · 等待 ${Number(data.waiting || 0)} · 已发布 ${Number(data.published || 0)} · 修订 ${Number(data.revised || 0)} · 来源不可用/不支持 ${Number(data.unavailable || 0)} · 投递失败 ${Number(data.failedDeliveries || 0)}</div><div style="margin-top:4px;">来源覆盖：${sources}</div><div style="margin-top:4px;">自动抽检 ${safeNewsText(fmt(audit.checkedAt))} · 长期等待 ${Number(audit.stuckCount || 0)} 项${audit.fingerprint ? ` · 状态指纹 ${safeNewsText(String(audit.fingerprint).slice(0, 12))}` : ''}</div>${stuck}${rows ? `<details style="margin-top:7px;"><summary style="cursor:pointer;">最近结果、等待状态与证据（${recent.length}）</summary>${rows}</details>` : `<div style="margin-top:6px;color:var(--text-secondary);">${safeNewsText(payload.reason || '尚无事件结果跟踪记录')}</div>`}<div style="margin-top:6px;font-size:10px;color:var(--text-secondary);">只显示来源确认的实际值；倒计时、预期值及上期值不会冒充结果。</div></section>`;
+    host.innerHTML = `<section class="glass-card" style="padding:12px;margin-top:10px;"><div style="display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap;"><strong style="color:var(--text);">Telegram 结果跟踪诊断与收件箱</strong><button class="tab" type="button" onclick="loadTelegramResultCoverage()">刷新</button></div><div style="margin-top:6px;">跟踪 ${Number(data.total || 0)} · 等待 ${Number(data.waiting || 0)} · 已发布 ${Number(data.published || 0)} · 修订 ${Number(data.revised || 0)} · 来源不可用/不支持 ${Number(data.unavailable || 0)} · 投递失败 ${Number(data.failedDeliveries || 0)}</div><div style="margin-top:4px;">来源覆盖：${sources}</div><div style="margin-top:4px;">自动抽检 ${safeNewsText(fmt(audit.checkedAt))} · 长期等待 ${Number(audit.stuckCount || 0)} 项${audit.fingerprint ? ` · 状态指纹 ${safeNewsText(String(audit.fingerprint).slice(0, 12))}` : ''}</div>${stuck}${rows ? `<details style="margin-top:7px;" open><summary style="cursor:pointer;">结果收件箱 · 最近 ${recent.length} 项</summary>${rows}</details>` : `<div style="margin-top:6px;color:var(--text-secondary);">${safeNewsText(payload.reason || '尚无事件结果跟踪记录')}</div>`}<div style="margin-top:6px;font-size:10px;color:var(--text-secondary);">只显示来源确认的实际值；倒计时、预期值及上期值不会冒充结果。按钮只更新已有投递状态，不创建或重发实盘订单。</div></section>`;
   } catch (error) {
     host.textContent = `Telegram 结果跟踪诊断不可用：${error.message || '读取失败'}`;
   }
 }
+async function handleTelegramResultAction(button) {
+  if (!button || !['ack', 'retry'].includes(button.dataset.resultAction)) return;
+  const action = button.dataset.resultAction;
+  const actionRef = button.dataset.resultActionRef || '';
+  const parent = button.closest('.telegram-result-inbox-row');
+  button.disabled = true;
+  try {
+    const response = await fetch(`/api/telegram/results/${encodeURIComponent(actionRef)}/action`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action }) });
+    const payload = await response.json();
+    if (!response.ok || !payload.success) throw new Error(payload.error || '结果收件箱操作失败');
+    if (parent) parent.setAttribute('data-action-result', action === 'ack' ? 'acknowledged' : 'requeued');
+    if (typeof window.showToast === 'function') window.showToast(action === 'ack' ? '结果已确认' : '已重新排队投递', 'success');
+    await loadTelegramResultCoverage();
+  } catch (error) {
+    button.disabled = false;
+    if (typeof window.showToast === 'function') window.showToast(error.message || '结果收件箱操作失败', 'error');
+  }
+}
+window.handleTelegramResultAction = handleTelegramResultAction;
 async function saveAiSettings(chain) {
   const prefix = chain === 'openrouter' ? 'openRouter' : 'groq';
   const resultEl = document.getElementById(`ai-${chain}-result`);
@@ -5464,6 +5501,7 @@ async function loadEconomicIndicators() {
 let optionsSnapshot = null;
 let optionsLoading = false;
 let optionsRequestId = 0;
+let optionHistoryRequestId = 0;
 function optionMetricCard(label, value, hint = '') {
   return `<div class="idx-card"><div class="idx-name">${label}</div><div class="idx-price">${value}</div>${hint ? `<div style="font-size:10px;color:var(--text-secondary);margin-top:3px;">${hint}</div>` : ''}</div>`;
 }
@@ -5496,6 +5534,10 @@ async function loadOptions(isSubmit = false) {
   const loading = document.getElementById('options-loading');
   const errorEl = document.getElementById('options-error');
   const chainEl = document.getElementById('option-chain');
+  const ivHost = document.getElementById('option-iv-term-structure');
+  const historyHost = document.getElementById('option-iv-history');
+  if (ivHost) ivHost.innerHTML = '';
+  if (historyHost) historyHost.innerHTML = '<section class="option-iv-history"><strong>真实快照对照</strong><p>等待当前标的的期权链来源…</p></section>';
   document.getElementById('options-loading-text').textContent = market === 'us'
     ? `正在读取 CBOE ${symbol} 延迟期权链...`
     : '正在读取 Deribit 公开期权链...';
@@ -5517,6 +5559,7 @@ async function loadOptions(isSubmit = false) {
     ).join('');
     if (previous && [...expirySelect.options].some(option => option.value === previous)) expirySelect.value = previous;
     renderOptionChain();
+    loadOptionIvSnapshotHistory(optionsSnapshot);
   } catch(error) {
     if (requestId !== optionsRequestId) return;
     errorEl.textContent = '期权数据加载失败：' + error.message;
@@ -5613,28 +5656,138 @@ function renderOptionIvTermStructure(snapshot) {
   const pct = value => isNumber(value) ? `${Number(value).toFixed(2)}%` : '--';
   const pp = value => isNumber(value) ? `${Number(value) > 0 ? '+' : ''}${Number(value).toFixed(2)} 个百分点` : '--';
   const covered = `${Number(structure.coveredExpiries || 0)}/${Number(structure.totalExpiries || 0)} 个到期日`;
+  const points = Array.isArray(structure.points) ? structure.points : [];
+  const missing = Array.isArray(structure.missingExpiries) ? structure.missingExpiries : [];
+  const expiryRows = [...points.map(point => ({ ...point, unavailable: false })), ...missing.map(point => ({ ...point, unavailable: true }))]
+    .sort((a, b) => Number(a.expiryMs) - Number(b.expiryMs));
+  const plotWidth = 760, plotHeight = 230, left = 52, right = 744, top = 18, bottom = 174;
+  const ivValues = points.flatMap(point => [Number(point.callIvPct), Number(point.putIvPct), Number(point.atmIvPct)]).filter(Number.isFinite);
+  const ivMin = ivValues.length ? Math.min(...ivValues) : 0;
+  const ivMax = ivValues.length ? Math.max(...ivValues) : 100;
+  const ivSpan = Math.max(ivMax - ivMin, 1);
+  const yForIv = value => bottom - ((Number(value) - (ivMin - ivSpan * 0.12)) / (ivSpan * 1.24)) * (bottom - top);
+  const xForIndex = index => expiryRows.length <= 1 ? (left + right) / 2 : left + index * (right - left) / (expiryRows.length - 1);
+  const ivSeries = [
+    { key: 'call', label: 'Call IV', color: 'var(--green)', value: point => point.callIvPct },
+    { key: 'put', label: 'Put IV', color: 'var(--red)', value: point => point.putIvPct },
+    { key: 'atm', label: 'ATM 均值', color: 'var(--purple)', value: point => point.atmIvPct },
+  ];
+  const seriesMarkup = ivSeries.map(series => {
+    const segments = [];
+    let segment = [];
+    expiryRows.forEach((row, index) => {
+      const value = row.unavailable ? null : Number(series.value(row));
+      if (Number.isFinite(value)) segment.push({ index, value });
+      else if (segment.length) { segments.push(segment); segment = []; }
+    });
+    if (segment.length) segments.push(segment);
+    const paths = segments.filter(rows => rows.length > 1).map(rows => `<path class="option-iv-series" data-series="${series.key}" d="${rows.map((row, index) => `${index ? 'L' : 'M'} ${xForIndex(row.index).toFixed(2)} ${yForIv(row.value).toFixed(2)}`).join(' ')}" fill="none" stroke="${series.color}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>`).join('');
+    const circles = segments.flat().map(row => `<circle data-expiry-ms="${Number(expiryRows[row.index].expiryMs)}" data-series-point="${series.key}" cx="${xForIndex(row.index).toFixed(2)}" cy="${yForIv(row.value).toFixed(2)}" r="3.7" fill="${series.color}"><title>${escape(series.label)} · ${escape(expiryRows[row.index].label)} · ${pct(row.value)}</title></circle>`).join('');
+    return paths + circles;
+  }).join('');
+  const xLabels = expiryRows.map((row, index) => `<text x="${xForIndex(index).toFixed(2)}" y="202" text-anchor="middle" class="option-iv-axis-label">${escape(row.label)}${row.unavailable ? ' · 缺失' : ''}</text>`).join('');
+  const grid = [0, 0.5, 1].map(ratio => {
+    const y = top + ratio * (bottom - top);
+    const value = ivMax + ivSpan * 0.12 - ratio * (ivSpan * 1.24);
+    return `<line x1="${left}" y1="${y.toFixed(2)}" x2="${right}" y2="${y.toFixed(2)}" class="option-iv-grid"/><text x="${left - 8}" y="${(y + 4).toFixed(2)}" text-anchor="end" class="option-iv-axis-label">${value.toFixed(1)}%</text>`;
+  }).join('');
   const rows = [
-    ...(Array.isArray(structure.points) ? structure.points : []).map(point => `<tr>
+    ...points.map(point => `<tr>
       <td>${escape(point.label)}<small>${Number(point.daysToExpiry)} 天</small></td>
       <td>${Number(point.atmStrike).toLocaleString(undefined, { maximumFractionDigits: 4 })}<small>距现价 ${pct(point.moneynessPct)}</small></td>
       <td>${pct(point.callIvPct)}</td><td>${pct(point.putIvPct)}</td>
       <td>${pct(point.atmIvPct)}</td><td>${pp(point.putMinusCallPp)}</td>
       <td>同档配对 ${Number(point.pairedContracts)}/2</td>
     </tr>`),
-    ...(Array.isArray(structure.missingExpiries) ? structure.missingExpiries.map(item => `<tr class="is-unavailable">
+    ...missing.map(item => `<tr class="is-unavailable">
       <td>${escape(item.label)}<small>${Number(item.daysToExpiry)} 天</small></td>
       <td colspan="5">不可用：${escape(item.reason)}</td><td>未纳入</td>
-    </tr>`) : []),
+    </tr>`),
   ].join('');
   const emptyRow = '<tr><td colspan="7">暂无符合条件的同到期、同执行价近 ATM 双边 IV 合约。</td></tr>';
   host.innerHTML = `<section class="option-iv-term" aria-label="当前期权链隐含波动率期限结构">
     <div class="option-iv-term-heading"><div><h3>当前链 IV 期限结构</h3>
       <p>同一来源快照中，按到期日取距现价 ${Number(structure.maxMoneynessPct).toFixed(1)}% 内最近的同执行价 Call/Put。</p></div>
       <span class="option-iv-term-status" data-state="${escape(structure.status)}">${statusLabel} · ${covered} · ${Number(structure.coveragePct || 0).toFixed(1)}%</span></div>
-    <div class="option-iv-term-table-wrap"><table><thead><tr><th>到期日</th><th>近 ATM 行权价</th><th>Call IV</th><th>Put IV</th><th>ATM 均值</th><th>Put−Call IV差</th><th>覆盖</th></tr></thead>
+    <div class="option-iv-toolbar" role="group" aria-label="IV 期限结构显示方式"><button type="button" class="tab active" data-iv-view="curve" aria-pressed="true">曲线</button><button type="button" class="tab" data-iv-view="table" aria-pressed="false">表格</button><button type="button" class="tab" data-option-iv-evidence aria-expanded="false">数据证据</button></div>
+    <div class="option-iv-chart" role="img" aria-label="当前链各到期日 Call、Put 与 ATM IV 曲线；缺失到期日不插值"><svg viewBox="0 0 ${plotWidth} ${plotHeight}" preserveAspectRatio="none" aria-hidden="true">${grid}${seriesMarkup}${xLabels}</svg>${points.length ? '' : '<p>暂无可绘制的有效 IV 点位。</p>'}</div>
+    <div class="option-iv-legend"><span style="--iv-series-color:var(--green)">Call IV</span><span style="--iv-series-color:var(--red)">Put IV</span><span style="--iv-series-color:var(--purple)">ATM 均值</span></div>
+    <div class="option-iv-term-table-wrap option-iv-table" hidden><table><thead><tr><th>到期日</th><th>近 ATM 行权价</th><th>Call IV</th><th>Put IV</th><th>ATM 均值</th><th>Put−Call IV差</th><th>覆盖</th></tr></thead>
       <tbody>${rows || emptyRow}</tbody></table></div>
-    <small>来源 ${escape(structure.source)} · 抓取 ${escape(new Date(structure.fetchedAt).toLocaleString('zh-CN'))} · 仅为当前链截面，不是历史曲线，也不构成预测；不插值。${structure.reason ? ` ${escape(structure.reason)}` : ''}</small>
+    <div class="option-iv-evidence" data-option-iv-evidence-detail hidden><strong>当前 IV 数据证据</strong><span>来源 ${escape(structure.source)}</span><span>抓取时间 ${escape(new Date(structure.fetchedAt).toLocaleString('zh-CN'))}</span><span>状态 ${escape(statusLabel)} · ${covered}</span><span>现价基准 ${Number(structure.spot).toLocaleString(undefined, { maximumFractionDigits: 4 })}</span><span>${escape(structure.reason || '每个点位来自当前真实期权链的同到期、同执行价双边合约。')}</span></div>
+    <small>当前链期限截面，不是历史 IV 曲线，也不构成价格预测；仅连接相邻且都有实际数据的到期点，不跨缺失期限插值。${structure.reason ? ` ${escape(structure.reason)}` : ''}</small>
   </section>`;
+  const chart = host.querySelector('.option-iv-chart'), table = host.querySelector('.option-iv-table');
+  host.querySelectorAll('[data-iv-view]').forEach(button => button.addEventListener('click', () => {
+    const showTable = button.dataset.ivView === 'table';
+    chart.hidden = showTable; table.hidden = !showTable;
+    host.querySelectorAll('[data-iv-view]').forEach(item => { const active = item === button; item.classList.toggle('active', active); item.setAttribute('aria-pressed', String(active)); });
+  }));
+  const evidenceButton = host.querySelector('[data-option-iv-evidence]');
+  evidenceButton?.addEventListener('click', () => {
+    const evidence = host.querySelector('[data-option-iv-evidence-detail]');
+    evidence.hidden = !evidence.hidden;
+    evidenceButton.setAttribute('aria-expanded', String(!evidence.hidden));
+  });
+}
+
+function optionSnapshotInstrument(snapshot) {
+  const venue = snapshot?.market === 'us_equity' ? 'cboe' : 'deribit';
+  const asset = String(snapshot?.asset || '').trim().toUpperCase();
+  return asset ? `option:${venue}:${asset}` : '';
+}
+
+async function loadOptionIvSnapshotHistory(snapshot) {
+  const host = document.getElementById('option-iv-history');
+  if (!host) return;
+  const requestId = ++optionHistoryRequestId;
+  const instrument = optionSnapshotInstrument(snapshot);
+  host.innerHTML = '<section class="option-iv-history"><strong>真实快照对照</strong><p>正在读取此标的已保存的期权链快照…</p></section>';
+  if (!instrument) { host.innerHTML = '<section class="option-iv-history"><strong>真实快照对照</strong><p>无法确认当前期权标的身份。</p></section>'; return; }
+  try {
+    const query = new URLSearchParams({ market: 'options', instrument, metadata: '1' });
+    const response = await fetch(`/api/options/history?${query}`, { cache: 'no-store' });
+    const payload = await response.json();
+    if (requestId !== optionHistoryRequestId || snapshot !== optionsSnapshot) return;
+    if (!response.ok || !payload.success) throw new Error(payload.reason || '历史快照覆盖不可用');
+    const snapshots = (Array.isArray(payload.data) ? payload.data : [])
+      .filter(row => row.instrument === instrument && row.source === snapshot.source && Number.isFinite(Date.parse(row.fetchedAt)))
+      .sort((a, b) => Date.parse(a.fetchedAt) - Date.parse(b.fetchedAt));
+    if (snapshots.length < 2) {
+      host.innerHTML = `<section class="option-iv-history"><strong>真实快照对照</strong><p>${stockEscapeHtml(snapshots.length ? '当前标的只有 1 个同来源真实快照；至少累积两个不同时间快照后才能比较。' : (payload.reason || '当前标的尚无已保存的同来源期权快照。'))}</p><small>只比较本地真实快照，不回填或推测历史 IV。</small></section>`;
+      return;
+    }
+    const optionRows = snapshots.map((row, index) => `<option value="${stockEscapeHtml(row.id)}">${stockEscapeHtml(row.tradeDate || row.fetchedAt)} · ${stockEscapeHtml(new Date(row.fetchedAt).toLocaleTimeString('zh-CN'))} · ${stockEscapeHtml(row.contentHash?.slice(0, 8) || row.id.slice(-8))}</option>`).join('');
+    host.innerHTML = `<section class="option-iv-history"><div class="option-iv-history-heading"><div><strong>真实快照对照</strong><p>${snapshots.length} 个 ${stockEscapeHtml(snapshot.source)} 快照 · ${stockEscapeHtml(snapshots[0].tradeDate)} 至 ${stockEscapeHtml(snapshots.at(-1).tradeDate)}</p></div><span>同一合约身份</span></div><div class="option-iv-history-controls"><label>之前<select data-option-iv-snapshot-before>${optionRows}</select></label><label>之后<select data-option-iv-snapshot-after>${optionRows}</select></label><button type="button" class="tab" data-option-iv-compare>比较所选快照</button></div><div data-option-iv-compare-output role="status">仅比较相同标的、来源和合约身份；历史不足或合约不匹配时不插值。</div></section>`;
+    const before = host.querySelector('[data-option-iv-snapshot-before]');
+    const after = host.querySelector('[data-option-iv-snapshot-after]');
+    before.selectedIndex = Math.max(0, snapshots.length - 2);
+    after.selectedIndex = snapshots.length - 1;
+    const compareButton = host.querySelector('[data-option-iv-compare]');
+    compareButton.addEventListener('click', async () => {
+      const output = host.querySelector('[data-option-iv-compare-output]');
+      const beforeRow = snapshots.find(row => row.id === before.value), afterRow = snapshots.find(row => row.id === after.value);
+      if (!beforeRow || !afterRow || Date.parse(afterRow.fetchedAt) <= Date.parse(beforeRow.fetchedAt)) {
+        output.textContent = '请选择时间先后明确的两个不同真实快照。'; return;
+      }
+      compareButton.disabled = true; output.textContent = '正在比较所选真实快照…';
+      try {
+        const compareQuery = new URLSearchParams({ instrument, fromId: beforeRow.id, toId: afterRow.id });
+        const compareResponse = await fetch(`/api/options/history/compare?${compareQuery}`, { cache: 'no-store' });
+        const compared = await compareResponse.json();
+        if (!compareResponse.ok || !compared.success) throw new Error(compared.reason || '所选快照无法比较；管理员权限或来源校验失败');
+        const change = compared.data?.changes?.[0];
+        if (!change?.contracts?.length) { output.textContent = compared.reason || '两个真实快照之间没有相同合约身份；不推算差值。'; return; }
+        const fields = ['impliedVolPct', 'bidPrice', 'askPrice', 'volume', 'openInterest'];
+        const rows = change.contracts.map(contract => `<tr><th>${stockEscapeHtml(contract.contract)}</th>${fields.map(field => { const value = contract.fields?.[field]; return `<td>${value?.before == null ? '--' : stockEscapeHtml(value.before)} → ${value?.after == null ? '--' : stockEscapeHtml(value.after)}${value?.delta == null ? `<small>${stockEscapeHtml(value?.reason || '缺少字段')}</small>` : `<small>${value.delta > 0 ? '+' : ''}${stockEscapeHtml(value.delta)}</small>`}</td>`; }).join('')}</tr>`).join('');
+        output.innerHTML = `<p>${stockEscapeHtml(change.fromAt)} → ${stockEscapeHtml(change.toAt)} · ${change.contracts.length} 个相同合约</p><div class="option-iv-term-table-wrap"><table><thead><tr><th>合约</th><th>IV</th><th>买价</th><th>卖价</th><th>成交量</th><th>持仓量</th></tr></thead><tbody>${rows}</tbody></table></div><small>来源 ${stockEscapeHtml(compared.source || snapshot.source)} · 仅按相同合约 ID 比较；缺失字段不补齐，不生成历史曲线。</small>`;
+      } catch (error) { output.textContent = error?.message || '历史快照比较失败'; }
+      finally { compareButton.disabled = false; }
+    });
+  } catch (error) {
+    if (requestId !== optionHistoryRequestId) return;
+    host.innerHTML = `<section class="option-iv-history"><strong>真实快照对照</strong><p>读取失败：${stockEscapeHtml(error?.message || '未知错误')}</p></section>`;
+  }
 }
 function optionMetric(value) {
   return value == null || !Number.isFinite(Number(value)) ? '--' : compactUsd(value);
@@ -8699,7 +8852,9 @@ function renderEventStudyResult(data, reason) {
   const categoryNames = { earnings: '财报', filing: '文件披露', insider: '内部人', macro: '宏观', news: '新闻' };
   const cohortHtml = cohort ? `<section style="margin-top:9px;padding-top:8px;border-top:1px solid var(--border);"><b>同类历史事件 · ${safeNewsText(categoryNames[cohort.category] || cohort.category)}</b><div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:6px;"><span>有效样本<br><b>${Number(cohort.sampleSize || 0)}</b></span><span>平均窗口收益<br><b>${metric(cohort.meanReturnPct)}</b></span><span>中位数<br><b>${metric(cohort.medianReturnPct)}</b></span></div><div style="margin-top:5px;color:var(--text-secondary);">95% Bootstrap 区间 ${interval ? `${metric(interval[0])} 至 ${metric(interval[1])}` : '样本不足，未计算'} · 基准调整均值 ${metric(cohort.benchmarkAdjustedMeanPct)} · 非事件日对照 ${cohort.placebo ? `${cohort.placebo.sampleSize} 件，均值 ${metric(cohort.placebo.meanReturnPct)}` : '不可用'}</div></section>` : `<div style="margin-top:8px;color:var(--text-secondary);">${data.market === 'stocks' ? '未提供事件标题，无法建立同类事件组。' : '当前市场没有可用的同类事件来源。'}</div>`;
   const sourceLink = data.sourceUrl ? `<a href="${safeNewsText(data.sourceUrl)}" target="_blank" rel="noopener noreferrer">打开事件原文</a>` : '';
-  host.innerHTML = `<div style="padding:9px;border:1px solid var(--border);border-radius:10px;background:var(--bg-secondary);font-size:11px;line-height:1.55;"><div><b>${safeNewsText(data.instrument)}</b> · ${safeNewsText(data.title || '未命名事件')} · 事件K线 ${safeNewsText(data.eventAt)} ${sourceLink}</div><div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:7px;"><span>窗口收益<br><b>${metric(data.rawReturnPct)}</b></span><span>最大有利<br><b style="color:var(--green);">${metric(data.mfePct)}</b></span><span>最大不利<br><b style="color:var(--red);">${metric(data.maePct)}</b></span></div><div style="margin-top:7px;color:var(--text-secondary);">事件收盘 ${Number(data.eventBar?.close || 0).toFixed(2)} · 后窗口 ${Number(data.window?.length || 0)} 根 · 恢复 ${data.recoveryBars == null ? '未恢复' : data.recoveryBars + ' 根'}</div>${cohortHtml}${(data.warnings || []).map(item => `<div style="color:#b7791f;margin-top:4px;">⚠ ${safeNewsText(item)}</div>`).join('')}<div style="color:var(--text-secondary);margin-top:6px;">${safeNewsText(data.disclaimer)}</div></div>`;
+  const volume = value => value == null ? '—' : Number(value).toLocaleString(undefined, { maximumFractionDigits: 2 });
+  const prePost = `<section class="event-study-before-after" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;margin-top:8px;"><div class="glass-card" style="padding:8px;"><b>事件前 · ${Number(data.preEventSampleSize || 0)} 根</b><div>标的收益 ${metric(data.preEventReturnPct)} · 基准调整 ${metric(data.benchmarkAdjustedPreEventReturnPct)}</div><div>平均成交量 ${volume(data.preEventAverageVolume)}</div></div><div class="glass-card" style="padding:8px;"><b>事件后 · ${Number(data.postEventSampleSize || 0)} 根</b><div>标的收益 ${metric(data.postEventReturnPct)} · 基准调整 ${metric(data.benchmarkAdjustedPostEventReturnPct)}</div><div>平均成交量 ${volume(data.postEventAverageVolume)} · 量能变化 ${metric(data.volumeChangePct)}</div></div></section>`;
+  host.innerHTML = `<div style="padding:9px;border:1px solid var(--border);border-radius:10px;background:var(--bg-secondary);font-size:11px;line-height:1.55;"><div><b>${safeNewsText(data.instrument)}</b> · ${safeNewsText(data.title || '未命名事件')} · 事件K线 ${safeNewsText(data.eventAt)} ${sourceLink}</div><div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:7px;"><span>窗口收益<br><b>${metric(data.rawReturnPct)}</b></span><span>最大有利<br><b style="color:var(--green);">${metric(data.mfePct)}</b></span><span>最大不利<br><b style="color:var(--red);">${metric(data.maePct)}</b></span></div>${prePost}<div style="margin-top:7px;color:var(--text-secondary);">事件收盘 ${Number(data.eventBar?.close || 0).toFixed(2)} · 后窗口 ${Number(data.window?.length || 0)} 根 · 恢复 ${data.recoveryBars == null ? '未恢复' : data.recoveryBars + ' 根'}</div>${cohortHtml}${(data.warnings || []).map(item => `<div style="color:#b7791f;margin-top:4px;">⚠ ${safeNewsText(item)}</div>`).join('')}<div style="color:var(--text-secondary);margin-top:6px;">${safeNewsText(data.disclaimer)}</div></div>`;
 }
 
 async function runEventStudyUi() {
@@ -11415,7 +11570,15 @@ async function togglePredictionSettlement(token) {
     const payoutText = Array.isArray(resolution.payouts) ? resolution.payouts.join(' / ') : '未提供';
     const transactionText = resolution.transactionHash ? `${String(resolution.transactionHash).slice(0, 12)}…` : '未提供';
     const history = (body.history || []).map((revision, index) => `<div style="margin-top:4px;color:var(--text-secondary);">规则版本 ${index + 1} · ${safeNewsText(revision.capturedAt)} · ${safeNewsText(String(revision.rulesHash || '无规则文本').slice(0, 14))}</div>`).join('');
-    panel.innerHTML = `<div style="padding:9px;border:1px solid var(--border);border-radius:10px;background:var(--bg-secondary);font-size:11px;line-height:1.55;"><b>结算规则与证据 · ${safeNewsText(statusText)}</b><div style="margin-top:5px;">平台公布/报告结果：${safeNewsText(announcedText)}</div><div>最终结算结果：${safeNewsText(resultText)}</div><div>平台状态：${safeNewsText(evidence.platformStatus || '未提供')} · 争议：${safeNewsText(evidence.disputeStatus || (resolution.wasDisputed ? 'disputed' : 'unknown'))}</div><div>官方市场记录：${evidence.sourceUrl ? `<a href="${safeNewsText(evidence.sourceUrl)}" target="_blank" rel="noopener noreferrer">查看来源数据</a>` : '来源地址不可用'} · 规则来源：${evidence.resolutionSourceUrl ? `<a href="${safeNewsText(evidence.resolutionSourceUrl)}" target="_blank" rel="noopener noreferrer">打开官方规则来源</a>` : '平台未提供独立规则原文链接'} · 裁定记录：${evidence.determinationSourceUrl ? `<a href="${safeNewsText(evidence.determinationSourceUrl)}" target="_blank" rel="noopener noreferrer">打开官方 resolution API</a>` : '无独立裁定接口'}</div><div>裁定状态：${safeNewsText(resolution.status || '未提供')} · Payouts：${safeNewsText(payoutText)} · 交易哈希：${safeNewsText(transactionText)}</div><div>关闭时间：${safeNewsText(evidence.closeAt || '未提供')} · 判定时间：${safeNewsText(evidence.determinationAt || '未提供')} · 结算时间：${safeNewsText(evidence.settlementAt || '未提供')}</div><div>规则 Hash：${safeNewsText(evidence.rulesHash || '暂无规则文本')} · 证据 Hash：${safeNewsText(evidence.evidenceHash || '—')}</div>${evidence.rulesText ? `<details style="margin-top:5px;"><summary style="cursor:pointer;">查看结算规则</summary><div style="white-space:pre-wrap;margin-top:5px;">${safeNewsText(evidence.rulesText)}</div></details>` : ''}${history}<div style="color:var(--text-secondary);margin-top:5px;">来源刷新：${safeNewsText(sourceStatusText)} · 抓取 ${safeNewsText(evidence.capturedAt || body.updatedAt || '时间未知')} · ${safeNewsText(body.reason || evidence.reason || '结算信息仅作核对，不自动结算模拟持仓。')}</div></div>`;
+    const timeline = body.timeline || {};
+    const timelineStatus = { recorded: '已记录', announced: '已观察到公布', 'not-disputed': '来源标记无争议', arbitrated: '已仲裁', disputed: '争议中', settled: '已核验结算', pending: '等待中', unavailable: '来源不可用', unknown: '未知 / 待核验' };
+    const timelineHtml = Array.isArray(timeline.stages) ? `<section class="prediction-settlement-timeline"><h4>结算进度时间线</h4><ol>${timeline.stages.map(stage => {
+      let sourceLink = '';
+      try { const url = new URL(String(stage.sourceUrl || '')); if (url.protocol === 'https:') sourceLink = `<a href="${safeNewsText(url.href)}" target="_blank" rel="noopener noreferrer">证据 ↗</a>`; } catch {}
+      const timeLabel = stage.at ? `${stage.timeKind === 'observed' ? '本地首次观察' : '来源时间'}：${safeNewsText(stage.at)}` : '时间未提供';
+      return `<li data-stage="${safeNewsText(stage.key)}" data-status="${safeNewsText(stage.status)}"><span class="prediction-settlement-dot" aria-hidden="true"></span><div><b>${safeNewsText(stage.label)}</b> · ${safeNewsText(timelineStatus[stage.status] || stage.status)}<small>${timeLabel}</small><div>${safeNewsText(stage.detail)} ${sourceLink}</div></div></li>`;
+    }).join('')}</ol>${timeline.ruleRevisions?.length ? `<details><summary>规则修订时间线（${timeline.ruleRevisions.length}）</summary>${timeline.ruleRevisions.map((revision,index)=>`<div>版本 ${index+1} · ${safeNewsText(revision.capturedAt || '时间未知')} · ${safeNewsText(revision.hash || '规则 Hash 未提供')}</div>`).join('')}</details>` : ''}</section>` : '';
+    panel.innerHTML = `<div style="padding:9px;border:1px solid var(--border);border-radius:10px;background:var(--bg-secondary);font-size:11px;line-height:1.55;"><b>结算规则与证据 · ${safeNewsText(statusText)}</b><div style="margin-top:5px;">平台公布/报告结果：${safeNewsText(announcedText)}</div><div>最终结算结果：${safeNewsText(resultText)}</div><div>平台状态：${safeNewsText(evidence.platformStatus || '未提供')} · 争议：${safeNewsText(evidence.disputeStatus || (resolution.wasDisputed ? 'disputed' : 'unknown'))}</div><div>官方市场记录：${evidence.sourceUrl ? `<a href="${safeNewsText(evidence.sourceUrl)}" target="_blank" rel="noopener noreferrer">查看来源数据</a>` : '来源地址不可用'} · 规则来源：${evidence.resolutionSourceUrl ? `<a href="${safeNewsText(evidence.resolutionSourceUrl)}" target="_blank" rel="noopener noreferrer">打开官方规则来源</a>` : '平台未提供独立规则原文链接'} · 裁定记录：${evidence.determinationSourceUrl ? `<a href="${safeNewsText(evidence.determinationSourceUrl)}" target="_blank" rel="noopener noreferrer">打开官方 resolution API</a>` : '无独立裁定接口'}</div><div>裁定状态：${safeNewsText(resolution.status || '未提供')} · Payouts：${safeNewsText(payoutText)} · 交易哈希：${safeNewsText(transactionText)}</div><div>关闭时间：${safeNewsText(evidence.closeAt || '未提供')} · 判定时间：${safeNewsText(evidence.determinationAt || '未提供')} · 结算时间：${safeNewsText(evidence.settlementAt || '未提供')}</div><div>规则 Hash：${safeNewsText(evidence.rulesHash || '暂无规则文本')} · 证据 Hash：${safeNewsText(evidence.evidenceHash || '—')}</div>${timelineHtml}${evidence.rulesText ? `<details style="margin-top:5px;"><summary style="cursor:pointer;">查看结算规则</summary><div style="white-space:pre-wrap;margin-top:5px;">${safeNewsText(evidence.rulesText)}</div></details>` : ''}${history}<div style="color:var(--text-secondary);margin-top:5px;">来源刷新：${safeNewsText(sourceStatusText)} · 抓取 ${safeNewsText(evidence.capturedAt || body.updatedAt || '时间未知')} · ${safeNewsText(body.reason || evidence.reason || '结算信息仅作核对，不自动结算模拟持仓。')}</div></div>`;
     panel.dataset.loaded = 'true';
   } catch (error) {
     panel.innerHTML = `<div class="empty-tip" style="color:var(--red);">结算证据不可用：${safeNewsText(error.message)} <button class="tab" onclick="delete document.getElementById('radar-settlement-${token}')?.dataset.loaded;togglePredictionSettlement('${token}')">重试</button></div>`;
@@ -12505,7 +12668,7 @@ async function startDashboard() {
 }
 for (const [name, original] of [['drawCandles', drawCandles], ['drawStockKline', drawStockKline]]) {
   const measured = function (...args) {
-    if (document.hidden) return original.apply(this, args);
+    if (document.hidden) return;
     const startedAt = performance.now();
     try { return original.apply(this, args); }
     finally { recordMmPerformance('chart', name, performance.now() - startedAt); }

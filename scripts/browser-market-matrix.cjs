@@ -218,6 +218,7 @@ async function main() {
     });
     let settlementStatus = null;
     let optionPayoffRequest = null;
+    let optionHistoryComparisonRequest = null;
     page.on('pageerror', error => pageErrors.push(error.message));
     page.on('response', response => {
       if (response.url().includes('/api/prediction/settlement/')) settlementStatus = response.status();
@@ -330,6 +331,16 @@ async function main() {
         assumptions: { session: 'US regular session', settlement: 'T+1', positionPct: 5, feesBps: 10, slippageBps: 5 },
       } }) });
     });
+    await page.route('**/api/options/history?*', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, market: 'options', instrument: 'option:cboe:SPY', data: [
+      { id: 'spy-snapshot-before', market: 'options', instrument: 'option:cboe:SPY', source: 'CBOE browser fixture', tradeDate: '2026-09-25', fetchedAt: '2026-09-25T20:00:00.000Z', contentHash: 'snapshot-before-hash' },
+      { id: 'spy-snapshot-after', market: 'options', instrument: 'option:cboe:SPY', source: 'CBOE browser fixture', tradeDate: '2026-09-26', fetchedAt: '2026-09-26T20:00:00.000Z', contentHash: 'snapshot-after-hash' },
+      { id: 'spy-other-source', market: 'options', instrument: 'option:cboe:SPY', source: 'Other provider', tradeDate: '2026-09-27', fetchedAt: '2026-09-27T20:00:00.000Z', contentHash: 'snapshot-other-hash' },
+    ], dataStatus: 'historical', source: 'CBOE browser fixture', reason: null }) }));
+    await page.route('**/api/options/history/compare?*', route => {
+      const url = new URL(route.request().url());
+      optionHistoryComparisonRequest = { instrument: url.searchParams.get('instrument'), fromId: url.searchParams.get('fromId'), toId: url.searchParams.get('toId') };
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, source: 'CBOE browser fixture', data: { coverage: [{ id: 'spy-snapshot-before', at: '2026-09-25T20:00:00.000Z', source: 'CBOE browser fixture' }, { id: 'spy-snapshot-after', at: '2026-09-26T20:00:00.000Z', source: 'CBOE browser fixture' }], changes: [{ fromAt: '2026-09-25T20:00:00.000Z', toAt: '2026-09-26T20:00:00.000Z', contracts: [{ contract: 'SPY-C-510', fields: { impliedVolPct: { before: 19, after: 21, delta: 2 }, bidPrice: { before: 1, after: 1.2, delta: .2 }, askPrice: { before: 1.2, after: 1.3, delta: .1 }, volume: { before: 120, after: 150, delta: 30 }, openInterest: { before: 400, after: 430, delta: 30 } } }] }] }, dataStatus: 'historical', reason: null }) });
+    });
     await page.route('**/api/equity-options/**', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data: {
       market: 'us_equity', asset: 'SPY', source: 'CBOE browser fixture', fetchedAt: '2026-09-27T08:00:00.000Z', spot: 500,
       ivTermStructure: { status: 'available', source: 'CBOE browser fixture', fetchedAt: '2026-09-27T08:00:00.000Z', spot: 500, maxMoneynessPct: 3, coveredExpiries: 1, totalExpiries: 1, coveragePct: 100, points: [{ expiryMs: Date.parse('2026-10-16T00:00:00.000Z'), label: '2026-10-16', daysToExpiry: 19, atmStrike: 510, moneynessPct: 2, callIvPct: 19, putIvPct: 23, atmIvPct: 21, putMinusCallPp: 4, pairedContracts: 2 }], missingExpiries: [], reason: null },
@@ -408,6 +419,12 @@ async function main() {
         reason: '未提供可核实的最终结果；不会根据概率或收盘价格推断结算。',
         data: { market: 'prediction', instrument: 'prediction:polymarket:12345', platform: 'Polymarket', marketId: '12345', status: 'closed', result: null, rulesText: 'Resolution: use the cited official source.', rulesHash: 'rule-hash', resolutionSourceUrl: 'https://example.org/settlement', closeAt: '2026-09-25T12:00:00.000Z', determinationAt: null, settlementAt: null, capturedAt: '2026-09-26T12:00:00.000Z', sourceUrl: 'https://gamma-api.polymarket.com/markets/12345', evidenceHash: 'evidence-hash', reason: '未提供可核实的最终结果；不会根据概率或收盘价格推断结算。' },
         history: [],
+        timeline: { stages: [
+          { key: 'close', label: '市场关闭 / 截止', status: 'recorded', at: '2026-09-25T12:00:00.000Z', timeKind: 'source', detail: '平台来源记录的截止时间', sourceUrl: 'https://gamma-api.polymarket.com/markets/12345', evidenceHash: 'evidence-hash' },
+          { key: 'announcement', label: '平台公布 / 报告', status: 'unknown', at: null, timeKind: 'unknown', detail: '未取得平台明确 YES/NO 公布结果', sourceUrl: null, evidenceHash: 'evidence-hash' },
+          { key: 'dispute', label: '争议 / 裁定', status: 'unknown', at: null, timeKind: 'unknown', detail: '来源未提供明确争议/裁定状态', sourceUrl: null, evidenceHash: 'evidence-hash' },
+          { key: 'final', label: '最终结算', status: 'unknown', at: null, timeKind: 'unknown', detail: '市场已关闭，但最终结果未核验', sourceUrl: null, evidenceHash: 'evidence-hash' },
+        ], ruleRevisions: [] },
       }),
     }));
     await page.goto(base + '/login', { waitUntil: 'domcontentloaded' });
@@ -494,15 +511,32 @@ async function main() {
     }, null, { timeout: 12_000 });
     assert.equal(settlementStatus, 200, await settlement.innerText());
     assert.match(await settlement.innerText(), /official source|最终结果/);
+    assert.match(await settlement.innerText(), /结算进度时间线/);
+    assert.match(await settlement.innerText(), /时间未提供/);
     await page.evaluate(() => setMarketScope('options'));
     assert.equal(await page.locator('#options-tab').isVisible(), true, 'options workspace must open with the options market');
     assert.equal(await page.evaluate(() => activeWorkspaceId), 'option-chain');
     await page.evaluate(() => { document.getElementById('option-market').value = 'us'; setOptionMarket('us'); });
     await page.locator('#option-chain table').waitFor({ state: 'visible', timeout: 15_000 });
     assert.match(await page.locator('#option-iv-term-structure').innerText(), /当前链 IV 期限结构/);
-    assert.match(await page.locator('#option-iv-term-structure').innerText(), /21\.00%/);
-    assert.match(await page.locator('#option-iv-term-structure').innerText(), /\+4\.00 个百分点/);
-    assert.match(await page.locator('#option-iv-term-structure').innerText(), /CBOE browser fixture/);
+    const ivTerm = page.locator('#option-iv-term-structure');
+    assert.equal(await ivTerm.locator('[data-expiry-ms]').count(), 3, 'one real expiry yields exactly one marker for each displayed IV series');
+    assert.match(await page.evaluate(() => document.querySelector('circle[data-series-point="atm"] title')?.textContent || ''), /21\.00%/);
+    await ivTerm.locator('[data-iv-view="table"]').click();
+    assert.equal(await ivTerm.locator('.option-iv-chart').isVisible(), false);
+    assert.equal(await ivTerm.locator('.option-iv-table').isVisible(), true);
+    assert.match(await ivTerm.locator('.option-iv-table').innerText(), /21\.00%/);
+    assert.match(await ivTerm.locator('.option-iv-table').innerText(), /\+4\.00 个百分点/);
+    await ivTerm.locator('[data-option-iv-evidence]').click();
+    assert.equal(await ivTerm.locator('[data-option-iv-evidence-detail]').isVisible(), true);
+    assert.match(await ivTerm.locator('[data-option-iv-evidence-detail]').innerText(), /CBOE browser fixture/);
+    const optionHistory = page.locator('#option-iv-history');
+    await optionHistory.locator('[data-option-iv-compare]').click();
+    await page.waitForFunction(() => document.querySelector('#option-iv-history [data-option-iv-compare-output]')?.textContent.includes('SPY-C-510'));
+    assert.equal(optionHistoryComparisonRequest.instrument, 'option:cboe:SPY');
+    assert.equal(optionHistoryComparisonRequest.fromId, 'spy-snapshot-before');
+    assert.equal(optionHistoryComparisonRequest.toId, 'spy-snapshot-after');
+    assert.match(await optionHistory.innerText(), /19 → 21/);
     assert.match(await page.locator('#option-chain').innerText(), /双边报价可见/);
     assert.match(await page.locator('#option-chain').innerText(), /价差过宽/);
     assert.match(await page.locator('#option-chain').innerText(), /流动性字段缺失/);
@@ -530,10 +564,11 @@ async function main() {
         if (theme === 'light') root.removeAttribute('data-theme'); else root.setAttribute('data-theme', theme);
         const card = getComputedStyle(document.querySelector('#option-payoff-builder .option-payoff'));
         const termCard = getComputedStyle(document.querySelector('#option-iv-term-structure .option-iv-term'));
+        const ivHistoryCard = getComputedStyle(document.querySelector('#option-iv-history .option-iv-history'));
         const select = getComputedStyle(document.querySelector('#option-payoff-builder [data-contract]'));
         const input = getComputedStyle(document.querySelector('#option-payoff-builder [data-multiplier]'));
         const button = getComputedStyle(document.querySelector('#option-payoff-builder [data-calculate]'));
-        return { theme, card:card.backgroundImage, text:card.color, termSurface:termCard.backgroundColor, termText:termCard.color, selectRadius:select.borderRadius, inputRadius:input.borderRadius, buttonRadius:button.borderRadius };
+        return { theme, card:card.backgroundImage, text:card.color, termSurface:termCard.backgroundColor, termText:termCard.color, historySurface:ivHistoryCard.backgroundColor, historyText:ivHistoryCard.color, selectRadius:select.borderRadius, inputRadius:input.borderRadius, buttonRadius:button.borderRadius };
       });
       if (original == null) root.removeAttribute('data-theme'); else root.setAttribute('data-theme', original);
       return states;
@@ -542,6 +577,8 @@ async function main() {
     assert.equal(new Set(payoffThemeStates.map(item => item.text)).size, 3, 'payoff text follows all three themes');
     assert.equal(new Set(payoffThemeStates.map(item => item.termSurface)).size, 3, 'IV term structure surface follows all three themes');
     assert.equal(new Set(payoffThemeStates.map(item => item.termText)).size, 3, 'IV term structure text follows all three themes');
+    assert.equal(new Set(payoffThemeStates.map(item => item.historySurface)).size, 3, 'historical IV comparison card follows all three themes');
+    assert.equal(new Set(payoffThemeStates.map(item => item.historyText)).size, 3, 'historical IV comparison text follows all three themes');
     assert.ok(payoffThemeStates.every(item => parseFloat(item.selectRadius) >= 6 && parseFloat(item.inputRadius) >= 6 && parseFloat(item.buttonRadius) >= 6));
     captureCryptoWorkspaceRequests = true;
     await page.evaluate(() => setMarketScope('crypto'));
@@ -641,11 +678,17 @@ async function main() {
     await page.evaluate(() => renderEventStudyResult({
       market: 'stocks', instrument: 'SNDK', title: 'Quarterly earnings', eventAt: '2026-09-01T00:00:00.000Z',
       eventBar: { close: 100 }, window: { length: 21 }, rawReturnPct: 1.2, mfePct: 2.4, maePct: -0.8, recoveryBars: 4,
+      preEventSampleSize: 20, postEventSampleSize: 20, preEventReturnPct: -2.1, postEventReturnPct: 1.2,
+      benchmarkAdjustedPreEventReturnPct: -0.4, benchmarkAdjustedPostEventReturnPct: 0.7,
+      preEventAverageVolume: 120000, postEventAverageVolume: 180000, volumeChangePct: 50,
       cohort: { category: 'earnings', sampleSize: 6, meanReturnPct: 1.1, medianReturnPct: 0.9, confidence95Pct: [0.1, 2.2], benchmarkAdjustedMeanPct: 0.5, placebo: { sampleSize: 6, meanReturnPct: 0.2 } },
       warnings: [], disclaimer: '历史统计，不是预测。',
     }, null));
     const eventStudyText = await page.locator('#event-study-result').textContent();
     assert.match(eventStudyText, /同类历史事件/);
+    assert.match(eventStudyText, /事件前 · 20 根/);
+    assert.match(eventStudyText, /事件后 · 20 根/);
+    assert.match(eventStudyText, /量能变化 50\.00%/);
     assert.match(eventStudyText, /95% Bootstrap 区间/);
     await page.evaluate(() => selectStockFromInstrumentLibrary('SNDK', 'Fixture Semiconductor', 'SNDK'));
     try {

@@ -36,6 +36,26 @@ export interface SettlementEvidence {
   reason: string | null;
 }
 
+export interface SettlementTimelineStage { key:'close'|'announcement'|'dispute'|'final'; label:string; status:string; at:string|null; timeKind:'source'|'observed'|'unknown'; detail:string; sourceUrl:string|null; evidenceHash:string; }
+export function buildSettlementTimeline(evidence:SettlementEvidence,history:SettlementEvidence[]=[]):{stages:SettlementTimelineStage[];ruleRevisions:Array<{capturedAt:string|null;hash:string|null;sourceUrl:string|null}>} {
+  const time=(value:string|null)=>{if(!value)return null;const parsed=Date.parse(value);return Number.isFinite(parsed)?new Date(parsed).toISOString():null;};
+  const sourceUrl=(value:string|null)=>safeHttpUrl(value);
+  const closeAt=time(evidence.closeAt);
+  const announced=!!evidence.announcedResult;
+  const observedAt=announced?time(evidence.capturedAt):null;
+  const disputeStatus=evidence.disputeStatus||'unknown';
+  const finalStatus=evidence.status==='settled'&&evidence.result?'settled':evidence.status==='disputed'?'disputed':evidence.status==='open'?'pending':evidence.status==='unavailable'||evidence.status==='unsupported'?'unavailable':'unknown';
+  const finalAt=finalStatus==='settled'?time(evidence.settlementAt):null;
+  const stages:SettlementTimelineStage[]=[
+    {key:'close',label:'市场关闭 / 截止',status:closeAt?'recorded':'unknown',at:closeAt,timeKind:closeAt?'source':'unknown',detail:closeAt?'平台来源记录的截止时间':'平台未提供可核验截止时间',sourceUrl:sourceUrl(evidence.sourceUrl),evidenceHash:evidence.evidenceHash},
+    {key:'announcement',label:'平台公布 / 报告',status:announced?'announced':evidence.status==='open'?'pending':'unknown',at:observedAt,timeKind:observedAt?'observed':'unknown',detail:announced?`平台报告 ${evidence.announcedResult}；时间为系统首次观察时间，不代表来源发布时间`:'未取得平台明确 YES/NO 公布结果',sourceUrl:sourceUrl(evidence.sourceUrl),evidenceHash:evidence.evidenceHash},
+    {key:'dispute',label:'争议 / 裁定',status:disputeStatus==='disputed'?'disputed':disputeStatus==='arbitrated'?'arbitrated':disputeStatus==='not-disputed'?'not-disputed':'unknown',at:time(evidence.determinationAt),timeKind:evidence.determinationAt?'source':'unknown',detail:disputeStatus==='disputed'?'官方证据显示争议未结束':disputeStatus==='arbitrated'?'官方证据标记已仲裁':disputeStatus==='not-disputed'?'官方记录未标记争议':'来源未提供明确争议/裁定状态',sourceUrl:sourceUrl(evidence.determinationSourceUrl),evidenceHash:evidence.evidenceHash},
+    {key:'final',label:'最终结算',status:finalStatus,at:finalAt,timeKind:finalAt?'source':'unknown',detail:finalStatus==='settled'?`来源核验最终结果 ${evidence.result}`:finalStatus==='disputed'?'结果仍处于争议，不能视为最终结算':finalStatus==='pending'?'市场仍开放，尚无最终结算':finalStatus==='unavailable'?'结算来源不可用或平台不支持':evidence.status==='closed'?'市场已关闭，但最终结果未核验':'最终结果或结算时间未知',sourceUrl:sourceUrl(evidence.determinationSourceUrl)||sourceUrl(evidence.resolutionSourceUrl)||sourceUrl(evidence.sourceUrl),evidenceHash:evidence.evidenceHash},
+  ];
+  const ruleRevisions=history.map(item=>({capturedAt:time(item.capturedAt),hash:item.rulesHash||null,sourceUrl:safeHttpUrl(item.resolutionSourceUrl)||safeHttpUrl(item.sourceUrl)}));
+  return {stages,ruleRevisions};
+}
+
 interface StateDocumentStore {
   get<T>(key: string): T | null;
   set<T>(key: string, value: T, version?: number): void;

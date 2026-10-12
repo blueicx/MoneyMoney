@@ -29,6 +29,15 @@ export interface EventStudyResult {
   window: EventStudyBar[];
   rawReturnPct: number | null;
   benchmarkAdjustedReturnPct: number | null;
+  preEventReturnPct: number | null;
+  postEventReturnPct: number | null;
+  benchmarkAdjustedPreEventReturnPct: number | null;
+  benchmarkAdjustedPostEventReturnPct: number | null;
+  preEventAverageVolume: number | null;
+  postEventAverageVolume: number | null;
+  volumeChangePct: number | null;
+  preEventSampleSize: number;
+  postEventSampleSize: number;
   mfePct: number | null;
   maePct: number | null;
   recoveryBars: number | null;
@@ -208,10 +217,21 @@ export function runEventStudy(input: EventStudyInput): EventStudyResult {
   const end = Math.min(input.bars.length - 1, eventIndex + afterBars);
   const window = input.bars.slice(start, end + 1);
   const eventBar = input.bars[eventIndex];
+  const preEventBars = input.bars.slice(start, eventIndex);
   const outcomeBars = input.bars.slice(eventIndex + 1, end + 1);
   const base = eventBar.close;
   const finalBar = outcomeBars[outcomeBars.length - 1] || eventBar;
   const rawReturnPct = returnPct(base, finalBar.close);
+  const preEventReturnPct = preEventBars.length >= 2 ? returnPct(preEventBars[0].close, preEventBars[preEventBars.length - 1].close) : null;
+  const postEventReturnPct = rawReturnPct;
+  const averageVolume = (rows: EventStudyBar[]) => {
+    const volumes = rows.map(row => row.volume).filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
+    return volumes.length ? round(mean(volumes)) : null;
+  };
+  const preEventAverageVolume = averageVolume(preEventBars);
+  const postEventAverageVolume = averageVolume(outcomeBars);
+  const volumeChangePct = preEventAverageVolume !== null && preEventAverageVolume !== 0 && postEventAverageVolume !== null
+    ? round(((postEventAverageVolume / preEventAverageVolume) - 1) * 100) : null;
   const mfePct = outcomeBars.length ? round(Math.max(...outcomeBars.map(bar => ((bar.high / base) - 1) * 100))): null;
   const maePct = outcomeBars.length ? round(Math.min(...outcomeBars.map(bar => ((bar.low / base) - 1) * 100))): null;
   let recoveryBars: number | null = null;
@@ -224,10 +244,17 @@ export function runEventStudy(input: EventStudyInput): EventStudyResult {
   const benchmarkFinal = matchingBar(input.benchmarkBars, finalBar.timestamp);
   const benchmarkReturn = benchmarkEvent && benchmarkFinal ? returnPct(benchmarkEvent.close, benchmarkFinal.close) : null;
   const benchmarkAdjustedReturnPct = rawReturnPct !== null && benchmarkReturn !== null ? round(rawReturnPct - benchmarkReturn) : null;
+  const benchmarkPreStart = preEventBars.length >= 2 ? matchingBar(input.benchmarkBars, preEventBars[0].timestamp) : null;
+  const benchmarkPreEnd = preEventBars.length >= 2 ? matchingBar(input.benchmarkBars, preEventBars[preEventBars.length - 1].timestamp) : null;
+  const benchmarkPreReturn = benchmarkPreStart && benchmarkPreEnd ? returnPct(benchmarkPreStart.close, benchmarkPreEnd.close) : null;
+  const benchmarkAdjustedPreEventReturnPct = preEventReturnPct !== null && benchmarkPreReturn !== null ? round(preEventReturnPct - benchmarkPreReturn) : null;
   const warnings = [
     '单事件样本，不能代表稳定统计规律。',
+    ...(preEventBars.length < Math.max(2, beforeBars) ? [`可用前窗口仅 ${preEventBars.length}/${beforeBars} 根K线；前事件收益需要至少两根完整K线。`] : []),
     ...(outcomeBars.length < afterBars ? [`可用后窗口仅 ${outcomeBars.length}/${afterBars} 根K线。`] : []),
     ...(input.benchmarkBars && benchmarkAdjustedReturnPct === null ? ['基准时间索引不完整，未计算基准调整收益。'] : []),
+    ...(input.benchmarkBars && preEventReturnPct !== null && benchmarkAdjustedPreEventReturnPct === null ? ['前事件窗口的基准时间索引不完整，未计算前窗口基准调整收益。'] : []),
+    ...(preEventAverageVolume !== null && postEventAverageVolume === null ? ['后窗口成交量缺失，未计算前后成交量变化。'] : []),
   ];
   return {
     id: `event_study_${crypto.randomUUID()}`,
@@ -238,6 +265,15 @@ export function runEventStudy(input: EventStudyInput): EventStudyResult {
     window,
     rawReturnPct: round(rawReturnPct),
     benchmarkAdjustedReturnPct,
+    preEventReturnPct: round(preEventReturnPct),
+    postEventReturnPct: round(postEventReturnPct),
+    benchmarkAdjustedPreEventReturnPct,
+    benchmarkAdjustedPostEventReturnPct: benchmarkAdjustedReturnPct,
+    preEventAverageVolume,
+    postEventAverageVolume,
+    volumeChangePct,
+    preEventSampleSize: preEventBars.length,
+    postEventSampleSize: outcomeBars.length,
     mfePct,
     maePct,
     recoveryBars,
@@ -263,6 +299,15 @@ export class EventStudyRepository {
       window: input.window || [],
       rawReturnPct: input.rawReturnPct ?? null,
       benchmarkAdjustedReturnPct: input.benchmarkAdjustedReturnPct ?? null,
+      preEventReturnPct: input.preEventReturnPct ?? null,
+      postEventReturnPct: input.postEventReturnPct ?? input.rawReturnPct ?? null,
+      benchmarkAdjustedPreEventReturnPct: input.benchmarkAdjustedPreEventReturnPct ?? null,
+      benchmarkAdjustedPostEventReturnPct: input.benchmarkAdjustedPostEventReturnPct ?? input.benchmarkAdjustedReturnPct ?? null,
+      preEventAverageVolume: input.preEventAverageVolume ?? null,
+      postEventAverageVolume: input.postEventAverageVolume ?? null,
+      volumeChangePct: input.volumeChangePct ?? null,
+      preEventSampleSize: input.preEventSampleSize ?? 0,
+      postEventSampleSize: input.postEventSampleSize ?? 0,
       mfePct: input.mfePct ?? null,
       maePct: input.maePct ?? null,
       recoveryBars: input.recoveryBars ?? null,

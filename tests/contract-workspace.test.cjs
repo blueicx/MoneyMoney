@@ -42,3 +42,12 @@ test('selected contract history has explicit coverage and snapshots never acquir
  assert.equal(result.series.funding.kind,'history');assert.equal(result.series.funding.points.length,1);assert.equal(result.series.funding.coverage.from,new Date(now-100000).toISOString());
  assert.equal(result.series.depth.kind,'snapshot');assert.equal(result.series.depth.sourceTime,null);assert.equal(result.series.depth.retrievedAt,new Date(now).toISOString());assert.equal(result.series.basis.points.length,0);
 });
+test('contract workspace exposes an admin-triggered same-contract ledger and funding review with no inferred settlement costs',()=>{
+ const fs=require('node:fs'),ui=fs.readFileSync('src/web/public/contracts-workspace.js','utf8'),server=fs.readFileSync('src/web/server.ts','utf8');
+ assert.match(ui,/data-holding-cost-review/);
+ assert.match(ui,/\/api\/contracts\/holding-cost/);
+ assert.match(ui,/不等同实际已付资金费/);
+ assert.match(server,/app\.get\('\/api\/contracts\/holding-cost'/);
+ assert.match(server,/reviewContractPositionCosts\(/);
+ assert.match(server,/if\(!adminOnly\(req,res\)\)return/);
+});

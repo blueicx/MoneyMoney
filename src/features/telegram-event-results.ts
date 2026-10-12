@@ -6,6 +6,10 @@ interface Store { get<T>(key: string): T | null; set<T>(key: string, value: T): 
 interface Delivery { id: string; event: EventRecord; text: string; status: 'pending' | 'sent' | 'failed' | 'acknowledged'; attempts: number; nextAttempt: number; error?: string; actual?: string; publishedAt?: string; retrievedAt?: string; resultSource?: string; resultUrl?: string; kind?: 'result' | 'revision' | 'waiting' | 'terminal'; originalMessageId?: number; messageId?: number; resultStatus?: string; reason?: string; nextCheckAt?: number | null; evidenceRefs?: string[]; controlRevision?: number; }
 type CoverageDelivery = Delivery & { chatId?: string };
 export const TELEGRAM_RESULT_COVERAGE_AUDIT_KEY = 'telegram-result-coverage-audit-v1';
+/** Opaque, stable row reference; keeps private Telegram chat identifiers out of the browser. */
+export function telegramResultActionRef(chatId: string, deliveryId: string): string {
+  return createHash('sha256').update(`${chatId}\0${deliveryId}`).digest('hex').slice(0, 32);
+}
 export interface EventResultDetail { id: string; title: string; eventDate: string; deliveryStatus: Delivery['status']; resultStatus: string; attempts: number; actual: string | null; publishedAt: string | null; retrievedAt: string | null; source: string; resultUrl: string | null; reason: string | null; error: string | null; nextCheckAt: string | null; evidenceRefs: string[]; }
 interface State { events: Record<string, EventRecord>; deliveries: Delivery[]; checkedAt?: Record<string,number>; reminders?: Record<string,{messageId:number;at:number}>; }
 export function hasEventActual(value: unknown): boolean {

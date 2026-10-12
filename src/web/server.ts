@@ -88,7 +88,7 @@ import { getGlobalMacroSpotSnapshot } from '../features/global-macro-spot';
 import { getCrossAssetCorrelationRadar } from '../features/cross-asset-correlation';
 import { getPerpetualCrowding } from '../features/perpetual-crowding';
 import { ContractResearchService, contractIdentity, contractScenario } from '../features/contract-research';
-import { loadContractPanelHistory } from '../features/contract-panel-history';
+import { loadContractPanelHistory, reviewContractPositionCosts } from '../features/contract-panel-history';
 import { klinePageWindow, klinePageStatus, stockKlineChartInitialWindow } from '../features/kline-page-window';
 import { contractCapacity, compareContractSnapshots } from '../features/contract-comparison';
 import { compareAiRunnerReports } from '../features/ai-runner-comparison';
@@ -141,7 +141,7 @@ import { assessResearchFreshness } from '../features/research-freshness';
 import { testNotificationChannels } from '../features/notification-channels';
 import { runResearchExperiment } from '../features/experiment-runner';
 import { compareExperiments } from '../features/experiment-comparison';
-import { compareOptionSnapshots, summarizeMarketHistory } from '../features/market-history-comparison';
+import { compareOptionSnapshotPair, compareOptionSnapshots, summarizeMarketHistory } from '../features/market-history-comparison';
 import { MarketHistoryCaptureScheduler } from '../features/market-history-scheduler';
 import { mergeStockDisclosureTimeline } from '../features/stock-disclosure-timeline';
 import { observeForwardSignal } from '../features/signal-forward';
@@ -178,7 +178,7 @@ import { verifyLoginToken, extractAuthToken } from './auth';
 import { registerApiAuthProtection, registerAuthRoutes } from './auth-routes';
 import { registerBuiltAssets, sendBuiltPage } from './static-assets';
 import { stateStore, getStorageHealth } from '../storage/sqlite-state';
-import { TelegramEventResultMonitor, formatEventResultDetail, lookupOfficialEventResult, summarizeTelegramResultCoverage, recordTelegramResultCoverageAudit, TELEGRAM_RESULT_COVERAGE_AUDIT_KEY } from '../features/telegram-event-results';
+import { TelegramEventResultMonitor, formatEventResultDetail, lookupOfficialEventResult, summarizeTelegramResultCoverage, recordTelegramResultCoverageAudit, TELEGRAM_RESULT_COVERAGE_AUDIT_KEY, telegramResultActionRef } from '../features/telegram-event-results';
 import { lookupTrackedResult, resultTrackingDisabledReason, toTrackedCalendarEvent } from '../features/telegram-result-adapters';
 import { loadSecQuarterlyEarningsActual } from '../features/sec-edgar-client';
 import type { EventRecord as TelegramTrackedResult } from '../features/telegram-event-results';
@@ -198,7 +198,7 @@ import { createDataEnvelope } from '../features/data-status';
 import { dataLakeCatalog } from '../storage/data-lake';
 import { dataLakeWorker } from '../storage/data-lake-worker';
 import { EventStudyRepository, buildEventStudyCohort, classifyEventCategory, runEventStudy } from '../features/event-study';
-import { PredictionSettlementRepository, buildPolymarketResolutionEndpoint, buildSettlementEndpoint, normalizeSettlementEvidence, settlementPayloadMatches } from '../features/prediction-settlement';
+import { PredictionSettlementRepository, buildPolymarketResolutionEndpoint, buildSettlementEndpoint, buildSettlementTimeline, normalizeSettlementEvidence, settlementPayloadMatches } from '../features/prediction-settlement';
 import { analyzePaperDrift, analyzePaperDriftByStrategy, collectPaperDriftSamples, summarizePaperDriftCoverage, samePaperInstrument, StrategyDriftGate } from '../features/paper-drift';
 import { DataCoverageCanary, DEFAULT_DATA_COVERAGE_CANARY_TARGETS, shouldRunOncePerShanghaiDay, summarizeCoverageCanaryHistory, toPublicCoverageCanarySummary, type CanaryCapabilityResult, type CanaryDataStatus, type DataCoverageCanaryTarget, type DataCoverageCanaryRun } from '../features/data-coverage-canary';
 import { summarizePublishedCoverage, type CoverageSourceObservation } from '../features/data-coverage-status';
@@ -3289,7 +3289,8 @@ function handleOptionsHistory(req: express.Request, res: express.Response) {
     if (!instrument) return res.status(400).json({ success: false, market, dataStatus: 'failed', reason: '必须指定规范期权标的 ID，例如 option:cboe:AAPL 或 option:deribit:BTC' });
     for (const date of [from, to].filter(Boolean)) if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || new Date(`${date}T00:00:00.000Z`).toISOString().slice(0, 10) !== date) return res.status(400).json({ success: false, market, instrument, dataStatus: 'failed', reason: 'from/to 必须为有效 YYYY-MM-DD 日期' });
     if (from && to && from > to) return res.status(400).json({ success: false, market, instrument, dataStatus: 'failed', reason: 'from 不能晚于 to' });
-    const data = dataLakeCatalog.listOptionSnapshots({ market: 'options', instrument, from: from || undefined, to: to || undefined });
+    const snapshots = dataLakeCatalog.listOptionSnapshots({ market: 'options', instrument, from: from || undefined, to: to || undefined });
+    const data = req.query.metadata === '1' ? snapshots.map(({ snapshot: _snapshot, ...metadata }) => metadata) : snapshots;
     const dates = [...new Set(data.map(item => item.tradeDate))].sort();
     const start = from || dates[0] || null;
     const end = to || dates.at(-1) || null;
@@ -3304,7 +3305,7 @@ function handleOptionsHistory(req: express.Request, res: express.Response) {
         cursor.setUTCDate(cursor.getUTCDate() + 1);
       }
     }
-    res.json({ success: true, market, instrument, data, coverage: { observedDates: dates, calendarGaps, gapNote: '日历缺口未区分周末、交易所假日与采集缺失，不能据此认定来源故障。', from: start, to: end }, dataStatus: data.length ? 'historical' : 'empty', source: [...new Set(data.map(item => item.source))].join(', ') || 'CBOE Delayed Quotes / Deribit Public API', updatedAt: data.at(-1)?.fetchedAt || new Date().toISOString(), reason: data.length ? null : '本地尚无该期权标的的真实历史快照；从当前来源成功读取后才会开始积累，不回填推测历史' });
+    res.json({ success: true, market, instrument, data, coverage: { observedDates: dates, calendarGaps, gapNote: '日历缺口未区分周末、交易所假日与采集缺失，不能据此认定来源故障。', from: start, to: end }, dataStatus: snapshots.length ? 'historical' : 'empty', source: [...new Set(snapshots.map(item => item.source))].join(', ') || 'CBOE Delayed Quotes / Deribit Public API', updatedAt: snapshots.at(-1)?.fetchedAt || new Date().toISOString(), reason: snapshots.length ? null : '本地尚无该期权标的的真实历史快照；从当前来源成功读取后才会开始积累，不回填推测历史' });
   } catch (error: any) { res.status(400).json({ success: false, market: String(req.query.market || 'options'), dataStatus: 'failed', reason: error.message }); }
 }
 
@@ -3314,7 +3315,10 @@ app.get('/api/options/history/compare', (req, res) => {
   if (!adminOnly(req, res)) return;
   try {
     const instrument = String(req.query.instrument || '');
-    const data = compareOptionSnapshots(dataLakeCatalog.listOptionSnapshots({ market: 'options', instrument, from: req.query.from ? String(req.query.from) : undefined, to: req.query.to ? String(req.query.to) : undefined }));
+    const snapshots = dataLakeCatalog.listOptionSnapshots({ market: 'options', instrument, from: req.query.from ? String(req.query.from) : undefined, to: req.query.to ? String(req.query.to) : undefined });
+    const fromId = String(req.query.fromId || ''), toId = String(req.query.toId || '');
+    if (Boolean(fromId) !== Boolean(toId)) throw new Error('fromId 与 toId 必须同时提供');
+    const data = fromId ? compareOptionSnapshotPair(snapshots, fromId, toId) : compareOptionSnapshots(snapshots);
     return res.json({ success: true, market: 'options', instrument, data, dataStatus: data.coverage.length ? 'historical' : 'empty', source: data.coverage.at(-1)?.source || '本地真实期权快照', updatedAt: data.coverage.at(-1)?.at || null, reason: data.reason });
   } catch (error) { return res.status(400).json({ success: false, dataStatus: 'failed', reason: error instanceof Error ? error.message : '比较失败' }); }
 });
@@ -3983,6 +3987,27 @@ app.get('/api/contracts/history',async(req,res)=>{
     res.json({success:true,...data,updatedAt:data.coverage.to,evidenceRefs:data.rows.map(row=>row.evidenceRef)});
   }catch(error:any){res.status(400).json({success:false,market:'crypto',dataStatus:'failed',reason:error.message});}
 });
+app.get('/api/contracts/holding-cost',async(req,res)=>{
+  if(!adminOnly(req,res))return;
+  try{
+    if(req.query.market!=='crypto')throw Error('合约持仓成本复核必须指定虚拟币市场');
+    const instrument=String(req.query.instrument||'');contractIdentity(instrument);
+    const now=Date.now(),from=req.query.from?String(req.query.from):undefined,to=req.query.to?String(req.query.to):new Date(now).toISOString();
+    const snapshot=await contractResearchService.detail(instrument,['funding','openInterest','basis']);
+    let archiveReason:string|null=null;
+    if(snapshot.dataStatus!=='cached'){
+      const lease='contract-history:'+instrument,owner='contract-history-'+crypto.randomUUID();
+      if(stateStore.acquireLease(lease,owner,Date.now(),60000)){
+        try{await dataLakeCatalog.stageContractMetrics(snapshot);}catch(error:any){archiveReason=error.message;}finally{stateStore.releaseLease(lease,owner);}
+      }else archiveReason='另一个请求正在归档该合约快照，本次仅读取已提交历史';
+    }
+    const history=await dataLakeCatalog.queryContractMetrics({market:'crypto',instrument,...(from?{from}:{}),...(to?{to}:{})});
+    if(archiveReason){history.dataStatus=history.dataStatus==='empty'?'partial':history.dataStatus;history.reason=archiveReason+'；'+history.reason;}
+    const ledger=unifiedPaperLedgerStore.get();
+    const data=reviewContractPositionCosts({market:'crypto',instrument,orders:ledger.orders,positions:ledger.positions,history,funding:snapshot.funding,fundingSource:snapshot.sections?.funding?.source,from,to,now});
+    res.json({success:true,market:'crypto',instrument,dataStatus:data.dataStatus,source:'统一模拟账本 + Gate 同合约公开快照',updatedAt:snapshot.updatedAt,reason:data.ledger.reason,evidenceRefs:[...history.rows.map((row:any)=>row.evidenceRef).filter(Boolean),...(snapshot.evidenceRefs||[])],data});
+  }catch(error:any){res.status(400).json({success:false,market:'crypto',dataStatus:'failed',reason:error.message});}
+});
 app.post('/api/contracts/scenario', express.json(),(req,res)=>{
   if(!adminOnly(req,res))return;
   if(String(req.body.instrument || '').startsWith('crypto:gateio-delivery:') && (Number(req.body.fundingRate || 0)!==0 || Number(req.body.fundingPeriods || 0)!==0))return res.status(400).json({success:false,dataStatus:'failed',reason:'交割合约不适用永续资金费率，请将资金费率和期数设为零'});
@@ -4006,8 +4031,8 @@ app.get('/api/prediction/settlement/:platform/:marketId', async (req,res)=>{
   if(platform!=='Kalshi'&&platform!=='Polymarket')return res.status(422).json({success:false,...context,dataStatus:'unsupported',sourceStatus:'unsupported',reason:'当前平台没有可核验的官方结算证据'});
   let sourceUrl:string;try{sourceUrl=buildSettlementEndpoint(platform,marketId);}catch(error:any){return res.status(400).json({success:false,...context,dataStatus:'failed',sourceStatus:'failed',reason:error.message});}
   const cached=predictionSettlementRepository.latest(platform,platform==='Kalshi'?marketId.toUpperCase():marketId);
-  try{const evidence=await refreshPredictionSettlement(platform,marketId);const refreshed=evidence.capturedAt!==cached?.capturedAt;res.json({success:true,data:evidence,history:predictionSettlementRepository.history(platform,evidence.marketId),market:'prediction',instrument:evidence.instrument,dataStatus:refreshed?'historical':'cached',sourceStatus:refreshed?'success':'cached',source:evidence.sourceUrl,updatedAt:evidence.capturedAt,reason:evidence.reason});}
-  catch(error:any){if(cached)return res.json({success:true,data:cached,history:predictionSettlementRepository.history(platform,cached.marketId),market:'prediction',instrument:cached.instrument,dataStatus:'cached',sourceStatus:'failed',source:cached.sourceUrl,updatedAt:cached.capturedAt,reason:'官方来源刷新失败，显示最近快照：'+error.message});res.status(503).json({success:false,...context,dataStatus:'unavailable',sourceStatus:'failed',source:sourceUrl,reason:error.message});}
+  try{const evidence=await refreshPredictionSettlement(platform,marketId);const refreshed=evidence.capturedAt!==cached?.capturedAt,history=predictionSettlementRepository.history(platform,evidence.marketId);res.json({success:true,data:evidence,history,timeline:buildSettlementTimeline(evidence,history),market:'prediction',instrument:evidence.instrument,dataStatus:refreshed?'historical':'cached',sourceStatus:refreshed?'success':'cached',source:evidence.sourceUrl,updatedAt:evidence.capturedAt,reason:evidence.reason});}
+  catch(error:any){if(cached){const history=predictionSettlementRepository.history(platform,cached.marketId);return res.json({success:true,data:cached,history,timeline:buildSettlementTimeline(cached,history),market:'prediction',instrument:cached.instrument,dataStatus:'cached',sourceStatus:'failed',source:cached.sourceUrl,updatedAt:cached.capturedAt,reason:'官方来源刷新失败，显示最近快照：'+error.message});}res.status(503).json({success:false,...context,dataStatus:'unavailable',sourceStatus:'failed',source:sourceUrl,reason:error.message});}
 });
 app.get('/api/contracts/kline',async(req,res)=>{
   try {if(req.query.market && req.query.market!=='crypto')throw new Error('合约市场不一致');res.json({success:true,...await contractResearchService.chart(String(req.query.instrument || ''),String(req.query.interval || '5m'))});}
@@ -7198,17 +7223,33 @@ app.get('/api/telegram/results/coverage', (req, res) => {
   const rows = chats.flatMap(chatId => telegramEventResults.history(chatId).map(row => ({ ...row, chatId })));
   const data = summarizeTelegramResultCoverage(rows);
   const recent = rows.slice(-100).reverse().map(row => ({
-    id: row.id, title: row.event.titleZh || row.event.title, kind: row.event.kind || row.event.market || 'unknown',
+    id: row.id, actionRef: telegramResultActionRef(row.chatId || '', row.id),
+    title: row.event.titleZh || row.event.title, kind: row.event.kind || row.event.market || 'unknown',
     eventDate: row.event.date, deliveryStatus: row.status, resultStatus: row.resultStatus || row.kind || 'unknown',
     actual: row.actual || null, source: row.resultSource || row.event.source || null, publishedAt: row.publishedAt || null,
     retrievedAt: row.retrievedAt || null, nextCheckAt: Number.isFinite(Number(row.nextCheckAt)) ? new Date(Number(row.nextCheckAt)).toISOString() : null,
     reason: row.reason || null, error: row.error || null,
+    hasOriginalReminder: Number.isSafeInteger(row.originalMessageId),
+    resultUrl: telegramEventResults.detail(row.chatId || '', row.id)?.resultUrl || null,
     evidenceRefs: (row.evidenceRefs || []).flatMap(value => { try { const url = new URL(String(value)); return ['http:', 'https:'].includes(url.protocol) ? [url.toString()] : []; } catch { return []; } }).slice(0, 5),
   }));
   const dataStatus = data.total === 0 ? 'empty' : data.stuckCountdowns.length ? 'partial' : 'historical';
   res.json({ success: true, market: 'all', instrument: null, dataStatus, source: 'Telegram event result outbox', updatedAt: new Date().toISOString(),
     reason: data.total === 0 ? '尚无事件结果跟踪记录' : data.stuckCountdowns.length ? '发现结果跟踪长期停留在倒计时或等待状态；实际值仍为空，未将其视为已发布' : null,
     audit: stateStore.get(TELEGRAM_RESULT_COVERAGE_AUDIT_KEY), data: { ...data, recent } });
+});
+app.post('/api/telegram/results/:actionRef/action', (req, res) => {
+  if (!adminOnly(req, res)) return;
+  const action = req.body?.action;
+  if (action !== 'ack' && action !== 'retry') return res.status(400).json({ success: false, error: 'action 必须是 ack 或 retry' });
+  const actionRef = String(req.params.actionRef || '');
+  const matches = [...telegramAdminChatIds()].flatMap(chatId => telegramEventResults.history(chatId)
+    .filter(row => telegramResultActionRef(chatId, row.id) === actionRef)
+    .map(row => ({ chatId, row })));
+  if (matches.length !== 1) return res.status(404).json({ success: false, error: '结果记录不存在或已过期' });
+  const [{ chatId, row }] = matches;
+  if (!telegramEventResults.update(chatId, row.id, action)) return res.status(409).json({ success: false, error: action === 'ack' ? '该投递尚不能确认' : '只有待投递或失败的消息可以重试' });
+  return res.json({ success: true, action, status: telegramEventResults.history(chatId).find(item => item.id === row.id)?.status || 'unknown' });
 });
 const telegramDigestPushes = new Set<string>();
 const telegramSourceStates = new Map<string, boolean>();

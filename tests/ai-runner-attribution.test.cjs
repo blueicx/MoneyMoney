@@ -42,11 +42,11 @@ test('selection/configuration attribution decomposes actual account net PnL agai
   assert.equal(result.universeHash, originalHash);
   assert.match(result.method, /等权持有/);
   assert.match(result.method, /非标准 Brinson/);
-  assert.match(result.method, /已平仓/);
+  assert.match(result.method, /已实现|已平仓/);
   assert.deepEqual(result.sources, ['Nasdaq']);
 });
 
-test('selection attribution only includes closed positions with exact ledger order lineage and no floating marks', () => {
+test('selection attribution separates realized and freshly marked open PnL with exact ledger lineage', () => {
   const missingLineage = selectionAttributionFixture();
   delete missingLineage.runner.positions[0].entryOrderId;
   assert.equal(aiRunnerSelectionAttribution('stocks', missingLineage.runner, missingLineage.account).status, 'unavailable');
@@ -55,12 +55,35 @@ test('selection attribution only includes closed positions with exact ledger ord
   mismatchedFill.account.orders.find(order => order.id === 'exit').price = 111;
   assert.equal(aiRunnerSelectionAttribution('stocks', mismatchedFill.runner, mismatchedFill.account).status, 'unavailable');
 
-  const open = selectionAttributionFixture();
-  open.runner.positions[0].status = 'OPEN';
-  open.runner.positions[0].exitOrderId = undefined;
-  open.account.positions = [{ instrumentId: 'stock:us:AAPL', instrumentType: 'stock', title: 'AAPL', quantity: 1, averageEntryPrice: 100, currentPrice: 150, openedAt: '2026-10-10T10:05:00.000Z', realizedPnl: 0, currency: 'USD', markStatus: 'live', markUpdatedAt: '2026-10-10T11:00:20.000Z' }];
-  open.account.orders = open.account.orders.filter(order => order.side === 'BUY');
-  assert.equal(aiRunnerSelectionAttribution('stocks', open.runner, open.account).status, 'unavailable');
+  const mixed = selectionAttributionFixture();
+  mixed.runner.positions.push({ id: 'position-nvda', instrumentId: 'stock:us:NVDA', entryOrderId: 'nvda-entry', status: 'OPEN', entryPrice: 200, quantity: 1, entryTime: '2026-10-10T10:10:00.000Z', entryFeeUsd: 1, entrySlippageUsd: 0 });
+  const valuationAt = new Date().toISOString();
+  for (const benchmark of Object.values(mixed.runner.benchmarks)) benchmark.updatedAt = valuationAt;
+  mixed.account.cash = 807;
+  mixed.account.valuationUpdatedAt = valuationAt;
+  mixed.account.positions = [{ instrumentId: 'stock:us:NVDA', instrumentType: 'stock', title: 'NVDA', quantity: 1, averageEntryPrice: 200, currentPrice: 220, openedAt: '2026-10-10T10:10:00.000Z', realizedPnl: 0, currency: 'USD', markStatus: 'live', markSource: 'Nasdaq', markUpdatedAt: valuationAt }];
+  mixed.account.orders.push({ id: 'nvda-entry', accountId: 'ai-runner:runner-selection', runnerId: mixed.runner.id, instrumentId: 'stock:us:NVDA', instrumentType: 'stock', side: 'BUY', price: 200, quantity: 1, timestamp: '2026-10-10T10:10:00.000Z', feeUsd: 1, slippageUsd: 0 });
+  const attributed = aiRunnerSelectionAttribution('stocks', mixed.runner, mixed.account);
+  assert.equal(attributed.status, 'available');
+  assert.equal(attributed.realizedNetPnlUsd, 8);
+  assert.equal(attributed.unrealizedPnlUsd, 19, 'open PnL includes its already-paid entry costs');
+  assert.equal(attributed.equityPnlUsd, 27);
+  assert.equal(attributed.netPnlUsd, 8, 'legacy net field remains realized-only');
+  assert.equal(attributed.configurationPnlUsd, -73, 'selection comparison uses marked equity PnL');
+  assert.equal(attributed.openPositionCount, 1);
+
+  const staleMark = selectionAttributionFixture();
+  staleMark.runner.positions.push({ id: 'position-nvda', instrumentId: 'stock:us:NVDA', entryOrderId: 'nvda-entry', status: 'OPEN', entryPrice: 200, quantity: 1, entryTime: '2026-10-10T10:10:00.000Z', entryFeeUsd: 1, entrySlippageUsd: 0 });
+  const staleAt = new Date().toISOString();
+  for (const benchmark of Object.values(staleMark.runner.benchmarks)) benchmark.updatedAt = staleAt;
+  staleMark.account.cash = 807;
+  staleMark.account.valuationStatus = 'stale';
+  staleMark.account.valuationUpdatedAt = staleAt;
+  staleMark.account.positions = [{ instrumentId: 'stock:us:NVDA', instrumentType: 'stock', title: 'NVDA', quantity: 1, averageEntryPrice: 200, currentPrice: 220, openedAt: '2026-10-10T10:10:00.000Z', realizedPnl: 0, currency: 'USD', markStatus: 'stale', markSource: 'Nasdaq', markUpdatedAt: staleAt }];
+  staleMark.account.orders.push({ id: 'nvda-entry', accountId: 'ai-runner:runner-selection', runnerId: staleMark.runner.id, instrumentId: 'stock:us:NVDA', instrumentType: 'stock', side: 'BUY', price: 200, quantity: 1, timestamp: '2026-10-10T10:10:00.000Z', feeUsd: 1, slippageUsd: 0 });
+  const stale = aiRunnerSelectionAttribution('stocks', staleMark.runner, staleMark.account);
+  assert.equal(stale.status, 'unavailable');
+  assert.match(stale.reason, /估值|过期|实时/);
 });
 
 test('selection/configuration attribution refuses incomplete or time-misaligned quote baselines', () => {
@@ -174,6 +197,7 @@ test('runner attribution leaves realized PnL unknown until there is an explicit 
 test('private runner history API and existing history panel expose scoped attribution', () => {
   const server = fs.readFileSync(path.join(__dirname, '../src/web/server.ts'), 'utf8');
   const html = require('./helpers/dashboard-source.cjs').readDashboardSource();
+  const runtime = fs.readFileSync(path.join(__dirname, '../src/web/public/modules/dashboard-runtime.js'), 'utf8');
   assert.match(server, /app\.get\('\/api\/ai-runners\/:id\/history', \(req, res\) => \{\s*if \(!adminOnly\(req, res\)\) return;/);
   assert.match(server, /const attribution = aiRunnerPortfolioAttribution\(market, runner\.id, account\)/);
   assert.match(server, /const selectionAttribution = aiRunnerSelectionAttribution\(market, runner, account\)/);
@@ -181,4 +205,8 @@ test('private runner history API and existing history panel expose scoped attrib
   assert.match(html, /不折算未知汇率/);
   assert.match(html, /冻结自选归因/);
   assert.match(html, /data-runner-attribution-chart/);
+  assert.ok(runtime.includes('已实现净盈亏'));
+  assert.ok(runtime.includes('未平仓净盈亏'));
+  assert.ok(runtime.includes('权益盈亏'));
+  assert.ok(runtime.includes('data-runner-history-filter'));
 });

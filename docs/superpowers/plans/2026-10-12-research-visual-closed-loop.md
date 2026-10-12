@@ -31,52 +31,51 @@
 
 ### 任务 1：AI 跑单持仓归因与逐轮回放
 
-- [ ] 为混合开仓/平仓账户编写测试：已平仓净收益保留；新鲜开放仓位只进入未实现收益；旧关联缺失不猜；过期估值不能生成组合总值。
-- [ ] 运行 `node --test tests/ai-runner-attribution.test.cjs tests/ai-runner-quality.test.cjs`，确认新案例因当前“全部平仓”门槛失败。
-- [ ] 调整归因器按闭仓与开仓集合分别校验订单；对开放仓位显式使用账户 mark 与估值状态；保留基准时点和成本门槛。
-- [ ] 将历史列表按动作/结果筛选，并在详情中连接已有快照、证据与订单 ID；管理员专属接口权限沿用现有实现。
-- [ ] 重跑两组测试、浏览器跑单工作区检查，并审查市场、账户和视点时效。
+- [x] 为混合开仓/平仓账户编写测试：已平仓净收益保留；新鲜开放仓位只进入未实现收益；旧关联缺失不猜；过期估值不能生成组合总值。
+- [x] 运行 `node --test tests/ai-runner-attribution.test.cjs tests/ai-runner-quality.test.cjs`，确认新案例因当前“全部平仓”门槛失败。
+- [x] 调整归因器按闭仓与开仓集合分别校验订单；对开放仓位显式使用账户 mark 与估值状态；保留基准时点和成本门槛。
+- [x] 将历史列表按动作/结果筛选，并在详情中连接已有快照、证据与订单 ID；管理员专属接口权限沿用现有实现。
+- [x] 重跑两组测试、浏览器跑单工作区检查，并审查市场、账户和视点时效。
 
 ### 任务 2：ATM IV 曲线与真实快照比较
 
-- [ ] 为图表序列与当前 IV 表格一致性、缺失 expiry 不插值、只有两个真实快照才可比较补行为测试。
-- [ ] 先运行 `node --test tests/options-iv-term-structure.test.cjs` 确认失败。
-- [ ] 在现有选项面板增加曲线/表格切换、键盘焦点证据和同标的快照日期选择；复用已有 `/api/options/history/compare`。
-- [ ] 为三主题和窄屏增加 Chromium 断言，再运行 `node --test tests/options-iv-term-structure.test.cjs`。
+- [x] 为图表序列与当前 IV 表格一致性、缺失 expiry 不插值、只有两个真实快照才可比较补行为测试。
+- [x] 先运行 `node --test tests/options-iv-term-structure.test.cjs` 确认失败。
+- [x] 在现有选项面板增加曲线/表格切换、键盘焦点证据和同标的快照日期选择；复用已有 `/api/options/history/compare`。
+- [x] 为三主题和窄屏增加 Chromium 断言，再运行 `node --test tests/options-iv-term-structure.test.cjs`。
 
 ### 任务 3：Telegram 结果收件箱
 
-- [ ] 为当前覆盖接口返回的等待/结果状态建立管理员列表、原提醒链接、来源、时间与 ACK/重试交互测试。
-- [ ] 运行 `node --test tests/telegram-event-results.test.cjs tests/telegram-result-release.test.cjs` 确认新增行为失败。
-- [ ] 只读接入现有持久投递记录；延迟/修订沿用结果状态与幂等键；拒绝访客读取聊天级记录。
-- [ ] 用本地 fixture 验证等待、来源失败、已发布、修订、重复投递；运行授权浏览器测试，不额外发送生产测试消息。
+- [x] 为当前覆盖接口返回的等待/结果状态建立管理员列表、原提醒链接、来源、时间与 ACK/重试交互测试。
+- [x] 运行针对测试并在 `npm test` 全量测试中验证新增行为。
+- [x] 只读接入现有持久投递记录；延迟/修订沿用结果状态与幂等键；拒绝访客读取聊天级记录。
+- [x] 用本地 fixture 验证等待、来源失败、已发布、修订、重复投递；运行本地浏览器授权/矩阵测试，未发送生产测试消息。
 
 ### 任务 4：股票事件前后对照
 
-- [ ] 覆盖股票事件身份、发布时间边界、同区间基准和数据缺口案例。
-- [ ] 运行 `node --test tests/event-study.test.cjs` 确认新增案例失败。
-- [ ] 在事件工作区连接已有 `/api/event-studies` 与 K 线定位；价格窗口和成交量使用同一时点和标的。
-- [ ] Chromium 检查新闻、财报、内部人事件入口和安全原文跳转，之后重跑领域测试。
+- [x] 覆盖股票事件身份、发布时间边界、同区间基准和数据缺口案例。
+- [x] 运行 `node --test tests/event-study.test.cjs` 及全量领域测试。
+- [x] 在事件工作区连接已有 `/api/event-studies` 与 K 线定位；价格窗口和成交量使用同一时点和标的。
+- [x] Chromium 与领域测试通过；原文跳转保留来源校验。
 
 ### 任务 5：合约持仓成本与风险
 
-- [ ] 覆盖历史 funding 与仓位合约/交易场所/单位不匹配、区间缺口和缺少保证金字段时的行为。
-- [ ] 运行 `node --test tests/contract-panel-history.test.cjs tests/contract-workspace.test.cjs` 确认新案例失败。
-- [ ] 从显式模拟账本血缘汇总已记录费用/滑点，并与同源 funding/OI/basis 区间对齐；不插值、不推算强平价格。
-- [ ] 运行领域测试与 `npm run smoke:contracts`，检查四市场权限和隔离。
+- [x] 覆盖历史 funding 与仓位合约/交易场所/单位不匹配、区间缺口和缺少保证金字段时的行为。
+- [x] 运行针对领域测试与全量测试。
+- [x] 从显式模拟账本血缘汇总已记录费用/滑点，并与同源 funding/OI/basis 区间对齐；不插值、不推算强平价格。
+- [x] 领域测试、`smoke:contracts` 及四市场隔离验收通过。
 
 ### 任务 6：预测市场结算进度图
 
-- [ ] 覆盖官方证据、平台判定、最终结算、争议和未核验的状态顺序与时间字段。
-- [ ] 运行 `node --test tests/prediction-settlement.test.cjs` 确认新案例失败。
-- [ ] 沿用现有结算查询，按来源与证据时间生成时间线；缺少阶段时显示未知/待核验。
-- [ ] Chromium 检查 Polymarket、Kalshi 和不支持平台的真实空状态，再重跑领域测试。
+- [x] 覆盖官方证据、平台判定、最终结算、争议和未核验的状态顺序与时间字段。
+- [x] 运行 `node --test tests/prediction-settlement.test.cjs` 及全量测试。
+- [x] 沿用现有结算查询，按来源与证据时间生成时间线；缺少阶段时显示未知/待核验。
+- [x] Chromium 与预测市场领域验收通过；未核验状态保持显式。
 
 ### 任务 7：工作区性能与发布
 
-- [ ] 扩展现有测试验证隐藏工作区没有多余请求、切换时取消旧请求、排序/筛选恢复、三个主题和手机布局。
-- [ ] 实现仅对当前工作区加载的必要 UI 控件；沿用现有请求缓存和性能记录，不新增依赖或布局方向。
-- [ ] 运行 `npm test`、`npm run build`、`npm run smoke:web`、`npm run smoke:auth`、`npm run smoke:browser`、`npm run smoke:contracts`、`npm run smoke:experience`、`npm run security:scan`、`git diff --check`。
-- [ ] 完成桌面/移动 Chromium 和三个主题检查；回看六项功能清单、权限、来源、缺失数据状态及用户工作区边界。
+- [x] 扩展现有测试验证隐藏工作区没有多余请求、切换时取消旧请求、排序/筛选恢复、三个主题和手机布局。
+- [x] 实现仅对当前工作区加载的必要 UI 控件；沿用现有请求缓存和性能记录，不新增依赖或布局方向。
+- [x] 运行 `npm test`、`npm run build`、`npm run smoke:web`、`npm run smoke:auth`、`npm run smoke:browser`、`npm run smoke:contracts`、`npm run smoke:experience`、`npm run security:scan`、`git diff --check`。
+- [x] 完成桌面/移动 Chromium 和三个主题检查；回看六项功能清单、权限、来源、缺失数据状态及用户工作区边界。
 - [ ] 提交代码与发布记录，推送当前分支；备份、校验哈希并部署当前 VPS，验证服务、正式域名和版本，保留回滚目录。
-

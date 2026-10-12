@@ -63,7 +63,10 @@ async function main() {
       const host = document.createElement('div'); host.id = 'ai-runner-history-browser-quality'; document.body.append(host);
       const originalFetch = window.fetch;
       const fixtures = {
-        '/api/ai-runners/browser-quality/history': { success: true, data: [], attribution: { reason: '测试无成交' }, selectionAttribution: { status: 'unavailable', reason: '测试数据不足' } },
+        '/api/ai-runners/browser-quality/history': { success: true, data: [
+          { action: 'BUY', instrument: 'AAPL', dataStatus: 'live', source: '浏览器夹具', at: '2026-10-12T00:00:00.000Z', reason: '验收用入场记录', signals: ['fixture-signal'], snapshotHash: 'fixture-snapshot-hash', orderId: 'fixture-order-buy', evidence: [{ dataset: 'bars', status: 'live', source: 'fixture-bars', dataAt: '2026-10-12T00:00:00.000Z' }], riskChecks: [{ name: '预算', passed: true }] },
+          { action: 'REJECTED', instrument: 'AAPL', dataStatus: 'failed', source: '浏览器夹具', at: '2026-10-12T00:01:00.000Z', reason: '验收用风控拒绝', signals: [], snapshotHash: null, orderId: null, evidence: [], riskChecks: [{ name: '报价新鲜度', passed: false, reason: '夹具过期' }] },
+        ], attribution: { reason: '测试无成交' }, selectionAttribution: { status: 'unavailable', reason: '测试数据不足' } },
         '/api/ai-runners/browser-quality/quality': { success: true, dataStatus: 'partial', reason: '已成熟且明确关联的样本不足', data: { decisions: 2, modelCalls: 2, failedModelCalls: 1, skippedModelCalls: 0, unlinkedDecisions: 1, latency: { averageMs: 90, p95Ms: 150 }, matured: { count: 1, calibrationAvailable: false, reason: '已成熟且明确关联订单的样本 1 笔；至少 20 笔后才显示置信度校准和胜率', modelVersionGroups: [{ strategyVersion: 'strategy-fixture', modelVersion: 'model-fixture', count: 1, brierScore: null, winRate: null }] } } },
       };
       window.fetch = async (input, init) => {
@@ -80,6 +83,19 @@ async function main() {
     assert.match(await qualityPanel.innerText(), /至少 20 笔/);
     assert.match(await qualityPanel.innerText(), /strategy-fixture · model-fixture/);
     assert.doesNotMatch(await qualityPanel.innerText(), /Brier 0\.000 · 胜率 0\.0%/);
+    const historyFilter = qualityPanel.locator('[data-runner-history-filter]');
+    assert.equal(await historyFilter.count(), 1);
+    assert.equal(await qualityPanel.locator('[data-runner-history-rows] > div').count(), 2);
+    await historyFilter.selectOption('REJECTED');
+    assert.equal(await qualityPanel.locator('[data-runner-history-rows] > div').count(), 1);
+    assert.match(await qualityPanel.locator('[data-runner-history-rows]').innerText(), /验收用风控拒绝/);
+    assert.doesNotMatch(await qualityPanel.locator('[data-runner-history-rows]').innerText(), /验收用入场记录/);
+    await historyFilter.selectOption('BUY');
+    const buyHistory = qualityPanel.locator('[data-runner-history-rows]');
+    assert.match(await buyHistory.innerText(), /验收用入场记录/);
+    assert.match(await buyHistory.innerText(), /fixture-snapshot/);
+    assert.match(await buyHistory.innerText(), /fixture-order-buy/);
+    assert.match(await buyHistory.innerText(), /fixture-bars/);
     const budget=await page.evaluate(()=>fetch('/api/ai-runners/comparisons/budget').then(r=>r.json()));
     assert.equal(budget.success,true);assert.equal(budget.data.limit,24);assert.equal(budget.data.issued,0);
     const streamResponse = await page.evaluate(async () => {
@@ -94,6 +110,39 @@ async function main() {
     assert.ok((await page.locator('#settings-tab').innerText()).includes('手动发送测试消息'), 'loaded settings expose an explicit Telegram test action');
     await page.waitForFunction(() => document.getElementById('telegram-result-coverage')?.textContent?.includes('Telegram 结果跟踪诊断'), null, { timeout: 3_000 });
     assert.match(await page.locator('#telegram-result-coverage').innerText(), /尚无事件结果跟踪记录/);
+    const inboxInteraction = await page.evaluate(async () => {
+      const originalFetch = window.fetch;
+      let actionRequest = null;
+      const fixture = { success: true, dataStatus: 'partial', reason: '浏览器夹具', audit: { checkedAt: '2026-10-12T00:00:00Z', stuckCount: 1 }, data: {
+        total: 2, waiting: 1, published: 1, revised: 1, unavailable: 1, failedDeliveries: 1, bySource: { BLS: 1 }, stuckCountdowns: [],
+        recent: [
+          { id: 'published-row', actionRef: 'a'.repeat(32), title: 'CPI actual', kind: 'macro', eventDate: '2026-10-12T00:00:00Z', deliveryStatus: 'sent', resultStatus: 'revised', actual: '3.1%', source: 'BLS', publishedAt: '2026-10-12T00:00:00Z', retrievedAt: '2026-10-12T00:01:00Z', nextCheckAt: null, hasOriginalReminder: true, resultUrl: 'https://www.bls.gov/news.release/cpi.nr0.htm', evidenceRefs: ['https://www.bls.gov/news.release/cpi.nr0.htm'] },
+          { id: 'failed-row', actionRef: 'b'.repeat(32), title: 'GDP result', kind: 'macro', eventDate: '2026-10-12T00:00:00Z', deliveryStatus: 'failed', resultStatus: 'unavailable', actual: null, source: 'BEA', publishedAt: null, retrievedAt: null, nextCheckAt: '2026-10-12T01:00:00Z', reason: '来源不可用', error: '重试夹具错误', hasOriginalReminder: false, resultUrl: null, evidenceRefs: [] },
+        ],
+      } };
+      window.fetch = async (input, init = {}) => {
+        const url = new URL(typeof input === 'string' ? input : input.url, location.href);
+        if (url.pathname === '/api/telegram/results/coverage') return { ok: true, status: 200, json: async () => fixture };
+        if (/^\/api\/telegram\/results\/[a-f0-9]{32}\/action$/.test(url.pathname)) {
+          actionRequest = { pathname: url.pathname, body: JSON.parse(init.body || '{}') };
+          return { ok: true, status: 200, json: async () => ({ success: true, action: actionRequest.body.action, status: 'acknowledged' }) };
+        }
+        return originalFetch(input, init);
+      };
+      try {
+        await loadTelegramResultCoverage();
+        document.querySelector('[data-result-action="ack"]')?.click();
+        for (let i = 0; i < 30 && !actionRequest; i++) await new Promise(resolve => setTimeout(resolve, 10));
+        return { text: document.getElementById('telegram-result-coverage').innerText, html: document.getElementById('telegram-result-coverage').innerHTML, actionRequest };
+      } finally { window.fetch = originalFetch; }
+    });
+    assert.match(inboxInteraction.text, /结果收件箱/);
+    assert.match(inboxInteraction.text, /原提醒已关联/);
+    assert.match(inboxInteraction.text, /原提醒未关联/);
+    assert.match(inboxInteraction.text, /来源不可用/);
+    assert.match(inboxInteraction.html, /target="_blank" rel="noopener noreferrer"/);
+    assert.equal(inboxInteraction.actionRequest.body.action, 'ack');
+    assert.match(inboxInteraction.actionRequest.pathname, /\/api\/telegram\/results\/a{32}\/action$/);
     const telegramStatus = await page.evaluate(() => fetch('/api/telegram/status').then(async response => ({ status: response.status, body: await response.json() })));
     assert.equal(telegramStatus.status, 200);
     assert.ok(Array.isArray(telegramStatus.body.data.testDeliveryHistory));
@@ -120,6 +169,8 @@ async function main() {
     const missingCsrf = await page.request.post(`${baseUrl}/api/report/daily`, { data: {} });
     assert.equal(missingCsrf.status(), 403);
     assert.equal((await missingCsrf.json()).code, 'CSRF_INVALID');
+    const missingResultActionCsrf = await page.request.post(`${baseUrl}/api/telegram/results/${'a'.repeat(32)}/action`, { data: { action: 'ack' } });
+    assert.equal(missingResultActionCsrf.status(), 403);
 
     page.once('dialog', dialog => dialog.accept());
     await page.click('button[title="退出登录"]');
@@ -140,8 +191,9 @@ async function main() {
       fetch('/api/paper/accounts/main/lifecycle'),
       fetch('/api/paper/accounts/main/reconcile', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }),
       fetch('/api/telegram/results/coverage'),
+      fetch('/api/telegram/results/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/action', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'ack' }) }),
     ])).map(response => response.status));
-    assert.deepEqual(guestLifecycle, [403, 403, 403], 'paper lifecycle and Telegram result diagnostics stay private');
+    assert.deepEqual(guestLifecycle, [403, 403, 403, 403], 'paper lifecycle and Telegram result diagnostics stay private');
     const guestPaperReads = await page.evaluate(async () => Promise.all([
       '/api/paper/ledger',
       '/api/paper/positions',

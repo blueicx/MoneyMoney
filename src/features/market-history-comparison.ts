@@ -27,6 +27,21 @@ export function compareOptionSnapshots(input: OptionSnapshot[]) {
     };
   }), reason: ordered.length < 2 ? '不足两个真实快照，尚不能比较历史变化' : null };
 }
+
+/** Compare only the two user-selected, persisted snapshots, never a synthesized interval. */
+export function compareOptionSnapshotPair(input: OptionSnapshot[], beforeId: string, afterId: string) {
+  if (!beforeId || !afterId || beforeId === afterId) throw new Error('请选择两个不同快照');
+  const before = input.find(row => row.id === beforeId);
+  const after = input.find(row => row.id === afterId);
+  if (!before || !after) throw new Error('找不到所选真实快照；请刷新覆盖列表');
+  if (before.market !== after.market || before.instrument !== after.instrument || before.source !== after.source) {
+    throw new Error('仅可比较同一标的、同一来源的真实快照');
+  }
+  const beforeAt = Date.parse(before.fetchedAt), afterAt = Date.parse(after.fetchedAt);
+  if (!Number.isFinite(beforeAt) || !Number.isFinite(afterAt) || afterAt <= beforeAt) throw new Error('所选快照不符合时间顺序');
+  return compareOptionSnapshots([before, after]);
+}
+
 interface HistoryEvidence { id: string; market: MarketId; instrument?: string; source: { id: string; name: string; url?: string | null }; observedAt: string; fields: Record<string, unknown>; dataStatus?: string }
 export function summarizeMarketHistory(input: HistoryEvidence[], market: MarketId, instrument: string) {
   assertMarketContext({ market, instrument, workspace: 'market-history' });

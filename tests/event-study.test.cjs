@@ -34,6 +34,30 @@ test('event study computes benchmark adjustment only when timestamps align', () 
   assert.equal(result.benchmarkAdjustedReturnPct, -4.4815);
 });
 
+test('event study compares pre/post returns and volume on the same event-anchored interval', () => {
+  const benchmark = bars.map((bar, index) => {
+    const close = [100, 100, 100, 95, 98][index];
+    return { ...bar, open: close, close, high: close + 1, low: close - 1 };
+  });
+  const result = runEventStudy({ market: 'stocks', instrument: 'AAPL', eventAt: bars[2].timestamp, bars, benchmarkBars: benchmark, beforeBars: 2, afterBars: 2 });
+  assert.equal(result.preEventReturnPct, 1);
+  assert.equal(result.postEventReturnPct, -6.4815);
+  assert.equal(result.benchmarkAdjustedPreEventReturnPct, 1);
+  assert.equal(result.benchmarkAdjustedPostEventReturnPct, -4.4815);
+  assert.equal(result.preEventAverageVolume, 11);
+  assert.equal(result.postEventAverageVolume, 21.5);
+  assert.equal(result.volumeChangePct, 95.4545);
+  assert.equal(result.preEventSampleSize, 2);
+  assert.equal(result.postEventSampleSize, 2);
+});
+
+test('event study leaves a pre-event comparison unavailable when fewer than two pre-event bars exist', () => {
+  const result = runEventStudy({ market: 'stocks', instrument: 'AAPL', eventAt: bars[0].timestamp, bars, beforeBars: 20, afterBars: 1 });
+  assert.equal(result.preEventReturnPct, null);
+  assert.equal(result.preEventAverageVolume, null);
+  assert.ok(result.warnings.some(item => /前窗口/.test(item)));
+});
+
 test('cohort uses only earlier published same-category events with completed outcomes', () => {
   const history = Array.from({ length: 90 }, (_, index) => {
     const close = 100 + index + (index % 3);
@@ -129,4 +153,9 @@ test('event study API is wired to point-in-time bars and private evidence routes
   assert.match(html, /const timeKind = item\.occurredAt \? '发生' : item\.scheduledAt \? '计划'/);
   assert.match(html, /同类历史事件/);
   assert.match(html, /事件标题/);
+  const runtime = fs.readFileSync('src/web/public/modules/dashboard-runtime.js', 'utf8');
+  assert.match(runtime, /事件前 · .*preEventSampleSize/s);
+  assert.match(runtime, /事件后 · .*postEventSampleSize/s);
+  assert.match(runtime, /benchmarkAdjustedPreEventReturnPct/);
+  assert.match(runtime, /volumeChangePct/);
 });

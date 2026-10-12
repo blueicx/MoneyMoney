@@ -35,3 +35,32 @@ test('contract history with missing or mismatched units is not plotted',()=>{
 test('no archives never becomes a fabricated curve and unselected panels remain unchanged',()=>{
  assert.ok(fs.existsSync('src/features/contract-panel-history.ts'));const {withContractPanelHistory}=require('../src/features/contract-panel-history');const detail={instrument:'crypto:gateio:BTC_USDT',series:{openInterest:{kind:'snapshot',value:10},basis:{kind:'snapshot',value:.2}}};const result=withContractPanelHistory(detail,{instrument:detail.instrument,dataStatus:'empty',rows:[],reason:'尚无归档'},['openInterest']);assert.equal(result.series.openInterest.points.length,0);assert.equal(result.series.openInterest.dataStatus,'empty');assert.match(result.series.openInterest.reason,/尚无归档/);assert.strictEqual(result.series.basis,detail.series.basis);
 });
+test('holding cost review uses only exact-contract ledger rows and leaves unrecorded funding cost unknown',()=>{
+ const {reviewContractPositionCosts}=require('../src/features/contract-panel-history');
+ const instrument='crypto:gateio:BTC_USDT',orders=[
+  {instrumentId:instrument,instrumentType:'crypto',side:'BUY',quantity:1,price:100,timestamp:'2026-10-01T00:00:00Z',feeUsd:1,slippageUsd:.5},
+  {instrumentId:instrument,instrumentType:'crypto',side:'SELL',quantity:1,price:110,timestamp:'2026-10-02T00:00:00Z',feeUsd:1.1,slippageUsd:.6},
+  {instrumentId:'crypto:gateio:ETH_USDT',instrumentType:'crypto',side:'BUY',quantity:2,price:20,timestamp:'2026-10-01T00:00:00Z',feeUsd:90,slippageUsd:90},
+  {instrumentId:instrument,instrumentType:'crypto',side:'BUY',quantity:1,price:100,timestamp:'2026-10-03T00:00:00Z'},
+ ];
+ const history={instrument,rows:[{retrievedAt:'2026-10-01T12:00:00Z',source:'Gate official',openInterestUsd:100,basisPct:.2,units:{openInterestUsd:'USDT',basisPct:'%'}}],coverage:{from:'2026-10-01T12:00:00Z',to:'2026-10-01T12:00:00Z',records:1}};
+ const result=reviewContractPositionCosts({market:'crypto',instrument,orders,history,funding:[{at:'2026-10-01T08:00:00Z',ratePct:.01},{at:'2026-10-04T08:00:00Z',ratePct:.02}],now:Date.parse('2026-10-03T12:00:00Z')});
+ assert.equal(result.ledger.orderCount,3);
+ assert.equal(result.ledger.feeUsd,2.1);
+ assert.equal(result.ledger.slippageUsd,1.1);
+ assert.equal(result.ledger.incompleteCostOrders,1);
+ assert.equal(result.funding.observationCount,1);
+ assert.equal(result.funding.paidCostUsd,null,'funding-rate history is not an account settlement ledger');
+ assert.match(result.funding.reason,/未记录逐笔资金结算/);
+ assert.equal(result.history.openInterest.records,1);
+ assert.equal(result.history.basis.records,1);
+ assert.equal(result.history.openInterest.maxObservedGapMs,null,'a single sample has no interpolated gap');
+ const partial=reviewContractPositionCosts({market:'crypto',instrument,orders,history:{...history,dataStatus:'partial',rows:[history.rows[0],{...history.rows[0],retrievedAt:'2026-10-02T12:00:00Z',openInterestUsd:120}]},funding:[],now:Date.parse('2026-10-03T12:00:00Z')});
+ assert.equal(partial.history.openInterest.dataStatus,'partial','an incomplete archive remains partial even when two observations exist');
+});
+test('holding cost review rejects cross-market, instrument-mismatched history and invalid windows',()=>{
+ const {reviewContractPositionCosts}=require('../src/features/contract-panel-history'),input={market:'crypto',instrument:'crypto:gateio:BTC_USDT',orders:[],history:{instrument:'crypto:gateio:BTC_USDT',rows:[]},funding:[],now:Date.parse('2026-10-03T12:00:00Z')};
+ assert.throws(()=>reviewContractPositionCosts({...input,market:'stocks'}),/市场|身份/);
+ assert.throws(()=>reviewContractPositionCosts({...input,history:{...input.history,instrument:'crypto:gateio:ETH_USDT'}}),/身份/);
+ assert.throws(()=>reviewContractPositionCosts({...input,from:'2026-10-04T00:00:00Z',to:'2026-10-03T00:00:00Z'}),/区间/);
+});
