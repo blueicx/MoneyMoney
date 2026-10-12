@@ -141,3 +141,12 @@
 - 页面逐周期显示覆盖数、源观测时间、抓取时间与缓存状态；缺值展示“暂无”，不将 `null` 格式化为 `$0.00`；来源失败显示具体原因。面板沿用主题变量，没有新增跨工作区内容。
 - `tests/stablecoin-liquidity-quality.test.cjs` 覆盖部分周期覆盖、未知锚定价、坏资产行、空/坏响应区分、坏响应后的恢复、无源时点时的行动门槛及 DOM 空值呈现。
 - 本次验证是本地数据契约和面板渲染测试；未据此声称 DefiLlama 线上可用率、源端新鲜度或稳定币资金流向已获核验。
+
+## 2026-10-12 发布记录：稳定币数据质量与提醒页上下文
+
+- 代码提交 `a4d890eb1af68aca4508358ebd7bdf663d34c837` 已推送到 `codex/research-closure-all` 并部署到当前 VPS。新增提醒标签上下文事件，修复组合提醒在真实“提醒”标签中没有按当前市场/标的加载能力的问题；冒烟用例改为核对股票 API 实际返回的 4 个字段。
+- 稳定币结果保留覆盖度与未知值，不再将未验证的抓取时间视为来源观测时间；在源端时点不可核验时，不生成流动性方向或交易助手分数。此来源仍只用于研究显示。
+- 验收通过：`npm test`、`npm run build`、`npm run smoke:web`、`npm run smoke:auth`、`npm run smoke:browser`、`npm run smoke:experience`、`npm run smoke:actions`、`npm run smoke:expansion`、`npm run smoke:practical`、`npm run security:scan`、`git diff --check`；部署后 `npm run smoke:production` 只读通过，覆盖四市场及 SNDK。未发送 Telegram 消息。
+- 正式域名 `https://bluetrade.bbroot.com` 返回版本提交 `a4d890eb1af68aca4508358ebd7bdf663d34c837`、健康 `alive`、登录页 HTTP 200；`moneymoney.service` 为 `active`。远端 Hash 与本地产物一致：`dist/web/server.js` `1e773360b8fcdf3d2dc58475c3e670293c8f115401cbe3fda299f3fc8624bf39`、`dist/web/public/index.html` `86c550036bd3f74fc608a251f5507b22f0aee6fc83f0027f7cfee89d55e60eab`、`asset-manifest.json` `3fa5c2b0af6505f652f13a40073c21331af97e941a055de752e7ae5b9d8791ca`、`build-info.json` `8bede6222fdd4e2ee20a708a53481afe40b6f1b173ec04af1c01703f94c056d7`、`stablecoin-liquidity.js` `98c9db7a09ee069509dc3dcd42b96f0d5a5c55ea550f87e24d5ccb7189bcf317`、`trade-assistant.js` `057be9b83c3977669486054bc0fb04a49a783b6376c18074fd1ad41235c50034`。
+- 发布归档 SHA-256 为 `2668f4b8ff257ee2ebcebb6b9e6ff15acf5810106efdae28357a72418497b318`。发布前备份 `/opt/moneymoney/backups/dist-pre-a4d890e-20261012-stablecoin-alerts` 和回滚目录 `/opt/moneymoney/dist.rollback-a4d890e-20261012-stablecoin-alerts` 均保留。首次以普通用户执行在 root-owned staging/backup 父目录创建阶段被拒，检查确认服务仍 active、线上 dist 未切换后，以 sudo 重跑同一已校验脚本成功。
+- 仅替换远端 `dist`；未改环境密钥、Nginx/TLS、业务数据库或数据湖。本地未跟踪 `data/research.db` 未提交，前后 SHA-256 均为 `27fd475e523568daa4cdcabf3146917023335a62affe00429babd721b3b79fd1`。部署用本地/远端临时归档和脚本已清理。
