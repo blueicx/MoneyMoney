@@ -5562,6 +5562,7 @@ function renderOptionChain() {
     optionMetricCard('Call/Put OI', optionMetric(expiry.callOpenInterest) + ' / ' + optionMetric(expiry.putOpenInterest), `成交 ${optionMetric(expiry.callVolume)} / ${optionMetric(expiry.putVolume)}`) +
     optionMetricCard('净 GEX / 1%', gex == null ? '--' : compactUsd(gex), gexHint) +
     (incompleteMetrics.length ? optionMetricCard('字段覆盖', '存在缺项', incompleteMetrics.join(' · ')) : '');
+  renderOptionIvTermStructure(optionsSnapshot);
   renderOptionStrategies(expiry);
   updatedEl.textContent = optionsSnapshot.source + ' · 抓取于 ' + new Date(optionsSnapshot.fetchedAt).toLocaleTimeString('zh-CN') + ' · 抓取时间不等于合约逐笔报价时间';
   const cell = (row, field, prefix='') => row ? `<td>${prefix}${row[field]}</td>` : '<td>--</td>';
@@ -5596,6 +5597,44 @@ function renderOptionChain() {
       </tbody>
     </table></div>`;
   renderOptionPayoffBuilder(expiry);
+}
+function renderOptionIvTermStructure(snapshot) {
+  const host = document.getElementById('option-iv-term-structure');
+  if (!host) return;
+  const structure = snapshot?.ivTermStructure;
+  if (!structure) {
+    host.innerHTML = '<section class="option-iv-term"><h3>当前链 IV 期限结构</h3><p>来源未提供期限结构数据。</p></section>';
+    return;
+  }
+  const statusLabel = structure.status === 'available' ? '覆盖完整'
+    : structure.status === 'partial' ? '部分覆盖' : '暂无有效配对';
+  const escape = value => stockEscapeHtml(String(value ?? ''));
+  const isNumber = value => value != null && value !== '' && Number.isFinite(Number(value));
+  const pct = value => isNumber(value) ? `${Number(value).toFixed(2)}%` : '--';
+  const pp = value => isNumber(value) ? `${Number(value) > 0 ? '+' : ''}${Number(value).toFixed(2)} 个百分点` : '--';
+  const covered = `${Number(structure.coveredExpiries || 0)}/${Number(structure.totalExpiries || 0)} 个到期日`;
+  const rows = [
+    ...(Array.isArray(structure.points) ? structure.points : []).map(point => `<tr>
+      <td>${escape(point.label)}<small>${Number(point.daysToExpiry)} 天</small></td>
+      <td>${Number(point.atmStrike).toLocaleString(undefined, { maximumFractionDigits: 4 })}<small>距现价 ${pct(point.moneynessPct)}</small></td>
+      <td>${pct(point.callIvPct)}</td><td>${pct(point.putIvPct)}</td>
+      <td>${pct(point.atmIvPct)}</td><td>${pp(point.putMinusCallPp)}</td>
+      <td>同档配对 ${Number(point.pairedContracts)}/2</td>
+    </tr>`),
+    ...(Array.isArray(structure.missingExpiries) ? structure.missingExpiries.map(item => `<tr class="is-unavailable">
+      <td>${escape(item.label)}<small>${Number(item.daysToExpiry)} 天</small></td>
+      <td colspan="5">不可用：${escape(item.reason)}</td><td>未纳入</td>
+    </tr>`) : []),
+  ].join('');
+  const emptyRow = '<tr><td colspan="7">暂无符合条件的同到期、同执行价近 ATM 双边 IV 合约。</td></tr>';
+  host.innerHTML = `<section class="option-iv-term" aria-label="当前期权链隐含波动率期限结构">
+    <div class="option-iv-term-heading"><div><h3>当前链 IV 期限结构</h3>
+      <p>同一来源快照中，按到期日取距现价 ${Number(structure.maxMoneynessPct).toFixed(1)}% 内最近的同执行价 Call/Put。</p></div>
+      <span class="option-iv-term-status" data-state="${escape(structure.status)}">${statusLabel} · ${covered} · ${Number(structure.coveragePct || 0).toFixed(1)}%</span></div>
+    <div class="option-iv-term-table-wrap"><table><thead><tr><th>到期日</th><th>近 ATM 行权价</th><th>Call IV</th><th>Put IV</th><th>ATM 均值</th><th>Put−Call IV差</th><th>覆盖</th></tr></thead>
+      <tbody>${rows || emptyRow}</tbody></table></div>
+    <small>来源 ${escape(structure.source)} · 抓取 ${escape(new Date(structure.fetchedAt).toLocaleString('zh-CN'))} · 仅为当前链截面，不是历史曲线，也不构成预测；不插值。${structure.reason ? ` ${escape(structure.reason)}` : ''}</small>
+  </section>`;
 }
 function optionMetric(value) {
   return value == null || !Number.isFinite(Number(value)) ? '--' : compactUsd(value);

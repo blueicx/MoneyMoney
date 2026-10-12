@@ -332,15 +332,17 @@ async function main() {
     });
     await page.route('**/api/equity-options/**', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data: {
       market: 'us_equity', asset: 'SPY', source: 'CBOE browser fixture', fetchedAt: '2026-09-27T08:00:00.000Z', spot: 500,
+      ivTermStructure: { status: 'available', source: 'CBOE browser fixture', fetchedAt: '2026-09-27T08:00:00.000Z', spot: 500, maxMoneynessPct: 3, coveredExpiries: 1, totalExpiries: 1, coveragePct: 100, points: [{ expiryMs: Date.parse('2026-10-16T00:00:00.000Z'), label: '2026-10-16', daysToExpiry: 19, atmStrike: 510, moneynessPct: 2, callIvPct: 19, putIvPct: 23, atmIvPct: 21, putMinusCallPp: 4, pairedContracts: 2 }], missingExpiries: [], reason: null },
       totalCallOpenInterest: null, totalPutOpenInterest: null, totalPutCallOIRatio: null,
       quote: { change: 1, changePercent: 0.2, volume: 10000, iv30Pct: 18 },
       expiries: [{ expiryMs: Date.parse('2026-10-16T00:00:00.000Z'), label: '2026-10-16', daysToExpiry: 19,
         rows: [
           { instrumentName: 'SPY-C-500', strike: 500, optionType: 'call', markPrice: 2, premiumUsd: 200, impliedVolPct: 18, bidPrice: 1.9, askPrice: 2.1, spreadPct: 10, volume: 200, volumeUsd: 40000, openInterest: 800, delta: 0.5, quoteQuality: { status: 'quoted', label: '双边报价可见', referenceAsk: 2.1, referenceBid: 1.9 } },
           { instrumentName: 'SPY-C-510', strike: 510, optionType: 'call', markPrice: 1.1, premiumUsd: 110, impliedVolPct: 19, bidPrice: 1, askPrice: 1.2, spreadPct: 18.2, volume: 120, volumeUsd: 13200, openInterest: 400, delta: 0.32, quoteQuality: { status: 'quoted', label: '双边报价可见', referenceAsk: 1.2, referenceBid: 1 } },
+          { instrumentName: 'SPY-P-510', strike: 510, optionType: 'put', markPrice: 1.4, premiumUsd: 140, impliedVolPct: 23, bidPrice: 1.3, askPrice: 1.5, spreadPct: 14.3, volume: 100, volumeUsd: 14000, openInterest: 200, delta: -0.48, quoteQuality: { status: 'quoted', label: '双边报价可见', referenceAsk: 1.5, referenceBid: 1.3 } },
           { instrumentName: 'SPY-P-500', strike: 500, optionType: 'put', markPrice: 3, premiumUsd: 300, impliedVolPct: 22, bidPrice: 1, askPrice: 2, spreadPct: 66.7, volume: 1, volumeUsd: 300, openInterest: 2, delta: -0.5, quoteQuality: { status: 'wide-spread', label: '价差过宽', referenceAsk: 2, referenceBid: 1 } },
           { instrumentName: 'SPY-P-1000', strike: 1000, optionType: 'put', markPrice: null, premiumUsd: null, impliedVolPct: null, bidPrice: 1, askPrice: 1.1, spreadPct: 9.5, volume: null, volumeUsd: null, openInterest: null, delta: -0.2, quoteQuality: { status: 'metrics-incomplete', label: '流动性字段缺失', referenceAsk: 1.1, referenceBid: 1 } },
-        ], callOpenInterest: null, putOpenInterest: null, callVolume: null, putVolume: null, putCallOIRatio: null, putCallVolumeRatio: null, maxPainStrike: null, strategyIdeas: [], strategyIdeasStatus: { status: 'unavailable', reason: 'OI 字段存在缺失；PCR、最大痛点及依赖它们的策略评分已停用。' }, dataQuality: { openInterest: { available: 3, total: 4, status: 'partial' }, volume: { available: 3, total: 4, status: 'partial' }, impliedVolatility: { available: 3, total: 4, status: 'partial' }, gammaExposure: { available: 3, total: 4, status: 'partial' } } }],
+        ], callOpenInterest: null, putOpenInterest: null, callVolume: null, putVolume: null, putCallOIRatio: null, putCallVolumeRatio: null, maxPainStrike: null, strategyIdeas: [], strategyIdeasStatus: { status: 'unavailable', reason: 'OI 字段存在缺失；PCR、最大痛点及依赖它们的策略评分已停用。' }, dataQuality: { openInterest: { available: 4, total: 5, status: 'partial' }, volume: { available: 4, total: 5, status: 'partial' }, impliedVolatility: { available: 4, total: 5, status: 'partial' }, gammaExposure: { available: 0, total: 5, status: 'unavailable' } } }],
     } }) }));
     await page.route('**/api/options/payoff', route => {
       optionPayoffRequest = route.request().postDataJSON();
@@ -497,10 +499,14 @@ async function main() {
     assert.equal(await page.evaluate(() => activeWorkspaceId), 'option-chain');
     await page.evaluate(() => { document.getElementById('option-market').value = 'us'; setOptionMarket('us'); });
     await page.locator('#option-chain table').waitFor({ state: 'visible', timeout: 15_000 });
+    assert.match(await page.locator('#option-iv-term-structure').innerText(), /当前链 IV 期限结构/);
+    assert.match(await page.locator('#option-iv-term-structure').innerText(), /21\.00%/);
+    assert.match(await page.locator('#option-iv-term-structure').innerText(), /\+4\.00 个百分点/);
+    assert.match(await page.locator('#option-iv-term-structure').innerText(), /CBOE browser fixture/);
     assert.match(await page.locator('#option-chain').innerText(), /双边报价可见/);
     assert.match(await page.locator('#option-chain').innerText(), /价差过宽/);
     assert.match(await page.locator('#option-chain').innerText(), /流动性字段缺失/);
-    assert.match(await page.locator('#options-summary').innerText(), /OI 3\/4/);
+    assert.match(await page.locator('#options-summary').innerText(), /OI 4\/5/);
     assert.match(await page.locator('#option-strategies').innerText(), /OI 字段存在缺失/);
     const missingMetricRow = page.locator('#option-chain tbody tr').filter({ hasText: '1,000' });
     assert.equal((await missingMetricRow.locator('td').nth(16).innerText()).trim(), '--', 'missing OI should render as unknown, not zero');
@@ -523,16 +529,19 @@ async function main() {
       const states = ['light','dark','money'].map(theme => {
         if (theme === 'light') root.removeAttribute('data-theme'); else root.setAttribute('data-theme', theme);
         const card = getComputedStyle(document.querySelector('#option-payoff-builder .option-payoff'));
+        const termCard = getComputedStyle(document.querySelector('#option-iv-term-structure .option-iv-term'));
         const select = getComputedStyle(document.querySelector('#option-payoff-builder [data-contract]'));
         const input = getComputedStyle(document.querySelector('#option-payoff-builder [data-multiplier]'));
         const button = getComputedStyle(document.querySelector('#option-payoff-builder [data-calculate]'));
-        return { theme, card:card.backgroundImage, text:card.color, selectRadius:select.borderRadius, inputRadius:input.borderRadius, buttonRadius:button.borderRadius };
+        return { theme, card:card.backgroundImage, text:card.color, termSurface:termCard.backgroundColor, termText:termCard.color, selectRadius:select.borderRadius, inputRadius:input.borderRadius, buttonRadius:button.borderRadius };
       });
       if (original == null) root.removeAttribute('data-theme'); else root.setAttribute('data-theme', original);
       return states;
     });
     assert.equal(new Set(payoffThemeStates.map(item => item.card)).size, 3, 'payoff card surface follows all three themes');
     assert.equal(new Set(payoffThemeStates.map(item => item.text)).size, 3, 'payoff text follows all three themes');
+    assert.equal(new Set(payoffThemeStates.map(item => item.termSurface)).size, 3, 'IV term structure surface follows all three themes');
+    assert.equal(new Set(payoffThemeStates.map(item => item.termText)).size, 3, 'IV term structure text follows all three themes');
     assert.ok(payoffThemeStates.every(item => parseFloat(item.selectRadius) >= 6 && parseFloat(item.inputRadius) >= 6 && parseFloat(item.buttonRadius) >= 6));
     captureCryptoWorkspaceRequests = true;
     await page.evaluate(() => setMarketScope('crypto'));
@@ -726,7 +735,7 @@ async function main() {
     await page.setViewportSize({ width: 390, height: 844 });
     assert.equal(await page.locator('#center-workspace').isVisible(), true);
     assert.deepEqual(pageErrors, []);
-    console.log('Browser market matrix passed: three-theme controls/news/SEC/contracts audit, four scopes, SEC 13F manager/stock views and source links, strict guru market isolation, options quote-quality cells, chart freshness/date drilldown/coverage, synchronized companion and same-market SPY comparison, data-preflight-blocked backtest/candidate freshness/manual rerun, alert retry/ACK/feedback, SLO, prediction evidence, collapse/restore, mobile center, no page errors');
+    console.log('Browser market matrix passed: three-theme controls/news/SEC/contracts/options IV term-structure audit, four scopes, SEC 13F manager/stock views and source links, strict guru market isolation, options quote-quality cells, chart freshness/date drilldown/coverage, synchronized companion and same-market SPY comparison, data-preflight-blocked backtest/candidate freshness/manual rerun, alert retry/ACK/feedback, SLO, prediction evidence, collapse/restore, mobile center, no page errors');
   } finally {
     if (browser) await browser.close();
     child.kill('SIGINT');

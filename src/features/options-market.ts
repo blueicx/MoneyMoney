@@ -183,6 +183,112 @@ export interface OptionExpiry {
   dataQuality: OptionExpiryDataQuality;
 }
 
+export interface OptionIvTermPoint {
+  expiryMs: number;
+  label: string;
+  daysToExpiry: number;
+  atmStrike: number;
+  moneynessPct: number;
+  callIvPct: number;
+  putIvPct: number;
+  atmIvPct: number;
+  putMinusCallPp: number;
+  pairedContracts: 2;
+}
+
+export interface OptionIvTermStructure {
+  status: 'available' | 'partial' | 'unavailable';
+  source: string;
+  fetchedAt: string;
+  spot: number;
+  maxMoneynessPct: number;
+  coveredExpiries: number;
+  totalExpiries: number;
+  coveragePct: number;
+  points: OptionIvTermPoint[];
+  missingExpiries: Array<{ expiryMs: number; label: string; daysToExpiry: number; reason: string }>;
+  reason: string | null;
+}
+
+/**
+ * Build a current, source-bound IV term structure from matched ATM option pairs.
+ * It deliberately does not interpolate, combine expiries, or infer historical IV.
+ */
+export function buildOptionIvTermStructure(
+  expiries: OptionExpiry[],
+  spot: number,
+  source: string,
+  fetchedAt: string,
+  maxMoneynessPct = 3,
+): OptionIvTermStructure {
+  if (!Number.isFinite(spot) || spot <= 0) throw new Error('期权期限结构需要有效的标的现价');
+  if (!Number.isFinite(maxMoneynessPct) || maxMoneynessPct <= 0 || maxMoneynessPct > 10) {
+    throw new Error('近 ATM 距离阈值必须在 0–10% 之间');
+  }
+
+  const points: OptionIvTermPoint[] = [];
+  const missingExpiries: OptionIvTermStructure['missingExpiries'] = [];
+  for (const expiry of expiries) {
+    const byStrike = new Map<number, { call?: OptionRow; put?: OptionRow }>();
+    for (const row of expiry.rows) {
+      if (!Number.isFinite(row.strike) || row.strike <= 0) continue;
+      const pair = byStrike.get(row.strike) || {};
+      pair[row.optionType] = row;
+      byStrike.set(row.strike, pair);
+    }
+    const sameStrikePairs = [...byStrike.entries()]
+      .filter(([, pair]) => pair.call && pair.put)
+      .map(([strike, pair]) => ({ strike, call: pair.call!, put: pair.put!, moneynessPct: Math.abs(strike - spot) / spot * 100 }));
+    const nearAtmPairs = sameStrikePairs
+      .filter(pair => pair.moneynessPct <= maxMoneynessPct)
+      .sort((a, b) => a.moneynessPct - b.moneynessPct || a.strike - b.strike);
+    const validPair = nearAtmPairs.find(pair => [pair.call, pair.put].every(row =>
+      Number.isFinite(row.impliedVolPct) && row.impliedVolPct! > 0 &&
+      Number.isFinite(row.bidPrice) && row.bidPrice > 0 &&
+      Number.isFinite(row.askPrice) && row.askPrice >= row.bidPrice &&
+      ['quoted', 'metrics-incomplete'].includes(row.quoteQuality?.status || '')
+    ));
+
+    if (!validPair) {
+      const reason = nearAtmPairs.length
+        ? '近 ATM 合约缺少有效 IV 或双边报价'
+        : sameStrikePairs.length
+          ? `最近同档配对行权价距离现价超过 ${maxMoneynessPct}%`
+          : '没有同一到期日、同一行权价的看涨/看跌合约对';
+      missingExpiries.push({ expiryMs: expiry.expiryMs, label: expiry.label, daysToExpiry: expiry.daysToExpiry, reason });
+      continue;
+    }
+
+    const callIvPct = validPair.call.impliedVolPct!;
+    const putIvPct = validPair.put.impliedVolPct!;
+    points.push({
+      expiryMs: expiry.expiryMs,
+      label: expiry.label,
+      daysToExpiry: expiry.daysToExpiry,
+      atmStrike: validPair.strike,
+      moneynessPct: Number(validPair.moneynessPct.toFixed(2)),
+      callIvPct,
+      putIvPct,
+      atmIvPct: (callIvPct + putIvPct) / 2,
+      putMinusCallPp: putIvPct - callIvPct,
+      pairedContracts: 2,
+    });
+  }
+
+  const totalExpiries = expiries.length;
+  const coveredExpiries = points.length;
+  const status: OptionIvTermStructure['status'] = coveredExpiries === 0
+    ? 'unavailable'
+    : coveredExpiries === totalExpiries ? 'available' : 'partial';
+  const coveragePct = totalExpiries ? coveredExpiries / totalExpiries * 100 : 0;
+  const reason = status === 'unavailable'
+    ? `暂无可计算的近 ATM IV 配对；需同一到期日、同一行权价、有效双边报价与 IV，且行权价距现价不超过 ${maxMoneynessPct}%`
+    : status === 'partial' ? `${coveredExpiries}/${totalExpiries} 个到期日有有效配对；其余到期日未纳入曲线` : null;
+
+  return { status, source, fetchedAt, spot, maxMoneynessPct, coveredExpiries, totalExpiries,
+    coveragePct: Number(coveragePct.toFixed(1)), points, missingExpiries, reason };
+}
+
 export interface OptionStrategyIdea {
   id: string;
   nameZh: string;
@@ -217,6 +323,7 @@ export interface OptionsSnapshot {
     bid?: number;
     ask?: number;
   };
+  ivTermStructure: OptionIvTermStructure;
   expiries: OptionExpiry[];
 }
 
@@ -664,12 +771,14 @@ export async function getOptionsSnapshot(rawAsset: string): Promise<OptionsSnaps
   const expiries = buildDeribitExpiries(instruments || [], summaries || [], asset, spot);
   const totalCallOpenInterest = completeSum(expiries, expiry => expiry.callOpenInterest);
   const totalPutOpenInterest = completeSum(expiries, expiry => expiry.putOpenInterest);
+  const fetchedAt = new Date().toISOString();
   const value: OptionsSnapshot = {
     source: 'Deribit Public API',
     market: 'crypto',
     asset,
-    fetchedAt: new Date().toISOString(),
+    fetchedAt,
     spot,
+    ivTermStructure: buildOptionIvTermStructure(expiries, spot, 'Deribit Public API', fetchedAt),
     totalCallOpenInterest,
     totalPutOpenInterest,
     totalPutCallOIRatio: totalCallOpenInterest != null && totalPutOpenInterest != null && totalCallOpenInterest > 0
@@ -786,12 +895,14 @@ export async function getEquityOptionsSnapshot(rawSymbol: string): Promise<Optio
   if (!expiries.length) throw new Error(`${symbol} 暂无有持仓或报价的期权链`);
   const totalCallOpenInterest = completeSum(expiries, expiry => expiry.callOpenInterest);
   const totalPutOpenInterest = completeSum(expiries, expiry => expiry.putOpenInterest);
+  const fetchedAt = new Date().toISOString();
   const value: OptionsSnapshot = {
     source: 'CBOE Delayed Quotes',
     market: 'us_equity',
     asset: symbol,
-    fetchedAt: new Date().toISOString(),
+    fetchedAt,
     spot: Number(data.current_price),
+    ivTermStructure: buildOptionIvTermStructure(expiries, Number(data.current_price), 'CBOE Delayed Quotes', fetchedAt),
     totalCallOpenInterest,
     totalPutOpenInterest,
     totalPutCallOIRatio: totalCallOpenInterest != null && totalPutOpenInterest != null && totalCallOpenInterest > 0

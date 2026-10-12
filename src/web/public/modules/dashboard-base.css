@@ -1355,6 +1355,20 @@
     .option-payoff-metrics span { padding:6px 8px;border:1px solid var(--border);border-radius:8px;background:var(--bg-secondary);font-size:11px; }
     .option-payoff table { width:100%;border-collapse:collapse;font-size:11px; }
     .option-payoff td,.option-payoff th { padding:6px;border-bottom:1px solid var(--border);text-align:right; }
+    .option-iv-term { margin:0 0 14px;padding:14px;border:1px solid var(--border);border-radius:14px;background:var(--bg-card);color:var(--text-primary);box-shadow:var(--shadow); }
+    .option-iv-term-heading { display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-bottom:9px; }
+    .option-iv-term h3 { margin:0 0 4px;font-size:14px; }
+    .option-iv-term p,.option-iv-term small { margin:0;color:var(--text-secondary);font-size:11px;line-height:1.55; }
+    .option-iv-term-status { padding:5px 8px;border:1px solid var(--border);border-radius:999px;background:var(--bg-secondary);color:var(--text-secondary);font-size:11px;white-space:nowrap; }
+    .option-iv-term-status[data-state="available"] { color:var(--green); }
+    .option-iv-term-status[data-state="partial"] { color:var(--yellow); }
+    .option-iv-term-table-wrap { overflow-x:auto;margin:8px 0; }
+    .option-iv-term table { width:100%;min-width:650px;border-collapse:collapse;font-size:11px; }
+    .option-iv-term th,.option-iv-term td { padding:7px 8px;border-bottom:1px solid var(--border);text-align:right;white-space:nowrap; }
+    .option-iv-term th:first-child,.option-iv-term td:first-child { text-align:left; }
+    .option-iv-term td small { display:block;margin-top:2px;font-size:10px; }
+    .option-iv-term tr.is-unavailable td { color:var(--text-secondary);white-space:normal; }
+    .option-iv-term tr:last-child td { border-bottom:0; }
     .impact-badge { display: inline-flex; align-items: center; gap: 5px; padding: 3px 8px; border-radius: 999px; font-size: 11px; font-weight: 700; }
     .impact-High { color: var(--red); background: var(--red-light); }
     .impact-Medium { color: var(--yellow); background: color-mix(in srgb, var(--yellow) 15%, transparent); }
