@@ -6288,7 +6288,7 @@ function renderChartSignalList(targetId, signals, emptyText) {
     const signal = recent[index];
     if (!signal) return;
     showStockChartEvidence({ ...signal, title: `${signal.side === 'buy' ? '买入' : '卖出'} · ${signal.label}`, triggerPrice: signal.price }, 'signal');
-    const targetIndex = Number.isInteger(Number(signal.index)) ? Number(signal.index) : stockChartKlines.findIndex(bar => Number(bar.time) === Number(signal.time));
+    const targetIndex = Number.isInteger(Number(signal.sourceIndex)) ? Number(signal.sourceIndex) : stockChartKlines.findIndex(bar => Number(bar.time) === Number(signal.time));
     if (targetIndex >= 0 && targetIndex < stockChartKlines.length) {
       stockChartReplayIndex = targetIndex;
       if (window.stockMoneyKLine?.setReplayCursor) window.stockMoneyKLine.setReplayCursor(targetIndex);

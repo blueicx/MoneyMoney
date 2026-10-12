@@ -76,6 +76,11 @@ async function main() {
       drawStockKline(canvas, expandedRows);
       const visibleRows = MoneyTradingChart.select(canvas, expandedRows, identity).rows.length;
       const signalText = document.getElementById('stock-chart-signals').textContent;
+      document.querySelector('#stock-chart-signals .chart-signal-item')?.click();
+      const clickedSignal = {
+        replayIndex: stockChartReplayIndex,
+        evidence: document.getElementById('stock-chart-evidence-detail')?.innerText || '',
+      };
       stockChartKlines = previous.rows;
       stockChartReplayIndex = previous.replayIndex;
       stockChartFocusEnabled = previous.focusEnabled;
@@ -83,10 +88,13 @@ async function main() {
       stockChartOverlayConfig = previous.config;
       Object.assign(previousView, savedView);
       drawStockKline(canvas, stockChartKlines);
-      return { visibleRows, signalText };
+      return { visibleRows, signalText, clickedSignal };
     });
     assert.equal(zoomedStrategy.visibleRows,15,'zoom fixture should display fewer than the 20-bar volume warmup period');
     assert.match(zoomedStrategy.signalText,/放量突破买入/,'volume-breakout signal should be calculated from full history and retained in the zoomed viewport');
+    assert.equal(zoomedStrategy.clickedSignal.replayIndex,25,'clicking a zoomed signal must navigate to its full-history candle');
+    assert.match(zoomedStrategy.clickedSignal.evidence,/触发价格：101/,'clicking a strategy point must retain its trigger price explanation');
+    assert.match(zoomedStrategy.clickedSignal.evidence,/OHLC：100\.00 \/ 102\.00 \/ 99\.00 \/ 101\.00/,'clicking a strategy point must show the triggering candle values');
     const patternMarkerBounds=await page.evaluate(()=>{
       const canvas=document.getElementById('stock-kline'),layer=document.getElementById('stock-chart-patterns');
       const priceBottom=28+(canvas.clientHeight-28-30)*.72;

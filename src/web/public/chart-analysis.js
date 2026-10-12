@@ -438,6 +438,11 @@
         strategyVersion: String(signal.strategyVersion || strategyVersion),
         side: signal.side,
         time: bar.time,
+        open: bar.open,
+        high: bar.high,
+        low: bar.low,
+        close: bar.close,
+        volume: bar.volume,
         triggerPrice: price,
         price,
         reason: String(signal.reason || ''),
@@ -456,7 +461,7 @@
     return items.flatMap(item => {
       const index = Number(item?.index);
       if (!Number.isInteger(index) || index < start || index >= end) return [];
-      return [{ ...item, index: index - start }];
+      return [{ ...item, sourceIndex: Number.isInteger(Number(item.sourceIndex)) ? Number(item.sourceIndex) : index, index: index - start }];
     });
   }
 

@@ -118,13 +118,23 @@ test('keeps long-lookback strategy signals when zooming into a viewport shorter 
   const fullSignals = analysis.detectStrategySignals(series, enabled);
   const viewportStart = 15;
   const viewportLength = 15;
-  const visibleSignals = analysis.mapIndexedItemsToViewport(fullSignals, viewportStart, viewportLength);
+  const fullPoints = analysis.buildStrategyChartPoints({
+    bars: series, signals: fullSignals, market: 'stocks', instrument: 'stock:us:SNDK', timeframe: '5m',
+    source: 'Isolated chart fixture', sourceTime: series.at(-1).time, live: false,
+  });
+  const visibleSignals = analysis.mapIndexedItemsToViewport(fullPoints, viewportStart, viewportLength);
 
   assert.deepEqual(analysis.detectStrategySignals(series.slice(viewportStart), enabled), [], 'the zoom window alone has no 20-bar warmup');
   assert.equal(visibleSignals.length, 1);
   assert.equal(visibleSignals[0].label, '放量突破买入');
   assert.equal(visibleSignals[0].index, 10, 'the signal index must be remapped to its visible candle');
+  assert.equal(visibleSignals[0].sourceIndex, 25, 'the original full-history index must remain available to click navigation');
   assert.equal(visibleSignals[0].time, series[25].time);
+  assert.deepEqual(
+    [visibleSignals[0].open, visibleSignals[0].high, visibleSignals[0].low, visibleSignals[0].close, visibleSignals[0].volume],
+    [series[25].open, series[25].high, series[25].low, series[25].close, series[25].volume],
+    'a zoomed signal must keep the triggering candle values for its explanation',
+  );
 });
 
 test('strategy chart points retain scoped evidence and distinguish forming from confirmed candles', () => {
