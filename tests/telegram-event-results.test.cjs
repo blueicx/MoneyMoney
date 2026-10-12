@@ -279,3 +279,44 @@ test('verified Kalshi settlement replies retain the official result source link'
  const detail=monitor.detail('owner',monitor.history('owner')[0].id);
  assert.equal(detail.resultUrl,sourceUrl);
 });
+
+test('FOMC minutes count as a published result only when the exact official release date, title, and time match',()=>{
+ const {parseFedFomcMinutesResult}=require('../src/features/telegram-event-results');
+ const event={title:'FOMC Meeting Minutes',date:'2026-10-07T18:00:00.000Z',country:'USD'};
+ const html='<p class="article__time">October 07, 2026</p><h3 class="title">Minutes of the Federal Open Market Committee, September 15-16, 2026</h3><p class="releaseTime">For release at 2:00 p.m. EDT</p><p>The Federal Reserve on Wednesday released the minutes of the Federal Open Market Committee meeting that was held on September 15–16, 2026.</p>';
+ const result=parseFedFomcMinutesResult(html,event,'2026-10-07T18:02:00.000Z');
+ assert.equal(result.status,'published');assert.equal(result.actual,'FOMC 会议纪要已发布');assert.equal(result.source,'Federal Reserve');
+ assert.equal(result.url,'https://www.federalreserve.gov/newsevents/pressreleases/monetary20261007a.htm');assert.equal(result.publishedAt,event.date);assert.equal(result.retrievedAt,'2026-10-07T18:02:00.000Z');
+ assert.notEqual(parseFedFomcMinutesResult(html,{...event,date:'2026-10-08T18:00:00.000Z'},'2026-10-08T18:02:00.000Z').status,'published','a different release day must not borrow minutes');
+ assert.notEqual(parseFedFomcMinutesResult(html,{...event,country:'EUR'},'2026-10-07T18:02:00.000Z').status,'published','a non-USD event must not borrow the Fed release');
+ assert.notEqual(parseFedFomcMinutesResult(html,{...event,date:'2026-10-07T19:00:00.000Z'},'2026-10-07T19:02:00.000Z').status,'published','a mismatched scheduled time must not be treated as the 2 p.m. release');
+ assert.notEqual(parseFedFomcMinutesResult(html.replace('October 07, 2026','October 08, 2026'),event,'2026-10-07T18:02:00.000Z').status,'published','the official article date must match the event');
+ assert.notEqual(parseFedFomcMinutesResult(html.replace('released the minutes','published a speech'),event,'2026-10-07T18:02:00.000Z').status,'published','a generic Fed page is not proof of released minutes');
+ assert.equal(parseFedFomcMinutesResult(html,event,'2026-10-07T17:59:00.000Z').status,'pending','a pre-release fetch must not publish an actual result');
+});
+
+test('FOMC result lookup fetches the date-bound Federal Reserve release and Telegram keeps its official link',async()=>{
+ const {lookupOfficialEventResult,TelegramEventResultMonitor}=require('../src/features/telegram-event-results');
+ const values=new Map(),store={get:k=>structuredClone(values.get(k)||null),set:(k,v)=>values.set(k,structuredClone(v))},calls=[],messages=[];
+ const event={title:'FOMC Meeting Minutes',date:'2026-10-07T18:00:00.000Z',country:'USD',impact:'high'};
+ const html='<p class="article__time">October 07, 2026</p><h3 class="title">Minutes of the Federal Open Market Committee, September 15-16, 2026</h3><p class="releaseTime">For release at 2:00 p.m. EDT</p><p>The Federal Reserve on Wednesday released the minutes of the Federal Open Market Committee meeting that was held on September 15–16, 2026.</p>';
+ const previousFetch=global.fetch,previousNow=Date.now,now=Date.parse('2026-10-07T18:03:00.000Z');Date.now=()=>now;
+ global.fetch=async input=>{const url=String(input);calls.push(url);if(url==='https://www.federalreserve.gov/newsevents/pressreleases/monetary20261007a.htm')return{ok:true,status:200,text:async()=>html};throw new Error('unexpected external request '+url);};
+ try{
+  const result=await lookupOfficialEventResult(event);assert.equal(result.status,'published');assert.deepEqual(calls,['https://www.federalreserve.gov/newsevents/pressreleases/monetary20261007a.htm']);
+  const monitor=new TelegramEventResultMonitor(store,async()=>result,()=>now);
+  await monitor.run('owner',[event],async text=>{messages.push(text);return 700;});
+  assert.match(messages[0],/FOMC 会议纪要已发布/);assert.match(messages[0],/<a href="https:\/\/www\.federalreserve\.gov\/newsevents\/pressreleases\/monetary20261007a\.htm">官方原文<\/a>/);
+ }finally{global.fetch=previousFetch;Date.now=previousNow;}
+});
+
+test('an unpublished FOMC release stays pending and keeps its official source link for retry',async()=>{
+ const {lookupOfficialEventResult}=require('../src/features/telegram-event-results');
+ const previousFetch=global.fetch,previousNow=Date.now;Date.now=()=>Date.parse('2026-10-08T18:03:00.000Z');
+ global.fetch=async()=>({ok:false,status:404,text:async()=>''});
+ try{
+  const result=await lookupOfficialEventResult({title:'FOMC Meeting Minutes',date:'2026-10-08T18:00:00.000Z',country:'USD'});
+  assert.equal(result.actual,null);assert.equal(result.status,'pending');assert.equal(result.source,'Federal Reserve');
+  assert.match(result.reason,/尚未发布/);assert.equal(result.url,'https://www.federalreserve.gov/newsevents/pressreleases/monetary20261008a.htm');
+ }finally{global.fetch=previousFetch;Date.now=previousNow;}
+});

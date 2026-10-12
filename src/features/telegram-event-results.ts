@@ -69,7 +69,7 @@ export function recordTelegramResultCoverageAudit(store: Store, rows: CoverageDe
 const escape = (s: unknown) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const identity = (event: EventRecord) => createHash('sha256').update(JSON.stringify(event.kind&&event.kind!=='macro'?[event.kind,event.market,event.instrument,event.resourceId,event.date]:[event.country, event.title, event.date])).digest('hex');
 function safeResultUrl(value?:string):string|null{
-  try{const url=new URL(value||'');return url.protocol==='https:'&&!url.username&&!url.password&&!url.port&&['www.bls.gov','www.bea.gov','www.sec.gov','api.gateio.ws','api.elections.kalshi.com','external-api.kalshi.com','gamma-api.polymarket.com','polymarket.com','kalshi.com','nfs.faireconomy.media'].includes(url.hostname)?url.toString():null;}catch{return null;}
+  try{const url=new URL(value||'');return url.protocol==='https:'&&!url.username&&!url.password&&!url.port&&['www.bls.gov','www.bea.gov','www.sec.gov','www.federalreserve.gov','api.gateio.ws','api.elections.kalshi.com','external-api.kalshi.com','gamma-api.polymarket.com','polymarket.com','kalshi.com','nfs.faireconomy.media'].includes(url.hostname)?url.toString():null;}catch{return null;}
 }
 function reportedMacroCalendarActual(event:EventRecord,now:number):Result|null{
   if((event.kind&&event.kind!=='macro')||event.source!=='ForexFactory Public JSON'||!hasEventActual(event.actual))return null;
@@ -442,8 +442,61 @@ export function parseBeaPceResult(scheduleHtml: string, releaseHtml: string, eve
   };
 }
 
+/** A Fed minutes result is a verified document publication, not a rate decision. */
+export function parseFedFomcMinutesResult(releaseHtml: string, event: Pick<EventRecord, 'title' | 'date' | 'country'>, retrievedAt = new Date().toISOString()): Result {
+  const source = 'Federal Reserve';
+  const unavailable = (reason: string, status = 'unavailable'): Result => ({ actual: null, status, source, reason });
+  if (event.country !== 'USD' || !/^FOMC\s+(?:Meeting\s+)?Minutes$/i.test(event.title.trim())) {
+    return unavailable('只支持美元 FOMC 会议纪要发布事件', 'unsupported');
+  }
+  const eventAt = Date.parse(event.date), retrieved = Date.parse(retrievedAt), parts = eventEasternParts(event.date);
+  if (!Number.isFinite(eventAt) || !parts) return unavailable('FOMC 事件日期无效，无法匹配美联储原文');
+  const articleDate = releaseHtml.match(/<p\b[^>]*class=["'][^"']*\barticle__time\b[^"']*["'][^>]*>\s*([^<]+?)\s*<\/p>/i)?.[1]?.trim();
+  const headingHtml = releaseHtml.match(/<h3\b[^>]*class=["'][^"']*\btitle\b[^"']*["'][^>]*>([\s\S]*?)<\/h3>/i)?.[1] || '';
+  const heading = headingHtml.replace(/<[^>]*>/g, ' ').replace(/&nbsp;|&#160;/gi, ' ').replace(/&amp;/gi, '&').replace(/\s+/g, ' ').trim();
+  const releaseText = releaseHtml.match(/<p\b[^>]*class=["'][^"']*\breleaseTime\b[^"']*["'][^>]*>([\s\S]*?)<\/p>/i)?.[1]
+    ?.replace(/<[^>]*>/g, ' ').replace(/&nbsp;|&#160;/gi, ' ').replace(/\s+/g, ' ').trim() || '';
+  const text = releaseHtml.replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1>/gi, ' ').replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;|&#160;/gi, ' ').replace(/&#8211;|&ndash;/gi, '–').replace(/&mdash;|&#8212;/gi, '—').replace(/&amp;/gi, '&').replace(/\s+/g, ' ');
+  const expectedDay = Date.UTC(Number(parts.year), new Date(`${parts.month} 1, ${parts.year} UTC`).getUTCMonth(), Number(parts.day));
+  const articleDay = articleDate ? Date.parse(`${articleDate} UTC`) : NaN;
+  if (!Number.isFinite(articleDay) || articleDay !== expectedDay || !/^Minutes of the Federal Open Market Committee\b/i.test(heading)
+    || !/Federal Reserve on\b[\s\S]{0,100}\breleased the minutes of the Federal Open Market Committee meeting/i.test(text)) {
+    return unavailable('美联储原文日期或标题与该 FOMC 纪要事件不一致');
+  }
+  const releaseTime = releaseText.match(/For release at\s+2:00\s*p\.m\.\s*(EDT|EST)\b/i)?.[1]?.toUpperCase();
+  const eventZone = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', timeZoneName: 'short' })
+    .formatToParts(new Date(eventAt)).find(part => part.type === 'timeZoneName')?.value?.toUpperCase();
+  if (parts.hour !== '14' || parts.minute !== '00' || !releaseTime || releaseTime !== eventZone) {
+    return unavailable('官方原文发布时间与日历事件的美东时区或 2:00 p.m. 时间不一致');
+  }
+  if (!Number.isFinite(retrieved) || retrieved < eventAt) return unavailable('抓取时间早于官方发布时点，继续等待核验', 'pending');
+  return {
+    actual: 'FOMC 会议纪要已发布', status: 'published', source,
+    url: `https://www.federalreserve.gov/newsevents/pressreleases/monetary${parts.year}${String(new Date(`${parts.month} 1, ${parts.year} UTC`).getUTCMonth() + 1).padStart(2, '0')}${parts.day.padStart(2, '0')}a.htm`,
+    publishedAt: new Date(eventAt).toISOString(), retrievedAt: new Date(retrieved).toISOString(),
+    reason: '美联储原文的发布日期、2:00 p.m. 美东发布时间及 FOMC 纪要标题均与事件匹配；此结果表示纪要发布，不代表利率决议变化。',
+  };
+}
+
 const officialCache = new Map<string, { at: number; html: string }>();
 export async function lookupOfficialEventResult(event: EventRecord): Promise<Result> {
+  if (/^FOMC\s+(?:Meeting\s+)?Minutes$/i.test(event.title.trim())) {
+    if (event.country !== 'USD') return { actual: null, status: 'unsupported', source: 'Federal Reserve', reason: '美联储 FOMC 纪要只匹配 USD 事件' };
+    const parts = eventEasternParts(event.date);
+    if (!parts) return { actual: null, status: 'unavailable', source: 'Federal Reserve', reason: 'FOMC 事件日期无效，无法匹配美联储原文' };
+    const month = String(new Date(`${parts.month} 1, ${parts.year} UTC`).getUTCMonth() + 1).padStart(2, '0');
+    const url = `https://www.federalreserve.gov/newsevents/pressreleases/monetary${parts.year}${month}${parts.day.padStart(2, '0')}a.htm`;
+    try {
+      let page = officialCache.get(url);
+      if (!page || Date.now() - page.at > 300000) {
+        const response = await fetch(url, { signal: AbortSignal.timeout(8000), headers: { 'User-Agent': 'MoneyMoney research contact via website' } });
+        if (!response.ok) return { actual: null, status: response.status === 404 ? 'pending' : 'unavailable', source: 'Federal Reserve', reason: response.status === 404 ? '美联储尚未发布该日期的纪要原文，继续等待' : `美联储原文暂不可用（HTTP ${response.status}）`, url };
+        page = { at: Date.now(), html: await response.text() }; officialCache.set(url, page);
+      }
+      return parseFedFomcMinutesResult(page.html, event, new Date(page.at).toISOString());
+    } catch { return { actual: null, status: 'unavailable', source: 'Federal Reserve', reason: '美联储 FOMC 纪要原文请求失败，稍后重试', url }; }
+  }
   const beaPioEvent = BEA_PIO_EVENT_TITLES.has(event.title.trim().toLowerCase());
   if (beaPioEvent) {
     if (event.country !== 'USD') return { actual: null, status: 'unsupported', source: 'U.S. Bureau of Economic Analysis (BEA)', reason: 'BEA 美国发布结果只匹配 USD 事件' };
