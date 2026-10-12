@@ -187,3 +187,12 @@
 - 远端关键产物 Hash 与本地一致：`dist/web/server.js` `0c7a3d174e5e939355df44434840fa5cd34394ac6599c88ab79b75a1324969e7`、`dist/web/public/index.html` `f2232b26f8386cb0546277cbe0c49b8dd4fb3168e3b3f31fc1f9e610f92587d8`、`asset-manifest.json` `48acd86b8668ac908d54ca7eb29d3c528c96f314ffaa15e0cdf3ea6f35eddd95`、`options-market.js` `8178e53d47f3c0905e0236564f931f52a41162a22fbdfe139ea83c0a4717a918`。发布归档 SHA-256 为 `ba457f387a4ef9169fff14fa6c16b01a84377a226d24f81a596acf4b0df51df8`。
 - 备份及回滚目录保留于 `/opt/moneymoney/backups/dist-pre-b8c3e1b-20261012-option-underlying` 与 `/opt/moneymoney/dist.rollback-b8c3e1b-20261012-option-underlying`。本次仅替换 `dist/`，未改数据库、数据湖、Telegram 配置或模拟账户；未发送 Telegram 消息。
 - 本地未跟踪 `data/research.db` 保持原样且未纳入提交或部署。
+
+## 2026-10-12 发布记录：Kalshi Telegram 结算来源链接
+
+- 代码提交 `5b99c7ada74c06b0d156ceb6216e3150971be42f` 已推送并部署。Telegram 已核验 Kalshi YES/NO 结算结果现在保留 `external-api.kalshi.com` 官方 API 证据链接；仅将该精确 HTTPS 主机加入既有 URL 白名单，其他协议、凭据、端口和主机校验不变。
+- 回归测试先复现结果消息缺少链接，再验证结果消息及历史详情都保留官方 URL。定向 Telegram 结果/适配器/结算测试 49/49 通过；全量 `npm test`、`npm run build`、`npm run smoke:web`、`npm run smoke:auth`、`npm run smoke:browser`、`npm run security:scan` 和 `git diff --check` 通过。
+- 正式域名版本接口返回完整提交 `5b99c7ada74c06b0d156ceb6216e3150971be42f`；健康接口为 `ok=true`、`mode=view-only`、存储健康且无迁移错误；登录页 HTTP 200，`moneymoney.service` 为 `active`。
+- 远端与本地产物 Hash 一致：`dist/web/server.js` `0c7a3d174e5e939355df44434840fa5cd34394ac6599c88ab79b75a1324969e7`、`dist/web/public/index.html` `f2232b26f8386cb0546277cbe0c49b8dd4fb3168e3b3f31fc1f9e610f92587d8`、`dist/features/telegram-event-results.js` `5f55556941a4b4b35ca5b67ccf0326fa45bbd972cce34e24fbbde5db25e007c8`。发布归档 SHA-256 为 `f5bda05f8cc59b16281002122b382c52970f56df7abb4e7abfafef145baaea3a`。
+- 备份及回滚目录保留于 `/opt/moneymoney/backups/dist-pre-5b99c7a-20261012-kalshi-source` 与 `/opt/moneymoney/dist.rollback-5b99c7a-20261012-kalshi-source`。仅替换 `dist/` 并重启 `moneymoney.service`；未改数据库、数据湖或 Telegram 配置，本次未发送 Telegram 消息。生产验证为健康/版本/登录 HTTP 检查，未运行可能触发失败通知的生产 Chromium canary。
+- 本地未跟踪 `data/research.db` 保持未暂存、未提交、未部署。
