@@ -69,7 +69,7 @@ export function recordTelegramResultCoverageAudit(store: Store, rows: CoverageDe
 const escape = (s: unknown) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const identity = (event: EventRecord) => createHash('sha256').update(JSON.stringify(event.kind&&event.kind!=='macro'?[event.kind,event.market,event.instrument,event.resourceId,event.date]:[event.country, event.title, event.date])).digest('hex');
 function safeResultUrl(value?:string):string|null{
-  try{const url=new URL(value||'');return url.protocol==='https:'&&!url.username&&!url.password&&!url.port&&['www.bls.gov','www.bea.gov','www.sec.gov','api.gateio.ws','api.elections.kalshi.com','gamma-api.polymarket.com','polymarket.com','kalshi.com','nfs.faireconomy.media'].includes(url.hostname)?url.toString():null;}catch{return null;}
+  try{const url=new URL(value||'');return url.protocol==='https:'&&!url.username&&!url.password&&!url.port&&['www.bls.gov','www.bea.gov','www.sec.gov','api.gateio.ws','api.elections.kalshi.com','external-api.kalshi.com','gamma-api.polymarket.com','polymarket.com','kalshi.com','nfs.faireconomy.media'].includes(url.hostname)?url.toString():null;}catch{return null;}
 }
 function reportedMacroCalendarActual(event:EventRecord,now:number):Result|null{
   if((event.kind&&event.kind!=='macro')||event.source!=='ForexFactory Public JSON'||!hasEventActual(event.actual))return null;

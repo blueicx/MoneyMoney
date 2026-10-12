@@ -263,3 +263,19 @@ test('coverage audit records a stuck incident once, scopes duplicate event ids b
  result=recordTelegramResultCoverageAudit(store,[],now+120000);assert.equal(result.audit.stuckCount,0);
  assert.equal(audits.length,2);assert.equal(audits[1].action,'telegram_result_coverage_recovered');
 });
+
+test('verified Kalshi settlement replies retain the official result source link',async()=>{
+ const {TelegramEventResultMonitor}=require('../src/features/telegram-event-results');
+ const {lookupTrackedResult}=require('../src/features/telegram-result-adapters');
+ const values=new Map(),store={get:k=>structuredClone(values.get(k)||null),set:(k,v)=>values.set(k,structuredClone(v))};
+ const event={title:'Will the event resolve YES?',date:'2026-10-12T11:30:00.000Z',impact:'high',kind:'prediction',market:'prediction',instrument:'prediction:kalshi:EXAMPLE-YES',resourceId:'EXAMPLE-YES',platform:'Kalshi'};
+ const sourceUrl='https://external-api.kalshi.com/trade-api/v2/markets/EXAMPLE-YES';
+ const settlement={market:'prediction',instrument:event.instrument,platform:'Kalshi',marketId:event.resourceId,status:'settled',result:'YES',settlementAt:'2026-10-12T11:45:00.000Z',evidenceHash:'verified-settlement-hash',sourceUrl};
+ const now=Date.parse('2026-10-12T12:00:00.000Z'),messages=[];
+ const monitor=new TelegramEventResultMonitor(store,tracked=>lookupTrackedResult(tracked,{settlement:async()=>settlement}),()=>now);
+ await monitor.run('owner',[event],async text=>{messages.push(text);return 501;});
+ assert.equal(messages.length,1);
+ assert.match(messages[0],/<a href="https:\/\/external-api\.kalshi\.com\/trade-api\/v2\/markets\/EXAMPLE-YES">官方原文<\/a>/);
+ const detail=monitor.detail('owner',monitor.history('owner')[0].id);
+ assert.equal(detail.resultUrl,sourceUrl);
+});
