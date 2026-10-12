@@ -78,4 +78,4 @@
 - [x] 实现仅对当前工作区加载的必要 UI 控件；沿用现有请求缓存和性能记录，不新增依赖或布局方向。
 - [x] 运行 `npm test`、`npm run build`、`npm run smoke:web`、`npm run smoke:auth`、`npm run smoke:browser`、`npm run smoke:contracts`、`npm run smoke:experience`、`npm run security:scan`、`git diff --check`。
 - [x] 完成桌面/移动 Chromium 和三个主题检查；回看六项功能清单、权限、来源、缺失数据状态及用户工作区边界。
-- [ ] 提交代码与发布记录，推送当前分支；备份、校验哈希并部署当前 VPS，验证服务、正式域名和版本，保留回滚目录。
+- [x] 已提交并推送代码 `7efcad5`；VPS 发布 `research-closure-7efcad5` 已校验 archive/server/index SHA-256，`moneymoney.service` 与正式域名 canary 通过；旧版备份 `/opt/moneymoney/backups/dist-pre-research-closure-7efcad5` 和回滚目录 `/opt/moneymoney/dist.rollback-research-closure-7efcad5` 保留。
