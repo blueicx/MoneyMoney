@@ -164,3 +164,11 @@
 - 之前的比较函数在两份旧记录都没有 `reportPeriod` 时绕过相邻期校验，可能把股数差错误标成增持；新增回归测试先复现该问题，再收紧比较条件。
 - 只有报告期相邻且证券身份行可比较时，当前期未披露才标成“未披露”；不能仅凭缺行声称卖出/清仓。
 - `tests/guru-holdings.test.cjs` 覆盖未知报告期、相邻期股数变化、跨期缺口、精确证券身份和未披露语义。验证为本地契约测试，不代表 SEC 当前在线覆盖率。
+
+## 2026-10-12 发布记录：13F 报告期比较门槛
+
+- 代码提交 `cf9d161b393ddd1461c886b2a82ab2bb321f63ba` 已推送到 `codex/research-closure-all` 并部署到当前 VPS。部署只替换 `dist/`，未改数据库、数据湖、Telegram 配置或模拟账户。
+- 本地验收：完整 `npm test`、`npm run build`、`npm run smoke:web`、`npm run smoke:auth`、`npm run smoke:browser`、`npm run security:scan`、`git diff --check` 均通过；生产只读 Chromium canary 覆盖股票、期权、虚拟币、预测市场及 SNDK。
+- 正式域名版本为 `cf9d161b393ddd1461c886b2a82ab2bb321f63ba`，健康 `alive`，登录页 HTTP 200；`moneymoney.service` 为 `active`，模式为 `view-only`，存储健康且无迁移错误。
+- 发布归档 SHA-256：`c04248c3a3247f42977b9985bb2ce28f3033a0e8495efd80cf8c22c1f4875d18`。远端关键 Hash 与本地一致：`server.js` `1bd2009a8589944eb3f2b9ab991f3d8c300c80921439590f0a9b1f7cf8e23be4`、`index.html` `f2232b26f8386cb0546277cbe0c49b8dd4fb3168e3b3f31fc1f9e610f92587d8`、`asset-manifest.json` `48acd86b8668ac908d54ca7eb29d3c528c96f314ffaa15e0cdf3ea6f35eddd95`、`guru-holdings.js` `9ecec9ec4e9d9dd76afe8f2293dfecf3beae91aa1dacf393edceb7a903d96cc1`。
+- 备份和回滚目录保留于 `/opt/moneymoney/backups/dist-pre-cf9d161-20261012-13f-period` 与 `/opt/moneymoney/dist.rollback-cf9d161-20261012-13f-period`。本地 `data/research.db` SHA-256 仍为 `27fd475e523568daa4cdcabf3146917023335a62affe00429babd721b3b79fd1`，未纳入 Git 或发布包。
