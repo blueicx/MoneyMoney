@@ -178,3 +178,12 @@
 - 多腿到期损益函数先解析每条期权合约的底层标的，再要求所有腿身份一致；无法从合约代码核验底层标的时 fail-closed。
 - `/api/options/payoff` 将请求的 CBOE 标的代码传入领域计算器，避免不同股票/ETF 的腿混合，或合约代码与当前请求标的不一致时仍返回貌似有效的损益曲线。
 - 仅改变分析校验，不接入执行器、不创建订单、不改期权来源或报价口径。`tests/options-market-quality.test.cjs` 覆盖混合标的拒绝、请求标的一致性和服务端参数接线；定向期权及合约 UI 测试通过。
+
+## 2026-10-12 发布记录：期权多腿底层标的一致性
+
+- 代码提交 `b8c3e1b8a1a095464a670ce14e08d2b34970b1d4` 已推送并部署到当前 VPS。`/api/options/payoff` 会校验每条腿可识别的底层标的、腿间一致性及其与请求标的的一致性；不明确时拒绝生成损益结果。
+- 本地验收：完整 `npm test`、`npm run build`、`npm run smoke:web`、`npm run smoke:auth`、`npm run smoke:browser`、`npm run security:scan`、`git diff --check` 均通过；期权/合约定向测试 23/23 通过。生产只读 Chromium canary 通过，覆盖股票、期权、虚拟币、预测市场及 SNDK。
+- 正式域名 `https://bluetrade.bbroot.com` 的版本接口返回 `b8c3e1b8a1a095464a670ce14e08d2b34970b1d4`，健康接口 `ok=true`，模式 `view-only`，登录页 HTTP 200；`moneymoney.service` 为 `active`。
+- 远端关键产物 Hash 与本地一致：`dist/web/server.js` `0c7a3d174e5e939355df44434840fa5cd34394ac6599c88ab79b75a1324969e7`、`dist/web/public/index.html` `f2232b26f8386cb0546277cbe0c49b8dd4fb3168e3b3f31fc1f9e610f92587d8`、`asset-manifest.json` `48acd86b8668ac908d54ca7eb29d3c528c96f314ffaa15e0cdf3ea6f35eddd95`、`options-market.js` `8178e53d47f3c0905e0236564f931f52a41162a22fbdfe139ea83c0a4717a918`。发布归档 SHA-256 为 `ba457f387a4ef9169fff14fa6c16b01a84377a226d24f81a596acf4b0df51df8`。
+- 备份及回滚目录保留于 `/opt/moneymoney/backups/dist-pre-b8c3e1b-20261012-option-underlying` 与 `/opt/moneymoney/dist.rollback-b8c3e1b-20261012-option-underlying`。本次仅替换 `dist/`，未改数据库、数据湖、Telegram 配置或模拟账户；未发送 Telegram 消息。
+- 本地未跟踪 `data/research.db` 保持原样且未纳入提交或部署。
