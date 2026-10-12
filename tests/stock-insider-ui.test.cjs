@@ -78,3 +78,14 @@ test('derivative Form 4 rows are labeled separately and never presented as commo
   assert.match(result, /不计入普通股买卖净额/);
   assert.doesNotMatch(result, /信号置信度|买入偏积极|<div[^>]*>净额<\/div>/);
 });
+
+test('non-market common-stock disclosures show their nature without buy/sell totals', () => {
+  const result = render({
+    ...noData,
+    dataStatus: 'live', reason: null,
+    transactions: [{ securityType: 'stock', action: 'OTHER', transactionNatureZh: '发行人授予、奖励或其他取得', securityTitle: 'Common Stock', ownerName: 'Jane Doe', ownerTitleZh: '高管·CFO', transactionDate: '2026-10-01', shares: 1000, priceUsd: 0, valueUsd: 0, plan10b5: false }],
+  });
+  assert.match(result, /发行人授予、奖励或其他取得/);
+  assert.match(result, /不计入普通股买卖净额/);
+  assert.doesNotMatch(result, /信号置信度|解读：|<div[^>]*>净额<\/div>/);
+});

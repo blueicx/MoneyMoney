@@ -3720,14 +3720,15 @@ function renderInsiderRadar(data) {
   const transactions = Array.isArray(data.transactions) ? data.transactions : [];
   const stockTransactions = transactions.filter(trade => trade.securityType !== 'derivative');
   const hasActivity = transactions.length > 0;
-  const hasStockActivity = stockTransactions.length > 0;
+  const hasStockActivity = stockTransactions.some(trade => trade.action === 'BUY' || trade.action === 'SELL');
   const rows = transactions.map(trade => {
     const derivative = trade.securityType === 'derivative';
     const buy = trade.action === 'BUY';
     const color = derivative || trade.action === 'OTHER' ? 'var(--text-secondary)' : buy ? 'var(--green)' : 'var(--red)';
-    const label = derivative ? `衍生证券申报（${trade.action === 'BUY' ? '取得' : trade.action === 'SELL' ? '处置' : '其他'}）` : trade.action === 'BUY' ? '买入' : trade.action === 'SELL' ? '卖出' : '其他';
+    const label = derivative ? `衍生证券申报（${trade.action === 'BUY' ? '取得' : trade.action === 'SELL' ? '处置' : '其他'}）` : trade.action === 'BUY' ? '买入' : trade.action === 'SELL' ? '卖出' : trade.transactionNatureZh || '其他申报';
     const price = !derivative && trade.priceUsd > 0 ? ' @ $' + trade.priceUsd.toFixed(2) : '';
     const security = derivative ? ` · ${trade.securityTitle || '衍生证券'}${trade.underlyingSecurityTitle ? `（标的：${trade.underlyingSecurityTitle}）` : ''}` : '';
+    const transactionNature = trade.action === 'OTHER' && trade.transactionNatureZh ? ` · ${trade.transactionNatureZh}` : '';
     let filingLink = '';
     try {
       const url = new URL(String(trade.sourceUrl || ''));
@@ -3739,7 +3740,9 @@ function renderInsiderRadar(data) {
       '<div style="min-width:0;"><div style="font-weight:700;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + stockEscapeHtml(trade.ownerName) + '">' +
       stockEscapeHtml(trade.ownerName) + '</div>' +
       '<div style="font-size:10.5px;color:var(--text-secondary);margin-top:3px;line-height:1.4;">' +
-        stockEscapeHtml(trade.ownerTitleZh) + ' · ' + stockEscapeHtml(trade.transactionDate) + stockEscapeHtml(security) +
+      stockEscapeHtml(trade.ownerTitleZh) + ' · ' + stockEscapeHtml(trade.transactionDate) + stockEscapeHtml(security) +
+        stockEscapeHtml(transactionNature) +
+        (trade.code ? ' · SEC 代码 ' + stockEscapeHtml(trade.code) : '') +
         (trade.plan10b5 ? ' · <span title="Rule 10b5-1 预设计划">预设计划</span>' : '') +
         (filingLink ? ' · ' + filingLink : '') +
       '</div></div>' +
@@ -3766,7 +3769,7 @@ function renderInsiderRadar(data) {
       ${hasStockActivity ? `<div style="margin-top:10px;padding:10px;border-radius:10px;background:color-mix(in srgb,${signalColor} 8%,transparent);font-size:11px;color:var(--text-primary);line-height:1.5;">
         <strong>解读：</strong>${safeNewsText(data.adviceZh)}<br><span style="font-size:10px;color:var(--text-secondary);">信号置信度 ${data.confidence}/100；官方申报有延迟。</span>
       </div>` : ''}
-      ${hasActivity ? `${hasStockActivity ? '' : '<div style="margin-top:10px;padding:10px;border-radius:9px;background:var(--bg-secondary);color:var(--text-secondary);font-size:12px;line-height:1.5;">发现衍生证券申报；与普通股买卖分开显示，不计入普通股买卖净额。</div>'}<div style="margin-top:6px;">${rows}</div>` : `<div style="margin-top:10px;padding:10px;border-radius:9px;background:var(--bg-secondary);color:var(--text-secondary);font-size:12px;line-height:1.5;">${safeNewsText(data.reason || '窗口内没有可解析的直接普通股买卖记录。')}</div>`}
+      ${hasActivity ? `${hasStockActivity ? '' : '<div style="margin-top:10px;padding:10px;border-radius:9px;background:var(--bg-secondary);color:var(--text-secondary);font-size:12px;line-height:1.5;">本窗口有 Form 4 申报，但没有可计入普通股买卖统计的 P/S 交易。授予、代扣、赠与、衍生证券等记录仍保留展示，不计入普通股买卖净额。</div>'}<div style="margin-top:6px;">${rows}</div>` : `<div style="margin-top:10px;padding:10px;border-radius:9px;background:var(--bg-secondary);color:var(--text-secondary);font-size:12px;line-height:1.5;">${safeNewsText(data.reason || '窗口内没有可解析的直接普通股买卖记录。')}</div>`}
       <div style="margin-top:8px;font-size:10.5px;color:var(--text-secondary);line-height:1.45;">来源：SEC EDGAR Form 4。内部人出售常与薪酬、税务和分散化有关，不能单独作为卖出依据；不构成投资建议。</div>
     </div>
   `;

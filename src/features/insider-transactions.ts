@@ -20,6 +20,7 @@ export interface InsiderTrade {
   securityType?: 'stock' | 'derivative';
   securityTitle?: string;
   underlyingSecurityTitle?: string;
+  transactionNatureZh?: string;
   sourceUrl?: string;
 }
 
@@ -83,6 +84,41 @@ function xmlText(block: string, tag: string): string {
 function number(value: string): number {
   const parsed = Number(String(value || '').replace(/[$,%\s]/g, ''));
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+const TRANSACTION_NATURE_ZH: Record<string, string> = {
+  P: '公开市场/私人买入',
+  S: '公开市场/私人卖出',
+  V: '自愿提前申报（性质见原文说明）',
+  A: '发行人授予、奖励或其他取得',
+  D: '向发行人处置',
+  F: '支付行权价或税款（交付/代扣证券）',
+  I: '依《交易法》16b-3(e)进行的酌情交易',
+  M: '衍生证券行权/转换',
+  C: '衍生证券转换',
+  E: '空头衍生头寸到期',
+  H: '长期衍生头寸到期/取消（收到对价）',
+  O: '价外衍生证券行权',
+  X: '价内/平价衍生证券行权',
+  G: '善意赠与',
+  L: '小额取得',
+  W: '遗嘱/继承取得或处置',
+  Z: '投票信托存入/提取',
+  J: '其他交易（见 SEC 脚注）',
+  K: '股权互换或类似工具',
+  U: '控制权变更要约处置',
+};
+
+function transactionCodes(code: string): string[] {
+  return code.split(/[\s/,]+/).map(value => value.trim()).filter(Boolean);
+}
+
+function transactionNature(code: string): string {
+  const codes = transactionCodes(code);
+  const primaryCode = codes.find(value => value !== 'K') || codes[0];
+  if (!primaryCode) return '未识别交易性质（请核对 SEC 原文）';
+  const label = TRANSACTION_NATURE_ZH[primaryCode] || `未识别代码 ${primaryCode}（请核对 SEC 原文）`;
+  return codes.includes('K') && primaryCode !== 'K' ? `${label}（涉及股权互换）` : label;
 }
 
 export function buildSecArchiveCandidates(accessionNumber: string, primaryDocument?: string): string[] {
@@ -163,14 +199,17 @@ function parseTransactionTable(xml: string, tableName: 'nonDerivativeTable' | 'd
     const codingBlock = segment.match(/<transactionCoding>([\s\S]*?)<\/transactionCoding>/i)?.[1] || '';
     const sharesBlock = segment.match(/<transactionShares>([\s\S]*?)<\/transactionShares>/i)?.[1] || '';
     const priceBlock = segment.match(/<transactionPricePerShare>([\s\S]*?)<\/transactionPricePerShare>/i)?.[1] || '';
-    const adBlock = segment.match(/<transactionAcquiredDisposedCode>([\s\S]*?)<\/transactionAcquiredDisposedCode>/i)?.[1] || '';
-
     const shares = number(xmlText(sharesBlock, 'value'));
     const price = number(xmlText(priceBlock, 'value'));
-    const ad = xmlText(adBlock, 'value').toUpperCase();
-    const action = ad === 'A' ? 'BUY' : ad === 'D' ? 'SELL' : 'OTHER';
+    const code = xmlText(codingBlock, 'transactionCode').toUpperCase();
+    const codes = transactionCodes(code);
+    const hasPurchaseCode = codes.includes('P');
+    const hasSaleCode = codes.includes('S');
+    const action = hasPurchaseCode !== hasSaleCode
+      ? hasPurchaseCode ? 'BUY' : 'SELL'
+      : 'OTHER';
 
-    if (!shares || (securityType === 'stock' && !['BUY', 'SELL'].includes(action))) continue;
+    if (!shares) continue;
 
     trades.push({
       filedAt,
@@ -178,12 +217,13 @@ function parseTransactionTable(xml: string, tableName: 'nonDerivativeTable' | 'd
       ownerName: ownerName || 'Unknown',
       ownerTitleZh: role,
       action: action as InsiderTrade['action'],
-      code: xmlText(codingBlock, 'transactionCode').toUpperCase(),
+      code,
       shares: round(shares, 0),
       priceUsd: securityType === 'derivative' ? 0 : round(price, 4),
       valueUsd: securityType === 'derivative' ? 0 : round(shares * price, 0),
       plan10b5: plan,
       securityType,
+      transactionNatureZh: transactionNature(code),
       securityTitle: xmlText(segment, 'securityTitle') || undefined,
       ...(securityType === 'derivative' && xmlText(segment, 'underlyingSecurityTitle')
         ? { underlyingSecurityTitle: xmlText(segment, 'underlyingSecurityTitle') } : {}),
@@ -201,8 +241,7 @@ export function parseForm4Transactions(xml: string, filedAt: string, sourceUrl?:
   ];
 }
 
-function buildSummary(
-  symbol: string,
+export function buildInsiderSummary(
   transactions: InsiderTrade[],
   scannedFilings: number
 ): Pick<
@@ -210,7 +249,9 @@ function buildSummary(
   'ownerCount' | 'buyCount' | 'sellCount' | 'buyValueUsd' | 'sellValueUsd' |
   'netValueUsd' | 'planSellRatio' | 'confidence' | 'signalZh' | 'adviceZh'
 > {
-  const commonStockTransactions = transactions.filter(trade => trade.securityType !== 'derivative');
+  const commonStockTransactions = transactions.filter(trade =>
+    trade.securityType !== 'derivative' && trade.action !== 'OTHER'
+  );
   const owners = new Set(commonStockTransactions.map(trade => trade.ownerName));
   const buys = commonStockTransactions.filter(trade => trade.action === 'BUY');
   const sells = commonStockTransactions.filter(trade => trade.action === 'SELL');
@@ -223,7 +264,7 @@ function buildSummary(
   let signalZh = commonStockTransactions.length ? '内部人买卖相对平衡' : '暂无直接普通股买卖样本';
   let adviceZh = commonStockTransactions.length
     ? '没有明显一边倒的官方申报信号；仍应把技术面、基本面和财报时间放在一起判断。'
-    : '衍生证券申报单独展示，不计入普通股买卖净额。';
+    : '授予、代扣、赠与、衍生证券等非 P/S 申报单独展示，不计入普通股买卖净额。';
   if (sellValue >= 2_000_000 && sells.length >= 3 && netValue < 0) {
     signalZh = '内部人卖出偏多';
     adviceZh = planSellRatio >= 0.6
@@ -240,7 +281,7 @@ function buildSummary(
     adviceZh = '高管常因税务、薪酬和分散化卖出；只有连续大额非计划卖出才更值得警惕。';
   }
 
-  const confidence = Math.min(88, Math.round(
+  const confidence = commonStockTransactions.length === 0 ? 0 : Math.min(88, Math.round(
     32 +
     Math.min(22, owners.size * 6) +
     Math.min(20, Math.log10(Math.max(1, buyValue + sellValue)) * 5) +
@@ -353,7 +394,7 @@ export async function getInsiderRadar(symbolInput: string): Promise<InsiderRadar
   transactions.sort((a, b) =>
     b.transactionDate.localeCompare(a.transactionDate) || a.ownerName.localeCompare(b.ownerName)
   );
-  const summary = buildSummary(symbol, transactions, scannedEntries.length);
+  const summary = buildInsiderSummary(transactions, scannedEntries.length);
   const coverage = classifyForm4Coverage({ totalFilings: entries.length, scannedFilings: scannedEntries.length, successfulFilings, failedFilings, transactionCount: transactions.length });
   const value: InsiderRadarResult = {
     symbol,
