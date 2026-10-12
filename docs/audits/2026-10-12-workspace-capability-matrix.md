@@ -130,4 +130,5 @@
 - 历史事件研究要求可核验发布时间；新闻允许以发布时间作为研究进入时点，但日历/事件必须有明确发生时间。计划时间晚于 `asOf` 时拒绝，计划日期已过但仍无发生证据时也拒绝；事件研究 cohort 排除仅有计划时间的事件。
 - 事件聚类、K线轨道、证据抽屉、工作区事件入口和证据快照均使用分离后的时间字段；图表明确标注计划/发生/发布，点击定位仍可使用 `timelineAt`，但不会把它作为历史研究证据。
 - 新增测试先复现旧归一化失败，再覆盖发布时间、计划时间、未核实发生状态、新闻研究时点、事件聚类、cohort 筛选和页面/服务端证据字段契约。
-- 本地目标测试通过；生产部署和正式域名验收尚待本批完整验证后记录。
+- 代码提交 `118e8346b25a107d487b9216e82ae9d96e217711` 已推送并部署；`moneymoney.service` 为 `active`，正式域名版本接口返回同一 commit，健康接口 `alive`。生产只读 Chromium canary 覆盖股票、期权、虚拟币、预测市场和 SNDK，访客私有读取边界检查通过；本次未发送 Telegram 测试消息。
+- 远端 `dist/web/server.js` SHA-256 为 `1e773360b8fcdf3d2dc58475c3e670293c8f115401cbe3fda299f3fc8624bf39`，`dist/web/public/index.html` SHA-256 为 `a66deba8dbf435bee787e55d6b00e8b19e4462f9541a1c50598f32e314639b46`，归档 SHA-256 `669c55824ac55721f0b0ed493a7fca2d2ba3e8b140b29b0c2f164e5b7b507a14`。备份及回滚目录保留于 `/opt/moneymoney/backups/dist-pre-118e834-20261012-event-time` 和 `/opt/moneymoney/dist.rollback-118e834-20261012-event-time`。
