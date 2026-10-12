@@ -196,3 +196,18 @@
 - 远端与本地产物 Hash 一致：`dist/web/server.js` `0c7a3d174e5e939355df44434840fa5cd34394ac6599c88ab79b75a1324969e7`、`dist/web/public/index.html` `f2232b26f8386cb0546277cbe0c49b8dd4fb3168e3b3f31fc1f9e610f92587d8`、`dist/features/telegram-event-results.js` `5f55556941a4b4b35ca5b67ccf0326fa45bbd972cce34e24fbbde5db25e007c8`。发布归档 SHA-256 为 `f5bda05f8cc59b16281002122b382c52970f56df7abb4e7abfafef145baaea3a`。
 - 备份及回滚目录保留于 `/opt/moneymoney/backups/dist-pre-5b99c7a-20261012-kalshi-source` 与 `/opt/moneymoney/dist.rollback-5b99c7a-20261012-kalshi-source`。仅替换 `dist/` 并重启 `moneymoney.service`；未改数据库、数据湖或 Telegram 配置，本次未发送 Telegram 消息。生产验证为健康/版本/登录 HTTP 检查，未运行可能触发失败通知的生产 Chromium canary。
 - 本地未跟踪 `data/research.db` 保持未暂存、未提交、未部署。
+
+## 2026-10-12 增量复核：SEC Form 4 交易代码语义
+
+- 内部人买卖方向改由 Form 4 `transactionCode` 判断：只有非衍生普通股 `P`（公开市场/私人买入）和 `S`（公开市场/私人卖出）进入买入、卖出、净额及相关信号统计；`transactionAcquiredDisposedCode` 的 A/D 只描述取得/处置方向，不能替代交易性质。
+- 其他申报行保留在原文列表，并按 SEC 代码展示性质；授予/发行人取得、向发行人处置、行权款或税款代扣、衍生品、赠与等不混入普通股买卖统计。未识别交易代码保持 `OTHER` 并提示核对原文；`P/K`、`S/K` 保留主买卖代码并注明股权互换。
+- 摘要无合格 P/S 普通股样本时不展示虚假的买卖平衡、净额置信度或方向性解读；SEC 来源链接继续限制为 HTTPS SEC 域名并安全转义。
+- 官方代码定义依据 [SEC Form 4 Instructions](https://www.sec.gov/files/form4data,0.pdf)。`tests/insider-transactions.test.cjs` 与 `tests/stock-insider-ui.test.cjs` 覆盖交易码方向、非市场代码保留、汇总排除及空状态呈现。
+
+## 2026-10-12 发布记录：SEC Form 4 买卖信号分类修复
+
+- 代码提交 `d32d428209cbcb4b620aaccbd5ba40b9a3fdfdf3` 已推送到 `codex/research-closure-all` 并部署当前 VPS。只发布编译产物 `dist/`，没有改远端环境密钥、数据库、数据湖或 Telegram 配置，也未发送 Telegram 消息。
+- 本地验收：完整 `npm test`、`npm run build`、`npm run smoke:web`、`npm run smoke:auth`、`npm run smoke:browser`、`npm run security:scan`、`git diff --check` 均通过；Chromium 矩阵覆盖四市场、三主题、SEC/13F 页面、隔离与移动布局。
+- 正式域名版本接口返回 `d32d428209cbcb4b620aaccbd5ba40b9a3fdfdf3`，健康接口 `alive`，登录页 HTTP 200，更新后的股票工作区资源 HTTP 200 且包含新说明；`moneymoney.service` 为 `active`。未运行可能向 Telegram 发送异常通知的生产 canary。
+- 本地/远端产物 SHA-256 一致：`dist/web/server.js` `0c7a3d174e5e939355df44434840fa5cd34394ac6599c88ab79b75a1324969e7`、`dist/web/public/index.html` `39a5e4c96a560b6e344b6c6c2ecdb8329372778ec79fde977250cb799b640f62`、`asset-manifest.json` `cd629da6fdab288f22d979eb56aff0ddde65423b9fdd748330087b32fc8ec46c`、`build-info.json` `d03e699f62d45dcbbb491b4e0362b0d25be42e769ac738b9e286b3a4ba22b9cc`、`insider-transactions.js` `f85b8fe7238d08e28fd8a2f44cc73d4836a4446d7f9a4d8195a0ad4a41eb96cf`、`workspace-stocks.82c03675c964b508.js` `82c03675c964b508a6cd2acb0a2af4f0d6ea34821767c37852b371bc3dc02ff0`。发布归档 SHA-256 为 `04f89ad2bd44fba82ad310ad514e79fb1624e48dff5d7ad1a95579cc746664a8`。
+- 备份和回滚目录保留于 `/opt/moneymoney/backups/dist-pre-d32d428-20261012-form4` 与 `/opt/moneymoney/dist.rollback-d32d428-20261012-form4`。部署前后服务均健康；本地未跟踪 `data/research.db` 的 SHA-256 前后均为 `27fd475e523568daa4cdcabf3146917023335a62affe00429babd721b3b79fd1`，未纳入 Git 或发布包。
