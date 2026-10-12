@@ -71,6 +71,17 @@ const GUEST_GET_PREFIXES = [
   '/workspaces/shared',
 ];
 
+const GUEST_INSTRUMENT_GET_PATHS = new Set([
+  '/instruments/search',
+  '/instruments/compare',
+  '/instruments/compare/snapshots',
+]);
+
+function isGuestInstrumentReadPath(pathname: string): boolean {
+  if (GUEST_INSTRUMENT_GET_PATHS.has(pathname)) return true;
+  return /^\/instruments\/(?:stock|option|crypto|prediction)\/[^/]+\/[^/]+\/(?:overview|timeline)$/.test(pathname);
+}
+
 function matchesPathPrefix(pathname: string, prefix: string): boolean {
   return pathname === prefix || pathname.startsWith(prefix + '/');
 }
@@ -78,6 +89,9 @@ function matchesPathPrefix(pathname: string, prefix: string): boolean {
 export function isGuestRequestAllowed(method: string, pathname: string): boolean {
   if (String(method).toUpperCase() !== 'GET') return false;
   const normalizedPath = '/' + String(pathname || '').replace(/^\/+/, '');
+  if (normalizedPath === '/instruments' || normalizedPath.startsWith('/instruments/')) {
+    return isGuestInstrumentReadPath(normalizedPath);
+  }
   return GUEST_GET_PREFIXES.some(prefix => matchesPathPrefix(normalizedPath, prefix));
 }
 export function blacklistToken(token: string): void {

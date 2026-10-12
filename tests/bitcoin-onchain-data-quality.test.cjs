@@ -128,6 +128,30 @@ test('same calendar date is not treated as a synchronized observation when sourc
   assert.match(result.reason, /没有可核验的共同观测时点/);
 });
 
+test('future on-chain observations are excluded relative to the retrieval as-of time', () => {
+  const retrievedAt = '2026-10-12T02:00:00.000Z';
+  const charts = validCharts();
+  charts['n-unique-addresses'] = {
+    points: [...points(60), { x: Date.parse(retrievedAt) + DAY, y: 9_999 }],
+  };
+
+  const result = buildBitcoinOnchainRadar(charts, retrievedAt);
+  const addresses = result.seriesStatus.find(row => row.chart === 'n-unique-addresses');
+  assert.equal(addresses.futureCount, 1);
+  assert.ok(Date.parse(addresses.sourceUpdatedAt) <= Date.parse(retrievedAt));
+  assert.match(addresses.reason, /晚于抓取时点/);
+  assert.equal(result.signal, 'unavailable', 'a series with post-as-of observations cannot support a synchronized aggregate');
+  assert.doesNotMatch(result.metrics.map(metric => metric.value).join(','), /9999/);
+
+  const onlyFuture = Object.fromEntries(CHARTS.map(chart => [chart, {
+    points: points(60, 100, Date.parse(retrievedAt) + DAY),
+  }]));
+  const noPastRecords = buildBitcoinOnchainRadar(onlyFuture, retrievedAt);
+  assert.equal(noPastRecords.dataStatus, 'partial');
+  assert.equal(noPastRecords.metrics.length, 0);
+  assert.match(noPastRecords.reason, /晚于抓取时点/);
+});
+
 test('one upstream chart exception remains a partial result and records retrieval time', async () => {
   const result = await getBitcoinOnchainRadar({
     fetchChart: async chart => {

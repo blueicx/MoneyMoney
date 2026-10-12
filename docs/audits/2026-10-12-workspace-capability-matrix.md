@@ -18,7 +18,7 @@
 |---|---|---|---|---|---|
 | `overview` 市场总览 | 总体及四市场、自选 | `#market-overview`、`#workspace-dashboard-cards` | `/api/workspace/dashboard?scope=`；市场专属 Provider 聚合 | 访客使用公开摘要；Provider 独立返回状态。冷缓存/来源不可用需逐卡核验 | `workspace-exclusive-runtime`；浏览器四市场矩阵待执行 |
 | `radar` 市场雷达 | 股票、期权、虚拟币、预测市场 | `marketRadarTab()` 对应当前市场 tab | `/api/market-ticker`、市场行情/雷达现有 loader | 各市场数据能力不等价；必须按当前市场展示实际来源状态 | 导航与市场隔离测试；各市场交互待抽检 |
-| `analysis` 标的分析 | 四市场 | `#analysis-tab` / `loadActiveWorkspaceInstrument()` | `/api/analysis`、`/api/instruments/:type/:venue/:symbol/overview` | 依赖明确 `InstrumentRef`；访客可见范围由后端响应决定，需继续核查私有字段 | `market-workspace-flow`、instrument 测试 |
+| `analysis` 标的分析 | 四市场 | `#analysis-tab` / `loadActiveWorkspaceInstrument()` | `/api/analysis`、`/api/instruments/search`、`compare`、`compare/snapshots`、标的 `overview`/`timeline` | `/api/analysis` 仅公开市场分析；访客统一标的读取仅放行明确 GET 路由，比较快照只返回 `visibility=public`；搜索/概览/时间线不读取自选、日记、任务或模拟账户 | `guest-mode`、`market-workspace-flow`、instrument 测试 |
 | `screener` 筛选与比较 | 四市场 | `#market-research-tools`、筛选模块 | `/api/screener`、`/api/screener/templates`、`/api/instruments/compare` | 市场参数需与筛选条件一致；跟踪模板不应跨市场复用 | screener/tracking 专项测试 |
 | `backtest` 策略回测 | 四市场（按数据能力） | `#backtest-tab` | `/api/backtest`、`/api/backtest/preflight` | 依赖历史覆盖、成本和样本区间；禁止将数据缺口当成零收益 | 回测专项与市场隔离测试 |
 | `risk` 风险监控 | 四市场 | `#risk-tab` | `/api/risk/overview`、`/api/risk/history`、纸面风险指标 API | 私人组合/模拟仓位受管理员权限保护；缺基准或汇率不能补零 | `guest-mode`、风险/组合完整性测试 |
@@ -70,6 +70,13 @@
 - 页面分别标注来源观测时间与 MoneyMoney 抓取时间；部分成功和失败原因沿用主题变量展示，缺少综合结果时不填充虚假分数。
 - `tests/bitcoin-onchain-data-quality.test.cjs` 覆盖正常零值、零成交额、负值、空序列、坏行、单源失败、精确共同时间点/错位时间戳、UI 状态及三主题渲染。
 - 此处验证的是代码契约和本地渲染；未据此声称 Blockchain.com 的在线可用率或数据完整度达到任何 SLA。
+
+## 2026-10-12 增量复核：访客标的分析权限与链上未来时点
+
+- 访客 `/api/instruments` 不再按整段前缀放行；只允许搜索、同市场比较、公开比较快照及合法标的身份的 `overview`/`timeline` GET。比较快照仍按 `visibility=public` 过滤，写入维持管理员权限。未来新增的 holdings、decisions、export 等子路由默认拒绝。
+- `/api/analysis` 仅读取公开市场分析服务；不读取统一自选、组合/模拟账本或 SQLite 私有业务状态。访客策略仍为只读 GET allowlist。
+- BTC 链上序列超过本次 `retrievedAt` 的点不参与指标、共同时间戳或信号计算；逐序列保留 `futureCount` 并显示排除原因。若所有记录都晚于抓取时点，返回 `partial`、零指标和明确原因，而不是错误展示为普通无数据。
+- `tests/guest-mode.test.cjs` 与 `tests/bitcoin-onchain-data-quality.test.cjs` 覆盖权限最小化、公开快照筛选、未来点过滤及全未来点状态。验证限于本地契约和页面，不代表上游当前 SLA。
 
 ## 2026-10-12 增量复核：主动资金流与盘口状态
 

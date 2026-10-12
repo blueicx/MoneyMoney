@@ -56,6 +56,38 @@ test('guest can read the stock library and search but cannot read private paper 
   assert.equal(auth.isGuestRequestAllowed('POST', '/watchlist'), false);
 });
 
+test('guest instrument access is limited to explicitly public instrument routes', () => {
+  for (const endpoint of [
+    '/instruments/search',
+    '/instruments/compare',
+    '/instruments/compare/snapshots',
+    '/instruments/stock/us/AAPL/overview',
+    '/instruments/crypto/binance/BTCUSDT/timeline',
+  ]) {
+    assert.equal(auth.isGuestRequestAllowed('GET', endpoint), true, `${endpoint} is a public read route`);
+  }
+  for (const endpoint of [
+    '/instruments/private/export',
+    '/instruments/compare/private',
+    '/instruments/stock/us/AAPL/holdings',
+    '/instruments/stock/us/AAPL/decisions',
+  ]) {
+    assert.equal(auth.isGuestRequestAllowed('GET', endpoint), false, `${endpoint} must remain private by default`);
+  }
+  assert.equal(auth.isGuestRequestAllowed('POST', '/instruments/compare/snapshots'), false);
+
+  const snapshotRouteStart = serverSrc.indexOf("app.get('/api/instruments/compare/snapshots'");
+  const snapshotRoute = serverSrc.slice(snapshotRouteStart, serverSrc.indexOf('\n});', snapshotRouteStart) + 4);
+  assert.match(snapshotRoute, /isGuest\s*\?\s*snapshots\.filter\(item\s*=>\s*item\.visibility\s*===\s*'public'\)/);
+
+  const analysisStart = serverSrc.indexOf("app.get('/api/analysis'");
+  const analysisEnd = serverSrc.indexOf('// Cross-market assistant:', analysisStart);
+  const analysisRoute = serverSrc.slice(analysisStart, analysisEnd);
+  assert.match(analysisRoute, /scope !== 'overview' && scope !== 'prediction'/);
+  assert.match(analysisRoute, /analysisEngine\.analyzeAll\(\)/);
+  assert.doesNotMatch(analysisRoute, /unifiedAlertStore|unifiedPaperLedgerStore|stateStore/);
+});
+
 test('guest workspace response never includes owner watchlist or paper positions', () => {
   assert.match(serverSrc, /const watchlist = payload\?\.role === 'guest' \? \[\] :/);
   assert.match(serverSrc, /const paper = payload\?\.role === 'guest' \? \[\] :/);

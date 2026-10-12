@@ -27,6 +27,7 @@ export interface BitcoinOnchainSeriesStatus {
   retrievedAt: string;
   sampleCount: number;
   invalidCount: number;
+  futureCount: number;
   reason: string | null;
   url: string;
 }
@@ -34,6 +35,7 @@ export interface BitcoinOnchainSeriesStatus {
 export interface BitcoinOnchainChartInput {
   points: Array<{ x: number; y: number }>;
   invalidCount?: number;
+  futureCount?: number;
   error?: string | null;
 }
 
@@ -224,22 +226,24 @@ function sourceStatus(chart: BitcoinOnchainChart, input: BitcoinOnchainChartInpu
   const latest = points[points.length - 1];
   const error = typeof input.error === 'string' ? input.error.trim().slice(0, 240) : '';
   const invalidCount = Number.isInteger(input.invalidCount) && Number(input.invalidCount) > 0 ? Number(input.invalidCount) : 0;
+  const futureCount = Number.isInteger(input.futureCount) && Number(input.futureCount) > 0 ? Number(input.futureCount) : 0;
   const dataStatus: BitcoinOnchainDataStatus = error
     ? 'unavailable'
-    : invalidCount > 0
+    : invalidCount > 0 || futureCount > 0
       ? 'partial'
     : !points.length
       ? 'empty'
       : points.length < MIN_HISTORY_POINTS
         ? 'partial'
         : 'historical';
-  const reason = error || (invalidCount > 0
-    ? `${invalidCount}条记录的时间或数值字段无效，已丢弃`
-    : dataStatus === 'empty'
-    ? '来源成功响应，但未返回记录'
-    : dataStatus === 'partial'
-      ? `有效历史不足${MIN_HISTORY_POINTS}个样本，当前${points.length}个`
-      : null);
+  const reasons = [
+    error || null,
+    invalidCount > 0 ? `${invalidCount}条记录的时间或数值字段无效，已丢弃` : null,
+    futureCount > 0 ? `${futureCount}条记录的观测时间晚于抓取时点，已排除` : null,
+    !error && dataStatus === 'empty' ? '来源成功响应，但未返回记录' : null,
+    !error && points.length > 0 && points.length < MIN_HISTORY_POINTS ? `有效历史不足${MIN_HISTORY_POINTS}个样本，当前${points.length}个` : null,
+  ].filter((reason): reason is string => Boolean(reason));
+  const reason = reasons.length ? reasons.join('；') : null;
   return {
     chart,
     labelZh: CHART_LABELS[chart],
@@ -248,6 +252,7 @@ function sourceStatus(chart: BitcoinOnchainChart, input: BitcoinOnchainChartInpu
     retrievedAt,
     sampleCount: points.length,
     invalidCount,
+    futureCount,
     reason,
     url: CHART_URLS[chart],
   };
@@ -273,11 +278,14 @@ export function buildBitcoinOnchainRadar(
   const normalizedInputs = Object.fromEntries(CHART_NAMES.map(chart => {
     const input = chartInputs[chart] || { points: [] };
     const parsedPoints = cleanPoints(input.points);
+    const futurePoints = parsedPoints.filter(point => point.x > retrievedMs);
     const positiveOnly = chart === 'hash-rate' || chart === 'market-cap';
-    const invalidDomainPoints = parsedPoints.filter(point => positiveOnly ? point.y <= 0 : point.y < 0).length;
-    const points = parsedPoints.filter(point => positiveOnly ? point.y > 0 : point.y >= 0);
+    const asOfPoints = parsedPoints.filter(point => point.x <= retrievedMs);
+    const invalidDomainPoints = asOfPoints.filter(point => positiveOnly ? point.y <= 0 : point.y < 0).length;
+    const points = asOfPoints.filter(point => positiveOnly ? point.y > 0 : point.y >= 0);
     const invalidCount = (Number.isInteger(input.invalidCount) && Number(input.invalidCount) > 0 ? Number(input.invalidCount) : 0) + invalidDomainPoints;
-    return [chart, { ...input, points, invalidCount }];
+    const futureCount = (Number.isInteger(input.futureCount) && Number(input.futureCount) > 0 ? Number(input.futureCount) : 0) + futurePoints.length;
+    return [chart, { ...input, points, invalidCount, futureCount }];
   })) as Record<BitcoinOnchainChart, BitcoinOnchainChartInput>;
   const cleanByChart = Object.fromEntries(CHART_NAMES.map(chart => [chart, normalizedInputs[chart].points])) as Record<BitcoinOnchainChart, ChartPoint[]>;
   const statuses = CHART_NAMES.map(chart => sourceStatus(chart, normalizedInputs[chart], normalizedRetrievedAt));
@@ -382,7 +390,7 @@ export function buildBitcoinOnchainRadar(
     && signalReady
     && metrics.length === CHART_NAMES.length;
   const noRecords = metrics.length === 0 && statuses.every(status => status.dataStatus === 'empty');
-  const hasAnySourceData = statuses.some(status => status.sampleCount > 0 || status.invalidCount > 0);
+  const hasAnySourceData = statuses.some(status => status.sampleCount > 0 || status.invalidCount > 0 || status.futureCount > 0);
   const dataStatus: BitcoinOnchainDataStatus = allAvailable
     ? 'historical'
     : noRecords
