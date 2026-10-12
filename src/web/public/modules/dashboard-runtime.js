@@ -683,6 +683,14 @@ async function loadAiRunners() {
       const highEquity = Math.max(...equityValues, Number(r.budgetUsd || 0));
       const equityPoints = equityRows.map((point, index) => `${equityRows.length < 2 ? 4 : 4 + index * 292 / (equityRows.length - 1)},${56 - ((Number(point.equityUsd) - lowEquity) / Math.max(0.01, highEquity - lowEquity)) * 48}`).join(' ');
       const equityCurve = equityRows.length ? `<svg viewBox="0 0 300 64" role="img" aria-label="模拟账户权益曲线" style="width:min(100%,300px);height:64px;overflow:visible;"><line x1="0" y1="56" x2="300" y2="56" stroke="var(--border)" stroke-width="1"/><polyline fill="none" stroke="var(--purple)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" points="${equityPoints}"/></svg>` : '<span style="color:var(--text-secondary);font-size:10.5px;">权益曲线将在首次执行后形成</span>';
+      const latestModelRequest = (r.aiCalls || []).find(call => typeof call.model === 'string' && call.model.trim());
+      const latestModelRequestLabel = latestModelRequest ? `最近模型请求 ${safeNewsText(latestModelRequest.model)}` : '尚无模型请求';
+      const modelRoutingLabel = r.modelSelection === 'available-free'
+        ? `免费模型故障回退 · ${latestModelRequestLabel}`
+        : `固定模型 ${safeNewsText(r.model || '运行时配置')}${latestModelRequest ? ` · ${latestModelRequestLabel}` : ''}`;
+      const quoteRoutingLabel = r.quoteSelection === 'best-valid' || r.quoteSelection === 'random-valid'
+        ? '合格实时报价确定性优选（最新优先；同时间点差优先）'
+        : '固定来源';
       const benchmarkText = s.benchmarkPnlUsd == null ? (s.benchmarkReason || `持有基准积累中 ${s.benchmarkCount || 0}/${s.benchmarkExpectedCount || 1}`) : `首次有效报价以来持有基准 ${s.benchmarkPnlUsd >= 0 ? '+' : ''}$${s.benchmarkPnlUsd.toFixed(2)} (${s.benchmarkReturnPct >= 0 ? '+' : ''}${s.benchmarkReturnPct}%)`;
       return `
       <div style="background:var(--bg-card);border-radius:12px;padding:14px;margin-bottom:10px;box-shadow:var(--shadow);font-size:12.5px;">
@@ -692,8 +700,8 @@ async function loadAiRunners() {
         </div>
         <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:6px;color:var(--text-secondary);font-size:11.5px;">
           <span>范围 ${universeName}</span><span>触发 ${triggerName}</span><span>预算 $${r.budgetUsd}</span><span>权益 $${s.equityUsd?.toFixed(2) ?? '—'}</span>
-          <span>模型 ${r.modelSelection === 'available-free' ? '免费模型自动切换（每轮最多3次）' : safeNewsText(r.model || '已配置模型')}</span>
-          <span>报价 ${r.quoteSelection === 'random-valid' ? '有效来源随机选择' : '固定来源'} · ${safeNewsText(r.lastDataSource || '等待首次报价')}</span>
+          <span>模型 ${modelRoutingLabel}</span>
+          <span>报价 ${quoteRoutingLabel} · ${safeNewsText(r.lastDataSource || '等待首次报价')}</span>
           <span>已平仓 ${s.closedCount ?? 0}</span><span>胜率 ${s.winRateReliable ? `${s.winRatePct}%` : `样本不足（${s.closedCount || 0}/20）`}</span>
           <span>单笔≤$${r.policy?.maxTradeUsd ?? '—'}</span><span>持仓≤${r.policy?.maxPositions ?? '—'}</span><span>日损≤$${r.policy?.maxDailyLossUsd ?? '—'}</span>
           <span>费用/额外滑点 $${Number(s.feeSlippageUsd || 0).toFixed(2)}</span><span>点差估算 $${Number(s.spreadCostUsd || 0).toFixed(2)}（成交价已计入）</span><span>估值 ${safeNewsText(s.valuationStatus || r.lastDataStatus || '暂无')}</span>

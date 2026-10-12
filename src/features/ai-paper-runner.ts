@@ -362,7 +362,7 @@ export interface AiRunner {
   model?: string;
   mode?: AiRunnerMode;
   modelSelection?: 'fixed' | 'available-free';
-  quoteSelection?: 'fixed' | 'random-valid';
+  quoteSelection?: 'fixed' | 'best-valid' | 'random-valid';
   trigger?: AiRunnerTrigger;
   universe?: AiRunnerUniverse;
   accountId?: string;
@@ -382,6 +382,7 @@ export interface AiRunner {
 interface CreateAiRunnerOptions {
   mode?: AiRunnerMode;
   trigger?: AiRunnerTrigger;
+  quoteSelection?: 'fixed' | 'best-valid' | 'random-valid';
   universe?: { kind?: 'single' | 'watchlist'; instruments?: AiRunnerInstrumentRef[]; sourceWatchlistId?: string };
   model?: string;
   comparisonControl?: AiRunner['comparisonControl'];
@@ -413,23 +414,29 @@ export interface AiRunnerQuote {
   bestAskSize?: number;
 }
 
-export function selectRunnerStockQuote(symbol: string, candidates: Array<{ source: string; status?: string; quote: StockQuote | null }>, maxAgeMs: number, now = Date.now(), random = Math.random): { source: string; quote: AiRunnerQuote } | null {
-  const valid = candidates.filter(row => {
+export function selectRunnerStockQuote(symbol: string, candidates: Array<{ source: string; status?: string; quote: StockQuote | null }>, maxAgeMs: number, now = Date.now()): { source: string; quote: AiRunnerQuote } | null {
+  const valid = candidates.flatMap(row => {
     const q = row.quote;
-    if (!q || q.symbol.toUpperCase() !== symbol.toUpperCase() || q.currency !== 'USD' || q.isRealTime !== true || ['stale','unavailable','degraded'].includes(row.status || '')) return false;
+    if (!q || q.symbol.toUpperCase() !== symbol.toUpperCase() || q.currency !== 'USD' || q.isRealTime !== true || ['stale','unavailable','degraded'].includes(row.status || '')) return [];
     const at = stockQuoteObservationTime(q.asOf);
-    return at != null && at <= now && now - at <= maxAgeMs && q.price > 0 && Number.isFinite(q.price)
-      && Number.isFinite(q.bestBid) && Number(q.bestBid) > 0 && Number.isFinite(q.bestAsk) && Number(q.bestAsk) >= Number(q.bestBid);
+    const bid = Number(q.bestBid), ask = Number(q.bestAsk), midpoint = (bid + ask) / 2;
+    if (at == null || at > now || now - at > maxAgeMs || q.price <= 0 || !Number.isFinite(q.price)
+      || !Number.isFinite(bid) || bid <= 0 || !Number.isFinite(ask) || ask < bid || midpoint <= 0) return [];
+    return [{ row, at, relativeSpread: (ask - bid) / midpoint }];
   });
   if (!valid.length) return null;
-  const selected = valid[Math.min(valid.length - 1, Math.max(0, Math.floor(random() * valid.length)))];
-  const at = new Date(stockQuoteObservationTime(selected.quote!.asOf)!).toISOString();
+  valid.sort((a, b) => b.at - a.at
+    || a.relativeSpread - b.relativeSpread
+    || (a.row.source < b.row.source ? -1 : a.row.source > b.row.source ? 1 : 0)
+    || a.row.quote!.price - b.row.quote!.price);
+  const selected = valid[0].row;
+  const at = new Date(valid[0].at).toISOString();
   return { source: selected.source, quote: { market:'stocks', status:'live', dataStatus:'live', source:selected.source,
     price:selected.quote!.price, bestBid:selected.quote!.bestBid, bestAsk:selected.quote!.bestAsk, updatedAt:at, fetchedAt:at } };
 }
 
 export function selectControlledStockQuote(symbol: string, candidates: Parameters<typeof selectRunnerStockQuote>[1], maxAgeMs: number, now = Date.now()) {
-  return selectRunnerStockQuote(symbol, candidates, maxAgeMs, now, () => 0);
+  return selectRunnerStockQuote(symbol, candidates, maxAgeMs, now);
 }
 
 export interface AiRunnerMarketState {
@@ -881,6 +888,7 @@ function normalizeRunner(runner: AiRunner): AiRunner {
     mode: runner.mode || 'rules',
     trigger: runner.trigger || 'scheduled',
     universe,
+    quoteSelection: runner.quoteSelection === 'random-valid' ? 'best-valid' : runner.quoteSelection,
     accountId,
     executionState: runner.executionState === 'legacy-readonly' || legacy ? 'legacy-readonly' : (runner.executionState || 'ready'),
     policy: { ...defaultPolicy(runner.budgetUsd, runner.symbolOrMarketId, universe.kind), ...(runner.policy || {}) },
@@ -963,6 +971,7 @@ export function createAiRunner(
     mode: options.mode || 'rules',
     trigger: options.trigger || 'scheduled',
     universe: frozenUniverse,
+    quoteSelection: options.quoteSelection === 'fixed' ? 'fixed' : 'best-valid',
     executionState: 'ready',
     ...(options.model ? { model: options.model } : {}),
     ...(options.comparisonControl ? { comparisonControl: options.comparisonControl } : {}),
@@ -1164,12 +1173,12 @@ function updateRunner(id: string, fn: (r: AiRunner) => void): AiRunner | null {
   });
 }
 
-export function updateAiRunnerRouting(id: string, patch: { modelSelection: 'fixed' | 'available-free'; quoteSelection: 'fixed' | 'random-valid' }): AiRunner | null {
-  if (!['fixed', 'available-free'].includes(patch.modelSelection) || !['fixed', 'random-valid'].includes(patch.quoteSelection)) throw new Error('模型或报价选择模式无效');
+export function updateAiRunnerRouting(id: string, patch: { modelSelection: 'fixed' | 'available-free'; quoteSelection: 'fixed' | 'best-valid' | 'random-valid' }): AiRunner | null {
+  if (!['fixed', 'available-free'].includes(patch.modelSelection) || !['fixed', 'best-valid', 'random-valid'].includes(patch.quoteSelection)) throw new Error('模型或报价选择模式无效');
   return updateRunner(id, runner => {
     if (runner.comparisonControl) throw new Error('对照实验必须保留固定模型和共享行情');
     runner.modelSelection = patch.modelSelection;
-    runner.quoteSelection = patch.quoteSelection;
+    runner.quoteSelection = patch.quoteSelection === 'random-valid' ? 'best-valid' : patch.quoteSelection;
   });
 }
 

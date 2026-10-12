@@ -10,6 +10,7 @@ test.after(() => stateStore.close());
 function fixture() {
   const group = createAiRunnerComparison('Stocks', 'MU', 'Micron', 1000, {}, { seed: 42, model: 'fixture/fixed-model' });
   const rows = group.runnerIds.map(id => runner.getAiRunners().find(row => row.id === id));
+  assert.ok(rows.every(row => row.quoteSelection === 'fixed'), '共同快照对照组必须显式固定报价来源');
   assert.equal(validateAiRunnerComparison(group, rows).valid, true);
   return { group, rows };
 }
@@ -22,7 +23,8 @@ test('matching edits to all arms cannot bypass the original frozen configuration
 test('comparison requires three distinct accounts and the exact rules/review/autonomous roles', () => {
   for (const change of [rows => rows[1].accountId = rows[0].accountId, rows => rows[1].mode = 'ai-autonomous-paper',
     rows => rows.forEach(r => r.trigger = 'signal'), rows => rows[2].modelSelection = 'available-free',
-    rows => rows[0].quoteSelection = 'random-valid', rows => rows[0].strategyVersion = 'changed']) {
+    rows => rows[0].quoteSelection = 'random-valid', rows => rows[0].quoteSelection = 'best-valid',
+    rows => rows[0].strategyVersion = 'changed']) {
     const { group, rows } = fixture(); change(rows);
     assert.equal(validateAiRunnerComparison(group, rows).valid, false);
   }

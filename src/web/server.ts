@@ -9335,7 +9335,8 @@ async function loadAiRunnerInstrumentSnapshot(runner: AiRunner, ref: AiRunnerIns
     } else if (ref.venue === 'Stocks') {
       const symbol = instrument.replace(/^US(?=[A-Z])/, '').replace(/\.(OQ|N)$/i,'');
       if (!/^[A-Z][A-Z0-9.:-]{0,19}$/.test(symbol)) throw new Error('股票代码格式无效');
-      if ((runner.quoteSelection === 'random-valid' && !runner.comparisonControl) || runner.comparisonControl) {
+      if ((runner.quoteSelection === 'best-valid' && !runner.comparisonControl)
+        || (runner.quoteSelection === 'random-valid' && !runner.comparisonControl) || runner.comparisonControl) {
         let yahoo = runnerYahooQuotes.get(symbol);
         if (!yahoo) { yahoo=createYahooStockAdapter();runnerYahooQuotes.set(symbol,yahoo);if(runnerYahooQuotes.size>100)runnerYahooQuotes.delete(runnerYahooQuotes.keys().next().value!); }
         const [nasdaq,yahooQuote,intraday] = await Promise.all([

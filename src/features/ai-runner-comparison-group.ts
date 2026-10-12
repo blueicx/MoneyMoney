@@ -34,6 +34,7 @@ export function createAiRunnerComparison(venue: AiRunnerVenue, instrument: strin
   return stateStore.transaction(() => {
     const rows = (['rules', 'ai-review', 'ai-autonomous-paper'] as const).map(mode => createAiRunner(venue, instrument, title, budget, policy, {
       mode, trigger: 'scheduled', universe: options.universe, model: options.model, startPaused: true, createdAt: at,
+      quoteSelection: 'fixed',
       comparisonControl: { groupId: id, seed: options.seed, temperature: 0, configHash: '' },
     }));
     const configHash = hash({ universe: frozen.hash, budget, policy: rows[0].policy, at, seed: options.seed, temperature: 0, model: options.model || null });

@@ -7,6 +7,7 @@ test.after(()=>{require('../dist/storage/sqlite-state').stateStore.close();fs.rm
 const { requestAiRunnerIntent } = require('../dist/features/ai-runner-model');
 const { stockQuoteObservationTime } = require('../dist/features/stock-signal-schedule');
 const { parseNasdaqQuotePayload } = require('../dist/features/nasdaq-stock-source');
+const { stateStore } = require('../dist/storage/sqlite-state');
 const runtime = { configured:true, apiKey:'fixture', apiUrl:'https://openrouter.ai/api/v1/chat/completions', model:'retired-model' };
 const runner = { model:'retired-model', modelSelection:'available-free', universe:{market:'stocks',instruments:[{venue:'Stocks',symbolOrMarketId:'MU'}]} };
 const intent = { action:'HOLD',instrument:'MU',market:'stocks',confidence:0.6,rationale:'等待有效报价及指标证据',counterEvidence:[],riskNotes:[] };
@@ -35,27 +36,47 @@ test('Nasdaq month-name source time retains exchange timezone and actual bid/ask
   const q=parseNasdaqQuotePayload('MU',{data:{symbol:'MU',primaryData:{lastSalePrice:'$10.03',percentageChange:'+1%',lastTradeTimestamp:'Oct 6, 2026 11:22 AM ET',bidPrice:'$10.01',askPrice:'$10.03',isRealTime:true}}});
   assert.equal(q.bestBid,10.01);assert.equal(q.bestAsk,10.03);assert.equal(q.isRealTime,true);
 });
-test('random quote selection only chooses same identity, fresh ordered bid/ask and keeps original timestamps',()=>{
+test('best valid quote selection is deterministic: newest first, tighter spread on ties, stable provider tie-break',()=>{
   const helpers=require('../dist/features/ai-paper-runner');
   assert.equal(typeof helpers.selectRunnerStockQuote,'function');
   const now=Date.parse('2026-10-06T15:22:30Z');
-  const candidate=(source,symbol='MU',at='2026-10-06T15:22:00Z',bid=10,ask=11)=>({source,quote:{symbol,asOf:at,currency:'USD',price:10.5,bestBid:bid,bestAsk:ask,isRealTime:true}});
-  const rows=[candidate('wrong','SNDK'),candidate('stale','MU','2026-10-06T15:00:00Z'),candidate('crossed','MU',undefined,12,11),candidate('future','MU','2026-10-06T15:23:00Z'),candidate('one'),candidate('two')];
-  const selected=helpers.selectRunnerStockQuote('MU',rows,120000,now,()=>0.99);
-  assert.equal(selected.source,'two');assert.equal(selected.quote.updatedAt,'2026-10-06T15:22:00.000Z');
-  assert.equal(helpers.selectRunnerStockQuote('MU',rows.slice(0,4),120000,now),null);
+  const candidate=(source,symbol='MU',at='2026-10-06T15:22:00Z',bid=10,ask=11)=>({source,quote:{symbol,asOf:at,currency:'USD',price:(bid+ask)/2,bestBid:bid,bestAsk:ask,isRealTime:true}});
+  const invalid=[candidate('wrong','SNDK'),candidate('stale','MU','2026-10-06T15:00:00Z'),candidate('crossed','MU',undefined,12,11),candidate('future','MU','2026-10-06T15:23:00Z')];
+  const freshWide=candidate('Yahoo fresh wide','MU','2026-10-06T15:22:20Z',10,11);
+  const olderTight=candidate('Nasdaq older tight','MU','2026-10-06T15:22:00Z',10.4,10.6);
+  assert.equal(helpers.selectRunnerStockQuote('MU',[...invalid,olderTight,freshWide],120000,now).source,'Yahoo fresh wide');
+  const sameTimeWide=candidate('Nasdaq','MU','2026-10-06T15:22:20Z',10,11);
+  const sameTimeTight=candidate('Yahoo','MU','2026-10-06T15:22:20Z',10.4,10.6);
+  assert.equal(helpers.selectRunnerStockQuote('MU',[sameTimeWide,sameTimeTight],120000,now).source,'Yahoo');
+  const tieRows=[candidate('Yahoo','MU','2026-10-06T15:22:20Z',10,10.2),candidate('Nasdaq','MU','2026-10-06T15:22:20Z',10,10.2)];
+  assert.equal(helpers.selectRunnerStockQuote('MU',tieRows,120000,now).source,'Nasdaq');
+  assert.equal(helpers.selectRunnerStockQuote('MU',[...tieRows].reverse(),120000,now).source,'Nasdaq');
+  assert.equal(helpers.selectRunnerStockQuote('MU',invalid,120000,now),null);
 });
-test('controlled comparison quote selection uses stable provider priority, leaving standalone random selection intact',()=>{
+test('controlled comparison quote selection remains deterministic under the shared quote arbitration',()=>{
   const helpers=require('../dist/features/ai-paper-runner'),now=Date.parse('2026-10-08T15:22:30Z');
   assert.equal(typeof helpers.selectControlledStockQuote,'function','缺少对照组固定报价选择');
   const row=source=>({source,status:'live',quote:{symbol:'AAPL',currency:'USD',price:100,bestBid:99,bestAsk:101,isRealTime:true,asOf:'2026-10-08T15:22:00Z'}});
-  assert.equal(helpers.selectControlledStockQuote('AAPL',[row('primary'),row('secondary')],120000,now).source,'primary');
+  assert.equal(helpers.selectControlledStockQuote('AAPL',[row('secondary'),row('primary')],120000,now).source,'primary');
   assert.equal(helpers.selectControlledStockQuote('AAPL',[row('wrong')],120000,now+3600000),null);
 });
-test('runner card exposes routing policies and selected provider rather than implying a fixed retired model',()=>{
-  const html=require('./helpers/dashboard-source.cjs').readDashboardSource();
+test('new runners use best-valid quotes and legacy random selection requests are normalized',()=>{
+  const helpers=require('../dist/features/ai-paper-runner');
+  const created=helpers.createAiRunner('Stocks','MU','Micron',1000,{}, {startPaused:true,createdAt:'2026-10-08T00:00:00.000Z'});
+  assert.equal(created.quoteSelection,'best-valid');
+  const updated=helpers.updateAiRunnerRouting(created.id,{modelSelection:'fixed',quoteSelection:'random-valid'});
+  assert.equal(updated.quoteSelection,'best-valid');
+  stateStore.set('ai-paper-runners',[{...updated,status:'RUNNING',modelSelection:'available-free',quoteSelection:'random-valid'}],1);
+  const loaded=helpers.getAiRunners().find(row=>row.id===created.id);
+  assert.equal(loaded.quoteSelection,'best-valid');
+  assert.equal(loaded.modelSelection,'available-free');assert.equal(loaded.status,'RUNNING');assert.equal(loaded.budgetUsd,1000);
+});
+test('runner card names deterministic quote arbitration and exposes the latest model request',()=>{
+  const html=fs.readFileSync(path.join(__dirname,'../src/web/public/modules/dashboard-runtime.js'),'utf8');
   assert.match(html,/r\.modelSelection === 'available-free'/);
-  assert.match(html,/r\.quoteSelection === 'random-valid'/);
+  assert.match(html,/r\.quoteSelection === 'best-valid' \|\| r\.quoteSelection === 'random-valid'/);
+  assert.match(html,/最近模型请求/);
+  assert.doesNotMatch(html,/有效来源随机选择/);
   assert.match(html,/safeNewsText\(r\.lastDataSource/);
 });
 test('decision clock is captured after asynchronous quotes so a completed new-minute candle is not misclassified as future',()=>{
