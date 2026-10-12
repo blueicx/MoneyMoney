@@ -172,3 +172,9 @@
 - 正式域名版本为 `cf9d161b393ddd1461c886b2a82ab2bb321f63ba`，健康 `alive`，登录页 HTTP 200；`moneymoney.service` 为 `active`，模式为 `view-only`，存储健康且无迁移错误。
 - 发布归档 SHA-256：`c04248c3a3247f42977b9985bb2ce28f3033a0e8495efd80cf8c22c1f4875d18`。远端关键 Hash 与本地一致：`server.js` `1bd2009a8589944eb3f2b9ab991f3d8c300c80921439590f0a9b1f7cf8e23be4`、`index.html` `f2232b26f8386cb0546277cbe0c49b8dd4fb3168e3b3f31fc1f9e610f92587d8`、`asset-manifest.json` `48acd86b8668ac908d54ca7eb29d3c528c96f314ffaa15e0cdf3ea6f35eddd95`、`guru-holdings.js` `9ecec9ec4e9d9dd76afe8f2293dfecf3beae91aa1dacf393edceb7a903d96cc1`。
 - 备份和回滚目录保留于 `/opt/moneymoney/backups/dist-pre-cf9d161-20261012-13f-period` 与 `/opt/moneymoney/dist.rollback-cf9d161-20261012-13f-period`。本地 `data/research.db` SHA-256 仍为 `27fd475e523568daa4cdcabf3146917023335a62affe00429babd721b3b79fd1`，未纳入 Git 或发布包。
+
+## 2026-10-12 增量复核：期权多腿标的身份
+
+- 多腿到期损益函数先解析每条期权合约的底层标的，再要求所有腿身份一致；无法从合约代码核验底层标的时 fail-closed。
+- `/api/options/payoff` 将请求的 CBOE 标的代码传入领域计算器，避免不同股票/ETF 的腿混合，或合约代码与当前请求标的不一致时仍返回貌似有效的损益曲线。
+- 仅改变分析校验，不接入执行器、不创建订单、不改期权来源或报价口径。`tests/options-market-quality.test.cjs` 覆盖混合标的拒绝、请求标的一致性和服务端参数接线；定向期权及合约 UI 测试通过。

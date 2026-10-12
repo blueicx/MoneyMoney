@@ -3477,7 +3477,7 @@ app.post('/api/options/payoff', express.json(), async (req, res) => {
       if (!row || row.quoteQuality?.status !== 'quoted') throw new Error(`合约 ${name || '(空)'} 不存在于当前到期链或缺少双边有效报价`);
       return { row: { ...row, expiryMs, quoteTime: snapshot.fetchedAt }, action: item.action, contracts: Number(item.contracts) };
     });
-    const data = calculateOptionPayoff({ spot: snapshot.spot, multiplier, legs });
+    const data = calculateOptionPayoff({ spot: snapshot.spot, multiplier, legs, underlyingSymbol: symbol });
     return res.json({ success: true, market: 'options', instrument: `option:cboe:${symbol}`, timeframe: expiry.label, dataStatus: 'delayed', source: snapshot.source, sourceTime: snapshot.fetchedAt, updatedAt: new Date().toISOString(), reason: '到期情景试算，不是成交回报；仅使用当前来源双边报价', evidenceRefs: [], data });
   } catch (error) {
     return res.status(422).json({ success: false, market: 'options', instrument: `option:cboe:${symbol}`, dataStatus: 'unavailable', source: 'CBOE Delayed Quotes', updatedAt: new Date().toISOString(), reason: error instanceof Error ? error.message : '期权试算失败', evidenceRefs: [] });

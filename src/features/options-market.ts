@@ -80,8 +80,16 @@ export interface OptionPayoffAnalysis {
   executionEnabled: false;
 }
 
+function optionUnderlyingSymbol(instrumentName: string): string | null {
+  const name = String(instrumentName || '').trim().toUpperCase().replace(/\s+/g, '');
+  const occ = /^([A-Z0-9]{1,6})\d{6}[CP]\d{8}$/.exec(name);
+  if (occ) return occ[1];
+  const separated = /^([A-Z][A-Z0-9.]{0,9})-(?:\d{6}|\d{8})-\d+(?:\.\d+)?-[CP]$/.exec(name);
+  return separated?.[1] || null;
+}
+
 /** Estimate expiration payoff from verified two-sided quotes; this never places orders. */
-export function calculateOptionPayoff(input: { spot: number; multiplier: number; legs: OptionPayoffLeg[]; nowMs?: number }): OptionPayoffAnalysis {
+export function calculateOptionPayoff(input: { spot: number; multiplier: number; legs: OptionPayoffLeg[]; nowMs?: number; underlyingSymbol?: string }): OptionPayoffAnalysis {
   const { spot, multiplier, legs } = input;
   const nowMs = Number.isFinite(input.nowMs) ? Number(input.nowMs) : Date.now();
   if (!Number.isFinite(spot) || spot <= 0) throw new Error('标的现价必须为正数');
@@ -101,6 +109,11 @@ export function calculateOptionPayoff(input: { spot: number; multiplier: number;
       throw new Error('期权合约身份、行权价或看涨/看跌类型无效');
     }
   }
+  const underlyings = legs.map(leg => optionUnderlyingSymbol(leg.row.instrumentName));
+  if (underlyings.some(symbol => !symbol)) throw new Error('无法从期权合约身份核验底层标的');
+  if (new Set(underlyings).size !== 1) throw new Error('多腿试算必须使用同一底层标的');
+  const requestedUnderlying = input.underlyingSymbol == null ? null : String(input.underlyingSymbol).trim().toUpperCase();
+  if (requestedUnderlying && underlyings[0] !== requestedUnderlying) throw new Error('期权合约底层标的与请求标的不一致');
 
   const scale = (leg: OptionPayoffLeg) => leg.contracts * multiplier;
   const premiumPerUnit = (leg: OptionPayoffLeg) => leg.action === 'buy' ? -leg.row.askPrice : leg.row.bidPrice;

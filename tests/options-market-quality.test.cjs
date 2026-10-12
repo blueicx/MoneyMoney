@@ -1,5 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
 const vm = require('node:vm');
 const { JSDOM } = require('jsdom');
 const { assessOptionQuoteQuality, calculateOptionPayoff, getEquityOptionsSnapshot } = require('../dist/features/options-market.js');
@@ -134,6 +135,35 @@ test('option payoff uses verified bid/ask sides and computes capped vertical-spr
   assert.ok(result.breakEvenPrices.some(price => Math.abs(price - 103) < 1e-8));
   assert.equal(result.curve.find(point => point.underlyingPrice === 120).pnlUsd, 700);
   assert.equal(result.executionEnabled, false);
+});
+
+test('option payoff rejects mixed underlyings even when expiry and quote quality match', () => {
+  const nowMs = Date.now();
+  const quoteTime = new Date(nowMs).toISOString();
+  const row = symbol => ({ instrumentName: `${symbol}261218C00100000`, strike: 100, optionType: 'call', bidPrice: 1, askPrice: 1.1,
+    quoteQuality: { status: 'quoted' }, expiryMs: Date.UTC(2026, 11, 18), quoteTime });
+
+  assert.throws(() => calculateOptionPayoff({ spot: 100, multiplier: 100, nowMs, legs: [
+    { row: row('SPY'), action: 'buy', contracts: 1 },
+    { row: row('AAPL'), action: 'sell', contracts: 1 },
+  ] }), /同一底层标的/);
+});
+
+test('option payoff binds contract identities to the requested underlying symbol', () => {
+  const nowMs = Date.now();
+  const quoteTime = new Date(nowMs).toISOString();
+  const row = { instrumentName: 'SPY261218C00100000', strike: 100, optionType: 'call', bidPrice: 1, askPrice: 1.1,
+    quoteQuality: { status: 'quoted' }, expiryMs: Date.UTC(2026, 11, 18), quoteTime };
+
+  assert.throws(() => calculateOptionPayoff({ spot: 100, multiplier: 100, nowMs, underlyingSymbol: 'AAPL', legs: [
+    { row, action: 'buy', contracts: 1 },
+    { row: { ...row, instrumentName: 'SPY261218P00100000', optionType: 'put' }, action: 'sell', contracts: 1 },
+  ] }), /与请求标的不一致/);
+});
+
+test('options payoff route binds every leg to the requested CBOE underlying', () => {
+  const server = fs.readFileSync('src/web/server.ts', 'utf8');
+  assert.match(server, /calculateOptionPayoff\(\{ spot: snapshot\.spot, multiplier, legs, underlyingSymbol: symbol \}\)/);
 });
 
 test('option payoff fails closed for missing quotes, mixed expiries and invalid multipliers', () => {
