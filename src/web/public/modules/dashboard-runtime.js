@@ -5840,7 +5840,7 @@ function renderStockChartEventRail(payload) {
     if (!Number.isFinite(asOfTime)) return true;
     const published = Date.parse(String(item?.publishedAt || ''));
     return Number.isFinite(published) && published <= asOfTime;
-  }).sort((left, right) => Date.parse(String(right?.publishedAt || right?.occurredAt || right?.at || 0)) - Date.parse(String(left?.publishedAt || left?.occurredAt || left?.at || 0))).slice(0, 40);
+  }).sort((left, right) => Date.parse(String(right?.occurredAt || right?.scheduledAt || right?.publishedAt || right?.timelineAt || right?.at || 0)) - Date.parse(String(left?.occurredAt || left?.scheduledAt || left?.publishedAt || left?.timelineAt || left?.at || 0))).slice(0, 40);
   window.mmStockChartEvents = eligible;
   const statuses = payload?.sourceStatus || {};
   const statusSummary = Object.entries(statuses).map(([name, value]) => `${name} ${value}`).join(' · ');
@@ -5856,9 +5856,10 @@ function renderStockChartEventRail(payload) {
     const sourceUrl = typeof item.source === 'object' ? item.source?.url : item.sourceUrl;
     let safeUrl = '';
     try { const parsed = new URL(String(sourceUrl || '')); if (['https:', 'http:'].includes(parsed.protocol)) safeUrl = parsed.href; } catch {}
-    const stamp = item.publishedAt || item.occurredAt || item.at || item.date || '';
+    const stamp = item.occurredAt || item.scheduledAt || item.publishedAt || item.timelineAt || item.at || item.date || '';
     const time = stamp ? formatChartTime(stamp) : '时间未提供';
-    return `<article class="mm-chart-event-card"><button type="button" class="mm-chart-event-item" data-chart-event-id="${stockEscapeHtml(item.id || index)}" data-chart-event-index="${index}" aria-current="false"><strong>${title}</strong><small>${stockEscapeHtml(item.kind || '事件')} · ${stockEscapeHtml(time)} · ${stockEscapeHtml(sourceName)}</small></button>${safeUrl ? `<a href="${stockEscapeHtml(safeUrl)}" target="_blank" rel="noopener noreferrer">查看来源 ↗</a>` : '<small>来源链接未提供</small>'}</article>`;
+    const timeKind = item.occurredAt ? '发生' : item.scheduledAt ? '计划' : item.publishedAt ? '发布' : '时间';
+    return `<article class="mm-chart-event-card"><button type="button" class="mm-chart-event-item" data-chart-event-id="${stockEscapeHtml(item.id || index)}" data-chart-event-index="${index}" aria-current="false"><strong>${title}</strong><small>${stockEscapeHtml(item.kind || '事件')} · ${timeKind} ${stockEscapeHtml(time)} · ${stockEscapeHtml(sourceName)}</small></button>${safeUrl ? `<a href="${stockEscapeHtml(safeUrl)}" target="_blank" rel="noopener noreferrer">查看来源 ↗</a>` : '<small>来源链接未提供</small>'}</article>`;
   }).join('');
   const markers = document.getElementById('stock-chart-event-markers');
   if (markers) markers.replaceChildren();
@@ -5871,7 +5872,7 @@ function renderStockChartEventRail(payload) {
       if (!item) return;
       host.querySelectorAll('[data-chart-event-index]').forEach(row => row.setAttribute('aria-current', String(row === button)));
       showStockChartEvidence(item, 'event');
-      focusStockChartTimestamp(item.occurredAt || item.publishedAt || item.at || item.date);
+      focusStockChartTimestamp(item.occurredAt || item.scheduledAt || item.publishedAt || item.timelineAt || item.at || item.date);
     });
   }
 }
@@ -5941,7 +5942,8 @@ function showStockChartEvidence(item, kind = 'event') {
   const sourceUrl = typeof item.source === 'object' ? item.source?.url : item.sourceUrl;
   let safeUrl = '';
   try { const parsed = new URL(String(sourceUrl || '')); if (['https:', 'http:'].includes(parsed.protocol)) safeUrl = parsed.href; } catch {}
-  const time = item.publishedAt || item.occurredAt || item.time || item.at || item.date;
+  const time = item.occurredAt || item.scheduledAt || item.publishedAt || item.timelineAt || item.time || item.at || item.date;
+  const timeKind = item.occurredAt ? '发生时间' : item.scheduledAt ? '计划时间' : item.publishedAt ? '发布时间' : '时间';
   const direction = item.direction === 'bullish' || item.side === 'buy' ? '看涨/买入' : item.direction === 'bearish' || item.side === 'sell' ? '看跌/卖出' : '';
   const state = item.status === 'forming' ? '形成中' : item.status === 'confirmed' ? '已确认' : item.status === 'invalidated' ? '已失效' : '';
   const details = [direction ? `方向：${direction}` : '', state ? `状态：${state}` : '', item.confidence ? `置信度：${item.confidence}` : '', item.reason, item.condition, item.meaning, item.disclaimer, item.dataStatus ? `数据状态：${item.dataStatus}` : '', item.strategyVersion ? `策略版本：${item.strategyVersion}` : ''].filter(Boolean);
@@ -5950,7 +5952,7 @@ function showStockChartEvidence(item, kind = 'event') {
   const ohlc = ['open', 'high', 'low', 'close'].map(key => Number(item[key]));
   if (ohlc.every(Number.isFinite)) details.push(`OHLC：${ohlc.map(value => formatChartPrice(value)).join(' / ')}`);
   if (Number.isFinite(Number(item.volume))) details.push(`成交量：${formatChartPrice(Number(item.volume))}`);
-  host.innerHTML = `<strong>${stockEscapeHtml(item.title || item.label || item.headline || (kind === 'signal' ? '策略点位' : '图表证据'))}</strong><div>${stockEscapeHtml(time ? formatChartTime(time) : '时间未提供')} · ${stockEscapeHtml(sourceName)}</div>${details.map(line => `<div>${stockEscapeHtml(line)}</div>`).join('')}${safeUrl ? `<a href="${stockEscapeHtml(safeUrl)}" target="_blank" rel="noopener noreferrer">查看原始证据 ↗</a>` : ''}`;
+  host.innerHTML = `<strong>${stockEscapeHtml(item.title || item.label || item.headline || (kind === 'signal' ? '策略点位' : '图表证据'))}</strong><div>${stockEscapeHtml(timeKind)}：${stockEscapeHtml(time ? formatChartTime(time) : '未提供')} · ${stockEscapeHtml(sourceName)}</div>${details.map(line => `<div>${stockEscapeHtml(line)}</div>`).join('')}${safeUrl ? `<a href="${stockEscapeHtml(safeUrl)}" target="_blank" rel="noopener noreferrer">查看原始证据 ↗</a>` : ''}`;
   if (status) status.textContent = kind === 'signal' ? '策略研究信号 · 不构成订单' : '来源证据';
 }
 function redrawStockChartEventMarkers() {
@@ -5972,7 +5974,7 @@ function redrawStockChartEventMarkers() {
   const intraday = ['1m', '5m', '15m', '1h'].includes(String(currentStockKlinePeriod || '').toLowerCase());
   const intervalMs = ({ '1m': 60_000, '5m': 300_000, '15m': 900_000, '1h': 3_600_000 })[String(currentStockKlinePeriod || '').toLowerCase()] || 0;
   const matches = (window.mmStockChartEvents || []).map((item, index) => {
-    const eventTime = Date.parse(String(item.occurredAt || item.publishedAt || item.at || item.date || ''));
+    const eventTime = Date.parse(String(item.occurredAt || item.scheduledAt || item.publishedAt || item.timelineAt || item.at || item.date || ''));
     const date = dayKey(eventTime);
     let barIndex = -1;
     if (intraday && Number.isFinite(eventTime) && bars.length) {
@@ -5995,9 +5997,10 @@ function redrawStockChartEventMarkers() {
     button.dataset.chartEventId = String(item.id || index);
     button.style.top = `${6 + lane * 23}px`;
     button.textContent = item.kind === 'news' ? 'N' : 'E';
-    button.title = `${item.title || '事件'} · ${date}`;
-    button.setAttribute('aria-label', `定位事件：${item.title || '未命名事件'}，${date}`);
-    button.addEventListener('click', () => { showStockChartEvidence(item, 'event'); focusStockChartTimestamp(item.occurredAt || item.publishedAt || item.at || item.date); });
+    const timeKind = item.occurredAt ? '发生' : item.scheduledAt ? '计划' : item.publishedAt ? '发布' : '时间';
+    button.title = `${item.title || '事件'} · ${timeKind} ${date}`;
+    button.setAttribute('aria-label', `定位${timeKind}时间：${item.title || '未命名事件'}，${date}`);
+    button.addEventListener('click', () => { showStockChartEvidence(item, 'event'); focusStockChartTimestamp(item.occurredAt || item.scheduledAt || item.publishedAt || item.timelineAt || item.at || item.date); });
     host.appendChild(button);
   });
 }
@@ -7769,10 +7772,16 @@ async function loadMarketTimeline() {
       const sourceStatusLine = Object.entries(entityPayload.sourceStatus || {}).map(([source, status]) => `${safeNewsText(source)}：${sourceLabels[status] || safeNewsText(status)}`).join(' · ');
       const statusLine = `<div style="font-size:10px;color:var(--text-secondary);margin-bottom:8px;">时间线状态：${safeNewsText(entityPayload.dataStatus || 'unknown')}${sourceStatusLine ? ` · 来源 ${sourceStatusLine}` : ''}</div>`;
       host.innerHTML = statusLine + (window.mm_eventEntities.length ? window.mm_eventEntities.map(item => {
-        const evidence = formatSourceEvidence({ title: item.title, sourceName: item.source?.name, sourceUrl: item.source?.url, publishedAt: item.publishedAt, fetchedAt: item.retrievedAt, sourceStatus: item.publishedAt ? 'live' : 'partial' });
+        const evidence = formatSourceEvidence({ title: item.title, sourceName: item.source?.name, sourceUrl: item.source?.url, scheduledAt: item.scheduledAt, occurredAt: item.occurredAt, publishedAt: item.publishedAt, fetchedAt: item.retrievedAt, sourceStatus: item.publishedAt ? 'live' : 'partial' });
         const id = safeAttr(item.id);
-        const canStudy = item.publishedAt && Date.parse(item.occurredAt) <= Date.now();
-        return `${evidence}<div class="event-research-actions">${activeMarketScope === 'stocks' ? `<button class="tab" type="button" data-event-id="${id}" onclick="openEventKlineFromTimeline(this)">定位 K 线</button><button class="tab guest-admin-only" type="button" data-event-id="${id}" onclick="openEventResearchFromTimeline(this)" ${canStudy ? '' : 'disabled title="尚未发生或缺少可核实的发布时间"'}>事件研究</button><button class="tab guest-admin-only" type="button" data-event-id="${id}" onclick="openEventDecisionFromTimeline(this)">写决策日记</button>` : '<span>真实快照变化；尚无可核验发布时间的记录不进入事件研究。</span>'}</div>`;
+        const occurrenceTime = item.occurredAt ? Date.parse(item.occurredAt) : null;
+        const scheduleTime = item.scheduledAt ? Date.parse(item.scheduledAt) : null;
+        const publicationTime = item.publishedAt ? Date.parse(item.publishedAt) : null;
+        const canStudy = Number.isFinite(publicationTime) && publicationTime <= Date.now()
+          && (item.kind === 'news'
+            ? (occurrenceTime === null || occurrenceTime <= Date.now())
+          : (Number.isFinite(occurrenceTime) && occurrenceTime <= Date.now() && (scheduleTime === null || scheduleTime <= Date.now())));
+        return `${evidence}<div class="event-research-actions">${activeMarketScope === 'stocks' ? `<button class="tab" type="button" data-event-id="${id}" onclick="openEventKlineFromTimeline(this)">定位 K 线</button><button class="tab guest-admin-only" type="button" data-event-id="${id}" onclick="openEventResearchFromTimeline(this)" ${canStudy ? '' : 'disabled title="事件未确认发生或缺少可核实的发布时间"'}>事件研究</button><button class="tab guest-admin-only" type="button" data-event-id="${id}" onclick="openEventDecisionFromTimeline(this)">写决策日记</button>` : '<span>真实快照变化；尚无可核验发布时间的记录不进入事件研究。</span>'}</div>`;
       }).join('') : `<div class="empty-tip">${safeNewsText(entityPayload.reason || '该股票暂无可核实的事件与新闻')}</div>`);
       return;
     }
@@ -8366,8 +8375,8 @@ async function persistTimelineEventEvidence(entity) {
     dataStatus: publishedAt ? 'historical' : 'partial',
     source: { id: `event-source:${sourceName.toLowerCase().replace(/[^a-z0-9.-]+/g, '-')}`, name: sourceName, url: entity.source?.url || null },
     observedAt: publishedAt || fetchedAt, fetchedAt,
-    fields: { title: entity.title, kind: entity.kind, occurredAt: entity.occurredAt, publishedAt: entity.publishedAt, retrievedAt: entity.retrievedAt, asOf: entity.asOf, sourceName, sourceUrl: entity.source?.url || null },
-    expectedFields: ['title', 'kind', 'occurredAt', 'publishedAt', 'retrievedAt', 'asOf', 'sourceName', 'sourceUrl'],
+    fields: { title: entity.title, kind: entity.kind, occurredAt: entity.occurredAt, scheduledAt: entity.scheduledAt, publishedAt: entity.publishedAt, timelineAt: entity.timelineAt, retrievedAt: entity.retrievedAt, asOf: entity.asOf, sourceName, sourceUrl: entity.source?.url || null },
+    expectedFields: ['title', 'kind', 'occurredAt', 'scheduledAt', 'publishedAt', 'timelineAt', 'retrievedAt', 'asOf', 'sourceName', 'sourceUrl'],
     ...(!publishedAt ? { reason: '来源未提供可核实且不晚于抓取时间的发布时间；不可用于时点回测入场条件' } : {}),
   }) });
   return result.data;
@@ -8376,14 +8385,15 @@ function openEventKlineFromTimeline(button) {
   const entity = timelineSelectedEntity(button);
   if (!entity) return showToast('事件与当前标的不匹配，请刷新', 'error');
   window.openWorkspace('stock-quotes');
-  applyStockKlineAsOf(entity.occurredAt.slice(0, 10));
+  const focusAt = entity.timelineAt || entity.scheduledAt || entity.occurredAt || entity.publishedAt;
+  if (focusAt) applyStockKlineAsOf(focusAt.slice(0, 10));
 }
 async function openEventResearchFromTimeline(button) {
   const entity = timelineSelectedEntity(button);
   if (!entity || !entity.publishedAt) return showToast('缺少可核实的发布时间，不能建立时点研究', 'error');
   try { window.mm_selectedStudyEventEvidenceId = (await persistTimelineEventEvidence(entity)).id; }
   catch (error) { return showToast(error.message || '事件证据快照保存失败', 'error'); }
-  const start = new Date(Math.max(Date.parse(entity.occurredAt), Date.parse(entity.publishedAt)));
+  const start = new Date(Math.max(Date.parse(entity.occurredAt || entity.publishedAt), Date.parse(entity.publishedAt)));
   const local = new Date(start.getTime() - start.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
   window.mm_selectedStudyEventId = entity.id;
   window.openWorkspace('decision-intelligence');
@@ -10912,6 +10922,8 @@ function formatSourceEvidence(item = {}) {
   const status = item.sourceStatus || 'live';
   const statusLabel = { live: '实时', ok: '可用', stale: '缓存', cached: '缓存', partial: '部分可用', unavailable: '不可用', error: '错误' }[status] || status;
   const publishedAt = item.publishedAt || item.date || item.time;
+  const timelineTimestamp = item.occurredAt || item.scheduledAt || publishedAt;
+  const timelineLabel = item.occurredAt ? '发生' : item.scheduledAt ? '计划' : publishedAt ? '发布' : '时间';
   const fetchedAt = item.fetchedAt;
   const formatTime = value => {
     if (!value) return '时间未知';
@@ -10926,7 +10938,7 @@ function formatSourceEvidence(item = {}) {
     <div class="source-evidence-meta">
       <span>${instrumentDetailEscape(sourceName)}</span><span>·</span>
       <span>${instrumentDetailEscape(typeLabel)}</span><span>·</span>
-      <span>${instrumentDetailEscape(formatTime(publishedAt))}</span><span>·</span>
+      <span>${instrumentDetailEscape(timelineLabel)} ${instrumentDetailEscape(formatTime(timelineTimestamp))}</span><span>·</span>
       <span>${statusText}</span>
     </div>
     ${safeUrl

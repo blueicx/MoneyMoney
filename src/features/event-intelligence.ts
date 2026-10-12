@@ -8,8 +8,13 @@ export interface EventEntity {
   kind: 'event' | 'news';
   title: string;
   normalizedTitle: string;
-  occurredAt: string;
+  /** Verified occurrence time only; never inferred from a UI/list timestamp. */
+  occurredAt: string | null;
+  /** Provider-declared future/planned time, not proof the event happened. */
+  scheduledAt: string | null;
   publishedAt: string | null;
+  /** Timestamp used only to place the row in a timeline or chart. */
+  timelineAt: string;
   retrievedAt: string;
   asOf: string;
   source: { name: string | null; url: string | null };
@@ -32,6 +37,8 @@ export interface EventCluster {
 interface TimelineRow {
   kind?: unknown;
   at?: unknown;
+  timelineAt?: unknown;
+  scheduledAt?: unknown;
   occurredAt?: unknown;
   publishedAt?: unknown;
   retrievedAt?: unknown;
@@ -77,10 +84,11 @@ export function buildEventEntities(rows: TimelineRow[], context: { market: Marke
   const defaultAsOf = isoOrNull(context.asOf) || defaultRetrievedAt;
   return rows.map((row): EventEntity | null => {
     const title = text(row.title);
-    const parsedAt = new Date(text(row.occurredAt || row.at));
-    if (!title || !Number.isFinite(parsedAt.getTime())) return null;
-    const occurredAt = parsedAt.toISOString();
+    const occurredAt = isoOrNull(row.occurredAt);
+    const scheduledAt = isoOrNull(row.scheduledAt);
     const publishedAt = isoOrNull(row.publishedAt);
+    const timelineAt = isoOrNull(row.timelineAt) || occurredAt || scheduledAt || publishedAt || isoOrNull(row.at);
+    if (!title || !timelineAt) return null;
     const retrievedAt = isoOrNull(row.retrievedAt) || defaultRetrievedAt;
     const asOf = isoOrNull(row.asOf) || defaultAsOf;
     const kind = row.kind === 'event' ? 'event' : 'news';
@@ -88,8 +96,8 @@ export function buildEventEntities(rows: TimelineRow[], context: { market: Marke
     if (!normalizedTitle) return null;
     const sourceName = text(row.source) || null;
     const url = safeUrl(row.url);
-    const id = `event_${entityHash({ market: context.market, instrument: context.instrument, kind, title, occurredAt, publishedAt, sourceName, url })}`;
-    return { id, market: context.market, instrument: context.instrument, kind, title, normalizedTitle, occurredAt, publishedAt, retrievedAt, asOf, source: { name: sourceName, url } };
+    const id = `event_${entityHash({ market: context.market, instrument: context.instrument, kind, title, occurredAt, scheduledAt, publishedAt, timelineAt, sourceName, url })}`;
+    return { id, market: context.market, instrument: context.instrument, kind, title, normalizedTitle, occurredAt, scheduledAt, publishedAt, timelineAt, retrievedAt, asOf, source: { name: sourceName, url } };
   }).filter((row): row is EventEntity => row !== null);
 }
 
@@ -100,7 +108,9 @@ export function selectResearchEvent(entities: readonly EventEntity[], id: string
   if (!entity) throw new Error('Event evidence not found for this instrument');
   if (!entity.publishedAt) throw new Error('Event publication time is unknown; historical study entry is unavailable');
   if (Date.parse(entity.publishedAt) > cutoff) throw new Error('Event was published after asOf; future evidence is unavailable');
-  if (Date.parse(entity.occurredAt) > cutoff) throw new Error('Event occurred after asOf; future outcome is unavailable');
+  if (entity.occurredAt && Date.parse(entity.occurredAt) > cutoff) throw new Error('Event occurred after asOf; future outcome is unavailable');
+  if (entity.scheduledAt && Date.parse(entity.scheduledAt) > cutoff) throw new Error('Event is scheduled after asOf; future outcome is unavailable');
+  if (entity.kind === 'event' && !entity.occurredAt) throw new Error('Event occurrence is not verified; scheduled time cannot establish a historical outcome');
   return entity;
 }
 
@@ -109,24 +119,24 @@ export function clusterEventEntities(entities: EventEntity[]): EventCluster[] {
   for (const entity of entities) {
     if (!MARKET_IDS.includes(entity.market)) throw new Error('Invalid event market');
     assertMarketContext({ market: entity.market, workspace: 'event-intelligence', instrument: entity.instrument });
-    const day = entity.occurredAt.slice(0, 10);
+    const day = entity.timelineAt.slice(0, 10);
     const key = `${entity.market}|${entity.instrument}|${entity.normalizedTitle}|${day}`;
     const group = groups.get(key) || [];
     group.push(entity);
     groups.set(key, group);
   }
   return [...groups.values()].map(group => {
-    const sorted = [...group].sort((left, right) => left.occurredAt.localeCompare(right.occurredAt));
+    const sorted = [...group].sort((left, right) => left.timelineAt.localeCompare(right.timelineAt));
     const first = sorted[0];
     const sources = [...new Map(sorted.map(item => [`${item.source.name || ''}|${item.source.url || ''}`, item.source])).values()];
     return {
-      id: `cluster_${entityHash({ market: first.market, instrument: first.instrument, normalizedTitle: first.normalizedTitle, day: first.occurredAt.slice(0, 10) })}`,
+      id: `cluster_${entityHash({ market: first.market, instrument: first.instrument, normalizedTitle: first.normalizedTitle, day: first.timelineAt.slice(0, 10) })}`,
       market: first.market,
       instrument: first.instrument,
       title: first.title,
       normalizedTitle: first.normalizedTitle,
-      firstAt: sorted[0].occurredAt,
-      lastAt: sorted[sorted.length - 1].occurredAt,
+      firstAt: sorted[0].timelineAt,
+      lastAt: sorted[sorted.length - 1].timelineAt,
       evidenceCount: sorted.length,
       evidenceIds: sorted.map(item => item.id),
       sources,

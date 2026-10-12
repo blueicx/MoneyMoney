@@ -26,7 +26,8 @@ test('watchlist event and action-center UI label scheduled time separately from 
   const actions = server.slice(server.indexOf('async function collectWatchlistActions'), server.indexOf("app.get('/api/watchlist/action-center"));
   assert.ok(actions.includes('scheduledAt: event.scheduledAt || event.date'));
   assert.ok(!actions.includes('occurredAt: event.date'));
-  assert.match(ui, /row\.scheduledAt\s*\|\|\s*row\.occurredAt/);
+  assert.match(ui, /row\.occurredAt\s*\|\|\s*row\.scheduledAt/);
+  assert.match(ui, /row\.kind !== 'news' && occurrenceTime === null/);
   assert.match(ui, /计划时间/);
 });
 test('read/pin/snooze persists by owner and resumes at expiration, invalid snooze is rejected', t => {

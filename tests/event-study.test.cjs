@@ -61,6 +61,21 @@ test('cohort with sparse evidence warns and does not invent a confidence interva
   assert.match(result.warnings.join(' '), /样本/);
 });
 
+test('cohort uses publication time for news but never treats scheduled calendar time as an occurrence', () => {
+  const history = Array.from({ length: 90 }, (_, index) => {
+    const close = 100 + index;
+    return { timestamp: new Date(Date.UTC(2026, 0, index + 1)).toISOString(), open: close, high: close + 1, low: close - 1, close };
+  });
+  const at = index => history[index].timestamp;
+  const events = [
+    { id: 'published-news', market: 'stocks', instrument: 'AAPL', kind: 'news', title: 'Quarterly earnings report', occurredAt: null, publishedAt: at(10) },
+    { id: 'scheduled-only', market: 'stocks', instrument: 'AAPL', kind: 'event', occurredAt: null, scheduledAt: at(20), publishedAt: at(19), title: 'Quarterly earnings report' },
+  ];
+  const result = buildEventStudyCohort({ market: 'stocks', instrument: 'AAPL', eventAt: at(70), title: 'Quarterly earnings report', bars: history, events, afterBars: 2 });
+  assert.deepEqual(result.eventIds, ['published-news']);
+  assert.equal(result.sampleSize, 1);
+});
+
 test('cohort limit is applied after filtering future events so old eligible evidence is not starved', () => {
   const history = Array.from({ length: 250 }, (_, index) => {
     const close = 100 + index;
@@ -104,9 +119,14 @@ test('event study API is wired to point-in-time bars and private evidence routes
   assert.match(html, /runEventStudyUi\(\)/);
   assert.match(server, /selectResearchEvent\(eventEntities, eventId, asOf\)/);
   assert.match(server, /buildEventStudyCohort\(/);
+  assert.match(server, /scheduledAt: entity\.scheduledAt/);
+  assert.match(server, /const anchorAt = selectedEvent\.occurredAt \|\| selectedEvent\.publishedAt!/);
   assert.match(server, /classifyEventCategory\(/);
   assert.match(server, /evidenceRefs: selectedEvent/);
   assert.match(html, /openEventResearchFromTimeline\(this\)/);
+  assert.match(html, /timelineAt: entity\.timelineAt/);
+  assert.match(html, /item\.kind === 'news'/);
+  assert.match(html, /const timeKind = item\.occurredAt \? '发生' : item\.scheduledAt \? '计划'/);
   assert.match(html, /同类历史事件/);
   assert.match(html, /事件标题/);
 });

@@ -4,7 +4,7 @@
   const markets = { stocks:'股票', options:'期权', crypto:'虚拟币', prediction:'预测市场' };
   const kinds = { changes:'今日变化', upcoming:'未来七天', alert:'待确认提醒', screener:'筛选进出', '13f':'13F 变化', review:'到期复盘' };
   let records = [], controller, lastScope, lastContext='', lifecycleController = new AbortController();
-  const timeForLocation = row => row.scheduledAt || row.occurredAt || row.publishedAt;
+  const timeForLocation = row => row.occurredAt || row.scheduledAt || row.publishedAt;
   function context() { const shell=document.getElementById('market-workspace-shell');return {market:shell?.dataset.marketScope,workspace:shell?.dataset.workspace,instrument:shell?.dataset.instrument || ''}; }
   const saved = key => { try { return JSON.parse(localStorage.getItem(key) || '{}'); } catch { return {}; } };
   const pref = saved('mm-action-filter-v1');
@@ -30,10 +30,13 @@
         event.preventDefault();
         try {
           if (!row.instrument) throw new Error('此记录没有明确标的，无法建立事件研究或日记');
-          if (anchor.textContent === '事件研究' && (!row.publishedAt || Date.parse(row.publishedAt) > Date.now() || row.occurredAt && Date.parse(row.occurredAt) > Date.now())) throw new Error('事件尚未发生或缺少发布时间，只可建立决策草稿');
+          const publicationTime = row.publishedAt ? Date.parse(row.publishedAt) : null;
+          const occurrenceTime = row.occurredAt ? Date.parse(row.occurredAt) : null;
+          const scheduledTime = row.scheduledAt ? Date.parse(row.scheduledAt) : null;
+          if (anchor.textContent === '事件研究' && (!Number.isFinite(publicationTime) || publicationTime > Date.now() || (occurrenceTime !== null && occurrenceTime > Date.now()) || (scheduledTime !== null && scheduledTime > Date.now()) || (row.kind !== 'news' && occurrenceTime === null))) throw new Error('事件尚未确认发生或缺少可核实发布时间，只可建立决策草稿');
           let refs = row.evidenceRefs.filter(id => !/^https?:/i.test(id));
           if (!refs.length) {
-            const result = await api('/api/evidence',{ method:'POST',body:JSON.stringify({ market:row.market,instrument:row.instrument,workspace:'event-intelligence',dataStatus:row.dataStatus,source:{ id:'action-center:'+row.market,name:row.source,url:row.sourceUrl || null },observedAt:row.publishedAt || row.occurredAt || row.observedAt,fetchedAt:row.observedAt,fields:{ title:row.title,kind:row.kind,scheduledAt:row.scheduledAt || null,publishedAt:row.publishedAt || null,occurredAt:row.occurredAt || null,sourceUrl:row.sourceUrl || null } }) });
+            const result = await api('/api/evidence',{ method:'POST',body:JSON.stringify({ market:row.market,instrument:row.instrument,workspace:'event-intelligence',dataStatus:row.dataStatus,source:{ id:'action-center:'+row.market,name:row.source,url:row.sourceUrl || null },observedAt:row.publishedAt || row.occurredAt || row.observedAt,fetchedAt:row.observedAt,fields:{ title:row.title,kind:row.kind,scheduledAt:row.scheduledAt || null,publishedAt:row.publishedAt || null,occurredAt:row.occurredAt || null,timelineAt:timeForLocation(row) || null,sourceUrl:row.sourceUrl || null } }) });
             refs = [result.data.id];
           }
           window.setMarketScope(row.market); window.setWorkspaceInstrument(row.instrument); window.openWorkspace('decision-intelligence');

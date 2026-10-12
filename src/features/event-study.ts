@@ -63,7 +63,8 @@ export interface EventStudyCohortResult {
 }
 
 interface CohortEvent {
-  id: string; market: MarketId; instrument: string; title: string; occurredAt: string; publishedAt: string | null;
+  id: string; market: MarketId; instrument: string; title: string; occurredAt: string | null; publishedAt: string | null;
+  scheduledAt?: string | null; kind?: 'event' | 'news';
 }
 
 export function classifyEventCategory(title: string): EventCategory {
@@ -106,10 +107,13 @@ export function buildEventStudyCohort(input: {
   const occupiedIndices: number[] = [];
   const eligibleEvents = input.events.flatMap(event => {
     if (event.market !== input.market || event.instrument !== input.instrument || classifyEventCategory(event.title) !== category || !event.publishedAt) return [];
-    const occurred = Date.parse(event.occurredAt);
     const published = Date.parse(event.publishedAt);
-    if (!Number.isFinite(occurred) || !Number.isFinite(published)) return [];
-    const entryTime = Math.max(occurred, published);
+    const occurred = event.occurredAt ? Date.parse(event.occurredAt) : null;
+    const scheduled = event.scheduledAt ? Date.parse(event.scheduledAt) : null;
+    if (!Number.isFinite(published) || (occurred !== null && !Number.isFinite(occurred)) || (scheduled !== null && !Number.isFinite(scheduled))) return [];
+    if (event.kind === 'event' && occurred === null) return [];
+    if (scheduled !== null && scheduled >= targetTime) return [];
+    const entryTime = Math.max(occurred ?? published, published);
     if (entryTime >= targetTime) return [];
     const index = input.bars.findIndex(bar => Date.parse(bar.timestamp) >= entryTime);
     if (index < 0 || index + afterBars >= input.bars.length || Date.parse(input.bars[index + afterBars].timestamp) >= targetTime) return [];

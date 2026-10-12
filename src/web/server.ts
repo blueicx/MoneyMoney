@@ -610,6 +610,7 @@ async function buildSharedMarketChangeDigest(ids: string[], since: string): Prom
         title, summary: item.reason || undefined, source: item.source.name, sourceUrl,
         scheduledAt: typeof item.fields.scheduledAt === 'string' ? item.fields.scheduledAt : undefined,
         occurredAt: typeof item.fields.occurredAt === 'string' ? item.fields.occurredAt : undefined,
+        timelineAt: typeof item.fields.timelineAt === 'string' ? item.fields.timelineAt : undefined,
         publishedAt, observedAt: item.observedAt, evidenceRefs: [item.id, ...(sourceUrl ? [sourceUrl] : [])], dataStatus: item.dataStatus,
       });
     }
@@ -1489,7 +1490,8 @@ app.post('/api/event-studies', express.json(), async (req, res) => {
       if (eventId) {
         selectedEvent = selectResearchEvent(eventEntities, eventId, asOf);
         selectedEventEvidenceId = persistTimelineEventEvidence(selectedEvent).id;
-        eventAt = new Date(Math.max(Date.parse(selectedEvent.occurredAt), Date.parse(selectedEvent.publishedAt!))).toISOString();
+        const anchorAt = selectedEvent.occurredAt || selectedEvent.publishedAt!;
+        eventAt = new Date(Math.max(Date.parse(anchorAt), Date.parse(selectedEvent.publishedAt!))).toISOString();
       }
     } else if (eventId) {
       throw new Error('当前市场事件研究尚无可靠的标的事件来源');
@@ -3852,13 +3854,15 @@ function persistTimelineEventEvidence(entity: ReturnType<typeof buildEventEntiti
       title: entity.title,
       kind: entity.kind,
       occurredAt: entity.occurredAt,
+      scheduledAt: entity.scheduledAt,
       publishedAt: entity.publishedAt,
+      timelineAt: entity.timelineAt,
       retrievedAt: entity.retrievedAt,
       asOf: entity.asOf,
       sourceName: entity.source.name,
       sourceUrl: entity.source.url,
     },
-    expectedFields: ['title', 'kind', 'occurredAt', 'publishedAt', 'retrievedAt', 'asOf', 'sourceName', 'sourceUrl'],
+    expectedFields: ['title', 'kind', 'occurredAt', 'scheduledAt', 'publishedAt', 'timelineAt', 'retrievedAt', 'asOf', 'sourceName', 'sourceUrl'],
     ...(hasPublishedEvidence ? {} : { reason: '来源未提供可核实且不晚于抓取时间的发布时间；不能用于时点回测入场条件' }),
   });
   decisionIntelligenceStore.saveEvidence(evidence);
@@ -5566,7 +5570,7 @@ export function getTelegramCommandHandlers(): Record<string, TelegramCommandHand
       stateStore.set(key,{ at:new Date().toISOString(),scope,items:shown });
       const lines = shown.map((row,index) => {
         const href = buildTelegramDeepLink(telegramPublicBaseUrl(),{ market:row.market,instrument:row.instrument || '',workspace:'action-center' });
-        const chart = row.market==='stocks' && row.instrument ? buildTelegramDeepLink(telegramPublicBaseUrl(),{market:row.market,instrument:row.instrument,workspace:'stock-quotes',timeframe:'1d',focusDate:(row.scheduledAt || row.occurredAt || row.publishedAt || '').slice(0,10)}):null;
+        const chart = row.market==='stocks' && row.instrument ? buildTelegramDeepLink(telegramPublicBaseUrl(),{market:row.market,instrument:row.instrument,workspace:'stock-quotes',timeframe:'1d',focusDate:(row.occurredAt || row.scheduledAt || row.publishedAt || '').slice(0,10)}):null;
         const status=({live:'实时',delayed:'延迟',cached:'缓存',partial:'部分成功',empty:'来源成功但无记录',unavailable:'来源不可用',failed:'请求失败',unsupported:'不支持',historical:'历史数据'} as Record<string,string>)[row.dataStatus] || row.dataStatus;
         return `${index+1}. ${escapeTelegramHtml(row.title)} · ${escapeTelegramHtml(status)}\n${escapeTelegramHtml(row.source)} · 抓取 ${escapeTelegramHtml(row.observedAt)}${row.scheduledAt ? '\n计划时间：'+escapeTelegramHtml(row.scheduledAt):''}${row.reason ? '\n原因：'+escapeTelegramHtml(row.reason):''}${href ? `\n<a href="${escapeTelegramHtml(href)}">网页与证据</a>` : ''}${chart ? ` · <a href="${escapeTelegramHtml(chart)}">对应日期图表</a>`:''}`;
       });
