@@ -17,7 +17,7 @@ import { getMarketRegime, type RegimeResult } from './market-regime';
 import { getSupportResistance, type SrResult } from './support-resistance';
 import { getMultiTimeframeConfluence, type ConfluenceResult } from './multi-timeframe';
 import { getEventRisk, type EventRiskResult } from './event-risk';
-import { getStablecoinLiquidity, type StablecoinLiquidityResult } from './stablecoin-liquidity';
+import { getStablecoinLiquidity, isStablecoinLiquidityActionable, type StablecoinLiquidityResult } from './stablecoin-liquidity';
 import { getCotRadar, type CotRadarResult } from './cftc-positioning';
 import { getPerpetualCrowding, type PerpetualCrowdingResult } from './perpetual-crowding';
 import { getOrderFlowLiquidityRadar, isOrderFlowMarketBiasEligible, type OrderFlowLiquidityResult } from './order-flow-liquidity';
@@ -1190,7 +1190,8 @@ async function buildContext(
   const sectorMomentumBoost = sectorRotation
     ? clamp(sectorRotation.averageExcessMomentum * 5, -8, 8)
     : 0;
-  const liquidityBoost = stablecoinLiquidity?.regimeBoost ?? 0;
+  const stablecoinLiquidityUsable = isStablecoinLiquidityActionable(stablecoinLiquidity);
+  const liquidityBoost = stablecoinLiquidityUsable ? stablecoinLiquidity?.regimeBoost ?? 0 : 0;
   const cotBoost = cotPositioning?.regimeBoost ?? 0;
   const derivativesBoost = perpetualCrowding?.regimeBoost ?? 0;
   const orderFlowComplete = isOrderFlowMarketBiasEligible(orderFlowLiquidity);
@@ -1462,7 +1463,7 @@ async function buildContext(
     });
   }
 
-  if (stablecoinLiquidity?.signal === 'contraction') {
+  if (stablecoinLiquidityUsable && stablecoinLiquidity?.signal === 'contraction') {
     cautionFlags.push({
       id: 'stablecoin-contraction',
       severity: 'medium',

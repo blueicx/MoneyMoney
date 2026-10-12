@@ -5,8 +5,8 @@ test('metric composer remains inside alerts, binds current instrument and render
  win.eval(fs.readFileSync('src/web/public/practical-experience.js','utf8'));win.document.dispatchEvent(new win.Event('DOMContentLoaded'));await new Promise(resolve=>setTimeout(resolve,20));
  assert.equal(win.document.querySelector('#mm-metric-composer').closest('#alerts-tab')?.id,'alerts-tab');
  assert.equal(win.document.querySelectorAll('[data-metric-field] option').length,0,'hidden alerts do not fetch capabilities');
- win.document.getElementById('market-workspace-shell').dataset.workspace='alerts';
- win.dispatchEvent(new win.Event('mm-workspace-context'));await new Promise(resolve=>setTimeout(resolve,20));
+ win.mm_active_tab='alerts';
+ win.dispatchEvent(new win.Event('mm-tab-context'));await new Promise(resolve=>setTimeout(resolve,20));
  assert.equal(win.document.querySelector('[data-metric-instrument]').textContent,'stock:us:SNDK');assert.equal(win.document.querySelectorAll('[data-metric-field] option').length,2);
  win.mm_isGuest=true;win.dispatchEvent(new win.Event('mm-workspace-context'));assert.equal(win.document.querySelector('#mm-metric-composer').hidden,true);dom.window.close();
 });

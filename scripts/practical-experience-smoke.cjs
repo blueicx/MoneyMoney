@@ -4,7 +4,7 @@ const user='practical-owner',pass='isolated-practical-93!';const child=spawn(pro
 async function main(){let browser;try{
  let ready=false;for(let i=0;i<70;i++){try{if((await fetch(base+'/api/health/live')).ok){ready=true;break;}}catch{}await new Promise(r=>setTimeout(r,200));}assert.ok(ready,'server ready');
  browser=await chromium.launch({channel:process.env.MONEYMONEY_SMOKE_BROWSER || 'chrome',headless:true});const context=await browser.newContext({viewport:{width:1440,height:900},serviceWorkers:'block'}),page=await context.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));
- await page.goto(base+'/login');await page.fill('#username',user);await page.fill('#password',pass);await Promise.all([page.waitForURL(url=>url.pathname==='/'),page.click('#submitBtn')]);await page.waitForSelector('#mm-research-lab',{state:'attached'});
+ await page.goto(base+'/login');await page.fill('#username',user);await page.fill('#password',pass);await Promise.all([page.waitForURL(url=>url.pathname==='/'),page.click('#submitBtn')]);await page.waitForFunction(()=>typeof window.openWorkspace==='function');await page.evaluate(()=>window.openWorkspace('research-lab'));await page.waitForSelector('#mm-research-lab',{state:'attached'});
  for(const [market,workspace] of [['stocks','guru-holdings'],['stocks','insider'],['options','greeks'],['crypto','funding-rate'],['prediction','prediction-radar']]){
   await page.evaluate(([market,workspace])=>{setMarketScope(market);openWorkspace(workspace);applyMarketScopeView();},[market,workspace]);
   for(const id of ['market-overview','workspace-dashboard-cards','market-change-digest','mm-action-center','mm-research-lab'])assert.equal(await page.locator('#'+id).isVisible(),false,market+'/'+workspace+': '+id);

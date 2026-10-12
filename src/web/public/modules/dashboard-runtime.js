@@ -7109,34 +7109,41 @@ async function loadStablecoinLiquidity() {
     const res = await fetch('/api/macro/stablecoins');
     const payload = await res.json();
     const d = payload.data;
-    if (!payload.success || !d) throw new Error(payload.error || 'no data');
-    const color = d.flowScore >= 12 ? 'var(--green)' : d.flowScore <= -12 ? 'var(--red)' : 'var(--warning)';
-    const meterPct = Math.min(100, Math.abs(d.flowScore));
-    const meterLeft = d.flowScore < 0 ? 50 - meterPct / 2 : 50;
+    if (!payload.success || !d) throw new Error(payload.reason || payload.error || '来源未返回数据');
+    const hasScore = Number.isFinite(d.flowScore);
+    const color = !hasScore ? 'var(--text-secondary)' : d.flowScore >= 12 ? 'var(--green)' : d.flowScore <= -12 ? 'var(--red)' : 'var(--warning)';
+    const meterPct = hasScore ? Math.min(100, Math.abs(d.flowScore)) : 0;
+    const meterLeft = hasScore && d.flowScore < 0 ? 50 - meterPct / 2 : 50;
+    const knownUsd = value => value == null || !Number.isFinite(Number(value)) ? '暂无' : compactUsd(value);
+    const coverage = d.coverage || {};
+    const retrievalLabel = d.retrievedAt ? formatBeijingDateTime(d.retrievedAt) : '未知';
+    const sourceTimeLabel = d.sourceUpdatedAt ? formatBeijingDateTime(d.sourceUpdatedAt) : '未提供';
     const chips = [
-      { label: '1日', value: compactUsd(d.netFlow1dUsd), pct: d.change1dPct },
-      { label: '7日', value: compactUsd(d.netFlow7dUsd), pct: d.change7dPct },
-      { label: '30日', value: compactUsd(d.netFlow30dUsd), pct: d.change30dPct },
+      { label: '1日', value: knownUsd(d.netFlow1dUsd), pct: d.change1dPct, count: coverage.flow1dCount },
+      { label: '7日', value: knownUsd(d.netFlow7dUsd), pct: d.change7dPct, count: coverage.flow7dCount },
+      { label: '30日', value: knownUsd(d.netFlow30dUsd), pct: d.change30dPct, count: coverage.flow30dCount },
     ].map(chip => {
-      const pct = Number(chip.pct);
-      const tone = Number.isFinite(pct) ? (pct >= 0 ? 'var(--green)' : 'var(--red)') : 'var(--text-secondary)';
-      const pctText = Number.isFinite(pct) ? ` · ${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%` : '';
-      return `<span style="padding:5px 8px;border-radius:8px;background:var(--bg-secondary);font-size:11px;">${chip.label} <strong style="color:${tone};">${safeNewsText(chip.value)}${pctText}</strong></span>`;
+      const pct = chip.pct == null ? null : Number(chip.pct);
+      const hasPct = pct !== null && Number.isFinite(pct);
+      const tone = hasPct ? (pct >= 0 ? 'var(--green)' : 'var(--red)') : 'var(--text-secondary)';
+      const pctText = hasPct ? ` · ${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%` : '';
+      const countText = Number.isFinite(Number(chip.count)) ? ` · 覆盖 ${chip.count}/${coverage.validSupplyCount || 0}` : '';
+      return `<span style="padding:5px 8px;border-radius:8px;background:var(--bg-secondary);font-size:11px;">${chip.label} <strong style="color:${tone};">${safeNewsText(chip.value)}${pctText}</strong><small style="color:var(--text-secondary);">${countText}</small></span>`;
     }).join('');
     const rows = (d.top5 || []).map(row => {
-      const flow = Number(row.netFlow7dUsd);
-      const tone = Number.isFinite(flow) ? (flow >= 0 ? 'var(--green)' : 'var(--red)') : 'var(--text-secondary)';
+      const flow = row.netFlow7dUsd == null ? null : Number(row.netFlow7dUsd);
+      const tone = flow !== null && Number.isFinite(flow) ? (flow >= 0 ? 'var(--green)' : 'var(--red)') : 'var(--text-secondary)';
       return `<div style="display:flex;justify-content:space-between;gap:10px;padding:7px 0;border-top:1px solid var(--border);font-size:12px;">
         <span style="font-weight:700;">${safeNewsText(row.symbol)}</span>
-        <span style="color:var(--text-secondary);">总量 ${compactUsd(row.circulatingUsd)}</span>
-        <span style="color:${tone};">7日 ${safeNewsText(compactUsd(row.netFlow7dUsd))}</span>
+        <span style="color:var(--text-secondary);">总量 ${knownUsd(row.circulatingUsd)} · 锚定价 ${row.pegPrice == null ? '未知' : safeNewsText(Number(row.pegPrice).toFixed(4))}</span>
+        <span style="color:${tone};">7日 ${safeNewsText(knownUsd(row.netFlow7dUsd))}</span>
       </div>`;
     }).join('');
     el.innerHTML = `
       <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;flex-wrap:wrap;">
         <div>
           <div style="font-weight:800;color:${color};">${safeNewsText(d.signalZh)}</div>
-          <div style="font-size:11px;color:var(--text-secondary);margin-top:3px;">总市值 ${compactUsd(d.totalCirculatingUsd)} · 流动性分 ${d.flowScore > 0 ? '+' : ''}${d.flowScore}</div>
+          <div style="font-size:11px;color:var(--text-secondary);margin-top:3px;">总量 ${knownUsd(d.totalCirculatingUsd)} · ${hasScore ? `流动性分 ${d.flowScore > 0 ? '+' : ''}${d.flowScore}` : '综合分暂不计算'}</div>
         </div>
         <span style="padding:5px 9px;border-radius:8px;background:var(--bg-secondary);font-size:11px;color:${color};">${safeNewsText(d.riskBias)}</span>
       </div>
@@ -7146,10 +7153,10 @@ async function loadStablecoinLiquidity() {
       </div>
       <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;">${chips}</div>
       ${rows}
-      <div style="font-size:11px;color:var(--text-secondary);margin-top:8px;line-height:1.5;">稳定币总量是慢速流动性proxy，不是精确资金流向；它用于调节风险背景，不单独构成买卖信号。</div>
+      <div style="font-size:11px;color:var(--text-secondary);margin-top:8px;line-height:1.5;">来源：DefiLlama · 来源观测时间：${safeNewsText(sourceTimeLabel)} · 抓取时间：${safeNewsText(retrievalLabel)} · 缓存：${d.cacheStatus === 'hit' ? '命中' : '新获取'}。资产 ${coverage.validSupplyCount || 0}/${coverage.assetCount || 0}；稳定币总量是慢速流动性 proxy，不代表资金直接流入交易所。${d.reason ? `<br>${safeNewsText(d.reason)}` : ''}</div>
     `;
   } catch(e) {
-    el.innerHTML = '<div style="color:var(--red);font-size:12px;">稳定币流动性加载失败</div>';
+    el.innerHTML = `<div style="color:var(--red);font-size:12px;">稳定币流动性来源不可用：${safeNewsText(e && e.message || '请求失败')}</div>`;
   }
 }
 // --- Crypto News ---
@@ -11025,6 +11032,7 @@ function showTab(tab, clicked, options = {}) {
   const impliedScope = marketScopeForTab(tab);
   if (!options.scopeAlreadySynced && impliedScope && impliedScope !== activeMarketScope) setMarketScope(impliedScope, { openTab: false });
   window.mm_active_tab = targetTab;
+  window.dispatchEvent(new CustomEvent('mm-tab-context', { detail: { tab: targetTab, market: activeMarketScope, instrument: currentInstrumentFilterId() } }));
   try { localStorage.setItem('mm-last-tab', targetTab); } catch (e) {}
   // Only navigation tabs belong to showTab. K-line period controls also use
   // the shared .tab visual class and must retain their own active state.
