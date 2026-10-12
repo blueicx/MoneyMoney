@@ -157,3 +157,10 @@
 - 正式域名 `https://bluetrade.bbroot.com` 返回版本提交 `a4d890eb1af68aca4508358ebd7bdf663d34c837`、健康 `alive`、登录页 HTTP 200；`moneymoney.service` 为 `active`。远端 Hash 与本地产物一致：`dist/web/server.js` `1e773360b8fcdf3d2dc58475c3e670293c8f115401cbe3fda299f3fc8624bf39`、`dist/web/public/index.html` `86c550036bd3f74fc608a251f5507b22f0aee6fc83f0027f7cfee89d55e60eab`、`asset-manifest.json` `3fa5c2b0af6505f652f13a40073c21331af97e941a055de752e7ae5b9d8791ca`、`build-info.json` `8bede6222fdd4e2ee20a708a53481afe40b6f1b173ec04af1c01703f94c056d7`、`stablecoin-liquidity.js` `98c9db7a09ee069509dc3dcd42b96f0d5a5c55ea550f87e24d5ccb7189bcf317`、`trade-assistant.js` `057be9b83c3977669486054bc0fb04a49a783b6376c18074fd1ad41235c50034`。
 - 发布归档 SHA-256 为 `2668f4b8ff257ee2ebcebb6b9e6ff15acf5810106efdae28357a72418497b318`。发布前备份 `/opt/moneymoney/backups/dist-pre-a4d890e-20261012-stablecoin-alerts` 和回滚目录 `/opt/moneymoney/dist.rollback-a4d890e-20261012-stablecoin-alerts` 均保留。首次以普通用户执行在 root-owned staging/backup 父目录创建阶段被拒，检查确认服务仍 active、线上 dist 未切换后，以 sudo 重跑同一已校验脚本成功。
 - 仅替换远端 `dist`；未改环境密钥、Nginx/TLS、业务数据库或数据湖。本地未跟踪 `data/research.db` 未提交，前后 SHA-256 均为 `27fd475e523568daa4cdcabf3146917023335a62affe00429babd721b3b79fd1`。部署用本地/远端临时归档和脚本已清理。
+
+## 2026-10-12 增量复核：13F 缺失报告期不得推算变化
+
+- 13F 股数变化只有在前后报告期都可解析、且确为相邻季度时才计算；任一期报告期缺失、格式异常或期间不相邻，变化状态为 `unavailable`，不按持仓行推断增持、减持或退出。
+- 之前的比较函数在两份旧记录都没有 `reportPeriod` 时绕过相邻期校验，可能把股数差错误标成增持；新增回归测试先复现该问题，再收紧比较条件。
+- 只有报告期相邻且证券身份行可比较时，当前期未披露才标成“未披露”；不能仅凭缺行声称卖出/清仓。
+- `tests/guru-holdings.test.cjs` 覆盖未知报告期、相邻期股数变化、跨期缺口、精确证券身份和未披露语义。验证为本地契约测试，不代表 SEC 当前在线覆盖率。

@@ -230,7 +230,7 @@ function quarterIndex(reportPeriod: string | null | undefined): number | null {
 }
 
 function reportPeriodComparisonReason(previous: Guru13FReport | null, current: Guru13FReport | null): string | null {
-  if (!previous || !current || (!previous.reportPeriod && !current.reportPeriod)) return null;
+  if (!previous || !current) return null;
   const previousQuarter = quarterIndex(previous.reportPeriod);
   const currentQuarter = quarterIndex(current.reportPeriod);
   return previousQuarter != null && currentQuarter != null && currentQuarter - previousQuarter === 1

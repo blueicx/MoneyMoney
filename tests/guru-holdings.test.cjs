@@ -88,13 +88,23 @@ test('13F parser rejects duplicate CUSIP rows with incompatible share/principal 
 });
 
 test('quarter comparison uses disclosed shares, not changing market value', () => {
-  const previous = { positions: [{ cusip: '037833100', shares: 100, reportedValueUsd: 20_000 }] };
-  const current = { positions: [{ cusip: '037833100', shares: 120, reportedValueUsd: 18_000 }] };
+  const previous = { reportPeriod: '2026-03-31', positions: [{ cusip: '037833100', classTitle: 'COM', shares: 100, reportedValueUsd: 20_000 }] };
+  const current = { reportPeriod: '2026-06-30', positions: [{ cusip: '037833100', classTitle: 'COM', shares: 120, reportedValueUsd: 18_000 }] };
 
   const row = compare13FReports(previous, current)[0];
 
   assert.equal(row.change, 'increased');
   assert.equal(row.shareDelta, 20);
+});
+
+test('13F reports without verifiable adjacent report periods never publish position changes', () => {
+  const previous = { positions: [{ cusip: '037833100', classTitle: 'COM', shares: 100 }] };
+  const current = { positions: [{ cusip: '037833100', classTitle: 'COM', shares: 120 }] };
+  const row = compare13FReports(previous, current)[0];
+
+  assert.equal(row.change, 'unavailable');
+  assert.equal(row.shareDelta, null);
+  assert.match(row.reason, /报告期.*无法核验/);
 });
 
 test('13F share changes are unavailable when an intervening quarter report is missing', () => {
@@ -217,9 +227,9 @@ test('consensus refuses ticker filters without a verified CUSIP and class mappin
 });
 
 test('missing current filing is labeled not disclosed rather than sold out', () => {
-  const previous = { positions: [{ cusip: '037833100', shares: 100, reportedValueUsd: 20_000 }] };
+  const previous = { reportPeriod: '2026-03-31', positions: [{ cusip: '037833100', shares: 100, reportedValueUsd: 20_000 }] };
 
-  assert.equal(compare13FReports(previous, { positions: [] })[0].change, 'not-disclosed');
+  assert.equal(compare13FReports(previous, { reportPeriod: '2026-06-30', positions: [] })[0].change, 'not-disclosed');
 });
 
 test('13F parser decodes XML entities and rejects invalid or ambiguous rows', () => {
@@ -230,13 +240,13 @@ test('13F parser decodes XML entities and rejects invalid or ambiguous rows', ()
 });
 
 test('13F identity keeps put/call rows distinct and reports absent baseline as unavailable', () => {
-  const current = { positions: [{
+  const current = { reportPeriod: '2026-06-30', positions: [{
     issuerName: 'APPLE INC', classTitle: 'COM', cusip: '037833100', shares: 100,
     reportedValue: 20, putCall: 'PUT', investmentDiscretion: null,
   }] };
 
   assert.equal(compare13FReports(null, current)[0].change, 'unavailable');
-  assert.equal(compare13FReports({ positions: [] }, current)[0].change, 'newly-disclosed');
+  assert.equal(compare13FReports({ reportPeriod: '2026-03-31', positions: [] }, current)[0].change, 'newly-disclosed');
 });
 
 test('13F amendment metadata distinguishes restatement, additive filing, and unknown type', () => {
