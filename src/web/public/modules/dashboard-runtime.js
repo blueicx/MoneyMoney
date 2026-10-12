@@ -1326,33 +1326,65 @@ function updateBacktestScopeNote() {
 let lastBacktestResult = null;
 const BACKTEST_CANDIDATE_KEY = 'mm-backtest-candidates-v1';
 let backtestCandidateFreshnessRevision = 0;
+function normalizeBacktestCandidate(item) {
+  if (item.source !== 'screener') return item;
+  const normalized = { ...item, resultStatus: 'not-run', strategyLabel: '筛选观察' };
+  for (const key of ['strategy', 'returnPct', 'winRatePct', 'maxDrawdownPct', 'totalTrades', 'dataSnapshotHash', 'strategyVersion']) delete normalized[key];
+  return normalized;
+}
 function readBacktestCandidates() {
   try {
     const value = JSON.parse(localStorage.getItem(BACKTEST_CANDIDATE_KEY) || '[]');
-    return Array.isArray(value) ? value.filter(item => item && typeof item === 'object') : [];
+    if (!Array.isArray(value)) return [];
+    const candidates = value.filter(item => item && typeof item === 'object');
+    const normalized = candidates.map(normalizeBacktestCandidate);
+    if (JSON.stringify(normalized) !== JSON.stringify(candidates)) {
+      try { localStorage.setItem(BACKTEST_CANDIDATE_KEY, JSON.stringify(normalized.slice(0, 30))); } catch {}
+    }
+    return normalized;
   } catch { return []; }
 }
 function writeBacktestCandidates(items) {
-  try { localStorage.setItem(BACKTEST_CANDIDATE_KEY, JSON.stringify(items.slice(0, 30))); } catch {}
+  try { localStorage.setItem(BACKTEST_CANDIDATE_KEY, JSON.stringify(items.map(normalizeBacktestCandidate).slice(0, 30))); } catch {}
 }
+function hasCandidateMetric(value) { return value !== null && value !== undefined && value !== '' && Number.isFinite(Number(value)); }
 function renderBacktestCandidates() {
   const host = document.getElementById('backtest-candidates');
   if (!host) return;
   const rows = readBacktestCandidates().filter(item => item.scope === activeMarketScope);
   host.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px;"><strong>📌 ${backtestScopeLabel()}候选库</strong><span style="font-size:11px;color:var(--text-secondary);">仅本浏览器保存，不跨市场混用</span></div>` + (rows.length
-    ? rows.map((item, index) => `<div class="backtest-meta" style="justify-content:space-between;align-items:center;border-bottom:1px solid var(--border);padding:8px 0;margin:0;flex-wrap:wrap;"><span><strong>${marketResearchEscape(item.instrument || '全市场')}</strong> · ${marketResearchEscape(item.strategyLabel || item.strategy)} · 收益 ${Number(item.returnPct || 0).toFixed(2)}% · 胜率 ${Number(item.winRatePct || 0).toFixed(0)}%<small data-candidate-freshness="${index}" style="display:block;color:var(--text-secondary);margin-top:4px;">等待时效核验…</small></span><span style="display:flex;gap:5px;flex-wrap:wrap;"><button type="button" class="tab" style="padding:4px 7px;font-size:11px;" onclick="loadBacktestCandidate(${index})">载入</button><button type="button" class="tab" style="padding:4px 7px;font-size:11px;" onclick="rerunBacktestCandidate(${index})">人工复跑</button><button type="button" class="tab" style="padding:4px 7px;font-size:11px;" onclick="openCandidateMonitor(${index})">🔔 提醒</button></span></div>`).join('')
+    ? rows.map((item, index) => {
+      const notRun = item.source === 'screener' || item.resultStatus === 'not-run';
+      const hasPerformance = !notRun && hasCandidateMetric(item.returnPct) && hasCandidateMetric(item.winRatePct);
+      const performance = notRun ? '尚未回测 · 暂无绩效数据'
+        : hasPerformance ? `收益 ${Number(item.returnPct).toFixed(2)}% · 胜率 ${Number(item.winRatePct).toFixed(0)}%`
+          : '绩效字段缺失 · 无法验证';
+      const freshness = notRun ? '尚未回测；没有数据快照可核验' : '等待时效核验…';
+      return `<div class="backtest-meta" style="justify-content:space-between;align-items:center;border-bottom:1px solid var(--border);padding:8px 0;margin:0;flex-wrap:wrap;"><span><strong>${marketResearchEscape(item.instrument || '全市场')}</strong> · ${marketResearchEscape(item.strategyLabel || item.strategy || '候选观察')} · ${performance}<small data-candidate-freshness="${index}" style="display:block;color:var(--text-secondary);margin-top:4px;">${freshness}</small></span><span style="display:flex;gap:5px;flex-wrap:wrap;"><button type="button" class="tab" style="padding:4px 7px;font-size:11px;" onclick="loadBacktestCandidate(${index})">载入</button><button type="button" class="tab" style="padding:4px 7px;font-size:11px;" onclick="rerunBacktestCandidate(${index})">人工复跑</button><button type="button" class="tab" style="padding:4px 7px;font-size:11px;" onclick="openCandidateMonitor(${index})">🔔 提醒</button></span></div>`;
+    }).join('')
     : '<div style="font-size:12px;color:var(--text-secondary);">当前市场还没有保存的回测候选。运行一组有交易记录的回测后即可保存。</div>');
   refreshBacktestCandidateFreshness(rows);
 }
 async function refreshBacktestCandidateFreshness(rows) {
   const revision = ++backtestCandidateFreshnessRevision;
   if (window.mm_isLoggedIn !== true || window.mm_isGuest === true) {
-    document.querySelectorAll('[data-candidate-freshness]').forEach(el => { el.textContent = '登录主人账号后可检查数据修订与策略版本'; });
+    rows.forEach((item, index) => {
+      const el = document.querySelector(`[data-candidate-freshness="${index}"]`);
+      if (!el) return;
+      el.textContent = item.source === 'screener' || item.resultStatus === 'not-run'
+        ? '尚未回测；没有数据快照可核验'
+        : '登录主人账号后可检查数据修订与策略版本';
+    });
     return;
   }
   await Promise.all(rows.map(async (item, index) => {
     const el = document.querySelector(`[data-candidate-freshness="${index}"]`);
     if (!el) return;
+    if (item.source === 'screener' || item.resultStatus === 'not-run') {
+      el.textContent = '尚未回测；没有数据快照可核验';
+      el.dataset.status = 'not-run';
+      return;
+    }
     if (!item.savedAt) { el.textContent = '保存时间缺失，无法核验'; return; }
     const query = new URLSearchParams({ market: item.scope, instrument: item.instrument || '', since: item.savedAt, timeframe: item.timeframe || '1d' });
     if (item.dataSnapshotHash) query.set('snapshotHash', item.dataSnapshotHash);
@@ -1381,7 +1413,7 @@ window.saveBacktestCandidate = function() {
     if (typeof window.showToast === 'function') window.showToast('请先运行当前市场的有效回测', 'error');
     return;
   }
-  const item = { ...lastBacktestResult, savedAt: new Date().toISOString() };
+  const item = { ...lastBacktestResult, resultStatus: 'completed', savedAt: new Date().toISOString() };
   const existing = readBacktestCandidates().filter(candidate => !(candidate.scope === item.scope && candidate.instrument === item.instrument && candidate.strategy === item.strategy));
   writeBacktestCandidates([item, ...existing]);
   renderBacktestCandidates();
@@ -1399,7 +1431,7 @@ window.loadBacktestCandidate = function(index) {
   const threshold = document.getElementById('bt-threshold');
   const holding = document.getElementById('bt-holding');
   if (input) input.value = item.instrument || '';
-  if (strategy) strategy.value = item.strategy || 'momentum';
+  if (strategy && item.strategy) strategy.value = item.strategy;
   if (lookback) lookback.value = item.lookback || 10;
   if (threshold) threshold.value = item.threshold || 0.03;
   if (holding) holding.value = item.holding || 5;
@@ -10853,7 +10885,7 @@ window.saveScreenerCandidate = function(index) {
   const instrument = screenerInstrumentRef(index);
   if (!instrument) return;
   const existing = readBacktestCandidates().filter(item => !(item.scope === activeMarketScope && item.instrument === instrument.symbol && item.source === 'screener'));
-  writeBacktestCandidates([{ scope: activeMarketScope, instrument: instrument.symbol, strategy: 'momentum', strategyLabel: '筛选候选', source: 'screener', returnPct: 0, winRatePct: 0, maxDrawdownPct: 0, totalTrades: 0, savedAt: new Date().toISOString() }, ...existing]);
+  writeBacktestCandidates([{ scope: activeMarketScope, instrument: instrument.symbol, strategyLabel: '筛选观察', source: 'screener', resultStatus: 'not-run', savedAt: new Date().toISOString() }, ...existing]);
   if (typeof window.showToast === 'function') window.showToast(`已保存 ${instrument.symbol} 为当前市场候选`, 'success');
 };
 window.addScreenerToWatchlist = async function(index) {
