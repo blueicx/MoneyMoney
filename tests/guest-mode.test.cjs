@@ -56,6 +56,53 @@ test('guest can read the stock library and search but cannot read private paper 
   assert.equal(auth.isGuestRequestAllowed('POST', '/watchlist'), false);
 });
 
+test('guest access fails closed for private research records, jobs, backfills, and admin registries', () => {
+  for (const endpoint of [
+    '/data/backfills/job-private-1',
+    '/data/canaries/targets',
+    '/data/instruments/resolve',
+    '/research',
+    '/research/private-note-1',
+    '/research/daily-briefing',
+    '/research/candidates',
+    '/research/experiments',
+    '/research/jobs',
+    '/research/jobs/job-private-1',
+    '/research/jobs/job-private-1/events',
+    '/research/artifacts/job-private-1',
+  ]) {
+    assert.equal(auth.isGuestRequestAllowed('GET', endpoint), false, `${endpoint} must remain private`);
+  }
+
+  for (const endpoint of [
+    '/data/history',
+    '/data/snapshots/snapshot_0123456789abcdef01234567_2026-10-12T00:00:00.000Z',
+    '/data/coverage',
+    '/data/canaries/summary',
+    '/research/factors/catalog',
+    '/research/price-comparison',
+  ]) {
+    assert.equal(auth.isGuestRequestAllowed('GET', endpoint), true, `${endpoint} is a public market-data read`);
+  }
+
+  const backfillStart = serverSrc.indexOf("app.get('/api/data/backfills/:id'");
+  const backfillRoute = serverSrc.slice(backfillStart, serverSrc.indexOf('\n});', backfillStart) + 4);
+  assert.match(backfillRoute, /adminOnly\(req,\s*res\)/, 'backfill details enforce admin access at the handler too');
+
+  const snapshotStart = serverSrc.indexOf("app.get('/api/data/snapshots/:id'");
+  const snapshotRoute = serverSrc.slice(snapshotStart, serverSrc.indexOf('\n});', snapshotStart) + 4);
+  assert.match(snapshotRoute, /isGuest\s*\?\s*dataLakeCatalog\.getSnapshot\(String\(req\.params\.id\)\)/,
+    'guests can resolve public point-in-time metadata but never private research snapshots');
+
+  for (const route of ["app.get('/api/research'", "app.get('/api/research/:id'", "app.get('/api/research/daily-briefing'", "app.get('/api/research/candidates'"]) {
+    const start = serverSrc.indexOf(route);
+    assert.notEqual(start, -1, `${route} exists`);
+    const handler = serverSrc.slice(start, serverSrc.indexOf('\n});', start) + 4);
+    assert.match(handler, /adminOnly\(req,\s*res\)/, `${route} contains private research data`);
+  }
+
+});
+
 test('guest instrument access is limited to explicitly public instrument routes', () => {
   for (const endpoint of [
     '/instruments/search',

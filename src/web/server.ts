@@ -870,7 +870,10 @@ app.get('/api/data/capabilities', async (req, res) => {
 
 app.get('/api/data/snapshots/:id', (req, res) => {
   try {
-    const snapshot = require('../features/research-repository').researchRepository.getDataSnapshot(String(req.params.id)) || dataLakeCatalog.getSnapshot(String(req.params.id));
+    const isGuest = (req as any).user?.role === 'guest';
+    const snapshot = isGuest
+      ? dataLakeCatalog.getSnapshot(String(req.params.id))
+      : require('../features/research-repository').researchRepository.getDataSnapshot(String(req.params.id)) || dataLakeCatalog.getSnapshot(String(req.params.id));
     if (!snapshot) return res.status(404).json({ success: false, error: 'Data snapshot not found' });
     const context = snapshot.context || snapshot;
     res.json({ success: true, data: snapshot, market: context.market, instrument: context.instrument || null, dataStatus: context.dataStatus || 'historical', source: snapshot.source || 'MoneyMoney point-in-time snapshot', updatedAt: context.updatedAt || snapshot.createdAt || null, reason: null });
@@ -1434,6 +1437,7 @@ app.post('/api/data/backfills', (req, res) => {
 });
 
 app.get('/api/data/backfills/:id', (req, res) => {
+  if (!adminOnly(req, res)) return;
   const job = dataLakeCatalog.getBackfill(String(req.params.id));
   if (!job) return res.status(404).json({ success: false, error: 'backfill job not found' });
   res.json({ success: true, data: job, market: job.market, instrument: job.instrument, dataStatus: job.status, source: 'MoneyMoney data worker queue', updatedAt: job.updatedAt, reason: job.reason || null });
@@ -7759,6 +7763,7 @@ app.get('/api/risk/history', (req, res) => {
 });
 
 app.get('/api/research/daily-briefing', (req, res) => {
+  if (!adminOnly(req, res)) return;
   try {
     const scope = requestedMarketScope(req.query.scope) || 'overview';
     const isPredictionOrOverview = scope === 'overview' || scope === 'prediction';
@@ -8227,6 +8232,7 @@ app.post('/api/research/factors/analyze', express.json(), (req, res) => {
 });
 
 app.get('/api/research/candidates', (req, res) => {
+  if (!adminOnly(req, res)) return;
   try {
     const rawMarket = String(req.query.market || '').trim();
     const market = rawMarket ? rawMarket as MarketId : undefined;
@@ -8410,6 +8416,7 @@ app.post('/api/research/experiments/:id/rerun', express.json(), (req, res) => {
 });
 
 app.get('/api/research', (req, res) => {
+  if (!adminOnly(req, res)) return;
   const scope = requestedMarketScope(req.query.scope);
   const entries = listResearchEntries(Number(req.query.limit) || 50).filter(entry => {
     if (!scope || scope === 'overview' || scope === 'watchlist') return true;
@@ -8420,6 +8427,7 @@ app.get('/api/research', (req, res) => {
 });
 
 app.get('/api/research/:id', (req, res) => {
+  if (!adminOnly(req, res)) return;
   const entry = getResearchEntry(String(req.params.id));
   if (!entry) return res.status(404).json({ success: false, error: '研究对象不存在' });
   res.json({ success: true, data: { ...entry, summary: summarizeResearchEntry(entry) } });

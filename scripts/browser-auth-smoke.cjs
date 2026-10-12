@@ -154,6 +154,24 @@ async function main() {
     assert.equal(guestPaperWrite, 403, 'guests must not create or mutate private paper orders');
     assert.equal(await page.locator('[data-paper-chart-layer]').count(),0,'guest cannot see private paper chart controls');
     assert.equal(await page.evaluate(()=>fetch('/api/ai-runners/comparisons/automatic').then(r=>r.status)),403,'automatic groups and scheduling history remain private');
+    const guestResearchAndData = await page.evaluate(async () => Promise.all([
+      '/api/data/backfills/private-smoke-id',
+      '/api/data/canaries/targets',
+      '/api/research',
+      '/api/research/private-note-smoke-id',
+      '/api/research/daily-briefing?scope=stocks',
+      '/api/research/candidates?market=stocks',
+      '/api/research/experiments?market=stocks',
+      '/api/research/jobs',
+      '/api/research/jobs/private-smoke-id/events',
+      '/api/research/artifacts/private-smoke-id',
+    ].map(async url => ({ url, status: (await fetch(url)).status }))));
+    assert.deepEqual(guestResearchAndData.map(item => item.status), Array(10).fill(403), JSON.stringify(guestResearchAndData));
+    const guestPublicCatalog = await page.evaluate(async () => Promise.all([
+      fetch('/api/data/canaries/summary').then(response => response.status),
+      fetch('/api/research/factors/catalog?market=stocks').then(response => response.status),
+    ]));
+    assert.deepEqual(guestPublicCatalog, [200, 200], 'public coverage summary and factor catalog remain readable');
     const guestRunnerHistory = await page.evaluate(() => fetch('/api/ai-runners/private-runner/history').then(async response => ({ status: response.status, body: await response.json() })));
     assert.equal(guestRunnerHistory.status, 403, JSON.stringify(guestRunnerHistory.body));
     assert.equal(guestRunnerHistory.body.code, 'GUEST_READ_ONLY');
@@ -166,7 +184,7 @@ async function main() {
     const guestTelegramSend = await page.evaluate(() => fetch('/api/telegram/test-delivery', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ idempotencyKey: 'guest-forbidden-0001' }) }).then(async response => ({ status: response.status, body: await response.json() })));
     assert.equal(guestTelegramSend.status, 403);
     assert.deepEqual(pageErrors, []);
-    console.log('Browser auth smoke passed: admin cookie, CSRF, Telegram and AI runner private guards, logout, guest read-only, SLO');
+    console.log('Browser auth smoke passed: admin cookie, CSRF, Telegram/runner/research/data private guards, public catalog, logout, guest read-only, SLO');
   } finally {
     if (browser) await browser.close();
     if (child) {

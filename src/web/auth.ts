@@ -65,11 +65,30 @@ const GUEST_GET_PREFIXES = [
   '/workspace',
   '/changes',
   '/evidence',
-  '/data',
   '/scenarios',
   '/signals/quality',
   '/workspaces/shared',
 ];
+
+const GUEST_DATA_GET_PATHS = new Set([
+  '/data/capabilities',
+  '/data/catalog',
+  '/data/history',
+  '/data/as-of',
+  '/data/quality',
+  '/data/slo',
+  '/data/revisions',
+  '/data/corporate-actions',
+  '/data/providers',
+  '/data/coverage',
+  '/data/canaries/summary',
+  '/data/discrepancies',
+]);
+
+const GUEST_RESEARCH_GET_PATHS = new Set([
+  '/research/factors/catalog',
+  '/research/price-comparison',
+]);
 
 const GUEST_INSTRUMENT_GET_PATHS = new Set([
   '/instruments/search',
@@ -91,6 +110,12 @@ export function isGuestRequestAllowed(method: string, pathname: string): boolean
   const normalizedPath = '/' + String(pathname || '').replace(/^\/+/, '');
   if (normalizedPath === '/instruments' || normalizedPath.startsWith('/instruments/')) {
     return isGuestInstrumentReadPath(normalizedPath);
+  }
+  if (normalizedPath === '/data' || normalizedPath.startsWith('/data/')) {
+    return GUEST_DATA_GET_PATHS.has(normalizedPath) || /^\/data\/snapshots\/[^/]{1,180}$/.test(normalizedPath);
+  }
+  if (normalizedPath === '/research' || normalizedPath.startsWith('/research/')) {
+    return GUEST_RESEARCH_GET_PATHS.has(normalizedPath);
   }
   return GUEST_GET_PREFIXES.some(prefix => matchesPathPrefix(normalizedPath, prefix));
 }
