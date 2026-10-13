@@ -56,6 +56,17 @@ async function main() {
       await page.mouse.click(rect.x+rect.width*.25,rect.y+Math.min(rect.height*.3,120));await page.mouse.click(rect.x+rect.width*.65,rect.y+Math.min(rect.height*.3,120));
       assert.match(await page.locator('#stock-chart-card [data-chart-measurement]').innerText(),/测量.*收盘涨跌.*最大回撤.*自然时间/);
       assert.equal(await tool.getAttribute('aria-pressed'),'true');await page.screenshot({path:path.join(data,`measurement-${theme}-${width}.png`)});await tool.click();
+      const beforeRules=await page.evaluate(()=>fetch('/api/alert-rules').then(r=>r.json()).then(body=>body.data.length));
+      await page.locator('#stock-chart-card [data-chart-price-alert]').click();
+      await layer.scrollIntoViewIfNeeded();const priceRect=await layer.boundingBox();
+      await page.mouse.click(priceRect.x+priceRect.width*.45,priceRect.y+Math.min(priceRect.height*.3,120));
+      const form=page.locator('#stock-chart-card [data-chart-alert-form]');await form.waitFor({state:'visible'});
+      await form.locator('[data-chart-alert-price]').fill('103.5');await form.locator('[data-chart-alert-direction]').selectOption('below');
+      await form.locator('[data-chart-alert-preview]').click();assert.match(await form.innerText(),/stock:us:AAPL.*达到或低于 103.5/);
+      assert.equal(await page.evaluate(()=>fetch('/api/alert-rules').then(r=>r.json()).then(body=>body.data.length)),beforeRules,'preview must not write a rule');
+      await form.locator('[data-chart-alert-confirm]').click();await form.locator('[data-chart-alert-message]').filter({hasText:'已保存提醒'}).waitFor();
+      const saved=await page.evaluate(()=>fetch('/api/alert-rules').then(r=>r.json()).then(body=>body.data));assert.equal(saved.length,beforeRules+1);assert.equal(saved.at(-1).instrumentId,'stock:us:AAPL');assert.equal(saved.at(-1).condition.value,103.5);assert.equal(saved.at(-1).channels.telegram,false);
+      await form.locator('[data-chart-alert-cancel]').click();
     }
     await page.setViewportSize({width:1440,height:900});await page.evaluate(()=>document.documentElement.removeAttribute('data-theme'));
     const zoomedStrategy = await page.evaluate(() => {

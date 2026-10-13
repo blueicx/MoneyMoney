@@ -1,6 +1,42 @@
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
 function load(){assert.ok(fs.existsSync('src/web/public/trading-chart.js'),'trading chart module must exist');const scope={window:{},document:{readyState:'loading',addEventListener(){}}};vm.runInNewContext(fs.readFileSync('src/web/public/trading-chart.js','utf8'),scope);return scope.window.MoneyTradingChart;}
 const rows=Array.from({length:100},(_,i)=>({time:i*300000,open:10,high:12,low:9,close:11,volume:5}));
+
+test('chart price reminder draft requires an explicit supported market identity and positive finite selected price',()=>{
+ const c=load();assert.equal(typeof c.priceAlertDraft,'function');
+ const context={market:'stocks',instrument:'stock:us:AAPL'};
+ const draft=c.priceAlertDraft(context,123.45,'above');assert.equal(draft.instrumentId,context.instrument);assert.equal(draft.scope,'stocks');assert.equal(draft.kind,'price');assert.equal(draft.condition.value,123.45);assert.equal(draft.channels.telegram,false);
+ assert.equal(c.priceAlertDraft({...context,market:'crypto'},123,'above'),null);
+ for(const price of [NaN,Infinity,0,-1])assert.equal(c.priceAlertDraft(context,price,'above'),null);
+ assert.equal(c.priceAlertDraft({market:'options',instrument:'option:cboe:AAPL'},123,'above'),null);
+ assert.equal(c.priceAlertDraft(context,123,'unknown'),null);
+ assert.equal(c.priceAlertDraft({market:'crypto',instrument:'crypto:binance:BTCUSDT'},123,'below').condition.direction,'below');
+});
+
+test('chart reminder picking and preview do not create a rule, confirmation is single-flight, changing instrument cancels preview',async()=>{
+ const {JSDOM}=require('jsdom'),dom=new JSDOM('<div style="width:800px"><canvas></canvas></div>',{runScripts:'outside-only',pretendToBeVisual:true}),w=dom.window;w.HTMLCanvasElement.prototype.getContext=()=>new Proxy({},{get:()=>()=>{}});w.mm_isLoggedIn=true;w.mm_isGuest=false;let calls=0;
+ try{w.eval(fs.readFileSync('src/web/public/trading-chart.js','utf8'));const canvas=w.document.querySelector('canvas');const context={market:'stocks',instrument:'stock:us:AAPL'};
+ w.fetch=async()=>{calls++;return {ok:true,json:async()=>({success:true,data:{id:'fixture-alert'}})};};
+ w.MoneyTradingChart.render(canvas,rows,{identity:'AAPL|5m',interval:'5m',alertContext:context});
+ const pick=w.document.querySelector('[data-chart-price-alert]');assert.ok(pick);pick.click();
+ assert.equal(w.document.querySelector('[data-chart-alert-form]').hidden,false,'keyboard activation must expose editable price without needing a canvas tap');
+ const layer=w.document.querySelector('.mm-trading-crosshair');layer.getBoundingClientRect=()=>({left:0,top:0,width:800,height:440});layer.dispatchEvent(new w.MouseEvent('click',{clientX:150,clientY:80,bubbles:true}));
+ const preview=w.document.querySelector('[data-chart-alert-preview]'),confirm=w.document.querySelector('[data-chart-alert-confirm]');assert.equal(calls,0);assert.equal(confirm.disabled,true);preview.click();assert.equal(calls,0);assert.equal(confirm.disabled,false);confirm.click();confirm.click();await new Promise(resolve=>setTimeout(resolve,15));assert.equal(calls,1);
+ pick.click();layer.dispatchEvent(new w.MouseEvent('click',{clientX:150,clientY:80}));preview.click();
+ w.MoneyTradingChart.render(canvas,rows,{identity:'MU|5m',interval:'5m',alertContext:{market:'stocks',instrument:'stock:us:MU'}});assert.equal(confirm.disabled,true);assert.equal(w.document.querySelector('[data-chart-alert-form]').hidden,true);
+ }finally{w.close();}
+});
+
+test('clearing a chart removes its pending price reminder preview',()=>{
+ const {JSDOM}=require('jsdom'),dom=new JSDOM('<div><canvas></canvas></div>',{runScripts:'outside-only',pretendToBeVisual:true}),w=dom.window;w.HTMLCanvasElement.prototype.getContext=()=>new Proxy({},{get:()=>()=>{}});w.mm_isLoggedIn=true;
+ try{w.eval(fs.readFileSync('src/web/public/trading-chart.js','utf8'));const canvas=w.document.querySelector('canvas');w.MoneyTradingChart.render(canvas,rows,{identity:'AAPL|5m',interval:'5m',alertContext:{market:'stocks',instrument:'stock:us:AAPL'}});w.document.querySelector('[data-chart-price-alert]').click();const layer=w.document.querySelector('.mm-trading-crosshair');layer.getBoundingClientRect=()=>({left:0,top:0,width:800,height:440});layer.dispatchEvent(new w.MouseEvent('click',{clientX:150,clientY:80}));w.document.querySelector('[data-chart-alert-preview]').click();w.MoneyTradingChart.clear(canvas);assert.equal(w.document.querySelector('[data-chart-alert-form]').hidden,true);assert.equal(w.document.querySelector('[data-chart-alert-confirm]').disabled,true);
+ }finally{w.close();}
+});
+
+test('guest charts expose no private reminder creation controls',()=>{
+ const {JSDOM}=require('jsdom'),dom=new JSDOM('<div><canvas></canvas></div>',{runScripts:'outside-only',pretendToBeVisual:true}),w=dom.window;w.HTMLCanvasElement.prototype.getContext=()=>new Proxy({},{get:()=>()=>{}});w.mm_isLoggedIn=true;w.mm_isGuest=true;
+ try{w.eval(fs.readFileSync('src/web/public/trading-chart.js','utf8'));w.MoneyTradingChart.render(w.document.querySelector('canvas'),rows,{identity:'AAPL|5m',interval:'5m',alertContext:{market:'stocks',instrument:'stock:us:AAPL'}});assert.equal(w.document.querySelector('[data-chart-price-alert]'),null);}finally{w.close();}
+});
 test('history pages merge only older actual candles without rewriting current rows or losing live refresh history',()=>{
  const c=load();assert.equal(typeof c.mergeHistory,'function');const current=rows.slice(50),older=rows.slice(40,51).map(row=>({...row,close:10}));
  const joined=c.mergeHistory(current,older,current[0].time);assert.equal(joined.length,60);assert.equal(joined[10].close,11);assert.equal(joined[0].time,rows[40].time);

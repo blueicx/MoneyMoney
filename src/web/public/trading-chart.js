@@ -136,6 +136,38 @@
   function countdown(bar,interval,now){const ms={'1m':60000,'5m':300000,'15m':900000,'30m':1800000,'1h':3600000}[interval];if(!ms)return '周期非短线';const left=Math.ceil((bar.time+ms-now)/1000);if(left<=0)return '等待新数据';return String(Math.floor(left/60)).padStart(2,'0')+':'+String(left%60).padStart(2,'0');}
   function select(canvas,rows,key){let s=views.get(canvas);if(!s || s.key!==key){persist(s);let saved;try{saved=JSON.parse(window.sessionStorage?.getItem('mm-chart-view:'+key)||'null');}catch{}s=Object.assign(restoreView(saved),{key});views.set(canvas,s);}return {...windowFor(rows,s),state:s};}
   const fmt=n=>Number.isFinite(n)?n.toLocaleString(undefined,{maximumFractionDigits:6}):'—';
+  function priceAlertDraft(context,price,direction){
+    const supported=context?.market==='stocks'?/^stock:us:[A-Z0-9.-]+$/.test(context.instrument||''):context?.market==='crypto'?/^crypto:(binance:[A-Z0-9]+|gateio:[A-Z0-9_]+)$/.test(context.instrument||''):false;
+    if(!supported||!Number.isFinite(price)||price<=0||!['above','below'].includes(direction))return null;
+    return {scope:context.market,instrumentId:context.instrument,kind:'price',condition:{direction,value:price},channels:{web:true,telegram:false},cooldownMinutes:30,enabled:true};
+  }
+  function resetPriceAlert(m){const a=m.alert;if(!a)return;a.controller?.abort();a.controller=null;a.active=false;a.draft=null;a.form.hidden=true;a.confirm.disabled=true;a.preview.disabled=a.price.disabled=a.direction.disabled=a.telegram.disabled=false;a.button.setAttribute('aria-pressed','false');a.button.textContent='价格提醒';a.message.textContent='';}
+  function setupPriceAlert(m){
+    const button=document.createElement('button'),form=document.createElement('div');button.type='button';button.className='btn mm-trading-zone';button.dataset.chartPriceAlert='';button.textContent='价格提醒';button.setAttribute('aria-pressed','false');form.dataset.chartAlertForm='';form.className='mm-paper-marker-detail';form.hidden=true;
+    form.innerHTML='<label>方向 <select class="mm-trading-zone" data-chart-alert-direction><option value="above">达到或高于</option><option value="below">达到或低于</option></select></label> <label>选定价格 <input class="mm-trading-zone" data-chart-alert-price type="number" min="0" step="any" aria-label="提醒价格"></label> <label><input type="checkbox" data-chart-alert-telegram> Telegram（使用已有配置）</label> <button type="button" class="btn mm-trading-zone" data-chart-alert-preview>预览条件</button> <button type="button" class="btn mm-trading-zone" data-chart-alert-confirm disabled>确认保存</button> <button type="button" class="btn mm-trading-zone" data-chart-alert-cancel>取消</button><p role="status" aria-live="polite" data-chart-alert-message></p>';
+    m.status.append(button);m.host.append(form);const query=selector=>form.querySelector(selector);
+    const a=m.alert={button,form,price:query('[data-chart-alert-price]'),direction:query('[data-chart-alert-direction]'),telegram:query('[data-chart-alert-telegram]'),preview:query('[data-chart-alert-preview]'),confirm:query('[data-chart-alert-confirm]'),message:query('[data-chart-alert-message]'),active:false,draft:null,controller:null};
+    button.addEventListener('click',()=>{resetPriceAlert(m);if(m.measure.active)m.measure.button.click();a.active=true;button.setAttribute('aria-pressed','true');button.textContent='点击图中价格';a.form.hidden=false;a.price.value=String(m.info.full.at(-1).close);a.message.textContent='点击绘图区选定价格，或手动输入；预览后才可确认保存';a.price.focus();});
+    query('[data-chart-alert-cancel]').addEventListener('click',()=>resetPriceAlert(m));
+    for(const input of [a.price,a.direction,a.telegram])input.addEventListener('input',()=>{a.draft=null;a.confirm.disabled=true;a.message.textContent='条件已修改，请重新预览';});
+    a.preview.addEventListener('click',()=>{
+      a.draft=priceAlertDraft(m.info.alertContext,Number(a.price.value),a.direction.value);a.confirm.disabled=!a.draft;
+      if(!a.draft){a.message.textContent='当前市场/标的不支持价格提醒，或价格无效';return;}
+      a.draft.channels.telegram=a.telegram.checked;a.key=m.info.identity;a.expiresAt=Date.now()+120000;
+      a.message.textContent=a.draft.scope+' · '+a.draft.instrumentId+' · '+(a.direction.value==='above'?'达到或高于 ':'达到或低于 ')+a.price.value+' · 冷却30分钟 · 网页'+(a.telegram.checked?' + Telegram':'')+'。这是未来提醒条件，不表示当前已触发；确认前不保存。';
+    });
+    a.confirm.addEventListener('click',async()=>{
+      if(a.confirm.disabled)return;
+      if(!a.draft||a.key!==m.info.identity||Date.now()>a.expiresAt){a.confirm.disabled=true;a.message.textContent='预览已失效，请重新预览';return;}
+      const controller=new AbortController(),key=a.key,draft=a.draft;a.controller=controller;a.confirm.disabled=true;a.preview.disabled=true;a.price.disabled=a.direction.disabled=a.telegram.disabled=true;a.message.textContent='正在保存提醒…';
+      const token=document.cookie.split(';').map(value=>value.trim()).find(value=>value.startsWith('mm_csrf='));
+      try{const response=await fetch('/api/alert-rules',{method:'POST',signal:controller.signal,headers:{'content-type':'application/json',...(token?{'x-csrf-token':decodeURIComponent(token.slice(8))}:{})},body:JSON.stringify(draft)}),body=await response.json();if(controller.signal.aborted||m.info.identity!==key||a.controller!==controller)return;if(!response.ok||!body.success)throw Error(body.error||body.reason||'保存失败');a.draft=null;a.message.textContent='已保存提醒 '+body.data.id+'；不会创建任何订单';}
+      catch(error){if(error.name!=='AbortError'&&a.controller===controller)a.message.textContent='保存结果需核对：'+error.message+'；请先在提醒列表检查，避免重复保存';}
+      finally{if(a.controller===controller){a.preview.disabled=false;a.price.disabled=a.direction.disabled=a.telegram.disabled=false;a.controller=null;}}
+    });
+    m.layer.addEventListener('click',e=>{if(!a.active)return;e.stopImmediatePropagation();if(m.moved)return;const g=m.info.geometry,r=m.layer.getBoundingClientRect(),x=(e.clientX-r.left)*g.W/r.width,y=(e.clientY-r.top)*g.H/r.height;if(x<g.padL||x>=g.W-g.padR||y<g.padT||y>g.padT+g.priceH)return;const price=g.maxP-(y-g.padT)/g.priceH*(g.maxP-g.minP);if(!priceAlertDraft(m.info.alertContext,price,'above'))return;a.active=false;a.button.textContent='价格提醒';a.button.setAttribute('aria-pressed','false');a.price.value=String(Number(price.toPrecision(12)));a.form.hidden=false;a.draft=null;a.confirm.disabled=true;a.message.textContent='已选择价格；请预览条件后确认保存';},{capture:true});
+    window.addEventListener('mm-workspace-context',()=>resetPriceAlert(m));
+  }
   function measureRange(full,firstTime,lastTime){
     const empty={dataStatus:'unavailable',reason:'测量端点不在已加载数据中；不会取最近日期或插值替代'};
     if(!Array.isArray(full)||!Number.isFinite(firstTime)||!Number.isFinite(lastTime))return empty;
@@ -169,6 +201,7 @@
       const measure=document.createElement('button'),measurement=document.createElement('span');measure.type='button';measure.className='btn mm-trading-zone';measure.dataset.chartMeasure='';measure.textContent='区间测量';measure.setAttribute('aria-pressed','false');measurement.dataset.chartMeasurement='';measurement.setAttribute('aria-live','polite');status.append(measure,measurement);m.measure={active:false,start:null,key:null,button:measure,output:measurement};
       measure.addEventListener('click',()=>{m.measure.active=!m.measure.active;m.measure.start=null;m.measure.key=m.info?.identity;measure.setAttribute('aria-pressed',String(m.measure.active));measure.textContent=m.measure.active?'退出测量':'区间测量';measurement.textContent=m.measure.active?'依次点击起点和终点 K 线；测量模式不打开策略解释':'';});
       if(window.mm_isLoggedIn===true&&window.mm_isGuest!==true){
+        setupPriceAlert(m);
         const label=document.createElement('label'),toggle=document.createElement('input'),details=document.createElement('details'),summary=document.createElement('summary'),list=document.createElement('div');
         toggle.type='checkbox';toggle.dataset.paperChartLayer='';label.append(toggle,' 模拟成交');status.append(label);summary.textContent='模拟成交与关联证据';details.append(summary,list);details.hidden=true;host.append(details);m.paper={toggle,details,list,markers:[],controller:null,key:null,evidenceControllers:new Set()};
         toggle.addEventListener('change',()=>{if(toggle.checked)loadPaper(m);else{m.paper.controller?.abort();abortPaperEvidence(m.paper);m.paper.key=null;m.paper.markers=[];details.hidden=true;queuePaint(m);}});
@@ -190,7 +223,8 @@
       layer.addEventListener('pointerleave',()=>{if(!m.drag){m.hover=null;queuePaint(m);}});
     }
     if(m.info?.identity!==info.identity){m.history.controller?.abort();m.history.pending=false;m.history.note.textContent='';m.history.earlier.disabled=false;if(m.measure){m.measure.active=false;m.measure.start=null;m.measure.output.textContent='';m.measure.button.textContent='区间测量';m.measure.button.setAttribute('aria-pressed','false');}}
-    m.info=info;m.history.earlier.hidden=!info.interactive||typeof info.loadEarlier!=='function';
+    if(m.alert&&(m.info?.identity!==info.identity||JSON.stringify(m.info?.alertContext)!==JSON.stringify(info.alertContext)))resetPriceAlert(m);
+    m.info=info;if(m.alert)m.alert.button.hidden=!priceAlertDraft(info.alertContext,1,'above');m.history.earlier.hidden=!info.interactive||typeof info.loadEarlier!=='function';
     if(info.adjustment){if(!m.adjustment){const label=document.createElement('label'),control=document.createElement('select');control.dataset.chartAdjustment='';control.className='mm-trading-zone';for(const [value,text] of [['source','来源口径'],['forward','前复权（不可用）'],['backward','后复权（不可用）']]){const option=document.createElement('option');option.value=value;option.textContent=text;control.append(option);}control.addEventListener('change',()=>{const current=m.info?.adjustment,available=current?.available||['source'];if(available.includes(control.value)){m.info?.onAdjustmentChange?.(control.value);}else control.value=current?.requested||'source';});label.append('价格口径 ',control);m.status.append(label);m.adjustment=control;}
       const available=new Set(Array.isArray(info.adjustment.available)?info.adjustment.available:['source']),sourceActual=info.adjustment.sourceActual||info.adjustment.actual;
       m.adjustment.hidden=false;m.adjustment.title=info.adjustment.reason||'未进行复权转换';m.adjustment.options[0].textContent='来源口径 · '+({unknown:'未声明',unadjusted:'未复权',mixed:'混合'}[sourceActual]||sourceActual);m.adjustment.options[1].textContent=available.has('forward')?'前复权（Yahoo Adj Close 系数推导）':'前复权（不可用）';m.adjustment.options[1].disabled=!available.has('forward');m.adjustment.options[2].disabled=!available.has('backward');m.adjustment.value=available.has(info.adjustment.requested)?info.adjustment.requested:'source';
@@ -241,7 +275,7 @@
     m.button.hidden=!i.interactive || views.get(i.canvas)?.follow!==false;
   }
   function updateClock(m){const i=m.info;if(!i||document.hidden||!m.host.getClientRects().length)return;const now=Date.now(),s=statusFor(i,i.full.at(-1),now),value=(i.interactive?countdown(i.full.at(-1),i.interval,now):'历史数据')+' · 连接：'+({snapshot:'来源快照',live:'已连接',disconnected:'断线',connecting:'连接中'}[s.connection]||s.connection)+' · 时效：'+({fresh:'新鲜',stale:'来源过期',unknown:'源时间未知'}[s.freshness])+' · 蜡烛：'+({forming:'形成中',completed:'已完成',historical:'历史模式'}[s.candle])+(s.session==='closed'?' · 休市（来源证明）':'');if(m.clock.textContent!==value)m.clock.textContent=value;m.zone.disabled=!i.exchangeTimeZone;m.zone.textContent=views.get(i.canvas)?.timeZone==='exchange'?'交易所时区':'本地时区';}
-  function clear(canvas){const m=mounts.get(canvas);if(m){m.history.controller?.abort();m.history.pending=false;m.history.earlier.hidden=true;m.history.note.textContent='';m.paper?.controller?.abort();abortPaperEvidence(m.paper);if(m.paper){m.paper.key=null;m.paper.markers=[];m.paper.details.hidden=true;}m.info=null;m.readoutKey=null;m.head.textContent='';m.clock.textContent='';m.zone.disabled=true;m.layer.hidden=true;m.layer.getContext('2d').clearRect(0,0,m.layer.width,m.layer.height);m.button.hidden=true;}}
+  function clear(canvas){const m=mounts.get(canvas);if(m){resetPriceAlert(m);m.history.controller?.abort();m.history.pending=false;m.history.earlier.hidden=true;m.history.note.textContent='';m.paper?.controller?.abort();abortPaperEvidence(m.paper);if(m.paper){m.paper.key=null;m.paper.markers=[];m.paper.details.hidden=true;}m.info=null;m.readoutKey=null;m.head.textContent='';m.clock.textContent='';m.zone.disabled=true;m.layer.hidden=true;m.layer.getContext('2d').clearRect(0,0,m.layer.width,m.layer.height);m.button.hidden=true;}}
   function render(canvas,full,options){
     if(document.hidden)return;
     if(!full.length){clear(canvas);return;}
@@ -258,6 +292,7 @@
     options.onViewport?.({rows,geometry:{W,H,padL,padR,padT,priceH,minP,maxP}});
   }
   window.MoneyTradingChart={createView,windowFor,pan,latest,zoom,countdown,select,decorate,clear,render,statusFor,restoreView,scheduleFrame,scalePrice,resetPrice,priceRange,pivotLevels,supportResistanceLineLayout,drawSupportResistance,paperMarkersFor,mergeHistory,measureRange,verifyPaperEvidenceEnvelope,verifyPaperExecutionEvidenceEnvelope,formatPaperExecutionEvidence};
+  window.MoneyTradingChart.priceAlertDraft=priceAlertDraft;
   window.MoneyTradingChart.redraw=canvas=>mounts.get(canvas)?.info?.redraw();
   function whenDomReady(callback) {
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', callback, { once: true });

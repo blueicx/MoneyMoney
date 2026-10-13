@@ -2709,7 +2709,7 @@ function calcBollinger(data, period = 20, multiplier = 2) {
     const x = padL + idx * cw + cw / 2;
     ctx.fillText(lbl, x - 14, H - 25);
   });
-  window.MoneyTradingChart?.decorate(canvas, {...canvas.moneySourceMetadata,identity:bnCurrentSymbol+'|'+bnCurrentInterval,canvas,full:tradingFull,rows:klines,interval:bnCurrentInterval,exchangeTimeZone:'UTC',ma:[7,25],volumeUnit:'基础币',interactive:!window.cryptoMoneyKLine?.timer,loadEarlier:loadEarlierCryptoKline,geometry:{W,H,padL,padR,padT,priceH:chartH,minP,maxP},redraw:()=>drawCandles(canvas,bnKlineData)});
+  window.MoneyTradingChart?.decorate(canvas, {...canvas.moneySourceMetadata,alertContext:{market:'crypto',instrument:'crypto:binance:'+bnCurrentSymbol},identity:bnCurrentSymbol+'|'+bnCurrentInterval,canvas,full:tradingFull,rows:klines,interval:bnCurrentInterval,exchangeTimeZone:'UTC',ma:[7,25],volumeUnit:'基础币',interactive:!window.cryptoMoneyKLine?.timer,loadEarlier:loadEarlierCryptoKline,geometry:{W,H,padL,padR,padT,priceH:chartH,minP,maxP},redraw:()=>drawCandles(canvas,bnKlineData)});
   renderChartPatternMarkers('bn-chart-patterns', cryptoPatterns, item => {
     const bar = klines[item.index];
     if (!bar) return null;
@@ -7456,7 +7456,8 @@ function drawStockKline(canvas, klines) {
   renderChartSignalList('stock-chart-signals', overlays.signals, '当前周期未触发所选策略信号');
   renderChartPatternList('stock-chart-pattern-list', overlays.patterns, '当前周期未识别到所选蜡烛形态');
   renderChartStructureList('stock-chart-structure-list', overlays.structures, overlays.chan, '当前周期未识别到结构标记');
-  window.MoneyTradingChart?.decorate(canvas,{...canvas.moneySourceMetadata,identity:currentStockSymbol+'|'+currentStockKlinePeriod,canvas,full:replayKlines,rows:klines,interval:currentStockKlinePeriod,exchangeTimeZone:stockChartExchangeTimezone,ma:[5,10,20],volumeUnit:'股',interactive:tradingActive,loadEarlier:!stockChartAsOf&&!stockChartIntradayDate&&stockChartAdjustment==='source'&&['1m','5m','15m','1h','1d'].includes(currentStockKlinePeriod)?loadEarlierStockKline:undefined,onAdjustmentChange:value=>{if(!['source','forward'].includes(value)||stockChartAsOf||stockChartIntradayDate)return;stockChartAdjustment=value;loadStockKline();},geometry:{W,H,padL,padR,padT,priceH,minP,maxP},redraw:()=>drawStockKline(canvas,stockChartKlines)});
+  const alertSymbol=String(currentStockSymbol).match(/^us([A-Z0-9.-]+)$/i)?.[1]?.toUpperCase();
+  window.MoneyTradingChart?.decorate(canvas,{...canvas.moneySourceMetadata,alertContext:alertSymbol?{market:'stocks',instrument:'stock:us:'+alertSymbol}:null,identity:currentStockSymbol+'|'+currentStockKlinePeriod,canvas,full:replayKlines,rows:klines,interval:currentStockKlinePeriod,exchangeTimeZone:stockChartExchangeTimezone,ma:[5,10,20],volumeUnit:'股',interactive:tradingActive,loadEarlier:!stockChartAsOf&&!stockChartIntradayDate&&stockChartAdjustment==='source'&&['1m','5m','15m','1h','1d'].includes(currentStockKlinePeriod)?loadEarlierStockKline:undefined,onAdjustmentChange:value=>{if(!['source','forward'].includes(value)||stockChartAsOf||stockChartIntradayDate)return;stockChartAdjustment=value;loadStockKline();},geometry:{W,H,padL,padR,padT,priceH,minP,maxP},redraw:()=>drawStockKline(canvas,stockChartKlines)});
   renderChartPatternMarkers('stock-chart-patterns', overlays.patterns, item => {
     const bar = klines[item.index];
     if (!bar) return null;
