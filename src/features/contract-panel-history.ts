@@ -31,7 +31,13 @@ export function withContractPanelHistory(detail:any,history:any,selected:string[
 }
 
 /** Reconcile explicit paper-ledger costs with same-contract observations; rates are not treated as paid funding cash flows. */
-export function reviewContractPositionCosts(input:{market:string;instrument:string;orders:any[];positions?:any[];history:any;funding:any[];fundingSource?:string;from?:string;to?:string;now?:number}) {
+export interface ContractFundingSettlement {
+  id:string; accountId:string; market:'crypto'; instrument:string; source:string;
+  settledAt:string; currency:'USDT'; amount:number; amountConvention:'cash-credit-positive';
+  status:'verified'; evidenceRef:string;
+}
+
+export function reviewContractPositionCosts(input:{market:string;instrument:string;accountId?:string;fundingSettlements?:ContractFundingSettlement[];orders:any[];positions?:any[];history:any;funding:any[];fundingSource?:string;from?:string;to?:string;now?:number}) {
   if(input.market!=='crypto')throw Error('持仓成本复核只支持虚拟币合约市场');
   contractIdentity(input.instrument);
   if(input.history?.instrument!==input.instrument)throw Error('合约历史标的身份不一致');
@@ -61,11 +67,33 @@ export function reviewContractPositionCosts(input:{market:string;instrument:stri
     const at=Date.parse(String(row.at||'')),rate=Number(row.ratePct);
     return Number.isFinite(at)&&at>=from&&at<=to&&at<=now&&Number.isFinite(rate)?[{at,ratePct:rate}]:[];
   }).sort((a,b)=>a.at-b.at);
+  // An official market funding rate is not evidence of an account cash payment.
+  // Consume only explicitly linked settlement records already in the unified ledger.
+  const settlements=new Map<string,ContractFundingSettlement>();
+  const conflicts=new Set<string>();let rejected=0;
+  for(const row of input.fundingSettlements||[]){
+    if(!input.accountId||row?.accountId!==input.accountId||row?.instrument!==input.instrument||row?.market!=='crypto')continue;
+    const at=Date.parse(row.settledAt);
+    if(!Number.isFinite(at)||at>to||at<from||at>now)continue;
+    if(typeof row.id!=='string'||!row.id.trim()||typeof row.source!=='string'||!row.source.trim()||typeof row.evidenceRef!=='string'||!row.evidenceRef.trim()||row.status!=='verified'||row.currency!=='USDT'||row.amountConvention!=='cash-credit-positive'||typeof row.amount!=='number'||!Number.isFinite(row.amount)){rejected++;continue;}
+    const old=settlements.get(row.id);
+    if(old && ['settledAt','amount','source','evidenceRef','currency','amountConvention'].some(key=>old[key as keyof ContractFundingSettlement]!==row[key as keyof ContractFundingSettlement]))conflicts.add(row.id);
+    else settlements.set(row.id,row);
+  }
+  const settlementRows=[...settlements.values()].filter(row=>!conflicts.has(row.id)).sort((a,b)=>Date.parse(a.settledAt)-Date.parse(b.settledAt));
+  const rawCashFlow=settlementRows.reduce((sum,row)=>sum+row.amount,0);
+  if(!Number.isFinite(rawCashFlow))rejected++;
+  const actualKnown=settlementRows.length>0&&conflicts.size===0&&rejected===0;
+  const cashFlow=actualKnown?rawCashFlow:null;
   return {
     market:'crypto',instrument:input.instrument,from:Number.isFinite(from)?new Date(from).toISOString():orders[0]?new Date(orders[0].at).toISOString():null,to:new Date(to).toISOString(),
     dataStatus:orders.length?(orders.some(row=>!costValue(row.feeUsd)||!costValue(row.slippageUsd))?'partial':'historical'):'empty',
     ledger:{orderCount:orders.length,orderIds:orders.flatMap(row=>row.id?[String(row.id)]:[]),firstOrderAt:orders[0]?new Date(orders[0].at).toISOString():null,lastOrderAt:orders.at(-1)?new Date(orders.at(-1).at).toISOString():null,feeUsd:knownFees.reduce((sum,value)=>sum+value,0),slippageUsd:knownSlippage.reduce((sum,value)=>sum+value,0),incompleteCostOrders:orders.filter(row=>!costValue(row.feeUsd)||!costValue(row.slippageUsd)).length,openPositions:positions,reason:orders.length?'仅汇总该规范合约的显式模拟账本费用与滑点；缺失字段不按零成本处理':'区间内没有该合约的明确模拟订单'},
-    funding:{observationCount:funding.length,from:funding.length?new Date(funding[0].at).toISOString():null,to:funding.length?new Date(funding[funding.length-1].at).toISOString():null,source:input.fundingSource||null,averageRatePct:funding.length?funding.reduce((sum,row)=>sum+row.ratePct,0)/funding.length:null,paidCostUsd:null,reason:'费率序列不是账户结算账单；未记录逐笔资金结算金额及结算时点持仓名义值/方向，因此不推算已支付资金费。'},
+    funding:{observationCount:funding.length,from:funding.length?new Date(funding[0].at).toISOString():null,to:funding.length?new Date(funding[funding.length-1].at).toISOString():null,source:input.fundingSource||null,averageRatePct:funding.length?funding.reduce((sum,row)=>sum+row.ratePct,0)/funding.length:null,
+      paidCostUsd:null,paidCostUSDT:cashFlow===null?null:-cashFlow,cashFlowUSDT:cashFlow,currency:'USDT',settlementCount:settlementRows.length,settlements:settlementRows,evidenceRefs:[...new Set(settlementRows.map(row=>row.evidenceRef))],conflictCount:conflicts.size,rejectedCount:rejected,
+      settlementStatus:actualKnown?'historical':conflicts.size||rejected?'partial':'unavailable',
+      coverageComplete:false,
+      reason:conflicts.size?'账户资金结算记录冲突；不发布实际成本合计':rejected?'存在未核验或字段不完整的结算记录；不发布实际成本合计':actualKnown?'仅汇总相同账户、合约、币种及区间内的明确结算现金流；收入为正、支出为负。记录覆盖未保证完整，不是完整持有期总成本。':'费率序列不是账户结算账单；未记录逐笔资金结算金额及结算时点持仓名义值/方向，因此不推算已支付资金费。'},
     history:{openInterest:metricSummary('openInterestUsd','USDT'),basis:metricSummary('basisPct','%'),timeBasis:input.history.timeBasis||'retrievedAt',reason:'严格限于相同规范合约和同源快照；不跨来源、不插值。'},
   };
 }

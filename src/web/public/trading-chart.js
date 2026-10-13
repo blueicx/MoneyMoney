@@ -136,6 +136,19 @@
   function countdown(bar,interval,now){const ms={'1m':60000,'5m':300000,'15m':900000,'30m':1800000,'1h':3600000}[interval];if(!ms)return '周期非短线';const left=Math.ceil((bar.time+ms-now)/1000);if(left<=0)return '等待新数据';return String(Math.floor(left/60)).padStart(2,'0')+':'+String(left%60).padStart(2,'0');}
   function select(canvas,rows,key){let s=views.get(canvas);if(!s || s.key!==key){persist(s);let saved;try{saved=JSON.parse(window.sessionStorage?.getItem('mm-chart-view:'+key)||'null');}catch{}s=Object.assign(restoreView(saved),{key});views.set(canvas,s);}return {...windowFor(rows,s),state:s};}
   const fmt=n=>Number.isFinite(n)?n.toLocaleString(undefined,{maximumFractionDigits:6}):'—';
+  function measureRange(full,firstTime,lastTime){
+    const empty={dataStatus:'unavailable',reason:'测量端点不在已加载数据中；不会取最近日期或插值替代'};
+    if(!Array.isArray(full)||!Number.isFinite(firstTime)||!Number.isFinite(lastTime))return empty;
+    const lo=Math.min(firstTime,lastTime),hi=Math.max(firstTime,lastTime),start=full.findIndex(row=>row.time===lo),end=full.findIndex(row=>row.time===hi);
+    if(start<0||end<start)return empty;
+    const rows=full.slice(start,end+1);
+    if(rows.some((row,i)=>![row.time,row.open,row.high,row.low,row.close].every(v=>typeof v==='number'&&Number.isFinite(v))||row.low<=0||row.high<Math.max(row.open,row.close,row.low)||row.low>Math.min(row.open,row.close)||(i>0&&row.time<=rows[i-1].time)))return {...empty,reason:'区间内 OHLC 或时间顺序无效，不能测量'};
+    const volumesKnown=rows.every(row=>typeof row.volume==='number'&&Number.isFinite(row.volume)&&row.volume>=0);
+    let peak=rows[0].close,dd=0;for(const row of rows){peak=Math.max(peak,row.close);dd=Math.max(dd,(peak-row.close)/peak*100);}
+    const volume=volumesKnown?rows.reduce((sum,row)=>sum+row.volume,0):null;
+    return {dataStatus:'historical',from:lo,to:hi,barCount:rows.length,durationMs:hi-lo,startClose:rows[0].close,endClose:rows.at(-1).close,returnPct:(rows.at(-1).close/rows[0].close-1)*100,maxCloseDrawdownPct:dd,volume:Number.isFinite(volume)?volume:null,
+      reason:'按已加载区间的收盘价测量；持续时间为自然时间，回撤不是盘中极值；缺口不插值'+(volumesKnown?'':'；部分成交量缺失，合计不可用')};
+  }
   function decorate(canvas,info){
     if(!info.rows.length){clear(canvas);return;}
     if(info.identity)select(canvas,info.full,info.identity);
@@ -153,6 +166,8 @@
         try{const reason=await load(controller.signal);if(current())historyNote.textContent=reason||'请求已取消或上下文已变化；未载入历史';}catch(error){if(error.name!=='AbortError'&&current())historyNote.textContent='更早记录不可用：'+error.message;}finally{if(current()){h.pending=false;earlier.disabled=false;}}
       });
       auto.addEventListener('click',()=>{resetPrice(views.get(canvas));queuePaint(m,true);});
+      const measure=document.createElement('button'),measurement=document.createElement('span');measure.type='button';measure.className='btn mm-trading-zone';measure.dataset.chartMeasure='';measure.textContent='区间测量';measure.setAttribute('aria-pressed','false');measurement.dataset.chartMeasurement='';measurement.setAttribute('aria-live','polite');status.append(measure,measurement);m.measure={active:false,start:null,key:null,button:measure,output:measurement};
+      measure.addEventListener('click',()=>{m.measure.active=!m.measure.active;m.measure.start=null;m.measure.key=m.info?.identity;measure.setAttribute('aria-pressed',String(m.measure.active));measure.textContent=m.measure.active?'退出测量':'区间测量';measurement.textContent=m.measure.active?'依次点击起点和终点 K 线；测量模式不打开策略解释':'';});
       if(window.mm_isLoggedIn===true&&window.mm_isGuest!==true){
         const label=document.createElement('label'),toggle=document.createElement('input'),details=document.createElement('details'),summary=document.createElement('summary'),list=document.createElement('div');
         toggle.type='checkbox';toggle.dataset.paperChartLayer='';label.append(toggle,' 模拟成交');status.append(label);summary.textContent='模拟成交与关联证据';details.append(summary,list);details.hidden=true;host.append(details);m.paper={toggle,details,list,markers:[],controller:null,key:null,evidenceControllers:new Set()};
@@ -162,7 +177,7 @@
       if(typeof ResizeObserver==='function'){let width=host.clientWidth;new ResizeObserver(()=>{if(host.clientWidth!==width){width=host.clientWidth;if(m.info && width>0)requestAnimationFrame(()=>m.info?.redraw());}}).observe(host);}
       button.addEventListener('click',()=>{latest(views.get(canvas));persist(views.get(canvas));m.hover=null;m.info.redraw();});
       layer.addEventListener('wheel',e=>{if(!m.info.interactive)return;e.preventDefault();zoom(views.get(canvas),e.deltaY>0?1:-1);persist(views.get(canvas));queuePaint(m,true);},{passive:false});
-      layer.addEventListener('click',e=>{if(!m.moved)canvas.dispatchEvent(new MouseEvent('click',{bubbles:true,clientX:e.clientX,clientY:e.clientY}));});
+      layer.addEventListener('click',e=>{if(m.moved)return;if(m.measure.active){const g=m.info.geometry,r=layer.getBoundingClientRect(),x=(e.clientX-r.left)*g.W/r.width;if(x<g.padL||x>=g.W-g.padR)return;const row=m.info.rows[Math.floor((x-g.padL)/(g.W-g.padL-g.padR)*m.info.rows.length)];if(!row)return;if(m.measure.start===null){m.measure.start=row.time;m.measure.output.textContent='已选起点 '+timeLabel(row.time,m.info,views.get(canvas))+'；请选择终点';return;}const result=measureRange(m.info.full,m.measure.start,row.time);m.measure.start=null;m.measure.output.textContent=result.dataStatus==='unavailable'?result.reason:'测量 '+result.barCount+' 根 · 收盘涨跌 '+fmt(result.returnPct)+'% · 收盘最大回撤 '+fmt(result.maxCloseDrawdownPct)+'% · 成交量 '+fmt(result.volume)+' '+(m.info.volumeUnit||'来源单位')+' · 自然时间 '+fmt(result.durationMs/3600000)+' 小时 · '+result.reason;return;}canvas.dispatchEvent(new MouseEvent('click',{bubbles:true,clientX:e.clientX,clientY:e.clientY}));});
       layer.addEventListener('pointerdown',e=>{if(!m.info.interactive)return;m.pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});if(m.pointers.size>2)return;layer.setPointerCapture(e.pointerId);if(m.pointers.size===2){const [a,b]=[...m.pointers.values()];m.pinch={distance:Math.hypot(a.x-b.x,a.y-b.y),count:views.get(canvas).count};m.drag=null;m.moved=true;return;}m.moved=false;const r=layer.getBoundingClientRect();m.drag={id:e.pointerId,x:e.clientX,y:e.clientY,axis:e.clientX-r.left>=m.info.geometry.W-m.info.geometry.padR,state:{...views.get(canvas)}};});
       const release=e=>{m.pointers.delete(e.pointerId);m.drag=null;m.pinch=null;};layer.addEventListener('pointerup',release);layer.addEventListener('pointercancel',release);layer.addEventListener('lostpointercapture',release);
       layer.addEventListener('pointermove',e=>{
@@ -174,7 +189,7 @@
       });
       layer.addEventListener('pointerleave',()=>{if(!m.drag){m.hover=null;queuePaint(m);}});
     }
-    if(m.info?.identity!==info.identity){m.history.controller?.abort();m.history.pending=false;m.history.note.textContent='';m.history.earlier.disabled=false;}
+    if(m.info?.identity!==info.identity){m.history.controller?.abort();m.history.pending=false;m.history.note.textContent='';m.history.earlier.disabled=false;if(m.measure){m.measure.active=false;m.measure.start=null;m.measure.output.textContent='';m.measure.button.textContent='区间测量';m.measure.button.setAttribute('aria-pressed','false');}}
     m.info=info;m.history.earlier.hidden=!info.interactive||typeof info.loadEarlier!=='function';
     if(info.adjustment){if(!m.adjustment){const label=document.createElement('label'),control=document.createElement('select');control.dataset.chartAdjustment='';control.className='mm-trading-zone';for(const [value,text] of [['source','来源口径'],['forward','前复权（不可用）'],['backward','后复权（不可用）']]){const option=document.createElement('option');option.value=value;option.textContent=text;control.append(option);}control.addEventListener('change',()=>{const current=m.info?.adjustment,available=current?.available||['source'];if(available.includes(control.value)){m.info?.onAdjustmentChange?.(control.value);}else control.value=current?.requested||'source';});label.append('价格口径 ',control);m.status.append(label);m.adjustment=control;}
       const available=new Set(Array.isArray(info.adjustment.available)?info.adjustment.available:['source']),sourceActual=info.adjustment.sourceActual||info.adjustment.actual;
@@ -242,7 +257,7 @@
     decorate(canvas,{...options,canvas,full,rows,interval:options.interval,volumeUnit:options.volumeUnit,ma:[5,10,30,60],maColors:['#ffad00','#18bf78','#29b6f6','#a778ff'],interactive:true,geometry:{W,H,padL,padR,padT,priceH,minP,maxP},redraw:()=>render(canvas,full,options)});
     options.onViewport?.({rows,geometry:{W,H,padL,padR,padT,priceH,minP,maxP}});
   }
-  window.MoneyTradingChart={createView,windowFor,pan,latest,zoom,countdown,select,decorate,clear,render,statusFor,restoreView,scheduleFrame,scalePrice,resetPrice,priceRange,pivotLevels,supportResistanceLineLayout,drawSupportResistance,paperMarkersFor,mergeHistory,verifyPaperEvidenceEnvelope,verifyPaperExecutionEvidenceEnvelope,formatPaperExecutionEvidence};
+  window.MoneyTradingChart={createView,windowFor,pan,latest,zoom,countdown,select,decorate,clear,render,statusFor,restoreView,scheduleFrame,scalePrice,resetPrice,priceRange,pivotLevels,supportResistanceLineLayout,drawSupportResistance,paperMarkersFor,mergeHistory,measureRange,verifyPaperEvidenceEnvelope,verifyPaperExecutionEvidenceEnvelope,formatPaperExecutionEvidence};
   window.MoneyTradingChart.redraw=canvas=>mounts.get(canvas)?.info?.redraw();
   function whenDomReady(callback) {
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', callback, { once: true });

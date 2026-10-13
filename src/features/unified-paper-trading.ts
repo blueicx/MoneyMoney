@@ -61,6 +61,8 @@ export interface UnifiedPaperLedger {
   runnerAccounts?: Record<string, UnifiedPaperRunnerAccount>;
   lifecycleEvents?: import('./paper-account-lifecycle').PaperLifecycleEvent[];
   corporateReceivables?: import('./paper-account-lifecycle').PaperCorporateReceivable[];
+  /** Explicit account settlement evidence, never inferred from public funding rates. */
+  fundingSettlements?: import('./contract-panel-history').ContractFundingSettlement[];
 }
 
 export interface UnifiedPaperRunnerAccount extends Omit<UnifiedPaperLedger, 'runnerAccounts'> {

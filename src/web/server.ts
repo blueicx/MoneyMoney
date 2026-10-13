@@ -4049,6 +4049,9 @@ app.get('/api/contracts/holding-cost',async(req,res)=>{
   try{
     if(req.query.market!=='crypto')throw Error('合约持仓成本复核必须指定虚拟币市场');
     const instrument=String(req.query.instrument||'');contractIdentity(instrument);
+    const accountId=String(req.query.accountId||'main');
+    const ledger=unifiedPaperLedgerStore.getAccount(accountId);
+    if(!ledger)throw Error('模拟账户不存在或未关联，不能混入主账户');
     const now=Date.now(),from=req.query.from?String(req.query.from):undefined,to=req.query.to?String(req.query.to):new Date(now).toISOString();
     const snapshot=await contractResearchService.detail(instrument,['funding','openInterest','basis']);
     let archiveReason:string|null=null;
@@ -4060,8 +4063,7 @@ app.get('/api/contracts/holding-cost',async(req,res)=>{
     }
     const history=await dataLakeCatalog.queryContractMetrics({market:'crypto',instrument,...(from?{from}:{}),...(to?{to}:{})});
     if(archiveReason){history.dataStatus=history.dataStatus==='empty'?'partial':history.dataStatus;history.reason=archiveReason+'；'+history.reason;}
-    const ledger=unifiedPaperLedgerStore.get();
-    const data=reviewContractPositionCosts({market:'crypto',instrument,orders:ledger.orders,positions:ledger.positions,history,funding:snapshot.funding,fundingSource:snapshot.sections?.funding?.source,from,to,now});
+    const data=reviewContractPositionCosts({market:'crypto',instrument,accountId:accountId==='unified-paper-ledger'?'main':accountId,fundingSettlements:ledger.fundingSettlements,orders:ledger.orders,positions:ledger.positions,history,funding:snapshot.funding,fundingSource:snapshot.sections?.funding?.source,from,to,now});
     res.json({success:true,market:'crypto',instrument,dataStatus:data.dataStatus,source:'统一模拟账本 + Gate 同合约公开快照',updatedAt:snapshot.updatedAt,reason:data.ledger.reason,evidenceRefs:[...history.rows.map((row:any)=>row.evidenceRef).filter(Boolean),...(snapshot.evidenceRefs||[])],data});
   }catch(error:any){res.status(400).json({success:false,market:'crypto',dataStatus:'failed',reason:error.message});}
 });

@@ -49,6 +49,15 @@ async function main() {
     });
     assert.equal(await page.evaluate(()=>currentStockKlinePeriod),'5m');
     assert.match(await page.locator('#stock-chart-card .mm-trading-readout').innerText(),/开 .*高 .*低 .*收 .*MA5/);
+    for(const width of [1440,390])for(const theme of ['light','dark','money']){
+      await page.setViewportSize({width,height:900});await page.evaluate(theme=>theme==='light'?document.documentElement.removeAttribute('data-theme'):document.documentElement.setAttribute('data-theme',theme),theme);
+      const tool=page.locator('#stock-chart-card [data-chart-measure]'),layer=page.locator('#stock-chart-card .mm-trading-crosshair');await tool.click();await layer.scrollIntoViewIfNeeded();
+      const rect=await layer.boundingBox();assert.ok(rect&&rect.width>100);
+      await page.mouse.click(rect.x+rect.width*.25,rect.y+Math.min(rect.height*.3,120));await page.mouse.click(rect.x+rect.width*.65,rect.y+Math.min(rect.height*.3,120));
+      assert.match(await page.locator('#stock-chart-card [data-chart-measurement]').innerText(),/测量.*收盘涨跌.*最大回撤.*自然时间/);
+      assert.equal(await tool.getAttribute('aria-pressed'),'true');await page.screenshot({path:path.join(data,`measurement-${theme}-${width}.png`)});await tool.click();
+    }
+    await page.setViewportSize({width:1440,height:900});await page.evaluate(()=>document.documentElement.removeAttribute('data-theme'));
     const zoomedStrategy = await page.evaluate(() => {
       const canvas = document.getElementById('stock-kline');
       const identity = currentStockSymbol + '|' + currentStockKlinePeriod;
