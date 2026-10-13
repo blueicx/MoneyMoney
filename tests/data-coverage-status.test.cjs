@@ -10,6 +10,36 @@ const canary = (overrides = {}) => ({
   status: 'live', reason: null, ...overrides,
 });
 
+test('unreadable catalogued snapshots are not usable history even when source canary succeeds', () => {
+  const partitions=[{status:'committed',partitionCount:2,rowCount:20,availablePartitionCount:0,availableRowCount:0,unavailablePartitionCount:2,reason:'2 份历史快照未通过内容校验'}];
+  const result=summarizePublishedCoverage({partitions,now});
+  assert.equal(result.partitionStatus,'unavailable');assert.equal(result.dataStatus,'unavailable');
+  assert.match(result.reason,/校验/);
+  const live=summarizePublishedCoverage({partitions,observations:[canary()],now});
+  assert.equal(live.sourceStatus,'live');assert.equal(live.partitionStatus,'unavailable');assert.equal(live.dataStatus,'partial');
+});
+
+test('mixed valid and damaged snapshots retain partial history separately from current source status', () => {
+  const result=summarizePublishedCoverage({partitions:[{status:'committed',partitionCount:2,rowCount:20,availablePartitionCount:1,availableRowCount:10,unavailablePartitionCount:1,reason:'1 份历史快照未通过内容校验'}],observations:[canary({status:'empty'})],now});
+  assert.equal(result.partitionStatus,'partial');assert.equal(result.sourceStatus,'empty');assert.equal(result.dataStatus,'partial');assert.match(result.reason,/校验/);
+});
+
+test('dashboard options card reports only verified history and keeps catalogue failures visible',()=>{
+  const {buildOptionsCoverageCard}=require('../dist/features/data-coverage-status');
+  assert.equal(typeof buildOptionsCoverageCard,'function');
+  const row={market:'options',dataset:'options-chain-snapshots',instrument:'option:cboe:AAPL',timeframe:'snapshot',partitionCount:2,rowCount:20,availablePartitionCount:1,availableRowCount:10,unavailablePartitionCount:1,availableLatestPublishedAt:'2026-09-26T14:00:00.000Z'};
+  const partial=buildOptionsCoverageCard([row]);
+  assert.equal(partial.status,'partial');assert.equal(partial.updatedAt,row.availableLatestPublishedAt);
+  assert.equal(partial.metrics.find(item=>item.label==='可用合约行').value,10);
+  assert.equal(partial.metrics.find(item=>item.label==='隔离分区').value,1);
+  assert.match(partial.reason,/校验|损坏/);
+  const unavailable=buildOptionsCoverageCard([{...row,availablePartitionCount:0,availableRowCount:0,unavailablePartitionCount:2,availableLatestPublishedAt:null}]);
+  assert.equal(unavailable.status,'unavailable');assert.equal(unavailable.updatedAt,null);
+  assert.equal(unavailable.metrics.find(item=>item.label==='可用合约行').value,0);
+  assert.equal(buildOptionsCoverageCard([]).status,'empty');
+  assert.equal(buildOptionsCoverageCard([{...row,market:'stocks'}]).status,'empty');
+});
+
 test('recent provider failure cannot be hidden by an older published partition', () => {
   const result = summarizePublishedCoverage({
     partitions: [{ status: 'published', rowCount: 120 }],

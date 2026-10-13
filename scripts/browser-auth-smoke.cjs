@@ -1,5 +1,5 @@
 const assert = require('node:assert/strict');
-const { spawn } = require('node:child_process');
+const { spawn, spawnSync } = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -10,6 +10,19 @@ const baseUrl = process.env.MONEYMONEY_SMOKE_URL || `http://127.0.0.1:${port}`;
 const username = process.env.MONEYMONEY_SMOKE_USER || 'browser-owner';
 const password = process.env.MONEYMONEY_SMOKE_PASS || 'local-browser-test-only-92!';
 const isolatedDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'moneymoney-auth-smoke-'));
+// Only seed an isolated local fixture, never the optional external smoke target.
+if (!process.env.MONEYMONEY_SMOKE_URL) {
+  const seed=spawnSync(process.execPath,['-e',`
+    const fs=require('node:fs'),path=require('node:path'),Database=require('better-sqlite3');
+    const {dataLakeCatalog:catalog}=require('./dist/storage/data-lake');
+    for(const fetchedAt of ['2026-09-26T14:00:00.000Z','2026-09-27T14:00:00.000Z']) {
+      const saved=catalog.saveOptionsChainSnapshot({market:'options',instrument:'option:cboe:AAPL',underlyingMarket:'stocks',source:'CBOE Delayed Quotes',fetchedAt,mode:'manual',snapshot:{source:'CBOE Delayed Quotes',market:'us_equity',asset:'AAPL',fetchedAt,expiries:[{expiryMs:Date.UTC(2026,8,30,20),rows:[{instrumentName:'AAPL260930C00100000',strike:100,optionType:'call'}]}]}});
+      if(fetchedAt.startsWith('2026-09-27')) {const db=new Database(path.join(process.env.MONEYMONEY_DATA_DIR,'moneymoney.sqlite'));const file=db.prepare('SELECT path FROM options_chain_partitions WHERE id=?').get(saved.id).path;db.close();fs.writeFileSync(file,'{"fixture":undefined}');}
+    }
+    catalog.close();
+  `],{cwd:path.join(__dirname,'..'),env:{...process.env,MONEYMONEY_DATA_DIR:isolatedDataDir},encoding:'utf8'});
+  assert.equal(seed.status,0,seed.stderr);
+}
 const child = process.env.MONEYMONEY_SMOKE_URL ? null : spawn(process.execPath, [path.join(__dirname, '../dist/web/server.js')], {
   cwd: path.join(__dirname, '..'),
   env: { ...process.env, MONEYMONEY_DATA_DIR: isolatedDataDir, APP_HOST: '127.0.0.1', APP_PORT: String(port), TELEGRAM_NETWORK_ENABLED: 'false', TELEGRAM_POLLING_ENABLED: 'false', TELEGRAM_BOT_TOKEN: '', TELEGRAM_CHAT_ID: '', TELEGRAM_ALLOWED_CHAT_IDS: '', TELEGRAM_ADMIN_CHAT_IDS: '', TELEGRAM_PROXY_URL: '', WECOM_WEBHOOK_URL: '', BARK_DEVICE_KEY: '', AI_PAPER_TRADING_ENABLED: 'false', PRIVATE_KEY: '', API_KEY: '', MONEYMONEY_LOGIN_USER: username, MONEYMONEY_LOGIN_PASS: password, MONEYMONEY_JWT_SECRET: 'local-auth-smoke-jwt-secret-0123456789abcdef' },
@@ -50,6 +63,30 @@ async function main() {
     assert.equal(status.data.loggedIn, true);
     assert.equal(status.data.role, 'admin');
     assert.ok(status.data.csrfToken);
+    if(child) {
+      const coverage=await page.evaluate(()=>fetch('/api/data/coverage?market=options&instrument=option%3Acboe%3AAAPL&timeframe=snapshot').then(r=>r.json()));
+      assert.equal(coverage.partitionStatus,'partial');assert.equal(coverage.dataStatus,'partial');
+      assert.equal(coverage.data[0].partitionCount,2);assert.equal(coverage.data[0].availablePartitionCount,1);
+      assert.equal(coverage.data[0].unavailablePartitionCount,1);assert.equal(coverage.data[0].availablePeriodEnd,'2026-09-26');
+      assert.match(coverage.reason,/校验/);
+      const history=await page.evaluate(()=>fetch('/api/options/history?market=options&instrument=option%3Acboe%3AAAPL').then(r=>r.json()));
+      assert.equal(history.dataStatus,'partial');assert.equal(history.snapshotHealth.unavailableCount,1);
+      const wrongMarket=await page.evaluate(()=>fetch('/api/data/coverage?market=crypto&instrument=option%3Acboe%3AAAPL').then(r=>r.json()));
+      assert.deepEqual(wrongMarket.data,[]);
+      await page.evaluate(()=>{setMarketScope('options');openWorkspace('overview');});
+      await page.waitForFunction(()=>document.querySelector('[data-dashboard-card="option-chain"]')?.dataset.status==='partial',null,{timeout:15000});
+      for(const width of [1440,390]) {
+        await page.setViewportSize({width,height:900});
+        for(const theme of ['light','dark','money']) {
+          await page.evaluate(theme=>{document.documentElement.setAttribute('data-theme',theme);},theme);
+          const text=await page.locator('[data-dashboard-card="option-chain"]').innerText();
+          assert.match(text,/可用合约行：1/);assert.match(text,/隔离分区：1/);assert.match(text,/部分成功/);assert.match(text,/校验/);
+          assert.ok(await page.locator('[data-dashboard-card="option-chain"]').isVisible());
+        }
+      }
+      await page.setViewportSize({width:1440,height:900});
+      await page.evaluate(()=>{document.documentElement.removeAttribute('data-theme');setMarketScope('stocks');openWorkspace('overview');});
+    }
     const runnerState = await page.evaluate(async () => {
       await loadAiRunners();
       const response = await fetch('/api/ai-runners');
@@ -178,6 +215,13 @@ async function main() {
     await page.click('#guestBtn');
     await page.waitForURL(url => url.pathname === '/', { timeout: 10_000 });
     const guestWrite = await page.evaluate(() => fetch('/api/report/daily', { method: 'POST' }).then(async response => ({ status: response.status, body: await response.json() })));
+    if(child) {
+      const coverage=await page.evaluate(()=>fetch('/api/data/coverage?market=options&timeframe=snapshot').then(r=>r.json()));
+      assert.equal(coverage.partitionStatus,'partial');assert.equal(coverage.data[0].availablePartitionCount,1);
+      assert.equal(coverage.data[0].unavailablePartitionCount,1);assert.equal(coverage.instrument,null);
+      assert.equal(Object.hasOwn(coverage.data[0],'instrument'),false);
+      assert.equal(Object.hasOwn(coverage,'sourceObservations'),false);
+    }
     assert.equal(guestWrite.status, 403);
     assert.equal(guestWrite.body.code, 'GUEST_READ_ONLY');
     const guestTelegramStatus = await page.evaluate(() => fetch('/api/telegram/status').then(async response => ({ status: response.status, body: await response.json() })));

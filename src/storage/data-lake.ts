@@ -32,7 +32,14 @@ export interface DataLakeDiagnostics {
   byDataset: Record<string, number>;
   backfills: Record<DataBackfillJob['status'], number>;
 }
-export interface DataCoverage { market: MarketId; instrument: string; dataset: string; timeframe: string; partitionCount: number; rowCount: number; periodStart: string; periodEnd: string; latestPublishedAt: string; status: DatasetStatus; }
+export interface DataCoverage {
+  market: MarketId; instrument: string; dataset: string; timeframe: string;
+  /** Catalog counts, not a guarantee of file readability. Preserved for compatibility. */
+  partitionCount: number; rowCount: number; periodStart: string; periodEnd: string; latestPublishedAt: string; status: DatasetStatus;
+  availablePartitionCount?: number; availableRowCount?: number; unavailablePartitionCount?: number;
+  availablePeriodStart?: string | null; availablePeriodEnd?: string | null; availableLatestPublishedAt?: string | null;
+  dataStatus?: 'historical' | 'partial' | 'unavailable'; reason?: string | null;
+}
 export interface DataDiscrepancy { id: string; market: MarketId; instrument: string; timeframe: string; sourceA: string; sourceB: string; status: 'partial'; reason: string; evidence: Array<{ timestamp: string; closeA: number; closeB: number; differencePct: number }>; createdAt: string; }
 export interface InstrumentQuarantine { market: MarketId; instrument: string; reason: string; createdAt: string; }
 export interface OptionsChainSnapshotInput { market: 'options'; instrument: string; underlyingMarket: 'stocks' | 'crypto'; source: 'CBOE Delayed Quotes' | 'Deribit Public API'; fetchedAt: string; timezone?: string; mode: 'daily' | 'manual'; snapshot: Record<string, any>; }
@@ -454,7 +461,21 @@ export class DataLakeCatalog {
     const barCoverage = rows.map(row => ({ market: row.market as MarketId, instrument: String(row.instrument), dataset: String(row.dataset), timeframe: String(row.timeframe), partitionCount: Number(row.partitionCount), rowCount: Number(row.rowCount), periodStart: String(row.periodStart), periodEnd: String(row.periodEnd), latestPublishedAt: String(row.latestPublishedAt), status: row.status as DatasetStatus }));
     if ((market && market !== 'options') || (timeframe && timeframe !== 'snapshot')) return barCoverage;
     const optionRows = this.db.prepare(`SELECT market,instrument,COUNT(*) AS partitionCount,SUM(row_count) AS rowCount,MIN(trade_date) AS periodStart,MAX(trade_date) AS periodEnd,MAX(fetched_at) AS latestPublishedAt FROM options_chain_partitions WHERE market = ? ${instrument ? 'AND instrument = ?' : ''} GROUP BY market,instrument ORDER BY instrument`).all(...(instrument ? ['options', instrument] : ['options'])) as Array<Record<string, unknown>>;
-    const optionCoverage: DataCoverage[] = optionRows.map(row => ({ market: 'options', instrument: String(row.instrument), dataset: 'options-chain-snapshots', timeframe: 'snapshot', partitionCount: Number(row.partitionCount), rowCount: Number(row.rowCount), periodStart: String(row.periodStart), periodEnd: String(row.periodEnd), latestPublishedAt: String(row.latestPublishedAt), status: 'committed' }));
+    const optionCoverage: DataCoverage[] = optionRows.map(row => {
+      const instrument = String(row.instrument);
+      const snapshots = this.listOptionSnapshots({ market:'options', instrument });
+      const unavailablePartitionCount = Number(row.partitionCount) - snapshots.length;
+      const dates = snapshots.map(item=>item.tradeDate).sort();
+      const times = snapshots.map(item=>item.fetchedAt).sort();
+      return { market:'options', instrument, dataset:'options-chain-snapshots', timeframe:'snapshot',
+        partitionCount:Number(row.partitionCount), rowCount:Number(row.rowCount),
+        periodStart:String(row.periodStart), periodEnd:String(row.periodEnd), latestPublishedAt:String(row.latestPublishedAt), status:'committed',
+        availablePartitionCount:snapshots.length, availableRowCount:snapshots.reduce((sum,item)=>sum+item.rowCount,0), unavailablePartitionCount,
+        availablePeriodStart:dates[0] ?? null, availablePeriodEnd:dates.at(-1) ?? null, availableLatestPublishedAt:times.at(-1) ?? null,
+        dataStatus:unavailablePartitionCount ? (snapshots.length ? 'partial':'unavailable'):'historical',
+        reason:unavailablePartitionCount ? `${unavailablePartitionCount} 份历史快照损坏、缺失或未通过内容校验；目录登记不代表可用行情` : null,
+      };
+    });
     return timeframe === 'snapshot' ? optionCoverage : [...barCoverage, ...optionCoverage];
   }
 
@@ -516,6 +537,18 @@ export class DataLakeCatalog {
       try {
         const content = JSON.parse(fs.readFileSync(String(row.path), 'utf8'));
         if (content.id !== row.id || content.contentHash !== row.contentHash || hash(content.snapshot) !== row.contentHash) return [];
+        if (content.market !== 'options' || content.instrument !== input.instrument || content.source !== row.source ||
+          content.underlyingMarket !== row.underlyingMarket || content.fetchedAt !== row.fetchedAt ||
+          content.tradeDate !== row.tradeDate || content.mode !== row.mode || content.rowCount !== row.rowCount) return [];
+        const snapshot = content.snapshot;
+        if (snapshot?.source !== row.source || String(snapshot?.asset).toUpperCase() !== input.instrument.split(':').at(-1)!.toUpperCase() ||
+          snapshot?.market !== (row.underlyingMarket === 'stocks' ? 'us_equity' : 'crypto') ||
+          new Date(snapshot?.fetchedAt).getTime() !== new Date(row.fetchedAt).getTime() || !Array.isArray(snapshot?.expiries)) return [];
+        const actualCount = snapshot.expiries.reduce((count:number,expiry:any)=>count+(Array.isArray(expiry?.rows)?expiry.rows.length:0),0);
+        if (actualCount !== row.rowCount || actualCount <= 0) return [];
+        const provider = row.source;
+        if (provider !== 'CBOE Delayed Quotes' && provider !== 'Deribit Public API') return [];
+        validateOptionsChainIdentity(input.instrument, provider, String(snapshot.asset).toUpperCase(), snapshot.expiries);
         return [{ id: String(row.id), market: 'options' as const, instrument: input.instrument, underlyingMarket: String(row.underlyingMarket), source: String(row.source), tradeDate: String(row.tradeDate), fetchedAt: String(row.fetchedAt), mode: String(row.mode), contentHash: String(row.contentHash), rowCount: Number(row.rowCount), snapshot: content.snapshot }];
       } catch { return []; }
     });

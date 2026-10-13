@@ -17,6 +17,33 @@ const stockRows = [
   { timestamp: '2026-09-02T00:00:00.000Z', open: 104, high: 108, low: 103, close: 107, volume: 1200 },
 ];
 
+test('options coverage separates registered counts from readable, hash-verified history without changing evidence', () => {
+  const {root,catalog}=tempCatalog();
+  try {
+    const save = fetchedAt => catalog.saveOptionsChainSnapshot({market:'options',instrument:'option:cboe:AAPL',underlyingMarket:'stocks',source:'CBOE Delayed Quotes',fetchedAt,mode:'manual',snapshot:{source:'CBOE Delayed Quotes',market:'us_equity',asset:'AAPL',fetchedAt,expiries:[{expiryMs:Date.UTC(2026,8,30,20),rows:[{instrumentName:'AAPL260930C00100000',strike:100,optionType:'call'}]}]}});
+    const good=save('2026-09-26T14:00:00.000Z'),bad=save('2026-09-27T14:00:00.000Z');
+    const db=new Database(path.join(root,'catalog.sqlite'));
+    const file=db.prepare('SELECT path FROM options_chain_partitions WHERE id=?').get(bad.id).path;
+    db.close();const original=Buffer.from('{"value":undefined}');fs.writeFileSync(file,original);
+    const row=catalog.listCoverage('options','option:cboe:AAPL','snapshot')[0];
+    assert.equal(row.partitionCount,2);assert.equal(row.rowCount,2); // compatibility: catalog counts
+    assert.equal(row.availablePartitionCount,1);assert.equal(row.availableRowCount,1);
+    assert.equal(row.unavailablePartitionCount,1);assert.equal(row.dataStatus,'partial');
+    assert.equal(row.availablePeriodStart,good.tradeDate);assert.equal(row.availablePeriodEnd,good.tradeDate);
+    assert.equal(row.availableLatestPublishedAt,good.fetchedAt);assert.match(row.reason,/校验|损坏/);
+    assert.deepEqual(fs.readFileSync(file),original);
+    assert.deepEqual(catalog.listCoverage('crypto'),[]);
+    assert.deepEqual(catalog.listCoverage('options','option:cboe:MSFT'),[]);
+    const goodFile=new Database(path.join(root,'catalog.sqlite'));
+    const goodPath=goodFile.prepare('SELECT path FROM options_chain_partitions WHERE id=?').get(good.id).path;goodFile.close();
+    const payload=JSON.parse(fs.readFileSync(goodPath,'utf8'));payload.snapshot.expiries[0].rows[0].strike=101;fs.writeFileSync(goodPath,JSON.stringify(payload));
+    const broken=catalog.listCoverage('options','option:cboe:AAPL')[0];
+    assert.equal(broken.availablePartitionCount,0);assert.equal(broken.availableRowCount,0);
+    assert.equal(broken.dataStatus,'unavailable');assert.equal(broken.availablePeriodStart,null);
+    assert.equal(broken.availableLatestPublishedAt,null);
+  } finally {catalog.close();fs.rmSync(root,{recursive:true,force:true});}
+});
+
 test('options history health reports corrupted registered snapshots without changing raw bytes or silently treating them as empty history',()=>{
  const {root,catalog}=tempCatalog();try{
   const input={market:'options',instrument:'option:cboe:AAPL',underlyingMarket:'stocks',source:'CBOE Delayed Quotes',fetchedAt:'2026-09-27T14:00:00.000Z',mode:'manual',snapshot:{source:'CBOE Delayed Quotes',market:'us_equity',asset:'AAPL',fetchedAt:'2026-09-27T14:00:00.000Z',expiries:[{expiryMs:Date.UTC(2026,8,30,20),rows:[{instrumentName:'AAPL260930C00100000',strike:100,optionType:'call'}]}]}};
@@ -24,6 +51,19 @@ test('options history health reports corrupted registered snapshots without chan
   const original=Buffer.from('{"exposureUsd":undefined}');fs.writeFileSync(row.path,original);
   const health=catalog.getOptionsSnapshotHealth({market:'options',instrument:input.instrument});assert.equal(health.dataStatus,'unavailable');assert.equal(health.validCount,0);assert.equal(health.unavailableCount,1);assert.equal(health.failures[0].id,saved.id);assert.match(health.reason,/损坏|校验/);assert.deepEqual(fs.readFileSync(row.path),original);
   const other=catalog.getOptionsSnapshotHealth({market:'options',instrument:'option:cboe:MSFT'});assert.equal(other.unavailableCount,0);
+ }finally{catalog.close();fs.rmSync(root,{recursive:true,force:true});}
+});
+
+test('options history rejects a valid-JSON envelope with mismatched identity or row count despite an unchanged snapshot hash',()=>{
+ const {root,catalog}=tempCatalog();try{
+  const fetchedAt='2026-09-27T14:00:00.000Z';const saved=catalog.saveOptionsChainSnapshot({market:'options',instrument:'option:cboe:AAPL',underlyingMarket:'stocks',source:'CBOE Delayed Quotes',fetchedAt,mode:'manual',snapshot:{source:'CBOE Delayed Quotes',market:'us_equity',asset:'AAPL',fetchedAt,expiries:[{expiryMs:Date.UTC(2026,8,30,20),rows:[{instrumentName:'AAPL260930C00100000',strike:100,optionType:'call'}]}]}});
+  const db=new Database(path.join(root,'catalog.sqlite'));const file=db.prepare('SELECT path FROM options_chain_partitions WHERE id=?').get(saved.id).path;db.close();
+  const payload=JSON.parse(fs.readFileSync(file,'utf8'));
+  for(const overrides of [{instrument:'option:cboe:MSFT'},{market:'stocks'},{source:'Deribit Public API'},{fetchedAt:'2026-09-28T14:00:00.000Z'},{rowCount:999}]){
+   fs.writeFileSync(file,JSON.stringify({...payload,...overrides}));
+   assert.equal(catalog.listOptionSnapshots({market:'options',instrument:'option:cboe:AAPL'}).length,0,JSON.stringify(overrides));
+   assert.equal(catalog.listCoverage('options','option:cboe:AAPL')[0].dataStatus,'unavailable');
+  }
  }finally{catalog.close();fs.rmSync(root,{recursive:true,force:true});}
 });
 

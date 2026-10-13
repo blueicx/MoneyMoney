@@ -208,7 +208,7 @@ import { EventStudyRepository, buildEventStudyCohort, classifyEventCategory, run
 import { PredictionSettlementRepository, buildPolymarketResolutionEndpoint, buildSettlementEndpoint, buildSettlementTimeline, normalizeSettlementEvidence, settlementPayloadMatches } from '../features/prediction-settlement';
 import { analyzePaperDrift, analyzePaperDriftByStrategy, collectPaperDriftSamples, summarizePaperDriftCoverage, samePaperInstrument, StrategyDriftGate } from '../features/paper-drift';
 import { DataCoverageCanary, DEFAULT_DATA_COVERAGE_CANARY_TARGETS, shouldRunOncePerShanghaiDay, summarizeCoverageCanaryHistory, toPublicCoverageCanarySummary, type CanaryCapabilityResult, type CanaryDataStatus, type DataCoverageCanaryTarget, type DataCoverageCanaryRun } from '../features/data-coverage-canary';
-import { summarizePublishedCoverage, type CoverageSourceObservation } from '../features/data-coverage-status';
+import { buildOptionsCoverageCard, summarizePublishedCoverage, type CoverageSourceObservation } from '../features/data-coverage-status';
 import { buildEventEntities, clusterEventEntities, selectResearchEvent } from '../features/event-intelligence';
 import { curlCommand } from '../utils/platform-command';
 import { STOCK_KLINE_PERIODS, createYahooStockKlineAdapter, normalizeYahooSymbol } from '../data/yahoo-adapter';
@@ -452,14 +452,7 @@ async function dashboardStockIndices(): Promise<DashboardProviderResult> {
 }
 
 function dashboardOptionsCoverage(): DashboardProviderResult {
-  const rows = dataLakeCatalog.listCoverage('options').filter(row => row.dataset.toLowerCase().includes('options-chain'));
-  const count = rows.reduce((sum, row) => sum + row.rowCount, 0);
-  return {
-    market: 'options', source: 'MoneyMoney 本地数据湖', status: rows.length ? 'historical' : 'empty',
-    updatedAt: rows.map(row => row.latestPublishedAt).sort().at(-1) || null,
-    metrics: rows.length ? [{ label: '已存合约行', value: count }, { label: '覆盖标的', value: new Set(rows.map(row => row.instrument)).size }, { label: '分区', value: rows.reduce((sum, row) => sum + row.partitionCount, 0) }] : [],
-    reason: rows.length ? '只展示已提交的真实期权链快照；历史不足时不推算 IV/Greeks。' : '本地尚无真实期权链快照，不回填推测历史。', data: rows,
-  };
+  return buildOptionsCoverageCard(dataLakeCatalog.listCoverage('options'));
 }
 
 async function buildDashboardProviderMap(scope: MarketScope, guest: boolean): Promise<Record<string, () => Promise<DashboardProviderResult> | DashboardProviderResult>> {
@@ -517,7 +510,7 @@ async function buildDashboardProviderMap(scope: MarketScope, guest: boolean): Pr
     };
   } else if (scope === 'options') {
     providers['option-chain'] = dashboardOptionsCoverage;
-    providers['option-volatility'] = () => { const result = dashboardOptionsCoverage(); return { ...result, reason: result.status === 'historical' ? '仅展示真实期权链历史覆盖；没有足够快照时不推算 IV/Greeks。' : '没有可验证的本地期权链历史，IV/Greeks 暂不可用。' }; };
+    providers['option-volatility'] = () => { const result = dashboardOptionsCoverage(); return { ...result, reason: `${result.reason || ''} 没有足够可用快照时不推算 IV/Greeks。` }; };
     providers['option-events'] = () => ({ market: 'options', status: 'unsupported', source: '期权事件映射', reason: '尚未指定期权及底层标的；不会将股票市场事件直接填入期权看板。' });
   } else if (scope === 'crypto') {
     providers['crypto-prices'] = async () => {
@@ -1121,7 +1114,7 @@ app.get('/api/data/slo', (req, res) => {
   const samples = researchRepository.listSourceHealthSamples(rawMarket, new Date(now.getTime() - days * 86_400_000).toISOString(), now.toISOString());
   const summary = summarizeSourceSlo(samples, { market: rawMarket, now, windowMs: days * 86_400_000 });
   const coverage = dataLakeCatalog.listCoverage(rawMarket as MarketId);
-  res.json({ success: true, ...summary, window, coverage: coverage.map(item => ({ instrument: item.instrument, dataset: item.dataset, timeframe: item.timeframe, status: item.status, latestPublishedAt: item.latestPublishedAt, partitionCount: item.partitionCount, rowCount: item.rowCount })), dataStatus: summary.sources.length ? (summary.sources.some(item => item.failed) ? 'partial' : 'historical') : 'empty', source: 'SQLite source health samples + local data lake coverage', updatedAt: now.toISOString(), reason: summary.reason });
+  res.json({ success: true, ...summary, window, coverage: coverage.map(item => ({ instrument: item.instrument, dataset: item.dataset, timeframe: item.timeframe, status: item.status, latestPublishedAt: item.latestPublishedAt, partitionCount: item.partitionCount, rowCount: item.rowCount, availablePartitionCount:item.availablePartitionCount, availableRowCount:item.availableRowCount, unavailablePartitionCount:item.unavailablePartitionCount, availablePeriodStart:item.availablePeriodStart, availablePeriodEnd:item.availablePeriodEnd, availableLatestPublishedAt:item.availableLatestPublishedAt, dataStatus:item.dataStatus, reason:item.reason })), dataStatus: summary.sources.length ? (summary.sources.some(item => item.failed) ? 'partial' : 'historical') : 'empty', source: 'SQLite source health samples + local data lake coverage', updatedAt: now.toISOString(), reason: summary.reason });
 });
 
 app.get('/api/data/revisions', (req, res) => {
@@ -1174,7 +1167,7 @@ app.get('/api/data/coverage', (req, res) => {
     },
     lastRun: toPublicCoverageCanarySummary(scopedRuns[0] || null),
   } : toPublicCoverageCanarySummary(scopedRuns[0] || null);
-  const publicData = isGuest ? data.map(item => ({ market: item.market, dataset: item.dataset, timeframe: item.timeframe, status: item.status, partitionCount: item.partitionCount, rowCount: item.rowCount })) : data;
+  const publicData = isGuest ? data.map(item => ({ market: item.market, dataset: item.dataset, timeframe: item.timeframe, status: item.status, partitionCount: item.partitionCount, rowCount: item.rowCount, availablePartitionCount:item.availablePartitionCount, availableRowCount:item.availableRowCount, unavailablePartitionCount:item.unavailablePartitionCount, dataStatus:item.dataStatus, reason:item.reason })) : data;
   res.json({ success: true, data: publicData, market: rawMarket || 'all', instrument: isGuest ? null : instrument || null, timeframe: timeframe || null, dataStatus: coverageStatus.dataStatus, partitionStatus: coverageStatus.partitionStatus, sourceStatus: coverageStatus.sourceStatus, sourceCheckedAt: coverageStatus.sourceCheckedAt, source: 'MoneyMoney local data coverage catalog + scheduled source canary', updatedAt: new Date().toISOString(), reason: coverageStatus.reason, discrepancyCount: isGuest ? undefined : conflicts.length, ...(isGuest ? {} : { sourceObservations }), canary: canaryHistory });
 });
 
