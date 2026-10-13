@@ -26,3 +26,12 @@ test('stock K-line telemetry represents unavailable values as null instead of fa
   assert.equal(telemetry.retrievedAt, new Date(0).toISOString());
   assert.equal(telemetry.reason, '连接失败');
 });
+
+test('K-line route does not substitute retrieval time when the provider did not declare source time',()=>{
+  const fs=require('node:fs'),vm=require('node:vm'),ts=require('typescript'),source=fs.readFileSync('src/web/server.ts','utf8');
+  const start=source.indexOf('    const providerTelemetry = (dataStatus:'),end=source.indexOf('\n    });',start)+8;
+  assert.ok(start>0 && end>start);
+  const code=ts.transpile(source.slice(start,end)+'\nglobalThis.observed=providerTelemetry("delayed",null);',{target:ts.ScriptTarget.ES2022});
+  const context=vm.createContext({snapshot:{source:'fixture',fetchedAt:'2026-10-13T00:00:00Z'},observedCacheMode:'origin',observedProviderLatencyMs:1,observedProviderLatencyAt:1,displayCacheEntry:null,buildStockKlineProviderTelemetry});
+  vm.runInContext(code,context);assert.equal(context.observed.sourceTime,null);assert.ok(context.observed.retrievedAt);
+});

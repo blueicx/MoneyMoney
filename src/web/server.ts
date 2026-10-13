@@ -3164,7 +3164,7 @@ app.get('/api/stock/kline', async (req, res) => {
     }
     const providerTelemetry = (dataStatus: string, reason: string | null, sourceTime: string | null = null, provider = snapshot?.source || 'Yahoo Finance 历史K线') => buildStockKlineProviderTelemetry({
       provider, cacheMode: observedCacheMode, providerLatencyMs: observedProviderLatencyMs, providerLatencyAt: observedProviderLatencyAt,
-      sourceTime: sourceTime || snapshot?.fetchedAt || null, dataStatus, reason,
+      sourceTime: sourceTime || null, dataStatus, reason,
       cacheAgeMs: displayCacheEntry?.cacheHit ? Math.max(0, Date.now() - displayCacheEntry.updatedAt) : 0,
     });
     if (!snapshot) {
