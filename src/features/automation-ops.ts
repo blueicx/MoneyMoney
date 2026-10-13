@@ -215,6 +215,7 @@ interface VerifiedStateBackupSummary {
   snapshotBytes: number;
   fileCount: number;
   lakeFileCount: number;
+  quarantinedFileCount: number;
 }
 type BackupLeaseStore = Pick<SQLiteStateStore, 'acquireLease' | 'refreshLease' | 'releaseLease'>;
 type BackupRunRecord = Omit<AutomationRun, 'id' | 'jobId' | 'durationMs'> & { durationMs?: number };
@@ -234,7 +235,9 @@ function parseVerifiedBackupSummary(output: string): VerifiedStateBackupSummary 
       || !Number.isSafeInteger(value.lakeFileCount) || value.lakeFileCount < 0
       || Object.keys(databaseBytes).some(name => !['moneymoney.sqlite', 'research.db'].includes(name)
         || !Number.isSafeInteger(databaseBytes[name]) || databaseBytes[name] < 0)) return null;
-    return { snapshot, databaseBytes, snapshotBytes: value.snapshotBytes, fileCount: value.fileCount, lakeFileCount: value.lakeFileCount };
+    const quarantinedFileCount = value.quarantinedFileCount ?? 0;
+    if (!Number.isSafeInteger(quarantinedFileCount) || quarantinedFileCount < 0 || quarantinedFileCount > value.fileCount) return null;
+    return { snapshot, databaseBytes, snapshotBytes: value.snapshotBytes, fileCount: value.fileCount, lakeFileCount: value.lakeFileCount, quarantinedFileCount };
   } catch { return null; }
 }
 
@@ -245,7 +248,7 @@ function formatVerifiedBackupMessage(summary: VerifiedStateBackupSummary | null)
   const databases = Object.entries(summary.databaseBytes)
     .map(([name, bytes]) => `${name} ${formatBackupBytes(bytes!)}`)
     .join('、') || '未发现 SQLite 数据库文件';
-  return `一致性快照已创建并通过校验；数据库：${databases}；快照数据 ${formatBackupBytes(summary.snapshotBytes)}（${summary.fileCount} 个文件，数据湖 ${summary.lakeFileCount} 个文件）；快照 ${summary.snapshot}`;
+  return `一致性快照已创建并通过校验；数据库：${databases}；快照数据 ${formatBackupBytes(summary.snapshotBytes)}（${summary.fileCount} 个文件，数据湖 ${summary.lakeFileCount} 个文件）；快照 ${summary.snapshot}${summary.quarantinedFileCount?`；隔离原始证据 ${summary.quarantinedFileCount} 个（数据仍不可用，非正常行情）`:''}`;
 }
 
 export function stateBackupDue(lastSuccessAt: string | null, now = Date.now(), intervalMs = 24 * 60 * 60_000): boolean {

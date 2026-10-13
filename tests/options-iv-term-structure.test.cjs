@@ -161,6 +161,16 @@ test('term-structure panel shows source-bound measurements and explicit missing-
   dom.window.close();
 });
 
+test('options history UI keeps quarantine warning visible even with a usable snapshot',async()=>{
+ const source=fs.readFileSync('src/web/public/modules/dashboard-runtime.js','utf8'),loader=source.match(/async function loadOptionIvSnapshotHistory\([\s\S]*?\n\}/)?.[0],identity=source.match(/function optionSnapshotInstrument\([\s\S]*?\n\}/)?.[0];
+ const dom=new JSDOM('<div id="option-iv-history"></div>'),snapshot={asset:'BTC',market:'crypto',source:'Deribit Public API'};
+ try{
+  const context={document:dom.window.document,optionsSnapshot:snapshot,snapshot,optionHistoryRequestId:0,URLSearchParams,stockEscapeHtml:value=>String(value).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;'),fetch:async()=>({ok:true,json:async()=>({success:true,reason:'1 份历史损坏已隔离 <script>bad()</script>',snapshotHealth:{unavailableCount:1},data:[{id:'good',instrument:'option:deribit:BTC',source:snapshot.source,fetchedAt:'2026-10-13T12:00:00Z'}]})})};
+  await vm.runInNewContext(`${identity};${loader};loadOptionIvSnapshotHistory(snapshot)`,context);
+  assert.match(dom.window.document.getElementById('option-iv-history').textContent,/历史损坏已隔离/);assert.equal(dom.window.document.querySelector('script'),null);
+ }finally{dom.window.close();}
+});
+
 test('options history UI compares exactly the selected two real snapshots and renders source-bound deltas', async () => {
   const source = fs.readFileSync('src/web/public/modules/dashboard-runtime.js', 'utf8');
   const loader = source.match(/async function loadOptionIvSnapshotHistory\([\s\S]*?\n\}/)?.[0];

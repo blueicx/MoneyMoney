@@ -74,6 +74,35 @@ function validateJson(contents, relativeName) {
   catch { throw new Error(`Invalid JSON: ${relativeName}`); }
 }
 
+// A damaged, catalogued options snapshot may be preserved as opaque evidence,
+// never interpreted as market data. No other JSON receives this exemption.
+function optionsEvidence(sourceRoot, relativeName) {
+  const match = /^lake\/options-chain\/\d{4}\/\d{2}\/(option_(?:deribit_(?:BTC|ETH)|cboe_[A-Z0-9.]+))\/(option_snapshot_[a-f0-9]{24})-([a-f0-9]{12})\.json$/i.exec(relativeName);
+  if (!match) return null;
+  const matches = [];
+  for (const databaseName of ['moneymoney.sqlite', 'research.db']) {
+    const file = path.join(sourceRoot, databaseName);
+    if (!fs.existsSync(file)) continue;
+    const db = new Database(file, { readonly: true, fileMustExist: true });
+    try {
+      if (!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='options_chain_partitions'").get()) continue;
+      const row = db.prepare('SELECT id,market,instrument,source,path,content_hash FROM options_chain_partitions WHERE id=?').get(match[2]);
+      if (!row || row.market !== 'options' || !/^[a-f0-9]{64}$/i.test(row.content_hash) || row.content_hash.slice(0,12) !== match[3]) continue;
+      const directory = row.instrument.replace(/[^A-Za-z0-9._-]/g,'_');
+      if (directory !== match[1] || !['Deribit Public API','CBOE Delayed Quotes'].includes(row.source)
+        || (row.instrument.startsWith('option:deribit:') !== (row.source === 'Deribit Public API'))
+        || !String(row.path).replace(/\\/g,'/').endsWith('/'+relativeName)) continue;
+      matches.push({ snapshotId:row.id, instrument:row.instrument, source:row.source, contentHash:row.content_hash, reason:'invalid-json' });
+    } finally { db.close(); }
+  }
+  return matches.length === 1 ? matches[0] : null;
+}
+
+function jsonIsInvalid(file) {
+  try { JSON.parse(fs.readFileSync(file,'utf8')); return false; }
+  catch (error) { if (error instanceof SyntaxError) return true; throw error; }
+}
+
 async function backup() {
   const primaryDb = path.join(dataRoot, 'moneymoney.sqlite');
   if (!fs.existsSync(primaryDb)) throw new Error('data/moneymoney.sqlite 不存在，请先启动一次服务');
@@ -109,7 +138,14 @@ async function backup() {
     filter: source => path.resolve(source) === path.resolve(lakeSource) || path.basename(source) !== '.staging',
   });
   const files = walkFiles(target).filter(name => name !== 'manifest.json').sort();
-  const manifest = { format: 2, createdAt: new Date().toISOString(), files: Object.fromEntries(files.map(name => [name, sha256(path.join(target, name))])), databases, sourceSqliteSidecars };
+  const quarantinedFiles = {};
+  for (const name of files.filter(name => name.endsWith('.json'))) {
+    if (!jsonIsInvalid(path.join(target,name))) continue;
+    const evidence = optionsEvidence(target,name);
+    if (!evidence) throw new Error(`Invalid JSON: ${name}`);
+    quarantinedFiles[name] = { ...evidence, rawHash:sha256(path.join(target,name)) };
+  }
+  const manifest = { format: 2, createdAt: new Date().toISOString(), files: Object.fromEntries(files.map(name => [name, sha256(path.join(target, name))])), databases, sourceSqliteSidecars, quarantinedFiles };
   fs.writeFileSync(path.join(target, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
   verifyBackupForRetention(target);
   verified = true;
@@ -124,6 +160,8 @@ async function backup() {
     snapshotBytes,
     fileCount: files.length,
     lakeFileCount: files.filter(name => name.startsWith('lake/')).length,
+    quarantinedFileCount: Object.keys(quarantinedFiles).length,
+    dataStatus: Object.keys(quarantinedFiles).length ? 'partial' : 'historical',
   };
   process.stdout.write(`State backup verified: ${JSON.stringify(summary)}\n`);
   } finally {
@@ -181,12 +219,20 @@ function safeBackupPath(input) {
 
 function verifyFiles(sourceRoot, manifest) {
   if (manifest.format !== 2 || !manifest.files || !manifest.databases) throw new Error('不支持或缺少备份 manifest');
+  if (Object.keys(manifest.quarantinedFiles || {}).some(name=>!Object.hasOwn(manifest.files,name))) throw new Error('Invalid quarantine manifest');
   for (const [name, expected] of Object.entries(manifest.files)) {
     const file = path.resolve(sourceRoot, name);
     const relative = path.relative(sourceRoot, file);
     if (!relative || relative.startsWith('..') || path.isAbsolute(relative) || !fs.existsSync(file) || !fs.statSync(file).isFile()) throw new Error(`备份文件缺失或路径无效: ${name}`);
     if (sha256(file) !== expected) throw new Error(`备份文件 Hash 不匹配: ${name}`);
-    if (name.toLowerCase().endsWith('.json')) validateJson(fs.readFileSync(file, 'utf8'), name);
+    const quarantine = manifest.quarantinedFiles?.[name];
+    if (name.toLowerCase().endsWith('.json')) {
+      const invalid = jsonIsInvalid(file);
+      if (invalid) {
+        const evidence = optionsEvidence(sourceRoot,name);
+        if (!quarantine || !evidence || quarantine.rawHash !== expected || Object.keys(evidence).some(key=>quarantine[key]!==evidence[key])) throw new Error(`Invalid JSON: ${name}`);
+      } else if (quarantine) throw new Error(`Invalid quarantine claim: ${name}`);
+    } else if (quarantine) throw new Error('Invalid quarantine file type');
   }
 }
 
@@ -212,7 +258,8 @@ function verify(input) {
     verifyFiles(sourceRoot, manifest);
     fs.cpSync(sourceRoot, isolatedRoot, { recursive: true, dereference: false });
     for (const [name, expected] of Object.entries(manifest.databases)) verifyDatabaseCounts(path.join(isolatedRoot, name), expected);
-    const result = { status: 'passed', startedAt, completedAt: new Date().toISOString(), backup: path.basename(sourceRoot), databases: Object.keys(manifest.databases), verifiedFiles: Object.keys(manifest.files).length, lakeFiles: Object.keys(manifest.files).filter(name => name.startsWith('lake/')).length, isolated: true };
+    const quarantinedFileCount = Object.keys(manifest.quarantinedFiles || {}).length;
+    const result = { status: 'passed', startedAt, completedAt: new Date().toISOString(), backup: path.basename(sourceRoot), databases: Object.keys(manifest.databases), verifiedFiles: Object.keys(manifest.files).length, lakeFiles: Object.keys(manifest.files).filter(name => name.startsWith('lake/')).length, isolated: true, quarantinedFileCount, dataStatus:quarantinedFileCount?'partial':'historical' };
     recordDrill(result);
     process.stdout.write(`Isolated recovery drill passed: ${result.databases.length} SQLite DB(s), ${result.verifiedFiles} file(s), live state untouched\n`);
   } catch (error) {

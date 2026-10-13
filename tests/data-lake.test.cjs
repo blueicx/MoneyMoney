@@ -17,6 +17,16 @@ const stockRows = [
   { timestamp: '2026-09-02T00:00:00.000Z', open: 104, high: 108, low: 103, close: 107, volume: 1200 },
 ];
 
+test('options history health reports corrupted registered snapshots without changing raw bytes or silently treating them as empty history',()=>{
+ const {root,catalog}=tempCatalog();try{
+  const input={market:'options',instrument:'option:cboe:AAPL',underlyingMarket:'stocks',source:'CBOE Delayed Quotes',fetchedAt:'2026-09-27T14:00:00.000Z',mode:'manual',snapshot:{source:'CBOE Delayed Quotes',market:'us_equity',asset:'AAPL',fetchedAt:'2026-09-27T14:00:00.000Z',expiries:[{expiryMs:Date.UTC(2026,8,30,20),rows:[{instrumentName:'AAPL260930C00100000',strike:100,optionType:'call'}]}]}};
+  const saved=catalog.saveOptionsChainSnapshot(input);const db=new Database(path.join(root,'catalog.sqlite'));const row=db.prepare('SELECT path FROM options_chain_partitions WHERE id=?').get(saved.id);db.close();
+  const original=Buffer.from('{"exposureUsd":undefined}');fs.writeFileSync(row.path,original);
+  const health=catalog.getOptionsSnapshotHealth({market:'options',instrument:input.instrument});assert.equal(health.dataStatus,'unavailable');assert.equal(health.validCount,0);assert.equal(health.unavailableCount,1);assert.equal(health.failures[0].id,saved.id);assert.match(health.reason,/损坏|校验/);assert.deepEqual(fs.readFileSync(row.path),original);
+  const other=catalog.getOptionsSnapshotHealth({market:'options',instrument:'option:cboe:MSFT'});assert.equal(other.unavailableCount,0);
+ }finally{catalog.close();fs.rmSync(root,{recursive:true,force:true});}
+});
+
 test('options snapshots omit missing object fields and encode missing array entries as null in valid canonical JSON', () => {
   const {root,catalog}=tempCatalog();
   try {

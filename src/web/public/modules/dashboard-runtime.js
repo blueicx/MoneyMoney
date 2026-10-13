@@ -5826,15 +5826,18 @@ async function loadOptionIvSnapshotHistory(snapshot) {
     const payload = await response.json();
     if (requestId !== optionHistoryRequestId || snapshot !== optionsSnapshot) return;
     if (!response.ok || !payload.success) throw new Error(payload.reason || '历史快照覆盖不可用');
+    const quarantineNote = payload.snapshotHealth?.unavailableCount ? `<p role="status">${stockEscapeHtml(payload.reason || '部分历史快照损坏或未通过校验，原始证据已逻辑隔离。')}</p>` : '';
     const snapshots = (Array.isArray(payload.data) ? payload.data : [])
       .filter(row => row.instrument === instrument && row.source === snapshot.source && Number.isFinite(Date.parse(row.fetchedAt)))
       .sort((a, b) => Date.parse(a.fetchedAt) - Date.parse(b.fetchedAt));
     if (snapshots.length < 2) {
       host.innerHTML = `<section class="option-iv-history"><strong>真实快照对照</strong><p>${stockEscapeHtml(snapshots.length ? '当前标的只有 1 个同来源真实快照；至少累积两个不同时间快照后才能比较。' : (payload.reason || '当前标的尚无已保存的同来源期权快照。'))}</p><small>只比较本地真实快照，不回填或推测历史 IV。</small></section>`;
+      if (quarantineNote) host.querySelector('section').insertAdjacentHTML('beforeend', quarantineNote);
       return;
     }
     const optionRows = snapshots.map((row, index) => `<option value="${stockEscapeHtml(row.id)}">${stockEscapeHtml(row.tradeDate || row.fetchedAt)} · ${stockEscapeHtml(new Date(row.fetchedAt).toLocaleTimeString('zh-CN'))} · ${stockEscapeHtml(row.contentHash?.slice(0, 8) || row.id.slice(-8))}</option>`).join('');
     host.innerHTML = `<section class="option-iv-history"><div class="option-iv-history-heading"><div><strong>真实快照对照</strong><p>${snapshots.length} 个 ${stockEscapeHtml(snapshot.source)} 快照 · ${stockEscapeHtml(snapshots[0].tradeDate)} 至 ${stockEscapeHtml(snapshots.at(-1).tradeDate)}</p></div><span>同一合约身份</span></div><div class="option-iv-history-controls"><label>之前<select data-option-iv-snapshot-before>${optionRows}</select></label><label>之后<select data-option-iv-snapshot-after>${optionRows}</select></label><button type="button" class="tab" data-option-iv-compare>比较所选快照</button></div><div data-option-iv-compare-output role="status">仅比较相同标的、来源和合约身份；历史不足或合约不匹配时不插值。</div></section>`;
+    if (quarantineNote) host.querySelector('section').insertAdjacentHTML('beforeend', quarantineNote);
     const before = host.querySelector('[data-option-iv-snapshot-before]');
     const after = host.querySelector('[data-option-iv-snapshot-after]');
     before.selectedIndex = Math.max(0, snapshots.length - 2);

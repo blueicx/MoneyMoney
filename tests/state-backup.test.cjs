@@ -7,6 +7,24 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const Database = require('better-sqlite3');
 
+test('registered malformed options snapshot is backed up as explicit opaque evidence and survives isolated recovery',t=>{
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'mm-opaque-option-backup-'));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
+ const primary=new Database(path.join(root,'moneymoney.sqlite'));primary.exec('CREATE TABLE sample(id INTEGER PRIMARY KEY)');primary.close();
+ const id='option_snapshot_'+'a'.repeat(24),relative='lake/options-chain/2026/09/option_deribit_BTC/'+id+'-'+'b'.repeat(12)+'.json',file=path.join(root,relative);
+ fs.mkdirSync(path.dirname(file),{recursive:true});const bytes=Buffer.from('{"exposureUsd":undefined}');fs.writeFileSync(file,bytes);
+ const catalog=new Database(path.join(root,'research.db'));catalog.exec('CREATE TABLE options_chain_partitions(id TEXT PRIMARY KEY,market TEXT,instrument TEXT,source TEXT,path TEXT,content_hash TEXT)');catalog.prepare('INSERT INTO options_chain_partitions VALUES(?,?,?,?,?,?)').run(id,'options','option:deribit:BTC','Deribit Public API',file,'b'.repeat(64));catalog.close();
+ const env={...process.env,MONEYMONEY_DATA_DIR:root};const run=spawnSync(process.execPath,['scripts/state-backup.cjs'],{cwd:process.cwd(),env,encoding:'utf8'});
+ assert.equal(run.status,0,run.stderr);const line=run.stdout.split(/\r?\n/).find(line=>line.startsWith('State backup verified: ')),summary=JSON.parse(line.slice('State backup verified: '.length));
+ assert.equal(summary.quarantinedFileCount,1);assert.equal(summary.dataStatus,'partial');
+ const folder=path.join(root,'backups',summary.snapshot),manifest=JSON.parse(fs.readFileSync(path.join(folder,'manifest.json'),'utf8'));
+ assert.equal(manifest.quarantinedFiles[relative].reason,'invalid-json');assert.equal(manifest.quarantinedFiles[relative].snapshotId,id);
+ assert.deepEqual(fs.readFileSync(path.join(folder,relative)),bytes);assert.deepEqual(fs.readFileSync(file),bytes);
+ const verify=spawnSync(process.execPath,['scripts/state-backup.cjs','verify',folder],{cwd:process.cwd(),env,encoding:'utf8'});assert.equal(verify.status,0,verify.stderr);
+ const report=JSON.parse(fs.readFileSync(path.join(root,'recovery-drill-last.json'),'utf8'));assert.equal(report.quarantinedFileCount,1);assert.equal(report.dataStatus,'partial');
+ const unrelated='private-cache.json';fs.writeFileSync(path.join(folder,unrelated),bytes);manifest.files[unrelated]=crypto.createHash('sha256').update(bytes).digest('hex');manifest.quarantinedFiles[unrelated]={...manifest.quarantinedFiles[relative]};fs.writeFileSync(path.join(folder,'manifest.json'),JSON.stringify(manifest));
+ const forged=spawnSync(process.execPath,['scripts/state-backup.cjs','verify',folder],{cwd:process.cwd(),env,encoding:'utf8'});assert.notEqual(forged.status,0,'quarantine must not bypass unrelated JSON');
+});
+
 for(const scenario of ['root','lake'])test(`malformed ${scenario} JSON aborts backup without leaving another snapshot or revealing payload`,t=>{
  const root=fs.mkdtempSync(path.join(os.tmpdir(),'mm-bad-json-backup-'));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
  const db=new Database(path.join(root,'moneymoney.sqlite'));db.exec('CREATE TABLE sample(id INTEGER PRIMARY KEY)');db.close();

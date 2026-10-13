@@ -6,6 +6,13 @@ const path = require('node:path');
 const { SQLiteStateStore } = require('../dist/storage/sqlite-state');
 const { StateBackupScheduler, stateBackupDue } = require('../dist/features/automation-ops');
 
+test('verified byte backup with quarantined evidence remains visibly partial in scheduler history',async()=>{
+ const records=[],store={acquireLease:()=>true,refreshLease:()=>true,releaseLease:()=>true};
+ const summary={format:1,status:'verified',snapshot:'2026-10-13T12-00-00-000Z',databaseBytes:{'moneymoney.sqlite':1024},snapshotBytes:2048,fileCount:4,lakeFileCount:1,quarantinedFileCount:1,dataStatus:'partial'};
+ const scheduler=new StateBackupScheduler({store,owner:'partial-evidence',clock:()=>Date.parse('2026-10-13T12:00:00Z'),getLastSuccessAt:()=>null,runBackup:async()=> 'State backup verified: '+JSON.stringify(summary),recordRun:record=>records.push(record)});
+ const result=await scheduler.runNow();assert.equal(result.status,'SUCCESS');assert.match(result.message,/隔离.*1|1.*隔离/);assert.match(records[0].message,/不可用|非正常/);
+});
+
 test('daily backup is due initially, after a day, and when the prior success time is invalid', () => {
   assert.equal(typeof stateBackupDue, 'function', 'daily due logic must be testable');
   const now = Date.parse('2026-10-10T12:00:00.000Z');

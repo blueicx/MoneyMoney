@@ -3347,6 +3347,7 @@ function handleOptionsHistory(req: express.Request, res: express.Response) {
     for (const date of [from, to].filter(Boolean)) if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || new Date(`${date}T00:00:00.000Z`).toISOString().slice(0, 10) !== date) return res.status(400).json({ success: false, market, instrument, dataStatus: 'failed', reason: 'from/to 必须为有效 YYYY-MM-DD 日期' });
     if (from && to && from > to) return res.status(400).json({ success: false, market, instrument, dataStatus: 'failed', reason: 'from 不能晚于 to' });
     const snapshots = dataLakeCatalog.listOptionSnapshots({ market: 'options', instrument, from: from || undefined, to: to || undefined });
+    const snapshotHealth = dataLakeCatalog.getOptionsSnapshotHealth({ market:'options',instrument,from:from||undefined,to:to||undefined });
     const data = req.query.metadata === '1' ? snapshots.map(({ snapshot: _snapshot, ...metadata }) => metadata) : snapshots;
     const dates = [...new Set(data.map(item => item.tradeDate))].sort();
     const start = from || dates[0] || null;
@@ -3362,7 +3363,7 @@ function handleOptionsHistory(req: express.Request, res: express.Response) {
         cursor.setUTCDate(cursor.getUTCDate() + 1);
       }
     }
-    res.json({ success: true, market, instrument, data, coverage: { observedDates: dates, calendarGaps, gapNote: '日历缺口未区分周末、交易所假日与采集缺失，不能据此认定来源故障。', from: start, to: end }, dataStatus: snapshots.length ? 'historical' : 'empty', source: [...new Set(snapshots.map(item => item.source))].join(', ') || 'CBOE Delayed Quotes / Deribit Public API', updatedAt: snapshots.at(-1)?.fetchedAt || new Date().toISOString(), reason: snapshots.length ? null : '本地尚无该期权标的的真实历史快照；从当前来源成功读取后才会开始积累，不回填推测历史' });
+    res.json({ success: true, market, instrument, data, snapshotHealth, coverage: { observedDates: dates, calendarGaps, gapNote: '日历缺口未区分周末、交易所假日与采集缺失，不能据此认定来源故障。', from: start, to: end }, dataStatus: snapshotHealth.dataStatus, source: [...new Set(snapshots.map(item => item.source))].join(', ') || 'CBOE Delayed Quotes / Deribit Public API', updatedAt: snapshots.at(-1)?.fetchedAt || new Date().toISOString(), reason: snapshotHealth.reason || (snapshots.length ? null : '本地尚无该期权标的的真实历史快照；从当前来源成功读取后才会开始积累，不回填推测历史') });
   } catch (error: any) { res.status(400).json({ success: false, market: String(req.query.market || 'options'), dataStatus: 'failed', reason: error.message }); }
 }
 

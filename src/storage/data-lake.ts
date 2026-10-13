@@ -521,6 +521,17 @@ export class DataLakeCatalog {
     });
   }
 
+  getOptionsSnapshotHealth(input: { market:'options'; instrument:string; from?:string; to?:string }) {
+    const valid = this.listOptionSnapshots(input);
+    const ids = new Set(valid.map(row=>row.id));
+    const rows = this.db.prepare(`SELECT id,source,fetched_at AS fetchedAt FROM options_chain_partitions WHERE market=? AND instrument=? ${input.from?'AND trade_date>=?':''} ${input.to?'AND trade_date<=?':''} ORDER BY fetched_at`)
+      .all('options',input.instrument,...(input.from?[input.from]:[]),...(input.to?[input.to]:[])) as Array<{id:string;source:string;fetchedAt:string}>;
+    const failures = rows.filter(row=>!ids.has(row.id)).map(row=>({...row,dataStatus:'unavailable',reason:'历史快照损坏、缺失或内容Hash校验失败；原始证据保留，未作为可用行情读取'}));
+    return {market:'options',instrument:input.instrument,validCount:valid.length,unavailableCount:failures.length,failures,
+      dataStatus:failures.length?(valid.length?'partial':'unavailable'):(valid.length?'historical':'empty'),
+      reason:failures.length?`${failures.length} 份历史快照损坏或未通过内容校验，已逻辑隔离；只返回 ${valid.length} 份通过校验的快照`:null};
+  }
+
   /** Same-contract public quote observations, never reconstructed exchange history. */
   async stageContractMetrics(snapshot: Record<string, any>): Promise<DatasetPartition> {
     const match=String(snapshot.instrument).match(/^crypto:(gateio|gateio-delivery):([A-Z0-9]+_USDT(?:_\d{8})?)$/);

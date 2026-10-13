@@ -18,6 +18,9 @@ function envelope(overrides = {}) {
 
 async function withApi(service, adminAllowed, run, watchlist = () => []) {
   const app = express();
+  // These short-lived fixtures test route behavior, not pooled transport.
+  // Do not keep fetch sockets alive across successive ephemeral requests.
+  app.use((_req,res,next)=>{res.setHeader('Connection','close');next();});
   app.use('/api/stocks/guru-holdings', createGuruHoldingsRouter(service, (_req, res) => {
     if (adminAllowed) return true;
     res.status(403).json({ error: '管理员权限不足' });
@@ -32,6 +35,12 @@ async function withApi(service, adminAllowed, run, watchlist = () => []) {
     await new Promise(resolve => server.close(resolve));
   }
 }
+
+test('ephemeral API fixture closes transport connections rather than reusing sockets between requests',async()=>{
+ await withApi({listGuruManagers:async()=>[]},false,async base=>{
+  const response=await fetch(base+'/managers');await response.json();assert.equal(response.headers.get('connection'),'close');
+ });
+});
 
 test('manager directory and CIK detail return stock-scoped evidence envelopes', async () => {
   let lookupQuery = null;
