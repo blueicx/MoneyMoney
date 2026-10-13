@@ -41,11 +41,16 @@ const BAR_FIELDS = ['timestamp', 'open', 'high', 'low', 'close'] as const;
 const IDENTIFIER = /^[A-Za-z0-9._:/-]+$/;
 
 function stableJson(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
-  if (value && typeof value === 'object') {
-    return `{${Object.entries(value as Record<string, unknown>).sort(([left], [right]) => left.localeCompare(right)).map(([key, item]) => `${JSON.stringify(key)}:${stableJson(item)}`).join(',')}}`;
-  }
-  return JSON.stringify(value);
+  // Apply JSON semantics before canonical ordering: omit undefined object
+  // fields, encode missing array entries as null, and honor Date/toJSON.
+  const serialized = JSON.stringify(value);
+  if (serialized === undefined) throw new Error('data lake value cannot be represented as JSON');
+  const encode = (item: any): string => {
+    if (Array.isArray(item)) return `[${item.map(encode).join(',')}]`;
+    if (item && typeof item === 'object') return `{${Object.entries(item).sort(([left], [right]) => left.localeCompare(right)).map(([key, field]) => `${JSON.stringify(key)}:${encode(field)}`).join(',')}}`;
+    return JSON.stringify(item);
+  };
+  return encode(JSON.parse(serialized));
 }
 function hash(value: unknown): string { return crypto.createHash('sha256').update(stableJson(value)).digest('hex'); }
 function sqlPath(value: string): string { return value.replace(/'/g, "''"); }

@@ -17,6 +17,23 @@ const stockRows = [
   { timestamp: '2026-09-02T00:00:00.000Z', open: 104, high: 108, low: 103, close: 107, volume: 1200 },
 ];
 
+test('options snapshots omit missing object fields and encode missing array entries as null in valid canonical JSON', () => {
+  const {root,catalog}=tempCatalog();
+  try {
+    const snapshot={source:'CBOE Delayed Quotes',market:'us_equity',asset:'AAPL',fetchedAt:'2026-09-27T14:00:00.000Z',exposureUsd:undefined,notes:[undefined,'undefined'],expiries:[{expiryMs:Date.UTC(2026,8,30,20),rows:[{instrumentName:'AAPL260930C00100000',strike:100,optionType:'call',impliedVolPct:undefined,volume:4,openInterest:30}]}]};
+    const input={market:'options',instrument:'option:cboe:AAPL',underlyingMarket:'stocks',source:'CBOE Delayed Quotes',fetchedAt:snapshot.fetchedAt,mode:'manual',snapshot};
+    const saved=catalog.saveOptionsChainSnapshot(input);
+    const walk=dir=>fs.readdirSync(dir,{withFileTypes:true}).flatMap(entry=>entry.isDirectory()?walk(path.join(dir,entry.name)):[path.join(dir,entry.name)]);
+    const file=walk(path.join(root,'lake','options-chain')).find(file=>file.endsWith('.json'));
+    const parsed=JSON.parse(fs.readFileSync(file,'utf8'));
+    assert.equal(Object.hasOwn(parsed.snapshot,'exposureUsd'),false);
+    assert.equal(Object.hasOwn(parsed.snapshot.expiries[0].rows[0],'impliedVolPct'),false);
+    assert.deepEqual(parsed.snapshot.notes,[null,'undefined']);
+    const normalized=catalog.saveOptionsChainSnapshot({...input,snapshot:JSON.parse(JSON.stringify(snapshot))});
+    assert.equal(normalized.contentHash,saved.contentHash);
+  } finally {catalog.close();fs.rmSync(root,{recursive:true,force:true});}
+});
+
 test('data lake writes atomic Parquet partitions and restores the latest revision at asOf', async () => {
   const { root, catalog } = tempCatalog();
   try {

@@ -69,12 +69,19 @@ function inspectSqliteSidecars(name) {
   return { wal: inspect('-wal'), shm: inspect('-shm') };
 }
 
+function validateJson(contents, relativeName) {
+  try { JSON.parse(contents); }
+  catch { throw new Error(`Invalid JSON: ${relativeName}`); }
+}
+
 async function backup() {
   const primaryDb = path.join(dataRoot, 'moneymoney.sqlite');
   if (!fs.existsSync(primaryDb)) throw new Error('data/moneymoney.sqlite 不存在，请先启动一次服务');
   fs.mkdirSync(backupRoot, { recursive: true });
   const target = path.join(backupRoot, stamp());
   fs.mkdirSync(target, { recursive: false });
+  let verified = false;
+  try {
   const databases = {};
   const sourceSqliteSidecars = {};
   for (const name of ['moneymoney.sqlite', 'research.db']) {
@@ -90,7 +97,7 @@ async function backup() {
     const source = path.join(dataRoot, name);
     if (name.endsWith('.json') && fs.statSync(source).isFile()) {
       const contents = fs.readFileSync(source, 'utf8');
-      JSON.parse(contents);
+      validateJson(contents, name);
       fs.writeFileSync(path.join(target, name), contents, 'utf8');
     }
   }
@@ -105,6 +112,7 @@ async function backup() {
   const manifest = { format: 2, createdAt: new Date().toISOString(), files: Object.fromEntries(files.map(name => [name, sha256(path.join(target, name))])), databases, sourceSqliteSidecars };
   fs.writeFileSync(path.join(target, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
   verifyBackupForRetention(target);
+  verified = true;
   pruneVerifiedBackups(retentionCount());
   const databaseBytes = Object.fromEntries(Object.keys(databases).map(name => [name, fs.statSync(path.join(target, name)).size]));
   const snapshotBytes = files.reduce((sum, name) => sum + fs.statSync(path.join(target, name)).size, 0);
@@ -118,6 +126,13 @@ async function backup() {
     lakeFileCount: files.filter(name => name.startsWith('lake/')).length,
   };
   process.stdout.write(`State backup verified: ${JSON.stringify(summary)}\n`);
+  } finally {
+    // Only this invocation's exact newly created directory is removable.
+    // Never delete an older failed backup or the original runtime data.
+    if (!verified && path.dirname(target) === path.resolve(backupRoot) && BACKUP_NAME_PATTERN.test(path.basename(target)) && !fs.lstatSync(target).isSymbolicLink()) {
+      fs.rmSync(target, { recursive: true, force: false });
+    }
+  }
 }
 
 function verifyBackupForRetention(sourceRoot) {
@@ -171,7 +186,7 @@ function verifyFiles(sourceRoot, manifest) {
     const relative = path.relative(sourceRoot, file);
     if (!relative || relative.startsWith('..') || path.isAbsolute(relative) || !fs.existsSync(file) || !fs.statSync(file).isFile()) throw new Error(`备份文件缺失或路径无效: ${name}`);
     if (sha256(file) !== expected) throw new Error(`备份文件 Hash 不匹配: ${name}`);
-    if (name.toLowerCase().endsWith('.json')) JSON.parse(fs.readFileSync(file, 'utf8'));
+    if (name.toLowerCase().endsWith('.json')) validateJson(fs.readFileSync(file, 'utf8'), name);
   }
 }
 

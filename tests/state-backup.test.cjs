@@ -7,6 +7,18 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const Database = require('better-sqlite3');
 
+for(const scenario of ['root','lake'])test(`malformed ${scenario} JSON aborts backup without leaving another snapshot or revealing payload`,t=>{
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'mm-bad-json-backup-'));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
+ const db=new Database(path.join(root,'moneymoney.sqlite'));db.exec('CREATE TABLE sample(id INTEGER PRIMARY KEY)');db.close();
+ const invalid=scenario==='root'?path.join(root,'private-cache.json'):path.join(root,'lake','options-chain','broken.json');
+ fs.mkdirSync(path.dirname(invalid),{recursive:true});const bytes=Buffer.from('{"privateValue":undefined,"secret":"do-not-log-this-payload"}');fs.writeFileSync(invalid,bytes);
+ const result=spawnSync(process.execPath,['scripts/state-backup.cjs'],{cwd:process.cwd(),env:{...process.env,MONEYMONEY_DATA_DIR:root},encoding:'utf8'});
+ assert.notEqual(result.status,0);assert.match(result.stderr,/invalid JSON/i);assert.match(result.stderr,new RegExp(path.basename(invalid).replace('.','\\.')));
+ assert.equal(result.stderr.includes('do-not-log-this-payload'),false);assert.equal(result.stderr.includes(root),false);
+ assert.deepEqual(fs.readFileSync(invalid),bytes);
+ const snapshots=fs.existsSync(path.join(root,'backups'))?fs.readdirSync(path.join(root,'backups')):[];assert.deepEqual(snapshots,[]);
+});
+
 test('large data-lake file hashing uses bounded-memory streaming', () => {
   const source = fs.readFileSync(path.join(process.cwd(), 'scripts/state-backup.cjs'), 'utf8');
   const start = source.indexOf('function sha256(file)');
