@@ -23,6 +23,7 @@ function chartHarness(fetcher, url = 'http://localhost/') {
   window.loadStockChartEventRail = () => {};
   for (const name of ['bindStockKlineSelection', 'updateStockKlineFocusControl', 'loadStockChartOverlayConfig', 'drawStockKline']) window[name] = () => {};
   for (const name of ['renderChartSignalList', 'renderChartPatternList', 'renderChartStructureList']) window[name] = (id, items, reason) => { window.document.getElementById(id).textContent = reason || ''; };
+  window.renderChartSignalMarkers = id => { window.document.getElementById(id).replaceChildren(); };
   window.renderChartPatternMarkers = id => { window.document.getElementById(id).textContent = ''; };
   window.renderMovingAverageValues = id => { window.document.getElementById(id).textContent = ''; };
   window.stockChartKlinesTime = () => '2026-10-05';

@@ -6,6 +6,7 @@ const crypto = require('node:crypto');
 const zlib = require('node:zlib');
 const ts = require('typescript');
 const { expandDashboardRuntime } = require('./dashboard-source-transform.cjs');
+const { optimizeWebAsset } = require('./optimize-web-assets.cjs');
 
 const root = path.join(__dirname, '..');
 const source = path.join(root, 'src', 'web', 'public');
@@ -28,7 +29,7 @@ const assets = path.join(target, 'assets');
 fs.mkdirSync(assets, { recursive: true });
 const manifest = {};
 function emit(name, body, extension) {
-  const content = Buffer.from(body);
+  const content = Buffer.from(optimizeWebAsset(body, extension));
   const hash = crypto.createHash('sha256').update(content).digest('hex');
   const relative = `/assets/${name}.${hash.slice(0, 16)}.${extension}`;
   const file = path.join(target, relative);
@@ -50,24 +51,24 @@ const asyncWorkspaceGroups = [
   ['research', /^(?:loadDecisionIntelligence|runBacktest|compareBacktests|runMonteCarlo|loadMarketResearch|runEventStudyUi)$/],
   ['charts', /^(?:performStockKlineLoad|loadEarlierStockKline|loadStockChartCompanion|loadStockChartEventRail|loadBinanceKlines|loadBinancePrices|loadBinanceDepth|loadBinanceTrades)$/],
   ['stocks', /^(?:loadGlobalMacroSpot|loadInsiderRadar|loadInstitutionalOwnership|loadAnalystConsensus|loadFundamentalQuality|loadShortInterest|loadEarningsCalendar|loadCotRadar|loadMarketScreener|loadStockSearch|loadStockWatchlistLibrary)$/],
-  ['options', /^loadOptions$/],
+  ['options', /^(?:loadOptions|loadOptionIvSnapshotHistory)$/],
   ['crypto', /^(?:loadFundingCarry|loadOrderFlowLiquidity|loadStablecoinLiquidity|loadPerpetualCrowding|loadBitcoinOnchain|loadDefiTvl|loadDefiProtocols|loadDefiYields|loadBinanceDashboard|loadBinancePortfolio|loadCryptoNews)$/],
-  ['prediction', /^(?:loadPredictionRadar|loadForecastLab|loadMarketCompare|loadCalibration|togglePredictionSettlement|togglePredictionHistory)$/],
+  ['prediction', /^(?:loadPredictionRadar|loadForecastLab|loadMarketCompare|loadCalibration|loadCategories|loadCategoryCardStats|selectCategory|loadCategoryOrderbooks|togglePredictionSettlement|togglePredictionHistory)$/],
   ['portfolio', /^(?:loadPaperPortfolio|loadPortfolioRisk|loadScopedPaperPortfolio|loadPaperDriftStatus|loadOrders|loadPositions|loadPortfolioSnapshotHistory|loadDecisionPortfolioAttribution|loadPortfolioSummary|comparePortfolioSnapshotHistory|submitSellOrder|openSellModal)$/],
   ['trading', /^(?:loadTradeAssistant|loadAnalysis|loadRiskPatrol|preflightAssetBacktest|refreshBacktestCandidateFreshness)$/],
   ['events', /^(?:loadMarketTimeline|loadEventCalendar)$/],
-  ['ops', /^(?:loadSourceSloPanel|loadOpsConsole|loadSourceHealth|loadMacroIndicators|loadNews|loadMacroCalendar|loadTelegramTestDeliveryHistory|loadTelegramSettingsForm|testTelegramSettings|saveTelegramSettings|loadTreasuryYields|loadMarketSentiment|runGlobalSearchNow|loadAlertDeliveryFeedback)$/],
+  ['ops', /^(?:loadSourceSloPanel|loadOpsConsole|loadSourceHealth|loadMacroIndicators|loadNews|loadMacroCalendar|loadTelegramTestDeliveryHistory|loadTelegramResultCoverage|loadTelegramSettingsForm|testTelegramSettings|saveTelegramSettings|loadTreasuryYields|loadMarketSentiment|runGlobalSearchNow|loadAlertDeliveryFeedback)$/],
 ];
 const syncWorkspaceGroups = [
-  ['charts', /^(?:loadStockKline|stockKlineRequestKey|runStockKlineSingleFlight|drawCandles|drawStockKline|drawMACD|drawRSI|drawDepthChart|drawStockChartCompanion|renderChartPatternMarkers|renderChartPatternList|renderChartStructureList|renderStockChartEventRail|stockChartEventInstrumentId|showStockChartEvidence|focusStockChartTimestamp|redrawStockChartEventMarkers|renderChartSignalList|updateStockKlineFocusControl|setStockKlineViewState|focusStockKlineDate|enterStockIntraday)$/],
+  ['charts', /^(?:loadStockKline|stockKlineRequestKey|runStockKlineSingleFlight|drawCandles|drawStockKline|initCryptoChartHover|drawMACD|drawRSI|drawDepthChart|drawStockChartCompanion|buildStockStrategySignals|buildCryptoStrategySignals|handleChartSignalSelection|renderChartPatternMarkers|renderChartPatternList|renderChartStructureList|renderStockChartEventRail|stockChartEventInstrumentId|showStockChartEvidence|focusStockChartTimestamp|redrawStockChartEventMarkers|updateStockKlineFocusControl|setStockKlineViewState|focusStockKlineDate|enterStockIntraday)$/],
   ['stocks', /^(?:renderGlobalMacroSpot|renderAnalystConsensus|renderFundamentalQuality|renderMarketBreadth|renderInsiderRadar|renderInstitutionalOwnership|renderShortInterest|renderMarketScreener|renderInstrumentDetail)$/],
   ['overview', /^fetchMarketOverviewJson$/],
-  ['options', /^(?:renderOptionChain|renderOptionStrategies|renderOptionPayoffBuilder)$/],
+  ['options', /^(?:renderOptionChain|renderOptionStrategies|renderOptionPayoffBuilder|renderOptionIvTermStructure)$/],
   ['crypto', /^(?:renderDefiYieldQuality)$/],
-  ['prediction', /^(?:renderOutcomes|radarMarketCard|renderForecastLab|renderPredictionRadar|renderPredictionLibraryQuick|predictionSparkline|forecastLabGroupTable|renderPredictionSizingResult|selectPredictionLibraryEvent)$/],
+  ['prediction', /^(?:renderOutcomes|radarMarketCard|renderForecastLab|renderPredictionRadar|renderPredictionLibraryQuick|predictionSparkline|forecastLabGroupTable|renderPredictionSizingResult|selectPredictionLibraryEvent|categoryCardHtml|renderCategories|updateCategoryCard|observeCategoryCards|fetchJsonOrNull|runLimited|toggleConditions)$/],
   ['research', /^(?:renderDecisionPortfolio|renderReviewNotes|renderEventStudyResult|renderDecisionEvidence|renderDecisionEvidenceChanges|renderDecisionSignalQuality)$/],
   ['events', /^(?:renderEventCalendar|renderEventMonthGrid)$/],
-  ['ops', /^(?:renderGlobalSearchResults|renderSettingsForm|renderTelegramSettingsForm)$/],
+  ['ops', /^(?:globalSearchCommands|renderGlobalSearchResults|renderSettingsForm|renderTelegramSettingsForm)$/],
   ['ai', /^(?:renderAiSettingsForm|syncAiRunnerVenueHint)$/],
 ];
 function splitWorkspaces(code) {
@@ -139,18 +140,26 @@ modules.charts.push(
   fs.readFileSync(path.join(source, 'trading-chart.js'), 'utf8'),
 );
 modules.comparison.push(fs.readFileSync(path.join(source, 'automatic-comparison.js'), 'utf8'));
+modules.portfolio.push(fs.readFileSync(path.join(source, 'watchlist-metadata.js'), 'utf8'));
 if (!dashboardStartupParts.length) throw new Error('Dashboard startup runtime was not collected');
 const dashboardStartupUrls = dashboardStartupParts.map(part => emit(part.name, part.code, 'js'));
+// Download public immutable code during auth; the gated loader still controls execution.
+html = html.replace(/<head>/i, `<head><link rel="preload" as="script" data-dashboard-core-preload href="${dashboardStartupUrls[0]}">`);
 const dashboardBootstrap = `(function(){\n'use strict';\nlet started=false;\nfunction loadScript(src){return new Promise((resolve,reject)=>{const script=document.createElement('script');script.src=src;script.async=true;script.dataset.dashboardStartup='true';script.onload=resolve;script.onerror=()=>reject(new Error('页面功能脚本加载失败'));document.head.append(script);});}\nfunction showFailure(){const banner=document.getElementById('network-status-banner');if(banner){banner.hidden=false;banner.textContent='页面功能脚本加载失败，请刷新重试';}else console.error('MoneyMoney dashboard startup bundle failed to load');}\nasync function start(){\n  if(started)return;started=true;\n  let authReady=window.mm_authReady;\n  if(!authReady||typeof authReady.then!=='function') await new Promise(resolve=>{\n    const ready=()=>resolve();\n    window.addEventListener('mm-auth-client-ready',ready,{once:true});\n    if(document.readyState==='complete') ready(); else window.addEventListener('load',ready,{once:true});\n  });\n  authReady=window.mm_authReady;\n  if(authReady&&typeof authReady.then==='function') await Promise.resolve(authReady).catch(()=>null);\n  try{\n    const sources=${JSON.stringify(dashboardStartupUrls)};\n    if(sources.length) await loadScript(sources[0]);\n    if(window.mm_dashboardReady) await Promise.resolve(window.mm_dashboardReady).catch(()=>null);\n    for(const src of sources.slice(1)) await loadScript(src);\n    window.dispatchEvent(new CustomEvent('mm-dashboard-runtime-loaded'));\n  }catch(error){showFailure();}\n}\nvoid start();\n})();`;
 const dashboardBootstrapParallel = dashboardBootstrap
   .replace('function loadScript(src){', 'function loadScript(src,ordered=false){')
   .replace('script.async=true;', 'script.async=ordered?false:true;')
   .replace('for(const src of sources.slice(1)) await loadScript(src);', 'await Promise.all(sources.slice(1).map(src=>loadScript(src,true)));');
 if (dashboardBootstrapParallel === dashboardBootstrap) throw new Error('Dashboard ordered startup loader was not generated');
-const dashboardBootstrapReady = dashboardBootstrapParallel.replace(
-  'if(window.mm_dashboardReady) await Promise.resolve(window.mm_dashboardReady).catch(()=>null);',
-  "if(window.mm_dashboardReady) await Promise.resolve(window.mm_dashboardReady).catch(()=>null);window.mm_dashboardCoreReady=true;window.dispatchEvent(new Event('mm-dashboard-core-ready'));",
-);
+const dashboardBootstrapReady = dashboardBootstrapParallel
+  .replace(
+    'if(window.mm_dashboardReady) await Promise.resolve(window.mm_dashboardReady).catch(()=>null);',
+    "if(window.mm_dashboardReady) await Promise.resolve(window.mm_dashboardReady).catch(()=>null);window.mm_dashboardCoreReady=true;window.dispatchEvent(new Event('mm-dashboard-core-ready'));",
+  )
+  .replace(
+    "await Promise.all(sources.slice(1).map(src=>loadScript(src,true)));\n    window.dispatchEvent(new CustomEvent('mm-dashboard-runtime-loaded'));",
+    "const optionalPattern=/dashboard-startup-(?:experience-enhancements|practical-experience)\\./;const immediate=sources.slice(1).filter(src=>!optionalPattern.test(src));const deferred=sources.slice(1).filter(src=>optionalPattern.test(src));if(immediate.length)await Promise.all(immediate.map(src=>loadScript(src,true)));window.dispatchEvent(new CustomEvent('mm-dashboard-runtime-loaded'));const loadDeferred=()=>Promise.all(deferred.map(src=>loadScript(src,true))).catch(()=>showFailure());if(deferred.length){if(typeof requestIdleCallback==='function')requestIdleCallback(()=>{void loadDeferred();},{timeout:1200});else setTimeout(()=>{void loadDeferred();},0);}",
+  );
 const dashboardBootstrapUrl = emit('dashboard-startup-bootstrap', dashboardBootstrapReady, 'js');
 html = html.replace(dashboardStartupPlaceholder, `<script defer src="${dashboardBootstrapUrl}"></script>`);
 if (html.includes(dashboardStartupPlaceholder)) throw new Error('Dashboard startup bootstrap placeholder was not replaced');

@@ -193,6 +193,31 @@ test('strategy points reject invalid market, identity, timeframe, and future ind
   assert.deepEqual(analysis.buildStrategyChartPoints({ bars, signals: [point], market: 'stocks', instrument: '', timeframe: '1d' }), []);
 });
 
+test('chart signal clustering groups only nearby screen points and retains each original signal', () => {
+  assert.equal(typeof analysis.clusterChartPointsByPixel, 'function');
+  const first = { signal: { id: 'a', label: '均线交叉' }, x: 20, y: 30 };
+  const second = { signal: { id: 'b', label: '放量突破' }, x: 25, y: 34 };
+  const distant = { signal: { id: 'c', label: 'RSI反转' }, x: 80, y: 70 };
+  const groups = analysis.clusterChartPointsByPixel([first, second, distant], { radius: 12 });
+  assert.equal(groups.length, 2);
+  assert.deepEqual(groups[0].items.map(item => item.signal.id), ['a', 'b']);
+  assert.deepEqual(groups[1].items.map(item => item.signal.id), ['c']);
+  assert.equal(groups[0].x, 22.5);
+  assert.equal(groups[0].y, 32);
+});
+
+test('pixel clustering compares only nearby grid cells for sparse large signal histories', () => {
+  const points = Array.from({ length: 1200 }, (_, index) => ({ x: index * 30, y: index % 2 ? 0 : 1, id: index }));
+  const originalHypot = Math.hypot;
+  let distanceChecks = 0;
+  Math.hypot = (...values) => { distanceChecks += 1; return originalHypot(...values); };
+  try {
+    const clusters = analysis.clusterChartPointsByPixel(points, { radius: 14 });
+    assert.equal(clusters.length, points.length);
+    assert.ok(distanceChecks < points.length * 10, `expected grid-local checks, observed ${distanceChecks}`);
+  } finally { Math.hypot = originalHypot; }
+});
+
 test('keeps strategy defaults when loading an older overlay preference', () => {
   const config = analysis.normalizeOverlayConfig({ signals: true, indicators: { ma: true } });
   assert.equal(config.strategies.maCross, true);

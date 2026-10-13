@@ -34,6 +34,7 @@ test('only the opt-in stock chart route applies the bootstrap window and labels 
  assert.match(route,/initialWindow\?bars\.slice\(-initialWindow\.limit\)/);
  assert.match(route,/cacheableLiveChart\s*=\s*isCacheableLatestStockChart/,'only an explicit latest chart request may use the display cache');
  assert.match(route,/responseDataStatus\s*=\s*displayCacheEntry\?\.status\s*===\s*'expired'/,'expired cached chart data must fail closed');
- assert.match(route,/dataStatus:klinePageStatus\(responseDataStatus,!!page\)/,'cache hits must be reported as cached, not as live source data');
+ assert.match(route,/const responseStatus\s*=\s*klinePageStatus\(responseDataStatus,!!page\)/,'the response status must retain the cached/history-page distinction');
+ assert.match(route,/dataStatus:responseStatus/,'cache hits must be reported as cached, not as live source data');
  assert.match(route,/sourceTime:history\?\.sourceTime\|\|null/,'source timestamp must remain visible separately from cache capture time');
 });

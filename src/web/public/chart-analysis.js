@@ -409,7 +409,7 @@
 
   function buildStrategyChartPoints({
     bars = [], signals = [], market, instrument, timeframe, strategyVersion = 'chart-strategy-v1',
-    source = '', sourceTime = null, live = false, sourceFresh = true, currentBarClosed,
+    source = '', sourceTime = null, live = false, sourceFresh = true, currentBarClosed, costBps = null, asOf = null, evidenceRefs = [],
   } = {}) {
     const expectedPrefix = market === 'stocks' ? 'stock:' : market === 'crypto' ? 'crypto:' : '';
     const normalized = Array.isArray(bars) ? bars.map(normalizeBar) : [];
@@ -431,6 +431,7 @@
       if (!Number.isFinite(price) || price <= 0) return [];
       return [{
         ...signal,
+        id: ['chart-signal-v1',market,instrument,timeframe,signal.strategyVersion||strategyVersion,signal.strategy,signal.side,bar.time].map(value=>encodeURIComponent(String(value))).join('|'),
         index,
         market,
         instrument,
@@ -449,7 +450,34 @@
         source: String(source || ''),
         sourceTime: validSourceTime,
         status,
+        evidenceRefs: Array.isArray(signal.evidenceRefs) ? [...signal.evidenceRefs] : [...evidenceRefs],
+        triggerEvidence: { market, instrument, source: String(source || ''), sourceTime: validSourceTime, time: bar.time, open: bar.open, high: bar.high, low: bar.low, close: bar.close, volume: bar.volume },
+        outcomes: strategyPointOutcomes(bars,index,price,signal.side,{status,live,currentBarClosed,costBps,asOf}),
       }];
+    });
+  }
+
+  function strategyPointOutcomes(bars,index,price,side,{status='confirmed',live=false,currentBarClosed=false,costBps=null,asOf=null}={}) {
+    const cut=asOf==null?Infinity:Number(asOf),sign=side==='sell'?-1:1;
+    return [1,3,5,20].map(horizon=>{
+      const result={horizon,status:'pending',reason:'观察期限未成熟',observedBars:0,returnPct:null,netReturnPct:null,mfePct:null,maePct:null,costBps};
+      if(status!=='confirmed')return {...result,status:'unconfirmed',reason:'形成中点位不评估后续表现'};
+      if(!Number.isFinite(price)||price<=0||!Array.isArray(bars)||!Number.isInteger(index)||index<0||!bars[index])return {...result,status:'unavailable',reason:'触发证据无效'};
+      const forward=[];let previous=Number(bars[index].time);
+      for(let i=index+1;i<=index+horizon;i++){
+        const bar=bars[i];if(!bar)break;
+        const time=Number(bar.time),values=[bar.open,bar.high,bar.low,bar.close].map(Number);
+        if(bar.gap||!Number.isFinite(time)||time<=previous||values.some(value=>!Number.isFinite(value)||value<=0)||Number(bar.high)<Math.max(Number(bar.open),Number(bar.close))||Number(bar.low)>Math.min(Number(bar.open),Number(bar.close)))return {...result,status:'unavailable',reason:'观察区间存在缺口、重复时间或无效 OHLC'};
+        // A candle's timestamp is its open, not proof of its close at an asOf cutoff.
+        const knownClosed=bar.closedAt!=null?Number(bar.closedAt):cut===Infinity?time:Number(bars[i+1]?.time);
+        if(!Number.isFinite(cut)&&cut!==Infinity || !Number.isFinite(knownClosed) || knownClosed>cut || time>cut || bar.closed===false || (live&&i===bars.length-1&&!currentBarClosed&&bar.closed!==true))break;
+        forward.push(bar);previous=time;
+      }
+      result.observedBars=forward.length;if(forward.length!==horizon)return result;
+      const pct=value=>sign*(Number(value)-price)/price*100;
+      const returnPct=pct(forward.at(-1).close),cost=costBps!=null&&Number.isFinite(Number(costBps))&&Number(costBps)>=0?Number(costBps):null;
+      return {...result,status:'matured',reason:cost===null?'成本假设未提供，仅展示毛表现':null,returnPct,netReturnPct:cost===null?null:returnPct-cost/100,costBps:cost,
+        mfePct:Math.max(0,...forward.map(bar=>pct(sign===1?bar.high:bar.low))),maePct:Math.min(0,...forward.map(bar=>pct(sign===1?bar.low:bar.high)))};
     });
   }
 
@@ -463,6 +491,60 @@
       if (!Number.isInteger(index) || index < start || index >= end) return [];
       return [{ ...item, sourceIndex: Number.isInteger(Number(item.sourceIndex)) ? Number(item.sourceIndex) : index, index: index - start }];
     });
+  }
+
+  function clusterChartPointsByPixel(points = [], { radius = 14 } = {}) {
+    const threshold = Number.isFinite(Number(radius)) ? Math.max(0, Number(radius)) : 14;
+    const valid = (Array.isArray(points) ? points : []).filter(point => Number.isFinite(Number(point?.x)) && Number.isFinite(Number(point?.y)));
+    const parent = valid.map((_, index) => index);
+    const find = index => {
+      let root = index;
+      while (parent[root] !== root) root = parent[root];
+      while (parent[index] !== index) { const next = parent[index]; parent[index] = root; index = next; }
+      return root;
+    };
+    const join = (left, right) => {
+      const leftRoot = find(left), rightRoot = find(right);
+      if (leftRoot !== rightRoot) parent[rightRoot] = leftRoot;
+    };
+    const cellSize = threshold || 1;
+    const buckets = new Map();
+    const coordinateRepresentatives = new Map();
+    for (let index = 0; index < valid.length; index += 1) {
+      const x = Number(valid[index].x), y = Number(valid[index].y);
+      const coordinateKey = `${x}\u0000${y}`;
+      const representative = coordinateRepresentatives.get(coordinateKey);
+      if (representative !== undefined) {
+        join(index, representative);
+        continue;
+      }
+      coordinateRepresentatives.set(coordinateKey, index);
+      if (threshold === 0) continue;
+      const cellX = Math.floor(x / cellSize), cellY = Math.floor(y / cellSize);
+      for (let dx = -1; dx <= 1; dx += 1) for (let dy = -1; dy <= 1; dy += 1) {
+        const nearby = buckets.get(`${cellX + dx},${cellY + dy}`) || [];
+        for (const other of nearby) {
+          const deltaX = x - Number(valid[other].x), deltaY = y - Number(valid[other].y);
+          if (Math.hypot(deltaX, deltaY) <= threshold) join(index, other);
+        }
+      }
+      const cellKey = `${cellX},${cellY}`;
+      const bucket = buckets.get(cellKey) || [];
+      bucket.push(index);
+      buckets.set(cellKey, bucket);
+    }
+    const grouped = new Map();
+    valid.forEach((point, index) => {
+      const root = find(index);
+      const group = grouped.get(root) || [];
+      group.push(point);
+      grouped.set(root, group);
+    });
+    return [...grouped.values()].map(items => ({
+      x: items.reduce((sum, item) => sum + Number(item.x), 0) / items.length,
+      y: items.reduce((sum, item) => sum + Number(item.y), 0) / items.length,
+      items,
+    }));
   }
 
   function buildChartOverlays({ bars = [], signals = [], config = {} } = {}) {
@@ -621,5 +703,5 @@
     };
   }
 
-  return { DEFAULT_CONFIG, CANDLE_PATTERN_CATALOG, normalizeOverlayConfig, chartDataStatusLabel, detectCandlestickPatterns, detectStructures, detectChanStructures, detectStrategySignals, buildStrategyChartPoints, mapIndexedItemsToViewport, movingAverage, bollingerBands, calculateMACD, buildChartOverlays, stepReplay, layoutMarkerLabels, protectReplayContext, createDrawingTool };
+  return { DEFAULT_CONFIG, CANDLE_PATTERN_CATALOG, normalizeOverlayConfig, chartDataStatusLabel, detectCandlestickPatterns, detectStructures, detectChanStructures, detectStrategySignals, buildStrategyChartPoints, strategyPointOutcomes, mapIndexedItemsToViewport, clusterChartPointsByPixel, movingAverage, bollingerBands, calculateMACD, buildChartOverlays, stepReplay, layoutMarkerLabels, protectReplayContext, createDrawingTool };
 });

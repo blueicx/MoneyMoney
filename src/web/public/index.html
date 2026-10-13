@@ -213,6 +213,7 @@
             <label><input type="checkbox" data-watchlist-column-toggle="status" checked="" onchange="setWorkspaceWatchlistColumn('status', this.checked)">状态</label>
             <label><input type="checkbox" data-watchlist-column-toggle="actions" checked="" onchange="setWorkspaceWatchlistColumn('actions', this.checked)">操作</label>
           </div>
+          <div id="workspace-watchlist-metadata"></div>
           <div id="workspace-watchlist-groups" class="workspace-watchlist-groups"><div class="empty-tip">正在读取当前市场自选...</div></div>
         </div>
         <div id="watchlist-stock-library" data-stock-library-item="workspace-watchlist" hidden=""></div>
@@ -459,7 +460,9 @@
             <div style="position:relative;">
               <canvas id="bn-candlestick" width="640" height="360" style="width:100%;height:auto;"></canvas>
               <div id="bn-chart-patterns" style="position:absolute;inset:0;pointer-events:none;overflow:visible;"></div>
+              <div id="bn-chart-signal-markers" class="chart-signal-hit-layer" aria-label="虚拟币策略点位"></div>
             </div>
+            <div id="bn-chart-signal-detail" class="chart-signal-detail" aria-live="polite">点击图表策略点位或下方信号查看时间、价格、来源和触发原因。</div>
             <div id="bn-chart-signals" class="chart-signal-list" aria-live="polite"></div>
             <div id="bn-chart-pattern-list" class="chart-pattern-list" aria-live="polite"></div>
             <div id="bn-hover-tip" style="display:none;position:absolute;background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:8px 12px;font-size:12px;pointer-events:none;z-index:10;box-shadow:0 4px 12px rgba(0,0,0,.15);white-space:nowrap;"></div>
@@ -672,6 +675,7 @@
                   <div class="stock-chart-stage">
                     <canvas id="stock-kline" width="640" height="360" style="width:100%;height:340px;display:block;"></canvas>
                     <div id="stock-chart-patterns" class="stock-chart-marker-layer" aria-hidden="true"></div>
+                    <div id="stock-chart-signal-markers" class="chart-signal-hit-layer" aria-label="股票策略点位"></div>
                     <div id="stock-chart-event-markers" class="stock-chart-event-markers" aria-label="K线事件标记"></div>
                   </div>
                   <section class="stock-chart-companion-panel" data-stock-chart-companion hidden aria-label="同步双图工作区">

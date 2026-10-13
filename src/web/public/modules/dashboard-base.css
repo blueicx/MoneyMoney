@@ -493,21 +493,29 @@
     .mm-chart-evidence-detail { padding:8px; border:1px solid var(--border); border-radius:9px; background:var(--bg-secondary); color:var(--text); font-size:10px; line-height:1.5; overflow-wrap:anywhere; }
     .mm-chart-evidence-detail a { display:inline-flex; margin-top:5px; }
     .stock-chart-marker-layer { position:absolute; inset:0; pointer-events:none; overflow:visible; }
+    .chart-signal-hit-layer { position:absolute; inset:0; z-index:5; pointer-events:none; overflow:hidden; }
+    .chart-signal-hit-target { position:absolute; transform:translate(-50%,-50%); width:24px; height:24px; min-width:24px; min-height:24px; padding:0; border:1px solid transparent; border-radius:50%; background:transparent; color:var(--text); font-size:10px; font-weight:800; line-height:22px; text-align:center; pointer-events:auto; cursor:pointer; }
+    .chart-signal-hit-target:hover,.chart-signal-hit-target:focus-visible { border-color:var(--purple); background:color-mix(in srgb,var(--bg-card) 86%,transparent); outline:2px solid color-mix(in srgb,var(--purple) 75%,transparent); outline-offset:1px; }
+    .chart-signal-hit-target.is-cluster { border-color:var(--yellow); background:var(--bg-card); color:var(--yellow); box-shadow:0 1px 5px color-mix(in srgb,var(--bg) 45%,transparent); }
+    .chart-signal-cluster-choices { position:absolute; z-index:8; display:grid; gap:4px; width:min(224px,calc(100% - 8px)); max-height:204px; overflow:auto; padding:6px; border:1px solid var(--border); border-radius:9px; background:var(--bg-card); box-shadow:var(--shadow); pointer-events:auto; }
+    .chart-signal-cluster-choices button { width:100%; min-height:30px; padding:5px 7px; border:1px solid var(--border); border-radius:6px; background:var(--bg-secondary); color:var(--text); text-align:left; font-size:10px; white-space:normal; }
+    .chart-signal-cluster-choices button:hover,.chart-signal-cluster-choices button:focus-visible { border-color:var(--purple); outline:2px solid color-mix(in srgb,var(--purple) 65%,transparent); }
     .stock-chart-event-markers { position:absolute; inset:0; pointer-events:none; overflow:hidden; }
     .stock-chart-event-marker { position:absolute; pointer-events:auto; transform:translateX(-50%); width:22px; min-height:22px; padding:0; border-radius:50%; border-color:var(--yellow); background:var(--bg-card); color:var(--yellow); font-size:10px; font-weight:800; }
-    #stock-chart-workspace-b .chart-signal-list { display:grid; gap:5px; margin-top:0; min-height:20px; }
+    #stock-chart-workspace-b .chart-signal-list { display:grid; gap:5px; margin-top:0; min-height:20px; max-height:min(38vh,320px); overflow:auto; overscroll-behavior:contain; }
     .chart-signal-item { width:100%; min-height:30px; justify-content:flex-start; flex-wrap:wrap; text-align:left; }
     .chart-pattern-list,.chart-structure-list { margin-top:0; }
-    .chart-signal-item:focus-visible,.mm-chart-event-item:focus-visible,.stock-chart-event-marker:focus-visible { outline:2px solid var(--purple); outline-offset:2px; }
+    .chart-signal-item:focus-visible,.mm-chart-event-item:focus-visible,.stock-chart-event-marker:focus-visible,.chart-signal-hit-target:focus-visible { outline:2px solid var(--purple); outline-offset:2px; }
     .chart-strategy-controls { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin:0 0 8px; font-size:11px; color:var(--text-secondary); }
     .chart-strategy-controls label { display:inline-flex; align-items:center; gap:4px; cursor:pointer; white-space:nowrap; }
     .chart-strategy-controls input { accent-color:var(--purple); }
-    .chart-signal-list { display:flex; gap:6px; flex-wrap:wrap; margin-top:8px; min-height:20px; }
+    .chart-signal-list { display:flex; gap:6px; flex-wrap:wrap; margin-top:8px; min-height:20px; max-height:min(38vh,320px); overflow:auto; overscroll-behavior:contain; }
     .chart-signal-item { display:inline-flex; align-items:center; gap:5px; border:1px solid var(--border); border-radius:7px; padding:4px 7px; font-size:10px; background:var(--bg-secondary); }
     .chart-signal-item.buy { color:var(--green); }
     .chart-signal-item.sell { color:var(--red); }
     .chart-signal-item.forming { border-style:dashed; background:color-mix(in srgb,var(--bg-secondary) 72%,transparent); }
     .chart-signal-item.confirmed { border-style:solid; }
+    .chart-signal-detail { margin:6px 0; padding:7px 9px; border:1px solid var(--border); border-radius:8px; background:var(--bg-secondary); color:var(--text-secondary); font-size:10px; line-height:1.45; overflow-wrap:anywhere; }
     .chart-signal-empty { color:var(--text-secondary); font-size:11px; }
     .chart-pattern-marker { position:relative; }
     .chart-pattern-marker:hover, .chart-pattern-marker:focus { outline:none; z-index:10; }
@@ -2341,3 +2349,15 @@
 .prediction-settlement-timeline details { margin-top: 8px; padding-top: 6px; border-top: 1px solid var(--border); }
 .prediction-settlement-timeline details > div { margin-top: 4px; color: var(--text-secondary); }
 @media(max-width:600px){.prediction-settlement-timeline{padding:8px}.prediction-settlement-timeline li{min-height:38px}}
+.watch-meta { margin: 12px 0; padding: 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg-secondary); color: var(--text); }
+.watch-meta summary { cursor: pointer; font-weight: 600; }
+.watch-meta-note, .watch-meta small { color: var(--text-secondary); font-size: 12px; }
+.watch-meta small { display: block; overflow-wrap: anywhere; }
+.watch-meta-controls { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; margin: 12px 0; }
+.watch-meta-controls label { display: grid; gap: 6px; }
+.watch-meta input:not([type=checkbox]), .watch-meta select { color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 8px; min-height: 40px; max-width: 100%; }
+.watch-meta input:focus-visible, .watch-meta select:focus-visible, .watch-meta summary:focus-visible { outline: 2px solid var(--purple); outline-offset: 2px; }
+.watch-meta fieldset { border: 1px solid var(--border); border-radius: 8px; }
+.watch-meta-scroll { overflow-x: auto; max-height: 360px; }
+.watch-meta-scroll th { position: sticky; top: 0; background: var(--bg-secondary); z-index: 1; }
+@media (max-width: 640px) { .watch-meta-controls label { flex: 1 1 100%; } .watch-meta button { min-height: 44px; } }

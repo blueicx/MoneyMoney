@@ -10,10 +10,10 @@ function ids(scope) {
   return resolveWorkspaceNavigation(scope).flatMap(group => group.items.map(item => item.id));
 }
 
-test('the market registry accounts for all 30 shared and market-specific workspaces', () => {
+test('the market registry accounts for all 32 shared and market-specific workspaces including private paper/order views', () => {
   const expected = [
     'overview', 'stock-quotes', 'crypto-quotes', 'events', 'radar', 'analysis', 'backtest', 'screener',
-    'watchlist', 'positions', 'risk', 'decision-intelligence', 'research-lab', 'action-center', 'breadth',
+    'watchlist', 'positions', 'paper', 'orders', 'risk', 'decision-intelligence', 'research-lab', 'action-center', 'breadth',
     'insider', 'institutional', 'guru-holdings', 'analyst', 'fundamentals', 'short-interest', 'option-chain',
     'volatility', 'greeks', 'funding-rate', 'open-interest', 'on-chain', 'order-flow', 'contracts', 'prediction-radar',
   ].sort();

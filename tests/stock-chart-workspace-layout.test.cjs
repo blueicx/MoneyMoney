@@ -16,6 +16,9 @@ test('stock chart workspace B puts events, chart, and evidence into one themed r
   assert.ok(layout.querySelector('#stock-chart-event-rail'));
   assert.ok(layout.querySelector('#stock-chart-evidence-detail'));
   assert.ok(layout.querySelector('#stock-chart-signals'));
+  assert.ok(layout.querySelector('#stock-chart-signal-markers'), 'stock strategy points need direct, accessible chart hit targets');
+  assert.ok(document.querySelector('#bn-chart-signal-markers'), 'crypto chart points need the same direct interaction surface');
+  assert.ok(document.querySelector('#bn-chart-signal-detail'), 'crypto signal selection should reveal timestamp, price, OHLC, source and reason');
   const css = fs.readFileSync('src/web/public/modules/dashboard-base.css', 'utf8');
   assert.match(css, /#stock-chart-workspace-b\s*\{[^}]*grid-template-columns:\s*minmax\(170px,[^;]+\)\s+minmax\(420px,[^)]+\)\s+minmax\(250px,[^;]+\)/);
   assert.match(css, /#stock-chart-card\s*\{[^}]*container-type:\s*inline-size/);
@@ -24,6 +27,10 @@ test('stock chart workspace B puts events, chart, and evidence into one themed r
   assert.match(css, /@media\s*\(max-width:\s*(?:900|768)px\)[\s\S]*?#stock-chart-workspace-b[\s\S]*?grid-template-columns/);
   assert.match(css, /#stock-chart-workspace-b[\s\S]*?var\(--bg-card\)/);
   assert.match(css, /#stock-chart-workspace-b[\s\S]*?var\(--border\)/);
+  assert.match(css, /\.chart-signal-hit-layer\s*\{[^}]*pointer-events:none/);
+  assert.match(css, /\.chart-signal-hit-target\s*\{[^}]*pointer-events:auto/);
+  assert.match(css, /chart-signal-cluster-choices/);
+  assert.match(css, /--bg-card/);
   dom.window.close();
 });
 

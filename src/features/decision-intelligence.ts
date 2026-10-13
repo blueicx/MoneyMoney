@@ -128,6 +128,7 @@ export function verifyEvidenceSnapshotHash(snapshot: EvidenceSnapshot): boolean 
 export function compareEvidenceSnapshots(left: EvidenceSnapshot, right: EvidenceSnapshot): Array<{ field: string; before: unknown; after: unknown }> {
   if (!verifyEvidenceSnapshotHash(left) || !verifyEvidenceSnapshotHash(right)) throw new Error('Evidence snapshot hash verification failed');
   if (left.market !== right.market || left.instrument !== right.instrument) throw new Error('Evidence snapshots must belong to the same market and instrument');
+  if (left.source.id !== right.source.id || left.workspace !== right.workspace) throw new Error('Evidence snapshots must use the same source and workspace');
   const keys = [...new Set([...Object.keys(left.fields), ...Object.keys(right.fields)])].sort();
   return keys.filter(key => stable(left.fields[key]) !== stable(right.fields[key])).map(field => ({ field, before: left.fields[field], after: right.fields[field] }));
 }
@@ -141,6 +142,8 @@ export interface EvidenceChanges {
   added: string[];
   removed: string[];
   fieldChanges: Array<{ field: string; before?: unknown; after?: unknown; status: 'changed' | 'added' | 'removed' }>;
+  fieldComparisons?: Array<EvidenceChanges['fieldChanges'][number] & {source:EvidenceSnapshot['source'];beforeSnapshotId?:string;afterSnapshotId:string;beforeSourceTime?:string;afterSourceTime:string;reason:string}>;
+  sourceChanges?: Array<{source:EvidenceSnapshot['source'];beforeStatus?:DataStatus;afterStatus:DataStatus;reason:string|null;beforeSnapshotId?:string;afterSnapshotId:string;updatedAt:string}>;
   evidenceRefs: string[];
   dataStatus: DataStatus;
   reason: string | null;
@@ -158,9 +161,10 @@ export function getEvidenceChanges(snapshots: EvidenceSnapshot[], market: Market
   const scoped = snapshots
     .filter(item => item.market === market && (!instrument || item.instrument === instrument))
     .sort((left, right) => left.fetchedAt.localeCompare(right.fetchedAt) || left.id.localeCompare(right.id));
+  if(scoped.some(item=>!verifyEvidenceSnapshotHash(item)))throw new Error('Evidence snapshot hash verification failed');
   const groups = new Map<string, EvidenceSnapshot[]>();
   scoped.forEach(item => {
-    const key = instrument ? 'selected-instrument' : `${item.source.id}:${item.instrument || 'market'}`;
+    const key = JSON.stringify([item.source.id,item.instrument || 'market',item.workspace]);
     const group = groups.get(key) || [];
     group.push(item);
     groups.set(key, group);
@@ -177,35 +181,42 @@ export function getEvidenceChanges(snapshots: EvidenceSnapshot[], market: Market
   const removed = new Set<string>();
   const fieldChanges: EvidenceChanges['fieldChanges'] = [];
   const evidenceRefs: string[] = [];
+  const fieldComparisons:NonNullable<EvidenceChanges['fieldComparisons']>=[];
+  const sourceChanges:NonNullable<EvidenceChanges['sourceChanges']>=[];
+  let degraded=false;
   latestByGroup.forEach(({ group, latest }) => {
     if (!latest) return;
-    const latestTime = new Date(latest.fetchedAt).getTime();
-    const previous = group.filter(item => new Date(item.fetchedAt).getTime() < latestTime).at(-1);
+    const previous = group.filter(item => new Date(item.fetchedAt).getTime() <= sinceTime).at(-1);
+    sourceChanges.push({source:latest.source,beforeStatus:previous?.dataStatus,afterStatus:latest.dataStatus,reason:latest.reason||null,beforeSnapshotId:previous?.id,afterSnapshotId:latest.id,updatedAt:latest.fetchedAt});
+    if(previous)evidenceRefs.push(previous.id);evidenceRefs.push(latest.id);
+    const comparable=new Set(['live','delayed','cached','historical','partial']);
+    if(!comparable.has(latest.dataStatus)){degraded=true;return;}
+    const comparablePrevious=previous&&comparable.has(previous.dataStatus)?previous:undefined;
+    const startOffset=fieldChanges.length;
     const latestFields = new Set(Object.keys(latest.fields));
-    const previousFields = new Set(previous ? Object.keys(previous.fields) : []);
-    if (previous) {
-      [...latestFields].filter(field => previousFields.has(field)).filter(field => stable(previous.fields[field]) !== stable(latest.fields[field])).forEach(field => {
+    const previousFields = new Set(comparablePrevious ? Object.keys(comparablePrevious.fields) : []);
+    if (comparablePrevious) {
+      [...latestFields].filter(field => previousFields.has(field)).filter(field => stable(comparablePrevious.fields[field]) !== stable(latest.fields[field])).forEach(field => {
         changed.add(field);
-        fieldChanges.push({ field, before: previous.fields[field], after: latest.fields[field], status: 'changed' });
+        fieldChanges.push({ field, before: comparablePrevious.fields[field], after: latest.fields[field], status: 'changed' });
       });
-      [...previousFields].filter(field => !latestFields.has(field)).forEach(field => {
+      [...previousFields].filter(field => !latestFields.has(field) && latest.dataStatus!=='partial').forEach(field => {
         removed.add(field);
-        fieldChanges.push({ field, before: previous.fields[field], status: 'removed' });
+        fieldChanges.push({ field, before: comparablePrevious.fields[field], status: 'removed' });
       });
     }
     [...latestFields].filter(field => !previousFields.has(field)).forEach(field => {
       added.add(field);
       fieldChanges.push({ field, after: latest.fields[field], status: 'added' });
     });
-    if (previous) evidenceRefs.push(previous.id);
-    evidenceRefs.push(latest.id);
+    fieldComparisons.push(...fieldChanges.slice(startOffset).map(change=>({...change,source:latest.source,beforeSnapshotId:comparablePrevious?.id,afterSnapshotId:latest.id,beforeSourceTime:comparablePrevious?.observedAt,afterSourceTime:latest.observedAt,reason:latest.reason||'来源未提供修订原因'})));
   });
   const latest = latestByGroup.map(item => item.latest).filter((item): item is EvidenceSnapshot => Boolean(item)).sort((left, right) => left.fetchedAt.localeCompare(right.fetchedAt)).at(-1);
   return {
     market, instrument, since, latestSnapshotId: latest?.id,
-    changed: [...changed].sort(), added: [...added].sort(), removed: [...removed].sort(), fieldChanges,
+    changed: [...changed].sort(), added: [...added].sort(), removed: [...removed].sort(), fieldChanges,fieldComparisons,sourceChanges,
     evidenceRefs: [...new Set(evidenceRefs)],
-    dataStatus: 'cached', reason: null,
+    dataStatus: degraded?'partial':'cached', reason: degraded?'部分来源无可比较字段；来源失败或无记录不代表旧字段被删除':null,
   };
 }
 

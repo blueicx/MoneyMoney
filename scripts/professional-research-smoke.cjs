@@ -65,8 +65,10 @@ async function main(){
     const experiments=[];
     const missingCosts=await page.request.post(base+'/api/research/experiments',{headers,data:{market:'stocks',instrument:'stock:us:AAPL',workspace:'research',dataSource:'isolated fixture',strategyVersion:'fixture-v1',prices:[100,101,102,103,104,105,106,107],signals:[],split:{trainSize:4,testSize:2}}});
     assert.ok(missingCosts.ok());assert.equal((await missingCosts.json()).data.costStress.dataStatus,'unavailable','missing costs are not relabeled as explicit zero cost');
+    const robustnessPrices=Array.from({length:240},(_,i)=>100+i*.1+Math.sin(i/4));
+    const fixtureHash=require('node:crypto').createHash('sha256').update(JSON.stringify(robustnessPrices)).digest('hex');
     for(const feeRate of [.001,.002]){
-      const response=await page.request.post(base+'/api/research/experiments',{headers,data:{market:'stocks',instrument:'stock:us:AAPL',workspace:'research',dataSource:'isolated fixture, not market data',strategyVersion:'fixture-v1',feeRate,slippage:.001,prices:[100,101,102,103,104,105,106,107],signals:[{timeIndex:0,direction:'buy'},{timeIndex:7,direction:'sell'}],split:{trainSize:4,testSize:2}}});
+      const response=await page.request.post(base+'/api/research/experiments',{headers,data:{market:'stocks',instrument:'stock:us:AAPL',workspace:'research',dataSource:'isolated fixture, not market data',dataSnapshotHash:fixtureHash,seed:42,strategyVersion:'fixture-v1',feeRate,slippage:.001,prices:robustnessPrices,signals:Array.from({length:8},(_,i)=>[{timeIndex:25+i*25,direction:'buy'},{timeIndex:30+i*25,direction:'sell'}]).flat(),split:{trainSize:100,testSize:40}}});
       assert.ok(response.ok());const row=(await response.json()).data;assert.equal(row.costStress.scenarios.length,3);experiments.push(row.experiment.id);
     }
     await page.evaluate(()=>openWorkspace('research-lab'));
@@ -76,11 +78,19 @@ async function main(){
     await page.locator('#mm-experiment-compare').click();await page.locator('[data-cost-stress] table').first().waitFor();
     assert.equal(await page.locator('[data-cost-stress] tbody tr').count(),6);
     assert.match(await page.locator('[data-cost-stress]').innerText(),/不自动排名/);
+    const analyzedId=await page.locator('[data-robustness-run]').first().getAttribute('data-robustness-run');
+    await page.locator('[data-robustness-run]').first().click();
+    await page.locator('[data-robustness-output]').first().filter({hasText:'配置 Hash'}).waitFor();
+    assert.match(await page.locator('[data-robustness-output]').first().innerText(),/随机入场.*12/);
+    assert.match(await page.locator('[data-robustness-output]').first().innerText(),/未独立核验/);
+    const persisted=await page.request.get(base+'/api/research/experiments/'+analyzedId).then(r=>r.json());
+    assert.equal(persisted.data.robustness.controls.randomEntry.length,12);
     assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+2),'mobile cost comparison fits viewport');
     await page.evaluate(()=>{setMarketScope('crypto');openWorkspace('fundamentals');});assert.equal(await panel.isVisible(),false);
     const guest=await browser.newPage();await guest.goto(base+'/login');await Promise.all([guest.waitForURL(url=>url.pathname==='/'),guest.click('#guestBtn')]);
     const privateStatus=await guest.evaluate(()=>fetch('/api/research/filings?instrument=stock:us:AAPL').then(r=>r.status));assert.equal(privateStatus,403);
     assert.equal(await guest.evaluate(()=>fetch('/api/research/committee?market=stocks&instrument=stock:us:AAPL').then(r=>r.status)),403);
+    assert.equal(await guest.evaluate(id=>fetch('/api/research/experiments/'+id+'/robustness',{method:'POST'}).then(r=>r.status),experiments[0]),403);
     assert.deepEqual(errors,[]);
     console.log(JSON.stringify({ok:true,fixtureOnly:true,themes,privateStatus,dataDirectory:data}));
   }finally{if(browser)await browser.close();child.kill();}

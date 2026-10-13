@@ -444,7 +444,8 @@ async function main() {
     await page.evaluate(() => openWorkspace('decision-intelligence'));
     await page.waitForFunction(() => window.MoneyMoneyHistoryChart && window.MoneyMoneyWorkflow, null, { timeout: 10_000 });
     assert.ok(lazyAssetRequests.some(url => /workspace-research/.test(url)), 'opening research should load its bundle on demand');
-    await page.evaluate(() => { currentInstrumentId = null; openWorkspace('events'); });
+    // Clear both the selected instrument and its deep-link context, as the UI does.
+    await page.evaluate(() => { setWorkspaceInstrument(null); openWorkspace('events'); });
     await page.waitForFunction(() => document.getElementById('market-timeline-list')?.textContent.includes('当前市场暂无事件与新闻'), null, { timeout: 10_000 }).catch(async error => {
       console.error(JSON.stringify(await page.evaluate(state => ({
         timelineRequests: state.requests,

@@ -44,7 +44,28 @@
     const section=document.createElement('section');section.className='mm-action-center';section.dataset.costStress='true';
     section.innerHTML='<h4>费用 / 滑点压力比较（非排名）</h4>'+experiments.map(row=>{const cost=row.costStress;return '<article><h5>'+esc(row.id)+'</h5><p>'+esc(cost?.reason || '旧实验未保存成本压力结果，未推算')+'</p>'+(cost?.scenarios?.length?'<div class="mm-table-scroll"><table><thead><tr><th>成本倍数</th><th>费用</th><th>滑点成本</th><th>净收益</th><th>最大回撤</th><th>成交</th></tr></thead><tbody>'+cost.scenarios.map(value=>'<tr><td>'+value.multiplier+'×</td><td>'+metric(value.totalFees)+'</td><td>'+metric(value.totalSlippage)+'</td><td>'+metric(value.totalReturnPct)+'%</td><td>'+metric(value.maxDrawdownPct)+'%</td><td>'+value.trades+'</td></tr>').join('')+'</tbody></table></div>':'')+'<p>'+esc((cost?.warnings || []).join('；'))+'</p></article>';}).join('');host.append(section);
   }
-  window.MoneyMoneyProfessionalResearch = { renderTailRisk, renderCommittee, renderCostStress };
+  function renderRobustness(host,experiments,request) {
+    if(!host || !window.mm_isLoggedIn || window.mm_isGuest)return;
+    const initial=context(),key=JSON.stringify(initial);
+    const section=document.createElement('section');section.className='mm-action-center';
+    section.innerHTML='<h4>固定输入稳健性对照</h4><p>只分析已保存实验；随机入场、时间安慰剂与入场前市场状态。不会调用模型、抓取行情或发布策略。</p>'+experiments.map(row=>'<article><h5>'+esc(row.id)+'</h5><button type="button" data-robustness-run="'+esc(row.id)+'">分析已保存输入</button><div role="status" data-robustness-output></div></article>').join('');host.append(section);
+    const current=()=>host.isConnected && !document.hidden && !window.mm_isGuest && window.mm_isLoggedIn && JSON.stringify(context())===key;
+    section.querySelectorAll('[data-robustness-run]').forEach(button=>button.onclick=async()=>{
+      if(!current())return;const output=button.parentElement.querySelector('[data-robustness-output]');button.disabled=true;output.textContent='正在分析保存输入…';
+      try{
+        const response=await request('/api/research/experiments/'+encodeURIComponent(button.dataset.robustnessRun)+'/robustness',{method:'POST'});
+        if(!current()){output.textContent='';return;}
+        const data=response.data,controls=data.controls;
+        const summaries=controls?['randomEntry','timePlacebo'].map(name=>{
+          const values=controls[name].map(row=>row.meanNetReturnPct).filter(value=>Number.isFinite(value));
+          return '<p>'+({randomEntry:'随机入场',timePlacebo:'时间安慰剂'}[name])+' · '+values.length+' 次可用对照 · 每次平均区间净收益范围 '+(values.length?metric(Math.min(...values))+'% — '+metric(Math.max(...values))+'%':'不可用')+'</p>';
+        }).join(''):'';
+        output.innerHTML='<p>'+esc(data.reason)+'</p><p>数据 Hash '+esc(data.dataHash || '未关联')+' · 配置 Hash '+esc(data.configurationHash || '未关联')+' · seed '+esc(data.seed ?? '未声明')+'</p>'+summaries+'<div class="mm-table-scroll"><table><thead><tr><th>入场前状态</th><th>完整区间</th><th>平均净收益假设</th></tr></thead><tbody>'+data.regimes.map(row=>'<tr><td>'+esc({rising:'上升',falling:'下降',flat:'持平',unknown:'未知'}[row.regime] || row.regime)+'</td><td>'+row.sampleCount+'</td><td>'+metric(row.meanNetReturnPct)+'%</td></tr>').join('')+'</tbody></table></div><p>'+data.warnings.map(esc).join('；')+'</p>';
+      }catch(error){if(current() && error.name!=='AbortError')output.textContent=error.message;else output.textContent='';}
+      finally{button.disabled=false;}
+    });
+  }
+  window.MoneyMoneyProfessionalResearch = { renderTailRisk, renderCommittee, renderCostStress,renderRobustness };
 
   // No polling or upstream work: only a visible, private stock-fundamentals workspace can query/index.
   let controller = new AbortController(), contextKey = '';

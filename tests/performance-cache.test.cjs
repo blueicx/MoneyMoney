@@ -20,6 +20,57 @@ test('Performance cache prevents duplicate requests and handles SWR', async () =
   assert.match(createCacheEtag(fresh.data), /^"[0-9a-f]+"$/);
 });
 
+test('Performance cache exposes origin latency and distinguishes origin, coalesced, and cache responses', async () => {
+  const { createPerformanceCache } = await import('../dist/features/performance-cache.js');
+  const cache = createPerformanceCache();
+  let calls = 0;
+  let release;
+  const fetcher = async () => {
+    calls += 1;
+    await new Promise(resolve => { release = resolve; });
+    return { rows: [1, 2, 3] };
+  };
+  const originPromise = cache.fetch('AAPL:5m', fetcher, { scope: 'stocks', source: 'yahoo', ttl: 1000 });
+  await new Promise(resolve => setImmediate(resolve));
+  const coalescedPromise = cache.fetch('AAPL:5m', fetcher, { scope: 'stocks', source: 'yahoo', ttl: 1000 });
+  release();
+  const [origin, coalesced] = await Promise.all([originPromise, coalescedPromise]);
+  assert.equal(calls, 1, 'coalesced callers must share one provider request');
+  assert.equal(origin.cacheMode, 'origin');
+  assert.equal(coalesced.cacheMode, 'coalesced');
+  assert.equal(typeof origin.providerLatencyMs, 'number');
+  assert.equal(coalesced.providerLatencyMs, origin.providerLatencyMs);
+  assert.equal(typeof origin.providerLatencyAt, 'number');
+
+  const cached = await cache.fetch('AAPL:5m', fetcher, { scope: 'stocks', source: 'yahoo', ttl: 1000 });
+  assert.equal(cached.cacheMode, 'cache');
+  assert.equal(cached.providerLatencyMs, origin.providerLatencyMs, 'cache telemetry is the last provider measurement, not a new request');
+  assert.equal(cached.providerLatencyAt, origin.providerLatencyAt);
+});
+
+test('stale cache telemetry is marked stale while retaining the timestamp of the last provider measurement', async () => {
+  const { createPerformanceCache } = await import('../dist/features/performance-cache.js');
+  const cache = createPerformanceCache();
+  const initial = await cache.fetch('BTCUSDT:1m', async () => ({ close: 10 }), { scope: 'crypto', source: 'binance', ttl: 5, staleTtl: 500 });
+  await new Promise(resolve => setTimeout(resolve, 10));
+  const stale = await cache.fetch('BTCUSDT:1m', async () => new Promise(() => {}), { scope: 'crypto', source: 'binance', ttl: 5, staleTtl: 500, timeoutMs: 1000 });
+  assert.equal(stale.cacheMode, 'stale');
+  assert.equal(stale.providerLatencyAt, initial.providerLatencyAt);
+  assert.equal(stale.providerLatencyMs, initial.providerLatencyMs);
+});
+
+test('provider failure telemetry survives immutable thrown values', async () => {
+  const { createPerformanceCache } = await import('../dist/features/performance-cache.js');
+  const cache = createPerformanceCache();
+  const frozenFailure = Object.freeze(new Error('immutable upstream failure'));
+  const result = await cache.fetch('AAPL:1d', async () => { throw frozenFailure; }, { scope: 'stocks', source: 'yahoo', ttl: 1000 });
+  assert.equal(result.cacheMode, 'error');
+  assert.match(result.error.message, /immutable upstream failure/);
+  assert.ok(Number.isFinite(result.providerLatencyMs) && result.providerLatencyMs >= 0);
+  assert.equal(result.providerLatencyMs, result.error.providerLatencyMs);
+  assert.ok(Number.isFinite(result.providerLatencyAt));
+});
+
 test('Performance cache serves stale data while refreshing once', async () => {
   const { createPerformanceCache } = await import('../dist/features/performance-cache.js');
   const cache = createPerformanceCache();

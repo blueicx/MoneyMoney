@@ -76,6 +76,13 @@ async function main() {
       drawStockKline(canvas, expandedRows);
       const visibleRows = MoneyTradingChart.select(canvas, expandedRows, identity).rows.length;
       const signalText = document.getElementById('stock-chart-signals').textContent;
+      const pointTargets = [...document.querySelectorAll('#stock-chart-signal-markers .chart-signal-hit-target')];
+      pointTargets[0]?.click();
+      const clickedMarker = {
+        targetCount: pointTargets.length,
+        replayIndex: stockChartReplayIndex,
+        evidence: document.getElementById('stock-chart-evidence-detail')?.innerText || '',
+      };
       document.querySelector('#stock-chart-signals .chart-signal-item')?.click();
       const clickedSignal = {
         replayIndex: stockChartReplayIndex,
@@ -88,11 +95,14 @@ async function main() {
       stockChartOverlayConfig = previous.config;
       Object.assign(previousView, savedView);
       drawStockKline(canvas, stockChartKlines);
-      return { visibleRows, signalText, clickedSignal };
+      return { visibleRows, signalText, clickedSignal, clickedMarker };
     });
     assert.equal(zoomedStrategy.visibleRows,15,'zoom fixture should display fewer than the 20-bar volume warmup period');
     assert.match(zoomedStrategy.signalText,/放量突破买入/,'volume-breakout signal should be calculated from full history and retained in the zoomed viewport');
     assert.equal(zoomedStrategy.clickedSignal.replayIndex,25,'clicking a zoomed signal must navigate to its full-history candle');
+    assert.equal(zoomedStrategy.clickedMarker.targetCount,1,'the plotted stock strategy point should have an accessible direct hit target');
+    assert.equal(zoomedStrategy.clickedMarker.replayIndex,25,'clicking the actual chart point must navigate to its exact full-history candle');
+    assert.match(zoomedStrategy.clickedMarker.evidence,/触发价格：101/,'chart marker selection must open the same trigger evidence as the explanation list');
     assert.match(zoomedStrategy.clickedSignal.evidence,/触发价格：101/,'clicking a strategy point must retain its trigger price explanation');
     assert.match(zoomedStrategy.clickedSignal.evidence,/OHLC：100\.00 \/ 102\.00 \/ 99\.00 \/ 101\.00/,'clicking a strategy point must show the triggering candle values');
     const patternMarkerBounds=await page.evaluate(()=>{
@@ -218,9 +228,9 @@ async function main() {
       const pending = loadBinanceKlines({ live: true });
       const s = window.__fixtureStreams.findLast(s => !s.closed);
       s.dispatchEvent(new MessageEvent('kline', { data: JSON.stringify({ instrument: 'crypto:binance:BTCUSDT', timeframe: '5m', bar: { time: start + 600000, open: 103, high: 110, low: 102, close: 108, volume: 3, closed: false }, eventTime: Date.now() }) }));
-      await pending; return bnKlineData.at(-1).close;
+      await pending; return { close: bnKlineData.at(-1).close, last: bnKlineData.at(-1), activeStreams: window.__fixtureStreams.filter(stream => !stream.closed).length, status: document.getElementById('mm-live-status-crypto')?.textContent };
     }, start);
-    assert.equal(preserved, 108, 'a delayed REST response must not overwrite newer stream data');
+    assert.equal(preserved.close, 108, `a delayed REST response must not overwrite newer stream data: ${JSON.stringify(preserved)}`);
     await page.locator('#crypto-chart-card').locator('button', { hasText: '暂停自动更新' }).click();
     await page.waitForFunction(() => document.getElementById('mm-live-status-crypto')?.textContent.includes('自动更新已关闭'));
     await page.evaluate(async () => { await new Promise(requestAnimationFrame); await new Promise(requestAnimationFrame); });

@@ -118,6 +118,24 @@ test('stock K-line sends the selected adjustment while forcing source basis for 
   assert.match(html, /stockChartAdjustment==='source'/);
 });
 
+test('stock K-line response exposes provider latency, cache mode, source time, coverage, and explicit status', () => {
+  const stockRoute = serverSource.slice(serverSource.indexOf("app.get('/api/stock/kline'"), serverSource.indexOf("app.use('/api/stocks/guru-holdings'"));
+  assert.match(stockRoute, /providerTelemetry/);
+  assert.match(stockRoute, /providerLatencyMs/);
+  assert.match(stockRoute, /cacheMode/);
+  assert.match(stockRoute, /providerLatencyAt/);
+  assert.match(stockRoute, /cache:displayCacheEntry\?\.cacheHit\?\{state:'cached',cacheMode:displayCacheEntry\.cacheMode/,
+    'the legacy cache state remains compatible while the detailed mode is additive');
+  assert.match(stockRoute, /try\s*\{\s*snapshot\s*=\s*await adapter\.fetchHistory\(historyRequest\);\s*\}\s*finally\s*\{\s*observedProviderLatencyAt\s*=/,
+    'failed direct provider calls must retain their attempted duration');
+  assert.match(stockRoute, /sourceTime/);
+  assert.match(stockRoute, /coverage/);
+  assert.match(stockRoute, /dataStatus/);
+  const html = require('./helpers/dashboard-source.cjs').readDashboardSource();
+  assert.match(html, /上次源站耗时/);
+  assert.match(html, /共享源站耗时/);
+});
+
 test('stock K-line time machine protects a newer date from stale loads', () => {
   const html = require('./helpers/dashboard-source.cjs').readDashboardSource();
   assert.match(html, /stockChartAsOfRevision/);

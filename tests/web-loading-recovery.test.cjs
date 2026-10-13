@@ -6,6 +6,18 @@ const crypto = require('node:crypto');
 const zlib = require('node:zlib');
 const vm = require('node:vm');
 const { JSDOM } = require('jsdom');
+const ts = require('typescript');
+function assetDeclaration(code, name) {
+  const ast = ts.createSourceFile('asset.js', code, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+  const node = ast.statements.find(item => ts.isFunctionDeclaration(item) && item.name?.text === name);
+  assert.ok(node, `${name} must keep its public classic-script name`);
+  return code.slice(node.getStart(ast), node.end);
+}
+function assertWorkspaceWrapper(code, name, group) {
+  const context = vm.createContext({ window: { MoneyWorkspaceModules: { invoke: (...args) => args } } });
+  vm.runInContext(assetDeclaration(code, name), context);
+  assert.deepEqual(JSON.parse(JSON.stringify(context[name]('fixture'))), [group, name, ['fixture']]);
+}
 const source = require('./helpers/dashboard-source.cjs').readDashboardSource();
 function sourceFunction(name) {
   const start = source.search(new RegExp(`(?:async )?function ${name}\\(`));
@@ -317,12 +329,14 @@ test('authenticated stock chart deep links prefetch exactly their current symbol
   let resolveAuth;
   let resolveKline;
   const requests = [];
+  let activated = false;
   dom.window.fetch = (url, options) => {
     requests.push([String(url), options]);
     return new Promise(resolve => { resolveKline = resolve; });
   };
   dom.window.mm_authReady = new Promise(resolve => { resolveAuth = resolve; });
   try {
+    dom.window.addEventListener('mm-workspace-modules-ready', () => { activated = true; });
     dom.window.eval(loader);
     await new Promise(resolve => setTimeout(resolve, 0));
     assert.equal(requests.filter(([url]) => url.startsWith('/api/stock/kline')).length, 0,
@@ -345,7 +359,14 @@ test('authenticated stock chart deep links prefetch exactly their current symbol
     assert.equal((await handoff.promise).body.reason, 'test response');
     assert.equal(dom.window.MoneyStockKlinePrefetch.take(url), null, 'the response is consumable only once');
     assert.equal(dom.window.document.querySelector('script[data-workspace-group="charts"]'), null,
-      'the prefetch may overlap core startup but must not execute the chart bundle');
+      'the chart module waits for core readiness while the prefetch may overlap startup');
+    dom.window.dispatchEvent(new dom.window.Event('mm-dashboard-core-ready'));
+    await new Promise(resolve => setTimeout(resolve, 0));
+    const chartScript = dom.window.document.querySelector('script[data-workspace-group="charts"]');
+    assert.ok(chartScript);
+    chartScript.onload();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.equal(activated, true);
   } finally { dom.window.close(); }
 });
 
@@ -410,12 +431,18 @@ test('the workspace loader waits through deferred auth-client execution when its
     resolveAuth({ loggedIn: true });
     await new Promise(resolve => setTimeout(resolve, 0));
     assert.equal(dom.window.document.querySelector('script[data-workspace-group="charts"]'), null,
-      'the bundle must also wait for the core dashboard to finish bootstrapping');
+      'chart code must wait until core readiness');
     assert.ok(dom.window.document.querySelector('link[rel="preload"][as="script"][data-workspace-preload="charts"]'),
       'the public chart bundle should preload after auth while core startup continues');
+    let activated = false;
+    dom.window.addEventListener('mm-workspace-modules-ready', () => { activated = true; });
     dom.window.dispatchEvent(new dom.window.Event('mm-dashboard-core-ready'));
     await new Promise(resolve => setTimeout(resolve, 0));
-    assert.ok(dom.window.document.querySelector('script[data-workspace-group="charts"]'));
+    const chartScript = dom.window.document.querySelector('script[data-workspace-group="charts"]');
+    assert.ok(chartScript);
+    chartScript.onload();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.equal(activated, true);
   } finally { dom.window.close(); }
 });
 
@@ -443,6 +470,8 @@ test('workspace startup stages are marked only when browser performance tracing 
     assert.ok(beforeCore.indexOf('moneymoney:auth-ready') < beforeCore.indexOf('moneymoney:chart-preload-start'));
     assert.equal(beforeCore.includes('moneymoney:dashboard-core-ready'), false,
       'the prefetch must already have started while core startup is still pending');
+    assert.equal(dom.window.document.querySelector('script[data-workspace-group="charts"]'), null,
+      'chart code waits for core while stock data prefetch overlaps startup');
     dom.window.dispatchEvent(new dom.window.Event('mm-dashboard-core-ready'));
     await new Promise(resolve => setTimeout(resolve, 0));
     const chartScript = dom.window.document.querySelector('script[data-workspace-group="charts"]');
@@ -450,7 +479,8 @@ test('workspace startup stages are marked only when browser performance tracing 
     const afterCore = performanceMarks.map(entry => entry.name);
     assert.ok(afterCore.includes('moneymoney:dashboard-core-ready'));
     assert.ok(afterCore.includes('moneymoney:chart-module-start'));
-    chartScript.onload();
+    assert.ok(dom.window.document.querySelector('script[data-workspace-group="charts"]'));
+    dom.window.document.querySelector('script[data-workspace-group="charts"]').onload();
     await new Promise(resolve => setTimeout(resolve, 0));
     assert.ok(performanceMarks.some(entry => entry.name === 'moneymoney:chart-module-ready'));
   } finally { dom.window.close(); }
@@ -474,7 +504,7 @@ test('production dashboard contains no large inline script and has verifiable co
   }
 });
 
-test('the large dashboard startup bundle is fetched only after the auth client settles', () => {
+test('the large dashboard startup bundle executes only after the auth client settles', async () => {
   const root = path.join('dist', 'web', 'public');
   const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
   const manifest = JSON.parse(fs.readFileSync(path.join(root, 'asset-manifest.json'), 'utf8'));
@@ -484,21 +514,30 @@ test('the large dashboard startup bundle is fetched only after the auth client s
   assert.doesNotMatch(html, /src="\/assets\/dashboard-1\.[^"]+\.js"/,
     'the large runtime must not compete with the authentication module during initial parsing');
   const bootstrap = fs.readFileSync(path.join(root, bootstrapRef), 'utf8');
-  assert.match(bootstrap, /mm-auth-client-ready/);
-  assert.match(bootstrap, /mm_authReady/);
-  assert.match(bootstrap, /window\.mm_dashboardReady\) await Promise\.resolve\(window\.mm_dashboardReady\)/,
-    'ordered compatibility scripts should wait for the core dashboard initialization');
-  const coreReadyIndex = bootstrap.indexOf("window.mm_dashboardCoreReady=true;window.dispatchEvent(new Event('mm-dashboard-core-ready'));");
-  const compatibilityScriptsIndex = bootstrap.indexOf('Promise.all(sources.slice(1).map(src=>loadScript(src,true)))');
-  assert.ok(coreReadyIndex >= 0 && coreReadyIndex < compatibilityScriptsIndex,
-    'compatibility scripts must start after core dashboard initialization');
-  assert.match(bootstrap, /script\.async=ordered\?false:true/,
-    'dynamic compatibility scripts must execute in insertion order while their downloads overlap');
-  assert.doesNotMatch(bootstrap, /for\(const src of sources\.slice\(1\)\) await loadScript\(src\)/,
-    'compatibility downloads must not form a serial network waterfall');
-  const runtimeLoadedIndex = bootstrap.indexOf("window.dispatchEvent(new CustomEvent('mm-dashboard-runtime-loaded'))");
-  assert.ok(runtimeLoadedIndex > compatibilityScriptsIndex,
-    'the runtime-loaded event must remain after every compatibility script has loaded');
+  const dom = new JSDOM('<!doctype html><html><head></head><body></body></html>', {runScripts:'outside-only'});
+  const w = dom.window, scripts = [], tick = () => new Promise(resolve => setTimeout(resolve, 0));
+  let resolveAuth, resolveCore, idle, runtimeEvents = 0;
+  w.mm_authReady = new Promise(resolve => { resolveAuth = resolve; });
+  w.mm_dashboardReady = new Promise(resolve => { resolveCore = resolve; });
+  w.requestIdleCallback = (fn, options) => { idle = fn; assert.equal(options.timeout, 1200); };
+  const append = w.document.head.append.bind(w.document.head);
+  w.document.head.append = node => { scripts.push(node); append(node); };
+  w.addEventListener('mm-dashboard-runtime-loaded', () => runtimeEvents++);
+  try {
+    w.eval(bootstrap); await tick(); assert.equal(scripts.length, 0);
+    resolveAuth(); await tick(); assert.equal(scripts.length, 1);
+    scripts[0].onload(); await tick(); assert.equal(scripts.length, 1, 'compatibility waits for core init');
+    resolveCore(); await tick();
+    const immediate = scripts.slice(1);
+    assert.equal(immediate.length, 2);
+    assert.ok(immediate.every(script => script.async === false), 'compatibility executes in order');
+    immediate.forEach(script => script.onload()); await tick();
+    assert.equal(runtimeEvents, 1, 'core readiness dispatches exactly once');
+    assert.equal(scripts.length, 3, 'optional experience scripts wait for idle');
+    idle(); await tick(); assert.equal(scripts.length, 5);
+    assert.ok(scripts.slice(3).every(script => /experience/.test(script.src) && script.async === false));
+    scripts.slice(3).forEach(script => script.onload()); await tick(); assert.equal(runtimeEvents, 1);
+  } finally { dom.window.close(); }
   const runtimeRef = Object.keys(manifest).find(reference => reference.includes('/dashboard-startup-runtime.'));
   assert.ok(runtimeRef, 'the main runtime should be emitted as a separately hashed resource');
   const runtime = fs.readFileSync(path.join(root, runtimeRef), 'utf8');
@@ -508,6 +547,40 @@ test('the large dashboard startup bundle is fetched only after the auth client s
     .map(reference => fs.readFileSync(path.join(root, reference), 'utf8')).join('\n');
   assert.match(startup, /window\.MoneyMoneyChartBridge/,
     'legacy chart bridge code must remain in the ordered startup sequence');
+});
+
+test('options IV history and Telegram result diagnostics stay in their lazy workspace bundles', () => {
+  const root = path.join('dist', 'web', 'public');
+  const manifest = JSON.parse(fs.readFileSync(path.join(root, 'asset-manifest.json'), 'utf8'));
+  const asset = fragment => {
+    const reference = Object.keys(manifest).find(item => item.includes(fragment));
+    assert.ok(reference, `${fragment} bundle must be emitted`);
+    return fs.readFileSync(path.join(root, reference), 'utf8');
+  };
+  const runtime = asset('/dashboard-startup-runtime.');
+  const options = asset('/workspace-options.');
+  const ops = asset('/workspace-ops.');
+  const charts = asset('/workspace-charts.');
+
+  assertWorkspaceWrapper(runtime, 'renderOptionIvTermStructure', 'options');
+  assertWorkspaceWrapper(runtime, 'loadOptionIvSnapshotHistory', 'options');
+  assetDeclaration(options, 'renderOptionIvTermStructure');
+  assetDeclaration(options, 'loadOptionIvSnapshotHistory');
+
+  assertWorkspaceWrapper(runtime, 'loadTelegramResultCoverage', 'ops');
+  assetDeclaration(ops, 'loadTelegramResultCoverage');
+  assertWorkspaceWrapper(runtime, 'globalSearchCommands', 'ops');
+  assetDeclaration(ops, 'globalSearchCommands');
+
+  assertWorkspaceWrapper(runtime, 'initCryptoChartHover', 'charts');
+  assetDeclaration(charts, 'initCryptoChartHover');
+  assert.match(assetDeclaration(charts, 'drawCandles'), /initCryptoChartHover\(\)/);
+
+  const prediction = asset('/workspace-prediction.');
+  assertWorkspaceWrapper(runtime, 'loadCategories', 'prediction');
+  assertWorkspaceWrapper(runtime, 'categoryCardHtml', 'prediction');
+  assetDeclaration(prediction, 'loadCategories');
+  assetDeclaration(prediction, 'categoryCardHtml');
 });
 
 test('dashboard and stock-index API share one cached single-flight upstream loader', () => {
@@ -562,8 +635,8 @@ test('dashboard core JavaScript stays below the cold-start budget and defers hea
   assert.ok(coreBytes < 420_000, `dashboard core is ${coreBytes} bytes; target is below 420,000 bytes to keep non-current renderers out of cold start`);
 
   const core = dashboardAssets.map(resource => fs.readFileSync(path.join(root, resource), 'utf8')).join('\n');
-  assert.match(core, /MoneyWorkspaceModules\.invoke\('trading',\s*'loadTradeAssistant'/);
-  assert.match(core, /MoneyWorkspaceModules\.invoke\('portfolio',\s*'loadPaperPortfolio'/);
+  assertWorkspaceWrapper(core, 'loadTradeAssistant', 'trading');
+  assertWorkspaceWrapper(core, 'loadPaperPortfolio', 'portfolio');
   assert.doesNotMatch(core, /async function loadTradeAssistant\s*\(/);
   assert.doesNotMatch(core, /async function loadPaperPortfolio\s*\(/);
 
@@ -596,7 +669,7 @@ test('overview-only loaders stay out of the chart bootstrap and load with the ov
   const overview = fs.readFileSync(path.join(root, overviewResource), 'utf8');
 
   for (const name of ['loadMarketOverview', 'loadCrossAssetCorrelation', 'loadResearchBriefing', 'loadCommandCenter']) {
-    assert.match(core, new RegExp(`MoneyWorkspaceModules\\.invoke\\('overview',\\s*'${name}'`), `${name} must resolve through the overview loader`);
+    assertWorkspaceWrapper(core, name, 'overview');
     assert.doesNotMatch(core, new RegExp(`async function ${name}\\s*\\(`), `${name} implementation must not be parsed on a stock-chart cold start`);
     assert.match(overview, new RegExp(`(?:async )?function ${name}\\s*\\(`), `${name} must load with the overview feature`);
   }

@@ -22,6 +22,12 @@ import { buildEventEvidence, filterTimelineItems, type EventEvidence } from '../
 import { assembleHistory } from '../features/portfolio-history';
 import { FinancialTextIndex } from '../storage/financial-text-index';
 import { createFinancialResearchRouter } from './financial-research-routes';
+import { createWatchlistMetadataRouter } from './watchlist-metadata-routes';
+import { createAiRunnerDiagnosticsRouter } from './ai-runner-diagnostics-routes';
+import { createResearchRobustnessRouter } from './research-robustness-routes';
+import { WatchlistMetadataStore } from '../features/watchlist-metadata';
+import { handleWatchlistMetadataCommand } from '../features/watchlist-metadata-telegram';
+import { reviewAiRunnerDecisions, diagnosticRunnerMarket } from '../features/ai-runner-diagnostics';
 import { ResearchCommittee } from '../features/research-committee';
 import { createResearchCommitteeRouter } from './research-committee-routes';
 import { LiveKlineHub, liveKlineScope } from '../features/live-kline-stream';
@@ -31,6 +37,7 @@ import { getRuntimeTelegramConfig, parseChatIds, runtimeSecrets } from '../confi
 import { api } from '../api';
 import { createCacheEtag, createPerformanceCache, globalCache } from '../features/performance-cache';
 import { isCacheableLatestStockChart, stockKlineDisplayCacheKey } from '../features/stock-kline-display-cache';
+import { buildStockKlineProviderTelemetry } from '../features/stock-kline-telemetry';
 
 import { tradingEngine } from '../trading';
 
@@ -377,6 +384,20 @@ app.get('/login', (req, res) => {
 });
 registerAuthRoutes(app);
 registerApiAuthProtection(app);
+const watchlistMetadataStore = new WatchlistMetadataStore(stateStore, () => unifiedAlertStore.listWatchlist());
+app.use('/api/watchlist/metadata', createWatchlistMetadataRouter(watchlistMetadataStore));
+app.use('/api/research/experiments',createResearchRobustnessRouter({get:id=>researchRepository.getExperiment(id),save:(id,result)=>researchRepository.saveExperiment(id,result)}));
+app.use('/api/ai-runners', createAiRunnerDiagnosticsRouter({
+  runner: id => { const runner=getAiRunners().find(row=>row.id===id),market=runner&&diagnosticRunnerMarket(runner);return runner&&market?{id:runner.id,market}:null; },
+  history: (id,cursor,limit)=>listAiRunnerHistory(id,cursor,limit),
+  signal:id=>runnerExecutionEvidence.signal(id),snapshot:id=>runnerExecutionEvidence.snapshot(id),
+  closedPositions: id => {
+    const runner=getAiRunners().find(row=>row.id===id);if(!runner)return [];
+    const account=unifiedPaperLedgerStore.getRunnerAccount(runner.accountId||`ai-runner:${id}`);if(!account||account.runnerId!==id)return [];
+    const orders=new Set(account.orders.map(row=>row.id));
+    return runner.positions.filter(row=>row.status==='CLOSED'&&row.entryOrderId&&row.exitOrderId&&orders.has(row.entryOrderId)&&orders.has(row.exitOrderId));
+  },
+}));
 const liveKlineHub = new LiveKlineHub({ enabled: process.env.MONEYMONEY_KLINE_STREAM_ENABLED !== 'false' });
 app.use('/api/kline-stream', createLiveKlineRouter(liveKlineHub));
 app.use('/api/research/committee', createResearchCommitteeRouter(new ResearchCommittee({
@@ -403,7 +424,8 @@ app.get('/api/workspace/navigation', (req, res) => {
     return res.status(400).json({ success: false, error: '未知市场 scope' });
   }
   const scope = rawScope as MarketScope;
-  return res.json({ success: true, scope, groups: resolveWorkspaceNavigation(scope) });
+  const groups=resolveWorkspaceNavigation(scope).map(group=>({...group,items:group.items.filter(item=>!item.requiresAdmin||(req as any).user?.role==='admin')})).filter(group=>group.items.length);
+  return res.json({ success: true, scope, groups });
 });
 
 async function loadStockIndicesData(): Promise<any[]> {
@@ -3056,6 +3078,9 @@ function getTelegramCryptoKlineAdapter(period: string, symbol: string, tradingDa
 }
 
 app.get('/api/stock/kline', async (req, res) => {
+  let observedProviderLatencyMs: number | null = null;
+  let observedProviderLatencyAt: number | null = null;
+  let observedCacheMode = 'bypass';
   try {
     const symbol = String(req.query.symbol || 'sh600519');
     const rawApiSymbol = String(req.query.api || '').trim().toUpperCase();
@@ -3086,7 +3111,11 @@ app.get('/api/stock/kline', async (req, res) => {
     }
     const requestedSymbol = rawApiSymbol || symbol;
     if (asOf) {
+      const historyStartedAt = Date.now();
       const historical = await dataLakeCatalog.queryBarsAsOf({ market: 'stocks', instrument: requestedSymbol.trim().toUpperCase(), timeframe: period, asOf });
+      observedProviderLatencyAt = Date.now();
+      observedProviderLatencyMs = Math.max(0, observedProviderLatencyAt - historyStartedAt);
+      observedCacheMode = 'local-history';
       const data = historical.rows.map(row => {
         const time = row.timestamp instanceof Date ? row.timestamp.getTime() : Date.parse(String(row.timestamp));
         return { time, open: Number(row.open), high: Number(row.high), low: Number(row.low), close: Number(row.close), volume: Number(row.volume || 0) };
@@ -3102,6 +3131,8 @@ app.get('/api/stock/kline', async (req, res) => {
         snapshotId: historical.snapshot?.id || null,
         ...stockChartDisclosure(data,adjustment,historical.adjustment),
         reason: historicalReason,
+        providerTelemetry: buildStockKlineProviderTelemetry({ provider: historical.source || 'MoneyMoney 本地时点数据湖', cacheMode: observedCacheMode, providerLatencyMs: observedProviderLatencyMs, providerLatencyAt: observedProviderLatencyAt, sourceTime: historical.updatedAt || asOf, dataStatus: data.length ? 'historical' : historical.dataStatus, reason: historicalReason }),
+        coverage: { records: data.length, from: data.length ? new Date(data[0].time).toISOString() : null, to: data.length ? new Date(data[data.length - 1].time).toISOString() : null, asOf, reason: historicalReason || null },
       });
     }
     const adapter = getStockKlineAdapter(effectivePeriod, requestedSymbol);
@@ -3114,11 +3145,31 @@ app.get('/api/stock/kline', async (req, res) => {
           return fresh;
         }, { scope: 'stocks', source: 'yahoo-finance-history', ttl: 15_000, staleTtl: 120_000, timeoutMs: 7_000 })
       : null;
-    const snapshot = displayCacheEntry?.status === 'expired' ? null
-      : displayCacheEntry?.data || (cacheableLiveChart ? null : await adapter.fetchHistory(historyRequest));
+    let snapshot;
+    if (displayCacheEntry) {
+      observedProviderLatencyMs = displayCacheEntry.error?.providerLatencyMs ?? displayCacheEntry.providerLatencyMs;
+      observedProviderLatencyAt = displayCacheEntry.error?.providerLatencyAt ?? displayCacheEntry.providerLatencyAt;
+      observedCacheMode = displayCacheEntry.cacheMode;
+      snapshot = displayCacheEntry.status === 'expired' ? null : displayCacheEntry.data;
+    } else if (cacheableLiveChart) snapshot = null;
+    else {
+      const providerStartedAt = Date.now();
+      observedCacheMode = 'origin';
+      try {
+        snapshot = await adapter.fetchHistory(historyRequest);
+      } finally {
+        observedProviderLatencyAt = Date.now();
+        observedProviderLatencyMs = Math.max(0, observedProviderLatencyAt - providerStartedAt);
+      }
+    }
+    const providerTelemetry = (dataStatus: string, reason: string | null, sourceTime: string | null = null, provider = snapshot?.source || 'Yahoo Finance 历史K线') => buildStockKlineProviderTelemetry({
+      provider, cacheMode: observedCacheMode, providerLatencyMs: observedProviderLatencyMs, providerLatencyAt: observedProviderLatencyAt,
+      sourceTime: sourceTime || snapshot?.fetchedAt || null, dataStatus, reason,
+      cacheAgeMs: displayCacheEntry?.cacheHit ? Math.max(0, Date.now() - displayCacheEntry.updatedAt) : 0,
+    });
     if (!snapshot) {
       const reason = displayCacheEntry?.error instanceof Error ? displayCacheEntry.error.message : '股票K线来源暂时不可用';
-      return res.json({ success: false, data: null, market: 'stocks', instrument: requestedSymbol, timeframe: effectivePeriod, dataStatus: 'unavailable', source: 'Yahoo Finance 历史K线', updatedAt: new Date().toISOString(), reason });
+      return res.json({ success: false, data: null, market: 'stocks', instrument: requestedSymbol, timeframe: effectivePeriod, dataStatus: 'unavailable', source: 'Yahoo Finance 历史K线', updatedAt: new Date().toISOString(), reason, providerTelemetry: providerTelemetry('unavailable', reason, null, 'Yahoo Finance 历史K线'), coverage: { records: 0, from: null, to: null, reason } });
     }
     const fetchedAtMs = Date.parse(snapshot.fetchedAt);
     const sourceAgeMs = Number.isFinite(fetchedAtMs) ? Math.max(0, Date.now() - fetchedAtMs) : Infinity;
@@ -3137,22 +3188,27 @@ app.get('/api/stock/kline', async (req, res) => {
     const forwardAvailable=!page&&Boolean(history?.forwardAdjustment.available&&history.forwardAdjustedBars?.length);
     const forwardReason=page?'来源历史分页无法保证统一 Adj Close 参考基准；前复权不可用':history?.forwardAdjustment.reason||'Yahoo 未返回完整 Adj Close 对齐序列；前复权不可用';
     if (!sourceBars?.length) {
-      return res.json({ success: false, data: null, dataStatus: responseDataStatus, source: snapshot.source, updatedAt, reason: displayCacheReason || snapshot.error || `暂无${periodConfig.label}股票K线数据` });
+      const reason = displayCacheReason || snapshot.error || `暂无${periodConfig.label}股票K线数据`;
+      return res.json({ success: false, data: null, dataStatus: responseDataStatus, source: snapshot.source, updatedAt, reason, providerTelemetry: providerTelemetry(responseDataStatus, String(reason), history?.sourceTime || null), coverage: { records: 0, from: null, to: null, reason: String(reason) } });
     }
     const bars=adjustment==='forward'?(forwardAvailable?history?.forwardAdjustedBars||null:null):sourceBars;
     if (adjustment==='forward'&&!forwardAvailable) {
-      return res.status(422).json({success:false,data:null,market:'stocks',instrument:requestedSymbol,timeframe:effectivePeriod,dataStatus:'unsupported',source:snapshot.source,updatedAt,adjustment:{requested:adjustment,actual:history?.adjustment||'unknown',available:['source'],conversionEnabled:false,reason:forwardReason},reason:forwardReason});
+      return res.status(422).json({success:false,data:null,market:'stocks',instrument:requestedSymbol,timeframe:effectivePeriod,dataStatus:'unsupported',source:snapshot.source,updatedAt,adjustment:{requested:adjustment,actual:history?.adjustment||'unknown',available:['source'],conversionEnabled:false,reason:forwardReason},reason:forwardReason,providerTelemetry:providerTelemetry('unsupported',forwardReason,history?.sourceTime||null),coverage:{records:sourceBars.length,from:sourceBars[0]?.time?new Date(sourceBars[0].time).toISOString():null,to:sourceBars.length?new Date(sourceBars[sourceBars.length-1].time).toISOString():null,reason:forwardReason}});
     }
     if (!bars?.length) {
-      return res.json({ success: false, data: null, dataStatus: responseDataStatus, source: snapshot.source, updatedAt, reason: displayCacheReason || snapshot.error || `暂无${periodConfig.label}股票K线数据` });
+      const reason = displayCacheReason || snapshot.error || `暂无${periodConfig.label}股票K线数据`;
+      return res.json({ success: false, data: null, dataStatus: responseDataStatus, source: snapshot.source, updatedAt, reason, providerTelemetry: providerTelemetry(responseDataStatus,String(reason),history?.sourceTime||null),coverage:{records:0,from:null,to:null,reason:String(reason)}});
     }
     if (tradingDate) {
       const timezone = resolveStockExchangeTimeZone(requestedSymbol);
       const session = filterStockBarsForTradingDate(bars, tradingDate, timezone);
-      return res.json({ success: session.bars.length > 0, data: session.bars,...stockChartDisclosure(session.bars,adjustment,history?.adjustment,{forwardReason}), dataStatus: session.bars.length ? snapshot.status : 'empty', market: 'stocks', instrument: requestedSymbol, timeframe: effectivePeriod, date: tradingDate, timezone, session, source: snapshot.source, sourceTime: history?.sourceTime || null, updatedAt, reason: session.bars.length ? undefined : `来源 ${snapshot.source} 当前覆盖 ${session.availableDateRange ? `${session.availableDateRange.from} 至 ${session.availableDateRange.to}` : '暂无可用交易日'}；未提供 ${tradingDate} 的 ${effectivePeriod} 日内数据` });
+      const reason = session.bars.length ? null : `来源 ${snapshot.source} 当前覆盖 ${session.availableDateRange ? `${session.availableDateRange.from} 至 ${session.availableDateRange.to}` : '暂无可用交易日'}；未提供 ${tradingDate} 的 ${effectivePeriod} 日内数据`;
+      return res.json({ success: session.bars.length > 0, data: session.bars,...stockChartDisclosure(session.bars,adjustment,history?.adjustment,{forwardReason}), dataStatus: session.bars.length ? snapshot.status : 'empty', market: 'stocks', instrument: requestedSymbol, timeframe: effectivePeriod, date: tradingDate, timezone, session, source: snapshot.source, sourceTime: history?.sourceTime || null, updatedAt, reason: reason || undefined, providerTelemetry: providerTelemetry(session.bars.length ? snapshot.status : 'empty', reason, history?.sourceTime || null), coverage: { records: session.bars.length, from: session.bars.length && session.bars[0]?.time ? new Date(session.bars[0].time).toISOString() : null, to: session.bars.length ? new Date(session.bars[session.bars.length - 1].time).toISOString() : null, availableDateRange: session.availableDateRange || null, requestedDate: tradingDate, reason } });
     }
     const selectedBars=page?bars.slice(-page.limit):initialWindow?bars.slice(-initialWindow.limit):bars;
-    res.json({ success: true,market:'stocks',instrument:requestedSymbol,timeframe:effectivePeriod,data:selectedBars,...stockChartDisclosure(selectedBars,adjustment,history?.adjustment,{forwardAvailable,forwardReason,volumeBasis:history?.forwardAdjustment.volumeBasis}),history:{nextBefore:selectedBars[0]?.time??null,requestedWindow:page??initialWindow??null,hasEarlier:null},dataStatus:klinePageStatus(responseDataStatus,!!page),source:snapshot.source,sourceTime:history?.sourceTime||null,updatedAt,timezone:resolveStockExchangeTimeZone(requestedSymbol),reason:displayCacheReason||snapshot.error||undefined,cache:displayCacheEntry?.cacheHit?{state:'cached',capturedAt:new Date(displayCacheEntry.updatedAt).toISOString(),sourceFetchedAt:updatedAt,ageMs:Math.max(0,Date.now()-displayCacheEntry.updatedAt),refreshing:displayCacheEntry.status==='stale'}:undefined});
+    const responseStatus = klinePageStatus(responseDataStatus,!!page);
+    const responseReason = displayCacheReason || snapshot.error || null;
+    res.json({ success: true,market:'stocks',instrument:requestedSymbol,timeframe:effectivePeriod,data:selectedBars,...stockChartDisclosure(selectedBars,adjustment,history?.adjustment,{forwardAvailable,forwardReason,volumeBasis:history?.forwardAdjustment.volumeBasis}),history:{nextBefore:selectedBars[0]?.time??null,requestedWindow:page??initialWindow??null,hasEarlier:null},coverage:{records:bars.length,returnedRecords:selectedBars.length,from:bars[0]?.time?new Date(bars[0].time).toISOString():null,to:bars.length?new Date(bars[bars.length-1].time).toISOString():null,requestedWindow:page??initialWindow??null},dataStatus:responseStatus,source:snapshot.source,sourceTime:history?.sourceTime||null,updatedAt,timezone:resolveStockExchangeTimeZone(requestedSymbol),reason:responseReason||undefined,providerTelemetry:providerTelemetry(responseStatus,responseReason,history?.sourceTime||null),cache:displayCacheEntry?.cacheHit?{state:'cached',cacheMode:displayCacheEntry.cacheMode,capturedAt:new Date(displayCacheEntry.updatedAt).toISOString(),sourceFetchedAt:updatedAt,ageMs:Math.max(0,Date.now()-displayCacheEntry.updatedAt),refreshing:displayCacheEntry.status==='stale'}:undefined});
   } catch (e: any) {
     res.json({
       success: false,
@@ -3162,6 +3218,7 @@ app.get('/api/stock/kline', async (req, res) => {
       updatedAt: new Date().toISOString(),
       reason: `股票K线来源不可用：${e.message || '请求失败'}`,
       error: e.message,
+      providerTelemetry: buildStockKlineProviderTelemetry({ provider: 'Yahoo Finance 历史K线', cacheMode: observedCacheMode, providerLatencyMs: observedProviderLatencyMs, providerLatencyAt: observedProviderLatencyAt, sourceTime: null, dataStatus: 'unavailable', reason: `股票K线来源不可用：${e.message || '请求失败'}` }),
     });
   }
 });
@@ -5512,6 +5569,17 @@ async function stockSignalsForChat(chatId: string, args: string[], automatic = f
 
 export function getTelegramCommandHandlers(): Record<string, TelegramCommandHandler> {
   const rawHandlers: Record<string, TelegramCommandHandler> = {
+    groups: ({chatId,args}) => handleWatchlistMetadataCommand(watchlistMetadataStore,{isOwner:telegramAdminChatIds().has(String(chatId)),scope:telegramScopeForChat(chatId),args}),
+    why: ({chatId,args}) => {
+      if(!telegramAdminChatIds().has(String(chatId)))return '仅管理员私聊可查看私人跑单诊断。';
+      const scope=telegramScopeForChat(chatId);if(!['stocks','options','crypto','prediction'].includes(scope))return '请先选择具体市场。';
+      const runners=getAiRunners().filter(row=>diagnosticRunnerMarket(row)===scope&&(!args[0]||row.id===args[0])).slice(0,3);
+      if(!runners.length)return '当前市场没有匹配跑单；不使用其他市场补位。';
+      return ['<b>为何未下单 · 已保存记录</b>',...runners.map(runner=>{
+        const result=reviewAiRunnerDecisions(listAiRunnerHistory(runner.id,undefined,5).data,runner.id,scope);
+        return escapeTelegramHtml(runner.title)+'\n'+(result.rows.length?result.rows.map(row=>`${escapeTelegramHtml(row.at)} · ${escapeTelegramHtml(row.instrument)} · ${escapeTelegramHtml(row.action)}\n${escapeTelegramHtml(row.reason)}\n数据 ${escapeTelegramHtml(row.dataGate.dataStatus)} · 模型 ${escapeTelegramHtml(row.model.status)}\n${escapeTelegramHtml(row.blockedChecks.join('；')||'未记录失败门控；不代表应当下单')}`).join('\n\n'):'尚无决策记录');
+      }),'仅查看已有记录，不调用模型、不改配置、不创建订单。'].join('\n\n');
+    },
     stocks: async ({ chatId }) => {
       const scope = telegramScopeForChat(chatId);
       if (scope !== 'stocks') return `当前为${TELEGRAM_SCOPE_LABELS[scope]}市场，请先点击“📈 股票”切换。`;

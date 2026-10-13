@@ -11,6 +11,8 @@ export type WorkspaceId =
   | 'screener'
   | 'watchlist'
   | 'positions'
+  | 'paper'
+  | 'orders'
   | 'risk'
   | 'decision-intelligence'
   | 'research-lab'
@@ -38,6 +40,7 @@ export interface WorkspaceItem {
   icon: string;
   scopes: readonly MarketScope[];
   requiresInstrument?: boolean;
+  requiresAdmin?: boolean;
   availability?: 'live' | 'degraded' | 'unavailable';
 }
 
@@ -61,6 +64,8 @@ const ITEMS: Record<WorkspaceId, WorkspaceItem> = {
   screener: { id: 'screener', label: '筛选与比较', icon: '⌕', scopes: ASSET_SCOPES },
   watchlist: { id: 'watchlist', label: '我的自选', icon: '★', scopes: ALL_SCOPES },
   positions: { id: 'positions', label: '我的持仓', icon: '▣', scopes: ALL_SCOPES },
+  paper: { id: 'paper', label: '模拟盘与 AI 跑单', icon: '▧', scopes: ALL_SCOPES, requiresAdmin:true },
+  orders: { id: 'orders', label: '模拟订单', icon: '≡', scopes: ALL_SCOPES, requiresAdmin:true },
   risk: { id: 'risk', label: '风险监控', icon: '♡', scopes: ASSET_SCOPES, requiresInstrument: true },
   'decision-intelligence': { id: 'decision-intelligence', label: '可信决策', icon: '◇', scopes: ASSET_SCOPES },
   'research-lab': { id: 'research-lab', label: '研究实验室', icon: '▧', scopes: ASSET_SCOPES },
@@ -87,6 +92,7 @@ const BASE_GROUPS: readonly { id: WorkspaceGroup['id']; label: string; items: re
   { id: 'market', label: '市场', items: ['overview', 'radar', 'analysis'] },
   { id: 'research', label: '研究', items: ['screener', 'backtest', 'risk'] },
   { id: 'intelligence', label: '决策', items: ['decision-intelligence', 'research-lab', 'action-center'] },
+  { id: 'portfolio', label: '私人模拟账户', items: ['paper','orders'] },
 ];
 
 const SPECIFIC_ITEMS: Record<MarketScope, readonly WorkspaceId[]> = {
