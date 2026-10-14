@@ -68,8 +68,8 @@ const ITEMS: Record<WorkspaceId, WorkspaceItem> = {
   orders: { id: 'orders', label: '模拟订单', icon: '≡', scopes: ALL_SCOPES, requiresAdmin:true },
   risk: { id: 'risk', label: '风险监控', icon: '♡', scopes: ASSET_SCOPES, requiresInstrument: true },
   'decision-intelligence': { id: 'decision-intelligence', label: '可信决策', icon: '◇', scopes: ASSET_SCOPES },
-  'research-lab': { id: 'research-lab', label: '研究实验室', icon: '▧', scopes: ASSET_SCOPES },
-  'action-center': { id: 'action-center', label: '自选行动', icon: '✓', scopes: ALL_SCOPES },
+  'research-lab': { id: 'research-lab', label: '研究实验室', icon: '▧', scopes: ASSET_SCOPES, requiresAdmin:true },
+  'action-center': { id: 'action-center', label: '自选行动', icon: '✓', scopes: ALL_SCOPES, requiresAdmin:true },
   breadth: { id: 'breadth', label: '市场宽度', icon: '▥', scopes: ['stocks'] },
   insider: { id: 'insider', label: '内部人交易', icon: '♟', scopes: ['stocks'], requiresInstrument: true },
   institutional: { id: 'institutional', label: '机构持仓', icon: '♜', scopes: ['stocks'], requiresInstrument: true },
@@ -131,4 +131,22 @@ export function defaultWorkspace(scope: MarketScope): WorkspaceId {
   if (scope === 'stocks') return 'stock-quotes';
   if (scope === 'crypto') return 'crypto-quotes';
   return 'overview';
+}
+
+export function workspaceAssetContracts(): Record<string, { market: MarketScope; workspace: WorkspaceId; requiresAdmin: boolean; requiresInstrument: boolean; modules: string[] }> {
+  const result: ReturnType<typeof workspaceAssetContracts> = {};
+  const loads: Partial<Record<WorkspaceId,string[]>> = {
+    overview:['overview'], 'stock-quotes':['charts'], 'crypto-quotes':['charts','crypto'],
+    'guru-holdings':['guru','tables'], contracts:['charts','contracts','tables'], events:['events'],
+    breadth:['stocks','tables'], insider:['stocks','tables'], institutional:['stocks','tables'], analyst:['stocks','tables'], fundamentals:['stocks','tables'], 'short-interest':['stocks','tables'],
+    'option-chain':['options','tables'], volatility:['options','tables'], greeks:['options','tables'],
+    'funding-rate':['crypto','tables'], 'open-interest':['crypto','tables'], 'on-chain':['crypto','tables'], 'order-flow':['crypto','tables'], 'prediction-radar':['prediction'],
+    'research-lab':['research','tables'], 'action-center':['research','tables'], 'decision-intelligence':['research','tables'], screener:['research','tables'], backtest:['research','tables'], risk:['research','tables'],
+    watchlist:['portfolio','tables'], positions:['portfolio','tables'], paper:['portfolio','ai','tables'], orders:['portfolio','tables'], analysis:['trading'],
+  };
+  for(const market of MARKET_SCOPES)for(const definition of Object.values(ITEMS)) {
+    if(!definition.scopes.includes(market))continue;
+    result[`${market}:${definition.id}`]={market,workspace:definition.id,requiresAdmin:definition.requiresAdmin===true,requiresInstrument:definition.requiresInstrument===true,modules:[...(loads[definition.id]||[])]};
+  }
+  return result;
 }

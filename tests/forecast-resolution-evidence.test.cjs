@@ -35,3 +35,6 @@ test('another process lease blocks mutations without altering JSON and a rejecte
  try{await assert.rejects(resolveForecastCase('Kalshi::KXTEST-26','YES'),/另一实例/);assert.equal(fs.readFileSync(file,'utf8'),before);}finally{stateStore.releaseLease('forecast-lab-write','other-worker');}
  assert.equal(await resolveForecastCase('unknown','YES'),null);
 });
+test('background radar captures a rejected forecast write instead of leaving an unhandled Promise',()=>{
+ const source=fs.readFileSync('src/features/prediction-radar.ts','utf8');const calls=source.match(/void recordForecastLab\([^\n]+/g)||[];assert.equal(calls.length,2);assert.ok(calls.every(call=>call.includes('.catch(')),'both cache refresh paths must capture lease or filesystem rejection');
+});

@@ -31,7 +31,10 @@ test('asset builder expands the marked classic runtime before applying workspace
 
 test('fundamentals workspace loads the deferred SEC filing research module', () => {
   const loader = fs.readFileSync(path.join(publicRoot, 'modules', 'workspace-loader.js'), 'utf8');
-  assert.match(loader, /\['research-lab', 'action-center', 'decision-intelligence', 'screener', 'backtest', 'risk', 'fundamentals'\]\.includes\(id\)/);
+  assert.match(loader, /manifest\.workspaceContracts/);
+  assert.deepEqual(require('../dist/features/market-workspace').workspaceAssetContracts()['stocks:fundamentals'].modules,['stocks','tables']);
+  const runtime=fs.readFileSync(path.join(publicRoot,'modules','dashboard-runtime.js'),'utf8');
+  assert.ok(/id === 'fundamentals'[\s\S]{0,140}MoneyWorkspaceModules\?\.ensure\('research'\)/.test(runtime),'SEC research is explicitly loaded only when the fundamentals workspace is opened');
   assert.match(fs.readFileSync(path.join(publicRoot, 'professional-research.js'), 'utf8'), /financial-text-research/);
 });
 

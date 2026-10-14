@@ -1050,7 +1050,7 @@ export function warmPredictionRadarCache(): Promise<void> {
       if (radar.markets.length) cache = { value: radar, expiresAt: Date.now() + CACHE_TTL_MS };
       void saveRadarSnapshot(radar);
       void recordPredictionHistory(radar.markets);
-      void recordForecastLab(radar.markets);
+      void recordForecastLab(radar.markets).catch(error => console.warn('[forecast-lab] Snapshot save failed:', error instanceof Error ? error.message.slice(0,160) : 'unknown error'));
     })
     .catch(() => {})
     .finally(() => {
@@ -1076,6 +1076,6 @@ export async function getPredictionRadar(query = '', limit = 60): Promise<Predic
   cache = { value: built, expiresAt: Date.now() + CACHE_TTL_MS };
   void saveRadarSnapshot(built);
   void recordPredictionHistory(built.markets);
-  void recordForecastLab(built.markets);
+  void recordForecastLab(built.markets).catch(error => console.warn('[forecast-lab] Snapshot save failed:', error instanceof Error ? error.message.slice(0,160) : 'unknown error'));
   return slicePredictionRadar(built, query, limit);
 }

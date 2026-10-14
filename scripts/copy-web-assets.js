@@ -180,7 +180,9 @@ html = html.replace(/(src|href)="(\/[^"?]+\.(?:js|css))(?:\?[^"\s]*)?"/g, (tag, 
   if (!fingerprinted.has(url)) fingerprinted.set(url, emit(path.basename(url).replace(/\.(js|css)$/, ''), fs.readFileSync(file), path.extname(url).slice(1)));
   return `${attribute}="${fingerprinted.get(url)}"`;
 });
-const loaderManifest = { modules: moduleUrls, styles: styleUrls };
+const workspaceContracts = require('../dist/features/market-workspace').workspaceAssetContracts();
+for(const contract of Object.values(workspaceContracts))for(const group of contract.modules)if(!moduleUrls[group])throw new Error(`Unknown workspace module ${group}`);
+const loaderManifest = { modules: moduleUrls, styles: styleUrls, workspaceContracts };
 const loader = fs.readFileSync(path.join(source, 'modules', 'workspace-loader.js'), 'utf8').replace('__WORKSPACE_MANIFEST__', JSON.stringify(loaderManifest));
 html = html.replace('</head>', `<script defer src="${emit('workspace-loader', loader, 'js')}"></script>\n</head>`);
 html = html.replace(/<script\b([^>]*)>/gi, (tag, attributes) => {

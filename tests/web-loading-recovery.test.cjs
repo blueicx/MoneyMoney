@@ -282,7 +282,7 @@ test('stock K-line requests expose a single-flight helper and use it for duplica
 
 test('an explicit workspace deep link waits for auth and core dashboard readiness before loading its bundle', async () => {
   const loader = fs.readFileSync(path.join('src', 'web', 'public', 'modules', 'workspace-loader.js'), 'utf8')
-    .replace('__WORKSPACE_MANIFEST__', JSON.stringify({ modules: { charts: '/assets/workspace-charts.fixture.js', events: '/assets/workspace-events.fixture.js' }, styles: {} }));
+    .replace('__WORKSPACE_MANIFEST__', JSON.stringify({ modules: { charts: '/assets/workspace-charts.fixture.js', events: '/assets/workspace-events.fixture.js' }, styles: {}, workspaceContracts: require('../dist/features/market-workspace').workspaceAssetContracts() }));
   const loadGroups = async url => {
     const dom = new JSDOM('<!doctype html><html><head></head><body></body></html>', { url, runScripts: 'outside-only' });
     const snapshot = () => ({
@@ -321,7 +321,7 @@ test('an explicit workspace deep link waits for auth and core dashboard readines
 
 test('authenticated stock chart deep links prefetch exactly their current symbol and timeframe before core readiness', async () => {
   const loader = fs.readFileSync(path.join('src', 'web', 'public', 'modules', 'workspace-loader.js'), 'utf8')
-    .replace('__WORKSPACE_MANIFEST__', JSON.stringify({ modules: { charts: '/assets/workspace-charts.fixture.js' }, styles: {} }));
+    .replace('__WORKSPACE_MANIFEST__', JSON.stringify({ modules: { charts: '/assets/workspace-charts.fixture.js' }, styles: {}, workspaceContracts: require('../dist/features/market-workspace').workspaceAssetContracts() }));
   const dom = new JSDOM('<!doctype html><html><head></head><body></body></html>', {
     url: 'http://localhost/?market=stocks&workspace=stock-quotes&instrument=stock%3Aus%3AAAPL&timeframe=1d',
     runScripts: 'outside-only',
@@ -372,7 +372,7 @@ test('authenticated stock chart deep links prefetch exactly their current symbol
 
 test('stock K-line prefetch excludes ambiguous, shared, historical, and non-chart contexts', async () => {
   const loader = fs.readFileSync(path.join('src', 'web', 'public', 'modules', 'workspace-loader.js'), 'utf8')
-    .replace('__WORKSPACE_MANIFEST__', JSON.stringify({ modules: { charts: '/assets/workspace-charts.fixture.js', events: '/assets/events.js' }, styles: {} }));
+    .replace('__WORKSPACE_MANIFEST__', JSON.stringify({ modules: { charts: '/assets/workspace-charts.fixture.js', events: '/assets/events.js' }, styles: {}, workspaceContracts: require('../dist/features/market-workspace').workspaceAssetContracts() }));
   const run = async (url, savedAsOf = '') => {
     const dom = new JSDOM('<!doctype html><html><head></head><body></body></html>', { url, runScripts: 'outside-only' });
     let resolveAuth;
@@ -410,7 +410,7 @@ test('stock K-line prefetch excludes ambiguous, shared, historical, and non-char
 
 test('the workspace loader waits through deferred auth-client execution when its promise is not assigned yet', async () => {
   const loader = fs.readFileSync(path.join('src', 'web', 'public', 'modules', 'workspace-loader.js'), 'utf8')
-    .replace('__WORKSPACE_MANIFEST__', JSON.stringify({ modules: { charts: '/assets/workspace-charts.fixture.js' }, styles: {} }));
+    .replace('__WORKSPACE_MANIFEST__', JSON.stringify({ modules: { charts: '/assets/workspace-charts.fixture.js' }, styles: {}, workspaceContracts: require('../dist/features/market-workspace').workspaceAssetContracts() }));
   const authClient = fs.readFileSync(path.join('src', 'web', 'public', 'modules', 'auth-client.js'), 'utf8');
   assert.match(authClient, /mm-auth-client-ready/, 'auth client signals when its promise has been assigned');
   const dom = new JSDOM('<!doctype html><html><head></head><body></body></html>', {
@@ -448,7 +448,7 @@ test('the workspace loader waits through deferred auth-client execution when its
 
 test('workspace startup stages are marked only when browser performance tracing is enabled', async () => {
   const loader = fs.readFileSync(path.join('src', 'web', 'public', 'modules', 'workspace-loader.js'), 'utf8')
-    .replace('__WORKSPACE_MANIFEST__', JSON.stringify({ modules: { charts: '/assets/workspace-charts.fixture.js' }, styles: {} }));
+    .replace('__WORKSPACE_MANIFEST__', JSON.stringify({ modules: { charts: '/assets/workspace-charts.fixture.js' }, styles: {}, workspaceContracts: require('../dist/features/market-workspace').workspaceAssetContracts() }));
   const dom = new JSDOM('<!doctype html><html><head></head><body></body></html>', {
     url: 'http://localhost/?market=stocks&workspace=stock-quotes&instrument=usAAPL', runScripts: 'outside-only',
   });

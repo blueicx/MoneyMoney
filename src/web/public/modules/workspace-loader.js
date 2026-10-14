@@ -225,20 +225,7 @@
   };
 
   function groupsForWorkspace(market, id) {
-    if (id === 'overview') return ['overview'];
-    if (id === 'guru-holdings') return ['guru', 'tables'];
-    if (id === 'contracts' && market === 'crypto') return ['charts', 'contracts', 'tables'];
-    if (id === 'events') return ['events'];
-    if (id === 'stock-quotes' && market === 'stocks') return ['charts'];
-    if (id === 'crypto-quotes' && market === 'crypto') return ['charts', 'crypto'];
-    if (['breadth', 'insider', 'institutional', 'analyst', 'fundamentals', 'short-interest'].includes(id) && market === 'stocks') return ['stocks', 'tables'];
-    if (['option-chain', 'volatility', 'greeks'].includes(id) && market === 'options') return ['options', 'tables'];
-    if (['funding-rate', 'open-interest', 'on-chain', 'order-flow'].includes(id) && market === 'crypto') return ['crypto', 'tables'];
-    if (id === 'prediction-radar' && market === 'prediction') return ['prediction'];
-    if (['research-lab', 'action-center', 'decision-intelligence', 'screener', 'backtest', 'risk', 'fundamentals'].includes(id)) return ['research', 'tables'];
-    if (['watchlist', 'positions', 'paper', 'orders'].includes(id)) return id === 'paper' ? ['portfolio', 'ai', 'tables'] : ['portfolio', 'tables'];
-    if (id === 'analysis') return ['trading'];
-    return [];
+    return [...(manifest.workspaceContracts?.[market + ':' + id]?.modules || [])];
   }
 
   const initialParams = new URLSearchParams(location.search);
