@@ -67,3 +67,10 @@
 - 最新全量281个文件、1438项、0失败；构建、Web/认证/浏览器/实时K线/合约冒烟和差异检查通过。新测试进入索引后安全扫描757个文件通过；未跟踪research.db保持原Hash。
 - 最新相同环境三次冷热中位数：桌面冷页面2489.4ms/图表3013ms、热501.9ms/749.8ms；手机冷1937.2ms/2895.8ms、热503.2ms/738.5ms。热脚本0字节；比最初冷图表约改善40%，比本次上一批2934/2767ms略慢，不能称为继续提速。原始日志`mm-registry-frozen-tests.log`、`mm-registry-frozen-benchmark.log`。
 - 新注册表仅统一市场归属、上下文要求、现有权限及资产依赖；所有旧模块的接口/内容布局声明仍是渐进治理，不伪称整体重写完成。
+
+## 已发布收尾 243cc1b
+
+- 代码提交243cc1be2ce52ffb96f1d5204f9817d6f56bd02d已推送。部署仅操作moneymoney.service及dist；VPS loopback版本与正式域名一致，服务active，根盘18GB可用。正式域名四市场/SNDK只读Chromium验收通过，日志`mm-20261014-production-243cc1b.log`。
+- archive SHA a3cd8a8760bd56047b3ce4e1781c05deb83603e0dd6e750d4e6a77ef2f3884b9；server SHA 5c4aa0df51cfc62af52d7028f0df3578aa5983abb239f2b6a9d025c71a622470；index SHA 00c8b2fbbd51a8d01541a0ea810079fcb33e072e33564ff65541e1949aabefef；manifest SHA 56f6364992faa858fab4e93b32364be6b2977f2e356a0de9bd3469f48d08a287，远端一致。
+- 备份`/opt/moneymoney/backups/dist-pre-243cc1b-20261014-workspace`，回滚`/opt/moneymoney/dist.rollback-243cc1b-20261014-workspace`保留2b37a7b；d371007路径也保留。数据库、数据湖和现有AI配置未加入产物或改动配置；research.db未跟踪且原Hash保留。
+- 本次完成以上两批，不把真实账单/阶梯保证金来源不足、全渠道单标的静默及所有旧模块声明改造等剩余范围标成已实现。此交付记录后续文档提交不改变线上代码版本243cc1b。
