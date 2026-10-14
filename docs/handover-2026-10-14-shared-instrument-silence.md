@@ -56,5 +56,5 @@
 
 - 代码955e84682e4f814a4a9f151844fd7b992cf3b45d已提交推送。VPS及正式域名版本一致，moneymoney.service active；股票/期权/虚拟币/预测市场/SNDK只读Chromium通过，日志`mm-silence-production-955e846.log`。没有向生产发测试消息、调用模型或提交测试订单。
 - archive SHA a37b614fa0ff4090e72a4ffe9eeba20befdba64f4481faff9f8f949c4bba5b94；server SHA 4995a28fc8814a70eeb2341cc0392bb569ecb4685a801da9e86b8eee559b1089；index SHA eb4005200fe670c7d346c61d3652fff15f6b6307f317ec310c1294fae638a12e；manifest SHA bee18c902db90ad0eb45844081855ee59cec63400f28dc0e693c770b3b41736e，远端实测一致。
-- 备份`/opt/moneymoney/backups/dist-pre-955e846-20261014-silence`，回滚`/opt/moneymoney/dist.rollback-955e846-20261014-silence`保留243cc1b。仅dist切换并重启moneymoney.service，没有改现有AI配置、数据库或数据湖文件。
+- 备份`/opt/moneymoney/backups/dist-pre-955e846-20261014-silence`，回滚`/opt/moneymoney/dist.rollback-955e846-20261014-silence`保留243cc1b。仅dist切换并重启moneymoney.service，没有改变现有AI配置或替换数据库/数据湖；服务正常运行时的采集写入不在此“未替换”声明内。
 - 旧版回滚不识别新增静默策略；如后续人工回滚，应重新核对通知暂停设置，不能假定旧版仍执行此新门控。新增状态仍留在SQLite，不删除。
