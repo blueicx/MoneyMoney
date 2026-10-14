@@ -44,10 +44,17 @@
 
 调用路径：明确身份与管理员确认 → SQLite事务 → 普通通知匹配/预览门控 → 投递前复核；图表、证据、策略与模拟账户不使用此门控。合约资金账单和交易所级保证金参数仍缺少可核验来源，不生成伪数据。
 
-最终性能与正式域名发布结果在实测后追加。
+最终性能与正式域名发布结果见下方实测记录。
 
 ## 最终冻结门槛
 
 - 全量1446项/283个文件，构建、Web/认证/浏览器/实时K线/合约冒烟与差异检查通过，安全扫描761个跟踪文件通过。日志以`mm-silence-release-`为前缀；首次并行构建期间的认证超时没有作为通过证据。
 - 同环境3次冷热、4倍CPU限速、80ms延迟、750KB/s：桌面冷页面2215.3ms/图表2914.1ms、热477.2ms/701.7ms；手机冷1875.6ms/2886.6ms、热457.5ms/755.5ms。热脚本0字节，原冷加载20%改善目标仍达成；不承诺生产网络等比例提速。
 - research.db保留且未跟踪，Hash仍为27fd475e523568daa4cdcabf3146917023335a62affe00429babd721b3b79fd1。发布前VPS旧版本243cc1b，服务active，根盘18GB可用。最终新版本/Hash/回滚目录待实际发布核验。
+
+## 已发布 955e846
+
+- 代码955e84682e4f814a4a9f151844fd7b992cf3b45d已提交推送。VPS及正式域名版本一致，moneymoney.service active；股票/期权/虚拟币/预测市场/SNDK只读Chromium通过，日志`mm-silence-production-955e846.log`。没有向生产发测试消息、调用模型或提交测试订单。
+- archive SHA a37b614fa0ff4090e72a4ffe9eeba20befdba64f4481faff9f8f949c4bba5b94；server SHA 4995a28fc8814a70eeb2341cc0392bb569ecb4685a801da9e86b8eee559b1089；index SHA eb4005200fe670c7d346c61d3652fff15f6b6307f317ec310c1294fae638a12e；manifest SHA bee18c902db90ad0eb45844081855ee59cec63400f28dc0e693c770b3b41736e，远端实测一致。
+- 备份`/opt/moneymoney/backups/dist-pre-955e846-20261014-silence`，回滚`/opt/moneymoney/dist.rollback-955e846-20261014-silence`保留243cc1b。仅dist切换并重启moneymoney.service，没有改现有AI配置、数据库或数据湖文件。
+- 旧版回滚不识别新增静默策略；如后续人工回滚，应重新核对通知暂停设置，不能假定旧版仍执行此新门控。新增状态仍留在SQLite，不删除。
