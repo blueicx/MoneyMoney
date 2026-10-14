@@ -10,7 +10,7 @@ export class TelegramSignalOutbox {
     const existing=this.repository.getAlertDelivery(delivery.id);if(existing)return existing;
     return this.repository.saveAlertDelivery({...delivery,status:'queued',attempts:0});
   }
-  async flush(chat:string,allowed:()=>boolean,send:(text:string)=>Promise<unknown>) {
+  async flush(chat:string,allowed:()=>boolean,send:(text:string)=>Promise<unknown>,render:(item:AlertDelivery)=>string|null=item=>item.payload?.message || '信号内容不可用') {
     if(!allowed())return;
     const key='telegram:stock-signal-outbox:'+chat,owner=randomUUID();
     if(!this.store.acquireLease(key,owner,this.clock(),120000))return;
@@ -22,10 +22,11 @@ export class TelegramSignalOutbox {
         if(current.expiresAt && (!Number.isFinite(Date.parse(current.expiresAt)) || this.clock()>=Date.parse(current.expiresAt))){this.repository.saveAlertDelivery({...current,status:'failed',attempts:7,lastError:'信号通知已过期或时间无效，不发送旧信号；可重新扫描'});continue;}
         const attempts=current.attempts || 0,last=current.lastAttemptAt ? Date.parse(current.lastAttemptAt):0;
         if(attempts && this.clock()-last<Math.min(3600000,60000*2**(attempts-1)))continue;
+        const text=render(current);if(text===null){if(current.lastError!=='当前通知策略暂缓投递，未消耗次数')this.repository.saveAlertDelivery({...current,lastError:'当前通知策略暂缓投递，未消耗次数'});continue;}
         const queued={...current,status:'queued',attempts:attempts+1,lastAttemptAt:new Date(this.clock()).toISOString()};
         this.repository.saveAlertDelivery(queued);
         let final:AlertDelivery;
-        try{await send(current.payload?.message || '信号内容不可用');final={...queued,status:'sent',deliveredAt:new Date(this.clock()).toISOString(),lastError:undefined};}
+        try{await send(text);final={...queued,status:'sent',deliveredAt:new Date(this.clock()).toISOString(),lastError:undefined};}
         catch{final={...queued,status:'failed',lastError:'Telegram投递失败，将按退避规则重试；最多7次'};}
         if(!this.store.refreshLease(key,owner,this.clock(),120000))break;
         if(this.repository.getAlertDelivery(item.id)?.status!=='acknowledged')this.repository.saveAlertDelivery(final);

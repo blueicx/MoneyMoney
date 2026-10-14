@@ -18,3 +18,8 @@ test('lost outbox lease blocks delivery before consuming an attempt',async()=>{
  const outbox=new TelegramSignalOutbox(repository,{acquireLease:()=>true,refreshLease:()=>false,releaseLease:()=>{}},()=>10000);
  let sends=0;await outbox.flush('a',()=>true,async()=>{sends++});assert.equal(sends,0);assert.equal(item.attempts,0);
 });
+test('delivery policy is rechecked for queued content before spending an attempt and can filter one symbol',async()=>{
+ const {TelegramSignalOutbox}=require('../src/features/telegram-signal-outbox');const item={id:'stock-signal:quiet',context:{market:'stocks',workspace:'signals'},alertId:'scan',channel:'telegram',status:'queued',attempts:0,payload:{chatId:'a',message:'AAPL MSFT'}};let text;
+ const repository={getAlertDelivery:()=>structuredClone(item),saveAlertDelivery:value=>{Object.assign(item,value);return value},listAlertDeliveries:()=>[structuredClone(item)]},leases={acquireLease:()=>true,refreshLease:()=>true,releaseLease:()=>{}};const outbox=new TelegramSignalOutbox(repository,leases);
+ await outbox.flush('a',()=>true,async value=>{text=value},()=>null);assert.equal(text,undefined);assert.equal(item.attempts,0);assert.equal(item.status,'queued');await outbox.flush('a',()=>true,async value=>{text=value},()=> 'MSFT');assert.equal(text,'MSFT');assert.equal(item.attempts,1);
+});

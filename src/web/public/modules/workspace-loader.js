@@ -218,6 +218,7 @@
   window.MoneyWorkspaceModules = {
     ensure,
     groupsForWorkspace,
+    contractForWorkspace: (market,id)=>manifest.workspaceContracts?.[market+':'+id]||null,
     async invoke(group, name, args) {
       try { await ensure(group); return window[name](...args); }
       catch (error) { window.showToast?.(error.message || '工作区加载失败，请重试', 'error'); throw error; }

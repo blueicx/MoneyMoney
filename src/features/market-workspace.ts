@@ -42,7 +42,9 @@ export interface WorkspaceItem {
   requiresInstrument?: boolean;
   requiresAdmin?: boolean;
   availability?: 'live' | 'degraded' | 'unavailable';
+  contract?: WorkspaceAssetContract;
 }
+export interface WorkspaceAssetContract { market:MarketScope; workspace:WorkspaceId; contentOwner:WorkspaceId; requiresAdmin:boolean; requiresInstrument:boolean; modules:string[]; readEndpoints:string[] }
 
 export interface WorkspaceGroup {
   id: 'market' | 'research' | 'intelligence' | 'portfolio' | 'market-specific';
@@ -62,8 +64,8 @@ const ITEMS: Record<WorkspaceId, WorkspaceItem> = {
   analysis: { id: 'analysis', label: '标的分析', icon: '⌁', scopes: ASSET_SCOPES, requiresInstrument: true },
   backtest: { id: 'backtest', label: '策略回测', icon: '⌘', scopes: ASSET_SCOPES, requiresInstrument: true },
   screener: { id: 'screener', label: '筛选与比较', icon: '⌕', scopes: ASSET_SCOPES },
-  watchlist: { id: 'watchlist', label: '我的自选', icon: '★', scopes: ALL_SCOPES },
-  positions: { id: 'positions', label: '我的持仓', icon: '▣', scopes: ALL_SCOPES },
+  watchlist: { id: 'watchlist', label: '我的自选', icon: '★', scopes: ALL_SCOPES, requiresAdmin:true },
+  positions: { id: 'positions', label: '我的持仓', icon: '▣', scopes: ALL_SCOPES, requiresAdmin:true },
   paper: { id: 'paper', label: '模拟盘与 AI 跑单', icon: '▧', scopes: ALL_SCOPES, requiresAdmin:true },
   orders: { id: 'orders', label: '模拟订单', icon: '≡', scopes: ALL_SCOPES, requiresAdmin:true },
   risk: { id: 'risk', label: '风险监控', icon: '♡', scopes: ASSET_SCOPES, requiresInstrument: true },
@@ -104,19 +106,20 @@ const SPECIFIC_ITEMS: Record<MarketScope, readonly WorkspaceId[]> = {
   watchlist: [],
 };
 
-function item(id: WorkspaceId): WorkspaceItem {
-  return { ...ITEMS[id], scopes: [...ITEMS[id].scopes] };
+function item(id: WorkspaceId, scope:MarketScope,contracts:Record<string,WorkspaceAssetContract>): WorkspaceItem {
+  return { ...ITEMS[id], scopes: [...ITEMS[id].scopes], contract:contracts[`${scope}:${id}`] };
 }
 
-function group(id: WorkspaceGroup['id'], label: string, ids: readonly WorkspaceId[]): WorkspaceGroup {
-  return { id, label, items: ids.map(item) };
+function group(id: WorkspaceGroup['id'], label: string, ids: readonly WorkspaceId[],scope:MarketScope,contracts:Record<string,WorkspaceAssetContract>): WorkspaceGroup {
+  return { id, label, items: ids.map(id=>item(id,scope,contracts)) };
 }
 
 export function resolveWorkspaceNavigation(scope: MarketScope): WorkspaceGroup[] {
   const specific = SPECIFIC_ITEMS[scope] || [];
-  const groups = BASE_GROUPS.map(base => group(base.id, base.label, base.items));
+  const contracts=workspaceAssetContracts();
+  const groups = BASE_GROUPS.map(base => group(base.id, base.label, base.items,scope,contracts));
   if (specific.length > 0) {
-    groups.push(group('market-specific', '市场专属', specific));
+    groups.push(group('market-specific', '市场专属', specific,scope,contracts));
   }
   return groups;
 }
@@ -133,7 +136,7 @@ export function defaultWorkspace(scope: MarketScope): WorkspaceId {
   return 'overview';
 }
 
-export function workspaceAssetContracts(): Record<string, { market: MarketScope; workspace: WorkspaceId; requiresAdmin: boolean; requiresInstrument: boolean; modules: string[] }> {
+export function workspaceAssetContracts(): Record<string, WorkspaceAssetContract> {
   const result: ReturnType<typeof workspaceAssetContracts> = {};
   const loads: Partial<Record<WorkspaceId,string[]>> = {
     overview:['overview'], 'stock-quotes':['charts'], 'crypto-quotes':['charts','crypto'],
@@ -144,9 +147,14 @@ export function workspaceAssetContracts(): Record<string, { market: MarketScope;
     'research-lab':['research','tables'], 'action-center':['research','tables'], 'decision-intelligence':['research','tables'], screener:['research','tables'], backtest:['research','tables'], risk:['research','tables'],
     watchlist:['portfolio','tables'], positions:['portfolio','tables'], paper:['portfolio','ai','tables'], orders:['portfolio','tables'], analysis:['trading'],
   };
+  const endpoints:Record<WorkspaceId,string[]>={
+    overview:['/api/workspace/dashboard'], 'stock-quotes':['/api/stock/kline'], 'crypto-quotes':['/api/binance/klines'], events:['/api/events/entities'], radar:['/api/workspace/dashboard'], analysis:['/api/instruments/:type/:venue/:symbol/overview'], backtest:['/api/research/experiments'], screener:['/api/screener'],watchlist:['/api/workspace/watchlist'],positions:['/api/paper/positions'],paper:['/api/paper/ledger'],orders:['/api/orders'],risk:['/api/risk/overview'],
+    'decision-intelligence':['/api/evidence','/api/decisions'], 'research-lab':['/api/research/experiments'], 'action-center':['/api/watchlist/action-center'],breadth:['/api/stock/market-breadth'],insider:['/api/stock/insider/:symbol'],institutional:['/api/stock/institutional/:symbol'],'guru-holdings':['/api/stocks/guru-holdings'],analyst:['/api/stock/analyst/:symbol'],fundamentals:['/api/stock/fundamentals/:symbol'],'short-interest':['/api/stock/short-interest/:symbol'],
+    'option-chain':['/api/equity-options/:symbol','/api/options/:asset'],volatility:['/api/options/history'],greeks:['/api/equity-options/:symbol'], 'funding-rate':['/api/funding-rates'],'open-interest':['/api/perpetual-crowding'],'on-chain':['/api/bitcoin-onchain'],'order-flow':['/api/order-flow-liquidity'],contracts:['/api/contracts/detail','/api/contracts/history'],'prediction-radar':['/api/prediction-radar'],
+  };
   for(const market of MARKET_SCOPES)for(const definition of Object.values(ITEMS)) {
     if(!definition.scopes.includes(market))continue;
-    result[`${market}:${definition.id}`]={market,workspace:definition.id,requiresAdmin:definition.requiresAdmin===true,requiresInstrument:definition.requiresInstrument===true,modules:[...(loads[definition.id]||[])]};
+    result[`${market}:${definition.id}`]={market,workspace:definition.id,contentOwner:definition.id,requiresAdmin:definition.requiresAdmin===true,requiresInstrument:definition.requiresInstrument===true,modules:[...(loads[definition.id]||[])],readEndpoints:[...endpoints[definition.id]]};
   }
   return result;
 }

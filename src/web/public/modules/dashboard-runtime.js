@@ -8443,6 +8443,7 @@ async function loadBinancePortfolio() {
 }
 // --- Alerts ---
 async function loadAlerts() {
+  void loadInstrumentSilences();
   try {
     const res = await fetch(scopedUrl('/api/alerts'));
     const { data: alerts } = await res.json();
@@ -8461,6 +8462,23 @@ async function loadAlerts() {
     }
     await loadAlertDeliveryFeedback();
   } catch (e) {}
+}
+let instrumentSilenceRevision=0;
+async function loadInstrumentSilences() {
+  const host=document.getElementById('instrument-silence-panel');if(!host)return;
+  if(window.mm_isGuest===true||window.mm_isLoggedIn!==true){host.hidden=true;host.replaceChildren();return;}
+  const token=marketScopeRequestToken(),revision=++instrumentSilenceRevision,market=activeMarketScope;
+  host.hidden=false;if(!['stocks','options','crypto','prediction'].includes(market)){host.textContent='单标的静默：请先选择具体市场。';return;}
+  const controller=new AbortController(),cancel=()=>controller.abort();window.addEventListener('mm-workspace-context',cancel,{once:true});
+  host.textContent='正在读取共享静默状态…';
+  try{const response=await fetch('/api/alerts/instrument-silences?market='+encodeURIComponent(market),{signal:controller.signal});const body=await response.json();if(revision!==instrumentSilenceRevision||!isCurrentMarketScopeToken(token))return;if(!response.ok||!body.success)throw new Error(body.reason||body.error||'读取失败');
+    host.innerHTML='<h4>网页 / Telegram 共享静默</h4><p>仅普通提醒和信号；风险、数据源故障、模拟成交不受影响。不改变策略、持仓或自选。</p><div class="mm-action-tools"><label>完整标的身份 <input class="mm-input" data-silence-instrument aria-label="静默标的身份" placeholder="stock:us:AAPL"></label><label>分钟 <input class="mm-input" type="number" data-silence-minutes aria-label="静默分钟" value="60" min="1" max="43200"></label><button class="btn btn-secondary" type="button" data-silence-save>静默</button></div><div data-silence-list></div><p data-silence-result aria-live="polite"></p>';
+    const input=host.querySelector('[data-silence-instrument]');input.value=/^(stock|option|crypto|prediction):/.test(String(currentInstrumentId||''))?currentInstrumentId:'';const list=host.querySelector('[data-silence-list]');
+    const save=async(instrument,until)=>{const result=host.querySelector('[data-silence-result]');try{if(!isCurrentMarketScopeToken(token))throw new Error('市场已切换，请刷新');const response=await fetch('/api/alerts/instrument-silences',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({market,instrument,until})});const body=await response.json();if(!isCurrentMarketScopeToken(token)||revision!==instrumentSilenceRevision)return;if(!response.ok||!body.success)throw new Error(body.reason||body.error||'保存失败');await loadInstrumentSilences();}catch(error){if(isCurrentMarketScopeToken(token))result.textContent=error.message;}};
+    for(const row of body.data.entries||[]){const line=document.createElement('div');line.className='mm-action-tools';const text=document.createElement('span');text.textContent=row.instrument+' · '+(row.active?'静默至 '+row.until:'已恢复/到期');line.append(text);if(row.active){const button=document.createElement('button');button.type='button';button.className='btn btn-secondary';button.textContent='恢复';button.onclick=()=>save(row.instrument,null);line.append(button);}list.append(line);}
+    host.querySelector('[data-silence-save]').onclick=()=>{const minutes=Number(host.querySelector('[data-silence-minutes]').value);if(!Number.isFinite(minutes)||minutes<1||minutes>43200){host.querySelector('[data-silence-result]').textContent='分钟必须为1–43200';return;}return save(input.value.trim(),new Date(Date.now()+minutes*60000).toISOString());};
+  }catch(error){if(error.name!=='AbortError'&&isCurrentMarketScopeToken(token)&&revision===instrumentSilenceRevision)host.textContent='静默状态读取失败：'+error.message+'。重新打开提醒区可重试。';}
+  finally{window.removeEventListener('mm-workspace-context',cancel);}
 }
 async function loadAlertDeliveryFeedback() {
   const host = document.getElementById('alerts-list');

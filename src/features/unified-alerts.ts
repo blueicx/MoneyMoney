@@ -182,7 +182,7 @@ export function evaluateUnifiedAlert(rule: UnifiedAlertRule, observation: Unifie
   return { matched, direction, message: matched ? `事件将在约 ${observation.minutesUntil} 分钟后发生` : '' };
 }
 
-export function triggerUnifiedAlerts(store: UnifiedAlertStore, observations: Array<{ instrumentId: string; observation: UnifiedAlertObservation }>, now = new Date()): UnifiedAlertHistory[] {
+export function triggerUnifiedAlerts(store: UnifiedAlertStore, observations: Array<{ instrumentId: string; observation: UnifiedAlertObservation }>, now = new Date(), silenced: (owner:string,instrument:string)=>boolean = ()=>false): UnifiedAlertHistory[] {
   const created: UnifiedAlertHistory[] = [];
   for (const rule of store.listRules()) {
     if (isAlertSuppressed(rule, now)) continue;
@@ -191,9 +191,11 @@ export function triggerUnifiedAlerts(store: UnifiedAlertStore, observations: Arr
       if (rule.instrumentId && item.instrumentId !== rule.instrumentId) return false;
       if (rule.scope && item.observation.scope !== rule.scope) return false;
       if (rule.watchlistId && !item.observation.watchlistIds?.includes(rule.watchlistId)) return false;
+      if (silenced(rule.ownerId,item.instrumentId)) return false;
       return Boolean(rule.instrumentId || rule.scope || rule.watchlistId);
     });
     if (!candidate) { if(rule.kind==='metric') store.recordMetricObservation(rule.id,false,now); continue; }
+    if (silenced(rule.ownerId,candidate.instrumentId)) continue;
     const result = evaluateUnifiedAlert(rule, candidate.observation);
     if (rule.kind==='metric') {
       const observed=Date.parse(candidate.observation.observedAt || '');
@@ -203,7 +205,7 @@ export function triggerUnifiedAlerts(store: UnifiedAlertStore, observations: Arr
     if (!result.matched) continue;
     const dedupKey = alertDedupKey(rule, candidate.observation);
     if (store.listHistory(500).some(item => item.dedupKey === dedupKey)) continue;
-    const entry = store.appendHistory({ ruleId: rule.id, ownerId: rule.ownerId, instrumentId: rule.instrumentId, kind: rule.kind, dedupKey, direction: result.direction, channels: { ...rule.channels }, message: result.message, createdAt: now.toISOString() });
+    const entry = store.appendHistory({ ruleId: rule.id, ownerId: rule.ownerId, instrumentId: candidate.instrumentId, kind: rule.kind, dedupKey, direction: result.direction, channels: { ...rule.channels }, message: result.message, createdAt: now.toISOString() });
     store.markTriggered(rule.id, now);
     created.push(entry);
   }
@@ -221,11 +223,13 @@ export interface UnifiedAlertPreview {
 }
 
 /** Evaluate the same rules as production without changing history or cooldown state. */
-export function previewUnifiedAlerts(store: UnifiedAlertStore, observations: Array<{ instrumentId: string; observation: UnifiedAlertObservation }>, now = new Date()): UnifiedAlertPreview[] {
+export function previewUnifiedAlerts(store: UnifiedAlertStore, observations: Array<{ instrumentId: string; observation: UnifiedAlertObservation }>, now = new Date(), silenced: (owner:string,instrument:string)=>boolean = ()=>false): UnifiedAlertPreview[] {
   return store.listRules().map(rule => {
     if (isAlertSuppressed(rule, now)) return { ruleId: rule.id, instrumentId: rule.instrumentId, wouldTrigger: false, suppressed: true, reason: '规则处于暂停、静默、冷却或已过期状态', direction: 'neutral', message: '' };
-    const candidate = observations.find(item => item.observation.kind === rule.kind && (!rule.instrumentId || item.instrumentId === rule.instrumentId) && (!rule.scope || item.observation.scope === rule.scope) && (!rule.watchlistId || item.observation.watchlistIds?.includes(rule.watchlistId)));
+    const candidate = observations.find(item => item.observation.kind === rule.kind && (!rule.instrumentId || item.instrumentId === rule.instrumentId) && (!rule.scope || item.observation.scope === rule.scope) && (!rule.watchlistId || item.observation.watchlistIds?.includes(rule.watchlistId)) && !silenced(rule.ownerId,item.instrumentId));
+    if(!candidate&&rule.instrumentId&&silenced(rule.ownerId,rule.instrumentId))return {ruleId:rule.id,instrumentId:rule.instrumentId,wouldTrigger:false,suppressed:true,reason:'标的处于共享静默状态',direction:'neutral',message:''};
     if (!candidate) return { ruleId: rule.id, instrumentId: rule.instrumentId, wouldTrigger: false, suppressed: false, reason: '本次试运行没有匹配到观察数据', direction: 'neutral', message: '' };
+    if(silenced(rule.ownerId,candidate.instrumentId))return {ruleId:rule.id,instrumentId:candidate.instrumentId,wouldTrigger:false,suppressed:true,reason:'标的处于共享静默状态',direction:'neutral',message:''};
     const result = evaluateUnifiedAlert(rule, candidate.observation);
     if (rule.kind==='metric') {
       const at=Date.parse(candidate.observation.observedAt || ''), duration=Number(rule.condition.durationMinutes || 0)*60_000;

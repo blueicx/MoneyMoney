@@ -64,6 +64,18 @@ async function main() {
     assert.equal(status.data.role, 'admin');
     assert.ok(status.data.csrfToken);
     if(child) {
+      await page.evaluate(()=>{setMarketScope('stocks');showTab('alerts');loadAlerts();});
+      const silencePanel=page.locator('#instrument-silence-panel');
+      await silencePanel.locator('[data-silence-instrument]').waitFor({state:'visible'});
+      for(const width of [1440,390])for(const theme of ['light','dark','money']) {
+        await page.setViewportSize({width,height:900});await page.evaluate(theme=>document.documentElement.setAttribute('data-theme',theme),theme);
+        await silencePanel.locator('[data-silence-instrument]').fill('stock:us:AAPL');await silencePanel.locator('[data-silence-save]').click();
+        try{await page.waitForFunction(()=>document.querySelector('#instrument-silence-panel [data-silence-list]')?.textContent.includes('静默至'));}catch(error){throw new Error('静默UI保存未完成 '+width+'/'+theme+' '+JSON.stringify(await page.evaluate(()=>({scope:activeMarketScope,text:document.querySelector('#instrument-silence-panel')?.textContent,field:document.querySelector('[data-silence-instrument]')?.value})))+' '+error.message);}
+        const saved=await page.evaluate(()=>fetch('/api/alerts/instrument-silences?market=stocks').then(r=>r.json()));assert.equal(saved.data.entries.find(row=>row.instrument==='stock:us:AAPL').active,true);
+        assert.notEqual(await silencePanel.locator('input').first().evaluate(el=>getComputedStyle(el).backgroundColor),'rgb(255, 255, 255)');
+        await silencePanel.getByRole('button',{name:'恢复',exact:true}).click();await page.waitForFunction(()=>document.querySelector('#instrument-silence-panel [data-silence-list]')?.textContent.includes('已恢复/到期'));
+      }
+      const wrongSilence=await page.evaluate(()=>fetch('/api/alerts/instrument-silences',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({market:'stocks',instrument:'crypto:binance:BTCUSDT',until:new Date(Date.now()+60000).toISOString()})}).then(r=>r.status));assert.equal(wrongSilence,400);
       const coverage=await page.evaluate(()=>fetch('/api/data/coverage?market=options&instrument=option%3Acboe%3AAAPL&timeframe=snapshot').then(r=>r.json()));
       assert.equal(coverage.partitionStatus,'partial');assert.equal(coverage.dataStatus,'partial');
       assert.equal(coverage.data[0].partitionCount,2);assert.equal(coverage.data[0].availablePartitionCount,1);
@@ -277,10 +289,11 @@ async function main() {
     });
     assert.equal(guestRunnerStream.status, 403, JSON.stringify(guestRunnerStream.body));
     assert.equal(guestRunnerStream.body.code, 'GUEST_READ_ONLY');
+    const guestSilence=await page.evaluate(async()=>Promise.all([fetch('/api/alerts/instrument-silences?market=stocks').then(r=>r.status),fetch('/api/alerts/instrument-silences',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({market:'stocks',instrument:'stock:us:AAPL',until:null})}).then(r=>r.status)]));assert.deepEqual(guestSilence,[403,403]);
     const guestTelegramSend = await page.evaluate(() => fetch('/api/telegram/test-delivery', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ idempotencyKey: 'guest-forbidden-0001' }) }).then(async response => ({ status: response.status, body: await response.json() })));
     assert.equal(guestTelegramSend.status, 403);
     assert.deepEqual(pageErrors, []);
-    console.log('Browser auth smoke passed: admin cookie, CSRF, Telegram/runner/research/data private guards, public catalog, logout, guest read-only, SLO');
+    console.log('Browser auth smoke passed: admin cookie, CSRF, three-theme desktop/mobile shared silence and restore, market rejection, private guards, public catalog, logout, guest read-only, SLO');
   } finally {
     if (browser) await browser.close();
     if (child) {

@@ -10,3 +10,7 @@ test('private action and experiment workspaces declare the same owner requiremen
 test('production loader receives generated contracts rather than a second hardcoded market-module map',()=>{
  const loader=fs.readFileSync('src/web/public/modules/workspace-loader.js','utf8'),builder=fs.readFileSync('scripts/copy-web-assets.js','utf8');assert.ok(loader.includes('manifest.workspaceContracts'));assert.ok(builder.includes('workspaceAssetContracts()'));assert.ok(!/id === 'stock-quotes' && market === 'stocks'/.test(loader));
 });
+test('workspace contracts declare their own content and necessary read APIs without executing them',()=>{
+ const contracts=require('../dist/features/market-workspace').workspaceAssetContracts();for(const contract of Object.values(contracts)){assert.equal(contract.contentOwner,contract.workspace);assert.ok(Array.isArray(contract.readEndpoints)&&contract.readEndpoints.length>0);assert.ok(contract.readEndpoints.every(endpoint=>endpoint.startsWith('/api/')));}assert.ok(contracts['stocks:fundamentals'].readEndpoints.includes('/api/stock/fundamentals/:symbol'));assert.ok(contracts['crypto:contracts'].readEndpoints.includes('/api/contracts/detail'));
+});
+test('private watchlist and position declarations match protected personal APIs',()=>{const contracts=require('../dist/features/market-workspace').workspaceAssetContracts();assert.equal(contracts['stocks:watchlist'].requiresAdmin,true);assert.equal(contracts['stocks:positions'].requiresAdmin,true);});

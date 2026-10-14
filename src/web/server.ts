@@ -122,6 +122,7 @@ import { getEventRisk } from '../features/event-risk';
 import { getCachedPredictionRadarSlice, getPredictionRadar, warmPredictionRadarCache, type PredictionMarket, type PredictionRadar } from '../features/prediction-radar';
 import { getPredictionHistory } from '../features/prediction-history';
 import { getForecastLabReport, resolveForecastCase } from '../features/forecast-lab';
+import { InstrumentSilenceStore } from '../features/instrument-silence';
 import { auditPredictionRelationship } from '../features/prediction-relationship-audit';
 import { calculatePredictionPosition } from '../features/prediction-position-sizer';
 import { aiCommentaryConfigured, getAiMarketCommentary } from '../features/ai-commentary';
@@ -388,6 +389,7 @@ app.get('/login', (req, res) => {
 registerAuthRoutes(app);
 registerApiAuthProtection(app);
 const watchlistMetadataStore = new WatchlistMetadataStore(stateStore, () => unifiedAlertStore.listWatchlist());
+const instrumentSilences = new InstrumentSilenceStore(stateStore);
 app.use('/api/watchlist/metadata', createWatchlistMetadataRouter(watchlistMetadataStore));
 app.use('/api/research/experiments',createResearchRobustnessRouter({get:id=>researchRepository.getExperiment(id),save:(id,result)=>researchRepository.saveExperiment(id,result)}));
 app.use('/api/ai-runners', createAiRunnerDiagnosticsRouter({
@@ -5451,9 +5453,9 @@ async function buildTelegramDigest(chatId: string, cadenceLabel = '每日'): Pro
   const since = previousDigest?.at || new Date(Date.now() - 24 * 60 * 60_000).toISOString();
   const marketIds: MarketId[] = ['stocks', 'options', 'crypto', 'prediction'];
   const marketNames: Record<MarketId, string> = { stocks: '股票', options: '期权', crypto: '虚拟币', prediction: '预测市场' };
-  const sharedChanges = await buildSharedMarketChangeDigest(ids, since);
+  const sharedChanges = (await buildSharedMarketChangeDigest(ids, since)).filter(row=>row.kind.startsWith('source-')||!row.instrument||!isTelegramAdmin(chatId)||!instrumentSilences.suppresses(row.instrument));
   const actionSummary = buildActionCenter(await collectWatchlistActions(ids,sharedChanges),{ states:actionCenterStore.states('admin') });
-  const pendingActions = actionSummary.items.filter(row => !row.read && !row.snoozed);
+  const pendingActions = actionSummary.items.filter(row => !row.read && !row.snoozed && (row.kind==='source'||!row.instrument||!isTelegramAdmin(chatId)||!instrumentSilences.suppresses(row.instrument)));
   const evidenceSummary = marketIds.map(market => {
     const changes = sharedChanges.filter(item => item.market === market);
     if (!changes.length) return `<b>${marketNames[market]}</b> · 自上次摘要后暂无自选变化`;
@@ -6540,6 +6542,12 @@ export function getTelegramCommandHandlers(): Record<string, TelegramCommandHand
     alerts: ({ chatId, args }) => {
       const key = String(args[0] || '').toLowerCase();
       const value = String(args[1] || '').toLowerCase();
+      if(['mute','unmute','mutes'].includes(key)) {
+        if(!isTelegramAdmin(chatId))return '仅管理员私聊可管理网页/TG共享静默。';
+        const scope=telegramScopeForChat(chatId);
+        if(key==='mutes')return ['<b>当前市场共享静默</b>',...instrumentSilences.list(scope).entries.map(row=>escapeTelegramHtml(row.instrument)+' · '+(row.active?'至 '+escapeTelegramHtml(row.until!):'已恢复/到期')),'/alerts mute stock:us:AAPL 60 · /alerts unmute stock:us:AAPL','仅普通提醒和信号；风险/来源故障/模拟成交不受影响。'].join('\n');
+        try{const minutes=Number(args[2]||60);if(key==='mute'&&(!Number.isFinite(minutes)||minutes<1||minutes>43200))throw new Error('分钟必须为1–43200');const row=instrumentSilences.update(scope,String(args[1]||''),key==='unmute'?null:new Date(Date.now()+minutes*60000).toISOString(),'telegram');telegramCommandCenterStore.recordAudit(chatId,'instrument_'+key,row.instrument);return '✅ 网页与管理员TG共用：'+escapeTelegramHtml(row.instrument)+' · '+(row.until?'静默至 '+row.until:'已恢复')+'\n不暂停策略、账户或风险提醒。';}catch(error:any){return escapeTelegramHtml(error.message);}
+      }
       if (!key) return formatTelegramPreferences(chatId);
       if (key === 'pause') {
         const minutes = Math.max(1, Math.min(24 * 60, Number(args[1] || 60)));
@@ -7367,8 +7375,26 @@ const telegramDigestPushes = new Set<string>();
 const telegramSourceStates = new Map<string, boolean>();
 let consecutivePollFail = 0;
 
-function telegramAlertSuppressed(chatId: string, priority: 'high' | 'normal' = 'normal'): boolean {
-  return shouldSuppressTelegramAlert(telegramCommandCenterStore.getAlertPolicy(chatId), priority);
+function telegramAlertSuppressed(chatId: string, priority: 'high' | 'normal' = 'normal', instrument?:string): boolean {
+  return shouldSuppressTelegramAlert(telegramCommandCenterStore.getAlertPolicy(chatId), priority) || !!instrument&&isTelegramAdmin(chatId)&&instrumentSilences.suppresses(instrument,priority);
+}
+function telegramActionSilenced(chatId:string,action:{symbol?:string;marketId?:string|number;instrumentId?:string},scope:MarketScope):boolean {
+  if(!isTelegramAdmin(chatId))return false;
+  const raw=String(action.instrumentId||action.marketId||action.symbol||'');
+  if(/^(stock|option|crypto|prediction):/.test(raw))return instrumentSilences.suppresses(raw);
+  const matches=telegramScopedWatchIds(chatId,scope).filter(id=>{const ref=parseInstrumentQuery(id);return ref?.symbol.toUpperCase()===raw.toUpperCase();});
+  if(matches.length===1)return instrumentSilences.suppresses(matches[0]);
+  // Legacy alerts without a verified identity cannot safely be filtered by title.
+  return instrumentSilences.list(scope).entries.some(row=>row.active);
+}
+
+async function flushTelegramStockSignalOutbox(chatId:string) {
+  await telegramStockSignalOutbox.flush(chatId,()=>telegramScopeForChat(chatId)==='stocks' && telegramCommandCenterStore.getPreferences(chatId).notifications.signals && !telegramAlertSuppressed(chatId,'normal'),async text=>{if(!telegramInteractionBot)throw Error('Telegram暂停');await telegramInteractionBot.sendToChat(chatId,telegramReply(text));},item=>{
+    const rows=item.payload?.signalRows;
+    if(!Array.isArray(rows))return instrumentSilences.list('stocks').entries.some(row=>row.active)&&isTelegramAdmin(chatId)?null:item.payload?.message||null;
+    const allowed=rows.filter(row=>typeof row?.instrument==='string'&&typeof row?.message==='string'&&!telegramAlertSuppressed(chatId,'normal',row.instrument));
+    return allowed.length?['<b>📡 股票信号更新</b>',...allowed.map(row=>row.message),'发送 /signals 查看完整股票池；静默仅影响通知。'].join('\n'):null;
+  });
 }
 
 function telegramSmartAlertOnCooldown(alert: { lastTriggeredAt?: string; cooldownMinutes: number }): boolean {
@@ -7392,6 +7418,7 @@ async function monitorTelegramSmartAlerts(): Promise<void> {
     if (alert.type === 'PROBABILITY' && radar && alert.symbol) {
       const market = radar.markets.find(item => item.platform === 'Polymarket' && item.title.toUpperCase().includes(alert.symbol!)) || radar.markets.find(item => item.id === alert.symbol);
       const probability = market ? market.modelProbability * 100 : NaN;
+      if(market&&telegramAlertSuppressed(alert.chatId,'normal',`prediction:${market.platform.toLowerCase()}:${market.id}`))continue;
       const hit = alert.direction === 'ABOVE' ? probability >= (alert.threshold || 0) : probability <= (alert.threshold || 0);
       if (hit && market) message = '当前模型概率 ' + formatTelegramNumber(probability, 1) + '%，达到条件 ' + telegramAlertDescription(alert);
     } else if (alert.type === 'RISK') {
@@ -7403,7 +7430,7 @@ async function monitorTelegramSmartAlerts(): Promise<void> {
       const upcoming = events.find(event => { const hours = (new Date(event.date).getTime() - Date.now()) / 3600000; return hours >= 0 && hours <= limit; });
       if (upcoming) message = '[' + getEventImpactZh(upcoming.impact) + (upcoming.categoryLabel ? '·' + escapeTelegramHtml(upcoming.categoryLabel) : '') + '] ' + escapeTelegramHtml(upcoming.titleZh || upcoming.title) + ' 将在 ' + formatTelegramNumber((new Date(upcoming.date).getTime() - Date.now()) / 3600000, 1) + ' 小时内发生';
     } else if (alert.type === 'SIGNAL') {
-      const reversal = actions.find(action => /反转|reversal|reverse/i.test(String(action.actionZh || '') + ' ' + String((action as any).reasons || '')));
+      const reversal = telegramActions(telegramScopeForChat(alert.chatId)).find(action => !telegramActionSilenced(alert.chatId,action,telegramScopeForChat(alert.chatId)) && /反转|reversal|reverse/i.test(String(action.actionZh || '') + ' ' + String((action as any).reasons || '')));
       if (reversal) message = escapeTelegramHtml(reversal.title || reversal.symbol) + ' 出现信号反转：' + escapeTelegramHtml(reversal.actionZh);
     }
     if (!message) continue;
@@ -7522,7 +7549,7 @@ async function monitorTelegramPriceAlerts(): Promise<void> {
   const prices = await binanceFeed.getMultiplePrices([...new Set(alerts.map(item => item.symbol))]);
   for (const alert of alerts) {
     const preference = telegramCommandCenterStore.getPreferences(alert.chatId).notifications;
-    if (telegramAlertSuppressed(alert.chatId)) continue;
+    if (telegramAlertSuppressed(alert.chatId,'normal',`crypto:binance:${alert.symbol}`)) continue;
     const ticker = prices[alert.symbol];
     if (!preference.priceAlerts || !ticker) continue;
     const hit = alert.direction === 'ABOVE' ? ticker.price >= alert.price : ticker.price <= alert.price;
@@ -7605,11 +7632,12 @@ async function runUnifiedAlertMonitor(): Promise<void> {
     }
   }
   if(!unifiedAlertMonitorLeaseOwned || !stateStore.refreshLease('unified-alert-monitor',unifiedAlertMonitorOwner,Date.now(),90_000)) return;
-  const triggered = triggerUnifiedAlerts(unifiedAlertStore, observations);
+  const triggered = triggerUnifiedAlerts(unifiedAlertStore, observations,new Date(),(owner,instrument)=>owner==='admin'&&instrumentSilences.suppresses(instrument));
   if (!triggered.length) return;
   const telegramConfig = getRuntimeTelegramConfig();
   const chats = parseChatIds(telegramConfig.allowedChatIds, telegramConfig.chatId);
   for (const entry of triggered) {
+    if(entry.ownerId==='admin'&&instrumentSilences.suppresses(entry.instrumentId))continue;
     const direction = entry.direction === 'bullish' ? '偏利好' : entry.direction === 'bearish' ? '偏利空' : entry.direction === 'neutral' ? '中性/无法判断' : entry.direction;
     const message = `🔔 ${entry.message} · ${direction} · ${entry.instrumentId}`;
     const alertMarket: MarketId = entry.instrumentId.startsWith('crypto:') ? 'crypto' : entry.instrumentId.startsWith('option:') ? 'options' : entry.instrumentId.startsWith('prediction:') ? 'prediction' : 'stocks';
@@ -7619,6 +7647,7 @@ async function runUnifiedAlertMonitor(): Promise<void> {
     }
     if (entry.channels.telegram && telegramInteractionBot) {
       for (const chatId of chats) {
+        if(telegramAlertSuppressed(chatId,'normal',entry.instrumentId))continue;
         const deliveryId = `delivery_${entry.id}_telegram_${chatId}`;
         try {
           await telegramInteractionBot.sendToChat(chatId, telegramReply(escapeTelegramHtml(message)));
@@ -7663,7 +7692,7 @@ async function monitorTelegramSlowAlerts(): Promise<void> {
           const deliveryStateKey = `telegram:stock-signal-last-delivered:${chatId}`;
           const deliveryLeaseKey = `telegram:stock-signal-delivery:${chatId}`;
           const alreadySent = stateStore.get<string>(deliveryStateKey) === snapshot.id;
-          const actionable = selectTelegramStockSignalAlerts(snapshot).filter(row=>isStockSignalNotificationFresh(row)).slice(0, 3);
+          const actionable = selectTelegramStockSignalAlerts(snapshot).filter(row=>isStockSignalNotificationFresh(row)&&!telegramAlertSuppressed(chatId,'normal',row.candidate.instrumentId)).slice(0, 3);
           if (actionable.length && !alreadySent) {
             const owner = `stock-signal:${crypto.randomUUID()}`;
             if (stateStore.acquireLease(deliveryLeaseKey, owner, Date.now(), 30_000)) {
@@ -7674,12 +7703,12 @@ async function monitorTelegramSlowAlerts(): Promise<void> {
                   && latestNotifications.signals && !telegramAlertSuppressed(chatId, 'normal')) {
                   const deliveryId='stock-signal:'+key;
                   const expiresAt=new Date(Math.min(Date.parse(snapshot.createdAt)+30*60000,...actionable.map(row=>stockQuoteObservationTime(row.updatedAt)!+30*60000))).toISOString();
-                  telegramStockSignalOutbox.enqueue({id:deliveryId,context:{market:'stocks',workspace:'signals'},alertId:snapshot.id,channel:'telegram',status:'queued',expiresAt,payload:{chatId,message:[
+                  telegramStockSignalOutbox.enqueue({id:deliveryId,context:{market:'stocks',workspace:'signals'},alertId:snapshot.id,channel:'telegram',status:'queued',expiresAt,payload:{chatId,signalRows:actionable.map(row=>({instrument:row.candidate.instrumentId,message:`· ${escapeTelegramHtml(row.candidate.name || row.candidate.symbol)} · ${escapeTelegramHtml(row.action?.actionZh || row.action?.action || '')} · ${escapeTelegramHtml(row.source)}`})),message:[
                     '<b>📡 股票信号更新</b>',
                     ...actionable.map(row => `· ${escapeTelegramHtml(row.candidate.name || row.candidate.symbol)} · ${escapeTelegramHtml(row.action?.actionZh || row.action?.action || '')} · ${escapeTelegramHtml(row.source)}`),
                     '', '发送 /signals 查看当前聊天可见的完整股票池。',
                   ].join('\n')}});
-                  await telegramStockSignalOutbox.flush(chatId,()=>telegramScopeForChat(chatId)==='stocks' && telegramCommandCenterStore.getPreferences(chatId).notifications.signals && !telegramAlertSuppressed(chatId,'normal'),async text=>{if(!telegramInteractionBot)throw Error('Telegram暂停');await telegramInteractionBot.sendToChat(chatId,telegramReply(text));});
+                  await flushTelegramStockSignalOutbox(chatId);
                   if(['sent','acknowledged'].includes(researchRepository.getAlertDelivery(deliveryId)?.status || '')) {
                     stateStore.set(deliveryStateKey, snapshot.id, 1);
                     telegramCommandCenterStore.recordAudit(chatId, 'stock_signal_scan_push', key);
@@ -7691,11 +7720,11 @@ async function monitorTelegramSlowAlerts(): Promise<void> {
             }
           }
         }
-        await telegramStockSignalOutbox.flush(chatId,()=>telegramScopeForChat(chatId)==='stocks' && telegramCommandCenterStore.getPreferences(chatId).notifications.signals && !telegramAlertSuppressed(chatId,'normal'),async text=>{if(!telegramInteractionBot)throw Error('Telegram暂停');await telegramInteractionBot.sendToChat(chatId,telegramReply(text));});
+        await flushTelegramStockSignalOutbox(chatId);
       } else if (lastAdvisorReport) {
         const signalKey = `${chatId}:${scope}:${lastAdvisorReport.generatedAt}`;
         if (!telegramSignalPushes.has(signalKey)) {
-          const actionable = telegramActions(scope).filter(item => item.action !== 'WAIT').slice(0, 3);
+          const actionable = telegramActions(scope).filter(item => item.action !== 'WAIT'&&!telegramActionSilenced(chatId,item,scope)).slice(0, 3);
           if (actionable.length) {
             await telegramInteractionBot.sendToChat(chatId, telegramReply([
               `<b>📡 ${escapeTelegramHtml(TELEGRAM_SCOPE_LABELS[scope])}市场新助手信号</b>`,
@@ -10559,6 +10588,14 @@ app.get('/api/alert-rules', (req, res) => {
   if (!adminOnly(req, res)) return;
   res.json({ success: true, data: unifiedAlertStore.listRules(), ownerId: 'admin' });
 });
+app.get('/api/alerts/instrument-silences',(req,res)=>{
+  if(!adminOnly(req,res))return;
+  res.json({success:true,ownerId:'admin',data:instrumentSilences.list(String(req.query.market||'')),dataStatus:'cached'});
+});
+app.post('/api/alerts/instrument-silences',express.json(),(req,res)=>{
+  if(!adminOnly(req,res))return;
+  try{const data=instrumentSilences.update(String(req.body.market||''),String(req.body.instrument||''),req.body.until,'web');res.json({success:true,data});}catch(error:any){res.status(400).json({success:false,reason:error.message});}
+});
 app.get('/api/alerts/metric-capabilities', (req,res)=>{
   if(!adminOnly(req,res)) return;
   const instrument=String(req.query.instrument || '');
@@ -10600,7 +10637,7 @@ app.post('/api/alerts/dry-run', express.json(), (req, res) => {
   if (!adminOnly(req, res)) return;
   try {
     const observations = Array.isArray(req.body?.observations) ? req.body.observations : [];
-    res.json({ success: true, data: previewUnifiedAlerts(unifiedAlertStore, observations.map((item: any) => ({ instrumentId: String(item.instrumentId || ''), observation: item.observation || item }))) });
+    res.json({ success: true, data: previewUnifiedAlerts(unifiedAlertStore, observations.map((item: any) => ({ instrumentId: String(item.instrumentId || ''), observation: item.observation || item })),new Date(),(owner,instrument)=>owner==='admin'&&instrumentSilences.suppresses(instrument)) });
   } catch (error: any) { res.status(400).json({ success: false, error: error?.message || '提醒试运行失败' }); }
 });
 app.get('/api/alerts/deliveries', (req, res) => {
@@ -10609,6 +10646,9 @@ app.get('/api/alerts/deliveries', (req, res) => {
 });
 app.post('/api/alerts/deliveries/:id/retry', express.json(), async (req, res) => {
   if (!adminOnly(req, res)) return;
+  const saved=researchRepository.getAlertDelivery(String(req.params.id));
+  if(saved?.id.startsWith('stock-signal:'))return res.status(409).json({success:false,error:'股票信号由带过期与静默检查的outbox自动重试，不通过通用投递入口绕过策略'});
+  if(saved?.context.instrument&&['alerts','signals'].includes(saved.context.workspace)&&instrumentSilences.suppresses(saved.context.instrument))return res.status(409).json({success:false,error:'标的处于共享静默状态，请先恢复；未消耗投递次数'});
   let queued: any;
   try {
     queued = researchRepository.retryAlertDelivery(String(req.params.id));

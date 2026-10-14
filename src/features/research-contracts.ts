@@ -296,7 +296,7 @@ export interface AlertDelivery {
   alertId: string;
   status: string;
   channel?: 'web' | 'telegram';
-  payload?: { message?: string; chatId?: string };
+  payload?: { message?: string; chatId?: string; signalRows?: Array<{instrument:string;message:string}> };
   attempts?: number;
   lastError?: string;
   lastAttemptAt?: string;
