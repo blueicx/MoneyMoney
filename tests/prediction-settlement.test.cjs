@@ -3,6 +3,21 @@ const fs = require('node:fs');
 const test = require('node:test');
 const { buildSettlementEndpoint, buildPolymarketResolutionEndpoint, settlementPayloadMatches, normalizeSettlementEvidence, PredictionSettlementRepository, buildSettlementTimeline } = require('../dist/features/prediction-settlement');
 
+test('rule audit compares same-identity captured text and deadlines without future or corrupted evidence',()=>{
+  const first=normalizeSettlementEvidence({platform:'Kalshi',marketId:'KXTEST-26',capturedAt:'2026-10-01T00:00:00Z',payload:{rules_primary:'If A by Friday.',close_time:'2026-10-02T00:00:00Z'}});
+  const latest=normalizeSettlementEvidence({platform:'Kalshi',marketId:'KXTEST-26',capturedAt:'2026-10-03T00:00:00Z',payload:{rules_primary:'If B by Friday.',close_time:'2026-10-04T00:00:00Z'}});
+  const other=normalizeSettlementEvidence({platform:'Kalshi',marketId:'OTHER-26',capturedAt:'2026-10-02T00:00:00Z',payload:{rules_primary:'OTHER'}});
+  const future={...latest,capturedAt:'2026-10-05T00:00:00Z'};
+  const audit=buildSettlementTimeline(latest,[future,other,latest,first]).ruleComparisons;
+  assert.ok(audit,'rule changes must be available');assert.equal(audit.length,1);assert.equal(audit[0].status,'changed');assert.deepEqual(audit[0].textChange,{removed:'A',added:'B'});assert.equal(audit[0].fields.find(field=>field.field==='closeAt').before,first.closeAt);assert.equal(audit[0].beforeHash,first.rulesHash);
+  const broken=buildSettlementTimeline({...latest,rulesHash:'wrong'},[first,{...latest,rulesHash:'wrong'}]).ruleComparisons[0];assert.equal(broken.status,'unavailable');assert.equal(broken.textChange,null);
+});
+
+test('rule comparison UI escapes exact changed text and keeps source-time uncertainty',()=>{
+  const source=require('./helpers/dashboard-source.cjs').readDashboardSource(),render=source.match(/function renderPredictionRuleAudit\(comparisons\) \{[\s\S]*?\n\}/)?.[0];assert.ok(render);
+  const vm=require('node:vm');const html=vm.runInNewContext(render+';renderPredictionRuleAudit(comparisons);',{safeNewsText:value=>String(value??'').replaceAll('<','&lt;'),comparisons:[{status:'changed',beforeAt:'2026-10-01',afterAt:'2026-10-02',textChange:{removed:'old',added:'<script>new'},fields:[{field:'closeAt',before:null,after:'2026-10-03'}],reason:'抓取时间不是生效时间',beforeHash:'a',afterHash:'b'}]});assert.match(html,/old/);assert.match(html,/&lt;script>/);assert.doesNotMatch(html,/<script>/);assert.match(html,/抓取时间不是生效时间/);
+});
+
 test('settlement source payload must identify the exact requested venue market', () => {
   assert.equal(settlementPayloadMatches('Kalshi', 'KXTEST-26', { ticker: 'KXTEST-26' }), true);
   assert.equal(settlementPayloadMatches('Kalshi', 'KXTEST-26', { ticker: 'OTHER-26' }), false);

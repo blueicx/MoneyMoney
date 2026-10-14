@@ -2,6 +2,25 @@ const test=require('node:test'),assert=require('node:assert/strict'),fs=require(
 function load(){assert.ok(fs.existsSync('src/web/public/trading-chart.js'),'trading chart module must exist');const scope={window:{},document:{readyState:'loading',addEventListener(){}}};vm.runInNewContext(fs.readFileSync('src/web/public/trading-chart.js','utf8'),scope);return scope.window.MoneyTradingChart;}
 const rows=Array.from({length:100},(_,i)=>({time:i*300000,open:10,high:12,low:9,close:11,volume:5}));
 
+test('shared chart cursor maps only into exact or known interval candles, never across a gap',()=>{
+ const c=load();assert.equal(typeof c.cursorIndexAtTime,'function');assert.equal(c.cursorIndexAtTime(rows,300000,'5m'),1);assert.equal(c.cursorIndexAtTime(rows,450000,'5m'),1);assert.equal(c.cursorIndexAtTime([{time:0},{time:900000}],450000,'5m'),null);assert.equal(c.cursorIndexAtTime(rows,450000,'unknown'),null);assert.equal(c.cursorIndexAtTime(rows,NaN,'5m'),null);
+});
+test('cursor synchronization preserves independent views and rejects a different market',async()=>{
+ const {JSDOM}=require('jsdom'),dom=new JSDOM('<div><canvas id="a"></canvas><canvas id="b"></canvas><canvas id="c"></canvas></div>',{runScripts:'outside-only',pretendToBeVisual:true}),w=dom.window;
+ w.HTMLCanvasElement.prototype.getContext=()=>new Proxy({measureText:()=>({width:70})},{get:(target,key)=>target[key]||(()=>{})});w.HTMLElement.prototype.getClientRects=()=>[{width:800,height:440}];
+ try{w.eval(fs.readFileSync('src/web/public/trading-chart.js','utf8'));const a=w.document.getElementById('a'),b=w.document.getElementById('b'),other=w.document.getElementById('c');
+ for(const canvas of [a,b,other]){canvas.getBoundingClientRect=()=>({left:0,top:0,width:800,height:440});canvas.getClientRects=()=>[{width:800,height:440}];}
+ w.MoneyTradingChart.render(a,rows,{identity:'primary',interval:'5m',syncContext:{market:'stocks',group:'stock:us:AAPL'}});w.MoneyTradingChart.render(b,rows,{identity:'companion',interval:'5m',syncContext:{market:'stocks',group:'stock:us:AAPL'}});w.MoneyTradingChart.render(other,rows,{identity:'crypto',interval:'5m',syncContext:{market:'crypto',group:'crypto:binance:BTCUSDT'}});
+ const view={...w.MoneyTradingChart.select(b,rows,'companion').state};const layer=a.parentElement.querySelector('.mm-trading-crosshair');layer.getBoundingClientRect=()=>({left:0,top:0,width:640,height:440});layer.dispatchEvent(new w.MouseEvent('pointermove',{clientX:200,clientY:150}));await new Promise(resolve=>setTimeout(resolve,65));
+ const selected=w.MoneyTradingChart.getCursor(a);assert.ok(selected.time!==null);assert.equal(w.MoneyTradingChart.getCursor(b).time,selected.time);assert.equal(w.MoneyTradingChart.getCursor(other).time,null);assert.deepEqual({...w.MoneyTradingChart.select(b,rows,'companion').state},view);
+ }finally{w.close();}
+});
+
+test('secondary chart layer choices independently hide MA readout without adding paper account controls',()=>{
+ const {JSDOM}=require('jsdom'),dom=new JSDOM('<div><canvas></canvas></div>',{runScripts:'outside-only',pretendToBeVisual:true}),w=dom.window;w.mm_isLoggedIn=true;w.mm_isGuest=false;w.HTMLElement.prototype.getClientRects=()=>[{width:600,height:440}];w.HTMLCanvasElement.prototype.getContext=()=>new Proxy({measureText:()=>({width:70})},{get:(target,key)=>target[key]||(()=>{})});
+ try{w.eval(fs.readFileSync('src/web/public/trading-chart.js','utf8'));const canvas=w.document.querySelector('canvas');w.MoneyTradingChart.render(canvas,rows,{identity:'secondary',interval:'5m',showMovingAverages:false,paperLayer:false});assert.doesNotMatch(w.document.querySelector('.mm-trading-readout').textContent,/MA5/);assert.equal(w.document.querySelector('[data-paper-chart-layer]'),null);w.MoneyTradingChart.render(canvas,rows,{identity:'secondary',interval:'5m',showMovingAverages:true,paperLayer:false});assert.match(w.document.querySelector('.mm-trading-readout').textContent,/MA5/);}finally{w.close();}
+});
+
 test('chart price reminder draft requires an explicit supported market identity and positive finite selected price',()=>{
  const c=load();assert.equal(typeof c.priceAlertDraft,'function');
  const context={market:'stocks',instrument:'stock:us:AAPL'};

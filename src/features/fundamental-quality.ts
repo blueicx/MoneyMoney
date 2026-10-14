@@ -7,6 +7,7 @@
 
 import { loadTickerRecords } from './insider-transactions';
 import { buildSecHeaders } from './sec-edgar-client';
+import { buildCapitalHistory, type CapitalHistory } from './stock-capital-history';
 
 export interface FundamentalHistoryPoint {
   endDate: string;
@@ -62,6 +63,7 @@ export interface FundamentalRadarResult {
   adviceZh: string;
   metrics: FundamentalMetrics;
   history: FundamentalHistoryPoint[];
+  capitalHistory?: CapitalHistory;
   missingFields: string[];
   supportingFactors: FundamentalFactor[];
   riskFactors: FundamentalFactor[];
@@ -589,6 +591,7 @@ function buildResult(symbol: string, facts: CompanyFacts): FundamentalRadarResul
     symbol: symbol.toUpperCase(),
     cik,
     companyName: facts.entityName || symbol.toUpperCase(),
+    capitalHistory: buildCapitalHistory(facts),
     updatedAt: retrievedAt,
     retrievedAt,
     fiscalPeriodEnd,

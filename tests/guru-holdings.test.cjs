@@ -33,6 +33,24 @@ test.after(() => {
   fs.rmSync(isolatedDataRoot, { recursive: true, force: true });
 });
 
+test('coholding compares positive stock positions by exact CUSIP/class/period without summing shares', () => {
+  const { buildGuruCoholdingRelationships } = require('../dist/features/guru-holdings.js');
+  assert.equal(typeof buildGuruCoholdingRelationships, 'function');
+  const manager = (cik, shares, reportPeriod = '2026-06-30') => ({ cik, shares, shareAmountType:'SH', reportPeriod, sourceUrl: 'https://www.sec.gov/Archives/'+cik });
+  const row = (cusip, managers, extra={}) => ({cusip,classTitle:'COM',putCall:null,symbol:'AAPL',managers,...extra});
+  const rows=[row('037833100',[manager('1',10),manager('2',20),manager('2',20),manager('3',0)]),row('594918104',[manager('1',10),manager('2',20)]),row('CALL',[manager('1',10),manager('2',20)],{putCall:'CALL'}),row('OLD',[manager('1',10,'2026-03-31'),manager('2',20)])];
+  const result=buildGuruCoholdingRelationships(rows,'2026-06-30');
+  assert.equal(result.length,1);assert.equal(result[0].commonSecurityCount,2);assert.equal(result[0].securities.length,2);assert.equal(result[0].combinedShares,undefined);assert.equal(result[0].managerCiks.join(','),'1,2');assert.equal(result[0].evidenceRefs.length,2);
+  assert.deepEqual(buildGuruCoholdingRelationships([row('123456789',[{...manager('1',10),shareAmountType:'PRN'},{...manager('2',20),shareAmountType:undefined}])],'2026-06-30'),[],'principal or unknown units cannot be treated as common stock shares');
+});
+
+test('consensus UI exposes pairwise exact-security overlap with a delayed disclosure warning', () => {
+  const source=require('./helpers/dashboard-source.cjs').readDashboardSource();
+  const render=source.match(/function renderGuruConsensus\(payload\) \{[\s\S]*?\n\}/)[0];
+  const {JSDOM}=require('jsdom'),vm=require('node:vm'),dom=new JSDOM('<div id="guru-holdings-content"></div>');
+  try{vm.runInNewContext(render+';renderGuruConsensus(payload);',{document:dom.window.document,marketResearchEscape:value=>String(value??''),payload:{rows:[],reportPeriod:'2026-06-30',coholdingRelationships:[{managerCiks:['1','2'],commonSecurityCount:1,securities:[{cusip:'037833100',classTitle:'COM',symbol:'AAPL'}]}]}});assert.match(dom.window.document.body.textContent,/机构两两共同披露/);assert.match(dom.window.document.body.textContent,/AAPL/);assert.match(dom.window.document.body.textContent,/不是市场总持仓/);}finally{dom.window.close();}
+});
+
 test('13F parser preserves CUSIP, class, shares, and reported value', () => {
   const xml = '<informationTable><infoTable><nameOfIssuer>APPLE INC</nameOfIssuer><titleOfClass>COM</titleOfClass><cusip>037833100</cusip><value>125000</value><shrsOrPrnAmt><sshPrnamt>500</sshPrnamt><sshPrnamtType>SH</sshPrnamtType></shrsOrPrnAmt></infoTable></informationTable>';
 

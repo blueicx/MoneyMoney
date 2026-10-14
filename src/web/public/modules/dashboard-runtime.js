@@ -2434,11 +2434,12 @@ function buildCryptoStrategySignals(bars, live = false) {
   const metadata = canvas?.moneySourceMetadata || {};
   const sourceTime = Number(metadata.sourceTime);
   const sourceFresh = metadata.connection === 'live' && Number.isFinite(sourceTime) && Date.now() - sourceTime >= -5000 && Date.now() - sourceTime <= 60_000;
-  return analysis?.buildStrategyChartPoints?.({
+  const points = analysis?.buildStrategyChartPoints?.({
     bars, signals, market: 'crypto', instrument: `crypto:binance:${bnCurrentSymbol}`, timeframe: bnCurrentInterval,
     source: metadata.source || 'Binance Spot Kline WebSocket', sourceTime: metadata.sourceTime, live, sourceFresh,
     currentBarClosed: bars[bars.length - 1]?.closed === true, evidenceRefs: metadata.evidenceRefs || [],
   }) || signals;
+  return filterChartSignalLifecycle(points,`crypto:binance:${bnCurrentSymbol}`,bnCurrentInterval);
 }
 function drawCandles(canvas, klines) {
   if (document.hidden) return;
@@ -3970,6 +3971,18 @@ function stockResearchFreshnessMarkup(freshness, fallback = {}) {
     ${meta.reason ? `<div style="margin-top:3px;">${safeNewsText(meta.reason)}</div>` : ''}
   </div>`;
 }
+function renderStockCapitalHistory(host, data) {
+  const section=document.createElement('section'),capital=data.capitalHistory;section.className='mm-paper-marker-detail';section.dataset.stockCapital='';
+  const fields=[['shares','普通股股数'],['operatingCashFlowUsd','年经营现金流'],['repurchasesUsd','年回购支付'],['dividendsUsd','年普通股股息支付'],['cashUsd','期末现金'],['debtUsd','长期债务（含当期）']];
+  const fieldText=field=>typeof field?.value==='number'&&Number.isFinite(field.value)?field.value.toLocaleString()+' '+field.unit:'不可用：'+(field?.reason||'未披露');
+  const table=rows=>'<div class="mm-table-scroll"><table><thead><tr><th>标的 / 年报区间</th>'+fields.map(([,title])=>'<th>'+title+'</th>').join('')+'<th>股数变化</th><th>证据</th></tr></thead><tbody>'+rows.map(row=>'<tr><td>'+stockEscapeHtml(row.symbol||data.symbol)+'<br>'+stockEscapeHtml(row.periodStart+' – '+row.periodEnd)+'</td>'+fields.map(([key])=>'<td>'+stockEscapeHtml(fieldText(row[key]))+'</td>').join('')+'<td>'+stockEscapeHtml(row.shareChangePct==null?'未匹配前期':row.shareChangePct.toFixed(2)+'%')+'</td><td><details><summary>字段披露</summary>'+fields.map(([key,title])=>'<p>'+stockEscapeHtml(title+' · '+((row[key]?.evidence||[]).map(item=>item.tag+' / '+item.unit+' / 申报 '+item.filed+' / accession '+(item.accession||'未提供')).join('；')||'缺少证据'))+'</p>').join('')+'</details></td></tr>').join('')+'</tbody></table></div>';
+  section.innerHTML='<h4>资本与现金流 · 精确年报披露</h4><p>'+stockEscapeHtml(capital?.reason||'旧快照未记录资本字段；刷新来源后再查看')+'</p>'+(capital?.points?.length?table(capital.points):'<p>来源无精确年度记录；不推算缺失值</p>')+'<label>同口径比较（2–4个美股代码，逗号分隔） <input data-capital-peers aria-label="资本比较标的" placeholder="AAPL,MSFT"></label><button type="button" class="btn btn-secondary" data-capital-compare>比较已披露区间</button><div data-capital-comparison role="status"></div>';
+  host.append(section);let controller;
+  section.querySelector('[data-capital-compare]').onclick=async event=>{const output=section.querySelector('[data-capital-comparison]'),symbols=section.querySelector('[data-capital-peers]').value.trim().toUpperCase(),captured=data.symbol;controller?.abort();controller=new AbortController();const current=controller;event.target.disabled=true;output.textContent='读取对应SEC来源，不使用其他市场补位…';
+    const cancel=()=>current.abort();window.addEventListener('mm-workspace-context',cancel,{once:true});
+    try{const response=await fetch('/api/stock/capital/compare?'+new URLSearchParams({symbols}),{signal:current.signal}),body=await response.json();if(current.signal.aborted||!section.isConnected||currentFundamentalSymbol!==captured)return;if(!response.ok||!body.success)throw Error(body.reason||'比较失败');output.innerHTML='<p>'+stockEscapeHtml(body.dataStatus+' · '+body.reason)+'</p>'+(body.data.rows.length?table(body.data.rows):'<p>无法比较：没有精确共同区间或来源失败</p>');}catch(error){if(error.name!=='AbortError'&&section.isConnected)output.textContent=error.message;}finally{window.removeEventListener('mm-workspace-context',cancel);if(controller===current)event.target.disabled=false;}
+  };
+}
 function renderFundamentalQuality(data, freshness) {
   const el = document.getElementById('fundamental-radar');
   if (!el) return;
@@ -4002,7 +4015,7 @@ function renderFundamentalQuality(data, freshness) {
   const historyRows = (data.history || []).map(point =>
     '<tr>' +
       '<td style="padding:6px 4px;color:var(--text-secondary);">' + stockEscapeHtml(String(point.periodKey || point.endDate || '').replace(':', ' ')) + '</td>' +
-      '<td style="padding:6px 4px;font-weight:600;">$' + compactUsd(point.revenueUsd || 0) + '</td>' +
+      '<td style="padding:6px 4px;font-weight:600;">' + (point.revenueUsd == null ? '不可用' : '$' + compactUsd(point.revenueUsd)) + '</td>' +
       '<td style="padding:6px 4px;">' + pct(point.netMarginPct) + '</td>' +
       '<td style="padding:6px 4px;">' + pct(point.operatingCashFlowMarginPct) + '</td>' +
       '<td style="padding:6px 4px;">' + ratio(point.currentRatio) + '</td>' +
@@ -4067,6 +4080,7 @@ function renderFundamentalQuality(data, freshness) {
         来源：SEC EDGAR XBRL / 10-Q、10-K。TTM 以可用季度申报合计，资产负债表指标取最近已披露时点；缺少连续季度时回退年度口径。基本面质量是筛选背景，不是买卖指令。
       </div>
     </div>`;
+  renderStockCapitalHistory(el, data);
 }
 let currentShortSymbol = 'AAPL';
 let shortInterestRequestToken = 0;
@@ -4587,7 +4601,9 @@ function renderGuruConsensus(payload) {
   const emptyReason = payload.reason || (payload.dataStatus === 'empty'
     ? '该报告期来源成功，但没有已保存的可展示证券记录。'
     : '该报告期没有可用的机构重合记录。');
-  host.innerHTML = `${summary}${cards || `<div class="empty-tip">${marketResearchEscape(emptyReason)}</div>`}`;
+  const relationships=Array.isArray(payload.coholdingRelationships)?payload.coholdingRelationships:[];
+  const overlap='<details class="mm-paper-marker-detail"><summary>机构两两共同披露 · '+relationships.length+' 对</summary><p>仅同报告期、同CUSIP/类别的正股股数披露；季度滞后、非实时，不是市场总持仓，不汇总机构股数。缺报不代表没有持仓。</p>'+(relationships.length?'<div class="mm-table-scroll"><table><thead><tr><th>机构 CIK</th><th>共同证券数</th><th>证券身份</th></tr></thead><tbody>'+relationships.map(pair=>'<tr><td>'+marketResearchEscape(pair.managerCiks.join(' / '))+'</td><td>'+Number(pair.commonSecurityCount)+'</td><td>'+marketResearchEscape(pair.securities.map(security=>(security.symbol||'未映射')+' · '+security.cusip+' / '+security.classTitle).join('；'))+'</td></tr>').join('')+'</tbody></table></div>':'<p>当前保存的同报告期披露不足以形成共同持有关系。</p>')+'</details>';
+  host.innerHTML = `${summary}${overlap}${cards || `<div class="empty-tip">${marketResearchEscape(emptyReason)}</div>`}`;
 }
 async function loadGuruManagerDirectory(force = false) {
   const host = document.getElementById('guru-holdings-content');
@@ -5888,12 +5904,15 @@ function renderOptionPayoffBuilder(expiry) {
   const options = rows.map(row => `<option value="${stockEscapeHtml(row.instrumentName)}">${row.optionType === 'call' ? 'Call' : 'Put'} ${Number(row.strike).toLocaleString()} · 买 ${row.askPrice} / 卖 ${row.bidPrice} · ${stockEscapeHtml(row.instrumentName)}</option>`).join('');
   const legs = [0,1,2,3].map(index => `<div class="option-payoff-leg" data-payoff-leg="${index}"><label><input type="checkbox" data-leg-enabled ${index < 2 ? 'checked' : ''}> 腿 ${index+1}</label><select data-contract ${index >= 2 ? 'disabled' : ''} aria-label="期权合约腿 ${index+1}">${options}</select><select data-action ${index >= 2 ? 'disabled' : ''} aria-label="买卖方向"><option value="buy">买入（按卖价）</option><option value="sell" ${index === 1 ? 'selected' : ''}>卖出（按买价）</option></select><input data-quantity type="number" min="1" max="100" step="1" value="1" ${index >= 2 ? 'disabled' : ''} aria-label="合约数量"></div>`).join('');
   host.innerHTML = `<section class="option-payoff"><div><h3>多腿到期损益试算</h3><p>同一到期日、仅使用当前 CBOE 双边有效报价；这是到期情景分析，不会创建订单。</p></div><div class="option-payoff-legs">${legs}</div><label class="option-payoff-multiplier">每份合约乘数（股） <input data-multiplier type="number" min="1" max="100000" step="1" value="" placeholder="先核实规格"></label><button type="button" data-calculate>计算到期损益</button><div data-result role="status">报价来源 ${stockEscapeHtml(optionsSnapshot.source)} · ${stockEscapeHtml(optionsSnapshot.fetchedAt)} · 买单按卖价、卖单按买价。</div><small>调整/特殊交割合约的乘数可能不同；请以该合约规格核实并填写乘数。未核实前不计算金额；结果不含费用、滑点、提前行权或指派风险。</small></section>`;
+  host.querySelector('.option-payoff').insertAdjacentHTML('beforeend','<details><summary>价格 / 时间 / IV 压力情景（欧式近似，不是预测）</summary><label><input type="checkbox" data-option-scenario-enabled> 同时计算模型情景</label><div class="option-payoff-legs">'+[['spotShockPct','标的价格冲击 %',0],['elapsedDays','经过天数',0],['ivShiftPctPoints','IV变化（百分点）',0],['ratePct','年化无风险利率 %（假设）',''],['dividendYieldPct','连续年化股息率 %（假设）',''],['feePerContractUsd','每腿每份入场费用 USD（假设）','']].map(([field,label,value])=>'<label>'+label+'<input type="number" step="any" data-option-scenario="'+field+'" value="'+value+'"></label>').join('')+'</div><p>仅使用本次来源报价和IV，Greeks为模型敏感度；不处理美式提前行权、离散除息或指派，不进行结算/下单。股息、费用、利率缺失时必须明确输入假设。</p></details>');
   host.querySelectorAll('[data-leg-enabled]').forEach(check => check.addEventListener('change', () => {
     const row = check.closest('[data-payoff-leg]');
     row.querySelectorAll('[data-contract],[data-action],[data-quantity]').forEach(control => { control.disabled = !check.checked; });
   }));
   host.querySelector('[data-calculate]').addEventListener('click', async event => {
     const button = event.currentTarget, result = host.querySelector('[data-result]');
+    const capturedSnapshot=optionsSnapshot;
+    const ownsResult=()=>result.isConnected && optionsSnapshot===capturedSnapshot && host.contains(result);
     const multiplier = Number(host.querySelector('[data-multiplier]').value);
     if (!Number.isInteger(multiplier) || multiplier < 1 || multiplier > 100_000) {
       result.textContent = '请先核实当前合约乘数并填写 1–100000 的整数；未核实前不显示损益。';
@@ -5904,15 +5923,19 @@ function renderOptionPayoffBuilder(expiry) {
       action: row.querySelector('[data-action]').value,
       contracts: Number(row.querySelector('[data-quantity]').value),
     }));
+    let scenario;
+    if(host.querySelector('[data-option-scenario-enabled]').checked){scenario={};for(const field of host.querySelectorAll('[data-option-scenario]')){if(!field.value.trim()||!Number.isFinite(Number(field.value))){result.textContent='请明确填写全部情景假设，不能把缺失利率、股息或费用自动当零。';return;}scenario[field.dataset.optionScenario]=Number(field.value);}}
     button.disabled = true; result.textContent = '正在以来源当前报价计算…';
     try {
-      const response = await fetch('/api/options/payoff', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ symbol:optionsSnapshot.asset, expiryMs:expiry.expiryMs, multiplier, legs:selectedLegs }) });
+      const response = await fetch('/api/options/payoff', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ symbol:optionsSnapshot.asset, expiryMs:expiry.expiryMs, multiplier, legs:selectedLegs, ...(scenario?{scenario}:{}) }) });
       const payload = await response.json();
+      if (!ownsResult()) return;
       if (!response.ok || !payload.success) throw new Error(payload.reason || '试算失败');
       const data = payload.data;
       const rowsHtml = data.curve.map(point => `<tr><td>${Number(point.underlyingPrice).toLocaleString()}</td><td style="color:${point.pnlUsd >= 0 ? 'var(--green)' : 'var(--red)'}">${point.pnlUsd >= 0 ? '+' : ''}$${Number(point.pnlUsd).toFixed(2)}</td></tr>`).join('');
       result.innerHTML = `<div class="option-payoff-metrics"><span>净权利金 ${data.netPremiumUsd >= 0 ? '支出' : '收入'} $${Math.abs(data.netPremiumUsd).toFixed(2)}</span><span>最大亏损 ${data.unboundedLoss ? '理论上无上限' : '$'+Number(data.maxLossUsd).toFixed(2)}</span><span>最大收益 ${data.unboundedGain ? '理论上无上限' : '$'+Number(data.maxGainUsd).toFixed(2)}</span><span>现价到期损益 $${Number(data.payoffAtSpotUsd).toFixed(2)}</span><span>盈亏平衡 ${data.breakEvenPrices.length ? data.breakEvenPrices.join(' / ') : '区间内无交点'}</span></div><table><thead><tr><th>到期标的价</th><th>估算损益</th></tr></thead><tbody>${rowsHtml}</tbody></table><p>${stockEscapeHtml(data.assumptions)}</p><small>来源 ${stockEscapeHtml(payload.source)} · 报价时间 ${stockEscapeHtml(payload.sourceTime)} · 状态 ${stockEscapeHtml(payload.dataStatus)}</small>`;
-    } catch (error) { result.textContent = error.message || '期权试算失败'; }
+      if(data.scenario){const s=data.scenario;result.insertAdjacentHTML('beforeend','<h4>三变量模型情景 · '+stockEscapeHtml(s.model)+'</h4><div class="option-payoff-metrics"><span>情景标的价 '+stockEscapeHtml(s.underlyingPrice)+'</span><span>剩余天数 '+stockEscapeHtml(s.remainingDays)+'</span><span>入场费用 $'+stockEscapeHtml(s.entryFeesUsd)+'</span><span>模型组合价值 $'+stockEscapeHtml(s.modelValueUsd)+'</span><span>模型损益（含入场费用） $'+stockEscapeHtml(s.pnlUsd)+'</span></div><p>'+stockEscapeHtml(s.greeks?'模型 Greeks：Delta '+s.greeks.delta+' · Gamma '+s.greeks.gamma+' · Vega/百分点 '+s.greeks.vegaPerPctPoint+' · Theta/日 '+s.greeks.thetaPerDay:'到期点Greeks不可用，未以零补齐')+'</p><div class="mm-table-scroll"><table><thead><tr><th>合约</th><th>来源IV %</th><th>情景IV %</th><th>入场报价</th><th>模型单份价</th></tr></thead><tbody>'+s.legs.map(leg=>'<tr><td>'+stockEscapeHtml(leg.instrumentName)+'</td><td>'+stockEscapeHtml(leg.sourceIvPct)+'</td><td>'+stockEscapeHtml(leg.scenarioIvPct)+'</td><td>'+stockEscapeHtml(leg.entryPrice)+'</td><td>'+stockEscapeHtml(leg.modelPrice)+'</td></tr>').join('')+'</tbody></table></div><p>'+stockEscapeHtml(s.assumptions)+'</p>');}
+    } catch (error) { if(ownsResult()) result.textContent = error.message || '期权试算失败'; }
     finally { button.disabled = false; }
   });
 }
@@ -5979,6 +6002,8 @@ let stockChartCompanionMode = 'same-symbol';
 let stockChartCompanionPeriod = '1h';
 let stockChartCompanionBars = [];
 let stockChartCompanionRequestRevision = 0;
+let stockChartCompanionController = null;
+window.addEventListener('mm-workspace-context',()=>{stockChartCompanionController?.abort();stockChartCompanionRequestRevision++;stockChartCompanionKey='';stockChartCompanionBars=[];const canvas=document.getElementById('stock-kline-companion');if(canvas)window.MoneyTradingChart?.clear?.(canvas);});
 let stockChartCompanionKey = '';
 try {
   stockChartCompanionOpen = localStorage.getItem('mm-stock-chart-layout-v1') === 'open';
@@ -6132,11 +6157,12 @@ function buildStockStrategySignals(bars, live = false) {
   const instrument = /^(SH|SZ|BJ)\d{6}$/.test(rawInstrument)
     ? `stock:cn:${rawInstrument}`
     : /^[A-Z][A-Z0-9.-]{0,14}$/.test(rawInstrument) ? `stock:us:${rawInstrument}` : '';
-  return analysis?.buildStrategyChartPoints?.({
+  const points = analysis?.buildStrategyChartPoints?.({
     bars, signals, market: 'stocks', instrument,
     timeframe: currentStockKlinePeriod, source: metadata.source || '股票行情来源', sourceTime: metadata.sourceTime,
     live, sourceFresh, currentBarClosed: bars[bars.length - 1]?.closed === true, evidenceRefs: metadata.evidenceRefs || [],
   }) || signals;
+  return filterChartSignalLifecycle(points,instrument,currentStockKlinePeriod);
 }
 function stockChartEventInstrumentId() {
   const raw = String(currentStockSymbol || '').trim().replace(/^stock:[^:]+:/i, '').replace(/^us(?=[A-Z])/, '').toUpperCase();
@@ -6403,12 +6429,29 @@ function renderChartSignalMarkers(targetId, signals, getPosition) {
   });
 }
 
+function chartSignalLifecyclePreferences(instrument,timeframe) {
+  const key='mm-chart-signal-filter-v1|'+instrument+'|'+timeframe;
+  try{const saved=JSON.parse(localStorage.getItem(key)||'{}');return {key,filters:{strategy:typeof saved.strategy==='string'?saved.strategy:'',side:['buy','sell'].includes(saved.side)?saved.side:'',status:['forming','confirmed'].includes(saved.status)?saved.status:''}};}catch{return {key,filters:{strategy:'',side:'',status:''}};}
+}
+function filterChartSignalLifecycle(points,instrument,timeframe) {
+  const {filters}=chartSignalLifecyclePreferences(instrument,timeframe);
+  return window.MoneyChartAnalysis?.filterStrategyChartPoints?.(points,filters)||points;
+}
+function renderChartSignalLifecycleControls(el,targetId) {
+  const stock=targetId==='stock-chart-signals',instrument=stock?stockChartEventInstrumentId():`crypto:binance:${bnCurrentSymbol}`,timeframe=stock?currentStockKlinePeriod:bnCurrentInterval;
+  const {key,filters}=chartSignalLifecyclePreferences(instrument,timeframe),panel=document.createElement('div');panel.className='mm-action-tools';panel.dataset.chartSignalFilters='';
+  const strategies=Object.keys(stock?stockChartOverlayConfig.strategies||{}:cryptoChartStrategyConfig||{});if(filters.strategy&&!strategies.includes(filters.strategy))strategies.push(filters.strategy);
+  panel.innerHTML=[['strategy','策略',[['','全部已选策略'],...strategies.map(value=>[value,value])]],['side','方向',[['','全部方向'],['buy','买入'],['sell','卖出']]],['status','确认状态',[['','全部状态'],['forming','形成中'],['confirmed','已确认']]]].map(([field,label,options])=>'<label>'+label+' <select data-signal-filter="'+field+'" aria-label="信号'+label+'">'+options.map(([value,text])=>'<option value="'+stockEscapeHtml(value)+'"'+(filters[field]===value?' selected':'')+'>'+stockEscapeHtml(text)+'</option>').join('')+'</select></label>').join('');
+  panel.addEventListener('change',event=>{const field=event.target.dataset.signalFilter;if(!['strategy','side','status'].includes(field))return;filters[field]=event.target.value;try{localStorage.setItem(key,JSON.stringify(filters));}catch{}if(stock)redrawStockKlineSelection();else if(bnKlineData.length)drawCandles(document.getElementById('bn-candlestick'),bnKlineData);});
+  el.prepend(panel);
+}
 function renderChartSignalList(targetId, signals, emptyText) {
   const el = document.getElementById(targetId);
   if (!el) return;
   const allVisible = (signals || []).slice().reverse();
   if (!allVisible.length) {
     el.innerHTML = `<span class="chart-signal-empty">${stockEscapeHtml(emptyText)}</span>`;
+    renderChartSignalLifecycleControls(el,targetId);
     return;
   }
   el.innerHTML = allVisible.map(signal => {
@@ -6422,6 +6465,7 @@ function renderChartSignalList(targetId, signals, emptyText) {
     return `<button type="button" class="chart-signal-item ${signal.side === 'buy' ? 'buy' : 'sell'} ${signal.status === 'forming' ? 'forming' : 'confirmed'}" title="${stockEscapeHtml(title)}" data-signal-status="${signal.status === 'forming' ? 'forming' : 'confirmed'}">${signal.status === 'forming' ? '◯' : '●'} ${signal.side === 'buy' ? '买' : '卖'} · ${stockEscapeHtml(signal.label)} · ${time} · ${priceText} · ${state}</button>`;
   }).join('');
   el.querySelectorAll('.chart-signal-item').forEach((button, index) => button.addEventListener('click', () => handleChartSignalSelection(allVisible[index], targetId)));
+  renderChartSignalLifecycleControls(el,targetId);
 }
 function renderChartPatternList(targetId, patterns, emptyText) {
   const el = document.getElementById(targetId);
@@ -6647,7 +6691,7 @@ function toggleStockChartCompanion() {
   saveStockChartCompanionPreferences();
   syncStockChartCompanionControls();
   if (stockChartCompanionOpen) loadStockChartCompanion();
-  else stockChartCompanionRequestRevision += 1;
+  else {stockChartCompanionController?.abort();stockChartCompanionRequestRevision += 1;}
   return stockChartCompanionOpen;
 }
 function setStockChartCompanionMode(value) {
@@ -6668,6 +6712,15 @@ function setStockChartCompanionPeriod(value) {
 }
 function drawStockChartCompanion(canvas, bars) {
   if (!canvas) return;
+  if(window.MoneyTradingChart?.render){
+    const period=canvas.closest('[data-mm-multi-period]')?.dataset.mmMultiPeriod||stockChartCompanionPeriod;
+    const instrument=stockChartCompanionMode==='benchmark'&&!canvas.closest('[data-mm-multi-period]')?'stock:us:SPY':stockChartEventInstrumentId();
+    const identity=(canvas.id||'multi-'+period)+'|'+instrument+'|'+period,key='mm-secondary-chart-layers-v1|'+identity;
+    let saved;try{saved=JSON.parse(localStorage.getItem(key)||'{}');}catch{}const layers={ma:saved?.ma!==false,volume:saved?.volume!==false};
+    window.MoneyTradingChart.render(canvas,bars||[],{...canvas.moneySourceMetadata,identity,interval:period,volumeUnit:'股',exchangeTimeZone:stockChartExchangeTimezone,interactive:!stockChartAsOf,paperLayer:false,showMovingAverages:layers.ma,showVolume:layers.volume,syncContext:{market:'stocks',group:stockChartEventInstrumentId()}});
+    const status=canvas.parentElement.querySelector('.mm-trading-status');if(status){let controls=status.querySelector('[data-secondary-layers]');if(!controls){controls=document.createElement('span');controls.dataset.secondaryLayers='';controls.innerHTML='<label><input type="checkbox" data-secondary-layer="ma"> 均线</label> <label><input type="checkbox" data-secondary-layer="volume"> 成交量</label>';status.append(controls);}controls.hidden=!bars?.length;controls.querySelectorAll('input').forEach(input=>input.checked=layers[input.dataset.secondaryLayer]);controls.onchange=event=>{const field=event.target.dataset.secondaryLayer;if(!['ma','volume'].includes(field))return;layers[field]=event.target.checked;try{localStorage.setItem(key,JSON.stringify(layers));}catch{}drawStockChartCompanion(canvas,bars);};}
+    return;
+  }
   const dpr = Math.max(1, window.devicePixelRatio || 1);
   const width = Math.max(280, canvas.clientWidth || 640), height = Math.max(180, canvas.clientHeight || 260);
   canvas.width = Math.round(width * dpr); canvas.height = Math.round(height * dpr);
@@ -6723,7 +6776,9 @@ function bindStockChartCompanionSelection() {
     const ratio = Math.max(0, Math.min(0.999999, (event.clientX - rect.left - 55) / plotWidth));
     const visible = stockChartReplayIndex >= 0 ? Math.min(stockChartKlines.length, stockChartReplayIndex + 1) : stockChartKlines.length;
     const index = Math.min(stockChartCompanionBars.length - 1, Math.floor(ratio * stockChartCompanionBars.length));
-    const focusTime = Number(stockChartCompanionBars[index]?.time);
+    const selected=window.MoneyTradingChart?.pickCandle?.(canvas,event.clientX);
+    if(window.MoneyTradingChart?.pickCandle&&!selected)return;
+    const focusTime = Number(selected?.time ?? stockChartCompanionBars[index]?.time);
     if (!Number.isFinite(focusTime)) return;
     let nearest = 0, nearestDelta = Infinity;
     for (let primaryIndex = 0; primaryIndex < visible; primaryIndex += 1) {
@@ -6742,6 +6797,7 @@ async function loadStockChartCompanion() {
   if (!canvas) return;
   bindStockChartCompanionSelection();
   const revision = ++stockChartCompanionRequestRevision;
+  stockChartCompanionController?.abort();const controller=new AbortController();stockChartCompanionController=controller;
   const benchmark = stockChartCompanionMode === 'benchmark';
   const symbol = benchmark ? 'usSPY' : currentStockSymbol;
   const apiSymbol = benchmark ? 'SPY' : currentStockApiSymbol;
@@ -6755,15 +6811,16 @@ async function loadStockChartCompanion() {
     const query = new URLSearchParams({ symbol, period: stockChartCompanionPeriod, interval: stockChartCompanionPeriod });
     if (apiSymbol) query.set('api', apiSymbol);
     if (stockChartAsOf) query.set('asOf', stockChartAsOf);
-    const response = await fetch(`/api/stock/kline?${query.toString()}`, { cache: 'no-store' });
+    const response = await fetch(`/api/stock/kline?${query.toString()}`, { cache: 'no-store',signal:controller.signal });
     const payload = await response.json();
-    if (revision !== stockChartCompanionRequestRevision) return;
+    if (revision !== stockChartCompanionRequestRevision || controller.signal.aborted) return;
     if (!response.ok || !payload.success || !Array.isArray(payload.data) || !payload.data.length) throw new Error(payload.reason || '来源没有返回可用K线');
     stockChartCompanionBars = payload.data;
+    canvas.moneySourceMetadata={connection:'snapshot',sourceTime:payload.sourceTime?Date.parse(payload.sourceTime):null,dataStatus:payload.dataStatus||'unknown',source:payload.source||'来源未知'};
     if (status) status.textContent = `${benchmark ? 'SPY基准' : safeNewsText(currentStockSymbol)} · ${stockChartCompanionPeriod} · ${payload.source || '来源未知'} · ${payload.data.length}根 · ${payload.dataStatus || '状态未知'}`;
     renderStockChartCompanion();
   } catch (error) {
-    if (revision !== stockChartCompanionRequestRevision) return;
+    if (revision !== stockChartCompanionRequestRevision || controller.signal.aborted || error.name==='AbortError') return;
     stockChartCompanionBars = [];
     if (status) status.textContent = `来源不可用：${error?.message || '请求失败'}`;
     renderStockChartCompanion();
@@ -7457,7 +7514,7 @@ function drawStockKline(canvas, klines) {
   renderChartPatternList('stock-chart-pattern-list', overlays.patterns, '当前周期未识别到所选蜡烛形态');
   renderChartStructureList('stock-chart-structure-list', overlays.structures, overlays.chan, '当前周期未识别到结构标记');
   const alertSymbol=String(currentStockSymbol).match(/^us([A-Z0-9.-]+)$/i)?.[1]?.toUpperCase();
-  window.MoneyTradingChart?.decorate(canvas,{...canvas.moneySourceMetadata,alertContext:alertSymbol?{market:'stocks',instrument:'stock:us:'+alertSymbol}:null,identity:currentStockSymbol+'|'+currentStockKlinePeriod,canvas,full:replayKlines,rows:klines,interval:currentStockKlinePeriod,exchangeTimeZone:stockChartExchangeTimezone,ma:[5,10,20],volumeUnit:'股',interactive:tradingActive,loadEarlier:!stockChartAsOf&&!stockChartIntradayDate&&stockChartAdjustment==='source'&&['1m','5m','15m','1h','1d'].includes(currentStockKlinePeriod)?loadEarlierStockKline:undefined,onAdjustmentChange:value=>{if(!['source','forward'].includes(value)||stockChartAsOf||stockChartIntradayDate)return;stockChartAdjustment=value;loadStockKline();},geometry:{W,H,padL,padR,padT,priceH,minP,maxP},redraw:()=>drawStockKline(canvas,stockChartKlines)});
+  window.MoneyTradingChart?.decorate(canvas,{...canvas.moneySourceMetadata,syncContext:{market:'stocks',group:stockChartEventInstrumentId()},alertContext:alertSymbol?{market:'stocks',instrument:'stock:us:'+alertSymbol}:null,identity:currentStockSymbol+'|'+currentStockKlinePeriod,canvas,full:replayKlines,rows:klines,interval:currentStockKlinePeriod,exchangeTimeZone:stockChartExchangeTimezone,ma:[5,10,20],volumeUnit:'股',interactive:tradingActive,loadEarlier:!stockChartAsOf&&!stockChartIntradayDate&&stockChartAdjustment==='source'&&['1m','5m','15m','1h','1d'].includes(currentStockKlinePeriod)?loadEarlierStockKline:undefined,onAdjustmentChange:value=>{if(!['source','forward'].includes(value)||stockChartAsOf||stockChartIntradayDate)return;stockChartAdjustment=value;loadStockKline();},geometry:{W,H,padL,padR,padT,priceH,minP,maxP},redraw:()=>drawStockKline(canvas,stockChartKlines)});
   renderChartPatternMarkers('stock-chart-patterns', overlays.patterns, item => {
     const bar = klines[item.index];
     if (!bar) return null;
@@ -11794,6 +11851,10 @@ function predictionMarketToken(item) {
   for (let i = 0; i < key.length; i++) hash = ((hash * 33) ^ key.charCodeAt(i)) >>> 0;
   return hash.toString(36);
 }
+function renderPredictionRuleAudit(comparisons) {
+  if(!Array.isArray(comparisons)||!comparisons.length)return '<p>暂无同一事件可比较的规则版本；从当前真实来源开始保存，不推测过去规则。</p>';
+  return '<details class="mm-paper-marker-detail"><summary>规则内容 / 截止 / 来源变化对照</summary>'+comparisons.map(row=>'<section><h4>'+safeNewsText(row.beforeAt)+' → '+safeNewsText(row.afterAt)+' · '+safeNewsText(row.status)+'</h4><p>规则Hash '+safeNewsText(row.beforeHash)+' → '+safeNewsText(row.afterHash)+'</p>'+(row.textChange?'<p>移除 <del style="white-space:pre-wrap">'+safeNewsText(row.textChange.removed||'（无）')+'</del></p><p>新增 <ins style="white-space:pre-wrap">'+safeNewsText(row.textChange.added||'（无）')+'</ins></p>':'<p>文本无法核验，不生成差异</p>')+(row.fields||[]).map(field=>'<p>'+safeNewsText(field.field)+'：'+safeNewsText(field.before||'未知')+' → '+safeNewsText(field.after||'未知')+'</p>').join('')+'<p>'+safeNewsText(row.reason)+'</p></section>').join('')+'</details>';
+}
 async function togglePredictionSettlement(token) {
   const item = predictionRadarState.cards.get(token);
   const panel = document.getElementById(`radar-settlement-${token}`);
@@ -11823,10 +11884,37 @@ async function togglePredictionSettlement(token) {
       return `<li data-stage="${safeNewsText(stage.key)}" data-status="${safeNewsText(stage.status)}"><span class="prediction-settlement-dot" aria-hidden="true"></span><div><b>${safeNewsText(stage.label)}</b> · ${safeNewsText(timelineStatus[stage.status] || stage.status)}<small>${timeLabel}</small><div>${safeNewsText(stage.detail)} ${sourceLink}</div></div></li>`;
     }).join('')}</ol>${timeline.ruleRevisions?.length ? `<details><summary>规则修订时间线（${timeline.ruleRevisions.length}）</summary>${timeline.ruleRevisions.map((revision,index)=>`<div>版本 ${index+1} · ${safeNewsText(revision.capturedAt || '时间未知')} · ${safeNewsText(revision.hash || '规则 Hash 未提供')}</div>`).join('')}</details>` : ''}</section>` : '';
     panel.innerHTML = `<div style="padding:9px;border:1px solid var(--border);border-radius:10px;background:var(--bg-secondary);font-size:11px;line-height:1.55;"><b>结算规则与证据 · ${safeNewsText(statusText)}</b><div style="margin-top:5px;">平台公布/报告结果：${safeNewsText(announcedText)}</div><div>最终结算结果：${safeNewsText(resultText)}</div><div>平台状态：${safeNewsText(evidence.platformStatus || '未提供')} · 争议：${safeNewsText(evidence.disputeStatus || (resolution.wasDisputed ? 'disputed' : 'unknown'))}</div><div>官方市场记录：${evidence.sourceUrl ? `<a href="${safeNewsText(evidence.sourceUrl)}" target="_blank" rel="noopener noreferrer">查看来源数据</a>` : '来源地址不可用'} · 规则来源：${evidence.resolutionSourceUrl ? `<a href="${safeNewsText(evidence.resolutionSourceUrl)}" target="_blank" rel="noopener noreferrer">打开官方规则来源</a>` : '平台未提供独立规则原文链接'} · 裁定记录：${evidence.determinationSourceUrl ? `<a href="${safeNewsText(evidence.determinationSourceUrl)}" target="_blank" rel="noopener noreferrer">打开官方 resolution API</a>` : '无独立裁定接口'}</div><div>裁定状态：${safeNewsText(resolution.status || '未提供')} · Payouts：${safeNewsText(payoutText)} · 交易哈希：${safeNewsText(transactionText)}</div><div>关闭时间：${safeNewsText(evidence.closeAt || '未提供')} · 判定时间：${safeNewsText(evidence.determinationAt || '未提供')} · 结算时间：${safeNewsText(evidence.settlementAt || '未提供')}</div><div>规则 Hash：${safeNewsText(evidence.rulesHash || '暂无规则文本')} · 证据 Hash：${safeNewsText(evidence.evidenceHash || '—')}</div>${timelineHtml}${evidence.rulesText ? `<details style="margin-top:5px;"><summary style="cursor:pointer;">查看结算规则</summary><div style="white-space:pre-wrap;margin-top:5px;">${safeNewsText(evidence.rulesText)}</div></details>` : ''}${history}<div style="color:var(--text-secondary);margin-top:5px;">来源刷新：${safeNewsText(sourceStatusText)} · 抓取 ${safeNewsText(evidence.capturedAt || body.updatedAt || '时间未知')} · ${safeNewsText(body.reason || evidence.reason || '结算信息仅作核对，不自动结算模拟持仓。')}</div></div>`;
+    panel.insertAdjacentHTML('beforeend',renderPredictionRuleAudit(timeline.ruleComparisons));
+    attachPredictionRelationshipCheck(panel,item);
     panel.dataset.loaded = 'true';
   } catch (error) {
     panel.innerHTML = `<div class="empty-tip" style="color:var(--red);">结算证据不可用：${safeNewsText(error.message)} <button class="tab" onclick="delete document.getElementById('radar-settlement-${token}')?.dataset.loaded;togglePredictionSettlement('${token}')">重试</button></div>`;
   }
+}
+function attachPredictionRelationshipCheck(panel,item) {
+  if(window.mm_isGuest===true||window.mm_isLoggedIn!==true)return;
+  const details=document.createElement('details');details.className='mm-paper-marker-detail';
+  const summary=document.createElement('summary');summary.textContent='两个事件的条件一致性检查';details.append(summary);
+  const target=document.createElement('select');target.className='mm-input';target.setAttribute('aria-label','比较事件');
+  const placeholder=document.createElement('option');placeholder.value='';placeholder.textContent='选择已加载事件（先打开其官方规则）';target.append(placeholder);
+  const identities=new Set();for(const row of predictionRadarState.cards.values()){
+    const identity='prediction:'+row.platform.toLowerCase()+':'+row.id;
+    if(identity==='prediction:'+item.platform.toLowerCase()+':'+item.id||identities.has(identity)||!['Kalshi','Polymarket'].includes(row.platform))continue;
+    identities.add(identity);const option=document.createElement('option');option.value=identity;option.textContent=row.platform+' · '+(row.titleZh||row.title);target.append(option);
+  }
+  const relation=document.createElement('select');relation.className='mm-input';relation.setAttribute('aria-label','显式关系假设');
+  for(const [value,text] of [['mutually-exclusive','两事件互斥（不假设穷尽）'],['left-implies-right','当前事件成立必然包含所选事件'],['equivalent','两事件结算条件等价']]){const option=document.createElement('option');option.value=value;option.textContent=text;relation.append(option);}
+  const label=document.createElement('label'),confirm=document.createElement('input');confirm.type='checkbox';label.append(confirm,' 我已阅读双方规则；这是我声明的研究假设，不是系统核验的事实');
+  const button=document.createElement('button');button.type='button';button.className='btn btn-secondary';button.textContent='检查现有快照';
+  const output=document.createElement('p');output.setAttribute('aria-live','polite');
+  details.append(target,relation,label,button,output);panel.append(details);
+  button.onclick=async()=>{
+    if(!target.value||!confirm.checked){output.textContent='请选择事件并确认关系假设。';return;}
+    const scopeToken=marketScopeRequestToken(),controller=new AbortController(),cancel=()=>controller.abort();window.addEventListener('mm-workspace-context',cancel,{once:true});button.disabled=true;
+    try{const response=await fetch('/api/prediction/relationships/check',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({left:'prediction:'+item.platform.toLowerCase()+':'+item.id,right:target.value,relationship:relation.value,confirmed:true}),signal:controller.signal});const body=await response.json();if(!details.isConnected||!isCurrentMarketScopeToken(scopeToken))return;if(!response.ok||!body.success)throw new Error(body.reason||body.error||'检查失败');output.textContent=(body.violated===null||body.violated===undefined?'无法核验':body.violated?'在声明假设下存在不一致，差 '+(body.violationProbability*100).toFixed(2)+' 个百分点':'在声明假设下未发现概率不一致')+' · '+(body.reason||'')+' · '+(body.updatedAt||'时间未提供');}
+    catch(error){if(error.name!=='AbortError'&&details.isConnected)output.textContent=error.message;}
+    finally{window.removeEventListener('mm-workspace-context',cancel);button.disabled=false;}
+  };
 }
 function savePredictionWatchlist() {
   localStorage.setItem('moneymoneyPredictionWatchlist', JSON.stringify([...predictionWatchlist]));
@@ -12454,15 +12542,17 @@ function renderForecastLab(d) {
   const outcomeMeta = { YES: ['✅ 发生', 'var(--green)'], NO: ['❌ 未发生', 'var(--red)'], INVALID: ['⚪ 无效', 'var(--text-secondary)'] };
   const resolvedRows = (d.resolvedCases || []).map(item => {
     const [label] = outcomeMeta[item.outcome] || ['—', ''];
+    const key=encodeURIComponent(item.key).replaceAll("'",'%27');
+    const verifyControl=item.verified!==true&&typeof window!=='undefined'&&window.mm_isLoggedIn===true&&window.mm_isGuest!==true?`<button type="button" class="tab" data-forecast-verify onclick="resolveForecastLabCase('${key}','',true)">用官方来源重新核验</button>`:'';
     return `
       <tr>
         <td style="padding:8px;min-width:220px;">
           <div style="font-weight:650;">${radarEscape(item.titleZh || item.title)}</div>
           <div style="font-size:10.5px;color:var(--text-secondary);">${radarEscape(item.platform)} · ${new Date(item.resolvedAt).toLocaleDateString()}</div>
         </td>
-        <td style="padding:8px;text-align:center;">${radarEscape(label)}</td>
+        <td style="padding:8px;text-align:center;">${radarEscape(label)}${verifyControl}</td>
         <td style="padding:8px;text-align:center;">市场 ${item.marketPct}%<br>系统 ${item.modelPct}%</td>
-        <td style="padding:8px;text-align:right;color:${item.modelBrier <= item.marketBrier ? 'var(--green)' : 'var(--red)'};">${item.modelBrier} / ${item.marketBrier}</td>
+        <td style="padding:8px;text-align:right;color:${item.modelBrier==null?'var(--text-secondary)':item.modelBrier <= item.marketBrier ? 'var(--green)' : 'var(--red)'};">${item.verified!==true?'未核验，不参与校准':item.modelBrier==null||item.marketBrier==null?'快照未证明早于结果，未评估':item.modelBrier+' / '+item.marketBrier}</td>
       </tr>`;
   }).join('');
   return `
@@ -12470,9 +12560,10 @@ function renderForecastLab(d) {
       <span class="radar-chip"><strong>待复盘</strong> ${d.activeCount}</span>
       <span class="radar-chip"><strong>已复盘</strong> ${d.resolvedCount}</span>
       <span class="radar-chip"><strong>评估样本</strong> ${d.evaluatedSamples}</span>
-      <span class="radar-chip"><strong>系统 Brier</strong> ${d.model.brier}</span>
-      <span class="radar-chip"><strong>市场 Brier</strong> ${d.market.brier}</span>
-      <span class="radar-chip">优势 <strong style="color:${edgeColor};">${d.modelEdgePct >= 0 ? '+' : ''}${d.modelEdgePct}%</strong></span>
+      <span class="radar-chip"><strong>系统 Brier</strong> ${d.evaluatedSamples?d.model.brier:'暂无核验样本'}</span>
+      <span class="radar-chip"><strong>市场 Brier</strong> ${d.evaluatedSamples?d.market.brier:'暂无核验样本'}</span>
+      <span class="radar-chip">优势 <strong style="color:${edgeColor};">${d.evaluatedSamples?(d.modelEdgePct >= 0 ? '+' : '')+d.modelEdgePct+'%':'不可用'}</strong></span>
+      <span class="radar-chip">未核验，不参与校准 ${Number(d.excludedUnverifiedCount||0)} 个事件</span>
     </div>
     <div style="padding:10px 12px;border-radius:14px;background:var(--bg-secondary);font-size:12.5px;line-height:1.6;color:var(--text-secondary);">${radarEscape(d.verdictZh)}</div>
     ${d.evaluatedSamples ? `
@@ -12528,15 +12619,15 @@ async function loadForecastLab(force = false) {
     forecastLabLoading = false;
   }
 }
-async function resolveForecastLabCase(encodedKey, outcome) {
+async function resolveForecastLabCase(encodedKey, outcome, verify = false) {
   const host = document.getElementById('forecast-lab-panel');
   if (!host) return;
-  host.innerHTML = '<div style="font-size:12px;color:var(--text-secondary);">⏳ 正在保存复盘结果...</div>';
+  host.innerHTML = '<div style="font-size:12px;color:var(--text-secondary);">'+(verify?'正在核验官方结果；成功后保存新版本，原记录保留…':'⏳ 正在保存复盘结果...')+'</div>';
   try {
     const res = await fetch('/api/forecast-lab/resolve', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ key: decodeURIComponent(encodedKey), outcome }),
+      body: JSON.stringify({ key: decodeURIComponent(encodedKey), outcome, ...(verify?{verify:true}:{}) }),
     });
     const body = await res.json();
     if (!body.success) throw new Error(body.error || '复盘结果保存失败');

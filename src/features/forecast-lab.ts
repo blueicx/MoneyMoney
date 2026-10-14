@@ -1,8 +1,11 @@
 import fs from 'fs';
 import path from 'path';
+import crypto from 'node:crypto';
 
 import { DATA_ROOT } from '../utils/paths';
+import { stateStore } from '../storage/sqlite-state';
 import type { PredictionMarket } from './prediction-radar';
+import { buildSettlementEndpoint, type SettlementEvidence } from './prediction-settlement';
 
 export type ForecastOutcome = 'YES' | 'NO' | 'INVALID';
 
@@ -32,6 +35,17 @@ export interface ResolvedForecastCase extends ForecastCase {
   outcome: ForecastOutcome;
   resolvedAt: string;
   autoExpired?: boolean;
+  settlementEvidence?: SettlementEvidence;
+}
+
+export function isVerifiedForecastResolution(item: Pick<ResolvedForecastCase,'key'|'platform'|'id'|'outcome'|'resolvedAt'|'settlementEvidence'>):boolean {
+  const evidence=item.settlementEvidence;
+  if(!evidence||evidence.market!=='prediction'||evidence.status!=='settled'||evidence.disputeStatus==='disputed'||!['YES','NO'].includes(item.outcome)||evidence.result!==item.outcome||evidence.platform!==item.platform||evidence.marketId!==item.id||item.key!==item.platform+'::'+item.id||evidence.instrument!==`prediction:${item.platform.toLowerCase()}:${item.id}`)return false;
+  const at=Date.parse(evidence.determinationAt||evidence.settlementAt||''),captured=Date.parse(evidence.capturedAt),recorded=Date.parse(item.resolvedAt);
+  if(!Number.isFinite(at)||!Number.isFinite(captured)||!Number.isFinite(recorded)||at>captured||captured>recorded)return false;
+  try{if(evidence.sourceUrl!==buildSettlementEndpoint(item.platform,item.id))return false;}catch{return false;}
+  const core={platform:evidence.platform,marketId:evidence.marketId,status:evidence.status,platformStatus:evidence.platformStatus,announcedResult:evidence.announcedResult,disputeStatus:evidence.disputeStatus,result:evidence.result,rulesText:evidence.rulesText,resolutionSourceUrl:evidence.resolutionSourceUrl,determinationSourceUrl:evidence.determinationSourceUrl,resolutionEvidence:evidence.resolutionEvidence,closeAt:evidence.closeAt,determinationAt:evidence.determinationAt,settlementAt:evidence.settlementAt,reason:evidence.reason};
+  return crypto.createHash('sha256').update(JSON.stringify(core)).digest('hex')===evidence.evidenceHash;
 }
 
 interface ForecastLabFile {
@@ -110,6 +124,7 @@ export interface ForecastLabReport {
   resolvedCount: number;
   evaluatedCases: number;
   evaluatedSamples: number;
+  excludedUnverifiedCount: number;
   model: ForecastMetricSummary;
   market: ForecastMetricSummary;
   modelEdgePct: number;
@@ -142,8 +157,9 @@ export interface ForecastLabReport {
     snapshots: number;
     marketPct: number;
     modelPct: number;
-    modelBrier: number;
-    marketBrier: number;
+    modelBrier: number | null;
+    marketBrier: number | null;
+    verified: boolean;
   }>;
   noteZh: string;
 }
@@ -154,6 +170,19 @@ const MAX_SNAPSHOTS = 80;
 const MAX_ACTIVE_CASES = 500;
 const MAX_RESOLVED_CASES = 1_000;
 const AUTO_EXPIRE_MS = 45 * 86_400_000;
+const WRITE_LEASE = 'forecast-lab-write';
+let mutationQueue: Promise<unknown> = Promise.resolve();
+
+function serializeMutation<T>(work: (owner: string) => Promise<T>): Promise<T> {
+  const run = mutationQueue.then(async () => {
+    const owner = crypto.randomUUID();
+    if (!stateStore.acquireLease(WRITE_LEASE, owner)) throw new Error('预测记录正在由另一实例保存，请重试');
+    try { return await work(owner); }
+    finally { stateStore.releaseLease(WRITE_LEASE, owner); }
+  });
+  mutationQueue = run.catch(() => undefined);
+  return run;
+}
 
 function clampProbability(value: unknown): number {
   const parsed = Number(value);
@@ -186,12 +215,19 @@ function loadLab(): ForecastLabFile {
   return emptyLab();
 }
 
-async function saveLab(state: ForecastLabFile): Promise<void> {
+async function saveLab(state: ForecastLabFile, owner: string): Promise<void> {
   state.updatedAt = new Date().toISOString();
   await fs.promises.mkdir(path.dirname(LAB_FILE), { recursive: true });
-  const tempFile = `${LAB_FILE}.tmp`;
-  await fs.promises.writeFile(tempFile, JSON.stringify(state), 'utf8');
-  await fs.promises.rename(tempFile, LAB_FILE);
+  const tempFile = `${LAB_FILE}.${owner}.tmp`;
+  try {
+    await fs.promises.writeFile(tempFile, JSON.stringify(state), 'utf8');
+    const lease = stateStore.getLease(WRITE_LEASE);
+    if (!lease || lease.owner !== owner || lease.expired) throw new Error('预测记录保存租约已失效，请重试');
+    // Keep the final ownership check and atomic publication in one synchronous turn.
+    fs.renameSync(tempFile, LAB_FILE);
+  } finally {
+    if (fs.existsSync(tempFile)) fs.unlinkSync(tempFile);
+  }
 }
 
 function metricSummary(samples: ForecastSample[], useModel: boolean): ForecastMetricSummary {
@@ -234,13 +270,15 @@ function groupStats(name: string, samples: ForecastSample[]): ForecastGroupStats
 
 function buildReport(state: ForecastLabFile): ForecastLabReport {
   const samples: ForecastSample[] = [];
-  for (const item of state.resolved) {
+  const verified=state.resolved.filter(isVerifiedForecastResolution),effective=new Map<string,ResolvedForecastCase>(),firstKnown=new Map<string,number>();
+  for(const item of verified){const prior=effective.get(item.key);if(!prior||Date.parse(item.resolvedAt)>=Date.parse(prior.resolvedAt))effective.set(item.key,item);const at=Date.parse(item.settlementEvidence!.determinationAt||item.settlementEvidence!.settlementAt!);firstKnown.set(item.key,Math.min(firstKnown.get(item.key)??Infinity,at));}
+  for (const item of effective.values()) {
     const actual = item.outcome === 'YES' ? 1 : item.outcome === 'NO' ? 0 : null;
     if (actual == null) continue;
     for (const snapshot of item.snapshots) {
       // A probability recorded after the event deadline or after its result was
       // known must not be counted as a forecast observation.
-      if (!isPreOutcomeSnapshot(snapshot.t, item.resolvedAt, item.endDate)) continue;
+      if (!isPreOutcomeSnapshot(snapshot.t, new Date(firstKnown.get(item.key)!).toISOString(), item.endDate)) continue;
       samples.push({
         key: item.key,
         platform: item.platform,
@@ -337,13 +375,14 @@ function buildReport(state: ForecastLabFile): ForecastLabReport {
         snapshots: item.snapshots.length,
         marketPct: Math.round(price * 100),
         modelPct: Math.round(model * 100),
-        modelBrier: Number(((model - actual) ** 2).toFixed(4)),
-        marketBrier: Number(((price - actual) ** 2).toFixed(4)),
+        verified: isVerifiedForecastResolution(item),
+        modelBrier: isVerifiedForecastResolution(item) && isPreOutcomeSnapshot(snapshot.t,item.settlementEvidence!.determinationAt||item.settlementEvidence!.settlementAt!,item.endDate) ? Number(((model - actual) ** 2).toFixed(4)) : null,
+        marketBrier: isVerifiedForecastResolution(item) && isPreOutcomeSnapshot(snapshot.t,item.settlementEvidence!.determinationAt||item.settlementEvidence!.settlementAt!,item.endDate) ? Number(((price - actual) ** 2).toFixed(4)) : null,
       };
     });
 
-  let verdictZh = '样本还不够，先让雷达持续刷新；事件落地后手动标记结果，统计会越来越有参考价值。';
-  if (model.samples >= 30) {
+  let verdictZh = '官方核验样本不足；人工标记、旧记录、争议或来源结果时间缺失不参与校准，不作可靠排名。';
+  if (model.cases >= 20) {
     if (modelEdgePct >= 10) verdictZh = '目前系统概率整体优于开盘市场价，但请继续积累样本，避免只看短期运气。';
     else if (modelEdgePct <= -10) verdictZh = '当前市场价整体比系统参考更准，建议把系统判断当作研究线索，不作为下单依据。';
     else verdictZh = '系统与市场价格接近，暂无明显优势；继续按平台、分类和信心分组观察。';
@@ -355,6 +394,7 @@ function buildReport(state: ForecastLabFile): ForecastLabReport {
     resolvedCount: state.resolved.length,
     evaluatedCases: new Set(samples.map(sample => sample.key)).size,
     evaluatedSamples: samples.length,
+    excludedUnverifiedCount: state.resolved.filter(item=>!isVerifiedForecastResolution(item)).length,
     model,
     market,
     modelEdgePct: Number(modelEdgePct.toFixed(1)),
@@ -372,6 +412,10 @@ function buildReport(state: ForecastLabFile): ForecastLabReport {
 
 /** Capture the system's pre-event judgment after every successful radar rebuild. */
 export async function recordForecastLab(markets: PredictionMarket[]): Promise<void> {
+  return serializeMutation(owner => recordForecastLabMutation(markets, owner));
+}
+
+async function recordForecastLabMutation(markets: PredictionMarket[], owner: string): Promise<void> {
   if (!Array.isArray(markets) || !markets.length) return;
   const state = loadLab();
   const now = Date.now();
@@ -441,30 +485,38 @@ export async function recordForecastLab(markets: PredictionMarket[]): Promise<vo
     state.resolved.splice(MAX_RESOLVED_CASES);
   }
 
-  await saveLab(state);
+  await saveLab(state, owner);
 }
 
 export function getForecastLabReport(): ForecastLabReport {
   return buildReport(loadLab());
 }
 
-export function resolveForecastCase(key: string, outcome: unknown): ForecastLabReport | null {
+export async function resolveForecastCase(key: string, outcome: unknown, settlementEvidence?:SettlementEvidence): Promise<ForecastLabReport | null> {
+  return serializeMutation(owner => resolveForecastCaseMutation(key, outcome, settlementEvidence, owner));
+}
+
+async function resolveForecastCaseMutation(key: string, outcome: unknown, settlementEvidence: SettlementEvidence | undefined, owner: string): Promise<ForecastLabReport | null> {
   const normalizedKey = String(key || '').trim();
   const normalizedOutcome = normalizeOutcome(outcome);
   if (!normalizedKey || !normalizedOutcome) return null;
   const state = loadLab();
-  const item = state.active[normalizedKey];
+  const previous=state.resolved.filter(row=>row.key===normalizedKey).at(-1);
+  const candidate=previous?{...previous,outcome:normalizedOutcome,resolvedAt:new Date().toISOString(),settlementEvidence}:null;
+  const item = state.active[normalizedKey] || (candidate&&isVerifiedForecastResolution(candidate)?previous:undefined);
   if (!item) return null;
+  if(previous?.outcome===normalizedOutcome&&previous.settlementEvidence?.evidenceHash===settlementEvidence?.evidenceHash&&isVerifiedForecastResolution(previous))return buildReport(state);
   delete state.active[normalizedKey];
   state.resolved.push({
     ...item,
     outcome: normalizedOutcome,
     resolvedAt: new Date().toISOString(),
+    ...(settlementEvidence?{settlementEvidence}:{}),
   });
   if (state.resolved.length > MAX_RESOLVED_CASES) {
     state.resolved.sort((a, b) => b.resolvedAt.localeCompare(a.resolvedAt));
     state.resolved.splice(MAX_RESOLVED_CASES);
   }
-  void saveLab(state);
+  await saveLab(state, owner);
   return buildReport(state);
 }

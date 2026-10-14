@@ -357,9 +357,10 @@ async function main() {
     } }) }));
     await page.route('**/api/options/payoff', route => {
       optionPayoffRequest = route.request().postDataJSON();
+      const scenario=optionPayoffRequest.scenario ? require('../dist/features/options-market').calculateOptionScenario({spot:510,multiplier:optionPayoffRequest.multiplier,underlyingSymbol:'SPY',nowMs:Date.parse('2026-10-14T00:00:00Z'),legs:optionPayoffRequest.legs.map(leg=>({action:leg.action,contracts:leg.contracts,row:{instrumentName:'SPY-20261016-'+(leg.instrumentName.includes('500')?'500':'510')+'-C',strike:leg.instrumentName.includes('500')?500:510,optionType:'call',bidPrice:1.9,askPrice:2.1,quoteQuality:{status:'quoted'},expiryMs:Date.parse('2026-10-16T00:00:00Z'),quoteTime:'2026-10-14T00:00:00Z',impliedVolPct:18}})),scenario:optionPayoffRequest.scenario}):null;
       return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, market: 'options', source: 'CBOE browser fixture', sourceTime: '2026-09-27T08:00:00.000Z', dataStatus: 'delayed', data: {
         netPremiumUsd: 110, maxLossUsd: 110, maxGainUsd: 890, unboundedLoss: false, unboundedGain: false, payoffAtSpotUsd: -110, breakEvenPrices: [511.1],
-        curve: [{ underlyingPrice: 500, pnlUsd: -110 }, { underlyingPrice: 510, pnlUsd: -110 }, { underlyingPrice: 520, pnlUsd: 890 }], assumptions: '验收情景；不会创建订单。', executionEnabled: false,
+        curve: [{ underlyingPrice: 500, pnlUsd: -110 }, { underlyingPrice: 510, pnlUsd: -110 }, { underlyingPrice: 520, pnlUsd: 890 }], assumptions: '验收情景；不会创建订单。', executionEnabled: false,...(scenario?{scenario}:{}),
       } }) });
     });
     await page.route('**/api/instruments/compare?**', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data: [
@@ -427,6 +428,10 @@ async function main() {
         ], ruleRevisions: [] },
       }),
     }));
+    const capitalModule=require('../dist/features/stock-capital-history');
+    const capitalFixture=capitalModule.buildCapitalHistory({facts:{'us-gaap':{NetCashProvidedByUsedInOperatingActivities:{units:{USD:[{start:'2025-01-01',end:'2025-12-31',filed:'2026-02-15',form:'10-K',fp:'FY',val:100,accn:'0000000001-26-000001'}]}}}}},'2026-10-14T00:00:00Z');
+    await page.route('**/api/stock/fundamentals/*',route=>route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({success:true,dataStatus:'partial',source:'SEC test fixture, not live',data:{symbol:decodeURIComponent(new URL(route.request().url()).pathname.split('/').at(-1)),cik:'1',companyName:'Acceptance fixture',metrics:{},history:[{periodKey:'2025',revenueUsd:null}],capitalHistory:capitalFixture,missingFields:['revenue'],supportingFactors:[],riskFactors:[]}})}));
+    await page.route('**/api/stock/capital/compare?*',route=>{const symbols=new URL(route.request().url()).searchParams.get('symbols').split(',');const data=capitalModule.compareCapitalHistory(symbols.map(symbol=>({symbol,capitalHistory:capitalFixture})));return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({success:true,...data,data})});});
     await page.goto(base + '/login', { waitUntil: 'domcontentloaded' });
     await page.fill('#username', 'matrix-owner');
     await page.fill('#password', 'local-matrix-test-only-92!');
@@ -554,6 +559,13 @@ async function main() {
     await payoffBuilder.locator('[data-multiplier]').fill('100');
     await payoffBuilder.getByRole('button', { name: '计算到期损益' }).click();
     await page.waitForFunction(() => document.querySelector('#option-payoff-builder [data-result]')?.textContent.includes('净权利金'));
+    await payoffBuilder.locator('details > summary').click();
+    await payoffBuilder.locator('[data-option-scenario-enabled]').check();
+    for(const [field,value] of Object.entries({spotShockPct:5,elapsedDays:1,ivShiftPctPoints:2,ratePct:4,dividendYieldPct:1,feePerContractUsd:1}))await payoffBuilder.locator('[data-option-scenario="'+field+'"]').fill(String(value));
+    await payoffBuilder.locator('[data-calculate]').click();
+    await page.waitForFunction(()=>document.querySelector('#option-payoff-builder [data-result]')?.textContent.includes('三变量模型情景'));
+    assert.match(await payoffBuilder.innerText(),/European Black-Scholes-Merton approximation/);
+    assert.match(await payoffBuilder.innerText(),/模型 Greeks/);assert.equal(optionPayoffRequest.scenario.elapsedDays,1);
     assert.equal(optionPayoffRequest.symbol, 'SPY');
     assert.equal(optionPayoffRequest.legs.length, 2);
     assert.deepEqual(optionPayoffRequest.legs.map(leg => leg.action), ['buy', 'sell']);
@@ -632,7 +644,7 @@ async function main() {
     assert.equal(companionPreferences.period, '1h');
     assert.ok(klineRequests.some(item => item.period === '1h' && item.symbol === 'usAAPL'), 'companion chart should use the selected stock in its own period');
     const companion = page.locator('#stock-kline-companion');
-    await companion.click({ position: { x: 105, y: 110 } });
+    await companion.locator('..').locator('.mm-trading-crosshair').click({ position: { x: 105, y: 110 } });
     await page.waitForFunction(() => document.querySelector('[data-chart-candle-date]')?.value === '2026-09-22', null, { timeout: 10_000 }).catch(async error => {
       console.error(JSON.stringify(await page.evaluate(() => {
         const canvas = document.querySelector('#stock-kline-companion');
@@ -739,6 +751,20 @@ async function main() {
     assert.equal(await page.locator('#workspace-sidebar-content [data-workspace-id="guru-holdings"]').count(), 0, 'guru holdings must not appear in options navigation');
     assert.equal(await page.locator('#guru-holdings-tab').isVisible(), false, 'guru holdings panel must be hidden outside stocks');
     await page.evaluate(() => setMarketScope('stocks'));
+    await page.evaluate(() => openWorkspace('fundamentals'));
+    await page.locator('[data-stock-capital]').waitFor({state:'visible'});
+    const capitalPanel=page.locator('[data-stock-capital]');
+    assert.match(await capitalPanel.innerText(),/100 USD/);assert.match(await capitalPanel.innerText(),/不可用/);
+    await capitalPanel.locator('[data-capital-peers]').fill('AAPL,MSFT');await capitalPanel.locator('[data-capital-compare]').click();
+    await page.waitForFunction(()=>document.querySelector('[data-capital-comparison]')?.textContent.includes('MSFT'));
+    assert.match(await capitalPanel.locator('[data-capital-comparison]').innerText(),/partial/);
+    await capitalPanel.locator('[data-mm-table-tools]').first().waitFor({state:'visible'});
+    const tableTools=capitalPanel.locator('[data-mm-table-tools]').first();await tableTools.locator('summary').click();
+    await tableTools.locator('[data-mm-table-column="1"]').uncheck();
+    assert.equal(await capitalPanel.locator('table').first().locator('thead th').nth(1).isVisible(),false);
+    await tableTools.locator('[data-mm-table-reset]').click();
+    assert.equal(await capitalPanel.locator('table').first().locator('thead th').nth(1).isVisible(),true);
+    await assertNoNativeControlLeaks(page,'SEC capital comparison');
     await page.evaluate(() => showTab('backtest'));
     await page.locator('#bt-market-id').fill('AAPL');
     await page.evaluate(() => runBacktest());

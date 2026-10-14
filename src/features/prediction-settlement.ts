@@ -37,7 +37,29 @@ export interface SettlementEvidence {
 }
 
 export interface SettlementTimelineStage { key:'close'|'announcement'|'dispute'|'final'; label:string; status:string; at:string|null; timeKind:'source'|'observed'|'unknown'; detail:string; sourceUrl:string|null; evidenceHash:string; }
-export function buildSettlementTimeline(evidence:SettlementEvidence,history:SettlementEvidence[]=[]):{stages:SettlementTimelineStage[];ruleRevisions:Array<{capturedAt:string|null;hash:string|null;sourceUrl:string|null}>} {
+export interface RuleComparison { beforeHash:string|null;afterHash:string|null;beforeAt:string;afterAt:string;status:'changed'|'unchanged'|'unavailable';textChange:{removed:string;added:string}|null;fields:Array<{field:string;before:string|null;after:string|null}>;reason:string;evidenceRefs:string[]; }
+export function compareSettlementRules(evidence:SettlementEvidence,history:SettlementEvidence[]):RuleComparison[] {
+  const cutoff=Date.parse(evidence.capturedAt);
+  const records=history.filter(row=>row.market==='prediction'&&row.instrument===evidence.instrument&&row.platform===evidence.platform&&row.marketId===evidence.marketId&&Number.isFinite(Date.parse(row.capturedAt))&&Date.parse(row.capturedAt)<=cutoff).slice().sort((a,b)=>a.capturedAt.localeCompare(b.capturedAt));
+  const pairs:RuleComparison[]=[];
+  for(let i=1;i<records.length;i++) {
+    const before=records[i-1],after=records[i];
+    if(before.capturedAt===after.capturedAt&&before.evidenceHash===after.evidenceHash)continue;
+    const valid=(row:SettlementEvidence)=>typeof row.rulesText==='string'&&row.rulesText.length<=60000&&sha256(row.rulesText)===row.rulesHash;
+    const fields=['closeAt','resolutionSourceUrl'].filter(field=>before[field as 'closeAt']!==after[field as 'closeAt']).map(field=>({field,before:before[field as 'closeAt'],after:after[field as 'closeAt']}));
+    let textChange:RuleComparison['textChange']=null;
+    if(valid(before)&&valid(after)) {
+      const a=Array.from(before.rulesText!),b=Array.from(after.rulesText!);let prefix=0,suffix=0;
+      while(prefix<Math.min(a.length,b.length)&&a[prefix]===b[prefix])prefix++;
+      while(suffix<Math.min(a.length,b.length)-prefix&&a[a.length-1-suffix]===b[b.length-1-suffix])suffix++;
+      textChange={removed:a.slice(prefix,a.length-suffix).join(''),added:b.slice(prefix,b.length-suffix).join('')};
+    }
+    const status=textChange===null?'unavailable':textChange.removed||textChange.added||fields.length?'changed':'unchanged';
+    pairs.push({beforeHash:before.rulesHash,afterHash:after.rulesHash,beforeAt:before.capturedAt,afterAt:after.capturedAt,status,textChange,fields,reason:status==='unavailable'?'规则文本缺失、过大或Hash不匹配，不推测修改内容':'精确保存文本与来源字段差异；抓取时间不是规则实际生效时间，不作语义推断',evidenceRefs:[before.evidenceHash,after.evidenceHash]});
+  }
+  return pairs.slice(-50);
+}
+export function buildSettlementTimeline(evidence:SettlementEvidence,history:SettlementEvidence[]=[]):{stages:SettlementTimelineStage[];ruleRevisions:Array<{capturedAt:string|null;hash:string|null;sourceUrl:string|null}>;ruleComparisons:RuleComparison[]} {
   const time=(value:string|null)=>{if(!value)return null;const parsed=Date.parse(value);return Number.isFinite(parsed)?new Date(parsed).toISOString():null;};
   const sourceUrl=(value:string|null)=>safeHttpUrl(value);
   const closeAt=time(evidence.closeAt);
@@ -52,8 +74,8 @@ export function buildSettlementTimeline(evidence:SettlementEvidence,history:Sett
     {key:'dispute',label:'争议 / 裁定',status:disputeStatus==='disputed'?'disputed':disputeStatus==='arbitrated'?'arbitrated':disputeStatus==='not-disputed'?'not-disputed':'unknown',at:time(evidence.determinationAt),timeKind:evidence.determinationAt?'source':'unknown',detail:disputeStatus==='disputed'?'官方证据显示争议未结束':disputeStatus==='arbitrated'?'官方证据标记已仲裁':disputeStatus==='not-disputed'?'官方记录未标记争议':'来源未提供明确争议/裁定状态',sourceUrl:sourceUrl(evidence.determinationSourceUrl),evidenceHash:evidence.evidenceHash},
     {key:'final',label:'最终结算',status:finalStatus,at:finalAt,timeKind:finalAt?'source':'unknown',detail:finalStatus==='settled'?`来源核验最终结果 ${evidence.result}`:finalStatus==='disputed'?'结果仍处于争议，不能视为最终结算':finalStatus==='pending'?'市场仍开放，尚无最终结算':finalStatus==='unavailable'?'结算来源不可用或平台不支持':evidence.status==='closed'?'市场已关闭，但最终结果未核验':'最终结果或结算时间未知',sourceUrl:sourceUrl(evidence.determinationSourceUrl)||sourceUrl(evidence.resolutionSourceUrl)||sourceUrl(evidence.sourceUrl),evidenceHash:evidence.evidenceHash},
   ];
-  const ruleRevisions=history.map(item=>({capturedAt:time(item.capturedAt),hash:item.rulesHash||null,sourceUrl:safeHttpUrl(item.resolutionSourceUrl)||safeHttpUrl(item.sourceUrl)}));
-  return {stages,ruleRevisions};
+  const ruleRevisions=history.filter(item=>item.instrument===evidence.instrument&&item.platform===evidence.platform&&item.marketId===evidence.marketId&&Date.parse(item.capturedAt)<=Date.parse(evidence.capturedAt)).map(item=>({capturedAt:time(item.capturedAt),hash:item.rulesHash||null,sourceUrl:safeHttpUrl(item.resolutionSourceUrl)||safeHttpUrl(item.sourceUrl)}));
+  return {stages,ruleRevisions,ruleComparisons:compareSettlementRules(evidence,history)};
 }
 
 interface StateDocumentStore {

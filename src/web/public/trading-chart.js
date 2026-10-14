@@ -68,6 +68,25 @@
     return drawn;
   }
   const intervals={'1m':60000,'3m':180000,'5m':300000,'15m':900000,'30m':1800000,'1h':3600000,'4h':14400000,'1d':86400000,'1w':604800000};
+  function cursorIndexAtTime(rows,time,interval){
+    if(!Array.isArray(rows)||!Number.isFinite(time))return null;
+    const exact=rows.findIndex(row=>row.time===time);if(exact>=0)return exact;
+    const duration=intervals[interval];if(!duration)return null;
+    const index=rows.findIndex((row,i)=>Number.isFinite(row.time)&&time>=row.time&&time<Math.min(row.time+duration,rows[i+1]?.time??Infinity));return index>=0?index:null;
+  }
+  function validCursorContext(context){return context&&({stocks:/^stock:(?:us|cn):[A-Z0-9.-]+$/,crypto:/^crypto:[a-z0-9-]+:[A-Z0-9_-]+$/}[context.market]?.test(context.group));}
+  function getCursor(canvas){const m=mounts.get(canvas);return {time:m?.hover!=null?m.info?.rows[m.hover]?.time??null:null,sharedTime:m?.sharedTime??null};}
+  function pickCandle(canvas,clientX){const m=mounts.get(canvas),g=m?.info?.geometry,r=canvas.getBoundingClientRect();if(!g||!r.width)return null;const x=(clientX-r.left)*g.W/r.width;if(x<g.padL||x>=g.W-g.padR)return null;return m.info.rows[Math.floor((x-g.padL)/(g.W-g.padL-g.padR)*m.info.rows.length)]||null;}
+  function publishCursor(m){
+    if(!m.localCursor)return;m.localCursor=false;const context=m.info?.syncContext;if(!validCursorContext(context))return;
+    window.dispatchEvent(new CustomEvent('mm-chart-shared-cursor',{detail:{...context,time:getCursor(m.info.canvas).time,canvas:m.info.canvas}}));
+  }
+  window.addEventListener?.('mm-chart-shared-cursor',event=>{
+    const from=event.detail;if(!validCursorContext(from)||from.time!==null&&!Number.isFinite(from.time)||document.hidden)return;
+    for(const canvas of document.querySelectorAll('canvas[data-chart-sync-group]')){const m=mounts.get(canvas),context=m?.info?.syncContext;if(!m||canvas===from.canvas||!m.host.getClientRects().length||context?.market!==from.market||context?.group!==from.group)continue;
+      m.hover=from.time===null?null:cursorIndexAtTime(m.info.rows,from.time,m.info.interval);m.sharedTime=from.time;m.crossY=null;m.localCursor=false;queuePaint(m);
+    }
+  });
   function paperMarkersFor(markers,rows,market,instrument,interval,asOf=Infinity){
     const width=intervals[interval];if(!width)return [];
     return (markers||[]).flatMap(marker=>{
@@ -200,7 +219,7 @@
       auto.addEventListener('click',()=>{resetPrice(views.get(canvas));queuePaint(m,true);});
       const measure=document.createElement('button'),measurement=document.createElement('span');measure.type='button';measure.className='btn mm-trading-zone';measure.dataset.chartMeasure='';measure.textContent='区间测量';measure.setAttribute('aria-pressed','false');measurement.dataset.chartMeasurement='';measurement.setAttribute('aria-live','polite');status.append(measure,measurement);m.measure={active:false,start:null,key:null,button:measure,output:measurement};
       measure.addEventListener('click',()=>{m.measure.active=!m.measure.active;m.measure.start=null;m.measure.key=m.info?.identity;measure.setAttribute('aria-pressed',String(m.measure.active));measure.textContent=m.measure.active?'退出测量':'区间测量';measurement.textContent=m.measure.active?'依次点击起点和终点 K 线；测量模式不打开策略解释':'';});
-      if(window.mm_isLoggedIn===true&&window.mm_isGuest!==true){
+      if(window.mm_isLoggedIn===true&&window.mm_isGuest!==true&&info.paperLayer!==false){
         setupPriceAlert(m);
         const label=document.createElement('label'),toggle=document.createElement('input'),details=document.createElement('details'),summary=document.createElement('summary'),list=document.createElement('div');
         toggle.type='checkbox';toggle.dataset.paperChartLayer='';label.append(toggle,' 模拟成交');status.append(label);summary.textContent='模拟成交与关联证据';details.append(summary,list);details.hidden=true;host.append(details);m.paper={toggle,details,list,markers:[],controller:null,key:null,evidenceControllers:new Set()};
@@ -218,13 +237,13 @@
         if(m.pointers.has(e.pointerId))m.pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
         if(m.pinch&&m.pointers.size===2){const [a,b]=[...m.pointers.values()],distance=Math.hypot(a.x-b.x,a.y-b.y);if(distance>=8&&m.pinch.distance>=8){views.get(canvas).count=Math.max(15,Math.min(300,Math.round(m.pinch.count*m.pinch.distance/distance)));persist(views.get(canvas));queuePaint(m,true);}return;}
         if(m.drag){if(m.drag.id!==e.pointerId)return;if(Math.abs((m.drag.axis?e.clientY-m.drag.y:e.clientX-m.drag.x))<4 && !m.moved)return;m.moved=true;Object.assign(views.get(canvas),m.drag.state);if(m.drag.axis)scalePrice(views.get(canvas),e.clientY-m.drag.y);else pan(m.info.full,views.get(canvas),(e.clientX-m.drag.x)/( (g.W-g.padL-g.padR)/m.info.rows.length));persist(views.get(canvas));queuePaint(m,true);return;}
-        m.hover=Math.max(0,Math.min(m.info.rows.length-1,Math.floor((x-g.padL)/(g.W-g.padL-g.padR)*m.info.rows.length)));m.crossY=Math.max(g.padT,Math.min(g.padT+g.priceH,e.clientY-r.top));queuePaint(m);
+        m.hover=Math.max(0,Math.min(m.info.rows.length-1,Math.floor((x-g.padL)/(g.W-g.padL-g.padR)*m.info.rows.length)));m.crossY=Math.max(g.padT,Math.min(g.padT+g.priceH,e.clientY-r.top));m.localCursor=true;queuePaint(m);
       });
-      layer.addEventListener('pointerleave',()=>{if(!m.drag){m.hover=null;queuePaint(m);}});
+      layer.addEventListener('pointerleave',()=>{if(!m.drag){m.hover=null;m.localCursor=true;queuePaint(m);}});
     }
     if(m.info?.identity!==info.identity){m.history.controller?.abort();m.history.pending=false;m.history.note.textContent='';m.history.earlier.disabled=false;if(m.measure){m.measure.active=false;m.measure.start=null;m.measure.output.textContent='';m.measure.button.textContent='区间测量';m.measure.button.setAttribute('aria-pressed','false');}}
     if(m.alert&&(m.info?.identity!==info.identity||JSON.stringify(m.info?.alertContext)!==JSON.stringify(info.alertContext)))resetPriceAlert(m);
-    m.info=info;if(m.alert)m.alert.button.hidden=!priceAlertDraft(info.alertContext,1,'above');m.history.earlier.hidden=!info.interactive||typeof info.loadEarlier!=='function';
+    m.info=info;if(validCursorContext(info.syncContext))canvas.dataset.chartSyncGroup=info.syncContext.group;else delete canvas.dataset.chartSyncGroup;if(m.alert)m.alert.button.hidden=!priceAlertDraft(info.alertContext,1,'above');m.history.earlier.hidden=!info.interactive||typeof info.loadEarlier!=='function';
     if(info.adjustment){if(!m.adjustment){const label=document.createElement('label'),control=document.createElement('select');control.dataset.chartAdjustment='';control.className='mm-trading-zone';for(const [value,text] of [['source','来源口径'],['forward','前复权（不可用）'],['backward','后复权（不可用）']]){const option=document.createElement('option');option.value=value;option.textContent=text;control.append(option);}control.addEventListener('change',()=>{const current=m.info?.adjustment,available=current?.available||['source'];if(available.includes(control.value)){m.info?.onAdjustmentChange?.(control.value);}else control.value=current?.requested||'source';});label.append('价格口径 ',control);m.status.append(label);m.adjustment=control;}
       const available=new Set(Array.isArray(info.adjustment.available)?info.adjustment.available:['source']),sourceActual=info.adjustment.sourceActual||info.adjustment.actual;
       m.adjustment.hidden=false;m.adjustment.title=info.adjustment.reason||'未进行复权转换';m.adjustment.options[0].textContent='来源口径 · '+({unknown:'未声明',unadjusted:'未复权',mixed:'混合'}[sourceActual]||sourceActual);m.adjustment.options[1].textContent=available.has('forward')?'前复权（Yahoo Adj Close 系数推导）':'前复权（不可用）';m.adjustment.options[1].disabled=!available.has('forward');m.adjustment.options[2].disabled=!available.has('backward');m.adjustment.value=available.has(info.adjustment.requested)?info.adjustment.requested:'source';
@@ -257,6 +276,7 @@
     const i=m.info;if(!i||document.hidden||!m.host.getClientRects().length)return;const g=i.geometry,dpr=window.devicePixelRatio||1,c=m.layer;c.width=g.W*dpr;c.height=g.H*dpr;c.style.width=g.W+'px';c.style.height=g.H+'px';const ctx=c.getContext('2d');ctx.scale(dpr,dpr);
     paperDetails(m);
     if(m.hover!=null)m.hover=Math.min(m.hover,i.rows.length-1);
+    publishCursor(m);
     const text=getComputedStyle(m.host).getPropertyValue('--text-secondary').trim()||'#a6adbf',bar=i.rows[m.hover??i.rows.length-1],last=i.full.at(-1);
     const pct=(bar.close/bar.open-1)*100;
     const readoutKey=JSON.stringify([bar.time,bar.open,bar.high,bar.low,bar.close,bar.volume,i.volumeUnit,i.ma,i.maColors,views.get(i.canvas)?.timeZone,i.exchangeTimeZone,i.full.slice(Math.max(0,i.full.findIndex(r=>r.time===bar.time)-60),i.full.findIndex(r=>r.time===bar.time)+1).map(r=>r.close)]);
@@ -287,12 +307,13 @@
     c.font='11px system-ui';c.fillStyle=getComputedStyle(canvas).getPropertyValue('--text-secondary').trim()||'#a6adbf';c.strokeStyle=getComputedStyle(canvas).getPropertyValue('--border').trim()||'#30394a';
     for(let j=0;j<5;j++){const p=minP+(maxP-minP)*j/4;c.beginPath();c.moveTo(padL,y(p));c.lineTo(W-padR,y(p));c.stroke();c.fillText(fmt(p),2,y(p));}
     rows.forEach((r,j)=>{const x=padL+(j+.5)*cw;c.strokeStyle=c.fillStyle=r.close>=r.open?'#18bf78':'#ef5350';c.beginPath();c.moveTo(x,y(r.high));c.lineTo(x,y(r.low));c.stroke();c.fillRect(x-cw*.3,Math.min(y(r.open),y(r.close)),Math.max(1,cw*.6),Math.max(1,Math.abs(y(r.open)-y(r.close))));if(options.showVolume!==false){c.globalAlpha=.65;const volumeHeight=(H-priceH-70)*(r.volume||0)/maxV;c.fillRect(x-cw*.3,H-40-volumeHeight,Math.max(1,cw*.6),volumeHeight);c.globalAlpha=1;}if(j%Math.max(1,Math.floor(rows.length/5))===0){c.fillStyle=getComputedStyle(canvas).getPropertyValue('--text-secondary').trim()||'#9da9bc';c.fillText(new Date(r.time).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}),x-18,H-15);}});
-    [5,10,30,60].forEach((n,j)=>{c.strokeStyle=['#ffad00','#18bf78','#29b6f6','#a778ff'][j];c.beginPath();let started=false;rows.forEach((r,k)=>{const index=selected.start+k;if(index<n-1)return;const avg=full.slice(index-n+1,index+1).reduce((s,b)=>s+b.close,0)/n,x=padL+(k+.5)*cw;if(!started){c.moveTo(x,y(avg));started=true;}else c.lineTo(x,y(avg));});c.stroke();});
-    decorate(canvas,{...options,canvas,full,rows,interval:options.interval,volumeUnit:options.volumeUnit,ma:[5,10,30,60],maColors:['#ffad00','#18bf78','#29b6f6','#a778ff'],interactive:true,geometry:{W,H,padL,padR,padT,priceH,minP,maxP},redraw:()=>render(canvas,full,options)});
+    (options.showMovingAverages===false?[]:[5,10,30,60]).forEach((n,j)=>{c.strokeStyle=['#ffad00','#18bf78','#29b6f6','#a778ff'][j];c.beginPath();let started=false;rows.forEach((r,k)=>{const index=selected.start+k;if(index<n-1)return;const avg=full.slice(index-n+1,index+1).reduce((s,b)=>s+b.close,0)/n,x=padL+(k+.5)*cw;if(!started){c.moveTo(x,y(avg));started=true;}else c.lineTo(x,y(avg));});c.stroke();});
+    decorate(canvas,{...options,canvas,full,rows,interval:options.interval,volumeUnit:options.volumeUnit,ma:options.showMovingAverages===false?[]:[5,10,30,60],maColors:['#ffad00','#18bf78','#29b6f6','#a778ff'],interactive:options.interactive!==false,geometry:{W,H,padL,padR,padT,priceH,minP,maxP},redraw:()=>render(canvas,full,options)});
     options.onViewport?.({rows,geometry:{W,H,padL,padR,padT,priceH,minP,maxP}});
   }
   window.MoneyTradingChart={createView,windowFor,pan,latest,zoom,countdown,select,decorate,clear,render,statusFor,restoreView,scheduleFrame,scalePrice,resetPrice,priceRange,pivotLevels,supportResistanceLineLayout,drawSupportResistance,paperMarkersFor,mergeHistory,measureRange,verifyPaperEvidenceEnvelope,verifyPaperExecutionEvidenceEnvelope,formatPaperExecutionEvidence};
   window.MoneyTradingChart.priceAlertDraft=priceAlertDraft;
+  Object.assign(window.MoneyTradingChart,{cursorIndexAtTime,getCursor,pickCandle});
   window.MoneyTradingChart.redraw=canvas=>mounts.get(canvas)?.info?.redraw();
   function whenDomReady(callback) {
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', callback, { once: true });

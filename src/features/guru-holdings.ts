@@ -129,6 +129,7 @@ export interface GuruConsensusManagerRow {
   filedAt: string;
   sourceUrl: string;
   shares: number | null;
+  shareAmountType?: 'SH' | 'PRN' | null;
   previousShares: number | null;
   shareDelta: number | null;
   change: GuruHoldingChangeKind;
@@ -163,6 +164,29 @@ export interface GuruConsensusSnapshot {
   reason: string | null;
   evidenceRefs: string[];
   rows: GuruConsensusRow[];
+  coholdingRelationships: ReturnType<typeof buildGuruCoholdingRelationships>;
+}
+
+/** Observed overlap only, never an aggregate market position or inferred holding. */
+export function buildGuruCoholdingRelationships(rows: GuruConsensusRow[], reportPeriod: string) {
+  const pairs = new Map<string, { managerCiks: string[]; reportPeriod: string; commonSecurityCount: number; securities: Array<{ cusip: string; classTitle: string; symbol: string | null }>; evidenceRefs: string[] }>();
+  for (const row of rows) {
+    if (row.putCall || !/^[A-Z0-9]{9}$/.test(row.cusip) || !row.classTitle) continue;
+    const managers = [...new Map(row.managers.filter(manager => manager.reportPeriod === reportPeriod
+      && manager.shareAmountType==='SH' && /^\d{1,10}$/.test(manager.cik) && Number.isFinite(manager.shares) && Number(manager.shares) > 0)
+      .map(manager => [manager.cik, manager])).values()].sort((a,b) => a.cik.localeCompare(b.cik));
+    for (let i=0;i<managers.length;i++) for (let j=i+1;j<managers.length;j++) {
+      const a=managers[i], b=managers[j], key=a.cik+'|'+b.cik;
+      let pair=pairs.get(key);
+      if (!pair) { pair={managerCiks:[a.cik,b.cik],reportPeriod,commonSecurityCount:0,securities:[],evidenceRefs:[]}; pairs.set(key,pair); }
+      if (!pair.securities.some(security=>security.cusip===row.cusip && security.classTitle===row.classTitle)) {
+        pair.securities.push({cusip:row.cusip,classTitle:row.classTitle,symbol:row.symbol});
+        pair.commonSecurityCount++;
+      }
+      pair.evidenceRefs=[...new Set([...pair.evidenceRefs,a.sourceUrl,b.sourceUrl].filter(Boolean))];
+    }
+  }
+  return [...pairs.values()].sort((a,b)=>b.commonSecurityCount-a.commonSecurityCount || a.managerCiks.join('|').localeCompare(b.managerCiks.join('|')));
 }
 
 interface GuruRefreshState {
@@ -430,6 +454,7 @@ export function aggregateGuruConsensus(
         filedAt: entry.report.filedAt || '',
         sourceUrl,
         shares: change.currentShares,
+        shareAmountType: entry.report.positions.find(position=>positionIdentity(position)===identity)?.shareAmountType ?? null,
         previousShares: change.previousShares,
         shareDelta: change.shareDelta,
         change: change.change,
@@ -644,6 +669,7 @@ export function createGuruHoldingsService(overrides: Partial<GuruHoldingsService
       reason,
       evidenceRefs: [...new Set(usable.flatMap(item => [item.report.sourceUrl || '', item.report.informationTableUrl || '']).filter(Boolean))],
       rows,
+      coholdingRelationships: reportPeriod ? buildGuruCoholdingRelationships(rows, reportPeriod) : [],
     };
   }
 

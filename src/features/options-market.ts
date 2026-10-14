@@ -163,6 +163,39 @@ export function calculateOptionPayoff(input: { spot: number; multiplier: number;
   };
 }
 
+export interface OptionScenarioParameters {
+  spotShockPct:number; elapsedDays:number; ivShiftPctPoints:number;
+  ratePct:number; dividendYieldPct:number; feePerContractUsd:number;
+}
+
+/** European BSM approximation only; not American exercise or an executable quote. */
+export function calculateOptionScenario(input: Parameters<typeof calculateOptionPayoff>[0] & {scenario:OptionScenarioParameters}) {
+  const payoff=calculateOptionPayoff(input),p=input.scenario,nowMs=input.nowMs ?? Date.now();
+  if(!p || Object.values(p).length<6 || [p.spotShockPct,p.elapsedDays,p.ivShiftPctPoints,p.ratePct,p.dividendYieldPct,p.feePerContractUsd].some(value=>typeof value!=='number'||!Number.isFinite(value)))throw Error('情景利率、股息率、费用及三变量必须明确输入有限数值假设');
+  if(Math.abs(p.spotShockPct)>20||Math.abs(p.ivShiftPctPoints)>25||p.elapsedDays<0||p.ratePct<-10||p.ratePct>30||p.dividendYieldPct<0||p.dividendYieldPct>30||p.feePerContractUsd<0||p.feePerContractUsd>1000)throw Error('情景超出支持范围：价格±20%、IV±25个百分点，利率-10–30%、股息0–30%、费用0–1000');
+  const remainingDays=(input.legs[0].row.expiryMs!-nowMs)/86400000;
+  if(p.elapsedDays>remainingDays)throw Error('经过天数不得超过合约到期时间');
+  if(input.legs.some(leg=>typeof leg.row.impliedVolPct!=='number'||!Number.isFinite(leg.row.impliedVolPct)||leg.row.impliedVolPct<=0||leg.row.impliedVolPct+p.ivShiftPctPoints<=0||leg.row.impliedVolPct+p.ivShiftPctPoints>400))throw Error('合约来源IV缺失、无效或冲击后超出0–400%，不能推算');
+  const cdf=(x:number)=>{const t=1/(1+.2316419*Math.abs(x)),density=Math.exp(-x*x/2)/Math.sqrt(2*Math.PI),tail=density*t*(.319381530+t*(-.356563782+t*(1.781477937+t*(-1.821255978+t*1.330274429))));return x>=0?1-tail:tail;};
+  const price=input.spot*(1+p.spotShockPct/100),years=Math.max(0,(remainingDays-p.elapsedDays)/365.25),r=p.ratePct/100,q=p.dividendYieldPct/100;
+  const value=(spot:number,strike:number,sigma:number,time:number,type:'call'|'put')=>{
+    if(time===0)return {price:Math.max(0,type==='call'?spot-strike:strike-spot),greeks:null};
+    const root=Math.sqrt(time),d1=(Math.log(spot/strike)+(r-q+sigma*sigma/2)*time)/(sigma*root),d2=d1-sigma*root,df=Math.exp(-r*time),div=Math.exp(-q*time),phi=Math.exp(-d1*d1/2)/Math.sqrt(2*Math.PI),call=type==='call';
+    const premium=call?spot*div*cdf(d1)-strike*df*cdf(d2):strike*df*cdf(-d2)-spot*div*cdf(-d1);
+    const theta=-spot*div*phi*sigma/(2*root)+(call?-r*strike*df*cdf(d2)+q*spot*div*cdf(d1):r*strike*df*cdf(-d2)-q*spot*div*cdf(-d1));
+    return {price:Math.max(0,premium),greeks:{delta:div*(call?cdf(d1):cdf(d1)-1),gamma:div*phi/(spot*sigma*root),vegaPerPctPoint:spot*div*phi*root/100,thetaPerDay:theta/365.25}};
+  };
+  const legs=input.legs.map(leg=>{
+    const sigma=(leg.row.impliedVolPct!+p.ivShiftPctPoints)/100,model=value(price,leg.row.strike,sigma,years,leg.row.optionType),scale=leg.contracts*input.multiplier*(leg.action==='buy'?1:-1);
+    return {instrumentName:leg.row.instrumentName,action:leg.action,contracts:leg.contracts,sourceIvPct:leg.row.impliedVolPct!,scenarioIvPct:sigma*100,entryPrice:leg.action==='buy'?leg.row.askPrice:leg.row.bidPrice,modelPrice:Number(model.price.toFixed(8)),modelValueUsd:model.price*scale,modelGreeks:model.greeks,scale};
+  });
+  const entryFeesUsd=input.legs.reduce((sum,leg)=>sum+leg.contracts*p.feePerContractUsd,0),modelValueUsd=legs.reduce((sum,leg)=>sum+leg.modelValueUsd,0);
+  const greeks=years===0?null:legs.reduce((sum,leg)=>{for(const name of ['delta','gamma','vegaPerPctPoint','thetaPerDay'] as const)sum[name]+=leg.modelGreeks![name]*leg.scale;return sum;},{delta:0,gamma:0,vegaPerPctPoint:0,thetaPerDay:0});
+  if(!Number.isFinite(modelValueUsd)||greeks&&Object.values(greeks).some(value=>!Number.isFinite(value)))throw Error('模型数值不可用，未发布情景结果');
+  return {model:'European Black-Scholes-Merton approximation v1',parameters:{...p},underlyingPrice:price,remainingDays:remainingDays-p.elapsedDays,entryPremiumUsd:payoff.netPremiumUsd,entryFeesUsd,modelValueUsd:Number(modelValueUsd.toFixed(2)),pnlUsd:Number((modelValueUsd-payoff.netPremiumUsd-entryFeesUsd).toFixed(2)),greeks,legs:legs.map(({scale,...leg})=>leg),executionEnabled:false,
+    assumptions:'欧式BSM近似、常数利率/连续股息率/IV；三变量为用户压力假设，不是预测或可成交价。美式提前行权、离散除息、指派、特殊交割和退出滑点不在模型内；到期仅计算内在价值，不执行结算。Greeks为模型敏感度，不冒充来源Greeks。'};
+}
+
 export interface OptionExpiry {
   expiryMs: number;
   label: string;

@@ -457,6 +457,10 @@
     });
   }
 
+  function filterStrategyChartPoints(points,filters={}) {
+    const rows=Array.isArray(points)?points:[];
+    return rows.filter(point=>(!filters.strategy||point.strategy===filters.strategy)&&(!filters.side||point.side===filters.side)&&(!filters.status||point.status===filters.status));
+  }
   function strategyPointOutcomes(bars,index,price,side,{status='confirmed',live=false,currentBarClosed=false,costBps=null,asOf=null}={}) {
     const cut=asOf==null?Infinity:Number(asOf),sign=side==='sell'?-1:1;
     return [1,3,5,20].map(horizon=>{
@@ -703,5 +707,5 @@
     };
   }
 
-  return { DEFAULT_CONFIG, CANDLE_PATTERN_CATALOG, normalizeOverlayConfig, chartDataStatusLabel, detectCandlestickPatterns, detectStructures, detectChanStructures, detectStrategySignals, buildStrategyChartPoints, strategyPointOutcomes, mapIndexedItemsToViewport, clusterChartPointsByPixel, movingAverage, bollingerBands, calculateMACD, buildChartOverlays, stepReplay, layoutMarkerLabels, protectReplayContext, createDrawingTool };
+  return { DEFAULT_CONFIG, CANDLE_PATTERN_CATALOG, normalizeOverlayConfig, chartDataStatusLabel, detectCandlestickPatterns, detectStructures, detectChanStructures, detectStrategySignals, buildStrategyChartPoints, filterStrategyChartPoints, strategyPointOutcomes, mapIndexedItemsToViewport, clusterChartPointsByPixel, movingAverage, bollingerBands, calculateMACD, buildChartOverlays, stepReplay, layoutMarkerLabels, protectReplayContext, createDrawingTool };
 });

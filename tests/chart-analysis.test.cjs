@@ -2,6 +2,13 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const analysis = require('../src/web/public/chart-analysis.js');
 
+test('strategy lifecycle filters preserve stable points and never recompute signals on a cropped viewport',()=>{
+  assert.equal(typeof analysis.filterStrategyChartPoints,'function');
+  const points=[{id:'a',strategy:'volume-breakout',side:'buy',status:'confirmed',index:80},{id:'b',strategy:'ma-cross',side:'sell',status:'forming',index:99}];
+  assert.deepEqual(analysis.filterStrategyChartPoints(points,{strategy:'volume-breakout',side:'buy',status:'confirmed'}),[points[0]]);
+  assert.deepEqual(analysis.filterStrategyChartPoints(points,{status:'forming'}),[points[1]]);assert.deepEqual(analysis.filterStrategyChartPoints(points,{}),points);assert.equal(points.length,2);assert.deepEqual(analysis.filterStrategyChartPoints(points,{side:'unknown'}),[]);
+});
+
 function bars() {
   return [
     { time: 1, open: 10, high: 10.3, low: 9.8, close: 10.02, volume: 100 },

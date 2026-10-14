@@ -5,6 +5,27 @@ const vm = require('node:vm');
 const { JSDOM } = require('jsdom');
 const { assessOptionQuoteQuality, calculateOptionPayoff, getEquityOptionsSnapshot } = require('../dist/features/options-market.js');
 
+test('price/time/IV scenarios use declared model assumptions and actual quote-side entry costs with deterministic results',()=>{
+ const {calculateOptionScenario}=require('../dist/features/options-market.js');assert.equal(typeof calculateOptionScenario,'function');
+ const nowMs=Date.UTC(2026,9,14),expiryMs=nowMs+365.25*86400000,quoteTime=new Date(nowMs).toISOString();
+ const row=type=>({instrumentName:'SPY-20271014-100-'+(type==='call'?'C':'P'),strike:100,optionType:type,bidPrice:10,askPrice:11,quoteQuality:{status:'quoted'},expiryMs,quoteTime,impliedVolPct:20});
+ const input={spot:100,multiplier:100,legs:[{row:row('call'),action:'buy',contracts:1},{row:row('put'),action:'buy',contracts:1}],nowMs,underlyingSymbol:'SPY',scenario:{spotShockPct:0,elapsedDays:0,ivShiftPctPoints:0,ratePct:5,dividendYieldPct:0,feePerContractUsd:1}};
+ const a=calculateOptionScenario(input),b=calculateOptionScenario(input);assert.deepEqual(a,b);assert.equal(a.executionEnabled,false);
+ assert.ok(Math.abs(a.legs[0].modelPrice-10.450584)<.00001);assert.ok(Math.abs(a.legs[1].modelPrice-5.573526)<.00001);
+ assert.equal(a.entryPremiumUsd,2200);assert.equal(a.entryFeesUsd,2);assert.ok(Math.abs(a.pnlUsd-(-599.589))<.02);assert.ok(a.greeks.gamma>0);assert.ok(a.greeks.vegaPerPctPoint>0);
+ const expired=calculateOptionScenario({...input,scenario:{...input.scenario,elapsedDays:365.25,spotShockPct:10}});assert.equal(expired.legs[0].modelPrice,10);assert.equal(expired.legs[1].modelPrice,0);assert.equal(expired.greeks,null);
+ assert.throws(()=>calculateOptionScenario({...input,scenario:{...input.scenario,elapsedDays:366}}),/到期/);
+ assert.throws(()=>calculateOptionScenario({...input,scenario:{...input.scenario,ratePct:undefined}}),/假设/);
+ assert.throws(()=>calculateOptionScenario({...input,legs:[{...input.legs[0],row:{...input.legs[0].row,impliedVolPct:null}},input.legs[1]]}),/IV/);
+ assert.throws(()=>calculateOptionScenario({...input,scenario:{...input.scenario,spotShockPct:-100}}),/范围/);
+});
+
+test('options builder exposes explicit three-variable model assumptions but does not request a scenario without them',async()=>{
+ const html=require('./helpers/dashboard-source.cjs').readDashboardSource(),render=html.match(/function renderOptionPayoffBuilder\(expiry\) \{[\s\S]*?\n\}/)[0];const dom=new JSDOM('<div id="option-payoff-builder"></div>');let calls=0;
+ const snapshot={market:'us_equity',asset:'SPY',source:'CBOE Delayed Quotes',fetchedAt:new Date().toISOString(),spot:100};const expiry={expiryMs:Date.now()+86400000,rows:[100,110].map(strike=>({instrumentName:'SPY-20271014-'+strike+'-C',strike,optionType:'call',bidPrice:1,askPrice:1.1,quoteQuality:{status:'quoted'}}))};
+ try{vm.runInNewContext(render+';renderOptionPayoffBuilder(expiry);',{document:dom.window.document,optionsSnapshot:snapshot,expiry,stockEscapeHtml:value=>String(value??''),fetch:async()=>{calls++;return {ok:false,json:async()=>({success:false,reason:'fixture'})};}});const checkbox=dom.window.document.querySelector('[data-option-scenario-enabled]');assert.ok(checkbox);checkbox.checked=true;dom.window.document.querySelector('[data-multiplier]').value='100';dom.window.document.querySelector('[data-calculate]').click();await new Promise(resolve=>setTimeout(resolve,10));assert.equal(calls,0);assert.match(dom.window.document.querySelector('[data-result]').textContent,/假设/);}finally{dom.window.close();}
+});
+
 test('missing option OI remains unknown, blocks dependent aggregates and preserves source-confirmed zero', async () => {
   const originalFetch = global.fetch;
   global.fetch = async () => ({
@@ -163,7 +184,14 @@ test('option payoff binds contract identities to the requested underlying symbol
 
 test('options payoff route binds every leg to the requested CBOE underlying', () => {
   const server = fs.readFileSync('src/web/server.ts', 'utf8');
-  assert.match(server, /calculateOptionPayoff\(\{ spot: snapshot\.spot, multiplier, legs, underlyingSymbol: symbol \}\)/);
+  assert.match(server, /const input = \{ spot: snapshot\.spot, multiplier, legs, underlyingSymbol: symbol, nowMs:Date\.now\(\) \}/);
+  assert.match(server, /calculateOptionPayoff\(input\)/);
+  assert.match(server, /calculateOptionScenario\(\{\.\.\.input,scenario:req\.body\.scenario\}\)/);
+});
+
+test('options payoff API accepts intact two-sided prices even when nonessential liquidity metrics are missing',()=>{
+  const source=fs.readFileSync('src/web/server.ts','utf8'),start=source.indexOf("app.post('/api/options/payoff'"),end=source.indexOf("app.",start+10),route=source.slice(start,end);
+  assert.match(route,/\['quoted',\s*'metrics-incomplete'\]\.includes\(row\.quoteQuality\?\.status/);
 });
 
 test('option payoff fails closed for missing quotes, mixed expiries and invalid multipliers', () => {
@@ -219,4 +247,13 @@ test('option payoff UI requires a verified contract multiplier before requesting
   assert.equal(requestCount, 0);
   assert.match(dom.window.document.querySelector('[data-result]').textContent, /先核实.*乘数/);
   dom.window.close();
+});
+
+test('option payoff late responses cannot populate a newly selected asset', async () => {
+  const source=require('./helpers/dashboard-source.cjs').readDashboardSource().match(/function renderOptionPayoffBuilder\(expiry\) \{[\s\S]*?\n\}/)[0];
+  const dom=new JSDOM('<div id="option-payoff-builder"></div>');let resolveResponse;
+  const snapshot={market:'us_equity',asset:'AAPL',spot:100};
+  const expiry={expiryMs:Date.now()+86400000,rows:['CALL','PUT'].map((instrumentName,index)=>({instrumentName,strike:100,optionType:index?'put':'call',bidPrice:1,askPrice:2,quoteQuality:{status:'quoted'}}))};
+  const context={document:dom.window.document,optionsSnapshot:snapshot,expiry,stockEscapeHtml:value=>String(value??''),fetch:()=>new Promise(resolve=>{resolveResponse=resolve;})};
+  try {vm.runInNewContext(source+';renderOptionPayoffBuilder(expiry);',context);dom.window.document.querySelector('[data-multiplier]').value='100';dom.window.document.querySelector('[data-calculate]').click();context.optionsSnapshot={...snapshot,asset:'MSFT'};resolveResponse({ok:false,json:async()=>({success:false,reason:'stale AAPL response'})});await new Promise(resolve=>setTimeout(resolve,0));assert.doesNotMatch(dom.window.document.querySelector('[data-result]').textContent,/stale AAPL response/);}finally{dom.window.close();}
 });

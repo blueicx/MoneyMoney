@@ -72,7 +72,7 @@ import { binanceFeed, alertManager, anomalyDetector } from '../features/binance'
 import { fetchRunnerBinanceKlines } from '../features/runner-binance-kline';
 import { llmAnalyzer, redditSentiment, whaleMonitor, strategyComparison, tradeJournal } from '../features/ai-social';
 import { binancePortfolio } from '../features/binance-portfolio';
-import { calculateOptionPayoff, getEquityOptionsSnapshot, getOptionsSnapshot } from '../features/options-market';
+import { calculateOptionPayoff, calculateOptionScenario, getEquityOptionsSnapshot, getOptionsSnapshot } from '../features/options-market';
 import { fetchDeribitOptionExecutionQuote, parseDeribitOptionInstrumentName } from '../features/runner-deribit-options';
 import { getMacroCalendar, getGlobalCryptoMetrics } from '../features/external-market-data';
 import { getStablecoinLiquidity } from '../features/stablecoin-liquidity';
@@ -81,6 +81,7 @@ import { getCotRadar } from '../features/cftc-positioning';
 import { getInsiderRadar } from '../features/insider-transactions';
 import { getAnalystConsensusSnapshot } from '../features/analyst-consensus';
 import { getFundamentalQuality } from '../features/fundamental-quality';
+import { compareCapitalHistory } from '../features/stock-capital-history';
 import { getShortInterestSnapshot } from '../features/short-interest';
 import { buildStockResearchFreshnessEnvelope } from '../features/stock-research-freshness';
 import { getMarketBreadthSnapshot } from '../features/market-breadth';
@@ -99,6 +100,7 @@ import { loadContractPanelHistory, reviewContractPositionCosts } from '../featur
 import { klinePageWindow, klinePageStatus, stockKlineChartInitialWindow } from '../features/kline-page-window';
 import { contractCapacity, compareContractSnapshots } from '../features/contract-comparison';
 import { compareAiRunnerReports } from '../features/ai-runner-comparison';
+import { formatTelegramComparisonSummary } from '../features/telegram-comparison-summary';
 import { createAiRunnerComparison, getAiRunnerComparison, validateAiRunnerComparison, validateScheduledAiRunnerComparison, buildAiRunnerComparisonSample, saveAiRunnerComparisonSample, listAiRunnerComparisonSamples, replayAiRunnerComparisonSample, type AiRunnerComparisonSample } from '../features/ai-runner-comparison-group';
 import { portfolioAttribution, aiRunnerPortfolioAttribution, aiRunnerSelectionAttribution } from '../features/portfolio-attribution';
 import { getFundingCarryRadar } from '../features/funding-carry';
@@ -120,6 +122,7 @@ import { getEventRisk } from '../features/event-risk';
 import { getCachedPredictionRadarSlice, getPredictionRadar, warmPredictionRadarCache, type PredictionMarket, type PredictionRadar } from '../features/prediction-radar';
 import { getPredictionHistory } from '../features/prediction-history';
 import { getForecastLabReport, resolveForecastCase } from '../features/forecast-lab';
+import { auditPredictionRelationship } from '../features/prediction-relationship-audit';
 import { calculatePredictionPosition } from '../features/prediction-position-sizer';
 import { aiCommentaryConfigured, getAiMarketCommentary } from '../features/ai-commentary';
 import { getAiConfigurationStatus, testAiConnection, type AiChain } from '../features/ai-runtime-config';
@@ -3004,6 +3007,13 @@ app.get('/api/stock/analyst/:symbol', async (req, res) => {
   }
 });
 
+app.get('/api/stock/capital/compare',async(req,res)=>{
+  const symbols=String(req.query.symbols||'').toUpperCase().split(',').map(value=>value.trim());
+  if(symbols.length<2||symbols.length>4||new Set(symbols).size!==symbols.length||symbols.some(symbol=>!/^[A-Z][A-Z0-9.-]{0,9}$/.test(symbol)))return res.status(400).json({success:false,market:'stocks',dataStatus:'failed',reason:'请选择2–4个不同的美股代码'});
+  const observations=await Promise.all(symbols.map(async symbol=>{try{const data=await getFundamentalQuality(symbol);return {symbol,capitalHistory:data.capitalHistory,dataStatus:data.capitalHistory?.dataStatus||'unavailable',reason:data.capitalHistory?.reason||'缺少资本披露',updatedAt:data.retrievedAt};}catch(error){return {symbol,dataStatus:'failed',reason:error instanceof Error?error.message:'SEC来源失败',updatedAt:null};}}));
+  const data=compareCapitalHistory(observations),failures=observations.filter(row=>row.dataStatus==='failed');
+  res.json({success:true,market:'stocks',instrument:null,dataStatus:data.dataStatus,source:'SEC EDGAR companyfacts · 精确年报区间',updatedAt:new Date().toISOString(),reason:failures.length?failures.map(row=>row.symbol+': '+row.reason).join('；'):data.reason,evidenceRefs:[],data,observations});
+});
 app.get('/api/stock/fundamentals/:symbol', async (req, res) => {
   try {
     const data = await getFundamentalQuality(String(req.params.symbol || ''));
@@ -3529,10 +3539,11 @@ app.post('/api/options/payoff', express.json(), async (req, res) => {
       const name = String(item?.instrumentName || '');
       if (name.length > 80) throw new Error('期权合约身份无效');
       const row = expiry.rows.find(candidate => candidate.instrumentName === name);
-      if (!row || row.quoteQuality?.status !== 'quoted') throw new Error(`合约 ${name || '(空)'} 不存在于当前到期链或缺少双边有效报价`);
+      if (!row || !['quoted', 'metrics-incomplete'].includes(row.quoteQuality?.status || '')) throw new Error(`合约 ${name || '(空)'} 不存在于当前到期链或缺少双边有效报价`);
       return { row: { ...row, expiryMs, quoteTime: snapshot.fetchedAt }, action: item.action, contracts: Number(item.contracts) };
     });
-    const data = calculateOptionPayoff({ spot: snapshot.spot, multiplier, legs, underlyingSymbol: symbol });
+    const input = { spot: snapshot.spot, multiplier, legs, underlyingSymbol: symbol, nowMs:Date.now() };
+    const data = {...calculateOptionPayoff(input), ...(req.body?.scenario ? {scenario:calculateOptionScenario({...input,scenario:req.body.scenario})}: {})};
     return res.json({ success: true, market: 'options', instrument: `option:cboe:${symbol}`, timeframe: expiry.label, dataStatus: 'delayed', source: snapshot.source, sourceTime: snapshot.fetchedAt, updatedAt: new Date().toISOString(), reason: '到期情景试算，不是成交回报；仅使用当前来源双边报价', evidenceRefs: [], data });
   } catch (error) {
     return res.status(422).json({ success: false, market: 'options', instrument: `option:cboe:${symbol}`, dataStatus: 'unavailable', source: 'CBOE Delayed Quotes', updatedAt: new Date().toISOString(), reason: error instanceof Error ? error.message : '期权试算失败', evidenceRefs: [] });
@@ -3641,8 +3652,14 @@ app.post('/api/forecast-lab/resolve', async (req, res) => {
   try {
     const key = String(req.body?.key || '');
     const outcome = String(req.body?.outcome || '');
-    const data = await resolveForecastCase(key, outcome);
-    if (!data) return res.json({ success: false, error: '没有找到这条待复盘预测，或结果标记无效。' });
+    const verify=req.body?.verify===true;
+    const [platform,id,...extra]=key.split('::');
+    // Evidence is obtained by the server, never accepted from the request body.
+    const settlementEvidence=!extra.length&&['Kalshi','Polymarket'].includes(platform)&&(verify||['YES','NO'].includes(outcome.toUpperCase()))
+      ? await refreshPredictionSettlement(platform as 'Kalshi'|'Polymarket',id).catch(()=>undefined) : undefined;
+    const verifiedOutcome=verify?(settlementEvidence?.status==='settled'?settlementEvidence.result:''):outcome;
+    const data = await resolveForecastCase(key, verifiedOutcome, settlementEvidence);
+    if (!data) return res.json({ success: false, error: verify?'官方最终结果、身份、Hash或结果时间尚无法核验；原记录保持不变。':'没有找到这条待复盘预测，或结果标记无效。' });
     res.json({ success: true, data });
   } catch (e: any) {
     res.json({ success: false, error: e.message });
@@ -4077,6 +4094,20 @@ app.get('/api/contracts/compare',async(req,res)=>{
     const rows=await Promise.all(instruments.map(instrument=>contractResearchService.detail(instrument)));
     res.json({success:true,...compareContractSnapshots(rows),updatedAt:new Date().toISOString()});
   }catch(error:any){res.status(400).json({success:false,dataStatus:'unavailable',reason:error.message});}
+});
+app.post('/api/prediction/relationships/check', express.json(), (req,res)=>{
+  if(!adminOnly(req,res))return;
+  const radar=getCachedPredictionRadarSlice('',240);
+  const quote=(instrument:unknown)=>{
+    const item=radar?.markets.find(row=>`prediction:${row.platform.toLowerCase()}:${row.id}`===instrument);
+    if(!item||!['Kalshi','Polymarket'].includes(item.platform))return null;
+    const evidence=predictionSettlementRepository.latest(item.platform,item.id);
+    return {market:'prediction',instrument:String(instrument),probability:item.yesPrice,observedAt:radar!.updatedAt,source:item.platform,ruleHash:evidence?.rulesHash||null,evidenceRef:evidence?.evidenceHash||null};
+  };
+  const left=quote(req.body.left),right=quote(req.body.right);
+  if(!left||!right)return res.json({success:true,market:'prediction',dataStatus:'unavailable',reason:'当前缓存没有两个精确匹配事件；先打开对应事件及官方规则，不新增来源请求或猜测身份',evidenceRefs:[],data:null});
+  const data=auditPredictionRelationship({left,right,relationship:req.body.relationship,confirmed:req.body.confirmed});
+  res.json({success:true,...data,source:'当前预测雷达缓存 + 已保存官方规则',updatedAt:radar!.updatedAt,data});
 });
 app.get('/api/prediction/settlement/:platform/:marketId', async (req,res)=>{
   const platform=String(req.params.platform||''),marketId=String(req.params.marketId||'');
@@ -4883,6 +4914,8 @@ const TELEGRAM_HELP = [
   '/alerts  查看或修改通知订阅',
   '/alert   直接建提醒；/alert draft 先预览再确认',
   '/inbox   查看私聊提醒并确认/重试',
+  '/pending 待处理自选行动；已读、置顶、稍后处理同步网页',
+  '/changes 今日变化摘要 · /why 为何未下单 · /comparison 已保存模拟对照结果',
   '/digest   查看或配置定时摘要',
   '/ops     查看自动化任务状态',
   '/strategies 查看 AI 模拟策略',
@@ -5565,6 +5598,20 @@ async function stockSignalsForChat(chatId: string, args: string[], automatic = f
 
 export function getTelegramCommandHandlers(): Record<string, TelegramCommandHandler> {
   const rawHandlers: Record<string, TelegramCommandHandler> = {
+    pending: context => rawHandlers.actioncenter(context),
+    changes: context => rawHandlers.digest({...context,args:['now']}),
+    comparison: ({chatId}) => {
+      if(!telegramAdminChatIds().has(String(chatId)))return '仅管理员私聊可查看私人对照账户。';
+      const scope=telegramScopeForChat(chatId);if(!['stocks','options','crypto','prediction'].includes(scope))return '请先选择具体市场。';
+      const saved=comparisonScheduler.list().groups.find(row=>row.market===scope);
+      const runners=getAiRunners().filter(row=>diagnosticRunnerMarket(row)===scope);
+      const groupId=saved?.groupId||runners.find(row=>row.comparisonControl)?.comparisonControl?.groupId;
+      const group=groupId?getAiRunnerComparison(groupId):null;
+      if(!group||group.market!==scope)return '当前市场没有保存的对照组；不创建默认池或跨市场补位。';
+      const arms=runners.filter(row=>group.runnerIds.includes(row.id));if(arms.length!==3)return '对照账户不完整，不能提供比较；请在网页查看保存状态。';
+      const histories=Object.fromEntries(arms.map(row=>[row.id,listAiRunnerHistory(row.id,undefined,200).data]));
+      return formatTelegramComparisonSummary(compareAiRunnerReports(arms,histories));
+    },
     groups: ({chatId,args}) => handleWatchlistMetadataCommand(watchlistMetadataStore,{isOwner:telegramAdminChatIds().has(String(chatId)),scope:telegramScopeForChat(chatId),args}),
     why: ({chatId,args}) => {
       if(!telegramAdminChatIds().has(String(chatId)))return '仅管理员私聊可查看私人跑单诊断。';
@@ -5647,6 +5694,7 @@ export function getTelegramCommandHandlers(): Record<string, TelegramCommandHand
     menu_page: () => telegramReply('当前菜单页。'),
     start: ({ chatId }) => telegramMarketSelectorReply(chatId),
     actioncenter: async ({ chatId, args }) => {
+      if(!telegramAdminChatIds().has(String(chatId)))return '仅管理员私聊可查看和处理私人自选行动。';
       const scope = telegramScopeForChat(chatId);
       const key = `action-center:telegram:${chatId}`;
       if (['read','pin','later'].includes(String(args[0]))) {
@@ -7902,6 +7950,7 @@ app.get('/api/research/daily-briefing', (req, res) => {
         resolvedCount: 0,
         evaluatedCases: 0,
         evaluatedSamples: 0,
+        excludedUnverifiedCount: 0,
         model: { cases: 0, samples: 0, brier: 0, logLoss: 0, hitRatePct: 0 },
         market: { cases: 0, samples: 0, brier: 0, logLoss: 0, hitRatePct: 0 },
         modelEdgePct: 0,

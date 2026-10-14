@@ -714,6 +714,12 @@
     { period: '1h', label: '1 小时' }, { period: '1d', label: '日线' },
   ];
   let multiChartRequest = 0;
+  let multiChartController = null;
+  window.addEventListener('mm-workspace-context',()=>{
+    multiChartController?.abort();multiChartRequest++;
+    const panel=document.getElementById('mm-stock-multi-chart');if(!panel)return;
+    panel.querySelectorAll('[data-mm-multi-period]').forEach(card=>{card.__mmBars=[];card.querySelector('[data-mm-multi-status]').textContent='上下文已变化，请展开或刷新读取当前标的';window.MoneyTradingChart?.clear?.(card.querySelector('canvas'));});
+  });
   function installMultiChartToggle() {
     const companion = document.querySelector('[data-stock-chart-companion]');
     const toolbar = companion?.querySelector('.stock-chart-companion-toolbar');
@@ -744,12 +750,13 @@
         if (!bars.length) return;
         const rect = canvas.getBoundingClientRect();
         const ratio = Math.max(0, Math.min(0.99999, (event.clientX - rect.left - 55) / Math.max(1, rect.width - 67)));
-        const bar = bars[Math.min(bars.length - 1, Math.floor(ratio * bars.length))];
+        const bar = window.MoneyTradingChart?.pickCandle?window.MoneyTradingChart.pickCandle(canvas,event.clientX):bars[Math.min(bars.length - 1, Math.floor(ratio * bars.length))];
         if (Number.isFinite(Number(bar?.time))) window.MoneyMoneyChartBridge.focusTimestamp(Number(bar.time));
       });
     }
     multi.hidden = !multi.hidden;
     if (!multi.hidden) loadMultiChart(false);
+    else {multiChartController?.abort();multiChartRequest++;}
     panel.querySelector('[data-mm-multi-chart-toggle]')?.setAttribute('aria-expanded', String(!multi.hidden));
   }
 
@@ -757,12 +764,13 @@
     const panel = document.getElementById('mm-stock-multi-chart');
     const bridge = window.MoneyMoneyChartBridge;
     if (!panel || !bridge) return;
-    const context = bridge.getContext();
+    const context = {...bridge.getContext()};
     if (!context?.symbol || !context?.apiSymbol) {
       panel.querySelectorAll('[data-mm-multi-status]').forEach(status => { status.textContent = '请先选择股票'; });
       return;
     }
     const revision = ++multiChartRequest;
+    multiChartController?.abort();const controller=new AbortController();multiChartController=controller;
     await Promise.all([...panel.querySelectorAll('[data-mm-multi-period]')].map(async card => {
       const period = card.dataset.mmMultiPeriod;
       const status = card.querySelector('[data-mm-multi-status]');
@@ -771,15 +779,16 @@
       try {
         const query = new URLSearchParams({ symbol: context.symbol, api: context.apiSymbol, period, interval: period });
         if (context.asOf) query.set('asOf', context.asOf);
-        const response = await fetch(`/api/stock/kline?${query}`, { credentials: 'include', cache: 'no-store' });
+        const response = await fetch(`/api/stock/kline?${query}`, { credentials: 'include', cache: 'no-store',signal:controller.signal });
         const body = await response.json();
-        if (revision !== multiChartRequest) return;
+        if (revision !== multiChartRequest || controller.signal.aborted || panel.hidden || bridge.getContext()?.symbol!==context.symbol) return;
         if (!response.ok || !body.success || !Array.isArray(body.data) || !body.data.length) throw new Error(body.reason || '来源无可用K线');
         card.__mmBars = body.data;
+        canvas.moneySourceMetadata={connection:'snapshot',sourceTime:body.sourceTime?Date.parse(body.sourceTime):null,dataStatus:body.dataStatus||'unknown',source:body.source||'来源未知'};
         bridge.draw(canvas, body.data);
         status.textContent = `${body.data.length} 根 · ${body.dataStatus || '状态未知'} · ${body.source || '来源未知'}`;
       } catch (error) {
-        if (revision !== multiChartRequest) return;
+        if (revision !== multiChartRequest || controller.signal.aborted || error.name==='AbortError') return;
         card.__mmBars = [];
         status.textContent = `不可用：${error.message || '请求失败'}`;
         bridge.draw(canvas, []);

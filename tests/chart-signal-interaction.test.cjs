@@ -9,10 +9,15 @@ function signalRuntimeSource() {
   assert.ok(start >= 0 && end > start, 'signal selection and renderer functions should exist');
   return html.slice(start, end);
 }
+function chartFilterContext(window) {
+  window.stockChartEventInstrumentId=()=> 'stock:us:AAPL';window.currentStockKlinePeriod='5m';window.stockChartOverlayConfig={strategies:{maCross:true,volumeBreakout:true}};
+  window.bnCurrentSymbol='BTCUSDT';window.bnCurrentInterval='5m';window.cryptoChartStrategyConfig={maCross:true};window.bnKlineData=[];window.redrawStockKlineSelection=()=>{};
+}
 
 test('chart strategy hit targets cluster dense points and let the user choose exact evidence', () => {
   const dom = new JSDOM('<div id="stock-chart-signal-markers" style="width:240px;height:180px"></div><div id="stock-chart-signals"></div><div id="stock-chart-evidence-status"></div><div id="stock-chart-evidence-detail"></div>', { runScripts: 'outside-only' });
   const window = dom.window;
+  chartFilterContext(window);
   const selected = [];
   window.MoneyChartAnalysis = {
     clusterChartPointsByPixel(items, { radius }) {
@@ -60,6 +65,7 @@ test('chart strategy hit targets cluster dense points and let the user choose ex
 test('crypto and stock chart signal lists include every visible point and use the shared selection handler', () => {
   const dom = new JSDOM('<div id="bn-chart-signals"></div><div id="stock-chart-signals"></div><div id="bn-chart-signal-detail"></div>', { runScripts: 'outside-only' });
   const window = dom.window;
+  chartFilterContext(window);
   window.stockEscapeHtml = value => String(value ?? '').replace(/[&<>"']/g, '');
   window.formatStockKlineTime = value => String(value);
   window.formatChartTime = value => String(value);
@@ -74,4 +80,9 @@ test('crypto and stock chart signal lists include every visible point and use th
   assert.match(window.document.getElementById('bn-chart-signal-detail').textContent, /触发价 21/);
   assert.match(window.document.getElementById('bn-chart-signal-detail').textContent, /OHLC 10 \/ 12 \/ 9 \/ 11/);
   dom.window.close();
+});
+
+test('lifecycle selection persists by instrument and timeframe without touching another market',()=>{
+  const dom=new JSDOM('<div id="stock-chart-signals"></div>',{runScripts:'outside-only',url:'http://localhost/'}),window=dom.window;chartFilterContext(window);window.stockEscapeHtml=value=>String(value??'');window.eval(signalRuntimeSource());
+  try{window.renderChartSignalList('stock-chart-signals',[],'无匹配信号');const field=window.document.querySelector('[data-signal-filter="status"]');field.value='confirmed';field.dispatchEvent(new window.Event('change',{bubbles:true}));assert.equal(window.chartSignalLifecyclePreferences('stock:us:AAPL','5m').filters.status,'confirmed');assert.equal(window.chartSignalLifecyclePreferences('crypto:binance:BTCUSDT','5m').filters.status,'');window.renderChartSignalList('stock-chart-signals',[],'无匹配信号');assert.equal(window.document.querySelector('[data-signal-filter="status"]').value,'confirmed');}finally{window.close();}
 });

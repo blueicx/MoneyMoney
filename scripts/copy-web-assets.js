@@ -44,7 +44,7 @@ function emit(name, body, extension) {
 // scripts intentionally preserve legacy inline handlers and cross-module state.
 const modules = {
   guru: [], research: [], ai: [], charts: [], comparison: [], overview: [],
-  stocks: [], options: [], crypto: [], prediction: [], portfolio: [], trading: [], events: [], ops: [],
+  stocks: [], options: [], crypto: [], prediction: [], portfolio: [], trading: [], events: [], ops: [], tables: [],
 };
 const asyncWorkspaceGroups = [
   ['overview', /^(?:loadMarketOverview|loadCrossAssetCorrelation|loadResearchBriefing|loadCommandCenter)$/],
@@ -61,11 +61,11 @@ const asyncWorkspaceGroups = [
 ];
 const syncWorkspaceGroups = [
   ['charts', /^(?:loadStockKline|stockKlineRequestKey|runStockKlineSingleFlight|drawCandles|drawStockKline|initCryptoChartHover|drawMACD|drawRSI|drawDepthChart|drawStockChartCompanion|buildStockStrategySignals|buildCryptoStrategySignals|handleChartSignalSelection|renderChartPatternMarkers|renderChartPatternList|renderChartStructureList|renderStockChartEventRail|stockChartEventInstrumentId|showStockChartEvidence|focusStockChartTimestamp|redrawStockChartEventMarkers|updateStockKlineFocusControl|setStockKlineViewState|focusStockKlineDate|enterStockIntraday)$/],
-  ['stocks', /^(?:renderGlobalMacroSpot|renderAnalystConsensus|renderFundamentalQuality|renderMarketBreadth|renderInsiderRadar|renderInstitutionalOwnership|renderShortInterest|renderMarketScreener|renderInstrumentDetail)$/],
+  ['stocks', /^(?:renderGlobalMacroSpot|renderAnalystConsensus|renderStockCapitalHistory|renderFundamentalQuality|renderMarketBreadth|renderInsiderRadar|renderInstitutionalOwnership|renderShortInterest|renderMarketScreener|renderInstrumentDetail)$/],
   ['overview', /^fetchMarketOverviewJson$/],
   ['options', /^(?:renderOptionChain|renderOptionStrategies|renderOptionPayoffBuilder|renderOptionIvTermStructure)$/],
   ['crypto', /^(?:renderDefiYieldQuality)$/],
-  ['prediction', /^(?:renderOutcomes|radarMarketCard|renderForecastLab|renderPredictionRadar|renderPredictionLibraryQuick|predictionSparkline|forecastLabGroupTable|renderPredictionSizingResult|selectPredictionLibraryEvent|categoryCardHtml|renderCategories|updateCategoryCard|observeCategoryCards|fetchJsonOrNull|runLimited|toggleConditions)$/],
+  ['prediction', /^(?:renderPredictionRuleAudit|renderOutcomes|radarMarketCard|renderForecastLab|renderPredictionRadar|renderPredictionLibraryQuick|predictionSparkline|forecastLabGroupTable|renderPredictionSizingResult|selectPredictionLibraryEvent|categoryCardHtml|renderCategories|updateCategoryCard|observeCategoryCards|fetchJsonOrNull|runLimited|toggleConditions)$/],
   ['research', /^(?:renderDecisionPortfolio|renderReviewNotes|renderEventStudyResult|renderDecisionEvidence|renderDecisionEvidenceChanges|renderDecisionSignalQuality)$/],
   ['events', /^(?:renderEventCalendar|renderEventMonthGrid)$/],
   ['ops', /^(?:globalSearchCommands|renderGlobalSearchResults|renderSettingsForm|renderTelegramSettingsForm)$/],
@@ -128,6 +128,7 @@ html = html.replace(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi, (tag, attributes,
   return `<script${deferredAttributes} src="${emit(`dashboard-${++number}`, splitWorkspaces(code), 'js')}"></script>`;
 });
 modules.guru.push(fs.readFileSync(path.join(source, 'guru-replay.js'), 'utf8'));
+modules.tables.push(fs.readFileSync(path.join(source, 'table-tools.js'), 'utf8'));
 modules.research.push(
   fs.readFileSync(path.join(source, 'workflow-polish.js'), 'utf8'),
   fs.readFileSync(path.join(source, 'interactive-history.js'), 'utf8'),
