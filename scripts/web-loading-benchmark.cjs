@@ -5,6 +5,8 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { chromium } = require('playwright');
+const { summarizeCpuProfile } = require('./benchmark-profile.cjs');
+const profileCpu = process.env.MONEYMONEY_BENCHMARK_PROFILE === '1';
 const assert = require('node:assert/strict');
 const port = 3198;
 const base = `http://127.0.0.1:${port}`;
@@ -164,6 +166,12 @@ const median = values => [...values].sort((a, b) => a - b)[Math.floor(values.len
         }
         if (cpuRate > 0) await cdp.send('Emulation.setCPUThrottlingRate', { rate: cpuRate });
         for (const temperature of ['cold', 'warm']) {
+          if (profileCpu) {
+            await cdp.send('Profiler.enable');
+            await cdp.send('Profiler.setSamplingInterval', { interval: 2000 });
+            await cdp.send('Performance.enable');
+            await cdp.send('Profiler.start');
+          }
           console.log(`benchmark sample start: viewport=${viewport.width} run=${run + 1} mode=${temperature}`);
           requests.length = 0;
           apiTimings.length = 0;
@@ -182,6 +190,12 @@ const median = values => [...values].sort((a, b) => a - b)[Math.floor(values.len
             && !!window.MoneyTradingChart, 'chart-settled')
             .catch(error => reportWaitFailure('chart-settled', error));
           const chartReadyMs = await page.evaluate(() => performance.now());
+          let cpuDiagnostics;
+          if (profileCpu) {
+            const { profile } = await cdp.send('Profiler.stop');
+            const { metrics } = await cdp.send('Performance.getMetrics');
+            cpuDiagnostics = { ...summarizeCpuProfile(profile), metrics: metrics.filter(row => ['LayoutDuration', 'RecalcStyleDuration', 'ScriptDuration', 'TaskDuration', 'Nodes'].includes(row.name)) };
+          }
           await Promise.allSettled(klineResponseTasks);
           const auxiliaryPendingAtChart = auxiliaryPaths.map(pathname => ({
             pathname,
@@ -233,6 +247,7 @@ const median = values => [...values].sort((a, b) => a - b)[Math.floor(values.len
               };
           }, { shellReadyMs, chartReadyMs });
           result.phaseMarks = chartResult.phaseMarks;
+          if (cpuDiagnostics) result.cpuDiagnostics = cpuDiagnostics;
           result.chartBundleResources = chartResult.chartBundleResources;
           result.klineResponseMetadata = [...klineResponseMetadata];
           result.auxiliaryPendingAtChart = auxiliaryPendingAtChart;

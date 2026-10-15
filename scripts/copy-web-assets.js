@@ -7,6 +7,7 @@ const zlib = require('node:zlib');
 const ts = require('typescript');
 const { expandDashboardRuntime } = require('./dashboard-source-transform.cjs');
 const { optimizeWebAsset } = require('./optimize-web-assets.cjs');
+const { deferStockChartMarkup } = require('./stock-workspace-markup.cjs');
 
 const root = path.join(__dirname, '..');
 const source = path.join(root, 'src', 'web', 'public');
@@ -192,7 +193,7 @@ html = html.replace(/<script\b([^>]*)>/gi, (tag, attributes) => {
 for (const sourceOnlyFile of ['modules/dashboard-runtime.js', 'modules/dashboard-base.css']) {
   fs.rmSync(path.join(target, sourceOnlyFile), { force: true });
 }
-fs.writeFileSync(path.join(target, 'index.html'), html);
+fs.writeFileSync(path.join(target, 'index.html'), deferStockChartMarkup(html));
 fs.writeFileSync(path.join(target, 'asset-manifest.json'), JSON.stringify(manifest, null, 2));
 for (const page of ['index.html', 'login.html']) {
   const file = path.join(target, page);

@@ -6060,14 +6060,21 @@ function formatChartTime(value) {
   if (!value) return '--';
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '--';
-  return date.toLocaleString('zh-CN', { year:'numeric', month:'numeric', day:'numeric', hour:'2-digit', minute:'2-digit' });
+  const formatter = formatChartTime.formatter ||= new Intl.DateTimeFormat('zh-CN', { year:'numeric', month:'numeric', day:'numeric', hour:'2-digit', minute:'2-digit' });
+  return formatter.format(date);
 }
 function stockKlineIsIntraday() { return ['1m', '5m', '15m', '1h'].includes(currentStockKlinePeriod); }
 function formatStockKlineTime(value) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '--';
   if (!stockKlineIsIntraday()) return date.toISOString().slice(0, 10);
-  return `${new Intl.DateTimeFormat('zh-CN', { timeZone: stockChartExchangeTimezone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(date)} ${stockChartExchangeTimezone}`;
+  const formatters = formatStockKlineTime.formatters ||= new Map();
+  if (!formatters.has(stockChartExchangeTimezone)) {
+    const formatter = new Intl.DateTimeFormat('zh-CN', { timeZone: stockChartExchangeTimezone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+    if (formatters.size >= 8) formatters.delete(formatters.keys().next().value);
+    formatters.set(stockChartExchangeTimezone, formatter);
+  }
+  return `${formatters.get(stockChartExchangeTimezone).format(date)} ${stockChartExchangeTimezone}`;
 }
 function renderMovingAverageValues(targetId, bars, periods) {
   const host = document.getElementById(targetId);
@@ -9981,6 +9988,8 @@ function writeDashboardCollapseState(key, open) {
 function initializeDashboardCollapses() {
   const state = readDashboardCollapseState();
   document.querySelectorAll('.dash-collapse[data-collapse-key]').forEach(section => {
+    if (section.dataset.collapseInitialized === 'true') return;
+    section.dataset.collapseInitialized = 'true';
     const key = section.dataset.collapseKey;
     if (!section.classList.contains('workspace-panel-flat') && Object.prototype.hasOwnProperty.call(state, key)) section.open = !!state[key];
     section.addEventListener('toggle', () => {
@@ -11161,7 +11170,20 @@ function renderCoreNav() {
   const mobile = document.getElementById('mobile-nav');
   if (mobile) mobile.innerHTML = navigationItems.map(([tab, label]) => `<button class="mnav-btn" data-tab="${tab}" onclick="mobileTab('${tab}')"><span>${label.slice(0, 2)}</span><small>${label.slice(2).trim()}</small></button>`).join('');
 }
+function mountStockChartWorkspace() {
+  if (activeMarketScope !== 'stocks' || !['stock-quotes', 'radar'].includes(activeWorkspaceId)) return false;
+  const template = document.getElementById('stock-chart-template');
+  if (!template?.content) return false;
+  template.replaceWith(template.content);
+  document.querySelectorAll('.stock-kline-period').forEach(button => button.classList.toggle('active', button.dataset.klinePeriod === currentStockKlinePeriod));
+  initializeDashboardCollapses();
+  renderChartPatternControls();
+  syncStockChartCompanionControls();
+  bindStockChartCompanionSelection();
+  return true;
+}
 function renderNavigationState() {
+  mountStockChartWorkspace();
   ensureMacroWorkspace();
   renderMarketScopeBar();
   renderUtilityNav();

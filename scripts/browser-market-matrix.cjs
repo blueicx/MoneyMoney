@@ -312,7 +312,7 @@ async function main() {
       }
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(payload) });
     });
-    await page.route('**/api/stock/market-breadth', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data: { generatedAt: '2026-09-29T01:00:00.000Z', gainers: [{ symbol: 'SNDK', name: 'Fixture Semiconductor', changePct: 4.2 }], losers: [{ symbol: 'TEST', name: 'Fixture Test Inc.', changePct: -2.1 }] } }) }));
+    await page.route('**/api/stock/market-breadth', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data: { generatedAt: '2026-09-29T01:00:00.000Z', source:'Browser acceptance fixture, not live', advancersPct:50,declinersPct:50,advanceDeclineRatio:1,medianChangePct:1.05,strongAdvancersPct:0,strongDeclinersPct:0,totalVolume:20,totalCount:2,capGroups:[],leadingSectors:[],laggingSectors:[],signal:'mixed',signalZh:'测试快照',adviceZh:'Browser acceptance fixture',regimeBoost:0,confidence:0, gainers: [{ symbol: 'SNDK', name: 'Fixture Semiconductor', changePct: 4.2,priceUsd:100,volume:10 }], losers: [{ symbol: 'TEST', name: 'Fixture Test Inc.', changePct: -2.1,priceUsd:100,volume:10 }] } }) }));
     await page.route('**/api/workspace/watchlist**', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, groups: [{ id: 'watchlist', label: '我的自选', items: [{ instrumentId: 'stock:us:FIX', title: 'Fixture Watchlist' }] }] }) }));
     await page.route('**/api/backtest/preflight**', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
       success: preflightReady, market: 'stocks', instrument: 'AAPL', timeframe: '1d', dataStatus: preflightReady ? 'ready' : 'insufficient',
@@ -440,12 +440,21 @@ async function main() {
     await page.waitForSelector('#market-workspace-shell');
     await page.waitForTimeout(500);
     assert.deepEqual(lazyAssetRequests, [], `the overview cold start must not download chart, research, comparison or contract bundles; contexts=${JSON.stringify(await page.evaluate(() => window.__workspaceContextTrace))}; stack=${await page.evaluate(() => window.__chartEnsureStack || '')}`);
+    assert.equal(await page.locator('#stock-kline').count(),0,'overview must not mount the inactive stock chart DOM');
     await page.evaluate(() => showTab('analysis'));
     await page.waitForFunction(() => window.loadTradeAssistant && !window.loadTradeAssistant.toString().includes('MoneyWorkspaceModules.invoke'), null, { timeout: 10_000 });
     assert.ok(lazyAssetRequests.some(url => /workspace-trading/.test(url)), 'opening the trade-assistant workspace should load its large feature bundle on demand');
     await page.evaluate(() => setMarketScope('stocks'));
     await page.waitForFunction(() => window.MoneyTradingChart && window.MoneyChartAnalysis, null, { timeout: 10_000 });
     assert.ok(lazyAssetRequests.some(url => /workspace-charts/.test(url)), 'opening the stock workspace should load its chart bundle on demand');
+    assert.equal(await page.locator('#stock-kline').count(),1,'stock workspace mounts its existing chart exactly once');
+    const stockMountRestored=await page.evaluate(()=>{
+      const canvas=document.getElementById('stock-kline'),period=currentStockKlinePeriod;
+      canvas.dataset.mountProbe='preserved';
+      openWorkspace('breadth');openWorkspace('stock-quotes');
+      return document.getElementById('stock-kline')===canvas&&canvas.dataset.mountProbe==='preserved'&&currentStockKlinePeriod===period&&document.querySelectorAll('#stock-kline').length===1;
+    });
+    assert.equal(stockMountRestored,true,'returning to the stock workspace preserves its canvas and selected period');
     await page.evaluate(() => openWorkspace('decision-intelligence'));
     await page.waitForFunction(() => window.MoneyMoneyHistoryChart && window.MoneyMoneyWorkflow, null, { timeout: 10_000 });
     assert.ok(lazyAssetRequests.some(url => /workspace-research/.test(url)), 'opening research should load its bundle on demand');
