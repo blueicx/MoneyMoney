@@ -41,3 +41,15 @@ Chromium常见请求头为`gzip, deflate, br, zstd`。原`req.acceptsEncodings('
 差异自查仅批准静态内容协商及本地测量工具改动；没有更改认证、私有接口、市场数据、订单或模型路由。未跟踪`data/research.db`保留且未暂存，SHA256仍为`27fd475e523568daa4cdcabf3146917023335a62affe00429babd721b3b79fd1`。全过程不用子agent。
 
 验收日志位于系统临时目录`mm-brotli-tests.log`、`mm-brotli-build.log`、`mm-brotli-smoke-*.log`、`mm-brotli-security.log`。
+
+## 生产发布核验
+
+代码`4df82345f507560bf8ff5727c835096ea9563ebb`已推送，提交后重新构建和Web冒烟通过。发布标签`4df8234-20261016-brotli`，仅替换dist并重启`moneymoney.service`，保留配置、数据库、数据湖与相邻服务。
+
+- 归档SHA256：`1b636f41550a1e68f0e9a8634695f4fc5e91bf31c3de91e2563c9f86ee02fa4b`。
+- 远端压缩模块SHA256：`6830eb64af86aeb9426e988cdffb42bef9fd8b60d339e6bf484da25bc78c0800`；manifest：`3c0df64600ed61e647082fdda5b86197d6fc505ac7d71a0f1fb68ede7736f349`，与本地一致。
+- 正式域名核心/图表脚本返回br，解压后SHA256分别为`72bee3bdc78d0374a5bab197b5e7eb23838a66588d679a7705b43db32e42a2e1`和`dce8763641ce98642d4017ea4d9ab800cdb18ebf44bbccb099d25aa4026acbbd`，与发布manifest一致；内容没有变化。
+- VPS直接请求浏览器常见请求头返回br、Content-Length49704；显式`br;q=0,gzip`仍返回gzip、Content-Length63989，确认禁用约束不被覆盖。
+- 备份：`/opt/moneymoney/backups/dist-pre-4df8234-20261016-brotli`；回滚：`/opt/moneymoney/dist.rollback-4df8234-20261016-brotli`。
+- 服务active，正式域名版本正确，线上只读Chromium四市场、SNDK及访客边界检查通过，日志`mm-brotli-production.log`。验收没有发送Telegram消息、调用生产模型或提交订单。
+- 发布前根盘约17GiB可用，本地数据库Hash发布后未变。整页提速20%仍未认定完成。
