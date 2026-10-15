@@ -6028,11 +6028,15 @@ function candlePatternCatalog() {
 }
 function renderChartPatternControls() {
   const catalog = candlePatternCatalog();
+  const signature = JSON.stringify(catalog);
   document.querySelectorAll('[id$="-chart-pattern-controls"]').forEach(host => {
     const scope = host.id.startsWith('crypto-') ? 'crypto' : 'stock';
-    host.innerHTML = '<span class="chart-pattern-controls-title">逐项形态</span>' + catalog.map(([type, label]) =>
-      `<label><input type="checkbox" data-chart-pattern="${type}" data-chart-pattern-scope="${scope}" onchange="${scope === 'crypto' ? 'setCryptoChartPattern' : 'setStockChartPattern'}('${type}', this.checked)"> ${label}</label>`
-    ).join('');
+    if (host.dataset.patternCatalogSignature !== signature || !host.firstElementChild) {
+      host.innerHTML = '<span class="chart-pattern-controls-title">逐项形态</span>' + catalog.map(([type, label]) =>
+        `<label><input type="checkbox" data-chart-pattern="${type}" data-chart-pattern-scope="${scope}" onchange="${scope === 'crypto' ? 'setCryptoChartPattern' : 'setStockChartPattern'}('${type}', this.checked)"> ${label}</label>`
+      ).join('');
+      host.dataset.patternCatalogSignature = signature;
+    }
     syncChartPatternControls(scope === 'crypto' ? cryptoChartOverlayConfig : stockChartOverlayConfig, scope);
   });
 }
@@ -6564,9 +6568,11 @@ function renderChartStructureList(targetId, structures, chan, emptyText) {
 function renderChartPatternMarkers(targetId, patterns, getPosition) {
   const layer = document.getElementById(targetId);
   if (!layer) return;
-  layer.innerHTML = '';
   const positioned = (patterns || []).map((item, index) => ({ item, index, position: getPosition(item) }))
     .filter(entry => entry.position && Number.isFinite(Number(entry.position.x)) && Number.isFinite(Number(entry.position.y)));
+  // An empty/disabled layer needs no geometry. Measure nonempty layers before
+  // mutating their DOM so clearing old markers does not force a layout read.
+  if (!positioned.length) { layer.replaceChildren(); return; }
   const chartWidth = layer.clientWidth || layer.parentElement?.clientWidth || 640;
   const chartHeight = layer.clientHeight || layer.parentElement?.clientHeight || 340;
   const canvasId = targetId === 'stock-chart-patterns' ? 'stock-kline' : targetId === 'bn-chart-patterns' ? 'bn-candlestick' : '';
@@ -6576,6 +6582,7 @@ function renderChartPatternMarkers(targetId, patterns, getPosition) {
   const offsetX = canvasRect && layerRect ? canvasRect.left - layerRect.left : 0;
   const offsetY = canvasRect && layerRect ? canvasRect.top - layerRect.top : 0;
   const compact = positioned.length >= 6 && chartWidth / positioned.length < 55;
+  layer.replaceChildren();
   positioned.forEach(({ item, index, position }) => {
     const direction = item.direction === 'bullish' ? '看涨' : item.direction === 'bearish' ? '看跌' : '中性';
     const color = item.direction === 'bearish' ? '#fb7185' : item.direction === 'bullish' ? '#34d399' : '#fbbf24';

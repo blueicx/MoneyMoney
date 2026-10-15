@@ -455,6 +455,14 @@ async function main() {
       return document.getElementById('stock-kline')===canvas&&canvas.dataset.mountProbe==='preserved'&&currentStockKlinePeriod===period&&document.querySelectorAll('#stock-kline').length===1;
     });
     assert.equal(stockMountRestored,true,'returning to the stock workspace preserves its canvas and selected period');
+    const patternControlsStable=await page.evaluate(()=>{
+      const input=document.querySelector('#stock-chart-pattern-controls input');
+      if(!input)return false;
+      input.focus();
+      renderChartPatternControls();renderChartPatternControls();
+      return document.querySelector('#stock-chart-pattern-controls input')===input&&document.activeElement===input;
+    });
+    assert.equal(patternControlsStable,true,'repeated chart initialization preserves pattern controls and keyboard focus');
     await page.evaluate(() => openWorkspace('decision-intelligence'));
     await page.waitForFunction(() => window.MoneyMoneyHistoryChart && window.MoneyMoneyWorkflow, null, { timeout: 10_000 });
     assert.ok(lazyAssetRequests.some(url => /workspace-research/.test(url)), 'opening research should load its bundle on demand');
