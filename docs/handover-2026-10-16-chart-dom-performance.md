@@ -33,3 +33,15 @@
 - 只涉及两个前端函数和测试/交接记录。差异自查确认不更改接口、Provider、数据库模式、AI模型路由、预算、范围、通知配置或订单逻辑；不用子agent。
 - 本地未跟踪`data/research.db`保留，SHA256仍为`27fd475e523568daa4cdcabf3146917023335a62affe00429babd721b3b79fd1`。不纳入提交。
 - 日志：系统临时目录`mm-chart-dom-tests.log`、`mm-chart-dom-build.log`、`mm-chart-dom-smoke-*.log`、`mm-chart-dom-security.log`。
+
+## 发布核验
+
+代码`14eeec0085938fd94c0cc69abd47137a8907df8c`已提交并推送，提交后重新构建和Web冒烟通过。只替换dist并操作`moneymoney.service`，未修改数据库、数据湖、配置或相邻服务。
+
+- 发布标签：`14eeec0-20261016-chart-dom`。
+- 归档SHA256：`3597291cda594c76cdacd6a2999e35e43ee6fcd1d013028f47dcc49bf300925e`。
+- 远端index SHA256：`ca9efc5a7cfc7b85377fdd1bbc8fb9c51d39ae95e07282bed9356040db1246b8`；manifest SHA256：`3c0df64600ed61e647082fdda5b86197d6fc505ac7d71a0f1fb68ede7736f349`，均与本地一致。
+- 正式域名实际下载核心脚本SHA256：`72bee3bdc78d0374a5bab197b5e7eb23838a66588d679a7705b43db32e42a2e1`；图表脚本SHA256：`dce8763641ce98642d4017ea4d9ab800cdb18ebf44bbccb099d25aa4026acbbd`，均与manifest一致。
+- 备份：`/opt/moneymoney/backups/dist-pre-14eeec0-20261016-chart-dom`；回滚：`/opt/moneymoney/dist.rollback-14eeec0-20261016-chart-dom`。
+- 服务active，内部健康检查与正式域名版本正确；正式域名只读Chromium四市场、SNDK、访客私有数据拒绝及移动布局检查通过，日志`mm-chart-dom-production.log`。检查未发送Telegram消息、未调用生产模型、未提交订单。
+- 发布前根盘约17GiB可用；本地数据库Hash发布后仍未变。性能20%目标仍未完成，发布不改变这一结论。
