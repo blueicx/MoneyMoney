@@ -7,6 +7,7 @@ import { timestampMillisValue } from '@duckdb/node-api';
 import { DATA_ROOT, ensureDir } from '../utils/paths';
 import { MARKET_IDS, type MarketId } from '../features/research-contracts';
 import { normalizeInstrumentRef, type InstrumentRef } from '../features/unified-instruments';
+import { assertStorageCapacity, inspectStorageCapacity } from './capacity-budget';
 
 export type DatasetStatus = 'staged' | 'committed' | 'rejected';
 export interface DatasetManifest { id: string; dataset: string; market: MarketId; source: string; fieldVersion: string; timezone: string; adjustment: string; createdAt: string; contentHash: string; }
@@ -20,6 +21,7 @@ export interface BackfillCheckpoint { cursor?: string; rowsWritten: number; part
 export interface DataBackfillJob { id: string; market: MarketId; dataset: string; instrument: string; timeframe: string; from: string; to: string; status: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled'; reason?: string; createdAt: string; updatedAt: string; leaseOwner?: string; leaseExpiresAt?: string; checkpoint: BackfillCheckpoint; }
 export interface BarRow { timestamp: string; open: number; high: number; low: number; close: number; volume?: number; publishedAt?: string; }
 export interface DataLakeDiagnostics {
+  filesystem?:ReturnType<typeof inspectStorageCapacity>;
   root: string;
   generatedAt: string;
   usageBytes: number;
@@ -318,6 +320,9 @@ export class DataLakeCatalog {
     ensureDir(path.dirname(finalPath));
     if (fs.existsSync(finalPath)) return { id: partitionId, manifestId, path: finalPath, dataset: input.dataset, market: input.market, instrument: input.instrument, timeframe: input.timeframe, periodStart: new Date(first).toISOString(), periodEnd: new Date(last).toISOString(), publishedAt: new Date(publishedAt).toISOString(), fetchedAt: new Date().toISOString(), rowCount: input.rows.length, status: 'committed', contentHash, quality };
 
+    assertStorageCapacity(this.lakeRoot,Math.max(1024*1024,input.rows.length*512));
+    const budget=this.getDiagnostics();
+    if(budget.usageBytes+input.rows.length*512>=budget.quotaBytes*.9)throw Error('数据湖达到90%容量停止线，未归档新K线分区');
     const instance = await DuckDBInstance.create(':memory:', { memory_limit: '512MB', threads: '1' });
     const connection = await instance.connect();
     try {
@@ -504,6 +509,7 @@ export class DataLakeCatalog {
     const payload = { id, market: input.market, instrument: input.instrument, underlyingMarket: input.underlyingMarket, source: input.source, fetchedAt: fetchedAt.toISOString(), tradeDate, timezone: timeZone, mode: input.mode, rowCount, contentHash: snapshotHash, snapshot: input.snapshot };
     const serialized = `${stableJson(payload)}\n`;
     const bytes = Buffer.byteLength(serialized);
+    assertStorageCapacity(this.lakeRoot,bytes);
     const diagnostics = this.getDiagnostics();
     if (diagnostics.usageBytes + bytes >= diagnostics.quotaBytes * 0.9) throw new Error('data lake reached the 90% storage stop threshold; options snapshot was not saved');
     const safeInstrument = input.instrument.replace(/[^A-Za-z0-9._-]/g, '_');
@@ -583,6 +589,7 @@ export class DataLakeCatalog {
     const target=path.join(this.lakeRoot,'crypto','contract-metrics',match[1],match[2],String(new Date(at).getUTCFullYear()),String(new Date(at).getUTCMonth()+1).padStart(2,'0'),contentHash+'.parquet');
     const stage=path.join(this.lakeRoot,'.staging',id+'-'+crypto.randomUUID()+'.tmp');
     if(this.getDiagnostics().quotaState==='blocked')throw Error('数据湖达到90%容量停止线，未归档新快照');
+    assertStorageCapacity(this.lakeRoot,1024*1024);
     ensureDir(path.dirname(target));
     const instance=await DuckDBInstance.create(':memory:',{memory_limit:'512MB',threads:'1'}),connection=await instance.connect();
     try{
@@ -661,7 +668,7 @@ export class DataLakeCatalog {
     const warningPercent = Number(options.warningPercent ?? 70);
     const stopPercent = Number(options.stopPercent ?? 90);
     const quotaState = usagePercent >= stopPercent ? 'blocked' : usagePercent >= warningPercent ? 'warning' : 'ok';
-    return { root: this.lakeRoot, generatedAt: new Date().toISOString(), usageBytes, quotaBytes, usagePercent, quotaState, partitionCount: partitions.length + optionPartitions.length, stagingFileCount, byMarket, byDataset, backfills };
+    return { root: this.lakeRoot, generatedAt: new Date().toISOString(), usageBytes, quotaBytes, usagePercent, quotaState, filesystem:inspectStorageCapacity(this.lakeRoot), partitionCount: partitions.length + optionPartitions.length, stagingFileCount, byMarket, byDataset, backfills };
   }
 
   claimNextBackfill(owner = '', leaseMs = 5 * 60 * 1000): DataBackfillJob | null {

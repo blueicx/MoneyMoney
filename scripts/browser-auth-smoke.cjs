@@ -145,6 +145,24 @@ async function main() {
     assert.match(await buyHistory.innerText(), /fixture-snapshot/);
     assert.match(await buyHistory.innerText(), /fixture-order-buy/);
     assert.match(await buyHistory.innerText(), /fixture-bars/);
+    const diagnosticFixture=require('../dist/features/ai-runner-diagnostics').reviewAiRunnerDecisions([
+      {id:'diagnostic-browser',runnerId:'browser-quality',market:'stocks',instrument:'AAPL',at:'2026-10-01T00:00:00Z',dataAt:'2026-09-30T23:59:59Z',dataStatus:'delayed',modelCallStatus:'failed',action:'NONE',reason:'隔离浏览器验收模型超时',signals:[],riskChecks:[]},
+    ],'browser-quality','stocks',[],'2026-10-02T00:00:00Z');
+    await page.evaluate(async data=>{
+      const original=window.fetch;
+      window.fetch=async(input,init)=>String(input).includes('/api/ai-runners/browser-quality/diagnostics')?{ok:true,json:async()=>({success:true,data,reason:'隔离浏览器夹具，不调用真实模型'})}:original(input,init);
+      try{await loadAiRunnerDiagnosticsUi('browser-quality');}finally{window.fetch=original;}
+    },diagnosticFixture);
+    await qualityPanel.locator('summary').first().click();
+    for(const width of [1440,390])for(const theme of ['light','dark','money']){
+      await page.setViewportSize({width,height:900});await page.evaluate(theme=>document.documentElement.setAttribute('data-theme',theme),theme);
+      await qualityPanel.scrollIntoViewIfNeeded();const text=await qualityPanel.innerText();
+      assert.match(text,/未下单原因汇总/);assert.match(text,/模型调用失败/);assert.match(text,/离散扫描不证明故障持续时间/);
+      assert.match(text,/不会自动新增调用/);assert.ok(await qualityPanel.locator('[data-ai-round-replay]').isVisible());
+      await qualityPanel.locator('[data-ai-round-replay]').focus();assert.equal(await qualityPanel.locator('[data-ai-round-replay]').evaluate(el=>document.activeElement===el),true);
+      await page.screenshot({path:path.join(isolatedDataDir,`inaction-${theme}-${width}.png`)});
+    }
+    await page.setViewportSize({width:1440,height:900});await page.evaluate(()=>document.documentElement.removeAttribute('data-theme'));
     const budget=await page.evaluate(()=>fetch('/api/ai-runners/comparisons/budget').then(r=>r.json()));
     assert.equal(budget.success,true);assert.equal(budget.data.limit,24);assert.equal(budget.data.issued,0);
     const streamResponse = await page.evaluate(async () => {

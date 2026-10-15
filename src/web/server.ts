@@ -200,6 +200,7 @@ import { unifiedPaperLedgerStore, calculateUnifiedPerformance, replayUnifiedPape
 import { pendingOptionSettlements } from '../features/paper-account-lifecycle';
 import { createPaperChartReferences, paperChartLineage, resolvePaperChartInstrument } from '../features/paper-chart-lineage';
 import { RunnerExecutionEvidenceStore, runnerSnapshotHash, runnerExecutionSnapshotId } from '../features/runner-execution-evidence';
+import { diagnoseAlertDelivery } from '../features/telegram-delivery-diagnostics';
 import { buildPredictFunExecutionQuote, predictionOutcomeQuote, predictionSettlementRulesGate } from '../features/runner-prediction-quotes';
 const runnerExecutionEvidence = new RunnerExecutionEvidenceStore(stateStore);
 import { stockChartAdjustmentRequestReason, stockChartDisclosure } from '../features/stock-chart-disclosure';
@@ -6869,7 +6870,7 @@ export function getTelegramCommandHandlers(): Record<string, TelegramCommandHand
     inbox: ({chatId}) => {
       const rows=researchRepository.listAlertDeliveries(200).filter((item:any)=>item.payload?.chatId===chatId).slice(0,12);
       if(!rows.length) return '收件箱暂无提醒记录。';
-      const text=['<b>提醒收件箱</b>',...rows.map((row:any)=>`${escapeTelegramHtml(row.id)} · ${escapeTelegramHtml(row.context.market)} · ${escapeTelegramHtml(row.status)}\n${escapeTelegramHtml(row.payload?.message || '提醒内容不可用')}${row.lastError ? '\n原因：'+escapeTelegramHtml(row.lastError):''}`)].join('\n\n');
+      const text=['<b>提醒收件箱</b>',...rows.map((row:any)=>{const diagnostic=diagnoseAlertDelivery(row);return `${escapeTelegramHtml(row.id)} · ${escapeTelegramHtml(row.context.market)} · ${escapeTelegramHtml(row.status)}\n${escapeTelegramHtml(row.payload?.message || '提醒内容不可用')}${row.lastError ? '\n原因：'+escapeTelegramHtml(row.lastError):''}\n排障：${escapeTelegramHtml(diagnostic.reason)}${diagnostic.nextRetryAt?'\n重试窗口：'+escapeTelegramHtml(diagnostic.nextRetryAt):''}`;})].join('\n\n');
       const buttons=rows.map((row:any)=>{
         const actions=row.status==='failed'||row.status==='queued' ? ['retry'] : row.status==='sent' ? ['ack']:[];
         return actions.map((action:string)=>({text:action==='retry'?'重试':'确认',callback_data:issueTelegramCallback('delivery:handle',{scope:row.context.market==='stocks'?'stocks':row.context.market==='options'?'options':row.context.market==='crypto'?'crypto':'prediction',id:JSON.stringify([action,row.id]),workspace:'alerts',chatId})}));
@@ -10642,7 +10643,7 @@ app.post('/api/alerts/dry-run', express.json(), (req, res) => {
 });
 app.get('/api/alerts/deliveries', (req, res) => {
   if (!adminOnly(req, res)) return;
-  res.json({ success: true, data: researchRepository.listAlertDeliveries(Number(req.query.limit) || 100) });
+  res.json({ success: true, data: researchRepository.listAlertDeliveries(Number(req.query.limit) || 100).map(item=>({...item,diagnostic:diagnoseAlertDelivery(item)})) });
 });
 app.post('/api/alerts/deliveries/:id/retry', express.json(), async (req, res) => {
   if (!adminOnly(req, res)) return;

@@ -127,6 +127,12 @@
     if(Number.isFinite(Number(fields.rsi14)))lines.push('RSI14：'+fmt(Number(fields.rsi14)));
     if(Number.isFinite(Number(fields.sma10)))lines.push('SMA10：'+fmt(Number(fields.sma10)));
     if(Array.isArray(decision.evidence)&&decision.evidence.length)lines.push('决策来源明细：'+decision.evidence.slice(0,10).map(item=>`${String(item.dataset)} · ${String(item.source)} · ${String(item.status)} · 数据 ${String(item.dataAt||'未知')} · 抓取 ${String(item.retrievedAt||'未知')}${item.reason?' · '+String(item.reason).slice(0,180):''}`).join('\n'));
+    if(row.quality){const q=row.quality,known=value=>typeof value==='number'&&Number.isFinite(value)?fmt(value):'未关联';
+      lines.push('模拟成交质量：决策至成交 '+known(q.decisionToFillMs)+' ms · 源报价年龄 '+known(q.quoteAgeAtFillMs)+' ms',
+        '相对决策参考价不利偏移 '+known(q.adverseMoveBps)+' bps · 已知报价价差 '+known(q.quoteSpreadBps)+' bps',
+        '记录费用 USD '+known(q.feeUsd)+' · 记录滑点 USD '+known(q.slippageUsd)+' · 成本合计 USD '+known(q.recordedCostsUsd),
+        '提交时报价：未关联 · 后续表现：未关联',String(q.reason||''));
+    }
     lines.push('快照 SHA-256：'+String(row.snapshot.hash));return lines.join('\n');
   }
   function abortPaperEvidence(p){for(const controller of p?.evidenceControllers||[])controller.abort();if(p)p.evidenceControllers=new Set();}

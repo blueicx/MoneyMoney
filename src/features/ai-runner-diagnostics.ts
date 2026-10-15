@@ -1,6 +1,38 @@
 import type { AiRunnerDecisionRecord, AiRunnerPosition } from './ai-paper-runner';
 interface DiagnosticGroup { instrument:string;strategyVersion:string;modelVersion:string;rounds:number;failedModelCalls:number;knownModelCalls:number;rejectedRounds:number;dataFailures:number;maturedSamples:number;maturedResult:null|{closedCount:number;netPnlUsd:number;recordedCostsUsd:number;winRate:number};reason:string }
 
+const inactionLabels = {
+  data_unqualified: ['数据不合格', '检查本轮来源状态、时间及缺失证据；不使用旧报价下单'],
+  model_failed: ['模型调用失败', '检查已记录的模型错误和耗时；不会自动新增调用'],
+  budget: ['预算门控', '核对当前账户可用预算；本页不调整预算'],
+  risk_gate: ['风控或执行门控', '查看失败条件；不自动放宽限制或恢复策略'],
+  no_opportunity: ['本轮信号未触发', '等待下一轮有效数据；不代表策略失效'],
+  unknown: ['原因未结构化关联', '查看保存的原始理由，不从文本猜测归因'],
+} as const;
+type InactionCode = keyof typeof inactionLabels;
+
+function inactionSummary(records:AiRunnerDecisionRecord[]) {
+  const categories = new Map<InactionCode,{code:InactionCode;label:string;nextAction:string;count:number;firstAt:string;lastAt:string;durationMs:null}>();
+  for (const row of records) {
+    if (!['NONE','REJECTED'].includes(row.action)) continue;
+    const failed = (row.riskChecks || []).filter(check=>check.passed===false);
+    // Use recorded gates only. Combined budget-and-risk cannot distinguish the two.
+    const dataFailed = !['live','delayed','historical'].includes(row.dataStatus)
+      || failed.some(check=>['quote-freshness','executable-quote','strategy-indicator-evidence'].includes(check.name));
+    const code:InactionCode = dataFailed ? 'data_unqualified' : row.modelCallStatus==='failed' ? 'model_failed'
+      : failed.some(check=>check.name==='budget') ? 'budget' : failed.length ? 'risk_gate'
+      : row.action==='NONE' && row.modelCallStatus==='success' && row.signals.length===0 ? 'no_opportunity' : 'unknown';
+    const [label,nextAction]=inactionLabels[code],previous=categories.get(code);
+    categories.set(code,{code,label,nextAction,count:(previous?.count||0)+1,
+      firstAt:previous && Date.parse(previous.firstAt)<Date.parse(row.at)?previous.firstAt:row.at,
+      lastAt:previous && Date.parse(previous.lastAt)>Date.parse(row.at)?previous.lastAt:row.at,durationMs:null});
+  }
+  const times=records.map(row=>Date.parse(row.at));
+  return {total:[...categories.values()].reduce((sum,row)=>sum+row.count,0),categories:[...categories.values()],
+    observedSpanMs:times.length?Math.max(...times)-Math.min(...times):null,
+    durationReason:'仅为保留记录的观察跨度；离散扫描不证明故障持续时间',executionChanges:0};
+}
+
 export function diagnosticRunnerMarket(runner:{venue:string;universe?:{market:string}}):string|null {
   const markets:Record<string,string>={Stocks:'stocks',Options:'options',Binance:'crypto','Predict.fun':'prediction'};
   const market=markets[runner.venue]||null;
@@ -9,7 +41,13 @@ export function diagnosticRunnerMarket(runner:{venue:string;universe?:{market:st
 
 /** Read-only interpretation of recorded gates. No quote fetch, strategy change, or model invocation. */
 export function reviewAiRunnerDecisions(records:AiRunnerDecisionRecord[],runnerId:string,market:string,positions:AiRunnerPosition[]=[],now=new Date().toISOString()) {
-  const scoped=records.filter(row=>row.runnerId===runnerId&&row.market===market);
+  const matching=records.filter(row=>row.runnerId===runnerId&&row.market===market);
+  const seen=new Set<string>();let duplicateRecords=0,invalidTimeRecords=0;
+  const scoped=matching.filter(row=>{
+    const at=Date.parse(row.at);
+    if(!Number.isFinite(at)||!Number.isFinite(Date.parse(now))||at>Date.parse(now)){invalidTimeRecords++;return false;}
+    if(seen.has(row.id)){duplicateRecords++;return false;}seen.add(row.id);return true;
+  });
   const rows=scoped.map(row=>{
     const blockedChecks=(row.riskChecks||[]).filter(check=>check.passed===false).map(check=>`${check.name}：${check.reason||'未记录拒绝原因'}`);
     const badEvidence=(row.evidence||[]).filter(evidence=>!['live','delayed','historical'].includes(evidence.status));
@@ -43,5 +81,5 @@ export function reviewAiRunnerDecisions(records:AiRunnerDecisionRecord[],runnerI
     if(total&&total.count>=20){group.maturedResult={closedCount:total.count,netPnlUsd:total.net,recordedCostsUsd:total.costs,winRate:total.wins/total.count};group.reason='仅统计已成熟且订单与成本完整的样本，不作策略排名';}
     else group.reason=`已成熟且成本完整 ${group.maturedSamples} 笔；至少20笔后展示该版本/标的净结果与胜率`;
   }
-  return {rows,groups:[...groups.values()].map(group=>({...group,modelFailureRate:group.knownModelCalls?group.failedModelCalls/group.knownModelCalls:null})),excludedRecords:records.length-scoped.length,readOnly:true,modelCalls:0};
+  return {rows,groups:[...groups.values()].map(group=>({...group,modelFailureRate:group.knownModelCalls?group.failedModelCalls/group.knownModelCalls:null})),inaction:inactionSummary(scoped),duplicateRecords,invalidTimeRecords,excludedRecords:records.length-scoped.length,readOnly:true,modelCalls:0};
 }

@@ -5,6 +5,7 @@ import type { MarketId } from './research-contracts';
 import type { PaperChartSignalReference, PaperChartSnapshotReference } from './paper-chart-lineage';
 import type { UnifiedPaperLedger } from './unified-paper-trading';
 import { parseDeribitOptionInstrumentName } from './runner-deribit-options';
+import { paperFillQuality } from './paper-fill-quality';
 
 type Store=Pick<SQLiteStateStore,'get'|'set'|'transaction'>;
 const digest=(value:unknown)=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -31,6 +32,7 @@ export interface VerifiedExecutionEvidence {
   market:MarketId;instrument:string;orderId:string;accountId:string;signalId:string;snapshotId:string;
   snapshot:{id:string;hash:string;at:string;fields:Record<string,any>};
   decision:Pick<AiRunnerDecisionRecord,'id'|'runnerId'|'at'|'market'|'instrument'|'dataStatus'|'source'|'dataAt'|'strategyVersion'|'modelVersion'|'side'|'signals'|'riskChecks'|'action'|'reason'|'orderId'|'evidence'|'snapshotHash'>;
+  quality?:ReturnType<typeof paperFillQuality>;
 }
 
 /** Immutable execution evidence in the SAME SQLite transaction as runner fills. Not another account ledger. */
@@ -95,8 +97,10 @@ export class RunnerExecutionEvidenceStore {
       const safeEvidence:NonNullable<AiRunnerDecisionRecord['evidence']>=Array.isArray(decision.evidence)?decision.evidence.slice(0,20).map((item:any)=>({dataset:item.dataset,source:item.source.slice(0,160),status:item.status.slice(0,40),dataAt:item.dataAt,retrievedAt:item.retrievedAt,reason:item.reason?String(item.reason).slice(0,240):undefined})):[];
       const safeDecision={id:decision.id,runnerId:decision.runnerId,at:decision.at,market:decision.market,instrument:decision.instrument,dataStatus:decision.dataStatus,source:decision.source,dataAt:decision.dataAt,strategyVersion:decision.strategyVersion,modelVersion:decision.modelVersion,
         signals:decision.signals.slice(0,20).map((item:string)=>item.slice(0,240)),riskChecks:decision.riskChecks.slice(0,20).map((item:any)=>({name:String(item.name||'').slice(0,120),passed:item.passed===true,reason:item.reason?String(item.reason).slice(0,240):undefined})),action:decision.action,side:decision.side,reason:String(decision.reason||'').slice(0,500),orderId:decision.orderId,evidence:safeEvidence,snapshotHash:decision.snapshotHash};
-      return {market:expected.market,instrument:expected.instrument,orderId:order.id,accountId:actualAccount,signalId:signal.id,snapshotId:snapshot.id,
+      const verified:VerifiedExecutionEvidence={market:expected.market,instrument:expected.instrument,orderId:order.id,accountId:actualAccount,signalId:signal.id,snapshotId:snapshot.id,
         snapshot:{id:snapshot.id,hash:snapshot.hash,at:snapshot.at,fields:JSON.parse(JSON.stringify(fields))},decision:safeDecision};
+      verified.quality=paperFillQuality({...order,accountId:actualAccount,runnerId:actualRunner} as any,verified);
+      return verified;
     }catch{return null;}
   }
 }
