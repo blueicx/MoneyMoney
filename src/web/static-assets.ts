@@ -3,7 +3,13 @@ import path from 'node:path';
 import type { Express, Request, Response } from 'express';
 
 function sendPrecompressed(req: Request, res: Response, file: string, cache: string): void {
-  const encoding = req.acceptsEncodings('br', 'gzip', 'identity');
+  const accepted = req.get('Accept-Encoding') || '';
+  // Without explicit quality weights the encodings are equally acceptable.
+  // Negotiator otherwise uses client list order (Chrome lists gzip first),
+  // wasting the smaller prebuilt Brotli variant. Keep weighted requests intact.
+  const preferBrotli = !/;\s*q\s*=/i.test(accepted)
+    && fs.existsSync(file + '.br') && req.acceptsEncodings('br') === 'br';
+  const encoding = preferBrotli ? 'br' : req.acceptsEncodings('br', 'gzip', 'identity');
   if (!encoding) { res.status(406).end(); return; }
   const suffix = encoding === 'br' ? '.br' : encoding === 'gzip' ? '.gz' : '';
   const selected = suffix && fs.existsSync(file + suffix) ? file + suffix : file;

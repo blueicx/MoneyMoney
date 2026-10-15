@@ -5,8 +5,9 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { chromium } = require('playwright');
-const { summarizeCpuProfile } = require('./benchmark-profile.cjs');
+const { summarizeCpuProfile, summarizeTimeline } = require('./benchmark-profile.cjs');
 const profileCpu = process.env.MONEYMONEY_BENCHMARK_PROFILE === '1';
+const traceLayout = process.env.MONEYMONEY_BENCHMARK_LAYOUT === '1';
 const assert = require('node:assert/strict');
 const port = 3198;
 const base = `http://127.0.0.1:${port}`;
@@ -97,6 +98,7 @@ const median = values => [...values].sort((a, b) => a - b)[Math.floor(values.len
         const apiRequestStartedAt = new WeakMap();
         const pageErrors = [];
         const responses = [];
+        const assetResponses = [];
         const klineResponseMetadata = [];
         const klineResponseTasks = [];
         const failedRequests = [];
@@ -145,6 +147,7 @@ const median = values => [...values].sort((a, b) => a - b)[Math.floor(values.len
         });
         page.on('response', response => {
           const url = new URL(response.url());
+          if (url.pathname.startsWith('/assets/')) assetResponses.push({ path:url.pathname, encoding:response.headers()['content-encoding'] || 'identity' });
           if (url.pathname.startsWith('/api/')) responses.push({ pathname: url.pathname, status: response.status() });
           if (url.pathname === '/api/stock/kline') {
             klineResponseTasks.push(response.json().then(body => klineResponseMetadata.push({
@@ -160,12 +163,18 @@ const median = values => [...values].sort((a, b) => a - b)[Math.floor(values.len
         page.on('pageerror', error => pageErrors.push(error.message));
         page.on('requestfailed', request => failedRequests.push({ url: request.url(), error: request.failure()?.errorText || 'unknown' }));
         const cdp = await context.newCDPSession(page);
+        const timeline = [];
+        if (traceLayout) cdp.on('Tracing.dataCollected', event => timeline.push(...event.value.filter(row => ['Layout', 'UpdateLayoutTree', 'ParseHTML', 'EvaluateScript', 'FunctionCall'].includes(row.name))));
         await cdp.send('Network.enable');
         if (networkProfile === 'weak') {
           await cdp.send('Network.emulateNetworkConditions', { offline: false, latency: 80, downloadThroughput: 750 * 1024 / 8, uploadThroughput: 250 * 1024 / 8 });
         }
         if (cpuRate > 0) await cdp.send('Emulation.setCPUThrottlingRate', { rate: cpuRate });
         for (const temperature of ['cold', 'warm']) {
+          if (traceLayout) {
+            timeline.length = 0;
+            await cdp.send('Tracing.start', { categories: 'devtools.timeline,disabled-by-default-devtools.timeline.stack', transferMode: 'ReportEvents' });
+          }
           if (profileCpu) {
             await cdp.send('Profiler.enable');
             await cdp.send('Profiler.setSamplingInterval', { interval: 2000 });
@@ -174,6 +183,7 @@ const median = values => [...values].sort((a, b) => a - b)[Math.floor(values.len
           }
           console.log(`benchmark sample start: viewport=${viewport.width} run=${run + 1} mode=${temperature}`);
           requests.length = 0;
+          assetResponses.length = 0;
           apiTimings.length = 0;
           klineResponseMetadata.length = 0;
           klineResponseTasks.length = 0;
@@ -190,6 +200,13 @@ const median = values => [...values].sort((a, b) => a - b)[Math.floor(values.len
             && !!window.MoneyTradingChart, 'chart-settled')
             .catch(error => reportWaitFailure('chart-settled', error));
           const chartReadyMs = await page.evaluate(() => performance.now());
+          let layoutDiagnostics;
+          if (traceLayout) {
+            const complete = new Promise(resolve => cdp.once('Tracing.tracingComplete', resolve));
+            await cdp.send('Tracing.end');
+            await complete;
+            layoutDiagnostics = summarizeTimeline(timeline);
+          }
           let cpuDiagnostics;
           if (profileCpu) {
             const { profile } = await cdp.send('Profiler.stop');
@@ -244,14 +261,18 @@ const median = values => [...values].sort((a, b) => a - b)[Math.floor(values.len
                 downloadSpanMs: startupStarts.length ? Math.max(...startupEnds) - Math.min(...startupStarts) : 0,
               },
               domContentLoadedMs: navigation?.domContentLoadedEventEnd || null,
+              navigationTiming: navigation ? { responseStart: navigation.responseStart, responseEnd: navigation.responseEnd, domInteractive: navigation.domInteractive, domContentLoadedEventEnd: navigation.domContentLoadedEventEnd } : null,
+              startupResources: resources.filter(row => ['script', 'link', 'fetch'].includes(row.initiatorType)).map(row => ({ path:new URL(row.name).pathname, startTime:row.startTime, responseStart:row.responseStart, responseEnd:row.responseEnd, transferSize:row.transferSize })),
               };
           }, { shellReadyMs, chartReadyMs });
           result.phaseMarks = chartResult.phaseMarks;
           if (cpuDiagnostics) result.cpuDiagnostics = cpuDiagnostics;
+          if (layoutDiagnostics) result.layoutDiagnostics = layoutDiagnostics;
           result.chartBundleResources = chartResult.chartBundleResources;
           result.klineResponseMetadata = [...klineResponseMetadata];
           result.auxiliaryPendingAtChart = auxiliaryPendingAtChart;
           result.apiRequestDetails = [...requests];
+          result.assetResponses = [...assetResponses];
           result.apiTimings = [...apiTimings];
           result.apiRequests = requests.map(request => request.pathname);
           result.apiRequestCounts = Object.fromEntries([...new Set(result.apiRequests)].map(path => [path, result.apiRequests.filter(request => request === path).length]));

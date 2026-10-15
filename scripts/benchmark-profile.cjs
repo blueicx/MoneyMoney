@@ -28,4 +28,18 @@ function summarizeCpuProfile(profile) {
   }
   return { sampledMs, frames: [...totals.values()].sort((a, b) => b.inclusiveMs - a.inclusiveMs).slice(0, 35) };
 }
-module.exports = { summarizeCpuProfile };
+function summarizeTimeline(events) {
+  const allowed = new Set(['Layout', 'UpdateLayoutTree', 'ParseHTML', 'EvaluateScript', 'FunctionCall']);
+  const origin = events.reduce((min, row) => Number.isFinite(row.ts) ? Math.min(min, row.ts) : min, Infinity);
+  const rows = events.filter(row => allowed.has(row.name) && row.ph === 'X' && Number.isFinite(row.dur) && row.dur >= 0).map(row => ({
+    name: row.name, durationMs: row.dur / 1000, atMs: (row.ts - origin) / 1000,
+    dirtyObjects:row.args?.beginData?.dirtyObjects, totalObjects:row.args?.beginData?.totalObjects,
+    stack: (row.args?.beginData?.stackTrace || row.args?.data?.stackTrace || []).slice(0, 5).map(frame => {
+      let path = ''; try { path = new URL(frame.url).pathname; } catch {}
+      return { functionName: frame.functionName || '(anonymous)', path, lineNumber: frame.lineNumber, columnNumber: frame.columnNumber };
+    }),
+  }));
+  const totals = [...allowed].map(name => ({ name, durationMs: rows.filter(row => row.name === name).reduce((sum, row) => sum + row.durationMs, 0) }));
+  return { totals, longest: rows.sort((a, b) => b.durationMs - a.durationMs).slice(0, 20) };
+}
+module.exports = { summarizeCpuProfile, summarizeTimeline };

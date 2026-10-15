@@ -35,6 +35,19 @@ test('hashed assets negotiate compression, validate ETag and remain cacheable wi
     const brotli = await fetch(base + resource, { headers: { 'accept-encoding': 'br' } });
     assert.equal(brotli.headers.get('content-encoding'), 'br');
     assert.equal((await brotli.text()).length > 0, true);
+    for (const [accepted, expected] of [
+      ['gzip, deflate, br, zstd', 'br'],
+      ['gzip;q=1, br;q=0.5', 'gzip'],
+      ['br;q=0, gzip', 'gzip'],
+      ['br;q=1, gzip;q=0.5', 'br'],
+      ['identity', null],
+    ]) {
+      const response = await fetch(base + resource, { headers: { 'accept-encoding': accepted } });
+      assert.equal(response.headers.get('content-encoding'), expected, accepted);
+      assert.equal(await response.text(), fs.readFileSync(path.join('dist/web/public', resource), 'utf8'));
+    }
+    const rejected = await fetch(base + resource, { headers: { 'accept-encoding': 'br;q=0,gzip;q=0,identity;q=0' } });
+    assert.equal(rejected.status, 406);
     const privateApi = await fetch(base + '/api/private');
     assert.equal(privateApi.headers.get('cache-control'), 'no-store');
     const head = await fetch(base + resource, { method: 'HEAD', headers: { 'accept-encoding': 'br' } });
