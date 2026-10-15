@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { exchangeSessionContext } from './exchange-session-context';
 import type { SQLiteStateStore } from '../storage/sqlite-state';
 type Store = Pick<SQLiteStateStore, 'get' | 'set' | 'acquireLease' | 'refreshLease' | 'releaseLease'>;
 interface Config { enabled: boolean; intervalMinutes: number; }
@@ -53,8 +54,9 @@ export function stockExchangeSession(venue: 'us' | 'cn' | 'hk', now: number, clo
   const date = `${value('year')}-${value('month')}-${value('day')}`;
   const minute = Number(value('hour')) * 60 + Number(value('minute'));
   const windows = venue === 'us' ? [[570, 960]] : venue === 'cn' ? [[570,690],[780,900]] : [[570,720],[780,960]];
-  const open = !['Sat','Sun'].includes(value('weekday')) && !closedDates.includes(date) && windows.some(([start,end]) => minute >= start && minute < end);
-  return { open, timezone, date, reason: open ? '交易所常规时段；是否有节假日/临时停市仍以来源状态为准' : '周末、已配置停市日或常规交易时段之外' };
+  const session=exchangeSessionContext(venue,now);
+  const open = !['Sat','Sun'].includes(value('weekday')) && !closedDates.includes(date) && !session.verifiedClosed && session.phase==='regular' && windows.some(([start,end]) => minute >= start && minute < end);
+  return { open, timezone, date, session, reason: open ? '交易所常规时段；是否有节假日/临时停市仍以来源状态为准' : session.verifiedClosed||session.earlyClose?session.source+' · '+session.phase:'周末、已配置停市日或常规交易时段之外' };
 }
 
 export class StockSignalSchedule {

@@ -2,6 +2,7 @@ import type { SQLiteStateStore } from '../storage/sqlite-state';
 import { assertMarketContext, type MarketId } from './research-contracts';
 
 export interface ActionCenterItem {
+  changePct?:number; volumeRatio?:number;
   id: string; market: MarketId; instrument?: string; kind: 'price' | 'event' | 'alert' | 'screener' | '13f' | 'review' | 'signal' | 'source';
   title: string; summary?: string; scheduledAt?: string; occurredAt?: string; publishedAt?: string; observedAt: string;
   source: string; sourceUrl?: string; dataStatus: string; reason?: string; evidenceRefs: string[];

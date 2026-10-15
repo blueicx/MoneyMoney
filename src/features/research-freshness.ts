@@ -5,6 +5,7 @@ export interface ResearchFreshnessInput {
   instrument?: string;
   timeframe?: string;
   createdAt: string;
+  asOf?: string;
   dataSnapshotHash?: string;
   strategyId?: string;
   strategyVersion?: string;
@@ -19,6 +20,8 @@ function stockSymbol(value: string): string {
 
 export function assessResearchFreshness(input: ResearchFreshnessInput) {
   const createdAt = Date.parse(input.createdAt);
+  const asOf=Date.parse(input.asOf||new Date().toISOString());
+  if(!Number.isFinite(asOf)||asOf<createdAt)throw Error('Research observation time is invalid');
   if (!Number.isFinite(createdAt)) throw new Error('Research freshness requires a valid createdAt');
   if (input.dataSnapshotHash && !/^[a-f0-9]{64}$/i.test(input.dataSnapshotHash)) throw new Error('Research snapshot hash must be SHA-256 hex');
   const findings: Array<{ kind: 'data-revision' | 'corporate-action' | 'strategy-version'; at: string; detail: string; hash?: string }> = [];
@@ -31,13 +34,13 @@ export function assessResearchFreshness(input: ResearchFreshnessInput) {
     const publishedAt = Date.parse(revision.publishedAt);
     if (revision.market !== input.market || !instrument || !matchesInstrument(revision.instrument)) continue;
     if (input.timeframe && revision.timeframe && revision.timeframe !== input.timeframe) continue;
-    if (!Number.isFinite(publishedAt) || publishedAt <= createdAt) continue;
+    if (!Number.isFinite(publishedAt) || publishedAt <= createdAt || publishedAt>asOf) continue;
     findings.push({ kind: 'data-revision', at: new Date(publishedAt).toISOString(), detail: `${revision.dataset || '数据'}在研究创建后发布了新版本`, hash: revision.contentHash });
   }
   if (input.market === 'stocks' && instrument) {
     for (const action of input.corporateActions || []) {
       const effectiveAt = Date.parse(action.effectiveAt);
-      if (action.market !== 'stocks' || !matchesInstrument(action.instrument) || !Number.isFinite(effectiveAt) || effectiveAt <= createdAt) continue;
+      if (action.market !== 'stocks' || !matchesInstrument(action.instrument) || !Number.isFinite(effectiveAt) || effectiveAt <= createdAt || effectiveAt>asOf) continue;
       findings.push({ kind: 'corporate-action', at: new Date(effectiveAt).toISOString(), detail: `研究创建后生效的公司行动：${action.kind}` });
     }
   }

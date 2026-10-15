@@ -90,6 +90,10 @@ import { createGuruHoldingsRouter } from '../features/guru-holdings-router';
 import * as guruHoldings from '../features/guru-holdings';
 import { buildMarketChangeDigest, calculateEvidencePriceChanges, type MarketChangeRecord } from '../features/market-change-digest';
 import { ActionCenterStore, buildActionCenter, type ActionCenterItem } from '../features/action-center';
+import { buildWatchlistOperations } from '../features/watchlist-operations';
+import { ResearchValidityTracker } from '../features/research-validity';
+import { estimatePortfolioExit } from '../features/portfolio-exit-stress';
+import { exchangeSessionContext } from '../features/exchange-session-context';
 import { startGuruHoldingsRefreshMonitor, stopGuruHoldingsRefreshMonitor } from '../features/guru-holdings-refresh-monitor';
 import { getFearGreed, getFundingRates } from '../features/market-sentiment';
 import { getGlobalMacroSpotSnapshot } from '../features/global-macro-spot';
@@ -713,6 +717,7 @@ async function buildSharedMarketChangeDigest(ids: string[], since: string): Prom
 }
 
 const actionCenterStore = new ActionCenterStore(stateStore);
+const researchValidityTracker=new ResearchValidityTracker(stateStore);
 async function collectWatchlistActions(ids: string[], suppliedDigest?: MarketChangeRecord[]): Promise<ActionCenterItem[]> {
   const now = new Date().toISOString();
   const watched = canonicalDigestWatchlist(ids);
@@ -723,6 +728,8 @@ async function collectWatchlistActions(ids: string[], suppliedDigest?: MarketCha
     title: row.title, summary: row.summary, scheduledAt: row.scheduledAt, occurredAt: row.occurredAt, publishedAt: row.publishedAt,
     observedAt: row.observedAt, source: row.source || '未声明来源', sourceUrl: row.sourceUrl,
     dataStatus: row.dataStatus || 'cached', evidenceRefs: row.evidenceRefs || [],
+    changePct:typeof row.changePct==='number'&&Number.isFinite(row.changePct)?row.changePct:undefined,
+    volumeRatio:typeof row.volumeRatio==='number'&&Number.isFinite(row.volumeRatio)?row.volumeRatio:undefined,
   }));
   const watchedSet = new Set(watched.map(row => row.instrument));
   for (const row of unifiedAlertStore.listHistory(100).filter(row => row.ownerId === 'admin' && watchedSet.has(row.instrumentId))) {
@@ -757,6 +764,15 @@ async function collectWatchlistActions(ids: string[], suppliedDigest?: MarketCha
         source: '事件日历', dataStatus: 'failed', reason: error instanceof Error ? error.message : '请求失败', evidenceRefs: [] });
     }
   }
+  for(const watchedRef of watched.filter(row=>row.market!=='stocks').slice(0,5)){
+    const snapshots=decisionIntelligenceStore.listEvidence(watchedRef.market).filter(row=>row.instrument===watchedRef.instrument).slice(0,50);
+    let count=0;
+    for(const snapshot of snapshots)for(const [field,title] of [['nextFundingAt','资金结算'],['expiryAt','合约到期'],['deadline','事件截止'],['scheduledAt','来源计划事件']] as const){
+      const value=snapshot.fields[field];if(typeof value!=='string')continue;
+      items.push({id:`risk:${snapshot.id}:${field}`,market:watchedRef.market,instrument:watchedRef.instrument,kind:'event',title,scheduledAt:value,observedAt:snapshot.fetchedAt,source:snapshot.source.name,sourceUrl:snapshot.source.url||undefined,dataStatus:snapshot.dataStatus,evidenceRefs:[snapshot.id]});count++;
+    }
+    if(!count)items.push({id:'source:risk:'+watchedRef.instrument,market:watchedRef.market,instrument:watchedRef.instrument,kind:'source',title:'风险日历缺少时间证据',observedAt:now,source:'本市场已保存证据快照',dataStatus:'unavailable',reason:'尚未保存同标的资金结算、到期或事件截止时间；不触发额外模型调用或上游全量扫描',evidenceRefs:[]});
+  }
   return items;
 }
 
@@ -764,11 +780,16 @@ app.get('/api/watchlist/action-center', async (req, res) => {
   if (!adminOnly(req, res)) return;
   try {
     const market = req.query.market ? decisionMarket(req.query.market) : undefined;
-    const records = await collectWatchlistActions(unifiedAlertStore.listWatchlist());
+    const scopedWatchlist=canonicalDigestWatchlist(unifiedAlertStore.listWatchlist()).filter(row=>!market||row.market===market);
+    const records = await collectWatchlistActions(scopedWatchlist.map(row=>row.instrument));
     const result = buildActionCenter(records, { market, states: actionCenterStore.states('admin') });
-    stateStore.set('action-center:items:admin', records);
+    stateStore.transaction(()=>{
+      const previous=stateStore.get<ActionCenterItem[]>('action-center:items:admin')||[];
+      stateStore.set('action-center:items:admin',market?[...previous.filter(row=>row.market!==market),...records]:records);
+    });
     const failures = result.items.some(row => ['failed', 'unavailable', 'partial'].includes(row.dataStatus));
-    return res.json({ success: true, ...result, market: market || 'overview', source: '自选、提醒、筛选、13F与决策记录',
+    const operations=MARKET_IDS.filter(scope=>!market||market===scope).map(scope=>({...buildWatchlistOperations(result.items,scopedWatchlist,scope),sessions:scope==='stocks'?(['us','cn','hk'] as const).map(venue=>exchangeSessionContext(venue)):[]}));
+    return res.json({ success: true, ...result, operations, market: market || 'overview', source: '自选、提醒、筛选、13F与决策记录',
       dataStatus: failures ? 'partial' : result.dataStatus, evidenceRefs: [...new Set(result.items.flatMap(row => row.evidenceRefs))] });
   } catch (error) { return res.status(500).json({ success: false, dataStatus: 'failed', reason: error instanceof Error ? error.message : '行动中心加载失败' }); }
 });
@@ -1860,6 +1881,22 @@ app.get('/api/research/price-comparison', async (req, res) => {
   } catch(error:any) {res.status(400).json({success:false,dataStatus:'failed',reason:error.message});}
 });
 
+app.get('/api/stock/session',(req,res)=>{
+  try{const venue=String(req.query.venue||'us');if(!['us','cn','hk'].includes(venue))throw Error('不支持的股票交易所');const data=exchangeSessionContext(venue as 'us'|'cn'|'hk');res.json({success:true,market:'stocks',data,dataStatus:'partial',source:data.source,updatedAt:new Date().toISOString(),reason:data.reason});}catch(error:any){res.status(400).json({success:false,dataStatus:'failed',reason:error.message});}
+});
+app.get('/api/portfolio/exit-stress',async(req,res)=>{
+  if(!adminOnly(req,res))return;
+  try{
+    const market=decisionMarket(req.query.market),type=({stocks:'stock',options:'option',crypto:'crypto',prediction:'prediction'} as const)[market];
+    const positions=unifiedPaperLedgerStore.get().positions.filter(row=>row.instrumentType===type),results=[];
+    for(const position of positions.slice(0,10)){
+      let book=null;const match=/^crypto:binance:([A-Z0-9]+USDT)$/.exec(position.instrumentId);
+      if(market==='crypto'&&match){const depth=await binanceFeed.getDepth(match[1],100);if(depth?.sourceStatus==='ok')book={instrument:position.instrumentId,source:'Binance Spot Public Depth',retrievedAt:depth.freshness,bids:depth.bids,asks:depth.asks,quantityUnit:'base'};}
+      results.push(estimatePortfolioExit({...position,currency:position.currency||(match?'USDT':undefined)},book));
+    }
+    res.json({success:true,market,data:results,dataStatus:results.some(row=>row.proceeds!==null)?'partial':results.length?'unavailable':'empty',source:'统一模拟账本 + 本市场可见深度',updatedAt:new Date().toISOString(),reason:positions.length>10?'仅检查前10个仓位以遵守来源预算，其余未评估':'仅预览，不创建订单；未接入可核验深度的市场显示不可用',orderChanges:0});
+  }catch(error:any){res.status(400).json({success:false,dataStatus:'failed',reason:error.message});}
+});
 app.get('/api/portfolio/analytics', async (req, res) => {
   if (!adminOnly(req, res)) return;
   try {
@@ -8565,7 +8602,8 @@ app.get('/api/research/experiments/:id/freshness', (req, res) => {
       createdAt: experiment.createdAt, dataSnapshotHash: experiment.dataSnapshotHash,
       strategyId: experiment.strategyId, strategyVersion: experiment.strategyVersion,
     });
-    return res.json({ success: true, data: freshness, market: experiment.market, instrument: experiment.instrument || null, dataStatus: freshness.status, source: 'research-freshness', updatedAt: new Date().toISOString(), reason: freshness.reason, manualRerunAvailable: Boolean(result.input) });
+    const validity=researchValidityTracker.observe(experiment,freshness,driftGate.list(experiment.market).filter(row=>row.strategyId===experiment.strategyId&&row.strategyVersion===experiment.strategyVersion).map(row=>({status:row.paused?'paused':'healthy',reason:row.reason})));
+    return res.json({ success: true, data: freshness, validity, market: experiment.market, instrument: experiment.instrument || null, dataStatus: freshness.status, source: 'research-freshness', updatedAt: new Date().toISOString(), reason: freshness.reason, manualRerunAvailable: Boolean(result.input) });
   } catch (error) { return res.status(400).json({ success: false, error: error instanceof Error ? error.message : '研究时效检查失败' }); }
 });
 

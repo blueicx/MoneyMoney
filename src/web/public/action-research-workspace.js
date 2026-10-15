@@ -3,7 +3,7 @@
   const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
   const markets = { stocks:'股票', options:'期权', crypto:'虚拟币', prediction:'预测市场' };
   const kinds = { changes:'今日变化', upcoming:'未来七天', alert:'待确认提醒', screener:'筛选进出', '13f':'13F 变化', review:'到期复盘' };
-  let records = [], controller, lastScope, lastContext='', lifecycleController = new AbortController();
+  let records = [], operations = [], controller, lastScope, lastContext='', lifecycleController = new AbortController();
   const timeForLocation = row => row.occurredAt || row.scheduledAt || row.publishedAt;
   function context() { const shell=document.getElementById('market-workspace-shell');return {market:shell?.dataset.marketScope,workspace:shell?.dataset.workspace,instrument:shell?.dataset.instrument || ''}; }
   const saved = key => { try { return JSON.parse(localStorage.getItem(key) || '{}'); } catch { return {}; } };
@@ -84,8 +84,18 @@
   async function loadActions() {
     controller?.abort(); controller = new AbortController(); const signal = controller.signal;
     const status = document.getElementById('mm-action-status'); status.textContent = '正在读取自选来源与处理记录…';
-    try { const market=context().market;const result = await api('/api/watchlist/action-center'+(markets[market] ? '?market='+market:''), { signal }); if (signal.aborted) return; records = result.items; status.textContent = `${result.counts.unread} 项待处理 · ${window.MoneyMoneyWorkflow?.status(result.dataStatus) || result.dataStatus} · ${result.updatedAt}${result.reason ? ' · ' + result.reason : ''}`; render(); }
+    try { const market=context().market;const result = await api('/api/watchlist/action-center'+(markets[market] ? '?market='+market:''), { signal }); if (signal.aborted) return; records = result.items; operations=result.operations||[]; status.textContent = `${result.counts.unread} 项待处理 · ${window.MoneyMoneyWorkflow?.status(result.dataStatus) || result.dataStatus} · ${result.updatedAt}${result.reason ? ' · ' + result.reason : ''}`; render(); renderOperations(); }
     catch (error) { if (error.name !== 'AbortError') status.textContent = error.message; }
+  }
+  function renderOperations(){
+    const host=document.getElementById('mm-watchlist-operations');if(!host)return;
+    const sort=document.getElementById('mm-action-map-sort')?.value||'pending',market=context().market;
+    const groups=operations.filter(row=>!markets[market]||row.calendar.market===market);
+    const magnitude=row=>row.changePct==null?-Infinity:Math.abs(row.changePct);
+    const rows=groups.flatMap(row=>row.map).slice().sort((a,b)=>sort==='event'?(Date.parse(a.nextEventAt)||Infinity)-(Date.parse(b.nextEventAt)||Infinity):sort==='change'?magnitude(b)-magnitude(a):sort==='data'?Number(['empty','partial'].includes(b.dataStatus))-Number(['empty','partial'].includes(a.dataStatus)):b.pending-a.pending);
+    host.innerHTML='<div class="mm-table-scroll"><table class="workspace-watchlist-table"><thead><tr><th>自选 / 图表</th><th>已关联涨跌</th><th>待处理 / 信号变化</th><th>下个事件</th><th>来源与状态</th></tr></thead><tbody>'+rows.map(row=>'<tr><td><a href="'+esc(link(row,({stocks:'stock-quotes',options:'option-chain',crypto:'crypto-quotes',prediction:'prediction-radar'})[row.market]))+'">'+esc(row.instrument)+'</a></td><td>'+esc(row.changePct==null?'未关联':row.changePct.toFixed(2)+'%')+'</td><td>'+Number(row.pending)+' / '+Number(row.signalChanges)+'</td><td>'+esc(row.nextEventAt||'暂无可核验时间')+'</td><td>'+esc(row.dataStatus)+' · '+esc(row.source.join('、')||row.reason)+'</td></tr>').join('')+'</tbody></table></div><h4>未来七天风险日历</h4>'+groups.map(group=>'<p>'+esc(markets[group.calendar.market])+' · '+esc(group.calendar.reason)+'</p>'+group.calendar.scheduled.map(row=>'<button type="button" class="tab" data-risk-event="'+esc(row.id)+'">'+esc(row.scheduledAt)+' · '+esc(row.title)+'</button>').join('')+'<p>时间未知 '+group.calendar.unknownTime.length+' 项 · 来源异常 '+group.calendar.sourceFailures.length+' 项</p>'+group.calendar.sourceFailures.map(row=>'<p>'+esc(row.instrument||'本市场')+' · '+esc(row.dataStatus)+' · '+esc(row.reason||'来源尚未给出原因')+'</p>').join('')).join('');
+    for(const button of host.querySelectorAll('[data-risk-event]'))button.onclick=()=>{const row=records.find(row=>row.id===button.dataset.riskEvent);if(row)drawer(row);};
+    for(const session of groups.flatMap(group=>group.sessions||[])){const text=document.createElement('p');text.textContent=session.venue+' · '+session.timezone+' · 常规时段 '+({pre:'盘前',regular:'盘中',post:'盘后',break:'午间间隔',outside:'常规时段之外',closed:'来源声明休市'}[session.phase]||session.phase)+' · '+session.reason;host.append(text);}
   }
   function drawCurves(host, series) {
     window.MoneyMoneyHistoryChart.render(host,series.map(row=>({...row,points:row.values.map((value,i)=>({date:row.dates?.[i] || String(i+1).padStart(6,'0')+' 根',value}))})),{title:series[0]?.label || '历史比较',onLocate:series.length===1 && series[0].dates && /^stock:us:[A-Z0-9.-]+$/.test(series[0].instrument || '') ? date=>window.MoneyMoneyWorkflow.locate(date,series[0].instrument):undefined});
@@ -102,9 +112,11 @@
     section.querySelector('.mm-action-tools').insertAdjacentHTML('beforeend','<button id="mm-action-history-toggle" type="button">处理历史</button>');
     document.getElementById('mm-action-status').insertAdjacentHTML('afterend','<div id="mm-action-history-panel" hidden role="status"></div>');
     document.getElementById('mm-action-state').onchange=render;
+    const map=document.createElement('details');map.innerHTML='<summary>自选变化地图 / 风险日历</summary><label>排序 <select id="mm-action-map-sort"><option value="pending">待处理数量</option><option value="change">绝对涨跌</option><option value="event">事件临近</option><option value="data">数据异常优先</option></select></label><div id="mm-watchlist-operations" role="status">加载行动记录后显示；缺失数值不以零补齐。</div>';
+    document.getElementById('mm-action-list').before(map);document.getElementById('mm-action-map-sort').onchange=renderOperations;
     const lab=document.createElement('section');lab.id='mm-research-lab';lab.className='mm-action-center';lab.dataset.workspaceId='research-lab';lab.hidden=true;
     lab.innerHTML='<h3>研究实验室</h3><p data-research-context></p><nav class="mm-research-tabs" role="tablist" aria-label="研究内容"><button role="tab" data-research-tab="history">历史快照</button><button role="tab" data-research-tab="experiments">实验比较</button><button role="tab" data-research-tab="comparison">标的比较</button><button role="tab" data-research-tab="forward">前向观察</button></nav>';
-    const panels=[...section.querySelectorAll('details')];
+    const panels=[...section.querySelectorAll('details')].filter(node=>node.querySelector('#mm-experiment-load,#mm-history-load'));
     for(const [i,node] of panels.entries()){node.dataset.researchPanel=i===0 ? 'experiments':'history';node.id='mm-research-'+node.dataset.researchPanel;node.setAttribute('role','tabpanel');lab.append(node);}
     lab.querySelector('#mm-experiment-load').insertAdjacentHTML('beforebegin','<label><input type="checkbox" id="mm-experiment-all">包含同市场其他标的</label>');
     const comparison=document.createElement('section');comparison.dataset.researchPanel='comparison';comparison.id='mm-research-comparison';comparison.setAttribute('role','tabpanel');
@@ -191,7 +203,7 @@
     const sync=()=>{
       const current=context(),key=JSON.stringify(current),privateAccess=window.mm_isGuest!==true && window.mm_isLoggedIn===true;
       if(key!==lastContext){controller?.abort();lifecycleController.abort();lifecycleController=new AbortController();lastContext=key;
-        if(current.market!==lastScope){records=[];lastScope=current.market;for(const id of ['mm-action-list','mm-experiment-options','mm-experiment-result','mm-history-result'])document.getElementById(id)?.replaceChildren();document.querySelector('[data-comparison-options]')?.replaceChildren();document.querySelector('[data-comparison-result]')?.replaceChildren();}
+        if(current.market!==lastScope){records=[];operations=[];lastScope=current.market;for(const id of ['mm-action-list','mm-watchlist-operations','mm-experiment-options','mm-experiment-result','mm-history-result'])document.getElementById(id)?.replaceChildren();document.querySelector('[data-comparison-options]')?.replaceChildren();document.querySelector('[data-comparison-result]')?.replaceChildren();}
         const lab=document.getElementById('mm-research-lab');lab.querySelector('[data-research-context]').textContent=(markets[current.market] || '请选择独立市场')+' / '+(current.instrument || '尚未选择标的');
         for(const id of ['mm-history-market','mm-experiment-market'])if(markets[current.market])document.getElementById(id).value=current.market;
         if(markets[current.market])document.querySelector('[data-forward-market]').value=current.market;

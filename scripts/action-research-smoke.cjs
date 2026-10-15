@@ -46,6 +46,14 @@ async function main() {
     await page.selectOption('#mm-action-market','crypto'); await page.click('#mm-action-refresh');
     const row = page.locator('#mm-action-list article').filter({ hasText:'BTC observed event' });
     await row.waitFor({ state:'visible',timeout:15000 });
+    const map=page.locator('#mm-watchlist-operations');await map.locator('..').locator(':scope > summary').click();
+    for(const width of [1440,390])for(const theme of ['light','dark','money']){
+      await page.setViewportSize({width,height:900});await page.evaluate(theme=>document.documentElement.setAttribute('data-theme',theme),theme);
+      await map.scrollIntoViewIfNeeded();assert.match(await map.innerText(),/crypto:binance:BTCUSDT/);assert.doesNotMatch(await map.innerText(),/stock:us:AAPL/);
+      await page.locator('#mm-action-map-sort').selectOption('change');assert.match(await map.innerText(),/未关联/);assert.match(await map.innerText(),/未来七天风险日历/);
+      await page.screenshot({path:path.join(dataDir,`operations-${theme}-${width}.png`)});
+    }
+    await page.setViewportSize({width:1440,height:900});await page.evaluate(()=>document.documentElement.removeAttribute('data-theme'));
     await row.locator('[data-pin]').click(); await row.locator('[data-pin]').filter({ hasText:'取消置顶' }).waitFor();
     await row.locator('[data-read]').click(); await row.locator('[data-read]').filter({ hasText:'标未读' }).waitFor();
     await row.locator('[data-detail]').click(); await page.locator('dialog.mm-action-detail').waitFor();
@@ -73,14 +81,18 @@ async function main() {
     for (const input of await page.locator('#mm-experiment-options input').all()) await input.check();
     await page.click('#mm-experiment-compare'); await page.locator('#mm-experiment-result [data-curves] svg').waitFor();
     await page.locator('#mm-experiment-result [data-drawdowns] svg').waitFor();
+    await page.locator('#mm-experiment-result').getByRole('button',{name:'检查结论失效与复核历史'}).click();
+    await page.waitForFunction(()=>document.getElementById('mm-experiment-result')?.textContent.includes('仅提示人工复核'));
     assert.match(await page.locator('#mm-experiment-result').innerText(),/不可直接.*排名/);
     await page.setViewportSize({ width:390,height:844 });
     await page.evaluate(()=>openWorkspace('action-center'));
     assert.ok(await page.locator('#mm-action-refresh').isVisible());
     assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth+2),'mobile shell fits viewport');
     const noCsrf = await context.request.patch(base+'/api/watchlist/action-center/'+encodeURIComponent(event.id),{ data:{ read:false } }); assert.equal(noCsrf.status(),403);
+    const exitPreview=await context.request.get(base+'/api/portfolio/exit-stress?market=stocks');assert.equal(exitPreview.status(),200);const exitBody=await exitPreview.json();assert.equal(exitBody.orderChanges,0);assert.equal(exitBody.market,'stocks');
+    const session=await (await context.request.get(base+'/api/stock/session?venue=us')).json();assert.equal(session.data.timezone,'America/New_York');assert.ok(session.data.reason);
     const guestContext=await browser.newContext(); await guestContext.request.post(base+'/api/auth/guest');
-    for (const url of ['/api/watchlist/action-center','/api/watchlist/action-center/history?market=crypto','/api/research/experiments?market=stocks','/api/research/experiments/compare?ids='+experiments.join(','),'/api/signals/quality?market=stocks','/api/market-history?market=crypto&instrument=crypto:binance:BTCUSDT','/api/diagnostics']) assert.equal((await guestContext.request.get(base+url)).status(),403,url);
+    for (const url of ['/api/watchlist/action-center','/api/watchlist/action-center/history?market=crypto','/api/portfolio/exit-stress?market=stocks','/api/research/experiments/'+experiments[0]+'/freshness','/api/research/experiments?market=stocks','/api/research/experiments/compare?ids='+experiments.join(','),'/api/signals/quality?market=stocks','/api/market-history?market=crypto&instrument=crypto:binance:BTCUSDT','/api/diagnostics']) assert.equal((await guestContext.request.get(base+url)).status(),403,url);
     await guestContext.close(); assert.deepEqual(errors,[]);
     console.log('Action/research Chromium smoke passed: real API aggregation, read/pin/snooze history, evidence drawer, experiment comparison, mobile, CSRF and guest isolation');
   } finally {

@@ -24,6 +24,26 @@ function sourceFunction(name) {
   return source.slice(start, source.indexOf('\n}', start) + 2);
 }
 
+test('a late index refresh cannot select a stock after the workspace or selection changed', async () => {
+  for (const change of ["activeWorkspaceId='events';currentInstrumentId=null", "currentInstrumentId='SNDK'", ""]) {
+    const dom = new JSDOM(source, { url: 'http://localhost/', runScripts: 'outside-only' });
+    const w = dom.window, selections = [];
+    let finish;
+    w.eval("var activeMarketScope='stocks',activeWorkspaceId='stock-quotes',currentInstrumentId='AAPL',currentStockDashboardController=null;");
+    w.loadStockIndices = () => new Promise(resolve => { finish = resolve; });
+    w.stockNameForSymbol = symbol => symbol;
+    w.selectStockSymbol = symbol => selections.push(symbol);
+    w.eval(sourceFunction('loadStockQuotes'));
+    try {
+      const pending = w.loadStockQuotes();
+      if (change) w.eval(change);
+      finish();
+      await pending;
+      assert.deepEqual(selections, change ? [] : ['AAPL'], change || 'unchanged context still loads its chart');
+    } finally { dom.window.close(); }
+  }
+});
+
 test('selecting a stock in its active workspace does not load unrelated research sources', () => {
   const dom = new JSDOM(source, { url: 'http://localhost/', runScripts: 'outside-only' });
   const w = dom.window;

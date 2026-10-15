@@ -1,0 +1,9 @@
+const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),{JSDOM}=require('jsdom');
+test('new action-map details is not mistaken for the research experiment panel',()=>{
+ const source=fs.readFileSync('src/web/public/action-research-workspace.js','utf8');
+ assert.ok(source.includes("section.querySelectorAll('details')].filter(node=>node.querySelector('#mm-experiment-load,#mm-history-load'))"),'only actual experiment/history details may move to research lab');
+});
+test('change-map magnitude sort keeps missing numbers last and never leaks a different market',()=>{
+ const source=fs.readFileSync('src/web/public/action-research-workspace.js','utf8'),start=source.indexOf('  function renderOperations()'),end=source.indexOf('  function drawCurves(',start),dom=new JSDOM('<select id="mm-action-map-sort"><option value="change">涨跌</option></select><div id="mm-watchlist-operations"></div>',{runScripts:'outside-only'}),w=dom.window;
+ try{w.esc=value=>String(value);w.context=()=>({market:'stocks'});w.link=row=>'?instrument='+row.instrument;w.eval('var records=[],markets={stocks:"股票",crypto:"虚拟币"},operations='+JSON.stringify([{map:[{market:'stocks',instrument:'AAPL',changePct:-3,pending:0,signalChanges:0,dataStatus:'cached',source:[]},{market:'stocks',instrument:'SNDK',changePct:null,pending:0,signalChanges:0,dataStatus:'empty',source:[]}],calendar:{market:'stocks',scheduled:[],unknownTime:[],sourceFailures:[],reason:'时间未知'}},{map:[{instrument:'BTC'}],calendar:{market:'crypto',scheduled:[],unknownTime:[],sourceFailures:[]}}])+';');w.eval(source.slice(start,end));w.renderOperations();assert.deepEqual([...w.document.querySelectorAll('tbody a')].map(el=>el.textContent),['AAPL','SNDK']);assert.doesNotMatch(w.document.body.textContent,/BTC/);assert.match(w.document.body.textContent,/未关联/);}finally{w.close();}
+});

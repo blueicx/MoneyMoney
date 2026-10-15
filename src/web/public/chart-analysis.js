@@ -457,6 +457,36 @@
     });
   }
 
+  function createStrategyPointTracker(){
+    const contexts=new Map(),key=c=>JSON.stringify([c.market,c.instrument,c.timeframe]);
+    return {
+      history(context){return (contexts.get(key(context))?.events||[]).map(row=>({...row}));},
+      observe(input,context){
+        const matches=point=>point.market===context.market&&point.instrument===context.instrument&&point.timeframe===context.timeframe;
+        const points=(Array.isArray(input)?input:[]).filter(matches),id=key(context),old=contexts.get(id)||{points:new Map(),events:[],sourceTime:-Infinity};
+        if(!context.live)return {points:points.map(point=>({...point,evolution:[]})),events:[]};
+        const output=()=>({points:points.map(point=>({...point,evolution:old.events.filter(event=>event.id===point.id).map(event=>({...event}))})),events:old.events.map(row=>({...row}))});
+        if(!context.live||!context.sourceFresh||!Number.isFinite(context.sourceTime)||!Number.isFinite(context.now)||context.sourceTime>context.now+5000||context.sourceTime<old.sourceTime)return output();
+        const present=new Set(points.map(point=>point.id)),enabled=new Set(context.enabledStrategies||[]),times=new Set(context.barTimes||[]);
+        const add=(point,state,reason)=>{old.events.push({id:point.id,state,at:context.now,sourceTime:context.sourceTime,time:point.time,strategy:point.strategy,price:point.triggerPrice,reason});};
+        for(const point of points){
+          const previous=old.points.get(point.id);
+          if(!previous){if(point.status==='forming')add(point,'forming',point.reason||'当前有效来源首次观察到条件满足');}
+          else if(previous.status!==point.status)add(point,point.status,point.reason||'本次完整数据重算后确认状态改变');
+          else if(point.status==='forming'&&context.sourceTime>old.sourceTime&&previous.reason!==point.reason)add(point,'updated',point.reason||'形成中条件变化');
+          old.points.set(point.id,{...point});
+        }
+        for(const [pointId,previous] of old.points){
+          if(previous.status!=='forming'||present.has(pointId)||!enabled.has(previous.strategy)||!times.has(previous.time))continue;
+          add(previous,'withdrawn','本次新鲜来源完整重算后条件不再满足；不是撤单，也不改变已确认历史');old.points.set(pointId,{...previous,status:'withdrawn'});
+        }
+        old.sourceTime=context.sourceTime;old.events=old.events.slice(-200);
+        while(old.points.size>500)old.points.delete(old.points.keys().next().value);
+        contexts.delete(id);contexts.set(id,old);while(contexts.size>8)contexts.delete(contexts.keys().next().value);
+        return output();
+      },
+    };
+  }
   function filterStrategyChartPoints(points,filters={}) {
     const rows=Array.isArray(points)?points:[];
     return rows.filter(point=>(!filters.strategy||point.strategy===filters.strategy)&&(!filters.side||point.side===filters.side)&&(!filters.status||point.status===filters.status));
@@ -707,5 +737,5 @@
     };
   }
 
-  return { DEFAULT_CONFIG, CANDLE_PATTERN_CATALOG, normalizeOverlayConfig, chartDataStatusLabel, detectCandlestickPatterns, detectStructures, detectChanStructures, detectStrategySignals, buildStrategyChartPoints, filterStrategyChartPoints, strategyPointOutcomes, mapIndexedItemsToViewport, clusterChartPointsByPixel, movingAverage, bollingerBands, calculateMACD, buildChartOverlays, stepReplay, layoutMarkerLabels, protectReplayContext, createDrawingTool };
+  return { DEFAULT_CONFIG, CANDLE_PATTERN_CATALOG, normalizeOverlayConfig, chartDataStatusLabel, detectCandlestickPatterns, detectStructures, detectChanStructures, detectStrategySignals, buildStrategyChartPoints, createStrategyPointTracker, filterStrategyChartPoints, strategyPointOutcomes, mapIndexedItemsToViewport, clusterChartPointsByPixel, movingAverage, bollingerBands, calculateMACD, buildChartOverlays, stepReplay, layoutMarkerLabels, protectReplayContext, createDrawingTool };
 });

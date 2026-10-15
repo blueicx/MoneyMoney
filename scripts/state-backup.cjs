@@ -106,6 +106,12 @@ function jsonIsInvalid(file) {
 async function backup() {
   const primaryDb = path.join(dataRoot, 'moneymoney.sqlite');
   if (!fs.existsSync(primaryDb)) throw new Error('data/moneymoney.sqlite 不存在，请先启动一次服务');
+  // Check before creating the snapshot; never delete live data to make a backup fit.
+  const sources=['moneymoney.sqlite','moneymoney.sqlite-wal','research.db','research.db-wal',...fs.readdirSync(dataRoot).filter(name=>name.endsWith('.json'))].map(name=>path.join(dataRoot,name)).filter(file=>fs.existsSync(file)&&fs.statSync(file).isFile());
+  const lake=path.join(dataRoot,'lake');if(fs.existsSync(lake))sources.push(...walkFiles(lake).filter(name=>!name.startsWith('.staging/')).map(name=>path.join(lake,name)));
+  const expectedBytes=sources.reduce((sum,file)=>sum+fs.statSync(file).size,0)*1.1+512*1024**2;
+  let available;try{const volume=fs.statfsSync(dataRoot);available=volume.bavail*volume.bsize;}catch{throw new Error('无法核验备份磁盘空间，未创建新备份');}
+  if(!Number.isFinite(available)||available<expectedBytes)throw new Error('备份磁盘空间不足：保留512MiB并预留源数据110%，未创建新备份，不删除线上数据');
   fs.mkdirSync(backupRoot, { recursive: true });
   const target = path.join(backupRoot, stamp());
   fs.mkdirSync(target, { recursive: false });

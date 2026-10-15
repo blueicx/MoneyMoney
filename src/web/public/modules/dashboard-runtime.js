@@ -2441,7 +2441,7 @@ function buildCryptoStrategySignals(bars, live = false) {
     source: metadata.source || 'Binance Spot Kline WebSocket', sourceTime: metadata.sourceTime, live, sourceFresh,
     currentBarClosed: bars[bars.length - 1]?.closed === true, evidenceRefs: metadata.evidenceRefs || [],
   }) || signals;
-  return filterChartSignalLifecycle(points,`crypto:binance:${bnCurrentSymbol}`,bnCurrentInterval);
+  return filterChartSignalLifecycle(recordChartPointEvolution(points,{market:'crypto',instrument:`crypto:binance:${bnCurrentSymbol}`,timeframe:bnCurrentInterval,live,sourceFresh,sourceTime,barTimes:bars.map(row=>row.time),enabledStrategies:Object.keys(cryptoChartStrategyConfig).filter(key=>cryptoChartStrategyConfig[key])}),`crypto:binance:${bnCurrentSymbol}`,bnCurrentInterval);
 }
 function drawCandles(canvas, klines) {
   if (document.hidden) return;
@@ -3739,10 +3739,11 @@ async function loadStockQuotes({ refreshChart = true } = {}) {
   const controller = new AbortController();
   currentStockDashboardController = controller;
   const signal = controller.signal;
+  const originScope = activeMarketScope, originWorkspace = activeWorkspaceId, originInstrument = currentInstrumentId;
   try {
     await Promise.allSettled([loadStockIndices(signal)]);
     const selectedSymbol = window._stockSelectedSymbol || currentInstrumentId || 'AAPL';
-    if (refreshChart && !signal.aborted && ['stocks', 'overview', 'watchlist'].includes(activeMarketScope)) selectStockSymbol(selectedSymbol, stockNameForSymbol(selectedSymbol), undefined, { refreshRelated: false });
+    if (refreshChart && !signal.aborted && activeMarketScope === originScope && activeWorkspaceId === originWorkspace && currentInstrumentId === originInstrument && ['stocks', 'overview', 'watchlist'].includes(activeMarketScope)) selectStockSymbol(selectedSymbol, stockNameForSymbol(selectedSymbol), undefined, { refreshRelated: false });
   } finally {
     if (currentStockDashboardController === controller) currentStockDashboardController = null;
   }
@@ -6164,7 +6165,7 @@ function buildStockStrategySignals(bars, live = false) {
     timeframe: currentStockKlinePeriod, source: metadata.source || '股票行情来源', sourceTime: metadata.sourceTime,
     live, sourceFresh, currentBarClosed: bars[bars.length - 1]?.closed === true, evidenceRefs: metadata.evidenceRefs || [],
   }) || signals;
-  return filterChartSignalLifecycle(points,instrument,currentStockKlinePeriod);
+  return filterChartSignalLifecycle(recordChartPointEvolution(points,{market:'stocks',instrument,timeframe:currentStockKlinePeriod,live,sourceFresh,sourceTime,barTimes:bars.map(row=>row.time),enabledStrategies:Object.keys(stockChartOverlayConfig.strategies||{}).filter(key=>stockChartOverlayConfig.strategies[key])}),instrument,currentStockKlinePeriod);
 }
 function stockChartEventInstrumentId() {
   const raw = String(currentStockSymbol || '').trim().replace(/^stock:[^:]+:/i, '').replace(/^us(?=[A-Z])/, '').toUpperCase();
@@ -6296,6 +6297,7 @@ function showStockChartEvidence(item, kind = 'event') {
   if (Number.isFinite(Number(item.volume))) details.push(`成交量：${formatChartPrice(Number(item.volume))}`);
   if (item.id && kind === 'signal') details.push(`点位 ID：${item.id}`);
   if (Array.isArray(item.outcomes)) details.push(...chartSignalOutcomeLines(item.outcomes));
+  if(Array.isArray(item.evolution))details.push(...chartPointEvolutionLines(item.evolution));
   if (Array.isArray(item.evidenceRefs) && item.evidenceRefs.length) details.push(`证据引用：${item.evidenceRefs.join(' · ')}`);
   host.innerHTML = `<strong>${stockEscapeHtml(item.title || item.label || item.headline || (kind === 'signal' ? '策略点位' : '图表证据'))}</strong><div>${stockEscapeHtml(timeKind)}：${stockEscapeHtml(time ? formatChartTime(time) : '未提供')} · ${stockEscapeHtml(sourceName)}</div>${details.map(line => `<div>${stockEscapeHtml(line)}</div>`).join('')}${safeUrl ? `<a href="${stockEscapeHtml(safeUrl)}" target="_blank" rel="noopener noreferrer">查看原始证据 ↗</a>` : ''}`;
   if (status) status.textContent = kind === 'signal' ? '策略研究信号 · 不构成订单' : '来源证据';
@@ -6369,6 +6371,7 @@ function handleChartSignalSelection(signal, targetId) {
     const ohlc = [signal.open, signal.high, signal.low, signal.close].every(value => Number.isFinite(Number(value)))
       ? `OHLC ${signal.open} / ${signal.high} / ${signal.low} / ${signal.close}` : 'OHLC 未提供';
     detail.textContent = `${signal.side === 'buy' ? '买入' : '卖出'} · ${signal.label || signal.strategy || '策略信号'} · ${time} · 触发价 ${priceText} · ${ohlc} · ${signal.status === 'forming' ? '形成中' : '已确认'} · ${signal.reason || '触发原因未提供'} · 来源 ${signal.source || '来源未知'}${signal.sourceTime ? ` · 来源时间 ${formatChartTime(signal.sourceTime)}` : ''}${signal.outcomes ? '\n'+chartSignalOutcomeLines(signal.outcomes).join('\n') : ''}`;
+    detail.textContent+='\n'+chartPointEvolutionLines(signal.evolution||[]).join('\n');
     window.mmSelectedCryptoChartSignal = signal;
   }
 }
@@ -6431,6 +6434,14 @@ function renderChartSignalMarkers(targetId, signals, getPosition) {
   });
 }
 
+function recordChartPointEvolution(points,context){
+  window.mmChartPointTracker ||= window.MoneyChartAnalysis?.createStrategyPointTracker?.();
+  return window.mmChartPointTracker?.observe(points,{...context,now:Date.now()}).points||points;
+}
+function chartPointEvolutionLines(events){
+  const labels={forming:'形成中',updated:'条件更新',withdrawn:'已撤回',confirmed:'收线后确认'};
+  return events.map(row=>`${formatChartTime(row.at)} · ${labels[row.state]||row.state} · ${row.strategy} · ${row.price??'价格未关联'} · ${row.reason}`);
+}
 function chartSignalLifecyclePreferences(instrument,timeframe) {
   const key='mm-chart-signal-filter-v1|'+instrument+'|'+timeframe;
   try{const saved=JSON.parse(localStorage.getItem(key)||'{}');return {key,filters:{strategy:typeof saved.strategy==='string'?saved.strategy:'',side:['buy','sell'].includes(saved.side)?saved.side:'',status:['forming','confirmed'].includes(saved.status)?saved.status:''}};}catch{return {key,filters:{strategy:'',side:'',status:''}};}
@@ -6446,6 +6457,9 @@ function renderChartSignalLifecycleControls(el,targetId) {
   panel.innerHTML=[['strategy','策略',[['','全部已选策略'],...strategies.map(value=>[value,value])]],['side','方向',[['','全部方向'],['buy','买入'],['sell','卖出']]],['status','确认状态',[['','全部状态'],['forming','形成中'],['confirmed','已确认']]]].map(([field,label,options])=>'<label>'+label+' <select data-signal-filter="'+field+'" aria-label="信号'+label+'">'+options.map(([value,text])=>'<option value="'+stockEscapeHtml(value)+'"'+(filters[field]===value?' selected':'')+'>'+stockEscapeHtml(text)+'</option>').join('')+'</select></label>').join('');
   panel.addEventListener('change',event=>{const field=event.target.dataset.signalFilter;if(!['strategy','side','status'].includes(field))return;filters[field]=event.target.value;try{localStorage.setItem(key,JSON.stringify(filters));}catch{}if(stock)redrawStockKlineSelection();else if(bnKlineData.length)drawCandles(document.getElementById('bn-candlestick'),bnKlineData);});
   el.prepend(panel);
+  const historical=stock?Boolean((typeof stockChartAsOf!=='undefined'&&stockChartAsOf)||(typeof stockChartIntradayDate!=='undefined'&&stockChartIntradayDate)||window.stockMoneyKLine?.timer||(typeof stockChartReplayIndex!=='undefined'&&typeof stockChartKlines!=='undefined'&&stockChartReplayIndex>=0&&stockChartReplayIndex<stockChartKlines.length-1)):Boolean(window.cryptoMoneyKLine?.timer);
+  const events=historical?[]:window.mmChartPointTracker?.history({market:stock?'stocks':'crypto',instrument,timeframe})||[];
+  if(events.length){const history=document.createElement('details'),summary=document.createElement('summary'),text=document.createElement('pre');summary.textContent='为何出现 / 消失（当前会话观测）';text.style.whiteSpace='pre-wrap';text.style.overflowWrap='anywhere';text.textContent='不是逐笔历史，关闭页面前未观察到的变化保持未知。\n'+chartPointEvolutionLines(events).join('\n');history.append(summary,text);el.append(history);}
 }
 function renderChartSignalList(targetId, signals, emptyText) {
   const el = document.getElementById(targetId);
@@ -9072,6 +9086,9 @@ function renderDecisionPortfolio(data, reason) {
   snapshotPanel.style.cssText = 'margin-top:14px;padding-top:10px;border-top:1px solid var(--border);';
   snapshotPanel.innerHTML = '<div style="display:flex;justify-content:space-between;gap:8px;align-items:center;"><strong>导入估值快照</strong><button type="button" class="tab" data-refresh-portfolio-snapshots>刷新</button></div><div style="font-size:10px;color:var(--text-secondary);margin:5px 0;">只记录已确认导入时的估值；差额不是投资收益，不推算缺失现金流或汇率。</div><div data-portfolio-snapshot-list class="empty-tip">正在读取私有快照…</div><div data-portfolio-snapshot-comparison></div>';
   host.append(snapshotPanel);
+  const exitPanel=document.createElement('details'),exitButton=document.createElement('button'),exitOutput=document.createElement('div');
+  exitPanel.innerHTML='<summary>模拟仓位退出压力测试</summary><p>只使用同标的可见深度，不外推缺失报价，不创建订单。</p>';exitButton.type='button';exitButton.className='tab';exitButton.textContent='读取当前仓位与可见深度';exitPanel.append(exitButton,exitOutput);host.append(exitPanel);
+  exitButton.onclick=async()=>{const market=activeMarketScope;exitButton.disabled=true;try{const result=await decisionFetchJson('/api/portfolio/exit-stress?market='+encodeURIComponent(market));if(market!==activeMarketScope||!exitPanel.isConnected)return;exitOutput.textContent=result.reason+'\n'+result.data.map(row=>`${row.instrument} · ${row.dataStatus} · ${row.proceeds==null?'不可估计':row.proceeds+' '+row.currency} · ${row.impactBps==null?'冲击未知':row.impactBps.toFixed(2)+' bps'} · ${row.reason}`).join('\n');exitOutput.style.whiteSpace='pre-wrap';}catch(error){if(market===activeMarketScope&&exitPanel.isConnected)exitOutput.textContent=error.message;}finally{exitButton.disabled=false;}};
   snapshotPanel.querySelector('[data-refresh-portfolio-snapshots]').onclick = () => loadPortfolioSnapshotHistory(activeMarketScope);
   void loadPortfolioSnapshotHistory(activeMarketScope);
   host.querySelector('#decision-portfolio-history').onclick=async()=>{try{const result=await decisionFetchJson('/api/portfolio/analytics?'+new URLSearchParams({market:activeMarketScope,accountSource:select.value,history:'1'}));renderDecisionPortfolio(result.data,result.reason);}catch(error){showToast(error.message,'error');}};
