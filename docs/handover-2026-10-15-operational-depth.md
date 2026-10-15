@@ -65,3 +65,13 @@
 - 新退出压力接口和实验复核接口的访客访问实际返回403；管理员预览返回orderChanges=0。没有向生产发送测试消息、调用真实模型或创建订单。
 - 安全扫描781个跟踪文件通过；差异检查通过。原有未跟踪`data/research.db` Hash仍为`27fd475e523568daa4cdcabf3146917023335a62affe00429babd721b3b79fd1`，不纳入提交。
 - 日志：系统临时目录`mm-depth2-release-tests.log`、`mm-depth2-verified-smoke-*.log`；用户批准性能目标单列后进入功能发布，部署结果以随后记录为准。
+
+## 第二批生产发布记录
+
+- 代码版本`3c5c674d78049c39ac7707e4a5cc9974501dd40d`已提交、推送并核对GitHub分支引用；提交后重新构建并通过Web冒烟。
+- 发布标签`3c5c674-20261015-operational`。归档SHA-256：`69dabf9c0309782bab636852084452070b5ac9ebac368d0ed81a213fd13e1efb`。
+- 远端主文件校验通过：`server.js`为`6347d2b4a8c4a51403259e518d7e40988dc33686fe729fa20cb1b0e0a1b71cec`，`index.html`为`b90ba76c5b487626ce5dd35e75143240417afa3cfc568e8ec1ed9202aeac2b9a`。公网实际下载核心静态资源后Hash与本地manifest一致，不仅核对HTML文件名。
+- 旧产物备份`/opt/moneymoney/backups/dist-pre-3c5c674-20261015-operational`、回滚目录`/opt/moneymoney/dist.rollback-3c5c674-20261015-operational`均已确认存在。只切换dist并操作`moneymoney.service`，服务active，根盘约17GiB可用。
+- 正式域名`https://bluetrade.bbroot.com`已返回新版本；生产只读Chromium巡检通过四市场、SNDK、K线身份别名、结算证据、右侧库收缩/恢复、手机中心区和访客私有数据隔离。生产报告在系统临时目录`moneymoney-canary-1792063375846/production-canary-report.json`。
+- 运行数据库、数据湖和现有AI配置没有替换或重置，没有生产测试单或测试通知。仅清理本轮临时测速副本的尝试被工具策略拒绝，未继续尝试绕过；该临时副本及依赖链接保留，不作为运行产物或业务数据使用。
+- 加载提速20%仍未验收，不能因本次上线改标完成；后续性能工作保留此前真实测量及控制组波动证据。
