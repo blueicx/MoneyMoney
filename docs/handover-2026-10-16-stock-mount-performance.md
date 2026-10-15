@@ -62,3 +62,17 @@ Remove-Item Env:MONEYMONEY_BENCHMARK_RUNS
 | 股票挂载试点+格式器复用 | 2432/2902 | 542/759 | 1935/2922 | 488/793 |
 
 这组数据不支持整页改善20%，也不支持所有路径都更快；用户此前已允许先发布通过验证的功能，性能目标继续单列。日志在系统临时目录`mm-stock-mount-frozen-tests.log`、`mm-stock-mount-browser-final.log`、`mm-mount-auth-isolated.log`、`mm-mount-final-smoke-*.log`和`mm-boot-layout-before.log`。
+
+## 生产发布
+
+代码`df7fb222528dedca244f90fcc1df9e0e17d4bd90`已提交推送并核对远端引用，提交后重新构建和Web冒烟通过。发布标签`df7fb22-20261016-stock-mount`，仅操作`moneymoney.service`并切换dist，不替换数据库或配置。
+
+- 归档Hash：`86be2529f185fd8fe324794f79f1e93a98d9c43d7212df32444f1561fa8f776e`。
+- 远端index Hash：`b24814a831d17c06513d9bf43f745a96148e05503f8224cba95a7f2e0591e50a`；manifest Hash：`bf607688aae38b36235a274f462e32da0095dd77ee741f73b07841dc39a0ce7c`，与本地一致。
+- 公网实际下载核心资源Hash：`76afac5976a8df0dd298bac1755ae82b2e33c025064d5c966de965dd240206df`，与本地manifest一致。
+- 备份：`/opt/moneymoney/backups/dist-pre-df7fb22-20261016-stock-mount`；回滚：`/opt/moneymoney/dist.rollback-df7fb22-20261016-stock-mount`。服务active，根盘约17GiB可用。
+- 正式域名版本、健康和只读Chromium四市场/SNDK/移动布局/私有数据隔离验收通过。报告位于系统临时目录`moneymoney-canary-1792081171594/production-canary-report.json`。
+
+补充对比同为构建产物的初始实时DOM：基线1217元素，试点1082元素，少135个；不以这个比例代替实际加载性能。源码HTML、未挂载template内容及运行后动态节点统计口径不同，不能混作同一计数。
+
+本批发布完成不等于整页提速20%完成。按用户批准路线，后续再依据股票试点边界逐区扩展，不直接把全部工作区改成惰性DOM。
