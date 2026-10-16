@@ -298,7 +298,7 @@ const median = values => [...values].sort((a, b) => a - b)[Math.floor(values.len
       const cold = samples.find(row => row.viewport === viewport && row.run === run && row.temperature === 'cold');
       const warm = samples.find(row => row.viewport === viewport && row.run === run && row.temperature === 'warm');
       if (!gateAuxiliaryRequests) assert.ok(warm.jsBytes < cold.jsBytes * .2, 'warm hashed scripts must hit browser cache');
-      for (const sample of [cold, warm]) for (const pathname of ['/api/stock/kline', '/api/watchlist', '/api/paper/positions']) {
+      for (const sample of [cold, warm]) for (const pathname of ['/api/auth/status', '/api/stock/kline', '/api/watchlist', '/api/paper/positions']) {
         assert.equal(sample.apiRequestCounts[pathname], 1,
           `${pathname} must be requested once during ${sample.temperature} stock-chart navigation; observed: ${JSON.stringify(sample.apiRequestDetails.filter(request => request.pathname === pathname))}`);
       }

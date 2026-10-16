@@ -24,6 +24,17 @@ function sourceFunction(name) {
   return source.slice(start, source.indexOf('\n}', start) + 2);
 }
 
+test('the existing auth status request can start while public assets download', () => {
+  const html = fs.readFileSync('dist/web/public/index.html', 'utf8');
+  const dom = new JSDOM(html);
+  try {
+    const preload = dom.window.document.querySelector('link[rel="preload"][as="fetch"][href="/api/auth/status"]');
+    assert.ok(preload, 'auth status must not wait behind full page parsing and layout');
+    assert.equal(preload.getAttribute('crossorigin'), 'use-credentials', 'reuse the cookie-authenticated request, not an anonymous duplicate');
+    assert.equal(dom.window.document.querySelectorAll('link[as="fetch"]').length, 1, 'never preload private workspace API before auth');
+  } finally { dom.window.close(); }
+});
+
 test('a late index refresh cannot select a stock after the workspace or selection changed', async () => {
   for (const change of ["activeWorkspaceId='events';currentInstrumentId=null", "currentInstrumentId='SNDK'", ""]) {
     const dom = new JSDOM(source, { url: 'http://localhost/', runScripts: 'outside-only' });
