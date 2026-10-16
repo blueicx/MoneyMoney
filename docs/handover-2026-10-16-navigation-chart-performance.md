@@ -41,3 +41,17 @@
 按“不使用子agent”约束由实施者逐项复核差异：同步HTML帮助函数与调用方同包、模块就绪先于待执行图表调用、工作区切换后不挂载迟到图表、相同导航节点焦点保留。没有把自检描述为独立人工审查。
 
 不使用子agent，不创建生产订单或调用生产模型，不发送测试Telegram消息，不调整AI账户、预算、自选范围或实盘禁用状态。未跟踪`data/research.db`保持原样且不提交，SHA256仍为`27fd475e523568daa4cdcabf3146917023335a62affe00429babd721b3b79fd1`。本批没有数据库迁移或数据湖写入。
+
+## 生产发布证据
+
+代码`69f5730270da872425353d2bf35d591d06f0c06c`已推送GitHub；提交后重新构建并通过Web冒烟。发布仅替换dist、重启`moneymoney.service`，没有环境配置或数据迁移。启动早期两次健康探测连接失败，随后成功，部署助手退出0、服务active。
+
+- 归档`moneymoney-69f5730-20261016-navigation.tar.gz`，SHA256为`30dd656f6b66bed7c4a3d18356d4f443855d500861b1766295574272ad2f096a`。
+- 服务器文件SHA256为`6347d2b4a8c4a51403259e518d7e40988dc33686fe729fa20cb1b0e0a1b71cec`，首页SHA256为`7472d64e0af0daad4e35b25f5e9ec4f76578ce32025670e9e925305c60b1ba37`。
+- 本地和远端manifest SHA256一致：`c66e6618e07d7907a1385c950b8e693939bafc31bc4b188c0fb6c956ff845052`。正式域名版本与代码SHA一致。
+- 核心脚本SHA256为`5d9d8040599b06add251769c476b9575a4134d2fe3ac49ebff3270be0db79ba9`，图表包为`4a3396536352984b961b1d47cd03fe462e0d00f2ff9be37360ec0c539e934900`，loader为`316efa8ba54a9c1288056e2c85fac302d83106fce7ce6a35eba595120f1a7f2f`。正式域名下载这三项和股票、总体、预测、运维包，7项均为Brotli、解压Hash匹配manifest。
+- 备份`/opt/moneymoney/backups/dist-pre-69f5730-20261016-navigation`；回滚目录`/opt/moneymoney/dist.rollback-69f5730-20261016-navigation`。此前`ef43600`产物保留。
+- 发布前根盘约17GiB可用、42%使用；发布后本地用户数据库Hash未变。
+- 正式域名只读Chromium抽检股票、期权、虚拟币、预测市场及SNDK通过，日志`mm-navigation-production.log`；没有发送通知或创建订单。
+
+安全扫描795个受跟踪文件通过，暂存差异检查通过。20%的整页冷加载目标继续保留为未完成项，不因发布而改变验收结论。
