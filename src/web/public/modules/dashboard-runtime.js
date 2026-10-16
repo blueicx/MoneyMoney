@@ -6064,21 +6064,33 @@ function formatChartTime(value) {
   if (!value) return '--';
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '--';
+  const values = formatChartTime.values ||= new Map();
+  const key = date.getTime();
+  if (values.has(key)) return values.get(key);
   const formatter = formatChartTime.formatter ||= new Intl.DateTimeFormat('zh-CN', { year:'numeric', month:'numeric', day:'numeric', hour:'2-digit', minute:'2-digit' });
-  return formatter.format(date);
+  const label = formatter.format(date);
+  if (values.size >= 512) values.delete(values.keys().next().value);
+  values.set(key, label);
+  return label;
 }
 function stockKlineIsIntraday() { return ['1m', '5m', '15m', '1h'].includes(currentStockKlinePeriod); }
 function formatStockKlineTime(value) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '--';
   if (!stockKlineIsIntraday()) return date.toISOString().slice(0, 10);
+  const values = formatStockKlineTime.values ||= new Map();
+  const key = `${stockChartExchangeTimezone}:${date.getTime()}`;
+  if (values.has(key)) return values.get(key);
   const formatters = formatStockKlineTime.formatters ||= new Map();
   if (!formatters.has(stockChartExchangeTimezone)) {
     const formatter = new Intl.DateTimeFormat('zh-CN', { timeZone: stockChartExchangeTimezone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
     if (formatters.size >= 8) formatters.delete(formatters.keys().next().value);
     formatters.set(stockChartExchangeTimezone, formatter);
   }
-  return `${formatters.get(stockChartExchangeTimezone).format(date)} ${stockChartExchangeTimezone}`;
+  const label = `${formatters.get(stockChartExchangeTimezone).format(date)} ${stockChartExchangeTimezone}`;
+  if (values.size >= 512) values.delete(values.keys().next().value);
+  values.set(key, label);
+  return label;
 }
 function renderMovingAverageValues(targetId, bars, periods) {
   const host = document.getElementById(targetId);
@@ -6462,6 +6474,7 @@ function filterChartSignalLifecycle(points,instrument,timeframe) {
   return window.MoneyChartAnalysis?.filterStrategyChartPoints?.(points,filters)||points;
 }
 function renderChartSignalLifecycleControls(el,targetId) {
+  el.querySelectorAll('[data-chart-signal-filters], [data-chart-signal-history]').forEach(node => node.remove());
   const stock=targetId==='stock-chart-signals',instrument=stock?stockChartEventInstrumentId():`crypto:binance:${bnCurrentSymbol}`,timeframe=stock?currentStockKlinePeriod:bnCurrentInterval;
   const {key,filters}=chartSignalLifecyclePreferences(instrument,timeframe),panel=document.createElement('div');panel.className='mm-action-tools';panel.dataset.chartSignalFilters='';
   const strategies=Object.keys(stock?stockChartOverlayConfig.strategies||{}:cryptoChartStrategyConfig||{});if(filters.strategy&&!strategies.includes(filters.strategy))strategies.push(filters.strategy);
@@ -6470,18 +6483,27 @@ function renderChartSignalLifecycleControls(el,targetId) {
   el.prepend(panel);
   const historical=stock?Boolean((typeof stockChartAsOf!=='undefined'&&stockChartAsOf)||(typeof stockChartIntradayDate!=='undefined'&&stockChartIntradayDate)||window.stockMoneyKLine?.timer||(typeof stockChartReplayIndex!=='undefined'&&typeof stockChartKlines!=='undefined'&&stockChartReplayIndex>=0&&stockChartReplayIndex<stockChartKlines.length-1)):Boolean(window.cryptoMoneyKLine?.timer);
   const events=historical?[]:window.mmChartPointTracker?.history({market:stock?'stocks':'crypto',instrument,timeframe})||[];
-  if(events.length){const history=document.createElement('details'),summary=document.createElement('summary'),text=document.createElement('pre');summary.textContent='为何出现 / 消失（当前会话观测）';text.style.whiteSpace='pre-wrap';text.style.overflowWrap='anywhere';text.textContent='不是逐笔历史，关闭页面前未观察到的变化保持未知。\n'+chartPointEvolutionLines(events).join('\n');history.append(summary,text);el.append(history);}
+  if(events.length){const history=document.createElement('details'),summary=document.createElement('summary'),text=document.createElement('pre');history.dataset.chartSignalHistory='';summary.textContent='为何出现 / 消失（当前会话观测）';text.style.whiteSpace='pre-wrap';text.style.overflowWrap='anywhere';text.textContent='不是逐笔历史，关闭页面前未观察到的变化保持未知。\n'+chartPointEvolutionLines(events).join('\n');history.append(summary,text);el.append(history);}
 }
 function renderChartSignalList(targetId, signals, emptyText) {
   const el = document.getElementById(targetId);
   if (!el) return;
+  const views = renderChartSignalList.views ||= new WeakMap();
+  let view = views.get(el);
+  if (!view) {
+    view = { html: null, signals: [], buttons: [] };
+    views.set(el, view);
+  }
   const allVisible = (signals || []).slice().reverse();
+  view.signals = allVisible;
   if (!allVisible.length) {
+    view.html = null;
+    view.buttons = [];
     el.innerHTML = `<span class="chart-signal-empty">${stockEscapeHtml(emptyText)}</span>`;
     renderChartSignalLifecycleControls(el,targetId);
     return;
   }
-  el.innerHTML = allVisible.map(signal => {
+  const html = allVisible.map(signal => {
     const time = signal.time ? (targetId === 'stock-chart-signals' ? formatStockKlineTime(signal.time) : new Date(signal.time).toLocaleDateString('zh-CN', { month:'numeric', day:'numeric' })) : '--';
     const price = Number(signal.triggerPrice ?? signal.price);
     const priceText = Number.isFinite(price) ? (price >= 1000 ? price.toFixed(0) : price.toFixed(2)) : '--';
@@ -6491,7 +6513,12 @@ function renderChartSignalList(targetId, signals, emptyText) {
     const title = [signal.reason, `来源：${source}`, `来源时间：${sourceTime}`, `状态：${state}`, `策略版本：${signal.strategyVersion || '未知'}`].filter(Boolean).join(' · ');
     return `<button type="button" class="chart-signal-item ${signal.side === 'buy' ? 'buy' : 'sell'} ${signal.status === 'forming' ? 'forming' : 'confirmed'}" title="${stockEscapeHtml(title)}" data-signal-status="${signal.status === 'forming' ? 'forming' : 'confirmed'}">${signal.status === 'forming' ? '◯' : '●'} ${signal.side === 'buy' ? '买' : '卖'} · ${stockEscapeHtml(signal.label)} · ${time} · ${priceText} · ${state}</button>`;
   }).join('');
-  el.querySelectorAll('.chart-signal-item').forEach((button, index) => button.addEventListener('click', () => handleChartSignalSelection(allVisible[index], targetId)));
+  if (view.html !== html || view.buttons.some(button => !el.contains(button))) {
+    el.innerHTML = html;
+    view.html = html;
+    view.buttons = Array.from(el.querySelectorAll('.chart-signal-item'));
+    view.buttons.forEach((button, index) => button.addEventListener('click', () => handleChartSignalSelection(view.signals[index], targetId)));
+  }
   renderChartSignalLifecycleControls(el,targetId);
 }
 function renderChartPatternList(targetId, patterns, emptyText) {

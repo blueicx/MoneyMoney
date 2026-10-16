@@ -86,3 +86,43 @@ test('lifecycle selection persists by instrument and timeframe without touching 
   const dom=new JSDOM('<div id="stock-chart-signals"></div>',{runScripts:'outside-only',url:'http://localhost/'}),window=dom.window;chartFilterContext(window);window.stockEscapeHtml=value=>String(value??'');window.eval(signalRuntimeSource());
   try{window.renderChartSignalList('stock-chart-signals',[],'无匹配信号');const field=window.document.querySelector('[data-signal-filter="status"]');field.value='confirmed';field.dispatchEvent(new window.Event('change',{bubbles:true}));assert.equal(window.chartSignalLifecyclePreferences('stock:us:AAPL','5m').filters.status,'confirmed');assert.equal(window.chartSignalLifecyclePreferences('crypto:binance:BTCUSDT','5m').filters.status,'');window.renderChartSignalList('stock-chart-signals',[],'无匹配信号');assert.equal(window.document.querySelector('[data-signal-filter="status"]').value,'confirmed');}finally{window.close();}
 });
+
+test('unchanged signal redraws preserve focus while clicks use the latest evidence object', () => {
+  const dom = new JSDOM('<div id="bn-chart-signals"></div><div id="bn-chart-signal-detail"></div>', { runScripts:'outside-only', pretendToBeVisual:true });
+  const w = dom.window;
+  chartFilterContext(w);
+  w.stockEscapeHtml = value => String(value ?? '');
+  w.formatChartTime = value => String(value);
+  let events = [{ at:1, state:'confirmed', strategy:'volumeBreakout', price:12, reason:'收线确认' }];
+  w.mmChartPointTracker = { history:() => events };
+  w.eval(signalRuntimeSource());
+  try {
+    const signal = { label:'放量突破', side:'buy', time:1, price:12, open:10, high:13, low:9, close:12, status:'confirmed' };
+    w.renderChartSignalList('bn-chart-signals', [signal], '无信号');
+    const button = w.document.querySelector('.chart-signal-item');
+    button.focus();
+    w.renderChartSignalList('bn-chart-signals', [{ ...signal, open:11 }], '无信号');
+    assert.equal(w.document.querySelector('.chart-signal-item'), button, 'unchanged labels must not rebuild hit targets on every quote or pan');
+    assert.equal(w.document.activeElement, button);
+    assert.equal(w.document.querySelectorAll('[data-chart-signal-filters]').length, 1, 'retaining buttons must not duplicate lifecycle controls');
+    for (let i = 0; i < 3; i++) w.renderChartSignalList('bn-chart-signals', [{ ...signal, open:11 }], '无信号');
+    assert.equal(w.document.querySelectorAll('[data-chart-signal-filters]').length, 1);
+    assert.equal(w.document.querySelectorAll('[data-chart-signal-history]').length, 1, 'redraw must replace, not accumulate, the observed lifecycle history');
+    button.click();
+    assert.match(w.document.getElementById('bn-chart-signal-detail').textContent, /OHLC 11 \/ 13 \/ 9 \/ 12/, 'preserved buttons must select current evidence, not stale closures');
+    w.renderChartSignalList('bn-chart-signals', [{ ...signal, status:'forming' }], '无信号');
+    assert.match(w.document.querySelector('.chart-signal-item').textContent, /形成中/);
+    events = [];
+    w.renderChartSignalList('bn-chart-signals', [{ ...signal, status:'forming' }], '无信号');
+    assert.equal(w.document.querySelectorAll('[data-chart-signal-history]').length, 0, 'obsolete history must not survive a context with no observed events');
+    w.renderChartSignalList('bn-chart-signals', [], '来源过期');
+    assert.equal(w.document.querySelector('.chart-signal-item'), null);
+    assert.match(w.document.getElementById('bn-chart-signals').textContent, /来源过期/);
+    w.renderChartSignalList('bn-chart-signals', [signal], '无信号');
+    w.document.querySelector('.chart-signal-item').click();
+    assert.match(w.document.getElementById('bn-chart-signal-detail').textContent, /OHLC 10 \/ 13 \/ 9 \/ 12/);
+    w.document.querySelector('.chart-signal-item').remove();
+    w.renderChartSignalList('bn-chart-signals', [signal], '无信号');
+    assert.ok(w.document.querySelector('.chart-signal-item'), 'a cleared workspace must rebuild missing targets even when its data matches');
+  } finally { w.close(); }
+});

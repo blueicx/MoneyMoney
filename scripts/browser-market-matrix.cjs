@@ -470,6 +470,31 @@ async function main() {
       return document.querySelector('#stock-chart-pattern-controls input')===input&&document.activeElement===input;
     });
     assert.equal(patternControlsStable,true,'repeated chart initialization preserves pattern controls and keyboard focus');
+    const signalTargetsStable = await page.evaluate(() => {
+      const theme = document.documentElement.dataset.theme;
+      const checks = [];
+      try {
+        for (const next of ['light', 'dark', 'money']) {
+          document.documentElement.dataset.theme = next;
+          // Explicit interaction fixture in the isolated browser, never a provider quote or order.
+          const point = { label:'验收：放量突破', side:'buy', status:'confirmed', time:1, price:12, open:10, high:13, low:9, close:12, sourceIndex:-1, source:'browser interaction fixture' };
+          renderChartSignalList('stock-chart-signals', [point], '无信号');
+          const host = document.getElementById('stock-chart-signals');
+          const button = host.querySelector('.chart-signal-item');
+          button.focus();
+          for (let i=0;i<3;i++) renderChartSignalList('stock-chart-signals', [{ ...point, open:11 }], '无信号');
+          checks.push(host.querySelector('.chart-signal-item') === button && document.activeElement === button
+            && host.querySelectorAll('[data-chart-signal-filters]').length === 1);
+          button.click();
+          checks.push(document.getElementById('stock-chart-evidence-detail').textContent.includes('OHLC：11.00 / 13.00 / 9.00 / 12.00'));
+        }
+      } finally {
+        document.documentElement.dataset.theme = theme;
+        redrawStockKlineSelection();
+      }
+      return checks.every(Boolean);
+    });
+    assert.equal(signalTargetsStable, true, 'three themes preserve signal targets/focus and select current OHLC without duplicate filters');
     await page.evaluate(() => openWorkspace('decision-intelligence'));
     await page.waitForFunction(() => window.MoneyMoneyHistoryChart && window.MoneyMoneyWorkflow, null, { timeout: 10_000 });
     assert.ok(lazyAssetRequests.some(url => /workspace-research/.test(url)), 'opening research should load its bundle on demand');
