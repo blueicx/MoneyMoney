@@ -4,6 +4,7 @@
   const modules = manifest.modules || manifest;
   const styles = manifest.styles || {};
   const pending = new Map();
+  const pendingActions = new Set();
   const pendingStyles = new Map();
   const preloadedScripts = new Set();
   const stockKlinePeriods = new Set(['1m', '5m', '15m', '1h', '1d', '3d', '5d', '60d', '120d', '1y', '5y']);
@@ -215,13 +216,33 @@
     return promise;
   }
 
+  function invocationContext() {
+    return JSON.stringify([window.marketScopeRequestToken?.(), document.body?.dataset.marketScope,
+      document.getElementById('market-workspace-shell')?.dataset.workspace, window.currentInstrumentFilterId?.()]);
+  }
+
   window.MoneyWorkspaceModules = {
     ensure,
     groupsForWorkspace,
     contractForWorkspace: (market,id)=>manifest.workspaceContracts?.[market+':'+id]||null,
-    async invoke(group, name, args) {
-      try { await ensure(group); return window[name](...args); }
-      catch (error) { window.showToast?.(error.message || '工作区加载失败，请重试', 'error'); throw error; }
+    async invoke(group, name, args, guardContext = false) {
+      const context = guardContext ? invocationContext() : null;
+      const run = async () => {
+        try {
+          await ensure(group);
+          if (guardContext && context !== invocationContext()) return;
+          return window[name](...args);
+        }
+        catch (error) { window.showToast?.(error.message || '工作区加载失败，请重试', 'error'); throw error; }
+      };
+      if (!guardContext) return run();
+      const existing = [...pendingActions].find(row => row.group === group && row.name === name && row.context === context
+        && row.args.length === args.length && row.args.every((value, index) => Object.is(value, args[index])));
+      if (existing) return existing.promise;
+      const entry = { group, name, context, args: [...args] };
+      pendingActions.add(entry);
+      entry.promise = Promise.resolve().then(run).finally(() => pendingActions.delete(entry));
+      return entry.promise;
     },
   };
 

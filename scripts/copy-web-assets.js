@@ -72,6 +72,16 @@ const syncWorkspaceGroups = [
   ['ops', /^(?:globalSearchCommands|renderGlobalSearchResults|renderSettingsForm|renderTelegramSettingsForm)$/],
   ['ai', /^(?:renderAiSettingsForm|syncAiRunnerVenueHint)$/],
 ];
+// These async entry points are not needed to initialize the shell. Preserve
+// their names and shared state, but discard calls whose context changes while
+// the existing workspace bundle is loading (especially administrative writes).
+const deferredActionGroups = [
+  ['ops', /^(?:loadInstrumentSilences|loadAlerts|addAlert|removeAlert|retryAlertDelivery|ackAlertDelivery|setAlertDeliveryFeedback|loadNotifications|markAllRead|loadSettings|saveSetting|resetSettings|loadConnectionInfo|showWalletModal|testTelegram|testNotificationChannels|loadEconomicIndicators|runOpsJob|runCoverageCanaryFromUi|sendDailyReport|handleTelegramResultAction)$/],
+  ['research', /^(?:saveDecisionRecordUi|runDecisionScenario|saveDecisionScenarioUi|saveCurrentDecisionWorkspace|shareDecisionWorkspace|generateDueDecisionReviews|retryDecisionSources|loadJournal|loadReviewNotes|saveNote|loadStrategies|resetStrategies)$/],
+  ['ai', /^(?:saveAiSettings|saveAiKey|testAiProvider|pauseRunner|resumeRunner|stopRunner|resetRunnerCircuit)$/],
+  ['prediction', /^(?:calculatePredictionSizing|resolveForecastLabCase)$/],
+  ['overview', /^(?:loadOverview|loadNewsTicker)$/],
+];
 function splitWorkspaces(code) {
   const ast = ts.createSourceFile('dashboard.js', code, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
   const changes = [];
@@ -79,13 +89,14 @@ function splitWorkspaces(code) {
     if (!ts.isFunctionDeclaration(node) || !node.name) continue;
     const name = node.name.text;
     const isAsync = Boolean(node.modifiers?.some(modifier => modifier.kind === ts.SyntaxKind.AsyncKeyword));
+    const deferredGroup = isAsync ? deferredActionGroups.find(([, pattern]) => pattern.test(name))?.[0] : null;
     const group = /guru/i.test(name) ? 'guru' : /aiRunner/i.test(name) || name === 'loadAiMarketCommentary' ? 'ai'
       : /^(?:renderResearchEntryUi|loadResearchWorkspace|createResearchEntryUi|addResearchNoteUi|addResearchSnapshotUi|openEventResearchFromTimeline)$/.test(name) ? 'research'
-        : isAsync ? asyncWorkspaceGroups.find(([, pattern]) => pattern.test(name))?.[0] || null
+        : isAsync ? asyncWorkspaceGroups.find(([, pattern]) => pattern.test(name))?.[0] || deferredGroup || null
           : syncWorkspaceGroups.find(([, pattern]) => pattern.test(name))?.[0] || null;
     if (!group) continue;
     modules[group].push(code.slice(node.getStart(ast), node.end));
-    changes.push({ start: node.getStart(ast), end: node.end, body: `function ${name}(...args) { return window.MoneyWorkspaceModules.invoke('${group}', '${name}', args); }` });
+    changes.push({ start: node.getStart(ast), end: node.end, body: `function ${name}(...args) { return window.MoneyWorkspaceModules.invoke('${group}', '${name}', args${deferredGroup ? ', true' : ''}); }` });
   }
   for (const change of changes.reverse()) code = code.slice(0, change.start) + change.body + code.slice(change.end);
   return code;

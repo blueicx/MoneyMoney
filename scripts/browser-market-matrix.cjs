@@ -455,6 +455,13 @@ async function main() {
       return document.getElementById('stock-kline')===canvas&&canvas.dataset.mountProbe==='preserved'&&currentStockKlinePeriod===period&&document.querySelectorAll('#stock-kline').length===1;
     });
     assert.equal(stockMountRestored,true,'returning to the stock workspace preserves its canvas and selected period');
+    // Loading intentionally disables overlays. A disabled input cannot receive
+    // focus, which must not be mistaken for a repeated-render focus regression.
+    await page.waitForFunction(() => {
+      const ready = document.getElementById('stock-chart-card')?.dataset.klineState === 'ready';
+      const input = document.querySelector('#stock-chart-pattern-controls input');
+      return ready && input && !input.disabled;
+    }, null, { timeout: 10_000 });
     const patternControlsStable=await page.evaluate(()=>{
       const input=document.querySelector('#stock-chart-pattern-controls input');
       if(!input)return false;
