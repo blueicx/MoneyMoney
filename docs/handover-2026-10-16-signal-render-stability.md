@@ -33,3 +33,19 @@ Web、认证和合约冒烟通过。实时图表冒烟首次等待指数响应�
 按不使用子agent的约束由实施者逐项自检：缓存有界、时区不串用、按钮引用更新、重复事件处理器不累积、控件/历史清理不删除点位、来源状态不由显示缓存推断。没有独立审查者。
 
 不修改后台策略、AI账户预算/模型/自选范围/运行状态，不创建生产订单或模型请求，不发送Telegram测试消息，不修改数据库或数据湖。未跟踪`data/research.db`保留、不提交，SHA256仍为`27fd475e523568daa4cdcabf3146917023335a62affe00429babd721b3b79fd1`。发布前VPS根盘17GiB可用、42%使用，原服务active。
+
+行动中心冒烟和最终45项定向回归通过；安全扫描796个受跟踪文件、差异检查通过。日志分别为`mm-signal-stability-smoke-actions.log`、`mm-signal-stability-focused.log`。原始完整单测日志为`mm-signal-stability-tests.log`。没有删除失败日志；实时图表首次和重跑分别保存在`mm-signal-stability-smoke-live-kline.log`与`mm-signal-stability-smoke-live-kline-retry.log`。
+
+## 已发布版本与回滚
+
+代码`5a185270a6f9bfcc7bef9a9f5a7435c46b4fb354`已推送GitHub。提交后重新构建，Web冒烟通过，再发布dist；后续文档提交不改变生产代码版本。
+
+- 归档`moneymoney-5a18527-20261016-signal.tar.gz`，SHA256：`b4a011d1bd45254af0acd64afb758b73eea1711311c47458d6c3b7fe7d6f8f27`。
+- 服务器SHA256：`6347d2b4a8c4a51403259e518d7e40988dc33686fe729fa20cb1b0e0a1b71cec`，与上一版相同；首页：`e239cd0d3e4e431dbf82e4621b512f386378a931dda7c437fe263b4b997cd96d`。
+- 资源manifest：`d56f0fd202989516c370c05815c4e256dd818d7ff56e167b8d126d8925410c4d`，本地与远端一致。
+- 正式域名核心脚本Hash：`9775862a4f6c4bc767f0ab6df81080055a3db0aa318828b138f8d77bcd0b54b2`；图表包：`2b0623282989d7e1384f4f1126e1b0d698b347abcdcc4def80312efbdb5fb906`；loader：`294c25bf513936f0090f3650eb41cf33eaa51efd58003398323162d79d39a2ec`。三项均返回Brotli，解压Hash匹配manifest。
+- 备份`/opt/moneymoney/backups/dist-pre-5a18527-20261016-signal`；回滚`/opt/moneymoney/dist.rollback-5a18527-20261016-signal`，保留此前`69f5730`产物。
+- 首次运行已有部署助手因CRLF在`set -euo pipefail`处退出，发生在任何发布步骤之前。只规范化传入bash的换行后重新执行；启动最初两次健康探测未连接，随后健康，助手退出0，服务active。只操作`moneymoney.service`和dist，不修改线上业务数据或配置。
+- 正式域名`https://bluetrade.bbroot.com`版本匹配；只读Chromium抽检股票、期权、虚拟币、预测市场及SNDK通过，日志`mm-signal-stability-production.log`。发布后用户数据库Hash未变。
+
+证据对应的结论是重复格式化与点位节点重建已经减少，生产功能验收通过；不是手机性能目标完成。后续性能工作仍应针对首屏关键路径和布局，沿用原始基线和反转顺序测量，不能靠移除点位或降低数据真实性取得较快结果。
