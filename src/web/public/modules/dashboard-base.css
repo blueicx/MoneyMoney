@@ -509,6 +509,18 @@
     .chart-strategy-controls { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin:0 0 8px; font-size:11px; color:var(--text-secondary); }
     .chart-strategy-controls label { display:inline-flex; align-items:center; gap:4px; cursor:pointer; white-space:nowrap; }
     .chart-strategy-controls input { accent-color:var(--purple); }
+    .chart-strategy-library { flex-basis:100%; width:100%; margin:6px 0; color:var(--text-secondary); font-size:12px; }
+    .chart-strategy-library > summary { cursor:pointer; padding:8px 0; color:var(--purple); }
+    .chart-strategy-entry { padding:10px; margin:6px 0; border:1px solid var(--border); border-radius:var(--radius); background:var(--bg-secondary); }
+    .chart-strategy-entry > label { font-weight:600; }
+    .chart-strategy-entry details { margin:6px 0; }
+    .chart-strategy-entry summary { cursor:pointer; padding:5px 0; }
+    .chart-strategy-entry p { white-space:normal; line-height:1.6; }
+    .chart-strategy-entry > small { display:block; overflow-wrap:anywhere; }
+    .chart-strategy-parameters { display:flex; flex-wrap:wrap; gap:8px; margin-top:8px; }
+    .chart-strategy-parameters label { display:flex; align-items:center; gap:5px; }
+    .chart-strategy-parameters input { width:78px; min-height:36px; }
+    @media(max-width:640px){.chart-strategy-entry > label { min-height:44px; }.chart-strategy-parameters input{min-height:44px;}}
     .chart-signal-list { display:flex; gap:6px; flex-wrap:wrap; margin-top:8px; min-height:20px; max-height:min(38vh,320px); overflow:auto; overscroll-behavior:contain; }
     .chart-signal-item { display:inline-flex; align-items:center; gap:5px; border:1px solid var(--border); border-radius:7px; padding:4px 7px; font-size:10px; background:var(--bg-secondary); }
     .chart-signal-item.buy { color:var(--green); }

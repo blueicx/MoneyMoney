@@ -1,15 +1,15 @@
 (function attachChartAnalysis(root, factory) {
-  const api = factory();
+  const api = factory(typeof module === 'object' && module.exports ? require('./chart-strategies.js') : root?.MoneyChartStrategies);
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.MoneyChartAnalysis = api;
-})(typeof window !== 'undefined' ? window : globalThis, function createChartAnalysis() {
+})(typeof window !== 'undefined' ? window : globalThis, function createChartAnalysis(strategyLibrary) {
   const DEFAULT_CONFIG = {
     signals: true,
     patterns: false,
     structures: false,
     volume: true,
     indicators: { ma: true, boll: false, macd: false },
-    strategies: { maCross: true, rsiReversal: false, bollinger: false, volumeBreakout: false },
+    strategies: { maCross: true, rsiReversal: false, bollinger: false, volumeBreakout: false, ...Object.fromEntries((strategyLibrary?.STRATEGY_CATALOG||[]).map(row=>[row.id,false])) },
     patternTypes: {},
     maxLabels: 80,
   };
@@ -350,7 +350,7 @@
     return values;
   }
 
-  function detectStrategySignals(inputBars = [], enabled = {}) {
+  function detectLegacyStrategySignals(inputBars = [], enabled = {}) {
     const bars = inputBars.map(normalizeBar);
     const options = {
       maCross: enabled.maCross !== false,
@@ -405,6 +405,14 @@
       }
     }
     return found.sort((left, right) => left.index - right.index || left.strategy.localeCompare(right.strategy));
+  }
+
+  function evaluateChartStrategies(inputBars = [], enabled = {}, context = {}) {
+    const output=strategyLibrary?.evaluateStrategies(inputBars,enabled,context)||{signals:[],statuses:{}};
+    return {signals:[...detectLegacyStrategySignals(inputBars,enabled),...output.signals].sort((a,b)=>a.index-b.index||a.strategy.localeCompare(b.strategy)),statuses:output.statuses};
+  }
+  function detectStrategySignals(inputBars = [], enabled = {}, context = {}) {
+    return evaluateChartStrategies(inputBars,enabled,context).signals;
   }
 
   function buildStrategyChartPoints({
@@ -737,5 +745,5 @@
     };
   }
 
-  return { DEFAULT_CONFIG, CANDLE_PATTERN_CATALOG, normalizeOverlayConfig, chartDataStatusLabel, detectCandlestickPatterns, detectStructures, detectChanStructures, detectStrategySignals, buildStrategyChartPoints, createStrategyPointTracker, filterStrategyChartPoints, strategyPointOutcomes, mapIndexedItemsToViewport, clusterChartPointsByPixel, movingAverage, bollingerBands, calculateMACD, buildChartOverlays, stepReplay, layoutMarkerLabels, protectReplayContext, createDrawingTool };
+  return { DEFAULT_CONFIG, STRATEGY_CATALOG:strategyLibrary?.STRATEGY_CATALOG||[], evaluateChartStrategies, CANDLE_PATTERN_CATALOG, normalizeOverlayConfig, chartDataStatusLabel, detectCandlestickPatterns, detectStructures, detectChanStructures, detectStrategySignals, buildStrategyChartPoints, createStrategyPointTracker, filterStrategyChartPoints, strategyPointOutcomes, mapIndexedItemsToViewport, clusterChartPointsByPixel, movingAverage, bollingerBands, calculateMACD, buildChartOverlays, stepReplay, layoutMarkerLabels, protectReplayContext, createDrawingTool };
 });

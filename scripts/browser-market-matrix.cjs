@@ -495,6 +495,45 @@ async function main() {
       return checks.every(Boolean);
     });
     assert.equal(signalTargetsStable, true, 'three themes preserve signal targets/focus and select current OHLC without duplicate filters');
+    const libraryHost=page.locator('#stock-advanced-strategies');
+    await libraryHost.locator('..').locator(':scope > summary').click();
+    assert.equal(await libraryHost.locator('input[type=checkbox]').count(),10);
+    const donchian=libraryHost.locator('[data-strategy-id="donchianBreakout"][type=checkbox]');
+    await donchian.check();
+    const row=donchian.locator('..').locator('..');
+    await row.locator('summary').click();
+    const lookback=row.locator('[data-parameter="lookback"]');
+    await lookback.fill('10');await lookback.press('Tab');
+    assert.equal(await page.evaluate(()=>JSON.parse(localStorage.getItem(stockChartStorageKey())).strategyParameters.donchianBreakout.lookback),10);
+    await lookback.fill('0');await lookback.press('Tab');
+    assert.equal(await lookback.inputValue(),'10','invalid parameters must not overwrite a valid saved experiment configuration');
+    assert.match(await row.textContent(),/参数/);
+    const strategyAudit=await page.evaluate(()=>{
+      const checks=[],colors=[],theme=document.documentElement.getAttribute('data-theme');
+      const bars=Array.from({length:60},(_,i)=>({time:Date.parse('2026-10-01T00:00:00Z')+i*60000,open:i<25?100:108+i-25,close:i<25?100:108+i-25,high:i<25?101:109+i-25,low:i<25?99:107+i-25,volume:100}));
+      // Isolated interaction fixture, never presented as a provider quote or an order.
+      const signals=MoneyChartAnalysis.detectStrategySignals(bars,{maCross:false,donchianBreakout:true},{market:'stocks',parameters:{donchianBreakout:{lookback:10}}});
+      const points=MoneyChartAnalysis.buildStrategyChartPoints({bars,signals,market:'stocks',instrument:'stock:us:AAPL',timeframe:'1m',source:'Browser strategy acceptance fixture',costBps:10}).map(point=>({...point,sourceIndex:-1}));
+      for(const next of ['light','dark','money']){
+        document.documentElement.setAttribute('data-theme',next);
+        colors.push(getComputedStyle(document.querySelector('#stock-advanced-strategies input[type=number]')).color);
+        renderChartSignalList('stock-chart-signals',points,'无信号');
+        const button=[...document.querySelectorAll('#stock-chart-signals .chart-signal-item')].find(b=>b.textContent.includes('唐奇安'));
+        if(!button){checks.push(false);continue;}button.click();
+        const evidence=document.getElementById('stock-chart-evidence-detail').textContent;
+        checks.push(evidence.includes('OHLC')&&evidence.includes('lookback')&&evidence.includes('后续 20 根')&&evidence.includes('Browser strategy acceptance fixture'));
+      }
+      if(theme===null)document.documentElement.removeAttribute('data-theme');else document.documentElement.setAttribute('data-theme',theme);
+      redrawStockKlineSelection();return {ok:checks.every(Boolean),colors};
+    });
+    assert.equal(strategyAudit.ok,true,'new strategy markers share parameter/version, OHLC, evidence and forward-outcome explanations across three themes');
+    assert.equal(new Set(strategyAudit.colors).size,3,'new parameter controls follow all three themes');
+    await page.setViewportSize({width:390,height:844});
+    await lookback.scrollIntoViewIfNeeded();
+    assert.equal(await lookback.isVisible(),true);
+    const bounds=await lookback.boundingBox();assert.ok(bounds.height>=36&&bounds.x>=0&&bounds.x+bounds.width<=390,'mobile strategy parameters remain touchable and within viewport');
+    await donchian.uncheck();await libraryHost.locator('..').locator(':scope > summary').click();
+    await page.setViewportSize({width:1440,height:900});
     await page.evaluate(() => openWorkspace('decision-intelligence'));
     await page.waitForFunction(() => window.MoneyMoneyHistoryChart && window.MoneyMoneyWorkflow, null, { timeout: 10_000 });
     assert.ok(lazyAssetRequests.some(url => /workspace-research/.test(url)), 'opening research should load its bundle on demand');
@@ -545,6 +584,16 @@ async function main() {
     await page.evaluate(() => setMarketScope('crypto'));
     await page.locator('#crypto-library-quick .stock-library-item').first().click();
     assert.ok((await page.locator('#crypto-library-current-symbol').innerText()).trim() !== '--');
+    await page.evaluate(()=>{loadCryptoChartStrategyConfig();loadCryptoChartOverlayConfig();});
+    const cryptoLibrary=page.locator('#bn-advanced-strategies');
+    await cryptoLibrary.locator('..').locator(':scope > summary').click();
+    assert.equal(await cryptoLibrary.locator('input[type=checkbox]').count(),10);
+    const cryptoMacd=cryptoLibrary.locator('[data-strategy-id=macdCross][type=checkbox]');
+    await cryptoMacd.check();
+    assert.equal(await page.evaluate(()=>JSON.parse(localStorage.getItem(cryptoChartStorageKey())).macdCross),true);
+    assert.equal(await page.evaluate(()=>stockChartOverlayConfig.strategies.macdCross),false,'crypto selection must not enable a stock strategy');
+    await cryptoMacd.uncheck();
+    await cryptoLibrary.locator('..').locator(':scope > summary').click();
     await page.evaluate(() => setMarketScope('prediction'));
     await page.waitForFunction(() => !document.querySelector('#prediction-library-quick')?.textContent?.includes('正在读取'), null, { timeout: 30_000 });
     assert.ok((await page.locator('#prediction-library-quick').innerText()).trim());
