@@ -10516,12 +10516,18 @@ function workspaceMenuMarkup(groups) {
   return groups.map(group => `<section class="workspace-group" data-workspace-group="${group.id}"><div class="workspace-group-label">${marketResearchEscape(group.label)}</div>${group.items.map(item => `<button type="button" class="workspace-item${item.id === activeWorkspaceId ? ' active' : ''}" data-workspace-id="${item.id}" onclick="openWorkspace('${item.id}')" aria-current="${item.id === activeWorkspaceId ? 'page' : 'false'}"><span class="workspace-item-icon">${marketResearchEscape(item.icon)}</span><span class="workspace-item-label">${marketResearchEscape(item.label)}</span></button>`).join('')}</section>`).join('');
 }
 
+const navigationMarkupCache = new WeakMap();
+function setNavigationMarkup(host, markup) {
+  if (!host || (host.firstElementChild && navigationMarkupCache.get(host) === markup)) return;
+  host.innerHTML = markup;
+  navigationMarkupCache.set(host, markup);
+}
 function renderWorkspaceMenu(groups) {
   const markup = groups?.length ? workspaceMenuMarkup(groups) : '<div class="workspace-empty">当前市场暂无专属功能。</div>';
   const content = document.getElementById('workspace-sidebar-content');
   const drawer = document.getElementById('workspace-drawer-content');
-  if (content) content.innerHTML = markup;
-  if (drawer) drawer.innerHTML = `<div class="workspace-sidebar-header"><div class="workspace-sidebar-title">市场功能区</div></div>${markup}`;
+  setNavigationMarkup(content, markup);
+  setNavigationMarkup(drawer, `<div class="workspace-sidebar-header"><div class="workspace-sidebar-title">市场功能区</div></div>${markup}`);
 }
 
 function renderWorkspaceSidebar() {
@@ -10999,7 +11005,7 @@ function workspaceAllowsView(node) {
 const legacyWorkspaceVisibility = new WeakMap();
 function applyWorkspaceView() {
   const shell = document.getElementById('market-workspace-shell');
-  if (shell) shell.dataset.workspace = activeWorkspaceId;
+  if (shell && shell.dataset.workspace !== activeWorkspaceId) shell.dataset.workspace = activeWorkspaceId;
   const exclusive = activeWorkspaceId !== 'overview';
   document.querySelectorAll('[data-workspace-id], [data-workspace-ids]').forEach(node => {
     const visible = (!node.dataset.marketScopes || scopeAllowsView(node.dataset.marketScopes)) && workspaceAllowsView(node);
@@ -11007,11 +11013,12 @@ function applyWorkspaceView() {
       && visible
       && node.matches('details.dash-collapse')
       && workspaceIdsForNode(node).includes(activeWorkspaceId);
-    node.hidden = !visible;
+    const hidden = !visible;
+    if (node.hidden !== hidden) node.hidden = hidden;
     node.classList.toggle('workspace-hidden', !visible);
     node.classList.toggle('workspace-panel-flat', flatPanel);
-    if (flatPanel) node.open = true;
-    if (!visible && node.tagName === 'DETAILS') node.open = false;
+    if (flatPanel && !node.open) node.open = true;
+    if (!visible && node.tagName === 'DETAILS' && node.open) node.open = false;
   });
   ['stocks-tab', 'binance-tab'].forEach(tabId => {
     const tab = document.getElementById(tabId);
@@ -11020,10 +11027,11 @@ function applyWorkspaceView() {
       if (node.matches('.section-title, #market-scope-empty, [data-workspace-id], [data-workspace-ids]')) return;
       if (exclusive) {
         if (!legacyWorkspaceVisibility.has(node)) legacyWorkspaceVisibility.set(node, node.hidden);
-        node.hidden = true;
-        node.classList.add('workspace-hidden');
+        if (!node.hidden) node.hidden = true;
+        if (!node.classList.contains('workspace-hidden')) node.classList.add('workspace-hidden');
       } else if (node.classList.contains('workspace-hidden')) {
-        node.hidden = Boolean(legacyWorkspaceVisibility.get(node)) || node.classList.contains('scope-hidden');
+        const hidden = Boolean(legacyWorkspaceVisibility.get(node)) || node.classList.contains('scope-hidden');
+        if (node.hidden !== hidden) node.hidden = hidden;
         legacyWorkspaceVisibility.delete(node);
         node.classList.remove('workspace-hidden');
       }
@@ -11037,18 +11045,21 @@ function scopedUrl(path) {
 function applyMarketScopeView() {
   document.querySelectorAll('[data-market-scopes]').forEach(node => {
     const visible = node.closest('#macro-tab') ? true : scopeAllowsView(node.dataset.marketScopes);
-    node.hidden = !visible;
+    const hidden = !visible;
+    if (node.hidden !== hidden) node.hidden = hidden;
     node.classList.toggle('scope-hidden', !visible);
-    if (!visible && node.tagName === 'DETAILS') node.open = false;
+    if (!visible && node.tagName === 'DETAILS' && node.open) node.open = false;
   });
   const title = document.querySelector('#stocks-tab > .section-title');
   const labels = { overview: '总体市场工作区', stocks: '股票市场工作区', options: '期权市场工作区', crypto: '虚拟币市场工作区', prediction: '预测市场工作区', watchlist: '自选标的工作区' };
-  if (title) title.textContent = `📊 ${labels[activeMarketScope] || '市场工作区'}`;
+  const titleText = `📊 ${labels[activeMarketScope] || '市场工作区'}`;
+  if (title && title.textContent !== titleText) title.textContent = titleText;
   const empty = document.getElementById('market-scope-empty');
   if (empty) {
     const hasVisibleSection = [...document.querySelectorAll('#stocks-tab .dash-collapse[data-market-scopes]')].some(node => !node.hidden);
-    empty.hidden = hasVisibleSection;
-    empty.textContent = `${labels[activeMarketScope] || '当前市场'}暂无可用的宏观工作区。请从对应市场首页进入专属功能。`;
+    if (empty.hidden !== hasVisibleSection) empty.hidden = hasVisibleSection;
+    const emptyText = `${labels[activeMarketScope] || '当前市场'}暂无可用的宏观工作区。请从对应市场首页进入专属功能。`;
+    if (empty.textContent !== emptyText) empty.textContent = emptyText;
   }
   applyWorkspaceView();
 }
@@ -11161,27 +11172,40 @@ function renderMarketScopeBar() {
     '<button class="market-scope-btn market-scope-action admin" data-admin-entry="settings" onclick="showTab(\'settings\')">⚙️ 总设置</button>',
     '<button class="market-scope-btn market-scope-action admin" data-admin-entry="ops" onclick="showTab(\'ops\')">🤖 自动化运营</button>',
   ].filter((_, index) => !window.mm_isGuest || index === 0).join('');
-  bar.innerHTML = `<span class="market-scope-label">市场</span>${scopes}<span class="market-scope-actions">${actions}</span>`;
+  setNavigationMarkup(bar, `<span class="market-scope-label">市场</span>${scopes}<span class="market-scope-actions">${actions}</span>`);
 }
 function renderUtilityNav() {
   const bar = document.getElementById('utility-nav-bar');
   if (!bar) return;
-  bar.innerHTML = `<span class="utility-nav-label">通用工具</span>${UTILITY_NAV_ITEMS.map(([tab, label]) => `<button class="utility-nav-btn" data-tab="${tab}" onclick="showTab('${tab}', this)">${label}</button>`).join('')}`;
+  setNavigationMarkup(bar, `<span class="utility-nav-label">通用工具</span>${UTILITY_NAV_ITEMS.map(([tab, label]) => `<button class="utility-nav-btn" data-tab="${tab}" onclick="showTab('${tab}', this)">${label}</button>`).join('')}`);
 }
 function renderCoreNav() {
   const items = CORE_NAV_ITEMS.filter(([tab]) => !(window.mm_isGuest && GUEST_ADMIN_TABS.has(tab)));
   const navigationItems = items.map(([tab, label]) => tab === 'radar' ? [marketRadarTab(), marketRadarLabel()] : [tab, label]);
   const markup = navigationItems.map(([tab, label]) => `<button class="core-workspace-btn" data-tab="${tab}" onclick="showTab('${tab}', this)">${label}</button>`).join('');
   const desktop = document.getElementById('core-workspace-nav');
-  if (desktop) desktop.innerHTML = markup;
+  setNavigationMarkup(desktop, markup);
   const mobile = document.getElementById('mobile-nav');
-  if (mobile) mobile.innerHTML = navigationItems.map(([tab, label]) => `<button class="mnav-btn" data-tab="${tab}" onclick="mobileTab('${tab}')"><span>${label.slice(0, 2)}</span><small>${label.slice(2).trim()}</small></button>`).join('');
+  setNavigationMarkup(mobile, navigationItems.map(([tab, label]) => `<button class="mnav-btn" data-tab="${tab}" onclick="mobileTab('${tab}')"><span>${label.slice(0, 2)}</span><small>${label.slice(2).trim()}</small></button>`).join(''));
 }
 function mountStockChartWorkspace() {
   if (activeMarketScope !== 'stocks' || !['stock-quotes', 'radar'].includes(activeWorkspaceId)) return false;
   const template = document.getElementById('stock-chart-template');
   if (!template?.content) return false;
+  if (!window.MoneyTradingChart || !window.MoneyChartAnalysis) {
+    const status = document.getElementById('stock-chart-mount-status');
+    const message = status?.querySelector('[data-stock-chart-mount-message]') || status;
+    if (message) message.textContent = '正在加载图表工作区…';
+    status?.setAttribute('aria-busy', 'true');
+    window.MoneyWorkspaceModules?.ensure('charts').catch(error => {
+      if (!status?.isConnected) return;
+      status.setAttribute('aria-busy', 'false');
+      if (message) message.textContent = (error.message || '图表资源加载失败') + '，请重试。';
+    });
+    return false;
+  }
   template.replaceWith(template.content);
+  document.getElementById('stock-chart-mount-status')?.remove();
   document.querySelectorAll('.stock-kline-period').forEach(button => button.classList.toggle('active', button.dataset.klinePeriod === currentStockKlinePeriod));
   initializeDashboardCollapses();
   renderChartPatternControls();
@@ -11201,7 +11225,6 @@ function renderNavigationState() {
   document.querySelectorAll('[data-market-scope]').forEach(node => node.classList.toggle('active', node.dataset.marketScope === activeMarketScope));
   document.querySelectorAll('[data-tab]').forEach(node => node.classList.toggle('active', node.dataset.tab === (window.mm_active_tab || 'command')));
   applyMarketScopeView();
-  applyWorkspaceView();
   applySidebarScope();
   const activeContent = document.querySelector('.tab-content.active');
   if (activeContent) activeContent.hidden = false;
@@ -13061,7 +13084,6 @@ async function startDashboard() {
   markMmPerformanceStage('dashboard-context-ready');
   if (activeWorkspaceId === 'events') loadEventTimelineWorkspace();
   else if (currentInstrumentId) loadActiveWorkspaceInstrument();
-  renderChartPatternControls();
   if (activeWorkspaceId === 'overview') {
     loadNewsTicker();
     if (activeMarketScope === 'overview') { loadMarketOverview(); loadResearchBriefing(); }
@@ -13079,6 +13101,8 @@ for (const [name, original] of [['drawCandles', drawCandles], ['drawStockKline',
 }
 window.addEventListener('mm-workspace-modules-ready', event => {
   if (event.detail?.group !== 'charts') return;
+  if (mountStockChartWorkspace()) applyMarketScopeView();
+  renderChartPatternControls();
   if (activeMarketScope === 'stocks' && activeWorkspaceId === 'stock-quotes' && stockChartKlines?.length) {
     drawStockKline(document.getElementById('stock-kline'), stockChartKlines);
   }

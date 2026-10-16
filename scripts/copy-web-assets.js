@@ -48,6 +48,7 @@ const modules = {
   stocks: [], options: [], crypto: [], prediction: [], portfolio: [], trading: [], events: [], ops: [], tables: [],
 };
 const asyncWorkspaceGroups = [
+  ['charts', /^loadEarlierCryptoKline$/],
   ['overview', /^(?:loadMarketOverview|loadCrossAssetCorrelation|loadResearchBriefing|loadCommandCenter)$/],
   ['research', /^(?:loadDecisionIntelligence|runBacktest|compareBacktests|runMonteCarlo|loadMarketResearch|runEventStudyUi)$/],
   ['charts', /^(?:performStockKlineLoad|loadEarlierStockKline|loadStockChartCompanion|loadStockChartEventRail|loadBinanceKlines|loadBinancePrices|loadBinanceDepth|loadBinanceTrades)$/],
@@ -61,6 +62,11 @@ const asyncWorkspaceGroups = [
   ['ops', /^(?:loadSourceSloPanel|loadOpsConsole|loadSourceHealth|loadMacroIndicators|loadNews|loadMacroCalendar|loadTelegramTestDeliveryHistory|loadTelegramResultCoverage|loadTelegramSettingsForm|testTelegramSettings|saveTelegramSettings|loadTreasuryYields|loadMarketSentiment|runGlobalSearchNow|loadAlertDeliveryFeedback)$/],
 ];
 const syncWorkspaceGroups = [
+  ['overview', /^(?:renderWorkspaceDashboardCards|renderMarketChangeDigest)$/],
+  ['stocks', /^(?:stockResearchFreshnessMarkup|workspaceTrendSvg)$/],
+  ['ops', /^renderUiPreferencesForm$/],
+  ['charts', /^(?:renderChartPatternControls|renderChartSignalMarkers|renderChartSignalList|renderChartSignalLifecycleControls)$/],
+  ['prediction', /^attachPredictionRelationshipCheck$/],
   ['charts', /^(?:loadStockKline|stockKlineRequestKey|runStockKlineSingleFlight|drawCandles|drawStockKline|initCryptoChartHover|drawMACD|drawRSI|drawDepthChart|drawStockChartCompanion|buildStockStrategySignals|buildCryptoStrategySignals|handleChartSignalSelection|renderChartPatternMarkers|renderChartPatternList|renderChartStructureList|renderStockChartEventRail|stockChartEventInstrumentId|showStockChartEvidence|focusStockChartTimestamp|redrawStockChartEventMarkers|updateStockKlineFocusControl|setStockKlineViewState|focusStockKlineDate|enterStockIntraday)$/],
   ['stocks', /^(?:renderGlobalMacroSpot|renderAnalystConsensus|renderStockCapitalHistory|renderFundamentalQuality|renderMarketBreadth|renderInsiderRadar|renderInstitutionalOwnership|renderShortInterest|renderMarketScreener|renderInstrumentDetail)$/],
   ['overview', /^fetchMarketOverviewJson$/],

@@ -276,6 +276,7 @@ const median = values => [...values].sort((a, b) => a - b)[Math.floor(values.len
           result.apiTimings = [...apiTimings];
           result.apiRequests = requests.map(request => request.pathname);
           result.apiRequestCounts = Object.fromEntries([...new Set(result.apiRequests)].map(path => [path, result.apiRequests.filter(request => request === path).length]));
+          assert.deepEqual(pageErrors, [], 'stock chart navigation must not hide browser runtime errors');
           assert.ok(result.apiRequests.includes('/api/stock/kline'), 'chart readiness must follow the scoped K-line request');
           const prefetchStart = result.phaseMarks.find(mark => mark.name === 'moneymoney:stock-kline-prefetch-start');
           const coreReady = result.phaseMarks.find(mark => mark.name === 'moneymoney:dashboard-core-ready');

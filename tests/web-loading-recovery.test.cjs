@@ -595,12 +595,39 @@ test('options IV history and Telegram result diagnostics stay in their lazy work
   assertWorkspaceWrapper(runtime, 'initCryptoChartHover', 'charts');
   assetDeclaration(charts, 'initCryptoChartHover');
   assert.match(assetDeclaration(charts, 'drawCandles'), /initCryptoChartHover\(\)/);
+  for (const name of ['renderChartSignalMarkers', 'renderChartSignalList', 'renderChartSignalLifecycleControls']) {
+    assert.match(assetDeclaration(runtime, name), /MoneyWorkspaceModules\.invoke/, `${name} must not ship its implementation in the shell`);
+    assertWorkspaceWrapper(runtime, name, 'charts');
+    assetDeclaration(charts, name);
+  }
 
   const prediction = asset('/workspace-prediction.');
   assertWorkspaceWrapper(runtime, 'loadCategories', 'prediction');
   assertWorkspaceWrapper(runtime, 'categoryCardHtml', 'prediction');
   assetDeclaration(prediction, 'loadCategories');
   assetDeclaration(prediction, 'categoryCardHtml');
+  assertWorkspaceWrapper(runtime, 'attachPredictionRelationshipCheck', 'prediction');
+  assetDeclaration(prediction, 'attachPredictionRelationshipCheck');
+});
+
+test('non-current dashboard, stock research and preference renderers stay out of the startup implementation', () => {
+  const root = path.join('dist', 'web', 'public');
+  const manifest = JSON.parse(fs.readFileSync(path.join(root, 'asset-manifest.json'), 'utf8'));
+  const asset = group => fs.readFileSync(path.join(root, Object.keys(manifest).find(item => item.includes(`/${group}.`))), 'utf8');
+  const core = asset('dashboard-startup-runtime');
+  for (const [group, names] of [
+    ['overview', ['renderWorkspaceDashboardCards', 'renderMarketChangeDigest']],
+    ['stocks', ['stockResearchFreshnessMarkup', 'workspaceTrendSvg']],
+    ['ops', ['renderUiPreferencesForm']],
+    ['charts', ['loadEarlierCryptoKline']],
+  ]) {
+    const bundle = asset(`workspace-${group}`);
+    for (const name of names) {
+      assert.match(assetDeclaration(core, name), /MoneyWorkspaceModules\.invoke/, `${name} must load with ${group}`);
+      assertWorkspaceWrapper(core, name, group);
+      assetDeclaration(bundle, name);
+    }
+  }
 });
 
 test('dashboard and stock-index API share one cached single-flight upstream loader', () => {
@@ -823,4 +850,9 @@ test('live K-line smoke waits for the deferred dashboard runtime before switchin
   const smoke = fs.readFileSync(path.join('scripts', 'live-kline-smoke.cjs'), 'utf8');
   assert.match(smoke, /page\.waitForFunction\([\s\S]*?typeof window\.setMarketScope === 'function'[\s\S]*?setMarketScope\('stocks'\)/,
     'the chart smoke must not race dashboard bootstrap after authentication');
+});
+
+test('loading benchmark rejects browser runtime errors instead of reporting a fast broken page', () => {
+  const benchmark=fs.readFileSync('scripts/web-loading-benchmark.cjs','utf8');
+  assert.match(benchmark,/assert\.deepEqual\(pageErrors,\s*\[\]/);
 });

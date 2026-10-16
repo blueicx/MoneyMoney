@@ -85,7 +85,7 @@ test('具体工作区只显示当前正文模块，并在总览时恢复市场�
   assert.match(html, /function workspaceAllowsView\(/);
   assert.match(html, /function applyWorkspaceView\(/);
   assert.match(html, /node\?\.dataset\?\.workspaceId/);
-  assert.match(html, /if \(!visible && node\.tagName === 'DETAILS'\) node\.open = false/);
+  assert.match(html, /if \(!visible && node\.tagName === 'DETAILS' && node\.open\) node\.open = false/);
   assert.match(html, /applyWorkspaceView\(\);/);
 });
 
@@ -122,7 +122,7 @@ test('独立功能面板在选中后扁平展示并保持展开', () => {
   assert.ok((html.match(/workspaceInlineRefresh\(/g) || []).length >= 8, 'workspace refresh controls should be rendered inside each data card');
   assert.match(html, /workspace-inline-refresh[\s\S]*workspace-signal-badge/);
   assert.match(html, /classList\.toggle\(['"]workspace-panel-flat['"],\s*flatPanel\)/);
-  assert.match(html, /if \(flatPanel\) node\.open = true/);
+  assert.match(html, /if \(flatPanel && !node\.open\) node\.open = true/);
   assert.match(html, /!section\.classList\.contains\(['"]workspace-panel-flat['"]\)/);
   assert.match(html, /section\.classList\.contains\(['"]workspace-panel-flat['"]\) && !section\.open/);
   for (const id of ['breadth', 'insider', 'institutional', 'analyst', 'fundamentals', 'short-interest', 'funding-rate', 'open-interest', 'on-chain', 'order-flow']) {

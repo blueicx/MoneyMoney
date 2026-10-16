@@ -148,7 +148,7 @@
         </div>
       </section>
       <!-- Command Center Tab -->
-      <div id="command-tab" class="tab-content active">
+      <div id="command-tab" class="tab-content">
         <div class="section-title">🏠 风险指挥台</div>
         <div id="command-center" class="glass-card" style="padding:18px;border-radius:20px;margin-bottom:18px;">
           <div style="color:var(--text-secondary);font-size:13px;">正在汇总风险、研究和自动化状态...</div>
@@ -646,7 +646,7 @@
                 <label><input type="checkbox" data-chart-strategy="bollinger" onchange="setStockChartStrategy('bollinger', this.checked)"> 布林反转</label>
                 <label><input type="checkbox" data-chart-strategy="volumeBreakout" onchange="setStockChartStrategy('volumeBreakout', this.checked)"> 放量突破</label>
                 <label><input type="checkbox" data-chart-overlay="patterns" onchange="setStockChartOverlay('patterns', this.checked)"> 蜡烛形态</label>
-                <div id="stock-chart-pattern-controls" class="chart-pattern-controls" aria-label="逐项蜡烛形态开关"><span class="chart-pattern-controls-title">逐项形态</span><label><input type="checkbox" data-chart-pattern="doji" data-chart-pattern-scope="stock"> 十字星</label></div>
+                <div id="stock-chart-pattern-controls" class="chart-pattern-controls" aria-label="逐项蜡烛形态开关"><span class="chart-pattern-controls-title">逐项形态 · 等待图表加载</span></div>
                 <label><input type="checkbox" data-chart-overlay="structures" onchange="setStockChartOverlay('structures', this.checked)"> 结构标记</label>
                 <label><input type="checkbox" data-chart-overlay="ma" checked="" onchange="setStockChartOverlay('ma', this.checked)"> 均线</label>
                 <label><input type="checkbox" data-chart-overlay="boll" onchange="setStockChartOverlay('boll', this.checked)"> 布林带</label>
