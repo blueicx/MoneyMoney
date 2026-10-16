@@ -64,6 +64,36 @@ async function main() {
     assert.equal(status.data.role, 'admin');
     assert.ok(status.data.csrfToken);
     if(child) {
+      // Exercise dependency ordering in Chromium, not just simulated DOM tests.
+      for(const failure of [false,true]) {
+        const dependencyContext=await browser.newContext({storageState:await page.context().storageState()});
+        const delayed=await dependencyContext.newPage();
+        let release;
+        const hold=new Promise(resolve=>{release=resolve;});
+        let intercepted;
+        const waiting=new Promise(resolve=>{intercepted=resolve;});
+        const errors=[];delayed.on('pageerror',error=>errors.push(error.message));
+        await delayed.route('**/assets/workspace-loader.*.js',async route=>{
+          intercepted();await hold;
+          if(failure)await route.abort('failed');else await route.continue();
+        });
+        try {
+          await delayed.goto(baseUrl+'/?market=stocks&workspace=stock-quotes&instrument=AAPL&timeframe=1d',{waitUntil:'domcontentloaded'});
+          await waiting;
+          await delayed.waitForFunction(()=>window.mm_isLoggedIn===true);
+          assert.equal(await delayed.evaluate(()=>typeof window.startDashboard),'undefined','core must wait for the async loader');
+          for(const id of ['market-overview','workspace-dashboard-cards','market-change-digest','market-research-tools']) {
+            assert.equal(await delayed.locator('#'+id).isVisible(),false,id+' must not flash before workspace selection');
+          }
+          release();
+          if(failure) {
+            await delayed.locator('#network-status-banner:not([hidden])').waitFor();
+            assert.match(await delayed.locator('#network-status-banner').innerText(),/脚本加载失败/);
+            assert.equal(await delayed.evaluate(()=>window.mm_dashboardCoreReady===true),false);
+          } else await delayed.waitForFunction(()=>window.mm_dashboardCoreReady===true);
+          assert.deepEqual(errors,[]);
+        } finally {release();await dependencyContext.close();}
+      }
       await page.evaluate(()=>{setMarketScope('stocks');showTab('alerts');loadAlerts();});
       const silencePanel=page.locator('#instrument-silence-panel');
       await silencePanel.locator('[data-silence-instrument]').waitFor({state:'visible'});

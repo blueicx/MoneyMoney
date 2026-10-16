@@ -13,6 +13,18 @@ function workspace(market, current) {
   return dom;
 }
 
+test('unselected root workspace panels stay hidden before any script initializes the context', () => {
+  const dom=new JSDOM(fs.readFileSync('src/web/public/index.html','utf8'));
+  try {
+    const panels=[...dom.window.document.querySelectorAll('#center-workspace > [data-workspace-id], #center-workspace > [data-workspace-ids]')].filter(node=>!node.classList.contains('tab-content'));
+    assert.equal(panels.length,4,'overview, cards, digest and screener remain in their original DOM');
+    for(const node of panels) {
+      assert.equal(node.hidden,true,node.id+' must not flash in an unrelated workspace');
+      assert.ok(node.classList.contains('workspace-hidden'),node.id+' must override inline display styles too');
+    }
+  } finally {dom.window.close();}
+});
+
 test('all four markets keep dashboard and action summary out of specific workspaces', () => {
   for (const [market, current] of [['stocks','guru-holdings'],['stocks','insider'],['stocks','backtest'],['options','greeks'],['crypto','funding-rate'],['prediction','prediction-radar']]) {
     const dom = workspace(market, current);

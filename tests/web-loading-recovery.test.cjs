@@ -35,6 +35,74 @@ test('the existing auth status request can start while public assets download', 
   } finally { dom.window.close(); }
 });
 
+test('auth and the dependency-only loader do not wait for document parsing', () => {
+  const dom = new JSDOM(fs.readFileSync('dist/web/public/index.html', 'utf8'));
+  try {
+    for (const name of ['auth-client', 'workspace-loader']) {
+      const script = [...dom.window.document.scripts].find(node => node.src.includes('/' + name + '.'));
+      assert.ok(script, name);
+      assert.ok(script.hasAttribute('async'), name + ' must overlap parsing, not block on DOMContentLoaded');
+      const firstStyle = dom.window.document.querySelector('link[rel="stylesheet"]');
+      assert.ok(script.compareDocumentPosition(firstStyle) & dom.window.Node.DOCUMENT_POSITION_FOLLOWING,
+        name + ' must be discoverable before stylesheet-blocked inline scripts');
+    }
+    const core = [...dom.window.document.scripts].find(node => node.src.includes('/dashboard-startup-bootstrap.'));
+    assert.ok(core.hasAttribute('defer'), 'DOM-dependent core must still wait for parsing');
+  } finally { dom.window.close(); }
+});
+
+test('early loader prefetches the authenticated chart but cannot evaluate it before core readiness', async () => {
+  const dom = new JSDOM('', { url:'http://localhost/?market=stocks&workspace=stock-quotes&instrument=AAPL&timeframe=1d', runScripts:'outside-only' });
+  const w = dom.window, calls = [];
+  let finishAuth;
+  w.mm_authReady = new Promise(resolve => { finishAuth = resolve; });
+  w.fetch = async url => { calls.push(String(url)); return { ok:true, status:200, json:async()=>({ data:[] }) }; };
+  const loader = fs.readFileSync('src/web/public/modules/workspace-loader.js','utf8').replace('__WORKSPACE_MANIFEST__', JSON.stringify({ modules:{ charts:'/assets/charts.fixture.js' },workspaceContracts:{'stocks:stock-quotes':{modules:['charts']}} }));
+  try {
+    w.document.body.remove();
+    w.eval(loader);
+    assert.equal(calls.length,0,'auth remains mandatory');
+    finishAuth();
+    await new Promise(resolve => setTimeout(resolve,0));
+    assert.equal(calls.length,1);
+    assert.match(calls[0],/^\/api\/stock\/kline\?/);
+    assert.ok(w.document.querySelector('link[as="script"]'));
+    assert.equal(w.document.querySelector('script[data-workspace-group]'),null,'public preloading is not workspace execution');
+    w.mm_dashboardCoreReady=true;
+    w.dispatchEvent(new w.Event('mm-dashboard-core-ready'));
+    await new Promise(resolve => setTimeout(resolve,0));
+    assert.ok(w.document.querySelector('script[data-workspace-group="charts"]'));
+  } finally { w.close(); }
+});
+
+test('a slow or failed async dependency loader cannot start the dashboard core', async () => {
+  const root = 'dist/web/public';
+  const manifest = JSON.parse(fs.readFileSync(root+'/asset-manifest.json','utf8'));
+  const bootstrap = fs.readFileSync(root+Object.keys(manifest).find(p=>p.includes('/dashboard-startup-bootstrap.')),'utf8');
+  for (const state of ['slow','failed','late-error']) {
+    const dom = new JSDOM('<head><script data-workspace-loader></script></head><body><div id="network-status-banner" hidden></div></body>', {runScripts:'outside-only'});
+    const w=dom.window, loader=w.document.querySelector('script'), inserted=[];
+    w.mm_authReady=Promise.resolve();
+    const append=w.document.head.append.bind(w.document.head);
+    w.document.head.append=node=>{inserted.push(node);append(node);};
+    if(state==='failed')loader.dataset.loadState='failed';
+    try {
+      w.eval(bootstrap);
+      await new Promise(resolve=>setTimeout(resolve,0));
+      assert.equal(inserted.length,0,state+' must not execute the core without its loader');
+      if(state==='slow') {
+        w.MoneyWorkspaceModules={};loader.dispatchEvent(new w.Event('load'));
+        await new Promise(resolve=>setTimeout(resolve,0));
+        assert.equal(inserted.length,1);
+      } else {
+        if(state==='late-error')loader.dispatchEvent(new w.Event('error'));
+        await new Promise(resolve=>setTimeout(resolve,0));
+        assert.equal(w.document.getElementById('network-status-banner').hidden,false);
+      }
+    } finally { w.close(); }
+  }
+});
+
 test('a late index refresh cannot select a stock after the workspace or selection changed', async () => {
   for (const change of ["activeWorkspaceId='events';currentInstrumentId=null", "currentInstrumentId='SNDK'", ""]) {
     const dom = new JSDOM(source, { url: 'http://localhost/', runScripts: 'outside-only' });
@@ -749,7 +817,7 @@ test('hashed dashboard entry scripts defer and feature bundles stay behind the l
   const assetScripts = [...html.matchAll(/<script\b([^>]*)>/gi)].filter(match => /\bsrc\s*=\s*["']\/assets\/[^"']+\.js["']/i.test(match[1]));
   assert.ok(assetScripts.length >= 3 && assetScripts.length <= 4,
     'initial HTML should load only auth, the workspace loader, and the small dashboard bootstrap');
-  assert.ok(assetScripts.every(match => /\bdefer\b|\btype\s*=\s*["']module["']/i.test(match[1])), 'hashed scripts should download in parallel and execute after parsing');
+  assert.ok(assetScripts.every(match => /\bdefer\b|\basync\b|\btype\s*=\s*["']module["']/i.test(match[1])), 'hashed scripts must not block HTML parsing');
   for (const group of ['workspace-charts.', 'workspace-research.', 'workspace-comparison.', 'workspace-contracts.']) {
     assert.ok(Object.keys(manifest).some(resource => resource.includes(group)), `${group} should exist as a separately cached on-demand bundle`);
     assert.doesNotMatch(html, new RegExp(`src=["']\\/assets\\/${group.replace('.', '\\.')}`),

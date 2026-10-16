@@ -6,6 +6,7 @@
   <link rel="apple-touch-icon" href="/icon.svg">
   <link rel="manifest" href="/manifest.json">
   <meta name="theme-color" content="#7c3aed">
+<script async type="module" src="/modules/auth-client.js"></script>
   <link rel="stylesheet" href="/modules/dashboard-base.css">
 <link rel="stylesheet" href="/experience-enhancements.css?v=20261001">
 <script src="/chart-strategies.js"></script>
@@ -32,7 +33,6 @@
     }
   };
 </script>
-<script type="module" src="/modules/auth-client.js"></script>
 </head>
 <body>
   <div id="network-status-banner" role="status" hidden style="position:fixed;z-index:100000;left:50%;top:8px;transform:translateX(-50%);padding:7px 14px;border-radius:999px;background:#7f1d1d;color:white;font-size:12px;box-shadow:0 8px 24px rgba(0,0,0,.3);">当前离线：仅显示已缓存的公开快照</div>
@@ -123,7 +123,7 @@
       <button id="workspace-drawer-open" class="workspace-drawer-open" type="button" onclick="openWorkspaceDrawer()">☰ 功能区</button>
       <div id="mm-toast-container"></div>
       <!-- Market Overview Bar -->
-      <div id="market-overview" data-workspace-id="overview" data-market-scopes="overview stocks options crypto prediction watchlist" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:16px;padding:12px 14px;background:var(--bg-card);border-radius:12px;border:1px solid var(--border);overflow-x:auto;">
+      <div id="market-overview" hidden class="workspace-hidden" data-workspace-id="overview" data-market-scopes="overview stocks options crypto prediction watchlist" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:16px;padding:12px 14px;background:var(--bg-card);border-radius:12px;border:1px solid var(--border);overflow-x:auto;">
         <span id="market-overview-heading" style="flex:0 0 auto;font-size:11px;font-weight:800;color:var(--purple);white-space:nowrap;">总体大盘</span>
         <div id="market-overview-items" style="display:flex;gap:8px;flex:1;flex-wrap:wrap;min-width:0;">
           <span class="skl" style="min-width:100px;height:36px;"></span>
@@ -133,13 +133,13 @@
         </div>
         <span id="market-overview-status" style="flex:0 0 auto;color:var(--text-secondary);font-size:10px;white-space:nowrap;">数据更新时间：-</span>
       </div>
-      <div id="workspace-dashboard-cards" class="workspace-dashboard-cards" data-workspace-id="overview" data-market-scopes="overview stocks options crypto prediction watchlist" aria-label="当前市场看板层级"></div>
-      <section id="market-change-digest" class="market-change-digest" data-workspace-ids="overview watchlist" aria-label="自选变化摘要" aria-live="polite">
+      <div id="workspace-dashboard-cards" hidden class="workspace-dashboard-cards workspace-hidden" data-workspace-id="overview" data-market-scopes="overview stocks options crypto prediction watchlist" aria-label="当前市场看板层级"></div>
+      <section id="market-change-digest" hidden class="market-change-digest workspace-hidden" data-workspace-ids="overview watchlist" aria-label="自选变化摘要" aria-live="polite">
         <div class="market-change-digest-head"><strong>🧭 自选变化摘要</strong><button type="button" class="tab" onclick="loadMarketChangeDigest(true)">刷新</button></div>
         <div id="market-change-digest-status" class="workspace-dashboard-card-reason">正在读取最近的行情、新闻、13F、信号和来源变化...</div>
         <div id="market-change-digest-list" class="market-change-digest-list"></div>
       </section>
-      <section id="market-research-tools" data-market-scopes="stocks options crypto prediction" data-workspace-ids="screener" style="display:grid;grid-template-columns:minmax(300px,1.2fr) minmax(260px,1fr);gap:12px;margin-bottom:16px;">
+      <section id="market-research-tools" hidden class="workspace-hidden" data-market-scopes="stocks options crypto prediction" data-workspace-ids="screener" style="display:grid;grid-template-columns:minmax(300px,1.2fr) minmax(260px,1fr);gap:12px;margin-bottom:16px;">
         <div id="market-screener" class="glass-card" style="padding:14px;border-radius:14px;">
           <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px;"><strong>🔎 当前市场筛选</strong><button class="tab" type="button" onclick="loadMarketResearch()">刷新</button></div>
           <div id="market-screener-fields" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;"><span class="empty-tip">选择市场后加载筛选字段</span></div>

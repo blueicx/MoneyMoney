@@ -185,7 +185,16 @@ const dashboardBootstrapReady = dashboardBootstrapParallel
     "await Promise.all(sources.slice(1).map(src=>loadScript(src,true)));\n    window.dispatchEvent(new CustomEvent('mm-dashboard-runtime-loaded'));",
     "const optionalPattern=/dashboard-startup-(?:experience-enhancements|practical-experience)\\./;const immediate=sources.slice(1).filter(src=>!optionalPattern.test(src));const deferred=sources.slice(1).filter(src=>optionalPattern.test(src));if(immediate.length)await Promise.all(immediate.map(src=>loadScript(src,true)));window.dispatchEvent(new CustomEvent('mm-dashboard-runtime-loaded'));const loadDeferred=()=>Promise.all(deferred.map(src=>loadScript(src,true))).catch(()=>showFailure());if(deferred.length){if(typeof requestIdleCallback==='function')requestIdleCallback(()=>{void loadDeferred();},{timeout:1200});else setTimeout(()=>{void loadDeferred();},0);}",
   );
-const dashboardBootstrapUrl = emit('dashboard-startup-bootstrap', dashboardBootstrapReady, 'js');
+const dashboardBootstrapSafe = dashboardBootstrapReady.replace('const sources=', `const loader=document.querySelector('script[data-workspace-loader]');
+    if(loader&&!window.MoneyWorkspaceModules)await new Promise((resolve,reject)=>{
+      const failed=()=>{cleanup();reject(new Error('工作区加载器下载失败'));};
+      const loaded=()=>{if(!window.MoneyWorkspaceModules)return failed();cleanup();resolve();};
+      const cleanup=()=>{loader.removeEventListener('load',loaded);loader.removeEventListener('error',failed);};
+      if(loader.dataset.loadState==='failed')return failed();
+      loader.addEventListener('load',loaded,{once:true});loader.addEventListener('error',failed,{once:true});
+    });
+    const sources=`);
+const dashboardBootstrapUrl = emit('dashboard-startup-bootstrap', dashboardBootstrapSafe, 'js');
 html = html.replace(dashboardStartupPlaceholder, `<script defer src="${dashboardBootstrapUrl}"></script>`);
 if (html.includes(dashboardStartupPlaceholder)) throw new Error('Dashboard startup bootstrap placeholder was not replaced');
 const moduleUrls = Object.fromEntries(Object.entries(modules).map(([group, code]) => [group, emit(`workspace-${group}`, code.join('\n'), 'js')]));
@@ -208,7 +217,9 @@ const workspaceContracts = require('../dist/features/market-workspace').workspac
 for(const contract of Object.values(workspaceContracts))for(const group of contract.modules)if(!moduleUrls[group])throw new Error(`Unknown workspace module ${group}`);
 const loaderManifest = { modules: moduleUrls, styles: styleUrls, workspaceContracts };
 const loader = fs.readFileSync(path.join(source, 'modules', 'workspace-loader.js'), 'utf8').replace('__WORKSPACE_MANIFEST__', JSON.stringify(loaderManifest));
-html = html.replace('</head>', `<script defer src="${emit('workspace-loader', loader, 'js')}"></script>\n</head>`);
+// This loader only starts authenticated reads/preloads. Its existing core gate
+// still prevents DOM-dependent workspace code from evaluating before startup.
+html = html.replace(/<link\b[^>]*rel="stylesheet"/, tag => `<script async data-workspace-loader onerror="this.dataset.loadState='failed'" src="${emit('workspace-loader', loader, 'js')}"></script>\n${tag}`);
 html = html.replace(/<script\b([^>]*)>/gi, (tag, attributes) => {
   if (!/\bsrc\s*=/.test(attributes) || /\b(?:async|defer)\b/i.test(attributes) || /\btype\s*=\s*["']module["']/i.test(attributes)) return tag;
   return `<script${attributes} defer>`;
