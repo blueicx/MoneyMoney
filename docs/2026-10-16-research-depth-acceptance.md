@@ -49,3 +49,23 @@ Chrome无头浏览器；CPU 4倍降速、网络延迟80ms/下载750Kbps；1440×
 | 手机视口/热 | 446ms | 790ms | 0B |
 
 四组均满足预先定义的绝对预算。实时图表冒烟：倒计时读数DOM变更0、倒计时绘图0、隐藏页绘图0；指针测试2次绘图。没有同环境旧版配对基线，`improvementPct=null`，不关闭历史20%提升目标。
+
+## 发布与正式域名验收
+
+- 运行代码提交：`e0f8c9bb2a3a1799a0a98081b2a4165b3648b57c`；已推送 `origin/codex/research-closure-all`。
+- 最终全量：307个隔离测试文件、1537项通过、0失败、0跳过。构建及Web、认证、四市场浏览器、实时K线、合约、行动中心、专业研究、自动对照、日常体验、工作区体验、加载基准全部通过；安全扫描814个受跟踪文件通过，差异检查通过。
+- JSON证据包通过Chromium真实下载，并使用Node SHA256重新核验导出K线与记录Hash一致。
+- 已按产物备份/切换流程部署，仅操作`moneymoney.service`。正式域名`https://bluetrade.bbroot.com`版本与运行代码提交一致，服务active，健康检查通过。部署启动等待期间出现两次连接未就绪，随后健康成功；不是持续性连接失败。
+- 正式域名四市场及非热门股票SNDK只读canary通过。额外使用访客会话对真实AAPL行情运行参数研究，样本外与Hash可见，当前策略设置不变；组合和跑单私有接口均403，禁止写入请求计数0。
+- 正式域名28个静态资源逐个解压后SHA256与本地manifest一致；远端server、index和manifest Hash一致。
+
+| 产物 | SHA256 |
+|---|---|
+| 发布归档 | `8924eb159bd7caa45fcb3cc3dccba6cee9291f3422e4d1c89f208252dde6c237` |
+| server.js | `0bc6d1ffb6cdad2ae0d1cf4946e4af89acb187102be6cf31a25b4d5541b68a1c` |
+| index.html | `280f59eb42d33539d14a470e8f2344749fd0536d3c6b3d6e79c8689f54c396a2` |
+| asset-manifest.json | `937474aa4587f0675dfe40e580709439da03450c8b317653c7ce1b48adedc054` |
+
+备份：`/opt/moneymoney/backups/dist-pre-e0f8c9b-20261016-research-depth`；兼容回滚：`/opt/moneymoney/dist.rollback-e0f8c9b-20261016-research-depth`，保留此前运行的`0a59936`产物。没有执行线上恢复演练或业务数据库回滚。
+
+保留用户数据库、数据湖和现有模拟跑单配置；未跟踪`data/research.db`未纳入提交，验收前后SHA256仍为`27fd475e523568daa4cdcabf3146917023335a62affe00429babd721b3b79fd1`。没有生产模型调用、测试通知或测试订单。此后的文档提交只记录验收，不代表另一次运行版本部署。
