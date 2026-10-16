@@ -64,4 +64,18 @@ npm run smoke:live-kline
 
 上述为本轮独立测量，未在本轮重复旧版同环境反转对照，因此不沿用此前百分比宣称本轮额外提速，也不把 Provider 等待当作纯前端耗时。新增库随当前 charts 包加载，不产生独立首屏脚本请求。
 
-全程单 agent 自检，无独立审查者；没有新增依赖、收费来源或真实执行器，没有修改服务端业务、AI 跑单或 Telegram 扫描配置。用户 `data/research.db` 不纳入提交，SHA256 保持 `27fd475e523568daa4cdcabf3146917023335a62affe00429babd721b3b79fd1`。生产发布与只读核验结果在完成后追加。
+全程单 agent 自检，无独立审查者；没有新增依赖、收费来源或真实执行器，没有修改服务端业务、AI 跑单或 Telegram 扫描配置。用户 `data/research.db` 不纳入提交，SHA256 保持 `27fd475e523568daa4cdcabf3146917023335a62affe00429babd721b3b79fd1`。
+
+## 生产发布与只读核验
+
+代码提交 `0a59936b626be2eb1ca0e5143b16ab42b4a0741a` 已推送 GitHub；正式域名 `https://bluetrade.bbroot.com` 返回相同版本，构建时间 `2026-10-16T13:58:18.136Z`。发布标签为 `0a59936-20261016-strategies`，仅重启 `moneymoney.service`。重启初期两次健康连接尚未就绪，随后健康检查成功；发布后再次检查服务为 active。
+
+| 产物 | SHA256 |
+|---|---|
+| 发布归档 | `c7e4c600aabc491eac4d94bb96e789393f9152545886749791b7e7f4cb3d042d` |
+| 生产 index.html | `77675617ae9b58d594ae576ec25cf16f303dd2cd4dd045226c3e7c1acf936ba5` |
+| 生产 asset-manifest.json | `ec54c555529717309b76b3b68755828627547ad6da8f51c5a7d6c8e573c422ca` |
+
+公网资源清单与本地一致；核心、charts、主题 CSS 和 loader 四份资源通过 Brotli 返回，解压后 Hash 均与清单一致。远端备份 `/opt/moneymoney/backups/dist-pre-0a59936-20261016-strategies` 和回滚目录 `/opt/moneymoney/dist.rollback-0a59936-20261016-strategies` 保留；旧首页 Hash `1d4d002c6ffc36009ed53301f71e216487bf9253989ae58105741b76abe1a4a6` 已复核。
+
+`npm run smoke:production` 正式域名只读巡检通过股票、期权、虚拟币、预测市场及 SNDK，日志 `mm-strategies-production.log`。额外以全新访客 Chromium 核验股票图表 10 组控件默认关闭、浏览器本地开关可操作、三个主题颜色切换、390px 手机布局及私有 AI 跑单接口拒绝访问，输出 `PRODUCTION_STRATEGY_UI_PASS`。未向生产提交订单、调用模型或发送测试通知；没有改动数据库、数据湖或 AI 运行配置。
