@@ -534,6 +534,46 @@ async function main() {
     const bounds=await lookback.boundingBox();assert.ok(bounds.height>=36&&bounds.x>=0&&bounds.x+bounds.width<=390,'mobile strategy parameters remain touchable and within viewport');
     await donchian.uncheck();await libraryHost.locator('..').locator(':scope > summary').click();
     await page.setViewportSize({width:1440,height:900});
+    const researchPanel=page.locator('#stock-chart-research [data-chart-research]');
+    await researchPanel.locator(':scope > summary').click();
+    const savedResearchSettings=await page.evaluate(()=>JSON.stringify(stockChartOverlayConfig));
+    // The existing provider fixture deliberately has fewer than 60 bars: verify its real empty reason first.
+    await researchPanel.locator('[data-research-lab]').click();
+    await page.waitForFunction(()=>/至少需要60根|配置 SHA256/.test(document.querySelector('#stock-chart-research [data-research-output]')?.textContent||''));
+    await page.evaluate(()=>{
+      const bars=Array.from({length:250},(_,i)=>{const close=100+i*.03+Math.sin(i/8)*4;return {time:Date.UTC(2025,0,1)+i*86400000,open:close,close,high:close+1,low:close-1,volume:100,closed:true};});
+      // Explicit isolated UI fixture, not a live provider, portfolio result or production order.
+      MoneyChartResearchControls.render({host:document.getElementById('stock-chart-research'),key:'browser-parameter-research-fixture',
+        getInput:()=>({market:'stocks',instrument:'stock:us:AAPL',timeframe:'1d',bars,points:[],source:'Browser research acceptance fixture, not live'}),
+        isCurrent:()=>activeMarketScope==='stocks'&&activeWorkspaceId==='stock-quotes'});
+    });
+    await researchPanel.locator('[data-research-lab]').click();
+    try{await page.waitForFunction(()=>/配置 SHA256/.test(document.querySelector('#stock-chart-research [data-research-output]')?.textContent||''),null,{timeout:15000});}
+    catch(error){console.error('Research lab diagnostic:',await researchPanel.innerText());throw error;}
+    assert.equal(await page.evaluate(()=>JSON.stringify(stockChartOverlayConfig)),savedResearchSettings,'parameter lab must not mutate active chart strategies');
+    assert.match(await researchPanel.innerText(),/out-of-sample/);
+    const [researchDownload]=await Promise.all([page.waitForEvent('download'),researchPanel.getByRole('button',{name:'导出本次研究证据 JSON（含当前标的历史数据）'}).click()]);
+    const exported=JSON.parse(fs.readFileSync(await researchDownload.path(),'utf8'));
+    assert.equal(exported.evidencePack.bars.length,250);
+    assert.equal(require('node:crypto').createHash('sha256').update(JSON.stringify(exported.evidencePack.bars)).digest('hex'),exported.dataHash,'exported bars reproduce the recorded hash');
+    assert.equal(exported.modelCalls,0);assert.equal(exported.orderChanges,0);
+    await researchPanel.locator('[data-research-quality]').click();
+    assert.match(await researchPanel.innerText(),/质量矩阵/);
+    await researchPanel.locator('[data-research-agreement]').click();
+    assert.match(await researchPanel.innerText(),/不生成综合概率/);
+    await researchPanel.locator('[data-research-timeframes]').click();
+    assert.match(await researchPanel.innerText(),/不额外请求行情/);
+    for(const theme of ['light','dark','money']){
+      await page.evaluate(theme=>document.documentElement.dataset.theme=theme,theme);
+      await page.setViewportSize({width:390,height:844});
+      const run=researchPanel.locator('[data-research-lab]');await run.scrollIntoViewIfNeeded();await run.focus();
+      assert.equal(await run.evaluate(e=>document.activeElement===e),true,'research action is keyboard reachable');
+      const bounds=await run.boundingBox();assert.ok(bounds.height>=44&&bounds.x>=0&&bounds.x+bounds.width<=390,'research controls fit mobile theme');
+      await page.screenshot({path:path.join(isolatedDataDir,'chart-research-'+theme+'-mobile.png')});
+    }
+    await page.setViewportSize({width:1440,height:900});
+    await researchPanel.locator(':scope > summary').click();
+    await page.evaluate(()=>redrawStockKlineSelection());
     await page.evaluate(() => openWorkspace('decision-intelligence'));
     await page.waitForFunction(() => window.MoneyMoneyHistoryChart && window.MoneyMoneyWorkflow, null, { timeout: 10_000 });
     assert.ok(lazyAssetRequests.some(url => /workspace-research/.test(url)), 'opening research should load its bundle on demand');

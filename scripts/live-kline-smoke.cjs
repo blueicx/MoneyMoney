@@ -37,6 +37,10 @@ async function main() {
     assert.equal(await page.evaluate(() => !!window.MoneyLiveKline), false, 'the live chart transport should remain unloaded before entering a chart workspace');
     const delayedIndexResponse = page.waitForResponse(response => new URL(response.url()).pathname === '/api/stock/indices');
     await page.evaluate(async () => { setMarketScope('stocks'); setWorkspaceInstrument('stock:us:AAPL'); openWorkspace('stock-quotes'); await loadStockKline('usAAPL', 'Apple', ''); });
+    // The quote workspace no longer guarantees an index panel/request. Explicitly
+    // exercise legacy late-card completion in an isolated hidden host instead of
+    // relying on unrelated overview initialization timing.
+    await page.evaluate(()=>{if(!document.getElementById('stock-indices')){const host=document.createElement('div');host.id='stock-indices';host.hidden=true;host.dataset.smokeFixture='late-index';document.body.append(host);}void loadStockQuotes({refreshChart:false});});
     await delayedIndexResponse;
     await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 0)));
     assert.equal(requests, 1, 'late index-card completion must not reload an already-open instrument K-line');

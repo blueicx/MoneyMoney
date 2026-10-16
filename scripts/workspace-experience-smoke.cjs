@@ -177,7 +177,7 @@ async function main() {
     await page.locator('#mm-stock-multi-chart').waitFor({ state: 'visible' });
     await page.waitForFunction(() => [...document.querySelectorAll('#mm-stock-multi-chart [data-mm-multi-status]')].every(node => node.textContent.includes('根 · historical')), null, { timeout: 12_000 });
     for (const period of ['5m', '15m', '1h', '1d']) assert.ok(klinePeriods.includes(period), `multi-period chart should request ${period}`);
-    await page.locator('#mm-stock-multi-chart [data-mm-multi-period="1d"] canvas').click({ position: { x: 80, y: 100 } });
+    await page.locator('#mm-stock-multi-chart [data-mm-multi-period="1d"] canvas.mm-trading-crosshair').click({ position: { x: 80, y: 100 } });
     await page.waitForFunction(() => document.querySelector('[data-chart-candle-date]')?.value === '2026-09-22', null, { timeout: 10_000 });
 
     await page.evaluate(() => showTab('alerts'));

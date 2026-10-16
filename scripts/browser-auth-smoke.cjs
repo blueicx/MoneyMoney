@@ -158,6 +158,7 @@ async function main() {
       await page.setViewportSize({width,height:900});await page.evaluate(theme=>document.documentElement.setAttribute('data-theme',theme),theme);
       await qualityPanel.scrollIntoViewIfNeeded();const text=await qualityPanel.innerText();
       assert.match(text,/未下单原因汇总/);assert.match(text,/模型调用失败/);assert.match(text,/离散扫描不证明故障持续时间/);
+      assert.ok(await qualityPanel.locator('[data-ai-decision-funnel]').isVisible(),'recorded decision funnel is visible');
       assert.match(text,/不会自动新增调用/);assert.ok(await qualityPanel.locator('[data-ai-round-replay]').isVisible());
       await qualityPanel.locator('[data-ai-round-replay]').focus();assert.equal(await qualityPanel.locator('[data-ai-round-replay]').evaluate(el=>document.activeElement===el),true);
       await page.screenshot({path:path.join(isolatedDataDir,`inaction-${theme}-${width}.png`)});

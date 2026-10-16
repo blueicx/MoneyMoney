@@ -62,7 +62,7 @@ const asyncWorkspaceGroups = [
   ['ops', /^(?:loadSourceSloPanel|loadOpsConsole|loadSourceHealth|loadMacroIndicators|loadNews|loadMacroCalendar|loadTelegramTestDeliveryHistory|loadTelegramResultCoverage|loadTelegramSettingsForm|testTelegramSettings|saveTelegramSettings|loadTreasuryYields|loadMarketSentiment|runGlobalSearchNow|loadAlertDeliveryFeedback)$/],
 ];
 const syncWorkspaceGroups = [
-  ['charts', /^(?:renderAdvancedChartStrategyControls|setChartStrategyParameters)$/],
+  ['charts', /^(?:renderAdvancedChartStrategyControls|setChartStrategyParameters|renderChartResearchTools)$/],
   ['overview', /^(?:renderWorkspaceDashboardCards|renderMarketChangeDigest)$/],
   ['stocks', /^(?:stockResearchFreshnessMarkup|workspaceTrendSvg)$/],
   ['ops', /^renderUiPreferencesForm$/],
@@ -111,7 +111,7 @@ function splitWorkspaces(code) {
 
 let html = fs.readFileSync(path.join(source, 'index.html'), 'utf8');
 html = expandDashboardRuntime(html, source);
-const lazyScripts = /<script\b[^>]*src="\/(?:chart-strategies|chart-strategy-controls|chart-analysis|live-kline|trading-chart|interactive-history|guru-replay|workflow-polish|action-research-workspace|professional-research|automatic-comparison|contracts-workspace)\.js[^"\s]*"[^>]*><\/script>/g;
+const lazyScripts = /<script\b[^>]*src="\/(?:chart-strategies|chart-strategy-controls|chart-analysis|chart-research|chart-research-controls|live-kline|trading-chart|interactive-history|guru-replay|workflow-polish|action-research-workspace|professional-research|automatic-comparison|contracts-workspace)\.js[^"\s]*"[^>]*><\/script>/g;
 html = html.replace(lazyScripts, '');
 let number = 0;
 const dashboardStartupParts = [];
@@ -158,6 +158,8 @@ modules.charts.push(
   fs.readFileSync(path.join(source, 'chart-strategies.js'), 'utf8'),
   fs.readFileSync(path.join(source, 'chart-strategy-controls.js'), 'utf8'),
   fs.readFileSync(path.join(source, 'chart-analysis.js'), 'utf8'),
+  fs.readFileSync(path.join(source, 'chart-research.js'), 'utf8'),
+  fs.readFileSync(path.join(source, 'chart-research-controls.js'), 'utf8'),
   fs.readFileSync(path.join(source, 'live-kline.js'), 'utf8'),
   fs.readFileSync(path.join(source, 'trading-chart.js'), 'utf8'),
 );

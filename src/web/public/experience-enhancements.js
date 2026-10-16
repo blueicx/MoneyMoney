@@ -798,6 +798,10 @@
 
   window.MoneyMoneyExperience = window.MoneyMoneyExperience || {};
   window.MoneyMoneyExperience.installMultiChartToggle = installMultiChartToggle;
+  // Charts can be mounted after this enhancement bundle has initialized.
+  // Run after all synchronous module-ready/context listeners finish mounting DOM.
+  window.addEventListener('mm-workspace-modules-ready',event=>{if(event.detail?.group==='charts')queueMicrotask(installMultiChartToggle);});
+  window.addEventListener('mm-workspace-context',()=>queueMicrotask(installMultiChartToggle));
   window.MoneyMoneyExperience.loadMultiChart = loadMultiChart;
   window.MoneyMoneyExperience.installWatchlistToolbar = installWatchlistToolbar;
   window.MoneyMoneyExperience.showUndo = showUndo;

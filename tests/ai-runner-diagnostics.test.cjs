@@ -1,4 +1,17 @@
 const test=require('node:test'),assert=require('node:assert/strict');require('ts-node/register/transpile-only');
+test('decision funnel never infers passed gates or fills from an order id and excludes duplicates and future rounds',()=>{
+ const {reviewAiRunnerDecisions}=require('../src/features/ai-runner-diagnostics');
+ const row={id:'a',runnerId:'r',market:'stocks',instrument:'AAPL',at:'2026-10-01T00:00:00Z',dataStatus:'delayed',source:'saved',signals:[{direction:'buy'}],riskChecks:[{name:'quote-freshness',passed:true},{name:'executable-quote',passed:true},{name:'budget',passed:true}],action:'BUY',orderId:'o',modelVersion:'fixed-v1',reason:'recorded'};
+ const result=reviewAiRunnerDecisions([row,row,{...row,id:'b',orderId:'unverified',riskChecks:[]},{...row,id:'future',at:'2027-01-01T00:00:00Z'}],'r','stocks',[{entryOrderId:'o',instrument:{venue:'Stocks',symbolOrMarketId:'AAPL'},entryTime:row.at,status:'OPEN'}],'2026-10-16T00:00:00Z');
+ assert.equal(result.funnel.evaluatedRounds,2);assert.equal(result.funnel.dataPassed,1);assert.equal(result.funnel.dataUnknown,1);assert.equal(result.funnel.signalRounds,2);assert.equal(result.funnel.submittedOrders,2);assert.equal(result.funnel.verifiedFilledOrders,1);assert.equal(result.funnel.unverifiedSubmittedOrders,1);assert.equal(result.funnel.scannedUniverseSize,null);assert.equal(result.modelCalls,0);
+});
+test('funnel excludes future, missing-time and cross-instrument fills',()=>{
+ const {reviewAiRunnerDecisions}=require('../src/features/ai-runner-diagnostics');
+ const row={id:'a',runnerId:'r',market:'stocks',instrument:'AAPL',at:'2026-10-01T00:00:00Z',dataStatus:'delayed',signals:[],riskChecks:[],action:'BUY',orderId:'o',reason:'recorded'};
+ for(const position of [{instrumentId:'AAPL',entryTime:'2027-01-01T00:00:00Z'},{instrumentId:'AAPL'},{instrumentId:'MU',entryTime:row.at}]){
+  assert.equal(reviewAiRunnerDecisions([row],'r','stocks',[{...position,entryOrderId:'o',status:'OPEN'}],'2026-10-16T00:00:00Z').funnel.verifiedFilledOrders,0);
+ }
+});
 test('legacy diagnostic scope uses explicit runner venue, never defaults unknown or options to stocks',()=>{
  const {diagnosticRunnerMarket}=require('../src/features/ai-runner-diagnostics');
  assert.equal(diagnosticRunnerMarket({venue:'Options'}),'options');assert.equal(diagnosticRunnerMarket({venue:'Binance'}),'crypto');

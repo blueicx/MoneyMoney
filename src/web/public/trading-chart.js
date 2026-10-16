@@ -76,6 +76,13 @@
   }
   function validCursorContext(context){return context&&({stocks:/^stock:(?:us|cn):[A-Z0-9.-]+$/,crypto:/^crypto:[a-z0-9-]+:[A-Z0-9_-]+$/}[context.market]?.test(context.group));}
   function getCursor(canvas){const m=mounts.get(canvas);return {time:m?.hover!=null?m.info?.rows[m.hover]?.time??null:null,sharedTime:m?.sharedTime??null};}
+  function temporalEvidenceRows(rows){return (rows||[]).map((row,index)=>{
+    const explicit=typeof row.closedAt==='number'&&Number.isFinite(row.closedAt)&&row.closedAt>=row.time?row.closedAt:null;
+    const next=typeof rows[index+1]?.time==='number'&&rows[index+1].time>row.time?rows[index+1].time:null;
+    const closeTime=explicit??next;
+    return {time:row.time,value:row.close,closeTime,closed:closeTime!==null&&row.closed!==false};
+  });}
+  function getTemporalSeries(canvas){const i=mounts.get(canvas)?.info,context=i?.syncContext;if(!i||!validCursorContext(context))return null;return {market:context.market,instrument:context.group,timeframe:i.interval,source:i.source||'图表来源未声明',points:temporalEvidenceRows(i.full)};}
   function pickCandle(canvas,clientX){const m=mounts.get(canvas),g=m?.info?.geometry,r=canvas.getBoundingClientRect();if(!g||!r.width)return null;const x=(clientX-r.left)*g.W/r.width;if(x<g.padL||x>=g.W-g.padR)return null;return m.info.rows[Math.floor((x-g.padL)/(g.W-g.padL-g.padR)*m.info.rows.length)]||null;}
   function publishCursor(m){
     if(!m.localCursor)return;m.localCursor=false;const context=m.info?.syncContext;if(!validCursorContext(context))return;
@@ -319,7 +326,7 @@
   }
   window.MoneyTradingChart={createView,windowFor,pan,latest,zoom,countdown,select,decorate,clear,render,statusFor,restoreView,scheduleFrame,scalePrice,resetPrice,priceRange,pivotLevels,supportResistanceLineLayout,drawSupportResistance,paperMarkersFor,mergeHistory,measureRange,verifyPaperEvidenceEnvelope,verifyPaperExecutionEvidenceEnvelope,formatPaperExecutionEvidence};
   window.MoneyTradingChart.priceAlertDraft=priceAlertDraft;
-  Object.assign(window.MoneyTradingChart,{cursorIndexAtTime,getCursor,pickCandle});
+  Object.assign(window.MoneyTradingChart,{cursorIndexAtTime,getCursor,pickCandle,temporalEvidenceRows,getTemporalSeries});
   window.MoneyTradingChart.redraw=canvas=>mounts.get(canvas)?.info?.redraw();
   function whenDomReady(callback) {
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', callback, { once: true });

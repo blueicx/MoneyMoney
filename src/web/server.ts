@@ -28,6 +28,7 @@ import { createResearchRobustnessRouter } from './research-robustness-routes';
 import { WatchlistMetadataStore } from '../features/watchlist-metadata';
 import { handleWatchlistMetadataCommand } from '../features/watchlist-metadata-telegram';
 import { reviewAiRunnerDecisions, diagnosticRunnerMarket } from '../features/ai-runner-diagnostics';
+import { previewPortfolioRiskBudget } from '../features/portfolio-risk-budget';
 import { ResearchCommittee } from '../features/research-committee';
 import { createResearchCommitteeRouter } from './research-committee-routes';
 import { LiveKlineHub, liveKlineScope } from '../features/live-kline-stream';
@@ -1925,9 +1926,10 @@ app.get('/api/portfolio/analytics', async (req, res) => {
     };
     if (!history) tailRisk.reason = '请读取本地历史与风险序列；用户导入的收益数组不冒充已核验日线';
     data.tailRisk = tailRisk;
+    const riskBudgetPreview=previewPortfolioRiskBudget(rows,req.query.riskCapPct==null?20:Number(req.query.riskCapPct),tailRisk);
     const cashFlows=rows.flatMap(row=>(row.cashFlows || []).map(flow=>({...flow,instrument:row.instrument,accountId:row.accountId || null})));
     const costCoverage=rows.map(row=>({instrument:row.instrument,currency:row.currency,averageCost:row.averageCost ?? null,unrealizedPnl:row.averageCost == null ? null : (row.price-row.averageCost)*row.quantity,reason:row.averageCost == null ? '旧记录未关联成本，未推算盈亏':null}));
-    res.json(decisionEnvelope({ market, data: { ...data, positions: rows, accounts: { imported, paper }, accountSource: selection,history,cashFlows,costCoverage,historyReason:history ? '历史曲线用于当前持仓的风险研究；缺少完整历史仓位、现金流或汇率时，不作为实际账户收益。' : '可读取本地历史装配风险序列' }, dataStatus: rows.length ? data.currencyReason || history?.dataStatus === 'partial' || history?.dataStatus === 'unavailable' ? 'partial' : 'cached' : 'empty', source: selection === 'paper' ? '统一模拟账本' : selection === 'imported' ? '校验后的导入仓位' : '用户显式选择合并', reason: rows.length ? data.currencyReason || data.returnReason : '所选账户当前市场暂无仓位' }));
+    res.json(decisionEnvelope({ market, data: { ...data, positions: rows, accounts: { imported, paper }, accountSource: selection,history,cashFlows,costCoverage,riskBudgetPreview,historyReason:history ? '历史曲线用于当前持仓的风险研究；缺少完整历史仓位、现金流或汇率时，不作为实际账户收益。' : '可读取本地历史装配风险序列' }, dataStatus: rows.length ? data.currencyReason || history?.dataStatus === 'partial' || history?.dataStatus === 'unavailable' ? 'partial' : 'cached' : 'empty', source: selection === 'paper' ? '统一模拟账本' : selection === 'imported' ? '校验后的导入仓位' : '用户显式选择合并', reason: rows.length ? data.currencyReason || data.returnReason : '所选账户当前市场暂无仓位' }));
   } catch (error: any) {
     res.status(400).json({ success: false, error: error.message, dataStatus: 'unavailable', reason: error.message });
   }

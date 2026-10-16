@@ -2,6 +2,13 @@ const test=require('node:test'),assert=require('node:assert/strict'),fs=require(
 function load(){assert.ok(fs.existsSync('src/web/public/trading-chart.js'),'trading chart module must exist');const scope={window:{},document:{readyState:'loading',addEventListener(){}}};vm.runInNewContext(fs.readFileSync('src/web/public/trading-chart.js','utf8'),scope);return scope.window.MoneyTradingChart;}
 const rows=Array.from({length:100},(_,i)=>({time:i*300000,open:10,high:12,low:9,close:11,volume:5}));
 
+test('cross-period closed evidence requires an explicit close timestamp or a following candle',()=>{
+ const c=load();assert.equal(typeof c.temporalEvidenceRows,'function');
+ const result=c.temporalEvidenceRows([{time:100,close:10},{time:200,close:11},{time:300,close:12,closed:true}]);
+ assert.equal(result[0].closeTime,200);assert.equal(result[1].closeTime,300);assert.equal(result[2].closed,false);assert.equal(result[2].closeTime,null);
+ assert.equal(c.temporalEvidenceRows([{time:100,close:10,closedAt:160}])[0].closeTime,160);
+});
+
 test('shared chart cursor maps only into exact or known interval candles, never across a gap',()=>{
  const c=load();assert.equal(typeof c.cursorIndexAtTime,'function');assert.equal(c.cursorIndexAtTime(rows,300000,'5m'),1);assert.equal(c.cursorIndexAtTime(rows,450000,'5m'),1);assert.equal(c.cursorIndexAtTime([{time:0},{time:900000}],450000,'5m'),null);assert.equal(c.cursorIndexAtTime(rows,450000,'unknown'),null);assert.equal(c.cursorIndexAtTime(rows,NaN,'5m'),null);
 });

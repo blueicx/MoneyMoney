@@ -54,6 +54,23 @@ async function main(){
     await page.evaluate(()=>{setWorkspaceInstrument('stock:us:AAPL');openWorkspace('decision-intelligence');loadDecisionIntelligence();});
     const committee=page.locator('[data-committee]');await committee.waitFor({state:'visible'});
     await committee.locator('input[value="'+saved.id+'"]').waitFor();
+    const imported=await page.request.post(base+'/api/portfolio/import',{headers,data:{commit:true,rows:[{market:'stocks',instrument:'stock:us:AAPL',quantity:4,price:200,currency:'USD'},{market:'stocks',instrument:'stock:us:SPY',quantity:1,price:200,currency:'USD'}]}});
+    assert.ok(imported.ok(),'isolated portfolio fixture is validated');
+    await page.locator('#decision-portfolio-source').selectOption('imported');
+    await page.locator('[data-risk-budget] [data-risk-cap]').waitFor();
+    assert.match(await page.locator('[data-risk-budget]').innerText(),/600.00 USD/);
+    for(const theme of ['light','dark','money']){
+      await page.evaluate(theme=>document.documentElement.dataset.theme=theme,theme);
+      await page.setViewportSize({width:390,height:844});
+      await page.locator('[data-risk-cap]').fill('15');
+      await page.locator('[data-risk-preview]').click();
+      await page.waitForFunction(()=>document.querySelector('[data-risk-budget]')?.textContent.includes('700.00 USD'));
+      assert.ok(await page.locator('[data-risk-preview]').isVisible());
+      await page.screenshot({path:path.join(data,'risk-budget-'+theme+'-mobile.png')});
+    }
+    const budgetPreview=await page.request.get(base+'/api/portfolio/analytics?market=stocks&accountSource=imported&riskCapPct=15').then(r=>r.json());
+    assert.equal(budgetPreview.data.riskBudgetPreview.orderChanges,0);assert.equal(budgetPreview.data.riskBudgetPreview.executionEnabled,false);
+    await page.setViewportSize({width:1440,height:900});
     assert.equal(await committee.locator('input').count(),1,'ephemeral provider-health evidence is not offered');
     await committee.locator('input').check();page.once('dialog',dialog=>dialog.accept());
     await committee.locator('[data-committee-run]').click();

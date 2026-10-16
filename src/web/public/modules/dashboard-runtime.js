@@ -828,6 +828,12 @@ async function loadAiRunnerDiagnosticsUi(id) {
     if(controller.signal.aborted||market!==activeMarketScope)return;
     const data=payload.data,rows=data.rows||[];
     host.innerHTML='<h4>逐轮原因诊断 · 只读</h4><p>'+safeNewsText(payload.reason||'按已有记录解释，不推测旧订单或修改策略')+'</p><div class="mm-table-scroll"><table class="workspace-watchlist-table"><thead><tr><th>标的 / 策略 / 模型</th><th>轮次</th><th>模型失败</th><th>拒绝 / 来源失败</th></tr></thead><tbody>'+(data.groups||[]).map(group=>'<tr><td>'+safeNewsText(group.instrument)+'<small style="display:block">'+safeNewsText(group.strategyVersion)+' · '+safeNewsText(group.modelVersion)+'</small></td><td>'+group.rounds+'</td><td>'+group.failedModelCalls+' / '+group.knownModelCalls+(group.modelFailureRate==null?' · 未关联':' · '+(group.modelFailureRate*100).toFixed(1)+'%')+'</td><td>'+group.rejectedRounds+' / '+group.dataFailures+'</td></tr>').join('')+'</tbody></table></div>'+rows.slice(0,100).map(row=>'<details style="margin:8px 0;padding:8px;border:1px solid var(--border);border-radius:8px;"><summary>'+safeNewsText(row.at)+' · '+safeNewsText(row.instrument)+' · '+safeNewsText(row.action)+'</summary><p>'+safeNewsText(row.reason)+'</p><p>数据：'+safeNewsText(row.dataGate.dataStatus)+' · '+safeNewsText(row.dataGate.reason)+' · '+safeNewsText(row.dataGate.dataAt||'时间未关联')+'</p><p>模型：'+safeNewsText(row.model.status)+' · '+safeNewsText(row.model.reason)+'</p><p>阻止下单：'+safeNewsText(row.blockedChecks.join('；')||'未记录失败门控；不代表应当下单')+'</p><button type="button" class="tab" data-ai-round-replay="'+safeNewsText(row.decisionId)+'">回放归档证据（不调用模型）</button><pre data-ai-round-output style="white-space:pre-wrap;overflow-wrap:anywhere;max-height:360px;overflow:auto"></pre></details>').join('')+(rows.length>100?'<p>仅展开最近100轮；完整保留历史使用时间线分页查询。</p>':'');
+    if(data.funnel){
+      const funnel=document.createElement('section');funnel.className='mm-action-tools';funnel.dataset.aiDecisionFunnel='';
+      const f=data.funnel;
+      funnel.innerHTML='<h4>逐轮决策与执行漏斗（只读）</h4><p>'+safeNewsText(f.reason)+'</p><div class="mm-table-scroll"><table><thead><tr><th>已记录标的轮次</th><th>数据通过 / 失败 / 未知</th><th>有信号</th><th>门控通过 / 拒绝 / 未知</th><th>提交订单</th><th>已核验成交 / 未核验</th></tr></thead><tbody><tr><td>'+Number(f.evaluatedRounds)+'</td><td>'+[f.dataPassed,f.dataFailed,f.dataUnknown].map(Number).join(' / ')+'</td><td>'+Number(f.signalRounds)+'</td><td>'+[f.riskPassed,f.riskBlocked,f.riskUnknown].map(Number).join(' / ')+'</td><td>'+Number(f.submittedOrders)+'</td><td>'+[f.verifiedFilledOrders,f.unverifiedSubmittedOrders].map(Number).join(' / ')+'</td></tr></tbody></table></div>';
+      host.prepend(funnel);
+    }
     const inaction=document.createElement('section');inaction.className='mm-action-tools';
     inaction.innerHTML='<h4>未下单原因汇总</h4><p>'+safeNewsText(data.inaction?.durationReason||'无结构化统计')+' · 未动作 '+Number(data.inaction?.total||0)+' 轮 · 排除 '+Number(data.excludedRecords||0)+' 条无效/重复/其他上下文记录</p><div class="mm-table-scroll"><table class="workspace-watchlist-table"><thead><tr><th>记录原因</th><th>轮次</th><th>首次 / 最近</th><th>下一步</th></tr></thead><tbody>'+(data.inaction?.categories||[]).map(row=>'<tr><td>'+safeNewsText(row.label)+'</td><td>'+Number(row.count)+'</td><td>'+safeNewsText(row.firstAt)+'<br>'+safeNewsText(row.lastAt)+'</td><td>'+safeNewsText(row.nextAction)+'</td></tr>').join('')+'</tbody></table></div>';host.prepend(inaction);
     const maturity=document.createElement('section');maturity.className='mm-action-tools';
@@ -2448,6 +2454,7 @@ function buildCryptoStrategySignals(bars, live = false) {
     source: metadata.source || 'Binance Spot Kline WebSocket', sourceTime: metadata.sourceTime, live, sourceFresh,
     currentBarClosed: bars[bars.length - 1]?.closed === true, evidenceRefs: metadata.evidenceRefs || [],
   }) || signals;
+  renderChartResearchTools('crypto',bars,points,metadata,{market:'crypto',instrument:`crypto:binance:${bnCurrentSymbol}`,timeframe:bnCurrentInterval,live,exchangeTimeZone:'UTC',sessionStartMinutes:0});
   return filterChartSignalLifecycle(recordChartPointEvolution(points,{market:'crypto',instrument:`crypto:binance:${bnCurrentSymbol}`,timeframe:bnCurrentInterval,live,sourceFresh,sourceTime,barTimes:bars.map(row=>row.time),enabledStrategies:Object.keys(cryptoChartStrategyConfig).filter(key=>cryptoChartStrategyConfig[key])}),`crypto:binance:${bnCurrentSymbol}`,bnCurrentInterval);
 }
 function drawCandles(canvas, klines) {
@@ -6148,6 +6155,21 @@ function setChartStrategyParameters(kind, id, parameters) {
   if(stock){if(stockChartKlines.length)drawStockKline(document.getElementById('stock-kline'),stockChartKlines);}
   else if(bnKlineData.length)drawCandles(document.getElementById('bn-candlestick'),bnKlineData);
 }
+function renderChartResearchTools(kind,bars,points,metadata,context) {
+  const host=document.getElementById(kind==='stock'?'stock-chart-research':'bn-chart-research');
+  if(!host||!window.MoneyChartResearchControls)return;
+  const config=kind==='stock'?stockChartOverlayConfig:cryptoChartOverlayConfig;
+  const key=JSON.stringify([context.market,context.instrument,context.timeframe,config.strategies,config.strategyParameters,bars.length,bars.at(-1)?.time,kind==='stock'?stockChartAsOf:null]);
+  window.MoneyChartResearchControls.render({host,key,
+    isCurrent:()=>!document.hidden&&activeMarketScope===context.market&&context.instrument===(kind==='stock'?stockChartEventInstrumentId():`crypto:binance:${bnCurrentSymbol}`)&&context.timeframe===(kind==='stock'?currentStockKlinePeriod:bnCurrentInterval)&&host.getClientRects().length>0,
+    getInput:()=>({...context,source:metadata.source||'',sourceTime:metadata.sourceTime||null,evidenceRefs:metadata.evidenceRefs||[],points,
+      at:window.MoneyTradingChart?.getCursor(document.getElementById(kind==='stock'?'stock-kline':'bn-candlestick'))?.time??(kind==='stock'&&stockChartAsOf?Date.parse(stockChartAsOf):Date.now()),
+      series:[...document.querySelectorAll('canvas[data-chart-sync-group]')].filter(canvas=>canvas.getClientRects().length>0).map(canvas=>window.MoneyTradingChart?.getTemporalSeries(canvas)).filter(Boolean),
+      bars:bars.map((bar,i)=>i===bars.length-1&&context.live?{...bar,closed:bar.closed===true}:bar),
+      asOf:kind==='stock'&&stockChartAsOf?Date.parse(stockChartAsOf):undefined}),
+    onSelect:id=>{const signal=points.find(point=>point.id===id);if(signal)handleChartSignalSelection(signal,kind==='stock'?'stock-chart-signal-markers':'bn-chart-signal-markers');},
+  });
+}
 function updateStockSupportResistanceStatus(message) {
   const host = document.getElementById('stock-sr-status');
   if (!host) return;
@@ -6223,6 +6245,7 @@ function buildStockStrategySignals(bars, live = false) {
     timeframe: currentStockKlinePeriod, source: metadata.source || '股票行情来源', sourceTime: metadata.sourceTime,
     live, sourceFresh, currentBarClosed: bars[bars.length - 1]?.closed === true, evidenceRefs: metadata.evidenceRefs || [],
   }) || signals;
+  renderChartResearchTools('stock',bars,points,metadata,{market:'stocks',instrument,timeframe:currentStockKlinePeriod,live,exchangeTimeZone:metadata.exchangeTimeZone,sessionStartMinutes:metadata.exchangeTimeZone&&['America/New_York','Asia/Shanghai','Asia/Hong_Kong'].includes(metadata.exchangeTimeZone)?570:null});
   return filterChartSignalLifecycle(recordChartPointEvolution(points,{market:'stocks',instrument,timeframe:currentStockKlinePeriod,live,sourceFresh,sourceTime,barTimes:bars.map(row=>row.time),enabledStrategies:Object.keys(stockChartOverlayConfig.strategies||{}).filter(key=>stockChartOverlayConfig.strategies[key])}),instrument,currentStockKlinePeriod);
 }
 function stockChartEventInstrumentId() {
@@ -9154,6 +9177,14 @@ function renderDecisionPortfolio(data, reason) {
     <table class="workspace-watchlist-table"><thead><tr><th>标的</th><th>数量</th><th>币种</th><th>成本</th><th>来源</th></tr></thead><tbody>${positions.map(row => `<tr><td>${safeNewsText(row.instrument)}</td><td>${row.quantity}</td><td>${safeNewsText(row.currency)}</td><td>${metric(row.averageCost)}</td><td>${safeNewsText(row.accountSource || '导入')}</td></tr>`).join('')}</tbody></table>`);
   const select = host.querySelector('#decision-portfolio-source'); select.value = selection;
   window.MoneyMoneyProfessionalResearch?.renderTailRisk(host, data?.tailRisk);
+  window.MoneyMoneyProfessionalResearch?.renderRiskBudgetPreview(host,data?.riskBudgetPreview,async cap=>{
+    const market=activeMarketScope,source=select.value,workspace=activeWorkspaceId;
+    const query=new URLSearchParams({market,accountSource:source,riskCapPct:String(cap)});
+    if(data?.tailRisk?.dataStatus==='historical')query.set('history','1');
+    const result=await decisionFetchJson('/api/portfolio/analytics?'+query);
+    if(!host.isConnected||document.hidden||market!==activeMarketScope||source!==select.value||workspace!==activeWorkspaceId)return;
+    renderDecisionPortfolio(result.data,result.reason);
+  });
   const attribution=document.createElement('section');attribution.innerHTML='<button type="button" onclick="loadDecisionPortfolioAttribution()">查看账户 / 币种 / 策略归因</button><div id="decision-portfolio-attribution" aria-live="polite"></div>';host.append(attribution);
   if (data?.history) {
     const section=document.createElement('section');section.innerHTML='<p>'+safeNewsText(data.historyReason)+'</p><div data-portfolio-history></div><p>历史状态：'+safeNewsText(data.history.reason || data.history.dataStatus)+'</p><h4>成本与现金流口径</h4>'+(data.costCoverage || []).map(row=>'<p>'+safeNewsText(row.instrument)+' · '+safeNewsText(row.currency)+' · 未实现盈亏 '+metric(row.unrealizedPnl)+' · '+safeNewsText(row.reason || '')+'</p>').join('')+'<p>已记录现金流 '+(data.cashFlows || []).length+' 项；缺少历史仓位或汇率时不生成账户回报。</p>';host.append(section);

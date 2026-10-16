@@ -65,7 +65,21 @@
       finally{button.disabled=false;}
     });
   }
-  window.MoneyMoneyProfessionalResearch = { renderTailRisk, renderCommittee, renderCostStress,renderRobustness };
+  function renderRiskBudgetPreview(host, data, request) {
+    if(!host || !data || !window.mm_isLoggedIn || window.mm_isGuest)return;
+    const initial=JSON.stringify(context()),current=()=>host.isConnected && !document.hidden && context().workspace==='decision-intelligence' && !window.mm_isGuest && window.mm_isLoggedIn && JSON.stringify(context())===initial;
+    const section=document.createElement('section');section.className='mm-action-center';section.dataset.riskBudget='true';
+    section.innerHTML='<h4>风险预算 · 只读再平衡预览</h4><p>'+esc(data.reason)+'</p>'+
+      (data.positions?.length?'<label>单标的上限（%） <input type="number" min="5" max="100" step="1" data-risk-cap value="'+esc(data.capPct)+'"></label> <button type="button" data-risk-preview>预览，不创建订单</button><p>最大权重 '+metric(data.before?.largestWeightPct)+'% → '+metric(data.after?.largestWeightPct)+'% · 假设现金留存 '+metric(data.cashReserveAmount)+' '+esc(data.currency)+'</p><p>日波动率 '+metric(data.before?.dailyVolatilityPct)+'% → '+metric(data.after?.dailyVolatilityPct)+'% · '+esc(data.riskReason || '')+'</p><div class="mm-table-scroll"><table class="workspace-watchlist-table"><thead><tr><th>标的</th><th>当前权重</th><th>假设权重</th><th>假设减少金额</th></tr></thead><tbody>'+data.positions.map(row=>'<tr><td>'+esc(row.instrument)+'</td><td>'+metric(row.currentPct)+'%</td><td>'+metric(row.targetPct)+'%</td><td>'+metric(row.reductionAmount)+' '+esc(data.currency)+'</td></tr>').join('')+'</tbody></table></div>':'')+
+      '<p>'+ (data.assumptions || []).map(esc).join('；')+'</p><p data-risk-status role="status"></p>';
+    host.append(section);const button=section.querySelector('[data-risk-preview]');if(!button)return;
+    button.onclick=async()=>{if(!current())return;const cap=Number(section.querySelector('[data-risk-cap]').value),status=section.querySelector('[data-risk-status]');
+      if(!Number.isFinite(cap)||cap<5||cap>100){status.textContent='上限必须为5–100%。';return;}
+      button.disabled=true;status.textContent='正在分析保存估值，不创建订单…';
+      try{await request(cap);}catch(error){if(current())status.textContent=error.message;}finally{button.disabled=false;}
+    };
+  }
+  window.MoneyMoneyProfessionalResearch = { renderTailRisk, renderCommittee, renderCostStress,renderRobustness,renderRiskBudgetPreview };
 
   // No polling or upstream work: only a visible, private stock-fundamentals workspace can query/index.
   let controller = new AbortController(), contextKey = '';

@@ -39,6 +39,34 @@ export function diagnosticRunnerMarket(runner:{venue:string;universe?:{market:st
   return market && (!runner.universe || runner.universe.market===market)?market:null;
 }
 
+/** Counts recorded instrument-rounds, not an unrecorded universe scan. Order IDs alone are not fills. */
+function decisionFunnel(records:AiRunnerDecisionRecord[],positions:AiRunnerPosition[],now:string) {
+  let dataPassed=0,dataFailed=0,dataUnknown=0,riskPassed=0,riskBlocked=0,riskUnknown=0;
+  const orders=new Set<string>();
+  for(const row of records){
+    const checks=row.riskChecks||[],quote=checks.filter(c=>['quote-freshness','executable-quote'].includes(c.name));
+    if(quote.some(c=>c.passed===false)||['failed','empty','unavailable','unsupported'].includes(row.dataStatus))dataFailed++;
+    else if(['live','delayed','historical'].includes(row.dataStatus)&&['quote-freshness','executable-quote'].every(name=>quote.some(c=>c.name===name&&c.passed===true)))dataPassed++;
+    else dataUnknown++;
+    if(checks.some(c=>c.passed===false))riskBlocked++;
+    else if(checks.length&&checks.every(c=>c.passed===true))riskPassed++;
+    else riskUnknown++;
+    if(['BUY','SELL'].includes(row.action)&&row.orderId)orders.add(row.orderId);
+  }
+  const verified=[...orders].filter(id=>{
+    const decisions=records.filter(row=>row.orderId===id&&['BUY','SELL'].includes(row.action));
+    if(decisions.length!==1)return false;
+    const decision=decisions[0],matches=positions.filter(p=>(p.instrumentId===decision.instrument || p.instrument?.symbolOrMarketId===decision.instrument&&diagnosticRunnerMarket({venue:p.instrument.venue} as Parameters<typeof diagnosticRunnerMarket>[0])===decision.market)&&['OPEN','CLOSED'].includes(p.status)&&(decision.action==='BUY'?p.entryOrderId===id:p.status==='CLOSED'&&p.exitOrderId===id));
+    if(matches.length!==1)return false;
+    const at=Date.parse(decision.action==='BUY'?matches[0].entryTime:matches[0].exitTime||'');
+    return Number.isFinite(at)&&at>=Date.parse(decision.at)&&at<=Date.parse(now);
+  }).length;
+  return {evaluatedRounds:records.length,scannedUniverseSize:null,dataPassed,dataFailed,dataUnknown,
+    signalRounds:records.filter(row=>Array.isArray(row.signals)&&row.signals.length>0).length,
+    riskPassed,riskBlocked,riskUnknown,submittedOrders:orders.size,verifiedFilledOrders:verified,unverifiedSubmittedOrders:orders.size-verified,
+    reason:'每轮只代表已记录的标的评估；各阶段非严格漏斗（持仓退出可能没有入场信号）。未知门控不算通过，订单ID不证明成交，未记录的全池扫描数量保持未知。'};
+}
+
 /** Read-only interpretation of recorded gates. No quote fetch, strategy change, or model invocation. */
 export function reviewAiRunnerDecisions(records:AiRunnerDecisionRecord[],runnerId:string,market:string,positions:AiRunnerPosition[]=[],now=new Date().toISOString()) {
   const matching=records.filter(row=>row.runnerId===runnerId&&row.market===market);
@@ -81,5 +109,5 @@ export function reviewAiRunnerDecisions(records:AiRunnerDecisionRecord[],runnerI
     if(total&&total.count>=20){group.maturedResult={closedCount:total.count,netPnlUsd:total.net,recordedCostsUsd:total.costs,winRate:total.wins/total.count};group.reason='仅统计已成熟且订单与成本完整的样本，不作策略排名';}
     else group.reason=`已成熟且成本完整 ${group.maturedSamples} 笔；至少20笔后展示该版本/标的净结果与胜率`;
   }
-  return {rows,groups:[...groups.values()].map(group=>({...group,modelFailureRate:group.knownModelCalls?group.failedModelCalls/group.knownModelCalls:null})),inaction:inactionSummary(scoped),duplicateRecords,invalidTimeRecords,excludedRecords:records.length-scoped.length,readOnly:true,modelCalls:0};
+  return {rows,groups:[...groups.values()].map(group=>({...group,modelFailureRate:group.knownModelCalls?group.failedModelCalls/group.knownModelCalls:null})),funnel:decisionFunnel(scoped,positions,now),inaction:inactionSummary(scoped),duplicateRecords,invalidTimeRecords,excludedRecords:records.length-scoped.length,readOnly:true,modelCalls:0};
 }

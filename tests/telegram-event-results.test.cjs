@@ -365,3 +365,10 @@ test('unpublished FOMC rate decision stays pending with the official retry URL',
   assert.match(result.reason,/尚未发布/);assert.equal(result.url,'https://www.federalreserve.gov/newsevents/pressreleases/monetary20261028a.htm');
  }finally{global.fetch=previousFetch;Date.now=previousNow;}
 });
+test('coverage does not convert null check times to epoch or flag future events, and deduplicates deliveries per chat',()=>{
+ const {summarizeTelegramResultCoverage}=require('../src/features/telegram-event-results');
+ const now=Date.parse('2026-10-16T12:00:00Z');
+ const row={id:'d',chatId:'one',status:'sent',attempts:0,nextAttempt:0,event:{title:'future',date:'2026-10-17T12:00:00Z'},text:'waiting',resultStatus:'waiting',nextCheckAt:null};
+ const r=summarizeTelegramResultCoverage([row,row,{...row,chatId:'two'},{...row,id:'due',event:{...row.event,date:'2026-10-15T00:00:00Z'}}],now);
+ assert.equal(r.total,3);assert.equal(r.duplicateDeliveries,1);assert.equal(r.stuckCountdowns.length,1);assert.equal(r.stuckCountdowns[0].nextCheckAt,null);assert.equal(r.stuckCountdowns[0].hoursOverdue,null);
+});

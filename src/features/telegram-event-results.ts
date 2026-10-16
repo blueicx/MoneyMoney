@@ -16,14 +16,20 @@ export function hasEventActual(value: unknown): boolean {
   return value !== null && value !== undefined && !/^(?:|n\/a|na|null|unknown|pending|—|-)$/i.test(String(value).trim());
 }
 export function summarizeTelegramResultCoverage(rows: CoverageDelivery[], now = Date.now()) {
-  const deliveries = Array.isArray(rows) ? rows : [];
+  const seen=new Set<string>();let duplicateDeliveries=0;
+  const deliveries = (Array.isArray(rows) ? rows : []).filter(row=>{
+    if(!row?.id)return Boolean(row);
+    const key=JSON.stringify([row.chatId||null,row.id]);
+    if(seen.has(key)){duplicateDeliveries++;return false;}seen.add(key);return true;
+  });
   const published = deliveries.filter(row => ['published', 'revised'].includes(String(row.resultStatus || '')) && hasEventActual(row.actual));
   const waiting = deliveries.filter(row => !hasEventActual(row.actual) && ['pending', 'waiting'].includes(String(row.resultStatus || row.kind || '')));
   const stuckCountdowns = waiting.flatMap(row => {
-    const next = Number(row.nextCheckAt);
+    const next = typeof row.nextCheckAt==='number'&&Number.isFinite(row.nextCheckAt)&&Math.abs(row.nextCheckAt)<=8.64e15 ? row.nextCheckAt : NaN;
     const eventAt = Date.parse(String(row.event?.date || ''));
     const overdueMs = Number.isFinite(next) ? now - next : 0;
     const eventAgeMs = Number.isFinite(eventAt) ? now - eventAt : 0;
+    if(!Number.isFinite(now)||Number.isFinite(eventAt)&&eventAt>now)return [];
     if (overdueMs < 2 * 3600000 && eventAgeMs < 24 * 3600000) return [];
     return [{ id: row.id, ...(row.chatId ? { chatId: row.chatId } : {}), kind: row.event?.kind || row.event?.market || 'unknown', resultStatus: row.resultStatus || 'pending',
       source: row.resultSource || row.event?.source || '未知', nextCheckAt: Number.isFinite(next) ? new Date(next).toISOString() : null,
@@ -34,6 +40,7 @@ export function summarizeTelegramResultCoverage(rows: CoverageDelivery[], now = 
   });
   return {
     total: deliveries.length,
+    duplicateDeliveries,
     published: published.length,
     revised: published.filter(row => row.resultStatus === 'revised').length,
     waiting: waiting.length,
