@@ -42,3 +42,16 @@
 最终完整测试299个文件、1483项通过、0失败；构建、Web、四市场三主题浏览器、认证、实时图表、合约与行动/研究冒烟通过，安全扫描793文件和差异检查通过。浏览器焦点诊断失败记录保留，不以重跑通过掩盖；修正等待前提后通过。实时图表冒烟使用传输夹具，不冒充交易所逐笔验收。日志为`mm-actions-final-tests.log`、`mm-actions-smoke-*.log`、`mm-actions-focus-red.log`、`mm-actions-focus-green.log`。
 
 未跟踪`data/research.db`保留且不提交，核验SHA256仍为`27fd475e523568daa4cdcabf3146917023335a62affe00429babd721b3b79fd1`。不使用子agent，不调用生产模型、不发送测试消息、不创建生产订单。生产发布结果在完成核验后补记。
+
+## 生产发布核验
+
+代码`ef43600d4ab7510518303d4b58ac0356e31881a1`已推送GitHub。提交后重新构建并运行Web冒烟，正式域名版本与VPS一致；服务active。只替换dist并重启`moneymoney.service`，没有配置或业务状态迁移。服务启动早期两次探测暂不可连接，随后健康检查成功，部署助手退出0。
+
+- 发布归档`moneymoney-ef43600-20261016-actions.tar.gz`，SHA256为`ced01c1459e3f301eebd6a212b0de5ef6fc502a931e4036d31cfa1110ab2730b`。
+- 服务器文件SHA256仍为`6347d2b4a8c4a51403259e518d7e40988dc33686fe729fa20cb1b0e0a1b71cec`，与上一版相同；首页SHA256为`b0c9eb7517621bf5b8fa792dc0cd4a481e37ec77cc029a1da29a908ac3782cb0`。
+- 远端manifest SHA256为`5cd680b4c43be47997898175ceb660067bc0fe83d138c0bd0e1180d9bcd5e331`，与本地相同。
+- 核心与loader SHA256分别为`9e8217990eb402ba4db2bb2d82442e0bf6f3f71aa1c02610a26b7febd55d2045`、`2c8ebe809aeab05943048fcae2a739a2c08412f124d3ea805f044e59ccdb4bb0`。正式域名下载核心、loader及5个相关工作区包全部返回Brotli，解压内容Hash均匹配manifest。
+- 备份`/opt/moneymoney/backups/dist-pre-ef43600-20261016-actions`，回滚`/opt/moneymoney/dist.rollback-ef43600-20261016-actions`。旧版`4df8234`产物保留。
+- 线上只读Chromium抽检股票、期权、虚拟币、预测市场及SNDK全部通过，日志`mm-actions-production.log`。用户本地数据库Hash在发布后未变，未跟踪文件未提交。
+
+整页冷加载改善20%的目标仍未完成；本批发布的是已验收的按需加载、加载期上下文保护及操作去重，不以更小下载量宣称整体提速达标。
