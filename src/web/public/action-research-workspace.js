@@ -52,6 +52,9 @@
     const chartLink=[...overlay.querySelectorAll('a')].find(anchor=>anchor.textContent==='图表');if(chartLink && row.market==='stocks')chartLink.onclick=async event=>{event.preventDefault();const at=timeForLocation(row);if(at){overlay.close();await window.MoneyMoneyWorkflow.locate(at,row.instrument);}else window.showToast?.('记录没有确定日期，不能猜测图表位置','info');};
     overlay.addEventListener('close', () => overlay.remove(), { once:true }); document.body.append(overlay); overlay.showModal();
   }
+  function actionPriority(row) {
+    return (row.pinned?100:0)+(['failed','unavailable','stale'].includes(row.dataStatus)?20:row.dataStatus==='partial'?10:0)+(!row.read?1:0);
+  }
   function render() {
     const host = document.getElementById('mm-action-list'); if (!host) return;
     const meta = {};
@@ -66,11 +69,17 @@
     window.mmActionSortMeta=meta;
     window.dispatchEvent(new Event('mm-action-items-updated'));
     const section = document.getElementById('mm-action-section').value, market = document.getElementById('mm-action-market').value;
-    pref.section = section; pref.market = market; try { localStorage.setItem('mm-action-filter-v1', JSON.stringify(pref)); } catch {}
+    pref.section = section; pref.market = market;pref.issueFirst=document.querySelector('[data-action-issue-first]')?.checked===true; try { localStorage.setItem('mm-action-filter-v1', JSON.stringify(pref)); } catch {}
     const filter=document.getElementById('mm-action-state')?.value || 'all';
     const rows = records.filter(row => (!section || row.section === section) && (!market || row.market === market) && (!row.snoozed || document.getElementById('mm-action-snoozed').checked) && (filter==='all' || filter==='unread' && !row.read || filter==='pinned' && row.pinned));
     const previousScroll = host.scrollTop;
     host.innerHTML = rows.length ? rows.map(row => `<article class="mm-action-row ${row.read ? 'is-read' : ''}" data-id="${esc(row.id)}"><button type="button" data-detail><strong>${row.pinned ? '📌 ' : ''}${esc(row.title)}</strong><small>${esc(markets[row.market])} · ${esc(row.instrument || '市场记录')} · ${esc(window.MoneyMoneyWorkflow?.status(row.dataStatus) || row.dataStatus)} · 抓取 ${esc(row.observedAt)}${row.scheduledAt ? ` · 计划 ${esc(row.scheduledAt)}` : ''}</small><span>${esc(row.summary || row.reason || '')}</span></button><div><button data-read>${row.read ? '标未读' : '已读'}</button><button data-pin>${row.pinned ? '取消置顶' : '置顶'}</button><button data-snooze>${row.snoozed ? '恢复处理' : '稍后一天'}</button></div></article>`).join('') : '<p class="empty-tip">当前筛选暂无可处理记录。来源失败会单独显示，不表示没有事件。</p>';
+    if(pref.issueFirst&&rows.length){
+      const byId=new Map(rows.map(row=>[row.id,row])),articles=[...host.querySelectorAll(':scope > article')].sort((a,b)=>actionPriority(byId.get(b.dataset.id))-actionPriority(byId.get(a.dataset.id)));
+      host.append(...articles);
+      const normal=articles.filter(article=>{const row=byId.get(article.dataset.id);return row.read&&!row.pinned&&['live','delayed','cached','historical'].includes(row.dataStatus);});
+      if(normal.length){const details=document.createElement('details'),summary=document.createElement('summary');details.className='mm-action-normal';summary.textContent='已读且无明确异常的记录（'+normal.length+'）';details.append(summary,...normal);host.append(details);}
+    }
     host.scrollTop = previousScroll;
     for (const article of host.querySelectorAll('article')) {
       const row = records.find(row => row.id === article.dataset.id);
@@ -111,7 +120,25 @@
     section.querySelector('.mm-action-tools').insertAdjacentHTML('beforeend','<select id="mm-action-state" aria-label="处理状态"><option value="all">全部状态</option><option value="unread">待处理</option><option value="pinned">已置顶</option></select>');
     section.querySelector('.mm-action-tools').insertAdjacentHTML('beforeend','<button id="mm-action-history-toggle" type="button">处理历史</button>');
     document.getElementById('mm-action-status').insertAdjacentHTML('afterend','<div id="mm-action-history-panel" hidden role="status"></div>');
+    const operationButton=document.createElement('button');operationButton.type='button';operationButton.setAttribute('data-unified-operations','');operationButton.textContent='统一历史 / 安全撤销';section.querySelector('.mm-action-tools').append(operationButton);
+    operationButton.onclick=async()=>{
+      const output=document.getElementById('mm-action-history-panel'),captured=JSON.stringify(context());if(window.mm_isGuest||!window.mm_isLoggedIn)return;output.hidden=false;output.textContent='读取已记录操作，不执行撤销…';
+      try{const current=context().market,result=await api('/api/operations/history'+(markets[current]?'?market='+encodeURIComponent(current):''));if(JSON.stringify(context())!==captured||!output.isConnected)return;
+        result.data=[...result.data,...(window.mmPreferenceJournal?.list(markets[current]?current:undefined)||[])].sort((a,b)=>Date.parse(b.at)-Date.parse(a.at)).slice(0,200);
+        output.innerHTML='<p>'+esc(result.reason)+'</p>'+result.data.map((row,index)=>'<article><strong>'+esc(row.summary)+'</strong><small>'+esc((row.market?markets[row.market]:'全局')+' · '+(row.instrument||'范围未关联')+' · '+row.at)+'</small>'+(row.canUndo?'<button type="button" data-operation-undo="'+index+'">预览并撤销该处理</button>':'<span>不可在此撤销或有后续修改</span>')+'</article>').join('');
+        for(const button of output.querySelectorAll('[data-operation-undo]'))button.onclick=async()=>{
+          if(JSON.stringify(context())!==captured||window.mm_isGuest||!window.mm_isLoggedIn)return;const row=result.data[Number(button.dataset.operationUndo)];if(!row||!row.canUndo)return;
+          if(!confirm('将撤销此条已记录的处理、自选或本机图表/布局偏好变更：'+row.summary+'。有后续修改时会拒绝；不会操作账户、运行策略或订单。继续？'))return;
+          button.disabled=true;try{
+            if(row.kind==='local-preference'){const restored=window.mmPreferenceJournal.undo(row.id);window.dispatchEvent(new CustomEvent('mm-preference-restored',{detail:{key:restored.key}}));}
+            else await api('/api/operations/history/undo',{method:'POST',body:JSON.stringify({kind:row.kind,id:row.id,...(row.kind==='action'?{expectedUpdatedAt:row.expectedUpdatedAt}:{revision:row.revision})})});
+            if(JSON.stringify(context())!==captured)return;if(row.kind!=='local-preference')await loadActions();await operationButton.onclick();
+          }catch(error){if(error.name!=='AbortError'&&JSON.stringify(context())===captured){button.disabled=false;button.textContent=error.message;}}
+        }
+      }catch(error){if(error.name!=='AbortError'&&JSON.stringify(context())===captured)output.textContent=error.message;}
+    };
     document.getElementById('mm-action-state').onchange=render;
+    const issueLabel=document.createElement('label'),issueFirst=document.createElement('input');issueFirst.type='checkbox';issueFirst.setAttribute('data-action-issue-first','');issueFirst.checked=pref.issueFirst===true;issueLabel.append(issueFirst,'异常优先 / 折叠已读正常记录');section.querySelector('.mm-action-tools').append(issueLabel);issueFirst.onchange=render;
     const map=document.createElement('details');map.innerHTML='<summary>自选变化地图 / 风险日历</summary><label>排序 <select id="mm-action-map-sort"><option value="pending">待处理数量</option><option value="change">绝对涨跌</option><option value="event">事件临近</option><option value="data">数据异常优先</option></select></label><div id="mm-watchlist-operations" role="status">加载行动记录后显示；缺失数值不以零补齐。</div>';
     document.getElementById('mm-action-list').before(map);document.getElementById('mm-action-map-sort').onchange=renderOperations;
     const lab=document.createElement('section');lab.id='mm-research-lab';lab.className='mm-action-center';lab.dataset.workspaceId='research-lab';lab.hidden=true;

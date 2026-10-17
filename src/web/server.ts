@@ -101,6 +101,9 @@ import { getGlobalMacroSpotSnapshot } from '../features/global-macro-spot';
 import { getCrossAssetCorrelationRadar } from '../features/cross-asset-correlation';
 import { getPerpetualCrowding } from '../features/perpetual-crowding';
 import { ContractResearchService, contractIdentity, contractScenario } from '../features/contract-research';
+import { createWorkspaceRecordSearchRouter } from './workspace-record-search-routes';
+import { createOperationHistoryRouter } from './operation-history-routes';
+import { validateReliabilityReport } from '../features/reliability-acceptance';
 import { loadContractPanelHistory, reviewContractPositionCosts } from '../features/contract-panel-history';
 import { klinePageWindow, klinePageStatus, stockKlineChartInitialWindow } from '../features/kline-page-window';
 import { contractCapacity, compareContractSnapshots } from '../features/contract-comparison';
@@ -394,7 +397,12 @@ app.get('/login', (req, res) => {
 });
 registerAuthRoutes(app);
 registerApiAuthProtection(app);
+app.use('/api/workspace/records/search',createWorkspaceRecordSearchRouter({
+  experiments:()=>researchRepository.listExperiments(200).map(row=>row.experiment).filter(Boolean).map(row=>({id:row.id,market:row.market,instrument:row.instrument||'',strategyVersion:row.strategyVersion,updatedAt:row.createdAt})),
+  orders:()=>unifiedPaperLedgerStore.get().orders.slice(-200).map(row=>({id:row.id||'',market:({stock:'stocks',option:'options',crypto:'crypto',prediction:'prediction'} as Record<string,string>)[row.instrumentType]||'',instrument:row.instrumentId,strategyVersion:row.strategyVersion,updatedAt:row.timestamp})),
+}));
 const watchlistMetadataStore = new WatchlistMetadataStore(stateStore, () => unifiedAlertStore.listWatchlist());
+app.use('/api/operations/history',createOperationHistoryRouter({actionHistory:()=>actionCenterStore.history('admin',{limit:500}),metadata:()=>watchlistMetadataStore.read(),undoAction:(id,version)=>actionCenterStore.undo('admin',id,version),undoMetadata:(id,revision)=>watchlistMetadataStore.undo(id,revision)}));
 const instrumentSilences = new InstrumentSilenceStore(stateStore);
 app.use('/api/watchlist/metadata', createWatchlistMetadataRouter(watchlistMetadataStore));
 app.use('/api/research/experiments',createResearchRobustnessRouter({get:id=>researchRepository.getExperiment(id),save:(id,result)=>researchRepository.saveExperiment(id,result)}));
@@ -3284,6 +3292,8 @@ app.get('/api/diagnostics', async (req, res) => {
       const drillPath = path.join(DATA_ROOT, 'recovery-drill-last.json');
       if (fs.existsSync(drillPath)) recoveryDrill = JSON.parse(fs.readFileSync(drillPath, 'utf8'));
     } catch { recoveryDrill = { status: 'unavailable', reason: '恢复演练记录无法读取' }; }
+    let reliabilityDrill=validateReliabilityReport(null,'');
+    try{const root=path.resolve(__dirname,'..'),report=path.join(root,'reliability-drill.json');if(fs.existsSync(report)&&fs.statSync(report).size<=128000){const info=JSON.parse(fs.readFileSync(path.join(root,'build-info.json'),'utf8'));reliabilityDrill=validateReliabilityReport(JSON.parse(fs.readFileSync(report,'utf8')),info.commit);}}catch{/* Missing/malformed build evidence stays explicitly unavailable. */}
     res.json({
       success: true,
       data: {
@@ -3313,6 +3323,7 @@ app.get('/api/diagnostics', async (req, res) => {
           maxInstrumentsPerRun: 3,
         },
         recoveryDrill,
+        reliabilityDrill,
         sources: { total: sources.total, online: sources.online, updatedAt: sources.updatedAt, unavailable: sources.items.filter(item => !item.ok).map(item => ({ id: item.id, detail: item.detail })) },
         researchJobs: jobs.reduce<Record<string, number>>((acc, job) => { acc[job.status] = (acc[job.status] || 0) + 1; return acc; }, {}),
         telegram: { configured: telegram.isConfigured, pollingEnabled: telegramConfig.pollingEnabled, pollingRunning: telegramInteractionBot?.isRunning || false, polling: telegramInteractionBot?.pollingStatus || null, lease: stateStore.getLease('telegram:getUpdates'), stockScanSchedules:parseChatIds(telegramConfig.allowedChatIds,telegramConfig.chatId).filter(isTelegramAdmin).map(chatId=>({chatId,config:stockSignalSchedule.get(chatId),history:stockSignalSchedule.history(chatId).slice(-5),lease:stateStore.getLease('telegram:stock-signal-schedule-lease:'+chatId)})) },

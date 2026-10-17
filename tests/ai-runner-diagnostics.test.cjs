@@ -1,4 +1,12 @@
 const test=require('node:test'),assert=require('node:assert/strict');require('ts-node/register/transpile-only');
+test('saved decision comparison reuses original rule/model evidence without inventing mature counterfactual profit',()=>{
+ const {buildSavedDecisionComparison}=require('../src/features/ai-runner-diagnostics'),decision={id:'d',runnerId:'r',market:'stocks',instrument:'AAPL',snapshotHash:'a'.repeat(64),strategyVersion:'v1',modelVersion:'saved-model',action:'REVIEW',reason:'saved reason',signals:['HOLD']};
+ assert.equal(typeof buildSavedDecisionComparison,'function');
+ const snapshot={hash:decision.snapshotHash,payload:{market:'stocks',instrument:'AAPL',candidateSignals:[{strategy:'rsi',direction:'buy'}]}};
+ const before=JSON.stringify({decision,snapshot}),result=buildSavedDecisionComparison(decision,snapshot);
+ assert.equal(result.modelCalls,0);assert.equal(result.orderChanges,0);assert.equal(result.recorded.action,'REVIEW');assert.equal(result.rules.candidates[0].direction,'buy');assert.equal(result.hypotheticalPerformance,null);assert.match(result.reason,/未归档|无法/);assert.equal(JSON.stringify({decision,snapshot}),before);
+ assert.equal(buildSavedDecisionComparison(decision,{...snapshot,payload:{...snapshot.payload,instrument:'MU'}}).dataStatus,'unavailable');
+});
 test('decision funnel never infers passed gates or fills from an order id and excludes duplicates and future rounds',()=>{
  const {reviewAiRunnerDecisions}=require('../src/features/ai-runner-diagnostics');
  const row={id:'a',runnerId:'r',market:'stocks',instrument:'AAPL',at:'2026-10-01T00:00:00Z',dataStatus:'delayed',source:'saved',signals:[{direction:'buy'}],riskChecks:[{name:'quote-freshness',passed:true},{name:'executable-quote',passed:true},{name:'budget',passed:true}],action:'BUY',orderId:'o',modelVersion:'fixed-v1',reason:'recorded'};

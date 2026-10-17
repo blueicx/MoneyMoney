@@ -584,7 +584,10 @@ export class DataLakeCatalog {
     if(openInterestUsd!==null&&(!Number.isFinite(openInterestUsd)||openInterestUsd<0)||basisPct!==null&&!Number.isFinite(basisPct)||openInterestUsd===null&&basisPct===null)throw Error('合约历史字段无效或缺失');
     const previous=this.db.prepare("SELECT * FROM dataset_partitions WHERE market='crypto' AND dataset='contract-metrics' AND instrument=? AND status='committed' ORDER BY fetched_at DESC LIMIT 1").get(snapshot.instrument) as any;
     if(previous&&at<Date.parse(previous.fetched_at)+300000)return this.listPartitions().find(row=>row.id===previous.id)!;
-    const row={market:'crypto',instrument:snapshot.instrument,source,retrievedAt:new Date(at).toISOString(),sourceTime:sourceTime===null?null:new Date(sourceTime).toISOString(),openInterestUsd,basisPct,openInterestUnit:'USDT',basisUnit:'%'};
+    const rules=snapshot.contractRules;
+    if(rules&&((rules.multiplier!=null&&(!Number.isFinite(rules.multiplier)||rules.multiplier<=0))||(rules.fundingIntervalSeconds!=null&&(!Number.isFinite(rules.fundingIntervalSeconds)||rules.fundingIntervalSeconds<=0))||rules.settlementCurrency!=='USDT'||(rules.inDelisting!=null&&typeof rules.inDelisting!=='boolean')||(rules.status!=null&&(typeof rules.status!=='string'||rules.status.length>80))))throw Error('来源合约规则字段无效，未归档猜测值');
+    const rulesJson=rules?JSON.stringify({multiplier:rules.multiplier??null,fundingIntervalSeconds:rules.fundingIntervalSeconds??null,settlementCurrency:rules.settlementCurrency,inDelisting:rules.inDelisting??null,status:rules.status??null}):null;
+    const row={market:'crypto',instrument:snapshot.instrument,source,retrievedAt:new Date(at).toISOString(),sourceTime:sourceTime===null?null:new Date(sourceTime).toISOString(),openInterestUsd,basisPct,openInterestUnit:'USDT',basisUnit:'%',rulesJson};
     const contentHash=hash(row),id='contract_metrics_'+contentHash.slice(0,24),manifestId='manifest_'+id;
     const target=path.join(this.lakeRoot,'crypto','contract-metrics',match[1],match[2],String(new Date(at).getUTCFullYear()),String(new Date(at).getUTCMonth()+1).padStart(2,'0'),contentHash+'.parquet');
     const stage=path.join(this.lakeRoot,'.staging',id+'-'+crypto.randomUUID()+'.tmp');
@@ -593,11 +596,12 @@ export class DataLakeCatalog {
     ensureDir(path.dirname(target));
     const instance=await DuckDBInstance.create(':memory:',{memory_limit:'512MB',threads:'1'}),connection=await instance.connect();
     try{
-      await connection.run('CREATE TABLE metrics (market VARCHAR,instrument VARCHAR,source VARCHAR,retrievedAt VARCHAR,sourceTime VARCHAR,openInterestUsd DOUBLE,basisPct DOUBLE,openInterestUnit VARCHAR,basisUnit VARCHAR)');
+      await connection.run('CREATE TABLE metrics (market VARCHAR,instrument VARCHAR,source VARCHAR,retrievedAt VARCHAR,sourceTime VARCHAR,openInterestUsd DOUBLE,basisPct DOUBLE,openInterestUnit VARCHAR,basisUnit VARCHAR,rulesJson VARCHAR)');
       const appender=await connection.createAppender('metrics');
       for(const value of [row.market,row.instrument,row.source,row.retrievedAt,row.sourceTime]){if(value===null)appender.appendNull();else appender.appendVarchar(value);}
       for(const value of [openInterestUsd,basisPct]){if(value===null)appender.appendNull();else appender.appendDouble(value);}
       appender.appendVarchar(row.openInterestUnit);appender.appendVarchar(row.basisUnit);
+      if(rulesJson===null)appender.appendNull();else appender.appendVarchar(rulesJson);
       appender.endRow();appender.closeSync();await connection.run(`COPY metrics TO '${sqlPath(stage)}' (FORMAT PARQUET,COMPRESSION ZSTD)`);
       const diagnostics=this.getDiagnostics();if(diagnostics.usageBytes+fs.statSync(stage).size>=diagnostics.quotaBytes*.9)throw Error('数据湖容量不足，未发布合约历史分区');
       fs.renameSync(stage,target);

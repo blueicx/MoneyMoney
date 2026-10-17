@@ -1,4 +1,14 @@
 import type { AiRunnerDecisionRecord, AiRunnerPosition } from './ai-paper-runner';
+
+/** Compare saved facts only; absent forward prices cannot become counterfactual fills or profit. */
+export function buildSavedDecisionComparison(decision:AiRunnerDecisionRecord,snapshot:{hash:string;payload:Record<string,any>}){
+  const base={dataStatus:'unavailable',reason:'原决策与归档快照未核验匹配，不重建旧输入',recorded:null as any,rules:null as any,hypotheticalPerformance:null,noTrade:{action:'NONE',hypothetical:true},modelCalls:0,orderChanges:0};
+  if(!snapshot||snapshot.hash!==decision.snapshotHash||snapshot.payload?.market!==decision.market||snapshot.payload?.instrument!==decision.instrument)return base;
+  const raw=snapshot.payload.candidateSignals,candidates=Array.isArray(raw)?raw.slice(0,50).flatMap(row=>typeof row==='string'?[{recordedText:row.slice(0,1000)}]:row&&typeof row==='object'?[Object.fromEntries(['strategy','strategyVersion','direction','side','reason','timeframe'].filter(key=>typeof row[key]==='string').map(key=>[key,row[key].slice(0,1000)]))]:[]):null;
+  return {...base,dataStatus:'historical',recorded:{id:decision.id,action:decision.action,strategyVersion:decision.strategyVersion||null,modelVersion:decision.modelVersion||null,reason:decision.reason,signals:Array.isArray(decision.signals)?decision.signals.slice(0,50):[]},
+    rules:candidates?{candidates,reason:'原快照已保存规则候选，不重新运行另一个策略版本'}:null,
+    reason:'只比较已保存模型决定、原规则候选与不交易假设；未归档同口径的未来价格路径与替代成交条件，无法给出这些假设的成熟收益，不猜测配对、不调用模型或改写账本。'};
+}
 interface DiagnosticGroup { instrument:string;strategyVersion:string;modelVersion:string;rounds:number;failedModelCalls:number;knownModelCalls:number;rejectedRounds:number;dataFailures:number;maturedSamples:number;maturedResult:null|{closedCount:number;netPnlUsd:number;recordedCostsUsd:number;winRate:number};reason:string }
 
 const inactionLabels = {

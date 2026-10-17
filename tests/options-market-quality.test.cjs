@@ -4,6 +4,15 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const { JSDOM } = require('jsdom');
 const { assessOptionQuoteQuality, calculateOptionPayoff, getEquityOptionsSnapshot } = require('../dist/features/options-market.js');
+test('multi-leg payoff reports quote age/skew and spread crossing but never represents the estimate as executable',()=>{
+ const nowMs=Date.UTC(2026,9,17),row={instrumentName:'SPY-20271014-100-C',strike:100,optionType:'call',bidPrice:10,askPrice:12,quoteQuality:{status:'quoted'},expiryMs:nowMs+86400000,quoteTime:new Date(nowMs).toISOString()};
+ const result=calculateOptionPayoff({spot:100,multiplier:100,nowMs,legs:[{row,action:'buy',contracts:1},{row:{...row,instrumentName:'SPY-20271014-110-C',strike:110,quoteTime:new Date(nowMs-90000).toISOString()},action:'sell',contracts:1}]});
+ assert.equal(result.quoteAudit.quoteSkewMs,90000);assert.equal(result.quoteAudit.maxAgeMs,90000);assert.equal(result.quoteAudit.spreadCrossingVsMidUsd,200);assert.equal(result.quoteAudit.executable,false);
+ assert.equal(result.quoteAudit.legs.length,2);assert.equal(result.quoteAudit.legs[0].referencePrice,12);assert.match(result.quoteAudit.reason,/不同步|同步/);
+});
+test('option payoff workspace displays quote skew, quote ages and non-executable status',()=>{
+ const source=require('./helpers/dashboard-source.cjs').readDashboardSource();assert.match(source,/audit\.dataset\.optionQuoteAudit/);assert.match(source,/data\.quoteAudit\.quoteSkewMs/);assert.match(source,/data\.quoteAudit\.legs/);
+});
 
 test('price/time/IV scenarios use declared model assumptions and actual quote-side entry costs with deterministic results',()=>{
  const {calculateOptionScenario}=require('../dist/features/options-market.js');assert.equal(typeof calculateOptionScenario,'function');

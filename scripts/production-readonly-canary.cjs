@@ -218,6 +218,12 @@ async function runProductionCanary({ baseUrl, artifactDir } = {}) {
     const privateRead = await page.request.get(`${target}/api/decisions?market=stocks`, { timeout: 15_000 });
     assert.ok([401, 403].includes(privateRead.status()), `guest must not read private decision records (HTTP ${privateRead.status()})`);
     report.guestPrivateReadStatus = privateRead.status();
+    report.guestResearchOperations = [];
+    for(const endpoint of ['/api/operations/history?market=stocks','/api/workspace/records/search?market=stocks&q=AAPL']){
+      const response=await page.request.get(target+endpoint,{timeout:15000});
+      assert.ok([401,403].includes(response.status()),'guest cannot read research operation summaries');
+      report.guestResearchOperations.push({endpoint: endpoint.split('?')[0],status:response.status()});
+    }
     for (const market of ['stocks', 'options', 'crypto', 'prediction']) {
       await selectMarket(page, market);
       report.markets.push(market);

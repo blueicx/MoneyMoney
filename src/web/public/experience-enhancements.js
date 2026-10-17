@@ -5,7 +5,7 @@
   const MARKET_LABELS = { stocks: '股票', options: '期权', crypto: '虚拟币', prediction: '预测市场' };
   const storage = {
     get(key, fallback) { try { const value = localStorage.getItem(key); return value == null ? fallback : JSON.parse(value); } catch { return fallback; } },
-    set(key, value) { try { localStorage.setItem(key, JSON.stringify(value)); } catch {} },
+    set(key, value) { try {if(key==='mm-layout-widths-v1'&&window.mmPreferenceJournal){const shell=document.getElementById('market-workspace-shell');window.mmPreferenceJournal.record(key,value,{market:shell?.dataset.marketScope,workspace:shell?.dataset.workspace});}else localStorage.setItem(key, JSON.stringify(value)); } catch {} },
   };
   const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
   const guest = () => window.mm_isGuest === true || window.mm_isLoggedIn !== true;
@@ -33,7 +33,7 @@
       const width = Math.max(min, Math.min(max, Math.round(value)));
       target.style.setProperty(cssVar, `${width}px`);
       saved[key] = width;
-      storage.set('mm-layout-widths-v1', saved);
+      storage.set('mm-layout-widths-v1', {...storage.get('mm-layout-widths-v1',{}),[key]:width});
       return width;
     };
     if (Number.isFinite(Number(saved.left))) shell.style.setProperty('--mm-left-width', `${Math.max(180, Math.min(360, Number(saved.left)))}px`);

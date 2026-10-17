@@ -47,7 +47,7 @@ function chartHarness(fetcher, url = 'http://localhost/') {
   return { window, document: window.document, close: () => dom.window.close() };
 }
 const empty = { success: false, data: null, dataStatus: 'unavailable', source: 'local lake', reason: '没有在 asOf 时点之前发布的数据分区' };
-const response = body => ({ ok: true, json: async () => body });
+const response = body => ({ ok: true, headers:new Headers({'x-request-id':'isolated-chart-fixture'}), json: async () => body });
 
 test('stock chart request, response, and visible render stages are measured in order', async () => {
   assert.ok(html.includes('function markMmPerformanceStage('), 'dashboard should expose a gated performance stage helper');

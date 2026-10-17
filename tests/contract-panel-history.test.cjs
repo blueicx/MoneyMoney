@@ -64,3 +64,16 @@ test('holding cost review rejects cross-market, instrument-mismatched history an
  assert.throws(()=>reviewContractPositionCosts({...input,history:{...input.history,instrument:'crypto:gateio:ETH_USDT'}}),/身份/);
  assert.throws(()=>reviewContractPositionCosts({...input,from:'2026-10-04T00:00:00Z',to:'2026-10-03T00:00:00Z'}),/区间/);
 });
+test('contract rule comparisons require exact identity/source and distinguish unknown legacy metadata from changes',()=>{
+ const {compareArchivedContractRules}=require('../dist/features/contract-panel-history');
+ const instrument='crypto:gateio:BTC_USDT',source='https://api.gateio.ws/api/v4/futures/usdt/contracts/BTC_USDT';
+ const row=(at,values)=>({market:'crypto',instrument,source,retrievedAt:at,rulesJson:JSON.stringify(values),evidenceRef:at,contentHash:'saved'});
+ const old={multiplier:.001,fundingIntervalSeconds:28800,settlementCurrency:'USDT',inDelisting:false,status:null};
+ const rows=[row('2026-10-01T00:00:00Z',old),row('2026-10-02T00:00:00Z',{...old,fundingIntervalSeconds:14400}),row('2026-10-03T00:00:00Z',{...old,multiplier:.002}),{...row('2026-10-02T01:00:00Z',old),instrument:'crypto:gateio:ETH_USDT'}];
+ const r=compareArchivedContractRules({instrument,rows,asOf:'2026-10-02T12:00:00Z'});
+ assert.equal(r.changes.length,1);assert.equal(r.changes[0].fields[0].field,'fundingIntervalSeconds');assert.equal(r.changes[0].effectiveAt,null);assert.equal(r.changes[0].fields[0].before,28800);
+ const unknown=compareArchivedContractRules({instrument,rows:[{...rows[0],rulesJson:undefined}]});assert.equal(unknown.dataStatus,'unavailable');assert.equal(unknown.changes.length,0);
+});
+test('contract workspace exposes observed rule changes only in its selected-contract panels',()=>{
+ const source=require('node:fs').readFileSync('src/web/public/contracts-workspace.js','utf8');assert.match(source,/data-contract-rule-history/);assert.match(source,/result\.ruleHistory/);
+});

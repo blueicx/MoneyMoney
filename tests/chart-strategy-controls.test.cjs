@@ -50,7 +50,7 @@ test('parameters survive two edits before data arrives without changing another 
   w.MoneyChartStrategies=library;w.MoneyChartStrategyControls=controls;
   w.eval("var stockChartOverlayConfig={strategies:{macdCross:true}},cryptoChartOverlayConfig={},cryptoChartStrategyConfig={},stockChartKlines=[],bnKlineData=[];");
   w.stockChartStorageKey=()=> 'stock:fixture';w.cryptoChartOverlayStorageKey=()=> 'crypto:fixture';
-  w.eval(declaration('renderAdvancedChartStrategyControls'));w.eval(declaration('setChartStrategyParameters'));
+  w.eval(declaration('saveChartLayoutPreference'));w.eval(declaration('renderAdvancedChartStrategyControls'));w.eval(declaration('setChartStrategyParameters'));
   try{
     w.renderAdvancedChartStrategyControls('stock');
     const host=w.document.getElementById('stock-advanced-strategies'),fast=host.querySelector('[data-strategy-id=macdCross][data-parameter=fast]'),slow=host.querySelector('[data-strategy-id=macdCross][data-parameter=slow]');

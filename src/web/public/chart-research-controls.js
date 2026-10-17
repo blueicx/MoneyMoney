@@ -14,7 +14,7 @@
       const cost=node('input');cost.type='number';cost.min='0';cost.max='1000';cost.step='1';cost.placeholder='未知成本';cost.setAttribute('aria-label','往返成本假设（基点）');
       const costLabel=node('label','往返成本 bps ');costLabel.append(cost);
       const grid=node('textarea');grid.setAttribute('aria-label','参数组 JSON（最多12组）');grid.rows=3;grid.value='[{}]';
-      const buttons=[['quality','质量矩阵'],['agreement','共振与冲突'],['lab','运行参数实验'],['timeframes','多周期时点证据']].map(([key,label])=>{const button=node('button',label);button.type='button';button.dataset['research'+key[0].toUpperCase()+key.slice(1)]='';tools.append(button);return button;});
+      const buttons=[['quality','质量矩阵'],['agreement','共振与冲突'],['lab','运行参数实验'],['timeframes','多周期时点证据'],['diagnostics','加载耗时诊断'],['audit','K线数据自检'],['regimes','策略环境档案'],['redundancy','策略重合对照'],['counterfactual','保存快照反事实'],['layout','点位布局自检']].map(([key,label])=>{const button=node('button',label);button.type='button';button.dataset['research'+key[0].toUpperCase()+key.slice(1)]='';tools.append(button);return button;});
       tools.append(strategy,horizon,costLabel);panel.append(tools,node('label','参数组 JSON（最多12组；不修改图表参数）'),grid);
       const output=node('div');output.setAttribute('role','status');output.dataset.researchOutput='';panel.append(output);host.append(panel);
       view={options,panel,output,revision:0};views.set(host,view);
@@ -45,11 +45,46 @@
             if(result.dataHash)output.append(node('p','数据 SHA256 '+result.dataHash+' · 配置 SHA256 '+result.configurationHash));
             if(result.evidencePack){const download=node('button','导出本次研究证据 JSON（含当前标的历史数据）');download.type='button';download.onclick=()=>{const url=URL.createObjectURL(new Blob([JSON.stringify(result,null,2)],{type:'application/json'})),a=node('a');a.href=url;a.download='chart-research-'+result.dataHash.slice(0,12)+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);};output.append(download);}
             output.append(table(['参数','区间','成熟 / 跨界剔除','毛 / 净均值 %','说明'],result.rows.flatMap(row=>row.splits.map(s=>[JSON.stringify(row.parameters),s.name,s.samples+' / '+s.purged,fmt(s.meanReturnPct)+' / '+fmt(s.meanNetReturnPct),s.reason]))));
-          }else{
+          }else if(i===3){
             const result=research.alignTimeframeEvidence(input);
             output.append(node('p','光标时点 '+(Number.isFinite(input.at)?new Date(input.at).toISOString():'未知')+'；只读取已打开的同标的图表，不额外请求行情。末根没有收线证据则保持未知。'));
             output.append(table(['周期','已收线时间 / 价格','说明'],result.rows.map(row=>[row.timeframe,row.point?new Date(row.point.closeTime).toISOString()+' / '+fmt(row.point.value):'不可用',row.reason])));
             if(!result.rows.length)output.append(node('p','请先打开同标的多周期图，并定位光标或选择历史日期。'));
+          }else if(i===4){
+            const result=research.buildRequestDiagnostics(input);
+            output.append(node('p',result.reason),table(['阶段','毫秒','数据口径'],result.stages.map(row=>[row.label,fmt(row.durationMs),row.historical?'历史采集耗时，非本次上游请求':'当前可观测阶段；未测得保持未知'])));
+            output.append(node('p','本次最大可观测阶段：'+(result.stages.find(row=>row.key===result.bottleneck)?.label||'未知')+' · 请求 ID '+(result.requestId||'未提供')));
+            output.append(node('p','本页面已观察脚本请求 '+fmt(result.page.scriptRequests)+' · 传输 '+fmt(result.page.scriptTransferBytes)+' 字节；只记录数量和大小，不记录URL、令牌或报文。最近REST耗时不代表推流延迟。'));
+          }else if(i===5){
+            const result=research.auditChartData(input);
+            output.append(node('p',result.dataStatus+' · '+result.reason),node('p','检查 '+result.rows+' 根 · 异常OHLC '+result.invalidOhlc.length+' · 异常成交量 '+result.invalidVolumes.length+' · 重复时间 '+result.duplicateTimes.length+' · 无效/倒序时间 '+result.invalidTimes.length+' · 待核验间隔 '+result.gaps.length+'；未修复或覆盖任何记录。'));
+            const issues=[...result.invalidOhlc.map(r=>({...r,type:'OHLC无效'})),...result.invalidVolumes.map(r=>({...r,type:'成交量无效'})),...result.duplicateTimes.map(r=>({...r,type:'重复时间'})),...result.invalidTimes.map(r=>({...r,type:r.reason})),...result.gaps.map(r=>({time:r.from,type:'时间间隔',reason:r.reason}))];
+            output.append(table(['异常','K线时间','原因'],issues.slice(0,100).map(row=>[row.type,Number.isFinite(row.time)?new Date(row.time).toISOString():'未知',row.reason||'只读记录，保留原始数据'])));
+            if(issues.length>100)output.append(node('p','仅列出前100项；缩小当前加载区间查看其余记录。'));
+            if(view.options.onBackfill){for(const gap of result.gaps.slice(0,10)){
+              const preview=research.buildGapBackfillPreview({...input,gap});if(!preview.request){output.append(node('p',preview.reason));continue;}
+              const repair=node('button','预览回补 '+preview.request.from+' → '+preview.request.to);repair.type='button';repair.dataset.gapBackfill='';output.append(repair);
+              repair.onclick=async()=>{if(view.revision!==revision||view.options.isCurrent?.()===false)return;repair.disabled=true;try{const result=await view.options.onBackfill(preview);if(view.revision===revision&&view.options.isCurrent?.()!==false)output.append(node('p',result?.reason||'没有创建回补任务。'));}catch(error){if(view.revision===revision)output.append(node('p',error.message||'回补请求失败'));}finally{repair.disabled=false;}};
+            }}else if(result.gaps.length)output.append(node('p','管理员登录后可预览并确认回补；本次只读检查不创建任务。'));
+          }else if(i===6){
+            const result=research.describeStrategyRegimes(input);
+            output.append(node('p','入场前20根已完成K线；波动为逐根标准差，非年化。未知流动性不靠成交量猜测。最多展示最近100条。'));
+            output.append(table(['点位 / 版本','趋势 / 已知根数','收益标准差 % / 平均成交量','证据'],result.rows.slice(-100).map(row=>[row.strategy+' / '+row.strategyVersion,({rising:'上升',falling:'下降',flat:'区间',unknown:'未知'}[row.trend])+' / '+row.priorBars,fmt(row.volatilityPct)+' / '+fmt(row.averageVolume),link(row.pointId)])));
+            if(!result.rows.length)output.append(node('p',result.reason||'当前没有可核验的已确认策略点位。'));
+          }else if(i===7){
+            const result=research.analyzeStrategyRedundancy(input);
+            output.append(node('p',result.reason),table(['策略 / 版本对','同向重合 / 并集','Jaccard','反向冲突','各自独有'],result.pairs.map(row=>[row.left.strategy+' '+row.left.strategyVersion+' / '+row.right.strategy+' '+row.right.strategyVersion,row.overlap+' / '+row.union,fmt(row.jaccard),row.conflicts,row.leftOnly+' / '+row.rightOnly])));
+            if(!result.pairs.length)output.append(node('p','至少需要两个明确策略版本的已确认点位；不会生成替代信号。'));
+          }else if(i===8){
+            button.disabled=true;const result=await research.evaluateCounterfactual({...input,horizon:Number(horizon.value),costBps:cost.value.trim()===''?null:Number(cost.value)});
+            if(view.revision!==revision||!host.isConnected||view.options.isCurrent?.()===false)return;
+            output.replaceChildren(node('p',result.reason));
+            if(result.dataHash)output.append(node('p','快照 SHA256 '+result.dataHash+' · 配置 SHA256 '+result.configurationHash));
+            output.append(table(['点位','状态 / 原因','不交易 %','信号毛 / 净 %'],result.rows.slice(-100).map(row=>[link(row.pointId),row.status+' / '+(row.reason||'仅收盘情景，无实际成交假设'),fmt(row.noTradeReturnPct),fmt(row.returnPct)+' / '+fmt(row.netReturnPct)])));
+            if(result.evidencePack){const download=node('button','导出可重放快照 JSON（含当前标的数据）');download.type='button';download.onclick=()=>{const url=URL.createObjectURL(new Blob([JSON.stringify(result,null,2)],{type:'application/json'})),a=node('a');a.href=url;a.download='counterfactual-'+result.dataHash.slice(0,12)+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);};output.append(download);}
+          }else if(i===9){
+            const result=research.auditChartLayout(input);output.append(node('p',result.dataStatus+' · '+result.reason),node('p','越界点位 '+result.outsideMarkers.length+' · 越界文字 '+result.outsideLabels.length+' · 可见标签重叠 '+result.overlaps.length+' · 未关联解释 '+result.unlinkedIds.length));
+            output.append(node('pre',JSON.stringify({outsideMarkers:result.outsideMarkers,outsideLabels:result.outsideLabels,overlaps:result.overlaps,unlinkedIds:result.unlinkedIds},null,2)));
           }
         }catch(error){if(view.revision===revision)output.textContent=error instanceof SyntaxError?'参数组 JSON 无效；没有改变当前策略。':error.message||'研究失败';}
         finally{button.disabled=false;}

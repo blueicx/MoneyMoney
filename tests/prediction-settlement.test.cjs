@@ -176,3 +176,11 @@ test('settlement rule revision URLs are filtered to safe HTTP sources', () => {
   ]);
   assert.deepEqual(timeline.ruleRevisions.map(row => row.sourceUrl), [null, 'https://example.org/rules']);
 });
+test('settlement audit exposes contradictory outcomes and observed waiting time without inventing withdrawal availability',()=>{
+ const evidence=normalizeSettlementEvidence({platform:'Polymarket',marketId:'12345',capturedAt:'2026-09-26T12:00:00Z',payload:{closed:true,status:'closed',result:'YES',close_time:'2026-09-25T12:00:00Z',conditionId:'0x'+'1'.repeat(64),rules_primary:'Original rule'}});
+ const current={...evidence,status:'settled',result:'NO',announcedResult:'YES',settlementAt:'2026-09-26T00:00:00Z'};
+ const timeline=buildSettlementTimeline(current,[{...evidence,status:'settled',result:'YES',capturedAt:'2026-09-25T18:00:00Z'}]);
+ assert.equal(timeline.audit.conflicts.length,1);assert.equal(timeline.audit.resultRevisions.length,1);assert.equal(timeline.audit.observedWaitMs,43200000);assert.equal(timeline.audit.capitalReleaseAt,null);
+ assert.match(timeline.audit.reason,/资金|提现/);
+ const unknown=buildSettlementTimeline({...current,closeAt:null,settlementAt:null},[]);assert.equal(unknown.audit.observedWaitMs,null);
+});

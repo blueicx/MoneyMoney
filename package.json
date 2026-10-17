@@ -37,6 +37,7 @@
     "smoke:live-kline": "node scripts/live-kline-smoke.cjs",
     "smoke:automatic-comparison": "node scripts/automatic-comparison-smoke.cjs",
     "state:backup": "node scripts/state-backup.cjs",
+    "drill:reliability": "node scripts/reliability-drill.cjs",
     "state:restore": "node scripts/state-backup.cjs restore"
   },
   "keywords": [

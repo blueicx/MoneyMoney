@@ -1,4 +1,13 @@
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs');
+test('financial revision history keeps exact field, period, unit and publication evidence without future revisions',()=>{
+ const {buildCapitalHistory}=require('../dist/features/stock-capital-history');
+ const row={start:'2025-01-01',end:'2025-12-31',filed:'2026-02-15',form:'10-K',fp:'FY',val:100,accn:'original'};
+ const facts={facts:{'us-gaap':{NetCashProvidedByUsedInOperatingActivities:{units:{USD:[row,{...row,val:90,filed:'2026-04-01',form:'10-K/A',accn:'amended'},{...row,val:95,filed:'2026-06-01',accn:'future'}]}}}}};
+ const early=buildCapitalHistory(facts,'2026-03-01T00:00:00Z'),late=buildCapitalHistory(facts,'2026-05-01T00:00:00Z');
+ assert.deepEqual(early.revisions,[]);assert.equal(late.revisions.length,1);
+ const r=late.revisions[0];assert.equal(r.before.value,100);assert.equal(r.after.value,90);assert.equal(r.unit,'USD');assert.equal(r.after.accession,'amended');assert.equal(r.change,-10);assert.equal(r.reason,'同字段、单位和报告区间的后续披露数值变化，不推断重述原因');
+ assert.equal(late.points[0].operatingCashFlowUsd.value,90);
+});
 test('capital history preserves exact report windows, field units, evidence and missing values',()=>{
  assert.ok(fs.existsSync('dist/features/stock-capital-history.js'),'same-period capital history module missing');
  const {buildCapitalHistory,compareCapitalHistory}=require('../dist/features/stock-capital-history');
@@ -18,6 +27,13 @@ test('capital conflicts and incomplete debt components are not averaged or treat
  assert.ok(fs.existsSync('dist/features/stock-capital-history.js'),'capital source arbitration missing');
  const {buildCapitalHistory}=require('../dist/features/stock-capital-history');const row={start:'2025-01-01',end:'2025-12-31',filed:'2026-02-15',form:'10-K',fp:'FY',val:5};const facts={facts:{'us-gaap':{NetCashProvidedByUsedInOperatingActivities:{units:{USD:[row,{...row,val:6}]}},LongTermDebtCurrent:{units:{USD:[{...row,start:undefined}]}}}}};
  const result=buildCapitalHistory(facts,'2026-03-01T00:00:00Z');assert.equal(result.points[0].operatingCashFlowUsd.value,null);assert.match(result.points[0].operatingCashFlowUsd.reason,/冲突/);assert.equal(result.points[0].debtUsd.value,null);
+});
+test('capital revision evidence is readable in the existing stock workspace without interpreting filing strings as markup',()=>{
+ const {JSDOM}=require('jsdom'),vm=require('node:vm'),source=require('./helpers/dashboard-source.cjs').readDashboardSource(),render=source.match(/function renderStockCapitalHistory\(host, data\) \{[\s\S]*?\n\}/)[0];
+ const dom=new JSDOM('<div id="host"></div>');
+ try{vm.runInNewContext(render+';renderStockCapitalHistory(document.getElementById("host"),data);',{document:dom.window.document,window:dom.window,data:{symbol:'AAPL',capitalHistory:{points:[],revisions:[{tag:'cashflow',unit:'USD',periodStart:'2025-01-01',periodEnd:'2025-12-31',before:{value:100,filed:'2026-02-15',accession:'old'},after:{value:90,filed:'2026-04-01',accession:'new'},change:-10,reason:'<img src=x>'}]}},stockEscapeHtml:v=>String(v??'').replace(/</g,'&lt;')});
+ assert.ok(dom.window.document.querySelector('[data-capital-revisions]'));assert.match(dom.window.document.body.textContent,/100.*90/);assert.equal(dom.window.document.querySelector('img'),null);
+ }finally{dom.window.close();}
 });
 
 test('capital UI renders missing fields explicitly and peer comparison stays within the selected stock workspace',()=>{

@@ -504,7 +504,8 @@ async function main() {
     await row.locator('summary').click();
     const lookback=row.locator('[data-parameter="lookback"]');
     await lookback.fill('10');await lookback.press('Tab');
-    assert.equal(await page.evaluate(()=>JSON.parse(localStorage.getItem(stockChartStorageKey())).strategyParameters.donchianBreakout.lookback),10);
+    const savedChartPreference=await page.evaluate(()=>({key:stockChartStorageKey(),value:JSON.parse(localStorage.getItem(stockChartStorageKey()))}));
+    assert.equal(savedChartPreference.value?.strategyParameters?.donchianBreakout?.lookback,10,JSON.stringify(savedChartPreference));
     await lookback.fill('0');await lookback.press('Tab');
     assert.equal(await lookback.inputValue(),'10','invalid parameters must not overwrite a valid saved experiment configuration');
     assert.match(await row.textContent(),/参数/);
@@ -536,6 +537,10 @@ async function main() {
     await page.setViewportSize({width:1440,height:900});
     const researchPanel=page.locator('#stock-chart-research [data-chart-research]');
     await researchPanel.locator(':scope > summary').click();
+    assert.equal(await page.evaluate(()=>typeof window.MoneyWorkspaceHistory?.install),'function','navigation helper ships inside existing startup, not a new unrelated request');
+    await researchPanel.locator('[data-research-diagnostics]').click();assert.match(await researchPanel.innerText(),/Provider|Provider来源/);
+    await researchPanel.locator('[data-research-layout]').click();assert.match(await researchPanel.innerText(),/越界点位 0/);assert.match(await researchPanel.innerText(),/越界文字 0/);
+    await researchPanel.locator('[data-research-audit]').click();assert.match(await researchPanel.innerText(),/未修复或覆盖/);
     const savedResearchSettings=await page.evaluate(()=>JSON.stringify(stockChartOverlayConfig));
     // The existing provider fixture deliberately has fewer than 60 bars: verify its real empty reason first.
     await researchPanel.locator('[data-research-lab]').click();
@@ -544,7 +549,7 @@ async function main() {
       const bars=Array.from({length:250},(_,i)=>{const close=100+i*.03+Math.sin(i/8)*4;return {time:Date.UTC(2025,0,1)+i*86400000,open:close,close,high:close+1,low:close-1,volume:100,closed:true};});
       // Explicit isolated UI fixture, not a live provider, portfolio result or production order.
       MoneyChartResearchControls.render({host:document.getElementById('stock-chart-research'),key:'browser-parameter-research-fixture',
-        getInput:()=>({market:'stocks',instrument:'stock:us:AAPL',timeframe:'1d',bars,points:[],source:'Browser research acceptance fixture, not live'}),
+        getInput:()=>({market:'stocks',instrument:'stock:us:AAPL',timeframe:'1d',bars,points:[{id:'browser-confirmed',market:'stocks',instrument:'stock:us:AAPL',timeframe:'1d',time:bars[50].time,price:bars[50].close,side:'buy',status:'confirmed',strategy:'maCross',strategyVersion:'browser-fixture-v1',outcomes:MoneyChartAnalysis.strategyPointOutcomes(bars,50,bars[50].close,'buy',{status:'confirmed',costBps:10})}],source:'Browser research acceptance fixture, not live'}),
         isCurrent:()=>activeMarketScope==='stocks'&&activeWorkspaceId==='stock-quotes'});
     });
     await researchPanel.locator('[data-research-lab]').click();
@@ -563,6 +568,12 @@ async function main() {
     assert.match(await researchPanel.innerText(),/不生成综合概率/);
     await researchPanel.locator('[data-research-timeframes]').click();
     assert.match(await researchPanel.innerText(),/不额外请求行情/);
+    await researchPanel.locator('[data-research-regimes]').click();assert.match(await researchPanel.innerText(),/browser-fixture-v1/);
+    await researchPanel.locator('[data-research-redundancy]').click();assert.match(await researchPanel.innerText(),/不证明独立性/);
+    await researchPanel.locator('[data-research-counterfactual]').click();await page.waitForFunction(()=>/快照 SHA256/.test(document.querySelector('#stock-chart-research [data-research-output]')?.textContent||''));
+    const [counterfactualDownload]=await Promise.all([page.waitForEvent('download'),researchPanel.getByRole('button',{name:'导出可重放快照 JSON（含当前标的数据）'}).click()]);
+    const counterfactual=JSON.parse(fs.readFileSync(await counterfactualDownload.path(),'utf8'));assert.equal(counterfactual.orderChanges,0);assert.equal(counterfactual.modelCalls,0);assert.equal(counterfactual.rows[0].noTradeReturnPct,0);
+    const reproducedHash=await page.evaluate(async pack=>(await MoneyChartResearch.evaluateCounterfactual({...pack.configuration,bars:pack.bars,points:pack.points})).configurationHash,counterfactual.evidencePack);assert.equal(reproducedHash,counterfactual.configurationHash);
     for(const theme of ['light','dark','money']){
       await page.evaluate(theme=>document.documentElement.dataset.theme=theme,theme);
       await page.setViewportSize({width:390,height:844});
@@ -940,6 +951,15 @@ async function main() {
     await page.waitForFunction(() => document.querySelector('#source-slo-panel')?.textContent?.includes('接口成功率与实际数据覆盖'), null, { timeout: 10_000 });
     await page.waitForFunction(() => document.querySelector('#source-slo-panel')?.textContent?.includes('连续空结果 2'), null, { timeout: 15_000 });
     assert.match(await page.locator('#source-slo-panel').innerText(), /连续空结果 2/);
+    await page.evaluate(()=>{setMarketScope('stocks',{openTab:false});openWorkspace('stock-quotes');});
+    await page.waitForFunction(()=>history.state?.mmWorkspace?.workspace==='stock-quotes');
+    await page.evaluate(()=>openWorkspace('events'));
+    await page.waitForFunction(()=>history.state?.mmWorkspace?.workspace==='events');
+    await page.goBack();
+    await page.waitForFunction(()=>activeMarketScope==='stocks'&&activeWorkspaceId==='stock-quotes');
+    await page.goForward();
+    await page.waitForFunction(()=>activeMarketScope==='stocks'&&activeWorkspaceId==='events');
+    assert.equal(await page.evaluate(()=>!!window.mmPreferenceJournal),true,'owner preference history is installed after authentication');
     await page.setViewportSize({ width: 390, height: 844 });
     assert.equal(await page.locator('#center-workspace').isVisible(), true);
     assert.deepEqual(pageErrors, []);

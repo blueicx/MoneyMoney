@@ -59,7 +59,17 @@ export function compareSettlementRules(evidence:SettlementEvidence,history:Settl
   }
   return pairs.slice(-50);
 }
-export function buildSettlementTimeline(evidence:SettlementEvidence,history:SettlementEvidence[]=[]):{stages:SettlementTimelineStage[];ruleRevisions:Array<{capturedAt:string|null;hash:string|null;sourceUrl:string|null}>;ruleComparisons:RuleComparison[]} {
+export function auditSettlementEvidence(evidence:SettlementEvidence,history:SettlementEvidence[]=[]){
+  const conflicts:Array<{reason:string;evidenceRefs:string[]}>=[ ];
+  if(evidence.announcedResult&&evidence.result&&evidence.announcedResult!==evidence.result)conflicts.push({reason:'同一快照的平台公布结果与最终结算结果不一致；需要人工核对官方证据',evidenceRefs:[evidence.evidenceHash]});
+  const at=Date.parse(evidence.capturedAt),eligible=history.filter(row=>row.market==='prediction'&&row.instrument===evidence.instrument&&row.platform===evidence.platform&&row.marketId===evidence.marketId&&Number.isFinite(Date.parse(row.capturedAt))&&Date.parse(row.capturedAt)<at&&row.status==='settled'&&row.result).sort((a,b)=>Date.parse(a.capturedAt)-Date.parse(b.capturedAt)),prior=eligible.at(-1);
+  const resultRevisions=prior&&evidence.status==='settled'&&evidence.result&&prior.result!==evidence.result?[{before:prior.result,after:evidence.result,beforeAt:prior.capturedAt,afterAt:evidence.capturedAt,evidenceRefs:[prior.evidenceHash,evidence.evidenceHash],reason:'同一平台标的的已保存最终结果发生变化，保留旧值，不推断修订或争议原因'}]:[];
+  const close=Date.parse(evidence.closeAt||''),settled=Date.parse(evidence.settlementAt||''),end=evidence.status==='settled'?settled:at;
+  const observedWaitMs=Number.isFinite(close)&&Number.isFinite(end)&&Number.isFinite(at)&&end>=close&&end<=at?end-close:null;
+  return {conflicts,resultRevisions,observedWaitMs,capitalReleaseAt:null,
+    reason:'等待时长只按来源截止/结算时间或本次抓取时间计算；没有可核验结算时间则保持未知。结算不代表资金已可提现，未计算实际账户资金占用或套利收益。',executionEnabled:false};
+}
+export function buildSettlementTimeline(evidence:SettlementEvidence,history:SettlementEvidence[]=[]):{stages:SettlementTimelineStage[];ruleRevisions:Array<{capturedAt:string|null;hash:string|null;sourceUrl:string|null}>;ruleComparisons:RuleComparison[];audit:ReturnType<typeof auditSettlementEvidence>} {
   const time=(value:string|null)=>{if(!value)return null;const parsed=Date.parse(value);return Number.isFinite(parsed)?new Date(parsed).toISOString():null;};
   const sourceUrl=(value:string|null)=>safeHttpUrl(value);
   const closeAt=time(evidence.closeAt);
@@ -75,7 +85,7 @@ export function buildSettlementTimeline(evidence:SettlementEvidence,history:Sett
     {key:'final',label:'最终结算',status:finalStatus,at:finalAt,timeKind:finalAt?'source':'unknown',detail:finalStatus==='settled'?`来源核验最终结果 ${evidence.result}`:finalStatus==='disputed'?'结果仍处于争议，不能视为最终结算':finalStatus==='pending'?'市场仍开放，尚无最终结算':finalStatus==='unavailable'?'结算来源不可用或平台不支持':evidence.status==='closed'?'市场已关闭，但最终结果未核验':'最终结果或结算时间未知',sourceUrl:sourceUrl(evidence.determinationSourceUrl)||sourceUrl(evidence.resolutionSourceUrl)||sourceUrl(evidence.sourceUrl),evidenceHash:evidence.evidenceHash},
   ];
   const ruleRevisions=history.filter(item=>item.instrument===evidence.instrument&&item.platform===evidence.platform&&item.marketId===evidence.marketId&&Date.parse(item.capturedAt)<=Date.parse(evidence.capturedAt)).map(item=>({capturedAt:time(item.capturedAt),hash:item.rulesHash||null,sourceUrl:safeHttpUrl(item.resolutionSourceUrl)||safeHttpUrl(item.sourceUrl)}));
-  return {stages,ruleRevisions,ruleComparisons:compareSettlementRules(evidence,history)};
+  return {stages,ruleRevisions,ruleComparisons:compareSettlementRules(evidence,history),audit:auditSettlementEvidence(evidence,history)};
 }
 
 interface StateDocumentStore {

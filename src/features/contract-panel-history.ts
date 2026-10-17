@@ -1,5 +1,24 @@
 import { contractIdentity } from './contract-research';
 
+/** Observed source revisions, not a reconstruction of exchange effective dates. */
+export function compareArchivedContractRules(input:{instrument:string;rows:any[];asOf?:string}){
+  const identity=contractIdentity(input.instrument),source='https://api.gateio.ws/api/v4/'+(identity.kind==='perpetual'?'futures':'delivery')+'/usdt/contracts/'+identity.contract;
+  const cutoff=input.asOf?Date.parse(input.asOf):Date.now();if(!Number.isFinite(cutoff))throw Error('合约规则时点无效');
+  const fields=['multiplier','fundingIntervalSeconds','settlementCurrency','inDelisting','status'],rows:any[]=[];
+  for(const row of (Array.isArray(input.rows)?input.rows:[]).slice(-2000)){
+    if(row?.market!=='crypto'||row.instrument!==input.instrument||row.source!==source||!Number.isFinite(Date.parse(row.retrievedAt))||Date.parse(row.retrievedAt)>cutoff||typeof row.rulesJson!=='string'||row.rulesJson.length>2048)continue;
+    try{const rules=JSON.parse(row.rulesJson);if(!rules||rules.settlementCurrency!=='USDT'||fields.some(key=>rules[key]!=null&&(key==='multiplier'||key==='fundingIntervalSeconds')&&(!Number.isFinite(rules[key])||rules[key]<=0))||rules.inDelisting!=null&&typeof rules.inDelisting!=='boolean'||rules.status!=null&&typeof rules.status!=='string')continue;rows.push({...row,rules});}catch{/* Legacy/malformed metadata remains unverified. */}
+  }
+  rows.sort((a,b)=>Date.parse(a.retrievedAt)-Date.parse(b.retrievedAt));
+  const changes=rows.slice(1).flatMap((after,index)=>{
+    const before=rows[index];if(Date.parse(after.retrievedAt)<=Date.parse(before.retrievedAt))return [];
+    const changed=fields.flatMap(field=>before.rules[field]!=null&&after.rules[field]!=null&&before.rules[field]!==after.rules[field]?[{field,before:before.rules[field],after:after.rules[field]}]:[]);
+    return changed.length?[{beforeAt:before.retrievedAt,afterAt:after.retrievedAt,effectiveAt:null,fields:changed,evidenceRefs:[before.evidenceRef,after.evidenceRef].filter(Boolean)}]:[];
+  });
+  return {dataStatus:rows.length>=2?'historical':rows.length?'partial':'unavailable',changes,records:rows.length,source,
+    reason:rows.length?'仅同合约同来源抓取快照的已知规则字段变化；未知字段不视为变更，观察时间不是生效时间，不据此重算实际历史费用。':'没有可核验的已归档规则元数据；旧记录保留未知，不回填猜测规则。'};
+}
+
 /** Derive only sampled observations; do not invent missing intervals or source time. */
 export async function loadContractPanelHistory(detail:any,selected:string[],read:()=>Promise<any>) {
   let history;
@@ -27,7 +46,7 @@ export function withContractPanelHistory(detail:any,history:any,selected:string[
       dataStatus:status,
       reason:(history.reason||'同来源归档快照')+'；'+points.length+' 个有效点；来源：'+(selectedSource||'未知')+(unitMismatches?'；忽略 '+unitMismatches+' 条单位缺失或不匹配记录':'')+(sourceSwitch?'；检测到来源切换，仅显示最新同源区间':'')+'；源时间未提供时仅按抓取时间对齐，缺口不插值'+(points.length<2?'；不足两个点，不能判定趋势':'')};
   }
-  return {...detail,series};
+  return {...detail,series,ruleHistory:compareArchivedContractRules({instrument:detail.instrument,rows:history.rows||[],asOf:detail.retrievedAt})};
 }
 
 /** Reconcile explicit paper-ledger costs with same-contract observations; rates are not treated as paid funding cash flows. */

@@ -10,6 +10,7 @@ export interface ActionCenterItem {
 }
 export interface ActionCenterState { read: boolean; pinned: boolean; snoozedUntil: string | null; updatedAt: string }
 export interface ActionCenterHistoryEntry {
+  undoOf?:string;
   id: string; itemId: string; title?: string; market: MarketId; instrument?: string;
   changes: Partial<Pick<ActionCenterState, 'read' | 'pinned' | 'snoozedUntil'>>;
   previous: ActionCenterState; next: ActionCenterState; updatedAt: string;
@@ -40,6 +41,20 @@ export class ActionCenterStore {
     const limit = Math.max(1, Math.min(500, Math.floor(Number(options.limit) || 100)));
     const rows = this.store.get<ActionCenterHistoryEntry[]>(`action-center:history:${owner}`) || [];
     return rows.filter(row => (!options.itemId || row.itemId === options.itemId) && (!options.market || row.market === options.market)).slice(-limit).reverse();
+  }
+  undo(owner:string,historyId:string,expectedUpdatedAt:string):ActionCenterState {
+    return this.store.transaction(()=>{
+      const key=`action-center:history:${owner}`,history=this.store.get<ActionCenterHistoryEntry[]>(key)||[],entry=history.find(row=>row.id===historyId),states=this.states(owner);
+      if(!entry||history.filter(row=>row.itemId===entry.itemId).at(-1)?.id!==entry.id)throw Error('存在后续修改或记录不可用，不能撤销');
+      assertMarketContext({market:entry.market,instrument:entry.instrument,workspace:'action-center'});
+      const current=states[entry.itemId],previous=entry.previous;
+      if(!current||current.updatedAt!==expectedUpdatedAt||JSON.stringify(current)!==JSON.stringify(entry.next))throw Error('处理状态版本已变化，请刷新后重试');
+      if(typeof previous?.read!=='boolean'||typeof previous?.pinned!=='boolean'||previous.snoozedUntil!==null&&!Number.isFinite(Date.parse(previous.snoozedUntil)))throw Error('旧状态不完整，不能猜测恢复');
+      const now=new Date().toISOString(),next={read:previous.read,pinned:previous.pinned,snoozedUntil:previous.snoozedUntil,updatedAt:now};
+      states[entry.itemId]=next;this.store.set(`action-center:states:${owner}`,states);
+      history.push({id:`ach_${Date.now().toString(36)}_${Math.random().toString(36).slice(2,8)}`,undoOf:entry.id,itemId:entry.itemId,title:entry.title,market:entry.market,instrument:entry.instrument,changes:{read:next.read,pinned:next.pinned,snoozedUntil:next.snoozedUntil},previous:current,next,updatedAt:now});
+      this.store.set(key,history.slice(-5000));this.store.appendAudit({id:'action-undo:'+history.at(-1)!.id,action:'action_center_undo',detail:JSON.stringify({id:entry.id,market:entry.market}),at:now});return next;
+    });
   }
 }
 export function buildActionCenter(input: ActionCenterItem[], options: { market?: MarketId; now?: string; states?: Record<string, ActionCenterState> } = {}) {

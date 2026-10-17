@@ -1,6 +1,6 @@
 import express from 'express';
 import type { AiRunnerDecisionRecord, AiRunnerPosition } from '../features/ai-paper-runner';
-import { reviewAiRunnerDecisions } from '../features/ai-runner-diagnostics';
+import { reviewAiRunnerDecisions, buildSavedDecisionComparison } from '../features/ai-runner-diagnostics';
 interface Dependencies {
   runner(id:string):{id:string;market:string}|null;
   history(id:string,cursor:string|undefined,limit:number):{data:AiRunnerDecisionRecord[];nextCursor?:string|null};
@@ -24,7 +24,7 @@ export function createAiRunnerDiagnosticsRouter(deps:Dependencies) {
     if(!decision){res.status(404).json({success:false,reason:'当前跑单的保留历史中没有该决策'});return;}
     const signal=deps.signal(decision.id),snapshot=decision.snapshotHash&&/^[a-f0-9]{64}$/.test(decision.snapshotHash)?deps.snapshot('rs_'+decision.snapshotHash):null;
     const linked=Boolean(signal&&snapshot&&signal.runnerId===runner.id&&signal.decision.runnerId===runner.id&&signal.decision.id===decision.id&&signal.decision.snapshotHash===decision.snapshotHash&&signal.snapshotIds.includes(snapshot.id)&&snapshot.hash===decision.snapshotHash&&snapshot.market===runner.market&&snapshot.payload.market===decision.market&&snapshot.payload.instrument===decision.instrument);
-    res.json({success:true,market:runner.market,instrument:decision.instrument,source:'已核验的归档执行证据',updatedAt:new Date().toISOString(),dataStatus:linked?'historical':'unavailable',reason:linked?'只读回放原始记录，不调用模型、不提交订单':'未关联或归档证据无法核验；不重建未知快照',readOnly:true,modelCalls:0,data:linked?{decision:signal!.decision,snapshot}:null,evidenceRefs:linked?[snapshot!.id]:[]});
+    res.json({success:true,market:runner.market,instrument:decision.instrument,source:'已核验的归档执行证据',updatedAt:new Date().toISOString(),dataStatus:linked?'historical':'unavailable',reason:linked?'只读回放原始记录，不调用模型、不提交订单':'未关联或归档证据无法核验；不重建未知快照',readOnly:true,modelCalls:0,data:linked?{decision:signal!.decision,snapshot,comparison:buildSavedDecisionComparison(signal!.decision,snapshot!)}:null,evidenceRefs:linked?[snapshot!.id]:[]});
   });
   return router;
 }

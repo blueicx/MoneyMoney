@@ -68,6 +68,7 @@ export interface OptionPayoffLeg {
 }
 
 export interface OptionPayoffAnalysis {
+  quoteAudit: {quoteSkewMs:number;maxAgeMs:number;spreadCrossingVsMidUsd:number;executable:false;reason:string;legs:Array<{instrument:string;quoteTime:string;ageMs:number;bid:number;ask:number;referencePrice:number;contracts:number;multiplier:number}>};
   netPremiumUsd: number;
   maxLossUsd: number | null;
   maxGainUsd: number | null;
@@ -149,7 +150,13 @@ export function calculateOptionPayoff(input: { spot: number; multiplier: number;
   const samplePrices = [...new Set([spot * 0.5, spot * 0.8, spot, spot * 1.2, spot * 1.5, ...strikes].filter(price => Number.isFinite(price) && price >= 0))].sort((a, b) => a - b);
   const curve = samplePrices.map(underlyingPrice => ({ underlyingPrice: Number(underlyingPrice.toFixed(4)), pnlUsd: Number(pnlAt(underlyingPrice).toFixed(2)) }));
   const netPremiumUsd = legs.reduce((sum, leg) => sum - premiumPerUnit(leg) * scale(leg), 0);
+  const times=legs.map(leg=>Date.parse(leg.row.quoteTime!));
+  const quoteAudit={quoteSkewMs:Math.max(...times)-Math.min(...times),maxAgeMs:Math.max(0,...times.map(time=>nowMs-time)),
+    spreadCrossingVsMidUsd:legs.reduce((sum,leg)=>sum+(leg.row.askPrice-leg.row.bidPrice)/2*scale(leg),0),executable:false as const,
+    reason:'逐腿参考报价不保证同步或同时成交；价差成本为相对中价的双边跨价估算，不含退出、手续费或额外滑点。缺少组合订单簿与可成交数量证据，不声明可执行报价。',
+    legs:legs.map(leg=>({instrument:leg.row.instrumentName,quoteTime:leg.row.quoteTime!,ageMs:Math.max(0,nowMs-Date.parse(leg.row.quoteTime!)),bid:leg.row.bidPrice,ask:leg.row.askPrice,referencePrice:leg.action==='buy'?leg.row.askPrice:leg.row.bidPrice,contracts:leg.contracts,multiplier}))};
   return {
+    quoteAudit,
     netPremiumUsd: Number(netPremiumUsd.toFixed(2)),
     maxLossUsd: unboundedLoss ? null : Number(Math.max(0, -minPnl).toFixed(2)),
     maxGainUsd: unboundedGain ? null : Number(Math.max(0, maxPnl).toFixed(2)),

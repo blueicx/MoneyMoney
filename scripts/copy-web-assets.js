@@ -124,7 +124,7 @@ html = html.replace(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi, (tag, attributes,
   const src = attributes.match(/\bsrc\s*=\s*["']([^"']+)["']/i)?.[1];
   if (isDashboardRuntime) {
     collectingDashboardStartup = true;
-    dashboardStartupParts.push({ name: 'dashboard-startup-runtime', code: splitWorkspaces(code) });
+    dashboardStartupParts.push({ name: 'dashboard-startup-runtime', code: fs.readFileSync(path.join(source,'workspace-history.js'),'utf8')+'\n'+splitWorkspaces(code) });
     return dashboardStartupPlaceholder;
   }
   if (collectingDashboardStartup) {
