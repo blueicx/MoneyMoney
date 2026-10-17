@@ -64,4 +64,21 @@ git diff --check
 
 独占测量：CPU 4倍降速、80ms网络延迟/750kbps，每视口冷/热各3次。1440宽度首屏/图表冷加载中位数1913/2875ms，热加载462/777ms；390宽度冷加载1605/3233ms，热加载490/785ms。热加载脚本传输为0，绝对预算通过；本轮没有配对基线，不声称新增提速百分比。
 
-生产发布结果另行记录；此实现记录本身不表示已发布。发布仅替换dist并重启 `moneymoney.service`，核对运行配置指纹、版本、资源Hash与正式域名，保留旧产物及用户数据。
+## 生产发布证据
+
+运行提交 `f3612fab8bfdbe968d93fe926137c39d2443070d` 已推送并部署，正式域名只读Chromium巡检通过：四市场、SNDK、登录/访客边界、K线与手机布局，页面错误为空。新增私人历史和记录搜索均拒绝访客（403）。
+
+28个公网静态资源逐一SHA256匹配，TLS正常；远端server/index/manifest与本机构建一致：
+
+| 产物 | SHA256 |
+|---|---|
+| 发布压缩包 | `7cdd086e172f6cdbd96dec45a32b4eb2ac6b1e74c59658e7d232f0d5a173b096` |
+| server.js | `e9842c20657f8ccfaca8cf94792f009060c5f6994cc8b6587905612ce0571b34` |
+| index.html | `3e705a7d3517d1b1d6c81bc905f5d05e15a2f3ab2013927904f6feda0ff1e1e6` |
+| asset-manifest.json | `ebbb8bc19541803e742325900c118e1ed9b2206a71a19898dd05dfdb6e664ff2` |
+
+仅重启 `moneymoney.service`，健康及版本检查通过。10个现有AI跑单的发布前/后只读配置指纹完全一致，未调用真实模型、发送测试通知或创建生产订单。
+
+旧版 `fc388fd` 保留于 `/opt/moneymoney/backups/dist-pre-f3612fa-20261017-research-ops` 及 `/opt/moneymoney/dist.rollback-f3612fa-20261017-research-ops`；两处server哈希均为 `0bc6d1ffb6cdad2ae0d1cf4946e4af89acb187102be6cf31a25b4d5541b68a1c`。运行包包含本提交39项隔离演练报告，明确标注Windows构建夹具，不宣称Linux生产故障注入。
+
+用户数据库、数据湖和文件未清理或加入提交；本机原有未跟踪 `data/research.db` SHA256始终为 `27fd475e523568daa4cdcabf3146917023335a62affe00429babd721b3b79fd1`。后续只更新本发布记录的文档提交无需重建运行包。
