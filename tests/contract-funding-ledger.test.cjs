@@ -7,6 +7,9 @@ const settlement=(overrides={})=>({id:'fund-1',accountId:'main',market:'crypto',
 test('holding-cost UI never relabels USD ledger fees as USDT funding cash',()=>{
  const ui=require('node:fs').readFileSync('src/web/public/contracts-workspace.js','utf8');assert.ok(ui.includes("number(l.feeUsd))+' USD ·"));assert.ok(ui.includes("number(l.slippageUsd))+' USD ·"));assert.ok(ui.includes('不将USD费用与USDT资金现金流直接相加'));
 });
+test('holding-cost UI includes explicit price attribution and linked order IDs rather than inferred net returns',()=>{
+ const ui=require('node:fs').readFileSync('src/web/public/contracts-workspace.js','utf8');assert.match(ui,/data-contract-attribution/);assert.match(ui,/recordedPricePnlUsd/);assert.match(ui,/priceOrderIds/);assert.match(ui,/unlinkedAccountOrders/);
+});
 test('actual funding uses explicit account cash flows, deduplicates IDs, and keeps assumptions separate',()=>{
  const records=[settlement(),settlement(),settlement({id:'fund-2',amount:1,settledAt:'2026-10-12T16:00:00Z'}),settlement({id:'other',accountId:'ai-runner:other',amount:-90})];
  const result=reviewContractPositionCosts({...base,fundingSettlements:records});

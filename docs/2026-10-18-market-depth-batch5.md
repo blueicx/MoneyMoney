@@ -20,3 +20,10 @@
 - CPU4倍、80ms/750kbps、桌面/手机冷暖各3次：桌面冷中位数可操作1702ms/图表2626ms，暖338ms/626ms；手机冷1525ms/2929ms，暖309ms/695ms，暖脚本传输0字节。绝对预算通过，没有同环境配对基线，不宣称20%提速。
 - 浏览器为明确夹具，只证明交互，不证明真实历史覆盖完整。没有新来源时仍显示未知/不可用，不创建生产模型调用、订单或验收通知，不改变10个既有跑单配置。
 - 24、Telegram、研究会话完整恢复、性能20%与其余部分继续沿总清单执行，不因本批交付改为全部完成。
+
+## 已发布证据
+
+- GitHub分支 `codex/research-closure-all` 已推送 `ee238d11fb7ed379238e993260ecebc8d3ba8cdf`。从该提交单独导出源码并构建，未包含下一批未提交文件、数据库或环境配置；导出产物再次通过Web/认证/合约/四市场浏览器冒烟。
+- 发布包 SHA256 `0bcfc551406f290b5d453e65eb119c8ac4fb7714f12e0d7f89ec9e7db77b7a7b`，远端server `35fa1f8ae95f4ab40ab7307083d590facc91ac15f7c3290d6ad09790d87dbb6f`、index `37ffbec0d24739efc6d319e5fa39adcc8e48a124262955ec0bdf79783ba4ac7f` 一致。
+- 正式域名版本为上述完整提交，28个资源Hash逐一匹配，四市场/SNDK只读生产巡检通过。仅重启 `moneymoney.service`，服务active，live健康正常。重启初始两次连接拒绝后健康检查成功，不将启动等待当故障隐去。
+- 回滚目录 `/opt/moneymoney/dist.rollback-ee238d1-20261018-depth5`、备份 `/opt/moneymoney/backups/dist-pre-ee238d1-20261018-depth5` 保留。根磁盘45%。前后10个跑单配置指纹均为 `5125162b35c9893e4a9ac7d11c40eeaca7297bd95d7434d6bec70712aa144181`。

@@ -212,7 +212,7 @@ async function main() {
       const originalFetch = window.fetch;
       let actionRequest = null;
       const fixture = { success: true, dataStatus: 'partial', reason: '浏览器夹具', audit: { checkedAt: '2026-10-12T00:00:00Z', stuckCount: 1 }, data: {
-        total: 2, waiting: 1, published: 1, revised: 1, unavailable: 1, failedDeliveries: 1, bySource: { BLS: 1 }, stuckCountdowns: [],
+        total: 2, waiting: 1, published: 1, revised: 1, unavailable: 1, failedDeliveries: 1, bySource: { BLS: 1 }, stuckCountdowns: [],supersededWaiting:1,slo:{sampleCount:2,missingOrInvalidTiming:1,publicationToRetrievalMs:{p95:180000},retrievalToDeliveryMs:{p95:60000},reason:'旧记录不回填'},
         recent: [
           { id: 'published-row', actionRef: 'a'.repeat(32), title: 'CPI actual', kind: 'macro', eventDate: '2026-10-12T00:00:00Z', deliveryStatus: 'sent', resultStatus: 'revised', actual: '3.1%', source: 'BLS', publishedAt: '2026-10-12T00:00:00Z', retrievedAt: '2026-10-12T00:01:00Z', nextCheckAt: null, hasOriginalReminder: true, resultUrl: 'https://www.bls.gov/news.release/cpi.nr0.htm', evidenceRefs: ['https://www.bls.gov/news.release/cpi.nr0.htm'] },
           { id: 'failed-row', actionRef: 'b'.repeat(32), title: 'GDP result', kind: 'macro', eventDate: '2026-10-12T00:00:00Z', deliveryStatus: 'failed', resultStatus: 'unavailable', actual: null, source: 'BEA', publishedAt: null, retrievedAt: null, nextCheckAt: '2026-10-12T01:00:00Z', reason: '来源不可用', error: '重试夹具错误', hasOriginalReminder: false, resultUrl: null, evidenceRefs: [] },
@@ -229,6 +229,7 @@ async function main() {
       };
       try {
         await loadTelegramResultCoverage();
+        document.querySelector('[data-result-slo]').open=true;
         document.querySelector('[data-result-action="ack"]')?.click();
         for (let i = 0; i < 30 && !actionRequest; i++) await new Promise(resolve => setTimeout(resolve, 10));
         return { text: document.getElementById('telegram-result-coverage').innerText, html: document.getElementById('telegram-result-coverage').innerHTML, actionRequest };
@@ -238,6 +239,7 @@ async function main() {
     assert.match(inboxInteraction.text, /原提醒已关联/);
     assert.match(inboxInteraction.text, /原提醒未关联/);
     assert.match(inboxInteraction.text, /来源不可用/);
+    assert.match(inboxInteraction.text,/发布→抓取 P95 180\.0 秒/);assert.match(inboxInteraction.text,/抓取→发送 P95 60\.0 秒/);assert.match(inboxInteraction.text,/旧记录不回填/);
     assert.match(inboxInteraction.html, /target="_blank" rel="noopener noreferrer"/);
     assert.equal(inboxInteraction.actionRequest.body.action, 'ack');
     assert.match(inboxInteraction.actionRequest.pathname, /\/api\/telegram\/results\/a{32}\/action$/);

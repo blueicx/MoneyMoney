@@ -113,6 +113,7 @@ import { klinePageWindow, klinePageStatus, stockKlineChartInitialWindow } from '
 import { contractCapacity, compareContractSnapshots } from '../features/contract-comparison';
 import { compareAiRunnerReports } from '../features/ai-runner-comparison';
 import { formatTelegramComparisonSummary } from '../features/telegram-comparison-summary';
+import { formatTelegramRunnerWhy } from '../features/telegram-runner-why';
 import { createAiRunnerComparison, getAiRunnerComparison, validateAiRunnerComparison, validateScheduledAiRunnerComparison, buildAiRunnerComparisonSample, saveAiRunnerComparisonSample, listAiRunnerComparisonSamples, replayAiRunnerComparisonSample, type AiRunnerComparisonSample } from '../features/ai-runner-comparison-group';
 import { portfolioAttribution, aiRunnerPortfolioAttribution, aiRunnerSelectionAttribution } from '../features/portfolio-attribution';
 import { getFundingCarryRadar } from '../features/funding-carry';
@@ -5751,10 +5752,10 @@ export function getTelegramCommandHandlers(): Record<string, TelegramCommandHand
       const scope=telegramScopeForChat(chatId);if(!['stocks','options','crypto','prediction'].includes(scope))return '请先选择具体市场。';
       const runners=getAiRunners().filter(row=>diagnosticRunnerMarket(row)===scope&&(!args[0]||row.id===args[0])).slice(0,3);
       if(!runners.length)return '当前市场没有匹配跑单；不使用其他市场补位。';
-      return ['<b>为何未下单 · 已保存记录</b>',...runners.map(runner=>{
-        const result=reviewAiRunnerDecisions(listAiRunnerHistory(runner.id,undefined,5).data,runner.id,scope);
-        return escapeTelegramHtml(runner.title)+'\n'+(result.rows.length?result.rows.map(row=>`${escapeTelegramHtml(row.at)} · ${escapeTelegramHtml(row.instrument)} · ${escapeTelegramHtml(row.action)}\n${escapeTelegramHtml(row.reason)}\n数据 ${escapeTelegramHtml(row.dataGate.dataStatus)} · 模型 ${escapeTelegramHtml(row.model.status)}\n${escapeTelegramHtml(row.blockedChecks.join('；')||'未记录失败门控；不代表应当下单')}`).join('\n\n'):'尚无决策记录');
-      }),'仅查看已有记录，不调用模型、不改配置、不创建订单。'].join('\n\n');
+      const now=Date.now(),today=new Date(now).toISOString().slice(0,10);
+      return formatTelegramRunnerWhy(runners.map(runner=>({title:runner.title,mode:runner.mode||'rules',sharedQuota:Boolean(runner.comparisonControl),
+        callsToday:Array.isArray(runner.aiCalls)?runner.aiCalls.filter(call=>Number.isFinite(Date.parse(call.at))&&Date.parse(call.at)<=now&&new Date(call.at).toISOString().slice(0,10)===today).length:null,
+        report:reviewAiRunnerDecisions(listAiRunnerHistory(runner.id,undefined,5).data,runner.id,scope)})));
     },
     stocks: async ({ chatId }) => {
       const scope = telegramScopeForChat(chatId);
@@ -7484,7 +7485,7 @@ app.get('/api/telegram/results/coverage', (req, res) => {
     title: row.event.titleZh || row.event.title, kind: row.event.kind || row.event.market || 'unknown',
     eventDate: row.event.date, deliveryStatus: row.status, resultStatus: row.resultStatus || row.kind || 'unknown',
     actual: row.actual || null, source: row.resultSource || row.event.source || null, publishedAt: row.publishedAt || null,
-    retrievedAt: row.retrievedAt || null, nextCheckAt: Number.isFinite(Number(row.nextCheckAt)) ? new Date(Number(row.nextCheckAt)).toISOString() : null,
+    retrievedAt: row.retrievedAt || null, sentAt:row.sentAt||null, nextCheckAt: typeof row.nextCheckAt==='number'&&Number.isFinite(row.nextCheckAt)&&Math.abs(row.nextCheckAt)<=8.64e15 ? new Date(row.nextCheckAt).toISOString() : null,
     reason: row.reason || null, error: row.error || null,
     hasOriginalReminder: Number.isSafeInteger(row.originalMessageId),
     resultUrl: telegramEventResults.detail(row.chatId || '', row.id)?.resultUrl || null,

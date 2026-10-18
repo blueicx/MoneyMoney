@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 export interface EventRecord { id?: string; title: string; titleZh?: string; date: string; country?: string; impact?: string; actual?: string | null; forecast?: string | null; previous?: string | null; source?: string; retrievedAt?: string; kind?:'macro'|'earnings'|'research'|'funding'|'prediction';market?:string;instrument?:string;resourceId?:string;platform?:string;symbol?:string;reportPeriodEnd?:string|null; }
 export interface Result { actual: string | null; status: string; reason?: string; source?: string; url?: string; publishedAt?: string; retrievedAt?: string; previous?: string | null; evidenceRefs?:string[]; }
 interface Store { get<T>(key: string): T | null; set<T>(key: string, value: T): void; appendAudit?(input: { id: string; action: string; detail: string; at?: string }): void; acquireLease?(key: string, owner: string, now: number, ttl: number): boolean; refreshLease?(key: string, owner: string, now: number, ttl: number): boolean; releaseLease?(key: string, owner: string): void; }
-interface Delivery { id: string; event: EventRecord; text: string; status: 'pending' | 'sent' | 'failed' | 'acknowledged'; attempts: number; nextAttempt: number; error?: string; actual?: string; publishedAt?: string; retrievedAt?: string; resultSource?: string; resultUrl?: string; kind?: 'result' | 'revision' | 'waiting' | 'terminal'; originalMessageId?: number; messageId?: number; resultStatus?: string; reason?: string; nextCheckAt?: number | null; evidenceRefs?: string[]; controlRevision?: number; }
+interface Delivery { id: string; event: EventRecord; text: string; status: 'pending' | 'sent' | 'failed' | 'acknowledged'; attempts: number; nextAttempt: number; error?: string; actual?: string; publishedAt?: string; retrievedAt?: string; sentAt?:string; resultSource?: string; resultUrl?: string; kind?: 'result' | 'revision' | 'waiting' | 'terminal'; originalMessageId?: number; messageId?: number; resultStatus?: string; reason?: string; nextCheckAt?: number | null; evidenceRefs?: string[]; controlRevision?: number; }
 type CoverageDelivery = Delivery & { chatId?: string };
 export const TELEGRAM_RESULT_COVERAGE_AUDIT_KEY = 'telegram-result-coverage-audit-v1';
 /** Opaque, stable row reference; keeps private Telegram chat identifiers out of the browser. */
@@ -23,7 +23,15 @@ export function summarizeTelegramResultCoverage(rows: CoverageDelivery[], now = 
     if(seen.has(key)){duplicateDeliveries++;return false;}seen.add(key);return true;
   });
   const published = deliveries.filter(row => ['published', 'revised'].includes(String(row.resultStatus || '')) && hasEventActual(row.actual));
-  const waiting = deliveries.filter(row => !hasEventActual(row.actual) && ['pending', 'waiting'].includes(String(row.resultStatus || row.kind || '')));
+  const eventKey=(row:CoverageDelivery)=>JSON.stringify([row.chatId||null,identity(row.event)]);
+  const resolved=new Set(published.map(eventKey));
+  const allWaiting = deliveries.filter(row => !hasEventActual(row.actual) && ['pending', 'waiting'].includes(String(row.resultStatus || row.kind || '')));
+  const waiting=allWaiting.filter(row=>!resolved.has(eventKey(row)));
+  const observed=published.flatMap(row=>{
+    const eventAt=Date.parse(row.event?.date),release=Date.parse(row.publishedAt||''),retrieval=Date.parse(row.retrievedAt||''),sent=Date.parse(row.sentAt||'');
+    return [eventAt,release,retrieval,sent,now].every(Number.isFinite)&&release>=eventAt&&retrieval>=release&&sent>=retrieval&&sent<=now?[{publicationToRetrieval:retrieval-release,retrievalToDelivery:sent-retrieval}]:[];
+  });
+  const distribution=(values:number[])=>{values.sort((a,b)=>a-b);return {samples:values.length,median:values.length?values[Math.ceil(values.length/2)-1]:null,p95:values.length?values[Math.ceil(values.length*.95)-1]:null};};
   const stuckCountdowns = waiting.flatMap(row => {
     const next = typeof row.nextCheckAt==='number'&&Number.isFinite(row.nextCheckAt)&&Math.abs(row.nextCheckAt)<=8.64e15 ? row.nextCheckAt : NaN;
     const eventAt = Date.parse(String(row.event?.date || ''));
@@ -44,6 +52,8 @@ export function summarizeTelegramResultCoverage(rows: CoverageDelivery[], now = 
     published: published.length,
     revised: published.filter(row => row.resultStatus === 'revised').length,
     waiting: waiting.length,
+    supersededWaiting:allWaiting.length-waiting.length,
+    slo:{sampleCount:observed.length,missingOrInvalidTiming:published.length-observed.length,publicationToRetrievalMs:distribution(observed.map(row=>row.publicationToRetrieval)),retrievalToDeliveryMs:distribution(observed.map(row=>row.retrievalToDelivery)),reason:'仅已保存且先后关系可核验的发布时间、抓取时间和成功发送时间；旧记录不回填，低样本不承诺来源SLO。'},
     failedDeliveries: deliveries.filter(row => row.status === 'failed').length,
     unavailable: deliveries.filter(row => ['unavailable', 'unsupported', 'unverifiable', 'stopped'].includes(String(row.resultStatus || ''))).length,
     byKind: deliveries.reduce<Record<string, number>>((counts, row) => { const key = String(row.event?.kind || row.event?.market || 'unknown'); counts[key] = (counts[key] || 0) + 1; return counts; }, {}),
@@ -126,7 +136,7 @@ export class TelegramEventResultMonitor {
       title: row.event.titleZh || row.event.title,
       eventDate: row.event.date,
       deliveryStatus: row.status,
-      resultStatus: row.resultStatus || (row.status === 'failed' ? 'unavailable' : row.status === 'sent' || row.status === 'acknowledged' ? 'published' : 'pending'),
+      resultStatus: row.resultStatus || (row.kind==='waiting'?'pending':row.kind==='terminal'?'unverifiable':hasEventActual(row.actual)?'published':'unknown'),
       attempts: row.attempts,
       actual: row.actual || null,
       publishedAt: row.publishedAt || null,
@@ -212,7 +222,8 @@ export class TelegramEventResultMonitor {
         if (previous && !published) continue;
         const terminal=!!event.kind&&event.kind!=='macro'&&['stopped','unsupported'].includes(result.status);
         if (!published && !terminal && age < 15 * 60000) continue;
-        const deliveryId = terminal?id+':terminal':published ? id + ':result:' + createHash('sha256').update(String(result.actual)).digest('hex') : id + ':waiting';
+        const unchanged=published&&previous&&String(previous.actual)===String(result.actual);
+        const deliveryId = terminal?id+':terminal':unchanged?previous!.id:published ? id + ':result:' + createHash('sha256').update(JSON.stringify([previous?.id||null,String(result.actual)])).digest('hex') : id + ':waiting';
         const url=safeResultUrl(result.url);
         const existing=state.deliveries.find(d=>d.id===deliveryId);if(existing){existing.nextCheckAt=now+(published?3600000:300000);existing.resultSource=result.source||event.source||existing.resultSource;existing.resultUrl=url||existing.resultUrl;if(!published){existing.resultStatus=result.status;existing.reason=result.reason;}continue;}
         const lines = [terminal?'⚠️ <b>结果追踪已停止</b>':published ? previous ? '📊 <b>事件结果已修订</b>' : '📊 <b>事件结果已发布</b>' : '⏳ <b>事件结果暂不可用</b>', escape(event.titleZh || event.title), '事件时间：' + escape(event.date)];
@@ -250,9 +261,11 @@ export class TelegramEventResultMonitor {
       if (!deliveryEnabled) return;
       for (const delivery of state.deliveries) {
         if (delivery.status !== 'pending' || delivery.nextAttempt > now) continue;
+        // Keep the old waiting record for audit, but never send it after a verified result exists.
+        if(delivery.kind==='waiting'&&state.deliveries.some(row=>(row.kind==='result'||row.kind==='revision')&&hasEventActual(row.actual)&&identity(row.event)===identity(delivery.event)))continue;
         if(this.store.refreshLease && !this.store.refreshLease(lease,this.owner,this.clock(),120000))throw new Error('事件结果租约已丢失，未投递');
         delivery.attempts++;
-        try { const messageId=await send(delivery.text,delivery.originalMessageId);if(typeof messageId==='number'&&Number.isSafeInteger(messageId)&&messageId>0)delivery.messageId=messageId;delivery.status = 'sent'; delete delivery.error; }
+        try { const messageId=await send(delivery.text,delivery.originalMessageId);if(typeof messageId==='number'&&Number.isSafeInteger(messageId)&&messageId>0)delivery.messageId=messageId;delivery.status = 'sent';delivery.sentAt=new Date(this.clock()).toISOString(); delete delivery.error; }
         catch { delivery.error = 'Telegram 投递失败'; delivery.nextAttempt = now + Math.min(3600000, 60000 * 2 ** (delivery.attempts - 1)); if (delivery.attempts >= 7) delivery.status = 'failed'; }
         persist();
       }
