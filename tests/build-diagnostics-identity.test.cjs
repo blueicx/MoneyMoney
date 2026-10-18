@@ -1,0 +1,8 @@
+const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),os=require('node:os'),vm=require('node:vm'),zlib=require('node:zlib');
+test('public diagnostic build stamp and compressed HTML describe the exact build without adding an API request',()=>{
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'mm-build-identity-')),commit='a'.repeat(40);fs.mkdirSync(path.join(root,'dist/web/public'),{recursive:true});fs.mkdirSync(path.join(root,'scripts'));fs.writeFileSync(path.join(root,'package.json'),JSON.stringify({version:'1.0.0'}));fs.writeFileSync(path.join(root,'dist/web/public/index.html'),'<html><head></head><body>fixture</body></html>');
+ try{const source=fs.readFileSync(path.join(__dirname,'../scripts/write-build-info.cjs'),'utf8');vm.runInNewContext(source,{require,__dirname:path.join(root,'scripts'),process:{env:{MONEYMONEY_BUILD_ID:commit},stdout:{write(){}}}});
+ const content=fs.readFileSync(path.join(root,'dist/web/public/index.html'));assert.match(content.toString(),new RegExp('<meta name="moneymoney-build" content="'+commit+'"'));assert.deepEqual(zlib.gunzipSync(fs.readFileSync(path.join(root,'dist/web/public/index.html.gz'))),content);assert.deepEqual(zlib.brotliDecompressSync(fs.readFileSync(path.join(root,'dist/web/public/index.html.br'))),content);assert.equal(JSON.parse(fs.readFileSync(path.join(root,'dist/build-info.json'))).commit,commit);
+ vm.runInNewContext(source,{require,__dirname:path.join(root,'scripts'),process:{env:{MONEYMONEY_BUILD_ID:commit},stdout:{write(){}}}});assert.equal((fs.readFileSync(path.join(root,'dist/web/public/index.html'),'utf8').match(/name="moneymoney-build"/g)||[]).length,1);
+ }finally{fs.rmSync(root,{recursive:true,force:true});}
+});

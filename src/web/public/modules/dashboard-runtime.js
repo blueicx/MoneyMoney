@@ -6172,6 +6172,13 @@ function renderChartResearchTools(kind,bars,points,metadata,context) {
   const config=kind==='stock'?stockChartOverlayConfig:cryptoChartOverlayConfig;
   const key=JSON.stringify([context.market,context.instrument,context.timeframe,config.strategies,config.strategyParameters,bars.length,bars.at(-1)?.time,kind==='stock'?stockChartAsOf:null]);
   window.MoneyChartResearchControls.render({host,key,
+    onSessionAudit:kind==='stock'&&window.mm_isLoggedIn===true&&!window.mm_isGuest?async (input,options)=>{
+      const query=new URLSearchParams({market:input.market,instrument:input.instrument,timeframe:input.timeframe,gaps:JSON.stringify(input.gaps)});
+      if(input.asOf!=null)query.set('asOf',String(input.asOf));
+      const response=await fetch('/api/stock/session/gaps?'+query,{cache:'no-store',signal:options.signal}),body=await response.json();
+      if(!response.ok||body.success===false)throw Error(body.reason||'交易日历审计失败');
+      return body.data;
+    }:null,
     onBackfill:window.mm_isLoggedIn===true&&!window.mm_isGuest?async preview=>{
       const current=()=>activeMarketScope===context.market&&context.instrument===(kind==='stock'?stockChartEventInstrumentId():`crypto:binance:${bnCurrentSymbol}`)&&context.timeframe===(kind==='stock'?currentStockKlinePeriod:bnCurrentInterval)&&host.getClientRects().length>0;
       if(!current())return {reason:'上下文已变化，未创建任务。'};
@@ -6183,7 +6190,7 @@ function renderChartResearchTools(kind,bars,points,metadata,context) {
       return {reason:'回补任务 '+(data.data?.id||data.id||'已提交')+'；按现有Worker预算执行，查询结果保留新抓取时间，不覆盖历史时点证据。'};
     }:null,
     isCurrent:()=>!document.hidden&&activeMarketScope===context.market&&context.instrument===(kind==='stock'?stockChartEventInstrumentId():`crypto:binance:${bnCurrentSymbol}`)&&context.timeframe===(kind==='stock'?currentStockKlinePeriod:bnCurrentInterval)&&host.getClientRects().length>0,
-    getInput:()=>({...context,source:metadata.source||'',sourceTime:metadata.sourceTime||null,evidenceRefs:metadata.evidenceRefs||[],points,
+    getInput:()=>({...context,source:metadata.source||'',sourceTime:metadata.sourceTime||null,dataStatus:metadata.dataStatus||'unknown',chartConfig:kind==='stock'?config:{...config,strategies:cryptoChartStrategyConfig},buildVersion:document.querySelector('meta[name="moneymoney-build"]')?.content||null,evidenceRefs:metadata.evidenceRefs||[],points,
       requestTiming:metadata.requestTiming||null,providerTelemetry:metadata.providerTelemetry||null,
       pageTiming:window.MoneyMoneyPerformance.snapshot().pageTiming,
       layout:document.getElementById(kind==='stock'?'stock-kline':'bn-candlestick')?.moneyResearchLayout||null,
@@ -6459,6 +6466,14 @@ function redrawStockChartEventMarkers() {
 }
 function handleChartSignalSelection(signal, targetId) {
   if (!signal) return;
+  if(signal.id&&signal.market&&signal.instrument&&signal.timeframe){
+    const selected=handleChartSignalSelection.selected||(handleChartSignalSelection.selected=new Map()),key=JSON.stringify([signal.market,signal.instrument,signal.timeframe]);
+    selected.delete(key);selected.set(key,signal.id);while(selected.size>16)selected.delete(selected.keys().next().value);
+    document.querySelectorAll('[data-chart-signal-context]').forEach(marker=>{
+      let ids=[];try{ids=JSON.parse(marker.dataset.chartSignalIds||'[]');}catch{}
+      marker.setAttribute('aria-pressed',String(ids.includes(selected.get(marker.dataset.chartSignalContext))));
+    });
+  }
   if (targetId === 'stock-chart-signals' || targetId === 'stock-chart-signal-markers') {
     showStockChartEvidence({ ...signal, title: `${signal.side === 'buy' ? '买入' : '卖出'} · ${signal.label}`, triggerPrice: signal.triggerPrice ?? signal.price }, 'signal');
     const targetIndex = Number.isInteger(Number(signal.sourceIndex)) ? Number(signal.sourceIndex) : stockChartKlines.findIndex(bar => Number(bar.time) === Number(signal.time));
@@ -6504,6 +6519,9 @@ function renderChartSignalMarkers(targetId, signals, getPosition) {
     marker.type = 'button';
     marker.className = `chart-signal-hit-target${members.length > 1 ? ' is-cluster' : ''}`;
     marker.dataset.chartSignalCluster = String(clusterIndex);
+    const first=members[0],context=JSON.stringify([first.market,first.instrument,first.timeframe]);
+    marker.dataset.chartSignalContext=context;marker.dataset.chartSignalIds=JSON.stringify(members.map(signal=>signal.id).filter(Boolean));
+    marker.setAttribute('aria-pressed',String(members.some(signal=>signal.id&&handleChartSignalSelection.selected?.get(context)===signal.id)));
     marker.style.left = `${Number(cluster.x)}px`;
     marker.style.top = `${Number(cluster.y)}px`;
     const labels = members.map(signal => `${signal.label || signal.strategy || '策略信号'} ${signal.side === 'buy' ? '买入' : '卖出'} ${signal.status === 'forming' ? '形成中' : '已确认'}`);

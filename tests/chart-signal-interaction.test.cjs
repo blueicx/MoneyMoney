@@ -14,6 +14,17 @@ function chartFilterContext(window) {
   window.bnCurrentSymbol='BTCUSDT';window.bnCurrentInterval='5m';window.cryptoChartStrategyConfig={maCross:true};window.bnKlineData=[];window.redrawStockKlineSelection=()=>{};
 }
 
+test('selected stable point remains highlighted through redraw and clustering without reopening or moving the replay cursor',()=>{
+ const dom=new JSDOM('<div id="bn-chart-signal-markers"></div><div id="bn-chart-signal-detail"></div>',{runScripts:'outside-only'}),w=dom.window;
+ try{chartFilterContext(w);w.formatChartTime=String;w.MoneyChartAnalysis=require('../src/web/public/chart-analysis');w.eval(signalRuntimeSource());
+ const point={id:'stable-one',market:'crypto',instrument:'crypto:binance:BTCUSDT',timeframe:'5m',strategy:'volumeBreakout',label:'放量突破',side:'buy',time:1,price:10,status:'confirmed'};
+ const position=()=>({x:100,y:80,minX:0,maxX:300,minY:0,maxY:200});w.renderChartSignalMarkers('bn-chart-signal-markers',[point],position);w.document.querySelector('[data-chart-signal-cluster]').click();assert.equal(w.document.querySelector('[data-chart-signal-cluster]').getAttribute('aria-pressed'),'true');
+ w.renderChartSignalMarkers('bn-chart-signal-markers',[{...point,price:11}],position);assert.equal(w.document.querySelector('[data-chart-signal-cluster]').getAttribute('aria-pressed'),'true');
+ w.renderChartSignalMarkers('bn-chart-signal-markers',[{...point,id:'another',instrument:'crypto:binance:ETHUSDT'}],position);assert.equal(w.document.querySelector('[data-chart-signal-cluster]').getAttribute('aria-pressed'),'false');
+ w.renderChartSignalMarkers('bn-chart-signal-markers',[point,{...point,id:'nearby',strategy:'maCross'}],position);assert.equal(w.document.querySelector('[data-chart-signal-cluster]').getAttribute('aria-pressed'),'true');w.document.querySelector('[data-chart-signal-cluster]').click();assert.equal(w.document.querySelectorAll('[data-chart-signal-choice]').length,2);
+ }finally{w.close();}
+});
+
 test('chart strategy hit targets cluster dense points and let the user choose exact evidence', () => {
   const dom = new JSDOM('<div id="stock-chart-signal-markers" style="width:240px;height:180px"></div><div id="stock-chart-signals"></div><div id="stock-chart-evidence-status"></div><div id="stock-chart-evidence-detail"></div>', { runScripts: 'outside-only' });
   const window = dom.window;

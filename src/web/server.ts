@@ -95,6 +95,7 @@ import { buildWatchlistOperations } from '../features/watchlist-operations';
 import { ResearchValidityTracker } from '../features/research-validity';
 import { estimatePortfolioExit } from '../features/portfolio-exit-stress';
 import { exchangeSessionContext } from '../features/exchange-session-context';
+import { createSessionGapRouter } from './session-gap-routes';
 import { startGuruHoldingsRefreshMonitor, stopGuruHoldingsRefreshMonitor } from '../features/guru-holdings-refresh-monitor';
 import { getFearGreed, getFundingRates } from '../features/market-sentiment';
 import { getGlobalMacroSpotSnapshot } from '../features/global-macro-spot';
@@ -1890,6 +1891,7 @@ app.get('/api/research/price-comparison', async (req, res) => {
   } catch(error:any) {res.status(400).json({success:false,dataStatus:'failed',reason:error.message});}
 });
 
+app.use('/api/stock/session/gaps',createSessionGapRouter());
 app.get('/api/stock/session',(req,res)=>{
   try{const venue=String(req.query.venue||'us');if(!['us','cn','hk'].includes(venue))throw Error('不支持的股票交易所');const data=exchangeSessionContext(venue as 'us'|'cn'|'hk');res.json({success:true,market:'stocks',data,dataStatus:'partial',source:data.source,updatedAt:new Date().toISOString(),reason:data.reason});}catch(error:any){res.status(400).json({success:false,dataStatus:'failed',reason:error.message});}
 });

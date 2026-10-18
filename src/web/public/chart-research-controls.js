@@ -22,6 +22,7 @@
       const link=id=>{const button=node('button','查看点位');button.type='button';button.dataset.researchPoint=id;button.onclick=()=>view.options.onSelect?.(id);return button;};
       buttons.forEach((button,i)=>button.onclick=async()=>{
         if(view.options.isCurrent?.()===false){view.revision++;output.textContent='上下文已经变化或工作区不可见，请等待当前图表后重新分析。';return;}
+        view.auditAbort?.abort();view.auditAbort=null;
         const revision=++view.revision,input=view.options.getInput?.()||{};output.replaceChildren();
         output.append(node('p','数据截至 '+(input.bars?.length?new Date(input.bars.at(-1).time).toISOString():'未知')+' · 来源 '+(input.source||'未知')+'；本次为手动快照分析，不随行情自动重算。'));
         const label=library.STRATEGY_CATALOG.find(s=>s.id===strategy.value)?.label||strategy.value;
@@ -55,9 +56,28 @@
             output.append(node('p',result.reason),table(['阶段','毫秒','数据口径'],result.stages.map(row=>[row.label,fmt(row.durationMs),row.historical?'历史采集耗时，非本次上游请求':'当前可观测阶段；未测得保持未知'])));
             output.append(node('p','本次最大可观测阶段：'+(result.stages.find(row=>row.key===result.bottleneck)?.label||'未知')+' · 请求 ID '+(result.requestId||'未提供')));
             output.append(node('p','本页面已观察脚本请求 '+fmt(result.page.scriptRequests)+' · 传输 '+fmt(result.page.scriptTransferBytes)+' 字节；只记录数量和大小，不记录URL、令牌或报文。最近REST耗时不代表推流延迟。'));
+            const budget=research.evaluateChartBudgets(input);
+            output.append(node('p',budget.reason),table(['阶段','当前 / 预算毫秒','诊断'],budget.stages.map(row=>[row.label,fmt(row.durationMs)+' / '+row.budgetMs,({within:'预算内',exceeded:'超过诊断预算',historical:'旧采集，不评价本次延迟',unmeasured:'未测量'}[row.state])])));
+            const bundle=research.buildChartSupportBundle(input),preview=node('details'),summary=node('summary','脱敏问题包预览（不自动上传）');preview.append(summary,node('pre',JSON.stringify(bundle,null,2)));output.append(preview);
+            const download=node('button','下载脱敏问题包');download.type='button';download.dataset.chartSupportDownload='';download.onclick=()=>{const url=URL.createObjectURL(new Blob([JSON.stringify(bundle,null,2)],{type:'application/json'})),a=node('a');a.href=url;a.download='moneymoney-chart-diagnostics.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);};output.append(download);
           }else if(i===5){
-            const result=research.auditChartData(input);
+            let result=research.auditChartData(input),calendarError=null;
+            if(input.market==='stocks'&&result.gaps.length&&view.options.onSessionAudit){
+              button.disabled=true;
+              try{
+                const controller=new AbortController();view.auditAbort=controller;
+                const sessionAudit=await view.options.onSessionAudit({market:input.market,instrument:input.instrument,timeframe:input.timeframe,asOf:input.asOf??null,gaps:result.gaps.filter(g=>g.to>g.from).slice(0,32).map(({from,to})=>({from,to}))},{signal:controller.signal});
+                if(view.revision!==revision||!host.isConnected||view.options.isCurrent?.()===false)return;
+                result=research.auditChartData({...input,sessionAudit});
+              }catch(error){calendarError=error.message||'日历来源检查失败';}
+              if(view.revision!==revision||!host.isConnected||view.options.isCurrent?.()===false)return;
+            }
+            if(calendarError)output.append(node('p','日历分类不可用：'+calendarError+'；保留待核验间隔，不据此声称漏数。'));
             output.append(node('p',result.dataStatus+' · '+result.reason),node('p','检查 '+result.rows+' 根 · 异常OHLC '+result.invalidOhlc.length+' · 异常成交量 '+result.invalidVolumes.length+' · 重复时间 '+result.duplicateTimes.length+' · 无效/倒序时间 '+result.invalidTimes.length+' · 待核验间隔 '+result.gaps.length+'；未修复或覆盖任何记录。'));
+            const coverage=research.buildLoadedCoverage(input);
+            output.append(node('p','逐日覆盖 · '+coverage.reason),table(['UTC日期','记录 / 唯一时间','首 / 末来源K线时间','OHLC异常 / 来源缺口','状态'],coverage.days.slice(-100).map(row=>[row.date,row.records+' / '+row.uniqueTimes,row.firstTime==null?'当前加载范围未观察到记录，不证明本日应有成交':new Date(row.firstTime).toISOString()+' / '+new Date(row.lastTime).toISOString(),row.invalidOhlc+' / '+row.sourceReportedGaps,row.dataStatus])));
+            if(coverage.days.length>100)output.append(node('p','仅展示最近100个UTC日期；缩小加载范围查看更早记录。'));
+            for(const row of result.sessionIntervals.slice(0,32))output.append(node('p',new Date(row.from).toISOString()+' → '+new Date(row.to).toISOString()+' · '+row.reason+' · '+(row.sourceUrl||'来源未提供')));
             const issues=[...result.invalidOhlc.map(r=>({...r,type:'OHLC无效'})),...result.invalidVolumes.map(r=>({...r,type:'成交量无效'})),...result.duplicateTimes.map(r=>({...r,type:'重复时间'})),...result.invalidTimes.map(r=>({...r,type:r.reason})),...result.gaps.map(r=>({time:r.from,type:'时间间隔',reason:r.reason}))];
             output.append(table(['异常','K线时间','原因'],issues.slice(0,100).map(row=>[row.type,Number.isFinite(row.time)?new Date(row.time).toISOString():'未知',row.reason||'只读记录，保留原始数据'])));
             if(issues.length>100)output.append(node('p','仅列出前100项；缩小当前加载区间查看其余记录。'));
@@ -71,6 +91,8 @@
             output.append(node('p','入场前20根已完成K线；波动为逐根标准差，非年化。未知流动性不靠成交量猜测。最多展示最近100条。'));
             output.append(table(['点位 / 版本','趋势 / 已知根数','收益标准差 % / 平均成交量','证据'],result.rows.slice(-100).map(row=>[row.strategy+' / '+row.strategyVersion,({rising:'上升',falling:'下降',flat:'区间',unknown:'未知'}[row.trend])+' / '+row.priorBars,fmt(row.volatilityPct)+' / '+fmt(row.averageVolume),link(row.pointId)])));
             if(!result.rows.length)output.append(node('p',result.reason||'当前没有可核验的已确认策略点位。'));
+            const map=research.buildStrategyRegimeMap({...input,horizon:Number(horizon.value),costBps:cost.value.trim()===''?null:Number(cost.value)});
+            output.append(node('p','环境表现地图 · '+map.reason),table(['策略 / 版本','方向 / 趋势 / 波动','成熟 / 待观察 / 不可用','毛 / 净均值 %','MFE / MAE %','说明'],map.groups.map(g=>[g.strategy+' / '+g.strategyVersion,g.side+' / '+g.trend+' / '+g.volatility,g.samples+' / '+g.pending+' / '+g.unavailable,fmt(g.meanReturnPct)+' / '+fmt(g.meanNetReturnPct),fmt(g.meanMfePct)+' / '+fmt(g.meanMaePct),g.reason])));
           }else if(i===7){
             const result=research.analyzeStrategyRedundancy(input);
             output.append(node('p',result.reason),table(['策略 / 版本对','同向重合 / 并集','Jaccard','反向冲突','各自独有'],result.pairs.map(row=>[row.left.strategy+' '+row.left.strategyVersion+' / '+row.right.strategy+' '+row.right.strategyVersion,row.overlap+' / '+row.union,fmt(row.jaccard),row.conflicts,row.leftOnly+' / '+row.rightOnly])));
@@ -90,7 +112,7 @@
         finally{button.disabled=false;}
       });
     }
-    if(view.options.key!==options.key){view.revision++;view.output.textContent='标的、周期或参数已变化；请重新分析当前数据。';}
+    if(view.options.key!==options.key){view.auditAbort?.abort();view.auditAbort=null;view.revision++;view.output.textContent='标的、周期或参数已变化；请重新分析当前数据。';}
     view.options=options;
   }
   return {render};

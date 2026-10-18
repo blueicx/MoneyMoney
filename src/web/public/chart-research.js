@@ -98,15 +98,35 @@
       reason:'Provider可能与请求等待重叠；缓存Provider耗时属于旧采集，不相加为总耗时。预取、鉴权、下载和解析未测得的阶段保持未知。'};
   }
   const intervals={'1m':60000,'5m':300000,'15m':900000,'1h':3600000,'1d':86400000};
+  function evaluateChartBudgets(o={}){
+    const limits={wait:3000,decode:50,provider:3000,render:32,document:1000,auth:1000};
+    return {stages:buildRequestDiagnostics(o).stages.map(row=>({...row,budgetMs:limits[row.key],state:row.durationMs==null?'unmeasured':row.historical?'historical':row.durationMs>limits[row.key]?'exceeded':'within'})),totalMs:null,improvementPct:null,
+      reason:'固定交互诊断预算，不是服务承诺或性能改善比例。等待与Provider耗时重叠，不相加；整页可操作时间和工作区切换需独立浏览器测量。'};
+  }
+  function buildChartSupportBundle(o={}){
+    const market=['stocks','crypto','options','prediction'].includes(o.market)?o.market:null;
+    const instrument=typeof o.instrument==='string'&&((market==='stocks'&&/^stock:(?:us|cn|hk):[A-Za-z0-9.]{1,20}$/.test(o.instrument))||(market==='crypto'&&/^crypto:[a-z0-9_-]{1,32}:[A-Z0-9._/-]{1,40}$/.test(o.instrument)))?o.instrument:null;
+    const timestamp=value=>number(value)&&value>=0&&value<=8640000000000000?new Date(value).toISOString():null;
+    const state=['live','delayed','cached','partial','empty','unavailable','unsupported','failed','historical'].includes(o.dataStatus)?o.dataStatus:'unknown';
+    const diagnostics=buildRequestDiagnostics(o),config=o.chartConfig||{};
+    return {schemaVersion:1,buildVersion:typeof o.buildVersion==='string'&&/^[a-f0-9]{7,40}$/.test(o.buildVersion)?o.buildVersion:null,
+      context:{market,instrument,timeframe:['1m','5m','15m','1h','1d','3d','5d','60d','120d','1y','5y'].includes(o.timeframe)?o.timeframe:null,asOf:timestamp(o.asOf)},
+      dataStatus:state,sourcePresent:Boolean(o.source),sourceTime:timestamp(o.sourceTime),
+      request:{requestId:diagnostics.requestId,stages:diagnostics.stages.map(({key,durationMs,historical,scope})=>({key,durationMs,historical:Boolean(historical),scope:scope==='page'?'page':'chart'}))},
+      chart:{strategies:Object.fromEntries((library?.STRATEGY_CATALOG||[]).map(row=>[row.id,config.strategies?.[row.id]===true])),indicators:Object.fromEntries(['ma','boll','macd'].map(key=>[key,config.indicators?.[key]===true]))},
+      includesPrivateRecords:false,excludes:['quotes','bars','pointIds','account','positions','orders','journal','modelOutput','sourcePayload','urls','cookies','tokens'],
+      reason:'仅导出当前标的、白名单图层和数字诊断；请预览后自行提供。不含行情原值、来源报文、账户、日记、模型输出或完整URL，不自动上传。'};
+  }
   function buildGapBackfillPreview(o={}){
     const fail=reason=>({request:null,reason}),match=String(o.instrument||'').match(o.market==='stocks'?/^stock:us:([A-Z][A-Z0-9.]{0,9})$/:o.market==='crypto'?/^crypto:binance:([A-Z0-9]{2,20}(?:USDT|USDC|USD))$/:/$^/);
     if(!match||!intervals[o.timeframe])return fail('当前标的身份、交易场所或周期没有已接线的回补来源；不改用其他市场。');
+    if(o.gap?.verification==='calendar-closure')return fail('该区间有休市证据，不按缺失K线创建回补任务。');
     const gap=o.gap||{},cut=Number.isFinite(o.asOf)?Math.min(o.asOf,o.now??Date.now()):o.now??Date.now();
     if(!Number.isFinite(gap.from)||!Number.isFinite(gap.to)||gap.from>=gap.to||gap.to>cut||gap.to-gap.from>31*86400000)return fail('回补区间无效、超过31天或超出当前历史时点；没有创建任务。');
     return {request:{market:o.market,instrument:match[1],dataset:'bars',timeframe:o.timeframe,from:new Date(gap.from).toISOString(),to:new Date(gap.to).toISOString()},reason:'只请求本区间同市场真实来源；交易时段尚未核验，间隔可能是休市，不保证有缺失数据。新抓取数据不会被伪装成历史时点已知信息。'};
   }
   function auditChartData(o){
-    const result={dataStatus:'historical',reason:'仅检查当前加载区间，不扫描或修改历史分区。',rows:0,invalidOhlc:[],invalidVolumes:[],duplicateTimes:[],invalidTimes:[],gaps:[],repairedRows:0};
+    const result={dataStatus:'historical',reason:'仅检查当前加载区间，不扫描或修改历史分区。',rows:0,invalidOhlc:[],invalidVolumes:[],duplicateTimes:[],invalidTimes:[],gaps:[],sessionIntervals:[],repairedRows:0};
     if(!scopeOk(o))return {...result,dataStatus:'unsupported',reason:'当前图表身份或市场不支持此检查'};
     if(!Array.isArray(o.bars)||o.bars.length>5000||o.asOf!=null&&!number(o.asOf))return {...result,dataStatus:'failed',reason:'需要有效时点及最多5000根K线'};
     const seen=new Set(),step=intervals[o.timeframe];let previous=null;
@@ -117,12 +137,39 @@
       if(previous!=null&&b.time<previous)result.invalidTimes.push({index,time:b.time,reason:'时间倒序'});
       if(![b.open,b.high,b.low,b.close].every(v=>number(v)&&v>0)||b.high<Math.max(b.open,b.close)||b.low>Math.min(b.open,b.close)||b.low>b.high)result.invalidOhlc.push({index,time:b.time});
       if(b.volume!=null&&(!number(b.volume)||b.volume<0))result.invalidVolumes.push({index,time:b.time});
-      if(previous!=null&&step&&b.time-previous>step*1.5)result.gaps.push({from:previous,to:b.time,verification:'unknown-session',missingBars:null,reason:'间隔超过名义周期；未提供交易所日历，可能休市或来源缺口，不直接判定丢失根数'});
+      if(previous!=null&&step&&b.time-previous>step*1.5){
+        const audit=o.sessionAudit,verified=same(audit,o)&&(audit.asOf??null)===(o.asOf??null)?audit.gaps?.find(g=>g.from===previous&&g.to===b.time):null;
+        const row=verified||{from:previous,to:b.time,verification:'unknown-session',missingBars:null,reason:'间隔超过名义周期；未提供交易所日历，可能休市或来源缺口，不直接判定丢失根数'};
+        if(row.verification==='calendar-closure')result.sessionIntervals.push(row);else result.gaps.push(row);
+      }
       if(b.gap)result.gaps.push({from:b.time,to:b.time,verification:'source-reported',missingBars:null,reason:'来源显式标记缺口'});
       previous=b.time;
     }
     if(!result.rows)return {...result,dataStatus:'empty',reason:'当前加载区间没有记录；本检查无法据此判断上游来源是否故障'};
     if(result.invalidOhlc.length+result.invalidVolumes.length+result.duplicateTimes.length+result.invalidTimes.length+result.gaps.length)result.dataStatus='partial';
+    return result;
+  }
+  function buildLoadedCoverage(o){
+    const result={dataStatus:'historical',source:o.source||null,timezone:'UTC',days:[],reason:'仅当前已加载K线，按UTC日期计数，不代表历史全库或交易所完整覆盖；缺少完整来源日历，不计算覆盖百分比。'};
+    if(!scopeOk(o))return {...result,dataStatus:'unsupported'};
+    if(!Array.isArray(o.bars)||o.bars.length>5000||o.asOf!=null&&!number(o.asOf))return {...result,dataStatus:'failed',reason:'需要有效时点及最多5000根K线'};
+    const groups=new Map();
+    for(const b of o.bars){
+      if(!number(b?.time)||Math.abs(b.time)>8640000000000000||o.asOf!=null&&b.time>o.asOf)continue;
+      const date=new Date(b.time).toISOString().slice(0,10),g=groups.get(date)||{date,records:0,times:new Set(),firstTime:b.time,lastTime:b.time,invalidOhlc:0,sourceReportedGaps:0,coveragePct:null};
+      g.records++;g.times.add(b.time);g.firstTime=Math.min(g.firstTime,b.time);g.lastTime=Math.max(g.lastTime,b.time);
+      if(![b.open,b.high,b.low,b.close].every(v=>number(v)&&v>0)||b.high<Math.max(b.open,b.close)||b.low>Math.min(b.open,b.close)||b.low>b.high)g.invalidOhlc++;
+      if(b.gap)g.sourceReportedGaps++;groups.set(date,g);
+    }
+    const recorded=[...groups.values()].sort((a,b)=>a.date.localeCompare(b.date));
+    if(recorded.length){
+      const end=Date.parse(recorded.at(-1).date),first=Date.parse(recorded[0].date),start=Math.max(first,end-365*86400000);result.earlierDatesOmitted=start>first;
+      for(let time=start;time<=end;time+=86400000){
+        const date=new Date(time).toISOString().slice(0,10),g=groups.get(date);
+        result.days.push(g?{date,records:g.records,uniqueTimes:g.times.size,firstTime:g.firstTime,lastTime:g.lastTime,invalidOhlc:g.invalidOhlc,sourceReportedGaps:g.sourceReportedGaps,coveragePct:null,dataStatus:g.invalidOhlc||g.sourceReportedGaps||g.records!==g.times.size?'partial':'historical'}:{date,records:0,uniqueTimes:0,firstTime:null,lastTime:null,invalidOhlc:0,sourceReportedGaps:0,coveragePct:null,dataStatus:'empty'});
+      }
+    }
+    if(!result.days.length)result.dataStatus='empty';else if(result.days.some(g=>g.dataStatus==='partial'))result.dataStatus='partial';
     return result;
   }
   function describeStrategyRegimes(o){
@@ -156,6 +203,25 @@
     return {pairs,ranking:null,portfolioContribution:null,modelCalls:0,orderChanges:0,truncated:groups.size>32,
       reason:'已确认点位按同根同方向比较；Jaccard重合不证明独立性或因果，独有点位不是组合净收益贡献，不给策略排名。最多32个版本、2000个点位。'};
   }
+  function buildStrategyRegimeMap(o){
+    const base={groups:[],ranking:null,modelCalls:0,orderChanges:0,dataStatus:'historical',reason:'按入场前20根已完成K线划分趋势与波动；逐根收益标准差<0.5%/0.5–2%/≥2%为低/中/高波动，非年化。后续已完成K线仅评价结果，重叠观察不是独立交易。'};
+    if(!scopeOk(o))return {...base,dataStatus:'unsupported'};
+    if(!Array.isArray(o.bars)||o.bars.length>5000||!Array.isArray(o.points)||o.points.length>2000||![1,3,5,20].includes(o.horizon)||o.asOf!=null&&!number(o.asOf)||o.costBps!=null&&(!number(o.costBps)||o.costBps<0||o.costBps>1000))return {...base,dataStatus:'failed',reason:'需要有效时点、1/3/5/20根期限、明确成本或未知，以及最多5000根K线/2000点位。'};
+    if(!o.source)return {...base,dataStatus:'unavailable',reason:'来源未关联，不统计可核验环境表现。'};
+    const audit=auditChartData(o);
+    if(audit.invalidTimes.length||audit.duplicateTimes.length||audit.invalidOhlc.length)return {...base,dataStatus:'unavailable',reason:'原始K线存在无效OHLC、倒序或重复时间，未修补或统计。'};
+    const points=scopedPoints(o).rows.filter(p=>p.status==='confirmed'&&(o.asOf==null||p.time<=o.asOf)),descriptors=new Map(describeStrategyRegimes({...o,points}).rows.map(r=>[r.pointId,r])),index=new Map(o.bars.map((b,i)=>[b.time,i])),groups=new Map();
+    for(const p of points){
+      const d=descriptors.get(p.id),volatility=d?.volatilityPct==null?'unknown':d.volatilityPct<.5?'low':d.volatilityPct<2?'medium':'high',trend=d?.trend||'unknown';
+      const key=JSON.stringify([p.strategy,p.strategyVersion||'未关联',p.side,trend,volatility]),g=groups.get(key)||{strategy:p.strategy,strategyVersion:p.strategyVersion||'未关联',side:p.side,trend,volatility,horizon:o.horizon,samples:0,pending:0,unavailable:0,positive:0,pointIds:[],gross:[],net:[],mfe:[],mae:[]};
+      const i=index.get(p.time),outcome=analysis.strategyPointOutcomes(o.bars,i,p.triggerPrice??p.price,p.side,{status:p.status,live:o.live,currentBarClosed:o.bars.at(-1)?.closed===true,costBps:o.costBps??null,asOf:o.asOf??null}).find(row=>row.horizon===o.horizon);
+      if(outcome?.status==='matured'){g.samples++;g.gross.push(outcome.returnPct);g.mfe.push(outcome.mfePct);g.mae.push(outcome.maePct);if(number(outcome.netReturnPct)){g.net.push(outcome.netReturnPct);if(outcome.netReturnPct>0)g.positive++;}g.pointIds.push(p.id);}
+      else if(outcome?.status==='pending')g.pending++;else g.unavailable++;
+      groups.set(key,g);
+    }
+    const rows=[...groups.values()].map(({gross,net,mfe,mae,...g})=>({...g,meanReturnPct:mean(gross),meanNetReturnPct:net.length===g.samples?mean(net):null,meanMfePct:mean(mfe),meanMaePct:mean(mae),winRate:g.samples>=20&&net.length===g.samples?g.positive/g.samples:null,reason:g.samples<20?'少于20个成熟观察，不提供可靠胜率或排名':net.length!==g.samples?'成本未知，不统计净胜率':'重叠信号不等于独立交易；仅为历史描述，不构成策略排名'}));
+    return {...base,groups:rows,dataStatus:rows.length?'historical':'empty'};
+  }
   async function evaluateCounterfactual(o){
     const empty=(reason,dataStatus='failed')=>({dataStatus,reason,rows:[],dataHash:null,configurationHash:null,evidencePack:null,ranking:null,modelCalls:0,orderChanges:0});
     if(!scopeOk(o))return empty('当前身份不属于股票或虚拟币图表','unsupported');
@@ -186,5 +252,5 @@
     const unlinkedIds=markers.filter(r=>!r.id||!ids.has(r.id)).map(r=>r.id??'未关联');
     return {...base,dataStatus:outsideMarkers.length+outsideLabels.length+overlaps.length+unlinkedIds.length?'partial':'historical',reason:'只读检查当前投影：被聚合或主动隐藏的标签不算丢失点位；不自动删除、移动或生成信号。',outsideMarkers,outsideLabels,overlaps,unlinkedIds};
   }
-  return {buildQualityMatrix,explainSignalAgreement,alignTimeframeEvidence,evaluateParameterLab,buildRequestDiagnostics,buildGapBackfillPreview,auditChartData,describeStrategyRegimes,analyzeStrategyRedundancy,evaluateCounterfactual,auditChartLayout};
+  return {buildQualityMatrix,explainSignalAgreement,alignTimeframeEvidence,evaluateParameterLab,buildRequestDiagnostics,evaluateChartBudgets,buildChartSupportBundle,buildGapBackfillPreview,auditChartData,buildLoadedCoverage,describeStrategyRegimes,buildStrategyRegimeMap,analyzeStrategyRedundancy,evaluateCounterfactual,auditChartLayout};
 });
