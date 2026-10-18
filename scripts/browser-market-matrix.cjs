@@ -8,6 +8,7 @@ const { chromium } = require('playwright');
 const port = 3191;
 const base = `http://127.0.0.1:${port}`;
 const isolatedDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'moneymoney-browser-matrix-'));
+process.env.MONEYMONEY_DATA_DIR=isolatedDataDir;
 const child = spawn(process.execPath, [path.join(__dirname, '../dist/web/server.js')], {
   cwd: path.join(__dirname, '..'),
   env: { ...process.env, MONEYMONEY_DATA_DIR: isolatedDataDir, APP_HOST: '127.0.0.1', APP_PORT: String(port), TELEGRAM_POLLING_ENABLED: 'false', AI_PAPER_TRADING_ENABLED: 'false', MONEYMONEY_DISABLE_GURU_REFRESH: 'true', PRIVATE_KEY: '', API_KEY: '', MONEYMONEY_LOGIN_USER: 'matrix-owner', MONEYMONEY_LOGIN_PASS: 'local-matrix-test-only-92!', MONEYMONEY_JWT_SECRET: 'local-matrix-jwt-secret-0123456789abcdef' },
@@ -219,6 +220,13 @@ async function main() {
     let settlementStatus = null;
     let optionPayoffRequest = null;
     let optionHistoryComparisonRequest = null;
+    const graphDocuments=new Map(),graphModule=require('../dist/features/prediction-relationship-audit'),graphStore=new graphModule.PredictionRelationshipStore({get:key=>graphDocuments.get(key)||null,set:(key,value)=>graphDocuments.set(key,value),transaction:fn=>fn()});
+    await page.route('**/api/prediction/relationships**',async route=>{
+      const now=new Date().toISOString(),quote=(instrument)=>({market:'prediction',instrument,probability:instrument.includes('kalshi')?.5:.6,observedAt:now,source:'ISOLATED RULE FIXTURE',ruleHash:'a'.repeat(64),evidenceRef:'isolated-rule-'+instrument});
+      if(route.request().method()==='GET')return route.fulfill({json:{success:true,market:'prediction',reason:'ISOLATED human-attested fixture, not verified semantics',data:graphStore.list({market:'prediction',now,ruleHash:()=> 'a'.repeat(64)})}});
+      const input=route.request().postDataJSON(),data=graphModule.auditPredictionRelationship({...input,left:quote(input.left),right:quote(input.right)}),saved=input.save?graphStore.save({...input,left:quote(input.left),right:quote(input.right)},now):null;
+      return route.fulfill({json:{success:true,...data,updatedAt:now,saved}});
+    });
     page.on('pageerror', error => pageErrors.push(error.message));
     page.on('response', response => {
       if (response.url().includes('/api/prediction/settlement/')) settlementStatus = response.status();
@@ -294,6 +302,8 @@ async function main() {
             { cik: '0001067983', filingName: 'Berkshire Hathaway Inc.', personAssociation: 'Warren Buffett', reportPeriod, filedAt: '2026-08-14', sourceUrl: secUrl, shares: 150, previousShares: 100, shareDelta: 50, change: 'increased' },
             { cik: '0001350694', filingName: 'Bridgewater Associates, LP', personAssociation: 'Ray Dalio', reportPeriod, filedAt: '2026-08-14', sourceUrl: secUrl, shares: 90, previousShares: 80, shareDelta: 10, change: 'increased' },
           ] }] };
+        payload.rows.forEach(row=>row.managers.forEach(manager=>manager.shareAmountType='SH'));
+        payload.coholdingRelationships=require('../dist/features/guru-holdings').buildGuruCoholdingRelationships(payload.rows,reportPeriod);
       } else if (last === 'history') {
         payload = { market: 'stocks', dataStatus: 'cached', source: 'SEC EDGAR Form 13F fixture', updatedAt: '2026-09-29T01:00:00.000Z', reason: null,
           evidenceRefs: [secUrl], manager: { cik: '0001067983', filingName: 'Berkshire Hathaway Inc.', personAssociation: 'Warren Buffett' },
@@ -357,10 +367,11 @@ async function main() {
     } }) }));
     await page.route('**/api/options/payoff', route => {
       optionPayoffRequest = route.request().postDataJSON();
+      const lifecycleCalendar=require('../dist/features/options-market').buildOptionLifecycleCalendar({source:'CBOE browser fixture',fetchedAt:new Date().toISOString(),legs:optionPayoffRequest.legs.map(leg=>({...leg,row:{instrumentName:leg.instrumentName}}))});
       const scenario=optionPayoffRequest.scenario ? require('../dist/features/options-market').calculateOptionScenario({spot:510,multiplier:optionPayoffRequest.multiplier,underlyingSymbol:'SPY',nowMs:Date.parse('2026-10-14T00:00:00Z'),legs:optionPayoffRequest.legs.map(leg=>({action:leg.action,contracts:leg.contracts,row:{instrumentName:'SPY-20261016-'+(leg.instrumentName.includes('500')?'500':'510')+'-C',strike:leg.instrumentName.includes('500')?500:510,optionType:'call',bidPrice:1.9,askPrice:2.1,quoteQuality:{status:'quoted'},expiryMs:Date.parse('2026-10-16T00:00:00Z'),quoteTime:'2026-10-14T00:00:00Z',impliedVolPct:18}})),scenario:optionPayoffRequest.scenario}):null;
       return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, market: 'options', source: 'CBOE browser fixture', sourceTime: '2026-09-27T08:00:00.000Z', dataStatus: 'delayed', data: {
         netPremiumUsd: 110, maxLossUsd: 110, maxGainUsd: 890, unboundedLoss: false, unboundedGain: false, payoffAtSpotUsd: -110, breakEvenPrices: [511.1],
-        curve: [{ underlyingPrice: 500, pnlUsd: -110 }, { underlyingPrice: 510, pnlUsd: -110 }, { underlyingPrice: 520, pnlUsd: 890 }], assumptions: '验收情景；不会创建订单。', executionEnabled: false,...(scenario?{scenario}:{}),
+        curve: [{ underlyingPrice: 500, pnlUsd: -110 }, { underlyingPrice: 510, pnlUsd: -110 }, { underlyingPrice: 520, pnlUsd: 890 }], assumptions: '验收情景；不会创建订单。', executionEnabled: false,lifecycleCalendar,...(scenario?{scenario}:{}),
       } }) });
     });
     await page.route('**/api/instruments/compare?**', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data: [
@@ -429,7 +440,8 @@ async function main() {
       }),
     }));
     const capitalModule=require('../dist/features/stock-capital-history');
-    const capitalFixture=capitalModule.buildCapitalHistory({facts:{'us-gaap':{NetCashProvidedByUsedInOperatingActivities:{units:{USD:[{start:'2025-01-01',end:'2025-12-31',filed:'2026-02-15',form:'10-K',fp:'FY',val:100,accn:'0000000001-26-000001'}]}}}}},'2026-10-14T00:00:00Z');
+    const annualCapital=(val)=>({start:'2025-01-01',end:'2025-12-31',filed:'2026-02-15',form:'10-K',fp:'FY',val,accn:'0000000001-26-000001'});
+    const capitalFixture=capitalModule.buildCapitalHistory({facts:{'us-gaap':{NetCashProvidedByUsedInOperatingActivities:{units:{USD:[annualCapital(100)]}},NetIncomeLoss:{units:{USD:[annualCapital(100)]}},WeightedAverageNumberOfDilutedSharesOutstanding:{units:{shares:[annualCapital(50)]}},EarningsPerShareDiluted:{units:{'USD/shares':[annualCapital(2)]}}}}},'2026-10-14T00:00:00Z');
     await page.route('**/api/stock/fundamentals/*',route=>route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({success:true,dataStatus:'partial',source:'SEC test fixture, not live',data:{symbol:decodeURIComponent(new URL(route.request().url()).pathname.split('/').at(-1)),cik:'1',companyName:'Acceptance fixture',metrics:{},history:[{periodKey:'2025',revenueUsd:null}],capitalHistory:capitalFixture,missingFields:['revenue'],supportingFactors:[],riskFactors:[]}})}));
     await page.route('**/api/stock/capital/compare?*',route=>{const symbols=new URL(route.request().url()).searchParams.get('symbols').split(',');const data=capitalModule.compareCapitalHistory(symbols.map(symbol=>({symbol,capitalHistory:capitalFixture})));return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({success:true,...data,data})});});
     await page.goto(base + '/login', { waitUntil: 'domcontentloaded' });
@@ -657,10 +669,11 @@ async function main() {
       predictionRadarState.data = {
         updatedAt: new Date().toISOString(), markets: [{ platform: 'Polymarket', id: '12345', title: 'Settlement evidence test', category: 'Test', group: '综合', outcome: 'YES', yesPrice: 0.6, noPrice: 0.4, volume24h: 0, volumeTotal: 0, liquidity: 2000, activityScore: 1, internalEdge: 0, modelProbability: 0.58, probabilityConfidence: 50, probabilityZh: '测试' }], opportunities: [], sources: {},
       };
+      predictionRadarState.data.markets.push({...predictionRadarState.data.markets[0],platform:'Kalshi',id:'EVENT-B',title:'Second explicit fixture identity'});
       renderPredictionRadar();
     });
-    await page.locator('#radar-markets .radar-card').getByRole('button', { name: /结算证据/ }).click();
-    const settlement = page.locator('#radar-markets .radar-card [id^="radar-settlement-"]');
+    await page.locator('#radar-markets .radar-card').first().getByRole('button', { name: /结算证据/ }).click();
+    const settlement = page.locator('#radar-markets .radar-card [id^="radar-settlement-"]').first();
     await settlement.waitFor({ state: 'visible' });
     await page.waitForFunction(() => {
       const panel = document.querySelector('#radar-markets [id^="radar-settlement-"]');
@@ -670,6 +683,9 @@ async function main() {
     assert.match(await settlement.innerText(), /official source|最终结果/);
     assert.match(await settlement.innerText(), /结算进度时间线/);
     assert.match(await settlement.innerText(), /时间未提供/);
+    const relationships=settlement.locator('details').filter({has:page.locator('[data-prediction-relationship-save]')});await relationships.locator(':scope > summary').click();
+    await relationships.locator('select[aria-label="比较事件"]').selectOption('prediction:kalshi:EVENT-B');await relationships.locator('input[type=checkbox]').first().check();await relationships.locator('[data-prediction-relationship-save]').check();await relationships.locator('textarea').fill('ISOLATED manually reviewed official rule references');await relationships.getByRole('button',{name:'检查现有快照',exact:true}).click();await page.waitForFunction(()=>document.body.textContent.includes('已保存私人人工关系 prg_'));await relationships.getByRole('button',{name:'读取已保存的人工关系图',exact:true}).click();
+    await relationships.locator('[data-prediction-relationship-graph] details').waitFor();await relationships.locator('[data-prediction-relationship-graph] summary').click();assert.match(await relationships.innerText(),/人工声明/);assert.match(await relationships.innerText(),/规则Hash未变化/);
     await page.evaluate(() => setMarketScope('options'));
     assert.equal(await page.locator('#options-tab').isVisible(), true, 'options workspace must open with the options market');
     assert.equal(await page.evaluate(() => activeWorkspaceId), 'option-chain');
@@ -710,7 +726,8 @@ async function main() {
     await payoffBuilder.locator('[data-multiplier]').fill('100');
     await payoffBuilder.getByRole('button', { name: '计算到期损益' }).click();
     await page.waitForFunction(() => document.querySelector('#option-payoff-builder [data-result]')?.textContent.includes('净权利金'));
-    await payoffBuilder.locator('details > summary').click();
+    await payoffBuilder.locator('details > summary').filter({hasText:'价格 / 时间 / IV'}).click();
+    await payoffBuilder.locator('[data-option-lifecycle] > summary').click();assert.match(await payoffBuilder.locator('[data-option-lifecycle]').innerText(),/合约身份日期不可核验/);assert.match(await payoffBuilder.locator('[data-option-lifecycle]').innerText(),/禁用/);
     await payoffBuilder.locator('[data-option-scenario-enabled]').check();
     for(const [field,value] of Object.entries({spotShockPct:5,elapsedDays:1,ivShiftPctPoints:2,ratePct:4,dividendYieldPct:1,feePerContractUsd:1}))await payoffBuilder.locator('[data-option-scenario="'+field+'"]').fill(String(value));
     await payoffBuilder.locator('[data-calculate]').click();
@@ -885,6 +902,10 @@ async function main() {
     await page.waitForFunction(() => document.querySelector('#guru-holdings-content')?.textContent?.includes('同一报告期'), null, { timeout: 10_000 });
     assert.match(await page.locator('#guru-holdings-content').innerText(), /Warren Buffett/);
     assert.match(await page.locator('#guru-holdings-content').innerText(), /2 家申报主体/);
+    await page.locator('#guru-holdings-content details.mm-paper-marker-detail > summary').click();
+    const relationGraph=page.locator('[data-guru-relationship-graph]');await relationGraph.waitFor();assert.equal(await relationGraph.locator('circle').count(),2);assert.equal(await relationGraph.locator('line').count(),1);assert.match(await relationGraph.innerText(),/缺报不等于无持仓/);
+    for(const width of [1440,390])for(const theme of ['light','dark','money']){await page.setViewportSize({width,height:900});await page.evaluate(theme=>theme==='light'?document.documentElement.removeAttribute('data-theme'):document.documentElement.setAttribute('data-theme',theme),theme);const control=relationGraph.locator('button').first();await control.scrollIntoViewIfNeeded();assert.ok(await control.isVisible());assert.ok((await control.boundingBox()).height>=30);await control.focus();assert.equal(await control.evaluate(el=>el===document.activeElement),true);await page.screenshot({path:path.join(isolatedDataDir,'guru-graph-'+theme+'-'+width+'.png')});}
+    await page.setViewportSize({width:1440,height:900});await page.evaluate(()=>document.documentElement.removeAttribute('data-theme'));
     assert.match(await page.locator('#guru-holdings-content a').first().getAttribute('href'), /^https:\/\/www\.sec\.gov\/Archives\/edgar\/data\//);
     await page.locator('#guru-holdings-report-period').selectOption('2026-03-31');
     await page.waitForFunction(() => document.querySelector('#guru-holdings-source-status')?.textContent?.includes('2026-03-31'), null, { timeout: 10_000 });
@@ -906,6 +927,9 @@ async function main() {
     await page.locator('[data-stock-capital]').waitFor({state:'visible'});
     const capitalPanel=page.locator('[data-stock-capital]');
     assert.match(await capitalPanel.innerText(),/100 USD/);assert.match(await capitalPanel.innerText(),/不可用/);
+    const perShare=capitalPanel.locator('[data-per-share-bridge]');await perShare.locator('summary').first().click();assert.match(await perShare.innerText(),/50 shares/);assert.match(await perShare.innerText(),/2\.0000 USD\/股/);assert.match(await perShare.innerText(),/不使用期末股数/);
+    for(const width of [1440,390])for(const theme of ['light','dark','money']){await page.setViewportSize({width,height:900});await page.evaluate(theme=>theme==='light'?document.documentElement.removeAttribute('data-theme'):document.documentElement.setAttribute('data-theme',theme),theme);await perShare.scrollIntoViewIfNeeded();assert.ok(await perShare.isVisible());assert.ok(await perShare.evaluate(el=>el.getBoundingClientRect().width<=innerWidth));await page.screenshot({path:path.join(isolatedDataDir,'per-share-'+theme+'-'+width+'.png')});}
+    await page.setViewportSize({width:1440,height:900});await page.evaluate(()=>document.documentElement.removeAttribute('data-theme'));
     await capitalPanel.locator('[data-capital-peers]').fill('AAPL,MSFT');await capitalPanel.locator('[data-capital-compare]').click();
     await page.waitForFunction(()=>document.querySelector('[data-capital-comparison]')?.textContent.includes('MSFT'));
     assert.match(await capitalPanel.locator('[data-capital-comparison]').innerText(),/partial/);
@@ -958,9 +982,9 @@ async function main() {
     await page.evaluate(()=>openWorkspace('events'));
     await page.waitForFunction(()=>history.state?.mmWorkspace?.workspace==='events');
     await page.goBack();
-    await page.waitForFunction(()=>activeMarketScope==='stocks'&&activeWorkspaceId==='stock-quotes');
+    await page.waitForFunction(()=>activeMarketScope==='stocks'&&activeWorkspaceId==='stock-quotes'&&history.state?.mmWorkspace?.workspace==='stock-quotes');
     await page.goForward();
-    await page.waitForFunction(()=>activeMarketScope==='stocks'&&activeWorkspaceId==='events');
+    try{await page.waitForFunction(()=>activeMarketScope==='stocks'&&activeWorkspaceId==='events'&&history.state?.mmWorkspace?.workspace==='events');}catch(error){const evidence=await page.evaluate(()=>({market:activeMarketScope,workspace:activeWorkspaceId,url:location.href,state:history.state,length:history.length}));fs.writeFileSync(path.join(isolatedDataDir,'navigation-diagnostic.json'),JSON.stringify(evidence,null,2));console.error(JSON.stringify(evidence));throw error;}
     assert.equal(await page.evaluate(()=>!!window.mmPreferenceJournal),true,'owner preference history is installed after authentication');
     await page.setViewportSize({ width: 390, height: 844 });
     assert.equal(await page.locator('#center-workspace').isVisible(), true);

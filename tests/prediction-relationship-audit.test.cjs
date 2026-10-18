@@ -6,6 +6,10 @@ test('explicit conditional relationships use exact probabilities and retain evid
  assert.equal(auditPredictionRelationship({...base,relationship:'left-implies-right'}).violated,true);assert.equal(auditPredictionRelationship({...base,relationship:'equivalent'}).violated,true);
  for(const patch of [{confirmed:false},{relationship:'same-title'},{right:{...b,instrument:a.instrument}},{right:{...b,market:'stocks'}},{right:{...b,ruleHash:null}},{right:{...b,probability:2}},{now:base.now+7200000}])assert.equal(auditPredictionRelationship({...base,...patch}).dataStatus,'unavailable');
 });
+test('manual relationship graph is opt-in, private and renders saved rule changes safely',()=>{
+ const source=require('./helpers/dashboard-source.cjs').readDashboardSource(),fn=source.match(/function attachPredictionRelationshipCheck\(panel,item\) \{[\s\S]*?\n\}/)[0];
+ assert.ok(fn.includes('data-prediction-relationship-save'));assert.ok(fn.includes('/api/prediction/relationships?market=prediction'));assert.ok(fn.includes('ruleStatus'));assert.ok(fn.includes('textContent'));
+});
 test('relationship controls are administrator-only and submit only identities and explicit assumptions',async()=>{
  const source=require('./helpers/dashboard-source.cjs').readDashboardSource(),fn=source.match(/function attachPredictionRelationshipCheck\(panel,item\) \{[\s\S]*?\n\}/)[0],{JSDOM}=require('jsdom'),dom=new JSDOM('<div id="panel"></div>',{url:'https://local.invalid'}),panel=dom.window.document.getElementById('panel');let request;
  const env={window:dom.window,document:dom.window.document,AbortController,predictionRadarState:{cards:new Map([['a',{platform:'Kalshi',id:'A',title:'A'}],['b',{platform:'Kalshi',id:'B',title:'B'}]])},marketScopeRequestToken:()=>({scope:'prediction',epoch:1}),isCurrentMarketScopeToken:()=>true,fetch:async(_,options)=>{request=JSON.parse(options.body);return {ok:true,json:async()=>({success:true,violated:true,violationProbability:.1,reason:'明确假设'})}}};

@@ -1,4 +1,5 @@
 /** Read-only Gate USDT linear contracts. No authenticated endpoint or execution adapter. */
+import { createHash } from 'node:crypto';
 type ContractKind = 'perpetual' | 'delivery';
 type Json = Record<string, any>;
 const numeric = (value: unknown): number | null => value === null || value === undefined || value === '' || typeof value === 'boolean' ? null : Number.isFinite(Number(value)) ? Number(value) : null;
@@ -15,6 +16,24 @@ export function contractScenario(input: { entryPrice: number; quantity: number; 
   const pnl=(exitPrice-entryPrice)*quantity*direction,tradingFees=(notional+exitPrice*quantity)*feeRate,fundingCost=notional*fundingRate*fundingPeriods*direction,remainingMargin=initialMargin+pnl-tradingFees-fundingCost;
   return {exitPrice,notional,initialMargin,pnl,tradingFees,fundingCost,remainingMargin,marginReturnPct:(remainingMargin/initialMargin-1)*100,marginExhausted:remainingMargin<=0,
     assumptions:'USDT 线性合约；数量为基础币；入场/退出同一手续费假设，资金费率与名义本金固定。不含阶梯维持保证金、逐次资金结算和滑点，不是强平价、历史回测或交易指令。',executionEnabled:false};
+}
+/** Current observed rules only. Missing risk tiers preclude a liquidation or historical claim. */
+export function reviewContractRuleStress(detail:any,scenario:Parameters<typeof contractScenario>[0],now=Date.now()) {
+  const unavailable=(reason:string)=>({market:'crypto',instrument:detail?.instrument||null,dataStatus:'unavailable',reason,effectiveAt:null,historicalRecalculationEnabled:false,liquidationPrice:null,executionEnabled:false});
+  let identity;try{identity=contractIdentity(detail?.instrument);}catch{return unavailable('合约市场或身份无法核验');}
+  const source='https://api.gateio.ws/api/v4/'+(identity.kind==='perpetual'?'futures':'delivery')+'/usdt/contracts/'+identity.contract;
+  const at=Date.parse(detail?.retrievedAt),rules=detail?.contractRules;
+  if(detail.market!=='crypto'||!Number.isFinite(now)||!Number.isFinite(at)||at>now||now-at>30000||detail.sections?.quote?.source!==source||!['delayed','live'].includes(detail.sections?.quote?.dataStatus))return unavailable('没有30秒内、同一合约的官方来源规则快照；不套用其他来源或历史规则');
+  if(!rules||rules.settlementCurrency!=='USDT'||![rules.multiplier,rules.leverageMax].every(n=>typeof n==='number'&&Number.isFinite(n)&&n>0)||typeof rules.maintenanceRate!=='number'||!Number.isFinite(rules.maintenanceRate)||rules.maintenanceRate<0||rules.maintenanceRate>=1||typeof rules.takerFeeRate!=='number'||!Number.isFinite(rules.takerFeeRate)||rules.takerFeeRate<0||rules.takerFeeRate>.1)return unavailable('官方快照缺少完整乘数、杠杆上限、维持保证金率或费率，不能计算规则情景');
+  if(scenario.leverage>rules.leverageMax)return unavailable('用户杠杆超过本次来源声明的上限，不放宽限制');
+  if(identity.kind==='delivery'&&(scenario.fundingRate!==0||scenario.fundingPeriods!==0))return unavailable('交割合约不能套用永续资金费率');
+  const result=contractScenario({...scenario,feeRate:rules.takerFeeRate}),version={instrument:detail.instrument,source,rules,observedAt:detail.retrievedAt};
+  const ruleVersionHash=createHash('sha256').update(JSON.stringify(version)).digest('hex');
+  const estimatedMaintenanceUSDT=result.exitPrice*scenario.quantity*rules.maintenanceRate;
+  if(!Object.values(result).filter(value=>typeof value==='number').every(Number.isFinite)||!Number.isFinite(estimatedMaintenanceUSDT)||!Number.isFinite(result.remainingMargin-estimatedMaintenanceUSDT))return unavailable('压力金额超出有限数值范围，不发布失真结果');
+  return {market:'crypto',instrument:detail.instrument,dataStatus:'partial',source,observedAt:detail.retrievedAt,ruleVersionHash,rules,effectiveAt:null,historicalRecalculationEnabled:false,assumedEntryPrice:scenario.entryPrice,...result,
+    estimatedMaintenanceUSDT,simpleMaintenanceBufferUSDT:result.remainingMargin-estimatedMaintenanceUSDT,liquidationPrice:null,
+    reason:'当前官方公开字段的简化压力情景；入场价和冲击为用户假设，手续费使用来源公开taker费率，非账户优惠费率。缺少阶梯风险限额、扣减额、其他仓位与资金余额，不计算交易所强平价。抓取时间不是生效时间，不重算历史费用。'};
 }
 async function gateRead(path: string) {
   const response=await fetch('https://api.gateio.ws/api/v4'+path,{signal:AbortSignal.timeout(8000),headers:{'X-Gate-Size-Decimal':'1'}});
@@ -86,7 +105,7 @@ export class ContractResearchService {
       if(bars && !candles.length)sections.bars={...sections.bars,dataStatus:'empty',reason:'来源成功但暂无已完成小时 K 线'};
       const failures=Object.values(sections).filter(row=>['unavailable','empty'].includes(row.dataStatus));
       return {market:'crypto',instrument,...identity,source:'Gate public API · USDT 线性合约',updatedAt,dataStatus:!valid?'unavailable':failures.length?'partial':'delayed',reason:!valid?sections.quote.reason:failures.map(row=>row.reason).join('；') || null,sections,
-        contractRules:valid?{multiplier,fundingIntervalSeconds:positive(data.funding_interval),settlementCurrency:'USDT',inDelisting:typeof data.in_delisting==='boolean'?data.in_delisting:null,status:typeof data.status==='string'?data.status.slice(0,80):null}:null,
+        contractRules:valid?{multiplier,fundingIntervalSeconds:positive(data.funding_interval),settlementCurrency:'USDT',inDelisting:typeof data.in_delisting==='boolean'?data.in_delisting:null,status:typeof data.status==='string'?data.status.slice(0,80):null,leverageMax:positive(data.leverage_max),maintenanceRate:numeric(data.maintenance_rate),takerFeeRate:numeric(data.taker_fee_rate)}:null,
         quote:{markPrice,indexPrice,lastPrice:positive(data.last_price),basisPct:markPrice && indexPrice ? markPrice/indexPrice*100-100:null,multiplier,openInterestUsd:markPrice && multiplier && size!=null && size>=0?markPrice*multiplier*size:null,
           fundingRatePct:identity.kind==='perpetual' && numeric(data.funding_rate)!=null?Number(data.funding_rate)*100:null,fundingIntervalSeconds:positive(data.funding_interval),nextFundingAt:positive(data.funding_next_apply)?new Date(Number(data.funding_next_apply)*1000).toISOString():null,
           expiresAt:positive(data.expire_time)?new Date(Number(data.expire_time)*1000).toISOString():null,leverageMax:positive(data.leverage_max),maintenanceRate:numeric(data.maintenance_rate),takerFeeRate:numeric(data.taker_fee_rate),makerFeeRate:numeric(data.maker_fee_rate),status:data.status || (valid?'来源未声明':'不可用')},

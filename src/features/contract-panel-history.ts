@@ -4,10 +4,10 @@ import { contractIdentity } from './contract-research';
 export function compareArchivedContractRules(input:{instrument:string;rows:any[];asOf?:string}){
   const identity=contractIdentity(input.instrument),source='https://api.gateio.ws/api/v4/'+(identity.kind==='perpetual'?'futures':'delivery')+'/usdt/contracts/'+identity.contract;
   const cutoff=input.asOf?Date.parse(input.asOf):Date.now();if(!Number.isFinite(cutoff))throw Error('合约规则时点无效');
-  const fields=['multiplier','fundingIntervalSeconds','settlementCurrency','inDelisting','status'],rows:any[]=[];
+  const fields=['multiplier','fundingIntervalSeconds','settlementCurrency','inDelisting','status','leverageMax','maintenanceRate','takerFeeRate'],rows:any[]=[];
   for(const row of (Array.isArray(input.rows)?input.rows:[]).slice(-2000)){
     if(row?.market!=='crypto'||row.instrument!==input.instrument||row.source!==source||!Number.isFinite(Date.parse(row.retrievedAt))||Date.parse(row.retrievedAt)>cutoff||typeof row.rulesJson!=='string'||row.rulesJson.length>2048)continue;
-    try{const rules=JSON.parse(row.rulesJson);if(!rules||rules.settlementCurrency!=='USDT'||fields.some(key=>rules[key]!=null&&(key==='multiplier'||key==='fundingIntervalSeconds')&&(!Number.isFinite(rules[key])||rules[key]<=0))||rules.inDelisting!=null&&typeof rules.inDelisting!=='boolean'||rules.status!=null&&typeof rules.status!=='string')continue;rows.push({...row,rules});}catch{/* Legacy/malformed metadata remains unverified. */}
+    try{const rules=JSON.parse(row.rulesJson);if(!rules||rules.settlementCurrency!=='USDT'||fields.some(key=>rules[key]!=null&&['multiplier','fundingIntervalSeconds','leverageMax'].includes(key)&&(!Number.isFinite(rules[key])||rules[key]<=0))||rules.maintenanceRate!=null&&(!Number.isFinite(rules.maintenanceRate)||rules.maintenanceRate<0||rules.maintenanceRate>=1)||rules.takerFeeRate!=null&&(!Number.isFinite(rules.takerFeeRate)||rules.takerFeeRate<0||rules.takerFeeRate>.1)||rules.inDelisting!=null&&typeof rules.inDelisting!=='boolean'||rules.status!=null&&typeof rules.status!=='string')continue;rows.push({...row,rules});}catch{/* Legacy/malformed metadata remains unverified. */}
   }
   rows.sort((a,b)=>Date.parse(a.retrievedAt)-Date.parse(b.retrievedAt));
   const changes=rows.slice(1).flatMap((after,index)=>{

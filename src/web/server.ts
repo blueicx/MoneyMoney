@@ -76,7 +76,7 @@ import { binanceFeed, alertManager, anomalyDetector } from '../features/binance'
 import { fetchRunnerBinanceKlines } from '../features/runner-binance-kline';
 import { llmAnalyzer, redditSentiment, whaleMonitor, strategyComparison, tradeJournal } from '../features/ai-social';
 import { binancePortfolio } from '../features/binance-portfolio';
-import { calculateOptionPayoff, calculateOptionScenario, getEquityOptionsSnapshot, getOptionsSnapshot } from '../features/options-market';
+import { buildOptionLifecycleCalendar, calculateOptionPayoff, calculateOptionScenario, getEquityOptionsSnapshot, getOptionsSnapshot } from '../features/options-market';
 import { fetchDeribitOptionExecutionQuote, parseDeribitOptionInstrumentName } from '../features/runner-deribit-options';
 import { getMacroCalendar, getGlobalCryptoMetrics } from '../features/external-market-data';
 import { getStablecoinLiquidity } from '../features/stablecoin-liquidity';
@@ -104,7 +104,7 @@ import { getFearGreed, getFundingRates } from '../features/market-sentiment';
 import { getGlobalMacroSpotSnapshot } from '../features/global-macro-spot';
 import { getCrossAssetCorrelationRadar } from '../features/cross-asset-correlation';
 import { getPerpetualCrowding } from '../features/perpetual-crowding';
-import { ContractResearchService, contractIdentity, contractScenario } from '../features/contract-research';
+import { ContractResearchService, contractIdentity, contractScenario, reviewContractRuleStress } from '../features/contract-research';
 import { createWorkspaceRecordSearchRouter } from './workspace-record-search-routes';
 import { createOperationHistoryRouter } from './operation-history-routes';
 import { validateReliabilityReport } from '../features/reliability-acceptance';
@@ -135,7 +135,8 @@ import { getCachedPredictionRadarSlice, getPredictionRadar, warmPredictionRadarC
 import { getPredictionHistory } from '../features/prediction-history';
 import { getForecastLabReport, resolveForecastCase } from '../features/forecast-lab';
 import { InstrumentSilenceStore } from '../features/instrument-silence';
-import { auditPredictionRelationship } from '../features/prediction-relationship-audit';
+import { PredictionRelationshipStore } from '../features/prediction-relationship-audit';
+import { createPredictionRelationshipRouter } from './prediction-relationship-routes';
 import { calculatePredictionPosition } from '../features/prediction-position-sizer';
 import { aiCommentaryConfigured, getAiMarketCommentary } from '../features/ai-commentary';
 import { getAiConfigurationStatus, testAiConnection, type AiChain } from '../features/ai-runtime-config';
@@ -3669,7 +3670,7 @@ app.post('/api/options/payoff', express.json(), async (req, res) => {
       return { row: { ...row, expiryMs, quoteTime: snapshot.fetchedAt }, action: item.action, contracts: Number(item.contracts) };
     });
     const input = { spot: snapshot.spot, multiplier, legs, underlyingSymbol: symbol, nowMs:Date.now() };
-    const data = {...calculateOptionPayoff(input), ...(req.body?.scenario ? {scenario:calculateOptionScenario({...input,scenario:req.body.scenario})}: {})};
+    const data = {...calculateOptionPayoff(input),lifecycleCalendar:buildOptionLifecycleCalendar({source:snapshot.source,fetchedAt:snapshot.fetchedAt,nowMs:input.nowMs,legs}), ...(req.body?.scenario ? {scenario:calculateOptionScenario({...input,scenario:req.body.scenario})}: {})};
     return res.json({ success: true, market: 'options', instrument: `option:cboe:${symbol}`, timeframe: expiry.label, dataStatus: 'delayed', source: snapshot.source, sourceTime: snapshot.fetchedAt, updatedAt: new Date().toISOString(), reason: '到期情景试算，不是成交回报；仅使用当前来源双边报价', evidenceRefs: [], data });
   } catch (error) {
     return res.status(422).json({ success: false, market: 'options', instrument: `option:cboe:${symbol}`, dataStatus: 'unavailable', source: 'CBOE Delayed Quotes', updatedAt: new Date().toISOString(), reason: error instanceof Error ? error.message : '期权试算失败', evidenceRefs: [] });
@@ -4204,10 +4205,15 @@ app.get('/api/contracts/holding-cost',async(req,res)=>{
     res.json({success:true,market:'crypto',instrument,dataStatus:data.dataStatus,source:'统一模拟账本 + Gate 同合约公开快照',updatedAt:snapshot.updatedAt,reason:data.ledger.reason,evidenceRefs:[...history.rows.map((row:any)=>row.evidenceRef).filter(Boolean),...(snapshot.evidenceRefs||[])],data});
   }catch(error:any){res.status(400).json({success:false,market:'crypto',dataStatus:'failed',reason:error.message});}
 });
-app.post('/api/contracts/scenario', express.json(),(req,res)=>{
+app.post('/api/contracts/scenario', express.json(),async(req,res)=>{
   if(!adminOnly(req,res))return;
   if(String(req.body.instrument || '').startsWith('crypto:gateio-delivery:') && (Number(req.body.fundingRate || 0)!==0 || Number(req.body.fundingPeriods || 0)!==0))return res.status(400).json({success:false,dataStatus:'failed',reason:'交割合约不适用永续资金费率，请将资金费率和期数设为零'});
-  try {if(req.body.market!=='crypto')throw new Error('合约市场不一致');contractIdentity(String(req.body.instrument || ''));res.json({success:true,market:'crypto',instrument:req.body.instrument,data:contractScenario(req.body),dataStatus:'historical',source:'明确输入的压力情景假设',updatedAt:new Date().toISOString(),reason:'压力测试，不是行情预测或真实订单'});}
+  try {
+    if(req.body.market!=='crypto')throw new Error('合约市场不一致');contractIdentity(String(req.body.instrument || ''));
+    const data=contractScenario(req.body);
+    const ruleStress=req.body.verifyRules===true?reviewContractRuleStress(await contractResearchService.detail(String(req.body.instrument),[]),req.body):null;
+    res.json({success:true,market:'crypto',instrument:req.body.instrument,data:{...data,...(ruleStress?{ruleStress}:{})},dataStatus:'historical',source:'明确输入的压力情景假设',updatedAt:new Date().toISOString(),reason:'压力测试，不是行情预测或真实订单'});
+  }
   catch(error:any){res.status(400).json({success:false,dataStatus:'failed',reason:error.message});}
 });
 app.get('/api/contracts/compare',async(req,res)=>{
@@ -4221,20 +4227,20 @@ app.get('/api/contracts/compare',async(req,res)=>{
     res.json({success:true,...compareContractSnapshots(rows),updatedAt:new Date().toISOString()});
   }catch(error:any){res.status(400).json({success:false,dataStatus:'unavailable',reason:error.message});}
 });
-app.post('/api/prediction/relationships/check', express.json(), (req,res)=>{
-  if(!adminOnly(req,res))return;
-  const radar=getCachedPredictionRadarSlice('',240);
-  const quote=(instrument:unknown)=>{
+app.use('/api/prediction/relationships',express.json(),createPredictionRelationshipRouter({
+  store:new PredictionRelationshipStore(stateStore),
+  quote:instrument=>{
+    const radar=getCachedPredictionRadarSlice('',240);
     const item=radar?.markets.find(row=>`prediction:${row.platform.toLowerCase()}:${row.id}`===instrument);
     if(!item||!['Kalshi','Polymarket'].includes(item.platform))return null;
     const evidence=predictionSettlementRepository.latest(item.platform,item.id);
     return {market:'prediction',instrument:String(instrument),probability:item.yesPrice,observedAt:radar!.updatedAt,source:item.platform,ruleHash:evidence?.rulesHash||null,evidenceRef:evidence?.evidenceHash||null};
-  };
-  const left=quote(req.body.left),right=quote(req.body.right);
-  if(!left||!right)return res.json({success:true,market:'prediction',dataStatus:'unavailable',reason:'当前缓存没有两个精确匹配事件；先打开对应事件及官方规则，不新增来源请求或猜测身份',evidenceRefs:[],data:null});
-  const data=auditPredictionRelationship({left,right,relationship:req.body.relationship,confirmed:req.body.confirmed});
-  res.json({success:true,...data,source:'当前预测雷达缓存 + 已保存官方规则',updatedAt:radar!.updatedAt,data});
-});
+  },
+  ruleHash:instrument=>{
+    const match=/^prediction:(kalshi|polymarket):([^\s]+)$/.exec(instrument);
+    return match?predictionSettlementRepository.latest(match[1]==='kalshi'?'Kalshi':'Polymarket',match[2])?.rulesHash||null:null;
+  },
+}));
 app.get('/api/prediction/settlement/:platform/:marketId', async (req,res)=>{
   const platform=String(req.params.platform||''),marketId=String(req.params.marketId||'');
   const context={market:'prediction',instrument:`prediction:${platform.toLowerCase()}:${marketId}`,source:platform||'unknown',updatedAt:new Date().toISOString()};

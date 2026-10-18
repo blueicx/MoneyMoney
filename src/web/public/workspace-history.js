@@ -18,7 +18,7 @@
     };
   }
   function install(options){
-    const w=options.window,history=w.history;let disposed=false,restoring=false,pending=false,last=null;
+    const w=options.window,history=w.history;let disposed=false,restoring=false,pending=false,last=null,queuedTarget=null;
     const contextKey=row=>JSON.stringify([row.market,row.workspace,row.instrument||null]);
     const capture=()=>({...options.current(),url:w.location.pathname+w.location.search+w.location.hash,scroll:Math.max(0,w.scrollY||0),centerScroll:w.document.getElementById('center-workspace')?.scrollTop||0});
     const write=(entry,url=entry.url)=>history.replaceState({...history.state,mmWorkspace:entry},'',url);
@@ -35,12 +35,16 @@
       last=next;
     });};
     const pop=async event=>{
-      const target=event.state?.mmWorkspace;if(disposed||restoring||!valid(target))return;
+      const requested=event.state?.mmWorkspace;if(disposed||!valid(requested))return;
+      queuedTarget=requested;if(restoring)return;
       restoring=true;
       try{
-        await options.restore(target);if(disposed)return;last={...target};write(last,target.url);
+        while(queuedTarget&&!disposed){
+        const target=queuedTarget;queuedTarget=null;if(!valid(target))continue;
+        await options.restore(target);if(disposed)return;if(queuedTarget)continue;last={...target};write(last,target.url);
         const apply=()=>{if(disposed||!last||contextKey(last)!==contextKey(target))return;w.scrollTo({top:Number.isFinite(target.scroll)?Math.max(0,target.scroll):0});const center=w.document.getElementById('center-workspace');if(center)center.scrollTop=Number.isFinite(target.centerScroll)?Math.max(0,target.centerScroll):0;};
         apply();w.requestAnimationFrame?.(apply);
+        }
       }catch{options.onError?.('无法恢复该工作区，请从当前市场菜单重新打开；没有执行写操作。');}
       finally{restoring=false;}
     };

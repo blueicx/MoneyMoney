@@ -27,3 +27,12 @@ test('device preference history is allowlisted, bounded and cannot undo over a c
  journal.record(key,{strategyParameters:{macdCross:{fast:10,slow:26}}},{market:'stocks',workspace:'stock-quotes'});const latest=journal.list('stocks')[0];journal.undo(latest.id);assert.match(storage.getItem(key),/"fast":12/);assert.equal(journal.list('crypto').length,0);
  assert.doesNotMatch(JSON.stringify(journal.list()),/"before"|"after"/);
 });
+test('a newer browser history target is not dropped while an earlier restore is still pending',async()=>{
+ const {install}=require('../src/web/public/workspace-history'),dom=new JSDOM('<main></main>',{url:'https://test.invalid/?market=stocks&workspace=stock-quotes'}),w=dom.window;w.scrollTo=()=>{};
+ let current={market:'stocks',workspace:'stock-quotes',instrument:'stock:us:AAPL'},release,attempts=0;
+ const api=install({window:w,current:()=>current,canRestore:()=>true,restore:async target=>{if(++attempts===1)await new Promise(resolve=>release=resolve);current={market:target.market,workspace:target.workspace,instrument:target.instrument};w.dispatchEvent(new w.Event('mm-workspace-context'));}});
+ try{const a={...w.history.state.mmWorkspace,workspace:'fundamentals',url:'?market=stocks&workspace=fundamentals'},b={...a,workspace:'events',url:'?market=stocks&workspace=events'};
+  w.dispatchEvent(new w.PopStateEvent('popstate',{state:{mmWorkspace:a}}));w.dispatchEvent(new w.PopStateEvent('popstate',{state:{mmWorkspace:b}}));release();await new Promise(r=>setImmediate(r));await new Promise(r=>setImmediate(r));
+  assert.equal(current.workspace,'events','latest navigation must win');assert.equal(w.history.state.mmWorkspace.workspace,'events');assert.equal(w.history.length,1,'restoration must never push new history');
+ }finally{api.dispose();w.close();}
+});

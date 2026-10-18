@@ -67,6 +67,21 @@ export interface OptionPayoffLeg {
   contracts: number;
 }
 
+/** Date evidence from exact OCC identity only; never infer exercise cutoff, dividends or assignment. */
+export function buildOptionLifecycleCalendar(input:{source:string;fetchedAt:string;nowMs?:number;legs:Array<{row:{instrumentName:string};action:string;contracts:number}>}) {
+  const now=input.nowMs??Date.now(),captured=Date.parse(input.fetchedAt);
+  const base={market:'options',source:input.source,updatedAt:input.fetchedAt,executionEnabled:false,reason:'合约日期日历，不是行权/指派指令；精确截止时间、除息与行权方式缺少来源元数据时保持未知，相关计算禁用。'};
+  if(!Number.isFinite(now)||!Number.isFinite(captured)||captured>now||now-captured>300000||!input.source||!Array.isArray(input.legs)||input.legs.length>4)return {...base,dataStatus:'unavailable',legs:[]};
+  const legs=input.legs.map(leg=>{
+    const match=/^([A-Z0-9]{1,6})(\d{6})[CP]\d{8}$/.exec(leg.row.instrumentName),raw=match?.[2];
+    const date=raw?'20'+raw.slice(0,2)+'-'+raw.slice(2,4)+'-'+raw.slice(4,6):null,parsed=date?Date.parse(date+'T00:00:00Z'):NaN;
+    const expiryDate=date&&Number.isFinite(parsed)&&new Date(parsed).toISOString().slice(0,10)===date?date:null;
+    return {instrument:leg.row.instrumentName,action:leg.action,contracts:leg.contracts,expiryDate,dateBasis:expiryDate?'OCC合约身份日期（非截止时刻）':'unknown',cutoffAt:null,exDividendAt:null,exerciseStyle:null,assignmentCalculationEnabled:false,
+      reason:(expiryDate?'仅核验合约编码日期，不能将其转换为统一UTC截止时间。':'合约身份日期不可核验，不猜测。')+(leg.action==='sell'?' 卖出腿有指派风险；来源未核验行权方式/除息日，不能计算发生概率或安全时点。':' 买入腿的行权方式、特殊交割和操作截止仍需官方规格核验。')};
+  });
+  return {...base,dataStatus:legs.some(leg=>leg.expiryDate)?'partial':'unavailable',legs};
+}
+
 export interface OptionPayoffAnalysis {
   quoteAudit: {quoteSkewMs:number;maxAgeMs:number;spreadCrossingVsMidUsd:number;executable:false;reason:string;legs:Array<{instrument:string;quoteTime:string;ageMs:number;bid:number;ask:number;referencePrice:number;contracts:number;multiplier:number}>};
   netPremiumUsd: number;

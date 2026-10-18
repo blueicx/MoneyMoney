@@ -2,7 +2,8 @@ type Fact={start?:string;end:string;filed?:string;form?:string;fp?:string;val:nu
 type Facts={cik?:number;facts?:Record<string,Record<string,{units?:Record<string,Fact[]>}>>};
 type Evidence={tag:string;unit:string;start:string|null;end:string;filed:string;accession:string|null};
 type Field={value:number|null;unit:string;reason:string|null;evidence:Evidence[]};
-export type CapitalPoint={periodStart:string;periodEnd:string;operatingCashFlowUsd:Field;repurchasesUsd:Field;dividendsUsd:Field;cashUsd:Field;debtUsd:Field;shares:Field;shareChangePct:number|null};
+export type PerShareBridge={netIncomeUsd:Field;weightedDilutedShares:Field;reportedDilutedEps:Field;impliedIncomePerDilutedShare:number|null;epsDifference:number|null;dataStatus:'historical'|'partial';reason:string};
+export type CapitalPoint={periodStart:string;periodEnd:string;operatingCashFlowUsd:Field;repurchasesUsd:Field;dividendsUsd:Field;cashUsd:Field;debtUsd:Field;shares:Field;shareChangePct:number|null;perShareBridge?:PerShareBridge};
 type RevisionValue={value:number|null;filed:string;accession:string|null;form:string|null};
 export type CapitalRevision={tag:string;unit:string;periodStart:string|null;periodEnd:string;before:RevisionValue;after:RevisionValue;change:number|null;reason:string};
 export type CapitalHistory={points:CapitalPoint[];revisions?:CapitalRevision[];asOf:string;source:string;dataStatus:'historical'|'partial'|'empty';reason:string};
@@ -49,9 +50,18 @@ export function buildCapitalHistory(facts:Facts,asOf=new Date().toISOString()):C
     const debtUsd:Field={value:debtKnown?current.value!+noncurrent.value!:null,unit:'USD',evidence:[...current.evidence,...noncurrent.evidence],reason:debtKnown?null:'当期/非当期长期债务缺失或申报口径不一致；不是全部债务'};
     return {periodStart,periodEnd,operatingCashFlowUsd:select(['NetCashProvidedByUsedInOperatingActivities'],'USD',periodStart,periodEnd,false,false),repurchasesUsd:select(['PaymentsForRepurchaseOfCommonStock'],'USD',periodStart,periodEnd),dividendsUsd:select(['PaymentsOfDividendsCommonStock'],'USD',periodStart,periodEnd),cashUsd:select(['CashAndCashEquivalentsAtCarryingValue'],'USD',periodStart,periodEnd,true),debtUsd,shares:select(['CommonStockSharesOutstanding'],'shares',periodStart,periodEnd,true),shareChangePct:null as number|null};
   });
-  for(let i=1;i<points.length;i++){const prior=points[i-1],row=points[i],gap=(Date.parse(row.periodEnd)-Date.parse(prior.periodEnd))/86400000;if(gap>=300&&gap<=400&&prior.shares.value!==null&&prior.shares.value>0&&row.shares.value!==null)row.shareChangePct=(row.shares.value/prior.shares.value-1)*100;}
+  const bridgedPoints:CapitalPoint[]=points.map(point=>{
+    const netIncomeUsd=select(['NetIncomeLoss'],'USD',point.periodStart,point.periodEnd,false,false),weightedDilutedShares=select(['WeightedAverageNumberOfDilutedSharesOutstanding'],'shares',point.periodStart,point.periodEnd),reportedDilutedEps=select(['EarningsPerShareDiluted'],'USD/shares',point.periodStart,point.periodEnd,false,false);
+    const filing=(field:Field)=>{const refs=new Set(field.evidence.map(e=>e.accession&&e.filed?e.accession+'|'+e.filed:null));return refs.size===1&&!refs.has(null)?[...refs][0]:null;};
+    const sameFiling=Boolean(filing(netIncomeUsd)&&filing(netIncomeUsd)===filing(weightedDilutedShares));
+    const impliedIncomePerDilutedShare=sameFiling&&netIncomeUsd.value!==null&&weightedDilutedShares.value!==null&&weightedDilutedShares.value>0?netIncomeUsd.value/weightedDilutedShares.value:null;
+    const epsDifference=impliedIncomePerDilutedShare!==null&&reportedDilutedEps.value!==null&&filing(reportedDilutedEps)===filing(netIncomeUsd)?impliedIncomePerDilutedShare-reportedDilutedEps.value:null;
+    const agreement=epsDifference!==null&&Math.abs(epsDifference)<=.011;
+    return {...point,perShareBridge:{netIncomeUsd,weightedDilutedShares,reportedDilutedEps,impliedIncomePerDilutedShare,epsDifference,dataStatus:agreement?'historical':'partial',reason:'仅同起止日期、USD/加权稀释股数及同一申报证据；不使用期末股数代替。净利润除以加权稀释股数是研究比值，不一定等于披露EPS（普通股归属、稀释分子调整及四舍五入可能有差异），保留差异，不推断原因。'+(!sameFiling?' 缺少同一申报引用，禁止跨申报拼接。':'')}};
+  });
+  for(let i=1;i<bridgedPoints.length;i++){const prior=bridgedPoints[i-1],row=bridgedPoints[i],gap=(Date.parse(row.periodEnd)-Date.parse(prior.periodEnd))/86400000;if(gap>=300&&gap<=400&&prior.shares.value!==null&&prior.shares.value>0&&row.shares.value!==null)row.shareChangePct=(row.shares.value/prior.shares.value-1)*100;}
   const complete=points.every(row=>[row.operatingCashFlowUsd,row.repurchasesUsd,row.dividendsUsd,row.cashUsd,row.debtUsd,row.shares].every(field=>field.value!==null));
-  return {points,revisions:revisions.sort((a,b)=>a.after.filed.localeCompare(b.after.filed)).slice(-200),asOf,source:'SEC EDGAR XBRL companyfacts · us-gaap',dataStatus:points.length?(complete?'historical':'partial'):'empty',reason:'仅精确年报区间及USD/股数单位；股数变化不等于实际融资稀释，长期债务不等于全部债务。申报日期没有时分秒时，时点查询保守等待次日06:00 UTC（纽约整日结束之后）；保留后续修订证据，最多列出最近200项字段变化。'};
+  return {points:bridgedPoints,revisions:revisions.sort((a,b)=>a.after.filed.localeCompare(b.after.filed)).slice(-200),asOf,source:'SEC EDGAR XBRL companyfacts · us-gaap',dataStatus:points.length?(complete?'historical':'partial'):'empty',reason:'仅精确年报区间及USD/股数单位；股数变化不等于实际融资稀释，长期债务不等于全部债务。申报日期没有时分秒时，时点查询保守等待次日06:00 UTC（纽约整日结束之后）；保留后续修订证据，最多列出最近200项字段变化。'};
 }
 
 export function compareCapitalHistory(input:Array<{symbol:string;capitalHistory?:CapitalHistory;dataStatus?:string}>) {

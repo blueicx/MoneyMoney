@@ -23,9 +23,9 @@ test('contract history pagination is exclusive and never repeats the boundary ob
 });
 test('contract snapshots persist source-confirmed rules without changing older records or inventing effective time',async()=>{
  const {root,c}=setup();try{
-  await c.stageContractMetrics({...snapshot('2026-10-01T00:00:00Z'),contractRules:{multiplier:.001,fundingIntervalSeconds:28800,settlementCurrency:'USDT',inDelisting:false,status:null}});
+  await c.stageContractMetrics({...snapshot('2026-10-01T00:00:00Z'),contractRules:{multiplier:.001,fundingIntervalSeconds:28800,settlementCurrency:'USDT',inDelisting:false,status:null,leverageMax:20,maintenanceRate:.005,takerFeeRate:.0005}});
   const h=await c.queryContractMetrics({market:'crypto',instrument:'crypto:gateio:BTC_USDT'});
   const rules=JSON.parse(h.rows[0].rulesJson);assert.equal(rules.multiplier,.001);assert.equal(rules.inDelisting,false);assert.equal(rules.status,null);
-  assert.equal(rules.effectiveAt,undefined);assert.ok(h.rows[0].contentHash);
+  assert.equal(rules.leverageMax,20);assert.equal(rules.maintenanceRate,.005);assert.equal(rules.takerFeeRate,.0005);assert.equal(rules.effectiveAt,undefined);assert.ok(h.rows[0].contentHash);
  }finally{c.close();fs.rmSync(root,{recursive:true,force:true});}
 });
