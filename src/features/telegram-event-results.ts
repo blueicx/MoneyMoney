@@ -28,6 +28,7 @@ export function summarizeTelegramResultCoverage(rows: CoverageDelivery[], now = 
   const allWaiting = deliveries.filter(row => !hasEventActual(row.actual) && ['pending', 'waiting'].includes(String(row.resultStatus || row.kind || '')));
   const waiting=allWaiting.filter(row=>!resolved.has(eventKey(row)));
   const observed=published.flatMap(row=>{
+    if(!['sent','acknowledged'].includes(row.status))return [];
     const eventAt=Date.parse(row.event?.date),release=Date.parse(row.publishedAt||''),retrieval=Date.parse(row.retrievedAt||''),sent=Date.parse(row.sentAt||'');
     return [eventAt,release,retrieval,sent,now].every(Number.isFinite)&&release>=eventAt&&retrieval>=release&&sent>=retrieval&&sent<=now?[{publicationToRetrieval:retrieval-release,retrievalToDelivery:sent-retrieval}]:[];
   });

@@ -3,9 +3,37 @@
   const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const statuses={live:'实时',delayed:'延迟',cached:'缓存',partial:'部分成功',empty:'来源成功但暂无记录',unavailable:'来源不可用',unsupported:'当前市场不支持',failed:'请求失败',historical:'历史数据',queued:'排队中',running:'执行中',succeeded:'已完成',cancelled:'已取消'};
   const ctx=()=>{const shell=document.getElementById('market-workspace-shell');return {market:shell?.dataset.marketScope,workspace:shell?.dataset.workspace,instrument:shell?.dataset.instrument || ''};};
-  let returnContext=null;
-  function returnButton(){let button=document.getElementById('mm-return-to-research');if(!button){button=document.createElement('button');button.id='mm-return-to-research';button.className='btn btn-secondary';button.dataset.workspaceId='stock-quotes';button.dataset.marketScopes='stocks';button.type='button';button.textContent='← 返回上一个工作区与图表区间';document.getElementById('center-workspace').prepend(button);}button.hidden=false;button.onclick=()=>{const saved=returnContext;if(!saved)return;returnContext=null;window.setMarketScope(saved.market);window.setWorkspaceInstrument(saved.instrument);window.openWorkspace(saved.workspace);history.replaceState({},'',saved.url);button.hidden=true;requestAnimationFrame(()=>{window.scrollTo({top:saved.scroll});});};}
-  async function locate(date,instrument){const current=ctx(),day=String(date || '').slice(0,10);if(current.market!=='stocks' || !/^stock:us:[A-Z0-9.-]+$/.test(instrument || '') || !/^\d{4}-\d{2}-\d{2}$/.test(day)){window.showToast?.('该记录没有可核验的股票身份与日期，未猜测图表。','info');return null;}returnContext={...current,url:location.pathname+location.search+location.hash,scroll:window.scrollY};window.setWorkspaceInstrument(instrument);window.openWorkspace('stock-quotes');returnButton();const index=await window.MoneyMoneyChartBridge.locateDay(instrument,day);if(index==null)window.showToast?.('该日期不在可用日线覆盖内，请查看图表数据原因与覆盖区间。','info');return index;}
+  let returnContext=null,locateVersion=0;
+  // In-memory navigation only: never save private text, results or account data in URL/storage.
+  const returnControls=['mm-experiment-all','mm-action-market','mm-action-section','mm-action-state','mm-action-snoozed','mm-action-map-sort'];
+  function captureReturn(current){return {...current,url:location.pathname+location.search+location.hash,historyState:history.state,scroll:window.scrollY,centerScroll:document.getElementById('center-workspace')?.scrollTop||0,focus:document.activeElement,
+    tab:document.querySelector('[data-research-tab][aria-selected="true"]')?.dataset.researchTab,
+    controls:returnControls.flatMap(id=>{const node=document.getElementById(id);return node?[{id,value:node.value,checked:node.checked}]:[];}),
+    choices:[...document.querySelectorAll('#mm-experiment-options input[type="checkbox"], [data-comparison-options] input[type="checkbox"]')].map(node=>({parent:node.closest('#mm-experiment-options')?'mm-experiment-options':'comparison',value:node.value,checked:node.checked}))};}
+  function returnButton(){
+    let button=document.getElementById('mm-return-to-research');if(!button){button=document.createElement('button');button.id='mm-return-to-research';button.className='btn btn-secondary';button.dataset.workspaceId='stock-quotes';button.dataset.marketScopes='stocks';button.type='button';button.textContent='← 返回上一个研究工作区';document.getElementById('center-workspace').prepend(button);}
+    button.hidden=false;button.onclick=()=>{
+      const saved=returnContext;if(!saved||ctx().market!==saved.market)return;returnContext=null;const version=++locateVersion;
+      window.setMarketScope(saved.market);window.setWorkspaceInstrument(saved.instrument);window.openWorkspace(saved.workspace);history.replaceState(saved.historyState,'',saved.url);button.hidden=true;
+      requestAnimationFrame(()=>{
+        const current=ctx();if(version!==locateVersion||current.market!==saved.market||current.workspace!==saved.workspace||current.instrument!==saved.instrument)return;
+        // Context navigation journals flush in a microtask; restore the saved entry afterwards.
+        history.replaceState(saved.historyState,'',saved.url);
+        [...document.querySelectorAll('[data-research-tab]')].find(node=>node.dataset.researchTab===saved.tab)?.click();
+        for(const row of saved.controls){const node=document.getElementById(row.id);if(node){node.value=row.value;if(typeof row.checked==='boolean')node.checked=row.checked;}}
+        for(const row of saved.choices){const selector=row.parent==='comparison'?'[data-comparison-options] input[type="checkbox"]':'#mm-experiment-options input[type="checkbox"]';for(const node of document.querySelectorAll(selector))if(node.value===row.value)node.checked=row.checked;}
+        if(saved.focus?.isConnected)saved.focus.focus({preventScroll:true});
+        const center=document.getElementById('center-workspace');if(center)center.scrollTop=saved.centerScroll;window.scrollTo({top:saved.scroll});
+      });
+    };
+  }
+  async function locate(date,instrument){
+    const current=ctx(),day=String(date || '').slice(0,10);if(current.market!=='stocks' || !/^stock:us:[A-Z0-9.-]+$/.test(instrument || '') || !/^\d{4}-\d{2}-\d{2}$/.test(day)){window.showToast?.('该记录没有可核验的股票身份与日期，未猜测图表。','info');return null;}
+    if(!returnContext||current.workspace!=='stock-quotes'||returnContext.market!==current.market)returnContext=captureReturn(current);
+    const version=++locateVersion;window.setWorkspaceInstrument(instrument);window.openWorkspace('stock-quotes');returnButton();const index=await window.MoneyMoneyChartBridge.locateDay(instrument,day);
+    const latest=ctx();if(version!==locateVersion||latest.market!=='stocks'||latest.workspace!=='stock-quotes'||latest.instrument!==instrument)return null;
+    if(index==null)window.showToast?.('该日期不在可用日线覆盖内，请查看图表数据原因与覆盖区间。','info');return index;
+  }
   async function api(url,options={}){const token=document.cookie.split(';').map(x=>x.trim()).find(x=>x.startsWith('mm_csrf='));const response=await fetch(url,{...options,headers:{'content-type':'application/json',...(token?{'x-csrf-token':decodeURIComponent(token.slice(8))}:{}),...options.headers}});const body=await response.json();if(!response.ok || body.success===false)throw Error(body.reason || body.error || '请求失败 '+response.status);return body;}
   function historyTools(host,data,rerun){
     const market=ctx().market,series=data.series || [],instrument=ctx().instrument;

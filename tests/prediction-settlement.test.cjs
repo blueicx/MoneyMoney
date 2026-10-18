@@ -141,10 +141,10 @@ test('settlement timeline distinguishes source-observed announcement, dispute, f
   {...evidence,capturedAt:'2026-09-25T12:00:00Z',rulesHash:'rule-v1'},
   {...evidence,capturedAt:'2026-09-26T12:00:00Z',rulesHash:'rule-v2'},
  ]);
- assert.deepEqual(open.stages.map(row=>row.key),['close','announcement','dispute','final']);
+ assert.deepEqual(open.stages.map(row=>row.key),['close','announcement','dispute','final','capital-release']);
  assert.equal(open.stages[0].at,'2026-09-25T12:00:00.000Z');
  assert.equal(open.stages[1].timeKind,'observed');
- assert.equal(open.stages[1].at,'2026-09-26T12:00:00.000Z');
+ assert.equal(open.stages[1].at,'2026-09-25T12:00:00.000Z');
  assert.equal(open.stages[2].status,'disputed');
  assert.equal(open.stages[2].at,null);
  assert.equal(open.stages[3].status,'disputed');

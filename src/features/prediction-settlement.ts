@@ -36,7 +36,7 @@ export interface SettlementEvidence {
   reason: string | null;
 }
 
-export interface SettlementTimelineStage { key:'close'|'announcement'|'dispute'|'final'; label:string; status:string; at:string|null; timeKind:'source'|'observed'|'unknown'; detail:string; sourceUrl:string|null; evidenceHash:string; }
+export interface SettlementTimelineStage { key:'close'|'announcement'|'dispute'|'final'|'capital-release'; label:string; status:string; at:string|null; timeKind:'source'|'observed'|'unknown'; detail:string; sourceUrl:string|null; evidenceHash:string; }
 export interface RuleComparison { beforeHash:string|null;afterHash:string|null;beforeAt:string;afterAt:string;status:'changed'|'unchanged'|'unavailable';textChange:{removed:string;added:string}|null;fields:Array<{field:string;before:string|null;after:string|null}>;reason:string;evidenceRefs:string[]; }
 export function compareSettlementRules(evidence:SettlementEvidence,history:SettlementEvidence[]):RuleComparison[] {
   const cutoff=Date.parse(evidence.capturedAt);
@@ -69,23 +69,29 @@ export function auditSettlementEvidence(evidence:SettlementEvidence,history:Sett
   return {conflicts,resultRevisions,observedWaitMs,capitalReleaseAt:null,
     reason:'等待时长只按来源截止/结算时间或本次抓取时间计算；没有可核验结算时间则保持未知。结算不代表资金已可提现，未计算实际账户资金占用或套利收益。',executionEnabled:false};
 }
-export function buildSettlementTimeline(evidence:SettlementEvidence,history:SettlementEvidence[]=[]):{stages:SettlementTimelineStage[];ruleRevisions:Array<{capturedAt:string|null;hash:string|null;sourceUrl:string|null}>;ruleComparisons:RuleComparison[];audit:ReturnType<typeof auditSettlementEvidence>} {
+export function buildSettlementTimeline(evidence:SettlementEvidence,history:SettlementEvidence[]=[]) {
   const time=(value:string|null)=>{if(!value)return null;const parsed=Date.parse(value);return Number.isFinite(parsed)?new Date(parsed).toISOString():null;};
   const sourceUrl=(value:string|null)=>safeHttpUrl(value);
   const closeAt=time(evidence.closeAt);
   const announced=!!evidence.announcedResult;
-  const observedAt=announced?time(evidence.capturedAt):null;
+  const cutoff=Date.parse(evidence.capturedAt);
+  const firstAnnouncement=announced?[...history,evidence].filter(row=>row.market==='prediction'&&row.instrument===evidence.instrument&&row.platform===evidence.platform&&row.marketId===evidence.marketId&&row.announcedResult===evidence.announcedResult&&Number.isFinite(Date.parse(row.capturedAt))&&Date.parse(row.capturedAt)<=cutoff).sort((a,b)=>Date.parse(a.capturedAt)-Date.parse(b.capturedAt))[0]:null;
+  const observedAt=firstAnnouncement?time(firstAnnouncement.capturedAt):null;
+  const elapsedTime=(value:string|null)=>{const at=time(value);return at&&Date.parse(at)<=cutoff?at:null;};
   const disputeStatus=evidence.disputeStatus||'unknown';
   const finalStatus=evidence.status==='settled'&&evidence.result?'settled':evidence.status==='disputed'?'disputed':evidence.status==='open'?'pending':evidence.status==='unavailable'||evidence.status==='unsupported'?'unavailable':'unknown';
-  const finalAt=finalStatus==='settled'?time(evidence.settlementAt):null;
+  const finalAt=finalStatus==='settled'?elapsedTime(evidence.settlementAt):null;
   const stages:SettlementTimelineStage[]=[
     {key:'close',label:'市场关闭 / 截止',status:closeAt?'recorded':'unknown',at:closeAt,timeKind:closeAt?'source':'unknown',detail:closeAt?'平台来源记录的截止时间':'平台未提供可核验截止时间',sourceUrl:sourceUrl(evidence.sourceUrl),evidenceHash:evidence.evidenceHash},
-    {key:'announcement',label:'平台公布 / 报告',status:announced?'announced':evidence.status==='open'?'pending':'unknown',at:observedAt,timeKind:observedAt?'observed':'unknown',detail:announced?`平台报告 ${evidence.announcedResult}；时间为系统首次观察时间，不代表来源发布时间`:'未取得平台明确 YES/NO 公布结果',sourceUrl:sourceUrl(evidence.sourceUrl),evidenceHash:evidence.evidenceHash},
+    {key:'announcement',label:'平台公布 / 报告',status:announced?'announced':evidence.status==='open'?'pending':'unknown',at:observedAt,timeKind:observedAt?'observed':'unknown',detail:announced?`平台报告 ${evidence.announcedResult}；时间为已保存同一结果的最早观察，不代表来源发布时间或从未修订`:'未取得平台明确 YES/NO 公布结果',sourceUrl:sourceUrl(firstAnnouncement?.sourceUrl||evidence.sourceUrl),evidenceHash:firstAnnouncement?.evidenceHash||evidence.evidenceHash},
     {key:'dispute',label:'争议 / 裁定',status:disputeStatus==='disputed'?'disputed':disputeStatus==='arbitrated'?'arbitrated':disputeStatus==='not-disputed'?'not-disputed':'unknown',at:time(evidence.determinationAt),timeKind:evidence.determinationAt?'source':'unknown',detail:disputeStatus==='disputed'?'官方证据显示争议未结束':disputeStatus==='arbitrated'?'官方证据标记已仲裁':disputeStatus==='not-disputed'?'官方记录未标记争议':'来源未提供明确争议/裁定状态',sourceUrl:sourceUrl(evidence.determinationSourceUrl),evidenceHash:evidence.evidenceHash},
     {key:'final',label:'最终结算',status:finalStatus,at:finalAt,timeKind:finalAt?'source':'unknown',detail:finalStatus==='settled'?`来源核验最终结果 ${evidence.result}`:finalStatus==='disputed'?'结果仍处于争议，不能视为最终结算':finalStatus==='pending'?'市场仍开放，尚无最终结算':finalStatus==='unavailable'?'结算来源不可用或平台不支持':evidence.status==='closed'?'市场已关闭，但最终结果未核验':'最终结果或结算时间未知',sourceUrl:sourceUrl(evidence.determinationSourceUrl)||sourceUrl(evidence.resolutionSourceUrl)||sourceUrl(evidence.sourceUrl),evidenceHash:evidence.evidenceHash},
+    {key:'capital-release',label:'账户资金释放 / 到账',status:'unknown',at:null,timeKind:'unknown',detail:'当前仅有市场级结算证据，没有明确账户与到账凭证。预言机交易、最终结果及模拟卖出均不证明账户资金可提现；不计算资金占用收益。',sourceUrl:null,evidenceHash:evidence.evidenceHash},
   ];
   const ruleRevisions=history.filter(item=>item.instrument===evidence.instrument&&item.platform===evidence.platform&&item.marketId===evidence.marketId&&Date.parse(item.capturedAt)<=Date.parse(evidence.capturedAt)).map(item=>({capturedAt:time(item.capturedAt),hash:item.rulesHash||null,sourceUrl:safeHttpUrl(item.resolutionSourceUrl)||safeHttpUrl(item.sourceUrl)}));
-  return {stages,ruleRevisions,ruleComparisons:compareSettlementRules(evidence,history),audit:auditSettlementEvidence(evidence,history)};
+  const duration=(start:string|null,end:string|null)=>start&&end&&Date.parse(end)>=Date.parse(start)?Date.parse(end)-Date.parse(start):null;
+  const clocks={closeToAnnouncementObservedMs:duration(closeAt,observedAt),closeToPlatformSettlementMs:duration(closeAt,finalAt),settlementToCapitalReleaseMs:null,reason:'观察时钟与来源时钟分别命名；没有账户到账证据不填资金释放时钟，不以预期或市场结算代替。'};
+  return {stages,clocks,ruleRevisions,ruleComparisons:compareSettlementRules(evidence,history),audit:auditSettlementEvidence(evidence,history)};
 }
 
 interface StateDocumentStore {

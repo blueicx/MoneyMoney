@@ -26,3 +26,7 @@ test('legacy sent waiting detail never pretends publication and invalid timestam
  const out=summarizeTelegramResultCoverage([{id:'x',event,status:'sent',actual:'0',resultStatus:'published',publishedAt:'bad',retrievedAt:'2026-10-01T10:00:00Z',sentAt:'2026-09-01T00:00:00Z'}],Date.parse('2026-10-02T00:00:00Z'));
  assert.equal(out.slo.sampleCount,0);assert.equal(out.slo.publicationToRetrievalMs.p95,null);
 });
+test('failed or pending delivery with an obsolete sent timestamp is not a successful delivery latency sample',()=>{
+ const row={id:'x',event,status:'failed',actual:'0',resultStatus:'published',publishedAt:event.date,retrievedAt:'2026-10-01T10:02:00Z',sentAt:'2026-10-01T10:03:00Z'};
+ const out=summarizeTelegramResultCoverage([row,{...row,id:'p',status:'pending'},{...row,id:'ack',status:'acknowledged'}],Date.parse('2026-10-02T00:00:00Z'));assert.equal(out.slo.sampleCount,1);assert.equal(out.failedDeliveries,1);
+});

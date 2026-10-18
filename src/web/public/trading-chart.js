@@ -167,7 +167,7 @@
   }
   function snapshotView(canvas){const s=views.get(canvas);return s?{...restoreView(s)}:null;}
   function applySavedView(canvas,input,identity){const old=views.get(canvas);if(!old||old.key!==identity)return false;const restored={...restoreView(input),key:old.key};views.set(canvas,restored);persist(restored);mounts.get(canvas)?.info?.redraw();return true;}
-  function persist(s){try{if(s?.key)window.sessionStorage?.setItem('mm-chart-view:'+s.key,JSON.stringify({count:s.count,follow:s.follow,anchor:s.anchor,timeZone:s.timeZone||'local'}));}catch{}}
+  function persist(s){try{if(s?.key)window.sessionStorage?.setItem('mm-chart-view:'+s.key,JSON.stringify(restoreView(s)));}catch{}}
   function scheduleFrame(m,fn,hidden,request){if(hidden()||m.framePending)return;m.framePending=true;request(()=>{m.framePending=false;if(!hidden())fn();});}
   function queuePaint(m,redraw){m.needsRedraw=m.needsRedraw||redraw;scheduleFrame(m,()=>{const full=m.needsRedraw;m.needsRedraw=false;if(full)m.info?.redraw();else paint(m);},()=>document.hidden||!m.host.getClientRects().length,requestAnimationFrame);}
   function timeLabel(time,i,s){const zone=s?.timeZone==='exchange'?i.exchangeTimeZone:s?.timeZone;try{return new Date(time).toLocaleString('zh-CN',zone&&zone!=='local'?{timeZone:zone}:undefined);}catch{return new Date(time).toLocaleString();}}

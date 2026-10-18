@@ -6661,6 +6661,9 @@ function chartSignalOutcomeLines(outcomes) {
 function renderChartSignalMarkers(targetId, signals, getPosition) {
   const layer = document.getElementById(targetId);
   if (!layer) return;
+  const focused=layer.contains(document.activeElement)?document.activeElement.dataset.chartSignalPointId:null;
+  const expanded=layer.mmExpandedSignalCluster;
+  let restoredExpansion=false;
   layer.replaceChildren();
   const positioned = (signals || []).map(signal => ({ signal, ...(getPosition?.(signal) || {}) }))
     .filter(item => Number.isFinite(Number(item.x)) && Number.isFinite(Number(item.y))
@@ -6682,34 +6685,49 @@ function renderChartSignalMarkers(targetId, signals, getPosition) {
     marker.setAttribute('aria-label', members.length > 1 ? `密集点位，共${members.length}个策略点位：${labels.join('；')}。点击选择具体信号` : `${labels[0]}，点击查看触发价格、OHLC和来源`);
     marker.title = members.length > 1 ? `密集点位 · ${members.length} 个策略信号` : labels[0];
     if (members.length > 1) marker.textContent = String(members.length);
-    marker.addEventListener('click', () => {
+    const expand=(focus=true) => {
       layer.querySelectorAll('.chart-signal-cluster-choices').forEach(node => node.remove());
+      layer.querySelectorAll('[aria-expanded="true"]').forEach(node=>node.setAttribute('aria-expanded','false'));
       if (members.length === 1) {
+        delete layer.mmExpandedSignalCluster;
         handleChartSignalSelection(members[0], targetId);
         return;
       }
+      marker.setAttribute('aria-expanded','true');
+      layer.mmExpandedSignalCluster={context,anchorId:members.find(signal=>signal.id)?.id||null};
       const choices = document.createElement('div');
       choices.className = 'chart-signal-cluster-choices';
       choices.setAttribute('role', 'group');
       choices.setAttribute('aria-label', `密集点位中的${members.length}个策略信号`);
       choices.style.left = `${Math.max(4, Math.min(Number(cluster.x) + 12, (layer.clientWidth || 640) - 228))}px`;
       choices.style.top = `${Math.max(4, Math.min(Number(cluster.y) + 12, (layer.clientHeight || 340) - Math.min(members.length * 34, 204)))}px`;
+      choices.style.maxWidth=Math.max(80,(layer.clientWidth||640)-8)+'px';
+      choices.addEventListener('keydown',event=>{
+        if(event.key==='Escape'){event.preventDefault();delete layer.mmExpandedSignalCluster;choices.remove();marker.setAttribute('aria-expanded','false');marker.focus();}
+        else if(['ArrowDown','ArrowUp'].includes(event.key)){event.preventDefault();const buttons=[...choices.querySelectorAll('button')],index=buttons.indexOf(document.activeElement);buttons[(index+(event.key==='ArrowDown'?1:-1)+buttons.length)%buttons.length]?.focus();}
+      });
       members.forEach(signal => {
         const choice = document.createElement('button');
         choice.type = 'button';
         choice.dataset.chartSignalChoice = 'true';
+        if(signal.id)choice.dataset.chartSignalPointId=signal.id;
         choice.textContent = `${signal.side === 'buy' ? '买入' : '卖出'} · ${signal.label || signal.strategy || '策略信号'} · ${signal.time ? (targetId.startsWith('stock-') ? formatStockKlineTime(signal.time) : formatChartTime(signal.time)) : '时间未提供'} · ${signal.triggerPrice ?? signal.price ?? '价格未提供'}`;
         choice.addEventListener('click', () => {
+          delete layer.mmExpandedSignalCluster;
           handleChartSignalSelection(signal, targetId);
           choices.remove();
         });
         choices.appendChild(choice);
       });
       layer.appendChild(choices);
-      choices.querySelector('button')?.focus();
-    });
+      if(focus)choices.querySelector('button')?.focus();
+      else if(focused)[...choices.querySelectorAll('button')].find(button=>button.dataset.chartSignalPointId===focused)?.focus();
+    };
+    marker.addEventListener('click',()=>expand());
     layer.appendChild(marker);
+    if(expanded?.anchorId&&expanded.context===context&&members.length>1&&members.some(signal=>signal.id===expanded.anchorId)){expand(false);restoredExpansion=true;}
   });
+  if(!restoredExpansion)delete layer.mmExpandedSignalCluster;
 }
 
 function recordChartPointEvolution(points,context){
@@ -10804,7 +10822,10 @@ function syncWorkspaceContextUrl() {
   params.set('workspace', workspaceContext.workspace);
   if (workspaceContext.instrument) params.set('instrument', workspaceContext.instrument);
   else params.delete('instrument');
-  history.replaceState({}, '', `${location.pathname}?${params}${location.hash}`);
+  const nextUrl=`${location.pathname}?${params}${location.hash}`;
+  // Even an identical replaceState can synchronously snapshot scroll/layout in Chromium.
+  // Keep shell/event synchronization below; only skip the redundant browser-history write.
+  if(nextUrl!==`${location.pathname}${location.search}${location.hash}`)history.replaceState({}, '', nextUrl);
   const shell = document.getElementById('market-workspace-shell');
   if (shell) { shell.dataset.workspace = activeWorkspaceId; shell.dataset.instrument = currentInstrumentFilterId(); }
   window.dispatchEvent(new CustomEvent('mm-workspace-context', { detail: { market: activeMarketScope, workspace: activeWorkspaceId, instrument: currentInstrumentFilterId() } }));

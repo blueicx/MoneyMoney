@@ -10,6 +10,7 @@ function signalRuntimeSource() {
   return html.slice(start, end);
 }
 function chartFilterContext(window) {
+  window.appendPointLifecycleAction=()=>{}; // The independently tested lifecycle module is outside this extracted renderer seam.
   window.stockChartEventInstrumentId=()=> 'stock:us:AAPL';window.currentStockKlinePeriod='5m';window.stockChartOverlayConfig={strategies:{maCross:true,volumeBreakout:true}};
   window.bnCurrentSymbol='BTCUSDT';window.bnCurrentInterval='5m';window.cryptoChartStrategyConfig={maCross:true};window.bnKlineData=[];window.redrawStockKlineSelection=()=>{};
 }

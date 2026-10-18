@@ -234,6 +234,7 @@ import { dataLakeCatalog } from '../storage/data-lake';
 import { dataLakeWorker } from '../storage/data-lake-worker';
 import { EventStudyRepository, buildEventStudyCohort, classifyEventCategory, runEventStudy } from '../features/event-study';
 import { PredictionSettlementRepository, buildPolymarketResolutionEndpoint, buildSettlementEndpoint, buildSettlementTimeline, normalizeSettlementEvidence, settlementPayloadMatches } from '../features/prediction-settlement';
+import { formatTelegramActionItem, fitTelegramActionQueue } from '../features/telegram-action-queue';
 import { analyzePaperDrift, analyzePaperDriftByStrategy, collectPaperDriftSamples, summarizePaperDriftCoverage, samePaperInstrument, StrategyDriftGate } from '../features/paper-drift';
 import { DataCoverageCanary, DEFAULT_DATA_COVERAGE_CANARY_TARGETS, shouldRunOncePerShanghaiDay, summarizeCoverageCanaryHistory, toPublicCoverageCanarySummary, type CanaryCapabilityResult, type CanaryDataStatus, type DataCoverageCanaryTarget, type DataCoverageCanaryRun } from '../features/data-coverage-canary';
 import { buildOptionsCoverageCard, summarizePublishedCoverage, type CoverageSourceObservation } from '../features/data-coverage-status';
@@ -5672,7 +5673,7 @@ async function buildTelegramDigest(chatId: string, cadenceLabel = '每日'): Pro
     '',
     '<b>📌 自选行动</b>',
     `待处理 ${pendingActions.length} 项 · 未来七天 ${actionSummary.counts.upcoming} 项`,
-    ...pendingActions.slice(0,5).map(row => `· ${escapeTelegramHtml(row.title)} · ${escapeTelegramHtml(row.source)} · ${escapeTelegramHtml(row.dataStatus)}`),
+    ...fitTelegramActionQueue(pendingActions.slice(0,5).map(row => '· '+formatTelegramActionItem(row)),900).lines,
     '查看与处理：/actioncenter',
     '',
     '<b>🧾 自上次摘要以来</b>',
@@ -5841,15 +5842,15 @@ export function getTelegramCommandHandlers(): Record<string, TelegramCommandHand
       }
       const items = await collectWatchlistActions(telegramScopedWatchIds(chatId,scope));
       const result = buildActionCenter(items,{ market:MARKET_IDS.includes(scope as MarketId) ? scope as MarketId : undefined,states:actionCenterStore.states('admin') });
-      const shown = result.items.filter(row => !row.read && !row.snoozed).slice(0,8);
-      stateStore.set(key,{ at:new Date().toISOString(),scope,items:shown });
-      const lines = shown.map((row,index) => {
+      const candidates = result.items.filter(row => !row.read && !row.snoozed).slice(0,8);
+      const rendered = candidates.map((row,index) => {
         const href = buildTelegramDeepLink(telegramPublicBaseUrl(),{ market:row.market,instrument:row.instrument || '',workspace:'action-center' });
         const chart = row.market==='stocks' && row.instrument ? buildTelegramDeepLink(telegramPublicBaseUrl(),{market:row.market,instrument:row.instrument,workspace:'stock-quotes',timeframe:'1d',focusDate:(row.occurredAt || row.scheduledAt || row.publishedAt || '').slice(0,10)}):null;
-        const status=({live:'实时',delayed:'延迟',cached:'缓存',partial:'部分成功',empty:'来源成功但无记录',unavailable:'来源不可用',failed:'请求失败',unsupported:'不支持',historical:'历史数据'} as Record<string,string>)[row.dataStatus] || row.dataStatus;
-        return `${index+1}. ${escapeTelegramHtml(row.title)} · ${escapeTelegramHtml(status)}\n${escapeTelegramHtml(row.source)} · 抓取 ${escapeTelegramHtml(row.observedAt)}${row.scheduledAt ? '\n计划时间：'+escapeTelegramHtml(row.scheduledAt):''}${row.reason ? '\n原因：'+escapeTelegramHtml(row.reason):''}${href ? `\n<a href="${escapeTelegramHtml(href)}">网页与证据</a>` : ''}${chart ? ` · <a href="${escapeTelegramHtml(chart)}">对应日期图表</a>`:''}`;
+        return `${index+1}. ${formatTelegramActionItem(row)}${href ? `\n<a href="${escapeTelegramHtml(href)}">网页与证据</a>` : ''}${chart ? ` · <a href="${escapeTelegramHtml(chart)}">对应日期图表</a>`:''}`;
       });
-      const text = ['<b>自选行动中心</b>',...lines,shown.length ? '下方按钮与网页共享状态，15分钟内有效。' : '当前没有待处理条目；来源无记录与来源故障分别展示。'].join('\n');
+      const fitted=fitTelegramActionQueue(rendered),shown=candidates.slice(0,fitted.count);
+      stateStore.set(key,{ at:new Date().toISOString(),scope,items:shown });
+      const text = ['<b>自选行动中心</b>',...fitted.lines,...(fitted.omitted?[`另有 ${fitted.omitted} 项因消息长度未展开，请到网页行动中心查看。`]:[]),shown.length ? '下方按钮与网页共享状态，15分钟内有效。' : candidates.length ? '条目详情超过安全消息长度，请到网页查看。' : '当前没有待处理条目；来源无记录与来源故障分别展示。'].join('\n');
       const buttons = shown.map((row,index) => ['read','pin','later'].map((action,i) => ({text:`${index+1} ${['已读','置顶','明天处理'][i]}`,callback_data:issueTelegramCallback('action:handle',{scope,id:JSON.stringify([action,row.id]),workspace:'action-center',chatId})})));
       return buttons.length ? telegramInlineReply(text,buttons) : text;
     },

@@ -36,6 +36,34 @@ async function main(){let browser;try{
    await page.locator('[data-point-lifecycle-open]').click();const drawer=page.locator('[data-point-lifecycle]');await drawer.waitFor();assert.match(await drawer.innerText(),/OHLC|后续已完成/);assert.ok(await drawer.evaluate(node=>node.getBoundingClientRect().width<=innerWidth));assert.ok(await drawer.evaluate(node=>{const s=getComputedStyle(node);return !s.backgroundColor.startsWith('rgba')&&s.backgroundColor!=='transparent'&&parseFloat(s.lineHeight)>18;}),'drawer must have an opaque theme surface and readable line height');await page.screenshot({path:path.join(data,'point-lifecycle-'+theme+'.png')});await drawer.press('Escape');await drawer.waitFor({state:'detached'});
  }
  await panel.locator('[data-research-regimes]').click();assert.match(await panel.locator('[data-research-output]').innerText(),/环境表现地图/);
+ // Explicit UI fixtures exercise clustering with production geometry/styles, not market signals.
+ for(const width of [1440,390])for(const theme of ['light','dark','money']){
+  await page.setViewportSize({width,height:1000});await page.evaluate(theme=>{
+    document.documentElement.dataset.theme=theme;
+    const first={id:'dense-a',market:'stocks',instrument:'stock:us:AAPL',timeframe:'5m',time:stockChartKlines[15].time,price:100,side:'buy',status:'confirmed',label:'Isolated dense fixture'};
+    window.depthDenseFixture=[first,{...first,id:'dense-b',label:'Isolated volume breakout fixture'}];
+    if(!document.getElementById('stock-depth-fixture-markers')){const original=document.getElementById('stock-chart-signal-markers'),copy=original.cloneNode(false);copy.id='stock-depth-fixture-markers';original.after(copy);}
+    renderChartSignalMarkers('stock-depth-fixture-markers',depthDenseFixture,()=>({x:80,y:110,minX:0,maxX:300,minY:0,maxY:300}));
+  },theme);
+  const layer=page.locator('#stock-depth-fixture-markers');await layer.locator('[data-chart-signal-cluster]').click();await layer.locator('[data-chart-signal-point-id="dense-b"]').focus();
+  await page.evaluate(()=>renderChartSignalMarkers('stock-depth-fixture-markers',[depthDenseFixture[1],{...depthDenseFixture[0],price:101}],()=>({x:80,y:110,minX:0,maxX:300,minY:0,maxY:300})));
+  assert.equal(await layer.locator('[data-chart-signal-choice]').count(),2);assert.equal(await page.evaluate(()=>document.activeElement.dataset.chartSignalPointId),'dense-b');assert.match(await layer.locator('[data-chart-signal-point-id="dense-a"]').innerText(),/101/);
+  const choices=layer.locator('.chart-signal-cluster-choices');assert.ok(await choices.evaluate(node=>{const r=node.getBoundingClientRect();return r.left>=0&&r.right<=innerWidth+1;}),'expanded choices must remain inside viewport');
+  await page.screenshot({path:path.join(data,`dense-${theme}-${width}.png`)});await page.keyboard.press('Escape');assert.equal(await choices.count(),0);
+ }
+ await page.evaluate(()=>document.getElementById('stock-depth-fixture-markers').remove());
+ await page.evaluate(()=>{setMarketScope('stocks');setWorkspaceInstrument('stock:us:AAPL');openWorkspace('research-lab');});
+ await page.locator('#mm-research-lab').waitFor({state:'visible'});await page.locator('[data-research-tab="comparison"]').click();
+ const originalScroll=await page.evaluate(()=>{const panel=document.getElementById('mm-research-comparison'),filler=document.createElement('div');filler.style.height='1200px';panel.append(filler);document.getElementById('mm-experiment-all').checked=true;document.querySelector('[data-comparison-load]').focus();const center=document.getElementById('center-workspace');center.scrollTop=120;history.replaceState({depthReturnFixture:true},'',location.href);return center.scrollTop;});
+ await page.evaluate(()=>MoneyMoneyWorkflow.locate('2026-10-15','stock:us:AAPL'));
+ await page.evaluate(()=>{document.getElementById('mm-experiment-all').checked=false;document.querySelector('[data-research-tab="history"]').click();});
+ await page.evaluate(()=>MoneyMoneyWorkflow.locate('2026-10-15','stock:us:AAPL'));await page.locator('#mm-return-to-research').click();
+ await page.waitForFunction(()=>document.getElementById('market-workspace-shell').dataset.workspace==='research-lab'&&document.querySelector('[data-research-tab="comparison"]').getAttribute('aria-selected')==='true');
+ assert.equal(await page.evaluate(()=>document.getElementById('mm-experiment-all').checked),true);assert.equal(await page.evaluate(()=>history.state.depthReturnFixture),true);assert.equal(await page.evaluate(()=>document.getElementById('center-workspace').scrollTop),originalScroll);
+ const settlement=require('../dist/features/prediction-settlement'),evidence=settlement.normalizeSettlementEvidence({platform:'Kalshi',marketId:'KXDEPTH-26',capturedAt:'2026-10-18T00:00:00Z',payload:{status:'settled',result:'yes',close_time:'2026-10-16T00:00:00Z',settlement_ts:'2026-10-17T00:00:00Z'}}),first={...evidence,capturedAt:'2026-10-17T02:00:00Z'};
+ await page.route('**/api/prediction/settlement/Kalshi/KXDEPTH-26',route=>route.fulfill({json:{success:true,data:evidence,history:[first,evidence],timeline:settlement.buildSettlementTimeline(evidence,[first,evidence]),sourceStatus:'success'}}));
+ await page.evaluate(async()=>{setMarketScope('prediction');openWorkspace('prediction-radar');await MoneyWorkspaceModules.ensure('prediction');predictionRadarState.cards.set('depth-clock',{platform:'Kalshi',id:'KXDEPTH-26'});const host=document.createElement('div');host.id='radar-settlement-depth-clock';document.getElementById('center-workspace').append(host);await togglePredictionSettlement('depth-clock');});
+ const timeline=page.locator('#radar-settlement-depth-clock .prediction-settlement-timeline');assert.equal(await timeline.locator('[data-stage]').count(),5);assert.match(await timeline.locator('[data-stage="announcement"]').innerText(),/2026-10-17T02:00:00/);assert.match(await timeline.locator('[data-stage="capital-release"]').innerText(),/未知|时间未提供/);assert.match(await timeline.locator('[data-stage="capital-release"]').innerText(),/账户.*到账凭证/);
  const guest=await browser.newPage();await guest.goto(base+'/login');await Promise.all([guest.waitForURL(url=>url.pathname==='/'),guest.click('#guestBtn')]);assert.equal(await guest.evaluate(()=>fetch('/api/stock/session/gaps').then(r=>r.status)),403);
  assert.equal(await guest.evaluate(()=>fetch('/api/research/basis?market=stocks&instrument=stock:us:AAPL&timeframe=5m').then(r=>r.status)),403);
  assert.equal(await guest.evaluate(()=>fetch('/api/chart/bookmarks?market=stocks&instrument=stock:us:AAPL&timeframe=5m').then(r=>r.status)),403);

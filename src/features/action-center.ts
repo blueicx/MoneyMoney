@@ -76,6 +76,10 @@ export function buildActionCenter(input: ActionCenterItem[], options: { market?:
     const relevantAt = Date.parse(item.scheduledAt || item.occurredAt || item.publishedAt || item.observedAt);
     const section = ['review','alert','screener','13f'].includes(item.kind) ? item.kind : relevantAt > nowMs ? 'upcoming' : 'changes';
     return { ...item, ...state, section, snoozed: Boolean(state.snoozedUntil && Date.parse(state.snoozedUntil) > nowMs) };
-  }).sort((a,b) => Number(b.pinned) - Number(a.pinned) || Number(a.read) - Number(b.read) || b.observedAt.localeCompare(a.observedAt));
+  }).sort((a,b) => {
+    const failure=(item:ActionCenterItem)=>['failed','unavailable'].includes(item.dataStatus)?1:0;
+    const deadline=(item:ActionCenterItem)=>item.scheduledAt&&Number.isFinite(Date.parse(item.scheduledAt))?Date.parse(item.scheduledAt):Infinity;
+    return Number(b.pinned)-Number(a.pinned)||Number(a.read||a.snoozed)-Number(b.read||b.snoozed)||failure(b)-failure(a)||(deadline(a)-deadline(b)||0)||b.observedAt.localeCompare(a.observedAt)||a.id.localeCompare(b.id);
+  });
   return { items, updatedAt: now, counts: { total: items.length, unread: items.filter(x => !x.read && !x.snoozed).length, upcoming: items.filter(x => x.section === 'upcoming').length }, dataStatus: items.length ? 'cached' : 'empty', reason: items.length ? null : '当前自选尚无可处理记录；可查看各标的来源与覆盖情况' };
 }

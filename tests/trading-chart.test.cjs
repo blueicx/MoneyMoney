@@ -8,6 +8,10 @@ test('saved chart views are detached snapshots and restore only the explicitly m
  assert.equal(c.applySavedView(canvas,saved,'SNDK|5m'),false);assert.equal(c.select(canvas,rows,'AAPL|5m').state.count,60);
  assert.equal(c.applySavedView(canvas,saved,'AAPL|5m'),true);assert.equal(c.snapshotView(canvas).count,42);assert.equal(c.snapshotView(canvas).priceScale,1.5);const copy=c.snapshotView(canvas);copy.count=1;assert.equal(c.snapshotView(canvas).count,42);assert.equal(c.windowFor(rows,c.select(canvas,rows,'AAPL|5m').state).rows.at(-1).time,rows[75].time);
 });
+test('returning to a chart restores its price scale as well as its date, count and timezone',()=>{
+ const data=new Map(),window={sessionStorage:{getItem:key=>data.get(key)||null,setItem:(key,value)=>data.set(key,value)}},scope={window,document:{readyState:'loading',addEventListener(){}}};vm.runInNewContext(fs.readFileSync('src/web/public/trading-chart.js','utf8'),scope);
+ const c=window.MoneyTradingChart,canvas={};c.select(canvas,rows,'AAPL|5m');c.applySavedView(canvas,{count:42,follow:false,anchor:rows[75].time,timeZone:'exchange',priceScale:1.5},'AAPL|5m');c.select(canvas,rows,'SNDK|5m');const restored=c.select(canvas,rows,'AAPL|5m').state;assert.equal(restored.priceScale,1.5);assert.equal(restored.anchor,rows[75].time);assert.equal(restored.follow,false);assert.equal(restored.count,42);assert.equal(restored.timeZone,'exchange');
+});
 
 test('cross-period closed evidence requires an explicit close timestamp or a following candle',()=>{
  const c=load();assert.equal(typeof c.temporalEvidenceRows,'function');
