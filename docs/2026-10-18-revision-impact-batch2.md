@@ -19,3 +19,11 @@
 浏览器矩阵旧脚本点击异步日历审计后立即断言有竞态，改为等待明确的完成内容后读取；未通过放宽超时掩盖失败。全量测试运行期间不执行构建。
 
 本批只完成32项清单中的04，不代表其他未勾选功能已交付。发布记录另附；数据库、数据湖及原有AI跑单配置不修改。
+
+## 生产发布
+
+`8a839bffc3be1c33e34f824bfa13ced327d88690` 已提交推送并部署，正式域名只读Chromium四市场/SNDK/历史身份/访客边界/手机与收缩恢复验收通过；28个公网静态资源Hash逐一匹配，健康和TLS正常。现有10个AI跑单的发布前后只读配置指纹相同，未提交生产实验、模型调用或订单。
+
+发布包Hash `4733e328f760525b9e9962b7328de1a41185d956a39d484d91191d813223f728`；server `77d63e2b245f41e36d5ca42f858aaae4714e7825f355db6990216aca41636bf9`；index `f5cd009c859dcf87cff194267671e811726c07f8ac0cb891f0687ae47d343c8d`；manifest `58910129ec7f13f0c0be1902cc2a2a2262aa9953358477161cf376b5e1b63cb1`。
+
+备份 `/opt/moneymoney/backups/dist-pre-8a839bf-20261018-depth2`，回滚 `/opt/moneymoney/dist.rollback-8a839bf-20261018-depth2`，均保留上一批server Hash `f62dc2904cc8417b3a2a05419aceb522ba2fd7d704e5dcf102bbe5f501ddf70f`。只替换dist并重启moneymoney.service，39项隔离可靠性演练报告随包保留。
