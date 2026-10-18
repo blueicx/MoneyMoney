@@ -44,7 +44,7 @@ function emit(name, body, extension) {
 // Extract declarations only, keeping state in its existing global scope. Classic
 // scripts intentionally preserve legacy inline handlers and cross-module state.
 const modules = {
-  guru: [], research: [], ai: [], charts: [], comparison: [], overview: [],
+  guru: [], research: [], ai: [], charts: [], chartResearch: [], comparison: [], overview: [],
   stocks: [], options: [], crypto: [], prediction: [], portfolio: [], trading: [], events: [], ops: [], tables: [],
 };
 const asyncWorkspaceGroups = [
@@ -158,12 +158,15 @@ modules.charts.push(
   fs.readFileSync(path.join(source, 'chart-strategies.js'), 'utf8'),
   fs.readFileSync(path.join(source, 'chart-strategy-controls.js'), 'utf8'),
   fs.readFileSync(path.join(source, 'chart-analysis.js'), 'utf8'),
-  fs.readFileSync(path.join(source, 'chart-research.js'), 'utf8'),
-  fs.readFileSync(path.join(source, 'chart-research-controls.js'), 'utf8'),
+  fs.readFileSync(path.join(source, 'chart-research-lazy.js'), 'utf8'),
   fs.readFileSync(path.join(source, 'live-kline.js'), 'utf8'),
   fs.readFileSync(path.join(source, 'trading-chart.js'), 'utf8'),
 );
 modules.comparison.push(fs.readFileSync(path.join(source, 'automatic-comparison.js'), 'utf8'));
+modules.chartResearch.push(
+  fs.readFileSync(path.join(source, 'chart-research.js'), 'utf8'),
+  fs.readFileSync(path.join(source, 'chart-research-controls.js'), 'utf8'),
+);
 modules.portfolio.push(fs.readFileSync(path.join(source, 'watchlist-metadata.js'), 'utf8'));
 if (!dashboardStartupParts.length) throw new Error('Dashboard startup runtime was not collected');
 const dashboardStartupUrls = dashboardStartupParts.map(part => emit(part.name, part.code, 'js'));

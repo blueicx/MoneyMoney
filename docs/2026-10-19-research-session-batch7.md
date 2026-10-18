@@ -36,3 +36,16 @@
 从eb2c10b固定点顺序自审规范与计划两条轴线（依用户要求不派子agent）：没有更改市场身份、撮合、来源选择、预算或模型路由；修正消息过长后显示按钮不一致风险；账户到账无证据明确未知，性能20%目标明确未证实，没有因测试通过而改成全项完成。
 
 最终本地`npm test`退出0：356文件、1698项、0失败；构建、Web/认证/行动研究/四市场矩阵/实时K线/专业研究/合约/研究深度冒烟均通过。实时夹具timerMutations=0、timerPaints=0、hiddenPaints=0、pointerPaints=2；不代表生产逐笔来源。901个跟踪文件安全扫描和差异检查通过。数据库Hash仍为`27fd475e523568daa4cdcabf3146917023335a62affe00429babd721b3b79fd1`，未提交。
+
+## 正式发布证据
+
+干净源码导出构建、Web/认证/四市场浏览器矩阵/合约验收通过后，提交并推送`91d3333f573c2de7fd87c3c1c8bd1c58c5db222f`。仅更新dist并重启moneymoney.service；生产服务active，本机与正式域名`/api/health/version`均返回同一完整commit。正式域名全部28项版本化资源逐项SHA256核验一致，四市场及SNDK只读canary通过。未发送Telegram测试消息或调用生产模型。
+
+- 产物SHA256：`e5f2b511d22c87978074d35d68934311259797000b1e11a1be7bdb642a63d086`
+- server.js：`32287ffbe31dd3e8b1621654fea58503aaab90c73bb66cbc997a578d7abc83d6`
+- index.html：`00ad3a3522a03098372adae2faa4a2e5a0670e951b5588255a77c6bf5898a297`
+- 备份目录：`/opt/moneymoney/backups/dist-pre-91d3333-20261019-depth7`
+- 回滚目录：`/opt/moneymoney/dist.rollback-91d3333-20261019-depth7`
+- 发布前后10个跑单的配置指纹一致：`5125162b35c9893e4a9ac7d11c40eeaca7297bd95d7434d6bec70712aa144181`。
+
+06、24、25、29、30具备本批实现、自动化与发布证据。31的绝对预算通过但相对20%目标未证实；32的脱敏下载已验收，归档随各批发布文档保存，后续性能批仍需独立记录。
