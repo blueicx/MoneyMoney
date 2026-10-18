@@ -1,4 +1,5 @@
 import { calculateBacktestMetrics, createWalkForwardFolds, type BacktestMetrics, type WalkForwardFold } from './backtest-analysis';
+import { randomUUID } from 'node:crypto';
 import { BacktestEngine, type BacktestResult, type BacktestSignal } from './backtest-engine';
 import { backtestCostStress } from './backtest-cost-stress';
 import { assertMarketContext, createExperimentRecord, type ExperimentRecord, type MarketContext } from './research-contracts';
@@ -41,6 +42,20 @@ export interface ResearchExperimentResult {
   folds: WalkForwardFold[];
   evidence: ExperimentEvidence;
   gate: PromotionGate;
+}
+
+/** A configuration identity is reproducible; a manual run identity must not replace its parent. */
+export function rerunSavedExperiment(previous:{experiment?:ExperimentRecord;input?:ResearchExperimentInput},overrides:Record<string,unknown>={}){
+  if(!previous?.input||!previous.experiment?.id)throw Error('实验缺少可复现输入，无法重跑');
+  const base=previous.input.context,parent=previous.experiment;
+  if(!base||base.market!==parent.market||base.instrument!==parent.instrument||base.timeframe!==parent.timeframe)throw Error('原实验输入身份或周期未明确关联，不猜测修复');
+  if(!overrides||typeof overrides!=='object'||Array.isArray(overrides)||Object.keys(overrides).some(key=>!['context','prices','signals','split','promotion'].includes(key)))throw Error('复跑参数无效');
+  const context=overrides.context;
+  if(context!=null&&(typeof context!=='object'||Array.isArray(context)))throw Error('复跑上下文参数无效');
+  const input=structuredClone({...previous.input,...overrides,context:{...base,...(context||{})}}) as ResearchExperimentInput;
+  if(input.context.market!==base.market||input.context.instrument!==base.instrument||input.context.timeframe!==base.timeframe)throw Error('复跑不可切换市场、标的身份或周期，请创建独立实验');
+  const result=runResearchExperiment(input),configurationId=result.experiment.id;
+  return {...result,experiment:{...result.experiment,id:`run_${randomUUID()}`},configurationId,rerunOf:parent.id,input};
 }
 
 function outOfSampleMetrics(result: BacktestResult, folds: readonly WalkForwardFold[], startingBalance: number): BacktestMetrics {

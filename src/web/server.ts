@@ -159,7 +159,9 @@ import { filterStockBarsForTradingDate, resolveStockExchangeTimeZone } from '../
 import { buildBacktestPreflight } from '../features/backtest-preflight';
 import { assessResearchFreshness } from '../features/research-freshness';
 import { testNotificationChannels } from '../features/notification-channels';
-import { runResearchExperiment } from '../features/experiment-runner';
+import { runResearchExperiment, rerunSavedExperiment } from '../features/experiment-runner';
+import { createResearchRevisionRouter } from './research-revision-routes';
+import type { RevisionImpactRecord } from '../features/research-revision-impact';
 import { compareExperiments } from '../features/experiment-comparison';
 import { compareOptionSnapshotPair, compareOptionSnapshots, summarizeMarketHistory } from '../features/market-history-comparison';
 import { MarketHistoryCaptureScheduler } from '../features/market-history-scheduler';
@@ -407,6 +409,37 @@ app.use('/api/operations/history',createOperationHistoryRouter({actionHistory:()
 const instrumentSilences = new InstrumentSilenceStore(stateStore);
 app.use('/api/watchlist/metadata', createWatchlistMetadataRouter(watchlistMetadataStore));
 app.use('/api/research/experiments',createResearchRobustnessRouter({get:id=>researchRepository.getExperiment(id),save:(id,result)=>researchRepository.saveExperiment(id,result)}));
+app.use('/api/research/experiments',createResearchRevisionRouter({load:id=>{
+  const saved=researchRepository.getExperiment(id),e=saved?.experiment;
+  if(!e||!MARKET_IDS.includes(e.market)||!e.instrument)return null;
+  const market=e.market as MarketId,identity=(value:string)=>dataLakeCatalog.resolveInstrument(market,value)?.id||value;
+  const instrument=identity(e.instrument),timeframe=e.timeframe;
+  const partitions=dataLakeCatalog.listPartitions().filter(p=>p.market===market&&identity(p.instrument)===instrument&&(!timeframe||p.timeframe===timeframe)).slice(-2000).map(p=>({...p,instrument}));
+  const byPartition=new Map(partitions.map(p=>[p.id,p]));
+  const evidenceById=new Map(decisionIntelligenceStore.listEvidence(market).map(evidence=>[evidence.id,evidence]));
+  const snapshotCache=new Map<string,ReturnType<typeof dataLakeCatalog.getSnapshot>>();
+  const refs=(values:string[])=>values.slice(0,50).flatMap(ref=>{
+    if(typeof ref!=='string')return [];
+    const evidence=evidenceById.get(ref);
+    if(evidence&&(evidence.market!==market||!evidence.instrument||identity(evidence.instrument)!==instrument))return [];
+    const snapshotId=evidence?.fields?.dataSnapshotId;
+    const key=typeof snapshotId==='string'?snapshotId:ref;
+    if(!snapshotCache.has(key))snapshotCache.set(key,dataLakeCatalog.getSnapshot(key));
+    const snapshot=snapshotCache.get(key);
+    if(snapshot&&snapshot.market===market&&identity(snapshot.instrument)===instrument&&(!timeframe||snapshot.timeframe===timeframe))return [{partitionId:snapshot.partitionId,hash:snapshot.contentHash}];
+    const partition=byPartition.get(ref);return partition?[{partitionId:ref,hash:partition.contentHash}]:[];
+  });
+  const records:RevisionImpactRecord[]=[{id:e.id,kind:'experiment',market,instrument,timeframe,createdAt:e.createdAt,snapshotHash:e.dataSnapshotHash}];
+  for(const signal of decisionIntelligenceStore.listSignalOutcomes(market).slice(-200)){
+    if(identity(signal.instrument)!==instrument)continue;
+    records.push({id:signal.id,kind:'signal',market,instrument,timeframe:signal.timeframe,createdAt:Number.isFinite(signal.triggeredAt)&&Math.abs(signal.triggeredAt)<8640000000000000?new Date(signal.triggeredAt).toISOString():'unknown',partitionRefs:refs(signal.evidenceRefs||[])});
+  }
+  for(const decision of decisionIntelligenceStore.listDecisions(market).slice(0,200)){
+    if(identity(decision.instrument)!==instrument)continue;
+    records.push({id:decision.id,kind:'decision',market,instrument,createdAt:decision.createdAt,partitionRefs:refs(decision.evidenceIds||[])});
+  }
+  return {market,instrument,timeframe,asOf:new Date().toISOString(),partitions,records,revisions:dataLakeCatalog.listRevisions(market).filter(r=>identity(r.instrument)===instrument&&(!timeframe||r.timeframe===timeframe)).slice(-2000).map(r=>({...r,instrument}))};
+}}));
 app.use('/api/ai-runners', createAiRunnerDiagnosticsRouter({
   runner: id => { const runner=getAiRunners().find(row=>row.id===id),market=runner&&diagnosticRunnerMarket(runner);return runner&&market?{id:runner.id,market}:null; },
   history: (id,cursor,limit)=>listAiRunnerHistory(id,cursor,limit),
@@ -8640,12 +8673,13 @@ app.get('/api/research/freshness', (req, res) => {
 });
 
 app.post('/api/research/experiments/:id/rerun', express.json(), (req, res) => {
+  res.setHeader('Cache-Control','private, no-store');
+  if(!adminOnly(req,res))return;
   try {
     const previous = researchRepository.getExperiment(String(req.params.id)) as any;
     if (!previous?.input) return res.status(409).json({ success: false, error: '实验缺少可复现输入，无法重跑' });
-    const input = { ...previous.input, ...(req.body?.overrides || {}) };
-    const result = runResearchExperiment(input);
-    researchRepository.saveExperiment(result.experiment.id, { ...result, input });
+    const result = rerunSavedExperiment(previous,req.body?.overrides || {});
+    researchRepository.saveExperiment(result.experiment.id, result);
     res.json({ success: true, data: result, rerunOf: String(req.params.id) });
   } catch (error: any) {
     res.status(400).json({ success: false, error: error?.message || '实验重跑失败' });

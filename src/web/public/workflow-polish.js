@@ -21,15 +21,40 @@
     const raw=series.filter(row=>row.rawPoints?.length);
     if(raw.length){const holder=document.createElement('details');holder.innerHTML='<summary>原始价格与公司行动口径（不把价格变化当总回报）</summary><div data-raw-chart></div>'+raw.map(row=>'<p>'+esc(row.instrument+' · 口径 '+(row.adjustment || '未知'))+'</p>'+(row.corporateActions || []).map(action=>'<p>'+esc(action.kind+' · 生效 '+action.effectiveAt+' · 发布 '+(action.publishedAt || '未知')+' · 来源 '+action.source+' · 参数 '+action.factor)+'</p>').join('')).join('');host.append(holder);window.MoneyMoneyHistoryChart.render(holder.querySelector('[data-raw-chart]'),raw.map(row=>({label:row.instrument+' · 来源原始价格',points:row.rawPoints.map(point=>({date:point.date,value:point.close}))})),{title:'来源原始价格（各标的单位分别核验）',onLocate:date=>locate(date,instrument)});}
   }
+  function renderRevisionImpact(host,experiments,request){
+    if(window.mm_isGuest===true)return;
+    const captured=JSON.stringify(ctx()),stale=()=>!host.isConnected||captured!==JSON.stringify(ctx());
+    const section=document.createElement('section');section.className='mm-revision-impact';host.append(section);
+    for(const experiment of experiments.slice(0,6)){
+      const article=document.createElement('article'),button=document.createElement('button'),output=document.createElement('div');
+      button.type='button';button.className='tab';button.dataset.revisionImpact=experiment.id;button.textContent='检查快照修订影响 · '+experiment.id;output.setAttribute('role','status');article.append(button,output);section.append(article);
+      button.onclick=async()=>{
+        if(stale())return;button.disabled=true;output.textContent='读取明确分区与快照引用…';
+        try{
+          const result=await request('/api/research/experiments/'+encodeURIComponent(experiment.id)+'/revision-impact');if(stale())return;
+          output.replaceChildren();const note=document.createElement('p');note.textContent=result.reason;output.append(note);
+          for(const row of result.data.rows){const p=document.createElement('p');p.textContent=row.kind+' · '+row.id+' · '+row.status+' · '+row.reason;output.append(p);
+            for(const change of row.findings){const detail=document.createElement('p');detail.textContent=change.publishedAt+' · '+change.oldHash+' → '+change.newHash+' · '+change.reason;output.append(detail);}}
+          if(!result.data.rows.length)output.textContent+=' 未关联到可核验研究记录。';
+          const reminder=document.createElement('p');reminder.textContent='下面仅用保存输入复跑，不会自动采集或采用修订后数据。新数据研究需明确创建新实验。';output.append(reminder);
+          const rerun=document.createElement('button');rerun.type='button';rerun.className='tab';rerun.dataset.preservedRerun=experiment.id;rerun.textContent='用保存输入复跑（保留原结果）';output.append(rerun);
+          rerun.onclick=async()=>{if(stale()||!confirm('用已保存输入创建独立复跑？原实验和结果保留，不调用模型、不创建订单，也不自动替换数据。'))return;
+            rerun.disabled=true;try{const result=await request('/api/research/experiments/'+encodeURIComponent(experiment.id)+'/rerun',{method:'POST',body:'{}'});if(stale())return;const p=document.createElement('p');p.textContent='已保存独立复跑 '+result.data.experiment.id+' · 原实验 '+result.rerunOf;output.append(p);}catch(error){if(!stale()&&error.name!=='AbortError')reminder.textContent=error.message;}finally{rerun.disabled=false;}};
+        }catch(error){if(!stale()&&error.name!=='AbortError')output.textContent=error.message;}
+        finally{button.disabled=false;}
+      };
+    }
+  }
   function experimentDetails(host,data,request){
     const validity=document.createElement('section'),check=document.createElement('button'),output=document.createElement('div');check.type='button';check.className='tab';check.textContent='检查结论失效与复核历史';validity.append(check,output);host.append(validity);
     check.onclick=async()=>{check.disabled=true;output.textContent='读取同版本数据修订和漂移证据…';try{const rows=await Promise.all(data.experiments.map(async row=>({id:row.id,...await request('/api/research/experiments/'+encodeURIComponent(row.id)+'/freshness')})));output.replaceChildren();for(const row of rows){const p=document.createElement('p');p.textContent=row.id+' · '+row.data.status+' · '+row.data.reason+' · '+(row.validity?.reason||'无复核历史')+'\n'+(row.validity?.history||[]).map(entry=>entry.at+' '+entry.status+' '+entry.reasons.join('；')).join('\n');p.style.whiteSpace='pre-wrap';output.append(p);}}catch(error){if(error.name!=='AbortError')output.textContent=error.message;}finally{check.disabled=false;}};
     window.MoneyMoneyProfessionalResearch?.renderRobustness(host,data.experiments,request);
+    renderRevisionImpact(host,data.experiments,request);
     const titles={instrument:'标的',timeframe:'周期',strategyId:'策略',strategyVersion:'策略版本',parameters:'声明参数',dataFrom:'数据起点',dataTo:'数据截止',dataSource:'来源',dataSnapshotHash:'快照 Hash',feeRate:'手续费率',slippage:'滑点',seed:'随机种子'};
     const section=document.createElement('section');section.innerHTML='<h4>逐实验配置差异</h4><div class="mm-table-scroll"><table><thead><tr><th>字段</th>'+data.experiments.map(row=>'<th>'+esc(row.id)+'</th>').join('')+'</tr></thead><tbody>'+data.differences.map(row=>'<tr><th>'+esc(titles[row.field] || row.field)+'</th>'+row.values.map(item=>'<td>'+esc(item.value!=null && typeof item.value==='object'?Object.entries(item.value).map(([key,value])=>key+'='+value).join('；'):item.value ?? '未声明')+'</td>').join('')+'</tr>').join('')+'</tbody></table></div>'+data.experiments.map(row=>'<article><h4>'+esc(row.id)+'</h4><p>声明参数：'+esc(row.parameters?Object.entries(row.parameters).map(([key,value])=>key+'='+value).join('；'):'旧实验未保存参数，不猜测')+' · 来源 '+esc(row.dataSource)+' · 策略 '+esc(row.strategyId)+' / '+esc(row.strategyVersion || '未关联')+'</p><p>样本外窗口：'+esc((row.folds || []).map(fold=>'训练 '+fold.trainStart+'–'+fold.trainEnd+' / 验证 '+fold.testStart+'–'+fold.testEnd).join('；') || '未声明')+'</p><button type="button" data-experiment-links="'+esc(row.id)+'">查看明确关联的信号、模拟成交和日记</button><div data-experiment-related="'+esc(row.id)+'"></div></article>').join('');host.append(section);
     section.querySelectorAll('[data-experiment-links]').forEach(button=>button.onclick=async()=>{const target=[...section.querySelectorAll('[data-experiment-related]')].find(node=>node.dataset.experimentRelated===button.dataset.experimentLinks);try{const result=await request('/api/research/experiments/'+encodeURIComponent(button.dataset.experimentLinks)+'/links');target.innerHTML='<p>'+esc(result.reason)+'</p>'+[['signals','信号'],['orders','模拟成交'],['decisions','决策日记']].map(([key,title])=>'<h5>'+title+'</h5>'+((result.data[key] || []).map(row=>'<p>'+esc(row.id+' · '+row.instrument+(row.timestamp?' · '+row.timestamp:''))+'</p>').join('') || '<p>未关联</p>')).join('');}catch(error){if(error.name!=='AbortError')target.textContent=error.message;}});
   }
-  window.MoneyMoneyWorkflow={locate,historyTools,experimentDetails,status:value=>statuses[value] || value};
+  window.MoneyMoneyWorkflow={locate,historyTools,experimentDetails,renderRevisionImpact,status:value=>statuses[value] || value};
   function init(){const date=new URLSearchParams(location.search).get('focusDate'),instrument=new URLSearchParams(location.search).get('instrument');if(date && /^stock:us:[A-Z0-9.-]+$/.test(instrument || ''))window.MoneyMoneyChartBridge.locateDay(instrument,date);const shell=document.getElementById('market-workspace-shell');new MutationObserver(()=>{if(returnContext && ctx().market!==returnContext.market){returnContext=null;document.getElementById('mm-return-to-research')?.setAttribute('hidden','');}}).observe(shell,{attributes:true,attributeFilter:['data-market-scope']});}
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init,{once:true});else init();
 })();

@@ -102,12 +102,23 @@ async function main(){
     assert.match(await page.locator('[data-robustness-output]').first().innerText(),/未独立核验/);
     const persisted=await page.request.get(base+'/api/research/experiments/'+analyzedId).then(r=>r.json());
     assert.equal(persisted.data.robustness.controls.randomEntry.length,12);
+    const revision=page.locator('[data-revision-impact]').first(),revisionId=await revision.getAttribute('data-revision-impact');
+    const original=await page.request.get(base+'/api/research/experiments/'+revisionId).then(r=>r.json());
+    await revision.click();await page.locator('[data-preserved-rerun]').first().waitFor();
+    assert.match(await page.locator('.mm-revision-impact').innerText(),/unlinked|未关联/);
+    const rerunResponse=page.waitForResponse(r=>r.url().endsWith('/'+revisionId+'/rerun')&&r.request().method()==='POST');
+    page.once('dialog',dialog=>dialog.accept());await page.locator('[data-preserved-rerun]').first().click();
+    const replay=await (await rerunResponse).json();assert.equal(replay.success,true);assert.notEqual(replay.data.experiment.id,revisionId);assert.equal(replay.rerunOf,revisionId);
+    await page.waitForFunction(id=>document.querySelector('.mm-revision-impact')?.textContent.includes(id),replay.data.experiment.id);
+    const untouched=await page.request.get(base+'/api/research/experiments/'+revisionId).then(r=>r.json());assert.deepEqual(untouched.data,original.data,'manual rerun must preserve the parent including saved robustness evidence');
+    assert.equal((await page.request.get(base+'/api/research/experiments/'+replay.data.experiment.id).then(r=>r.json())).data.rerunOf,revisionId);
     assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+2),'mobile cost comparison fits viewport');
     await page.evaluate(()=>{setMarketScope('crypto');openWorkspace('fundamentals');});assert.equal(await panel.isVisible(),false);
     const guest=await browser.newPage();await guest.goto(base+'/login');await Promise.all([guest.waitForURL(url=>url.pathname==='/'),guest.click('#guestBtn')]);
     const privateStatus=await guest.evaluate(()=>fetch('/api/research/filings?instrument=stock:us:AAPL').then(r=>r.status));assert.equal(privateStatus,403);
     assert.equal(await guest.evaluate(()=>fetch('/api/research/committee?market=stocks&instrument=stock:us:AAPL').then(r=>r.status)),403);
     assert.equal(await guest.evaluate(id=>fetch('/api/research/experiments/'+id+'/robustness',{method:'POST'}).then(r=>r.status),experiments[0]),403);
+    assert.equal(await guest.evaluate(id=>fetch('/api/research/experiments/'+id+'/revision-impact').then(r=>r.status),experiments[0]),403);
     assert.deepEqual(errors,[]);
     console.log(JSON.stringify({ok:true,fixtureOnly:true,themes,privateStatus,dataDirectory:data}));
   }finally{if(browser)await browser.close();child.kill();}

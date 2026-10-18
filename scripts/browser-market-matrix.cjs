@@ -540,7 +540,9 @@ async function main() {
     assert.equal(await page.evaluate(()=>typeof window.MoneyWorkspaceHistory?.install),'function','navigation helper ships inside existing startup, not a new unrelated request');
     await researchPanel.locator('[data-research-diagnostics]').click();assert.match(await researchPanel.innerText(),/Provider|Provider来源/);
     await researchPanel.locator('[data-research-layout]').click();assert.match(await researchPanel.innerText(),/越界点位 0/);assert.match(await researchPanel.innerText(),/越界文字 0/);
-    await researchPanel.locator('[data-research-audit]').click();assert.match(await researchPanel.innerText(),/未修复或覆盖/);
+    await researchPanel.locator('[data-research-audit]').click();
+    await page.waitForFunction(()=>document.querySelector('#stock-chart-research [data-research-output]')?.textContent.includes('未修复或覆盖'));
+    assert.match(await researchPanel.innerText(),/未修复或覆盖/);
     const savedResearchSettings=await page.evaluate(()=>JSON.stringify(stockChartOverlayConfig));
     // The existing provider fixture deliberately has fewer than 60 bars: verify its real empty reason first.
     await researchPanel.locator('[data-research-lab]').click();
