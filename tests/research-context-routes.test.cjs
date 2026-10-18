@@ -1,0 +1,7 @@
+const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs');require('ts-node/register/transpile-only');
+test('private context routes capture only server current watchlist and never accept caller historical members',async()=>{
+ assert.ok(fs.existsSync('src/web/research-context-routes.ts'));const express=require('express'),{createResearchContextRouter}=require('../src/web/research-context-routes');let captured=null;
+ const app=express();app.use(express.json());app.use((req,res,next)=>{req.user={role:req.headers['x-role']};next();});app.use(createResearchContextRouter({list:(market,asOf)=>({market,asOf,universes:[],trials:[]}),capture:(market,ids,source)=>captured={market,ids,source}},()=>['stock:us:AAPL','crypto:binance:BTCUSDT']));const server=app.listen(0,'127.0.0.1');await new Promise(r=>server.once('listening',r));const base='http://127.0.0.1:'+server.address().port;
+ try{assert.equal((await fetch(base+'?market=stocks')).status,403);const headers={'x-role':'admin','content-type':'application/json'};assert.equal((await fetch(base+'/universe',{method:'POST',headers,body:JSON.stringify({market:'stocks',instruments:['stock:us:SNDK']})})).status,400);assert.equal(captured,null);const response=await fetch(base+'/universe',{method:'POST',headers,body:JSON.stringify({market:'stocks'})});assert.equal(response.status,201);assert.deepEqual(captured.ids,['stock:us:AAPL']);assert.match(response.headers.get('cache-control'),/no-store/);
+ }finally{await new Promise(r=>server.close(r));}
+});

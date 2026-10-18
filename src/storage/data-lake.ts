@@ -638,6 +638,13 @@ export class DataLakeCatalog {
     }));
   }
 
+  /** Public-to-owner metadata projection only. Never expose the filesystem path or infer old units. */
+  listPartitionEvidence(market:MarketId,instrument:string,timeframe:string){
+    if(!MARKET_IDS.includes(market)||!instrument||instrument.length>220||!/^[A-Za-z0-9]{1,12}$/.test(timeframe))throw Error('分区范围无效');
+    const rows=this.db.prepare('SELECT p.id,p.market,p.instrument,p.timeframe,p.content_hash AS contentHash,p.published_at AS publishedAt,p.fetched_at AS fetchedAt,p.status,p.period_start AS periodStart,p.period_end AS periodEnd,p.row_count AS rowCount,m.source,m.timezone,m.adjustment,m.field_version AS fieldVersion,q.report FROM dataset_partitions p JOIN dataset_manifests m ON p.manifest_id=m.id LEFT JOIN data_quality_reports q ON q.partition_id=p.id WHERE p.market=? AND p.instrument=? AND p.timeframe=? ORDER BY p.published_at DESC LIMIT 200').all(market,instrument,timeframe) as Array<Record<string,any>>;
+    return rows.map(row=>{let qualityValid=false;try{qualityValid=JSON.parse(row.report)?.valid===true;}catch{}return {id:String(row.id),market,instrument:String(row.instrument),timeframe:String(row.timeframe),contentHash:String(row.contentHash),publishedAt:String(row.publishedAt),fetchedAt:String(row.fetchedAt),status:String(row.status),periodStart:String(row.periodStart),periodEnd:String(row.periodEnd),rowCount:Number(row.rowCount),source:String(row.source),timezone:String(row.timezone),adjustment:String(row.adjustment),fieldVersion:String(row.fieldVersion),qualityValid,units:{},unitsReason:'历史分区未固定字段单位，保持未知，不根据市场或当前Provider契约回填。'};});
+  }
+
   listQuality(market?: MarketId, instrument?: string): Array<{ partitionId: string; report: DataQualityReport }> {
     const rows = (market && instrument
       ? this.db.prepare('SELECT q.partition_id AS partitionId, q.report FROM data_quality_reports q JOIN dataset_partitions p ON p.id = q.partition_id WHERE p.market = ? AND p.instrument = ? ORDER BY q.checked_at DESC').all(market, instrument)

@@ -83,6 +83,13 @@
     return {time:row.time,value:row.close,closeTime,closed:closeTime!==null&&row.closed!==false};
   });}
   function getTemporalSeries(canvas){const i=mounts.get(canvas)?.info,context=i?.syncContext;if(!i||!validCursorContext(context))return null;return {market:context.market,instrument:context.group,timeframe:i.interval,source:i.source||'图表来源未声明',points:temporalEvidenceRows(i.full)};}
+  function navigateClosedEvidence(canvas,request){
+    const m=mounts.get(canvas),series=getTemporalSeries(canvas),view=views.get(canvas);
+    if(!m||!series||!view||series.market!==request?.market||series.instrument!==request.instrument||series.timeframe!==request.timeframe||!Number.isFinite(request.asOf))return false;
+    const point=series.points.find(row=>row.time===request.time&&row.closed&&row.closeTime<=request.asOf);if(!point)return false;
+    if(!applySavedView(canvas,{...view,follow:false,anchor:point.time},view.key))return false;
+    const refreshed=mounts.get(canvas);refreshed.hover=cursorIndexAtTime(refreshed.info.rows,point.time,series.timeframe);refreshed.sharedTime=point.time;refreshed.crossY=null;queuePaint(refreshed);return true;
+  }
   function pickCandle(canvas,clientX){const m=mounts.get(canvas),g=m?.info?.geometry,r=canvas.getBoundingClientRect();if(!g||!r.width)return null;const x=(clientX-r.left)*g.W/r.width;if(x<g.padL||x>=g.W-g.padR)return null;return m.info.rows[Math.floor((x-g.padL)/(g.W-g.padL-g.padR)*m.info.rows.length)]||null;}
   function publishCursor(m){
     if(!m.localCursor)return;m.localCursor=false;const context=m.info?.syncContext;if(!validCursorContext(context))return;
@@ -155,8 +162,11 @@
     if(Number.isFinite(input.count))s.count=Math.max(15,Math.min(300,Math.round(input.count)));
     if(input.follow===false&&Number.isFinite(input.anchor)){s.follow=false;s.anchor=input.anchor;}
     s.timeZone='local';if(input.timeZone==='exchange')s.timeZone='exchange';else if(typeof input.timeZone==='string'&&input.timeZone!=='local'){try{new Intl.DateTimeFormat('zh-CN',{timeZone:input.timeZone});s.timeZone=input.timeZone;}catch{}}
+    if(Number.isFinite(input.priceScale)&&input.priceScale>=.25&&input.priceScale<=8)s.priceScale=input.priceScale;
     return s;
   }
+  function snapshotView(canvas){const s=views.get(canvas);return s?{...restoreView(s)}:null;}
+  function applySavedView(canvas,input,identity){const old=views.get(canvas);if(!old||old.key!==identity)return false;const restored={...restoreView(input),key:old.key};views.set(canvas,restored);persist(restored);mounts.get(canvas)?.info?.redraw();return true;}
   function persist(s){try{if(s?.key)window.sessionStorage?.setItem('mm-chart-view:'+s.key,JSON.stringify({count:s.count,follow:s.follow,anchor:s.anchor,timeZone:s.timeZone||'local'}));}catch{}}
   function scheduleFrame(m,fn,hidden,request){if(hidden()||m.framePending)return;m.framePending=true;request(()=>{m.framePending=false;if(!hidden())fn();});}
   function queuePaint(m,redraw){m.needsRedraw=m.needsRedraw||redraw;scheduleFrame(m,()=>{const full=m.needsRedraw;m.needsRedraw=false;if(full)m.info?.redraw();else paint(m);},()=>document.hidden||!m.host.getClientRects().length,requestAnimationFrame);}
@@ -326,7 +336,7 @@
   }
   window.MoneyTradingChart={createView,windowFor,pan,latest,zoom,countdown,select,decorate,clear,render,statusFor,restoreView,scheduleFrame,scalePrice,resetPrice,priceRange,pivotLevels,supportResistanceLineLayout,drawSupportResistance,paperMarkersFor,mergeHistory,measureRange,verifyPaperEvidenceEnvelope,verifyPaperExecutionEvidenceEnvelope,formatPaperExecutionEvidence};
   window.MoneyTradingChart.priceAlertDraft=priceAlertDraft;
-  Object.assign(window.MoneyTradingChart,{cursorIndexAtTime,getCursor,pickCandle,temporalEvidenceRows,getTemporalSeries});
+  Object.assign(window.MoneyTradingChart,{cursorIndexAtTime,getCursor,pickCandle,temporalEvidenceRows,getTemporalSeries,snapshotView,applySavedView,navigateClosedEvidence});
   window.MoneyTradingChart.redraw=canvas=>mounts.get(canvas)?.info?.redraw();
   function whenDomReady(callback) {
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', callback, { once: true });

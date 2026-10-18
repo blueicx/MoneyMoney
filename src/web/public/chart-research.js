@@ -252,5 +252,15 @@
     const unlinkedIds=markers.filter(r=>!r.id||!ids.has(r.id)).map(r=>r.id??'未关联');
     return {...base,dataStatus:outsideMarkers.length+outsideLabels.length+overlaps.length+unlinkedIds.length?'partial':'historical',reason:'只读检查当前投影：被聚合或主动隐藏的标签不算丢失点位；不自动删除、移动或生成信号。',outsideMarkers,outsideLabels,overlaps,unlinkedIds};
   }
-  return {buildQualityMatrix,explainSignalAgreement,alignTimeframeEvidence,evaluateParameterLab,buildRequestDiagnostics,evaluateChartBudgets,buildChartSupportBundle,buildGapBackfillPreview,auditChartData,buildLoadedCoverage,describeStrategyRegimes,buildStrategyRegimeMap,analyzeStrategyRedundancy,evaluateCounterfactual,auditChartLayout};
+  function buildPointLifecycle(o){
+    const empty={dataStatus:'unavailable',reason:'点位身份、时间或触发证据不匹配，不推断生命周期',transitions:[],observations:[],linkedFills:[],expiry:'unknown'};
+    const p=o.point;if(!scopeOk(o)||!same(p,o)||!p.id||!number(o.at)||!number(p.time)||p.time>o.at||!['buy','sell'].includes(p.side)||!['forming','confirmed','invalidated','withdrawn'].includes(p.status))return empty;
+    const index=(o.bars||[]).findIndex(b=>b.time===p.time),price=p.triggerPrice??p.price;
+    const observations=index<0?[]:analysis.strategyPointOutcomes(o.bars,index,price,p.side,{status:p.status,live:o.live===true,currentBarClosed:false,costBps:o.costBps??null,asOf:o.at});
+    const transitions=(p.evolution||[]).filter(e=>e.id===p.id&&number(e.at)&&e.at<=o.at&&['forming','updated','confirmed','withdrawn','invalidated'].includes(e.state)).slice(-200).map(e=>({...e}));
+    const fills=(o.fills||[]).filter(f=>f.market===o.market&&f.instrument===o.instrument&&f.signalId===p.id&&f.orderId&&f.accountId&&f.snapshotId&&number(f.time)&&f.time>=p.time&&f.time<=o.at&&number(f.price)&&f.price>0);
+    return {...empty,dataStatus:'historical',reason:'只展示当前会话实际观察、已收线后续路径与明确ID关联；未观察变化和旧成交不按时间推断。到期不是平仓，观察收益不是成交收益。',
+      transitions,observations,linkedFills:fills,expiry:number(p.expiresAt)&&p.expiresAt>=p.time?(p.expiresAt<=o.at?'expired':'not-expired'):'unknown'};
+  }
+  return {buildPointLifecycle,buildQualityMatrix,explainSignalAgreement,alignTimeframeEvidence,evaluateParameterLab,buildRequestDiagnostics,evaluateChartBudgets,buildChartSupportBundle,buildGapBackfillPreview,auditChartData,buildLoadedCoverage,describeStrategyRegimes,buildStrategyRegimeMap,analyzeStrategyRedundancy,evaluateCounterfactual,auditChartLayout};
 });

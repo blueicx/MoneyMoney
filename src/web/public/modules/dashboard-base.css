@@ -492,6 +492,10 @@
     .mm-stock-chart-evidence h4 { margin:0 0 6px; font-size:10px; color:var(--text-secondary); }
     .mm-chart-evidence-detail { padding:8px; border:1px solid var(--border); border-radius:9px; background:var(--bg-secondary); color:var(--text); font-size:10px; line-height:1.5; overflow-wrap:anywhere; }
     .mm-chart-evidence-detail a { display:inline-flex; margin-top:5px; }
+    .mm-point-lifecycle-drawer { position:fixed; inset:0 0 0 auto; margin:0; width:min(540px,100vw); max-width:100vw; height:100dvh; max-height:100dvh; box-sizing:border-box; padding:20px; border:1px solid var(--border); background:var(--bg); color:var(--text); font-family:system-ui,sans-serif; font-size:13px; line-height:1.65; overflow:auto; overflow-wrap:anywhere; }
+    .mm-point-lifecycle-drawer::backdrop { background:rgba(0,0,0,.4); }
+    .mm-point-lifecycle-drawer button { min-height:40px; padding:8px 12px; border:1px solid var(--border); border-radius:8px; background:var(--bg-primary); color:var(--text); cursor:pointer; }
+    .mm-point-lifecycle-drawer button:focus-visible { outline:2px solid var(--purple); outline-offset:3px; }
     .stock-chart-marker-layer { position:absolute; inset:0; pointer-events:none; overflow:visible; }
     .chart-signal-hit-layer { position:absolute; inset:0; z-index:5; pointer-events:none; overflow:hidden; }
     .chart-signal-hit-target { position:absolute; transform:translate(-50%,-50%); width:24px; height:24px; min-width:24px; min-height:24px; padding:0; border:1px solid transparent; border-radius:50%; background:transparent; color:var(--text); font-size:10px; font-weight:800; line-height:22px; text-align:center; pointer-events:auto; cursor:pointer; }

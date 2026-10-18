@@ -2,6 +2,13 @@ const test=require('node:test'),assert=require('node:assert/strict'),fs=require(
 function load(){assert.ok(fs.existsSync('src/web/public/trading-chart.js'),'trading chart module must exist');const scope={window:{},document:{readyState:'loading',addEventListener(){}}};vm.runInNewContext(fs.readFileSync('src/web/public/trading-chart.js','utf8'),scope);return scope.window.MoneyTradingChart;}
 const rows=Array.from({length:100},(_,i)=>({time:i*300000,open:10,high:12,low:9,close:11,volume:5}));
 
+test('saved chart views are detached snapshots and restore only the explicitly matching chart identity',()=>{
+ const c=load(),canvas={};c.select(canvas,rows,'AAPL|5m');assert.equal(typeof c.snapshotView,'function');assert.equal(typeof c.applySavedView,'function');
+ const saved={count:42,follow:false,anchor:rows[75].time,timeZone:'exchange',priceScale:1.5};
+ assert.equal(c.applySavedView(canvas,saved,'SNDK|5m'),false);assert.equal(c.select(canvas,rows,'AAPL|5m').state.count,60);
+ assert.equal(c.applySavedView(canvas,saved,'AAPL|5m'),true);assert.equal(c.snapshotView(canvas).count,42);assert.equal(c.snapshotView(canvas).priceScale,1.5);const copy=c.snapshotView(canvas);copy.count=1;assert.equal(c.snapshotView(canvas).count,42);assert.equal(c.windowFor(rows,c.select(canvas,rows,'AAPL|5m').state).rows.at(-1).time,rows[75].time);
+});
+
 test('cross-period closed evidence requires an explicit close timestamp or a following candle',()=>{
  const c=load();assert.equal(typeof c.temporalEvidenceRows,'function');
  const result=c.temporalEvidenceRows([{time:100,close:10},{time:200,close:11},{time:300,close:12,closed:true}]);

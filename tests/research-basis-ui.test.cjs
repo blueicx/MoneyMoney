@@ -1,0 +1,9 @@
+const test=require('node:test'),assert=require('node:assert/strict'),{JSDOM}=require('jsdom'),{render}=require('../src/web/public/chart-research-controls');
+test('basis workbench is click-only, renders conflict evidence as text and requires a reason before scoped persistence',async()=>{
+ const dom=new JSDOM('<div id="host"></div>'),host=dom.window.document.getElementById('host'),scope={market:'stocks',instrument:'stock:us:AAPL',timeframe:'1d',bars:[]};let reads=0,writes=0;
+ const data={...scope,revision:0,reason:'Only research basis; current chart unchanged',records:[],conflicts:[{sourceA:'<script>bad</script>',sourceB:'second',reason:'差异待核对',createdAt:'2026-10-01',evidence:[{timestamp:'2026-10-01',closeA:1,closeB:2,differencePct:100}]}],options:[{id:'p1',source:'safe',publishedAt:'2026-10-01',fetchedAt:'2026-10-02',timezone:'UTC',adjustment:'unknown',fieldVersion:'bars-v1',units:{},qualityValid:true,status:'committed'}]};
+ try{render({host,key:'a',getInput:()=>scope,onBasis:async(input,change)=>{assert.equal(input.instrument,scope.instrument);if(change){writes++;assert.equal(change.partitionId,'p1');assert.equal(change.reason,'explicit reason');return {...data,revision:1,records:[{id:'p1',reason:change.reason,selectedAt:'now'}]};}reads++;return data;}});
+ assert.equal(reads,0);const button=host.querySelector('[data-research-basis]');assert.ok(button,'basis workbench button missing');await button.onclick();assert.equal(reads,1);assert.equal(host.querySelector('script'),null);assert.match(host.textContent,/差异待核对/);
+ await host.querySelector('[data-basis-save]').onclick();assert.equal(writes,0);host.querySelector('[data-basis-reason]').value='explicit reason';await host.querySelector('[data-basis-save]').onclick();assert.equal(writes,1);assert.match(host.textContent,/explicit reason/);
+ }finally{dom.window.close();}
+});

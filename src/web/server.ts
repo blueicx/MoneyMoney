@@ -161,6 +161,13 @@ import { assessResearchFreshness } from '../features/research-freshness';
 import { testNotificationChannels } from '../features/notification-channels';
 import { runResearchExperiment, rerunSavedExperiment } from '../features/experiment-runner';
 import { createResearchRevisionRouter } from './research-revision-routes';
+import { createResearchBasisRouter } from './research-basis-routes';
+import { ResearchBasisStore } from '../features/research-basis';
+import { createChartBookmarkRouter } from './chart-bookmark-routes';
+import { chartBookmarkLink, readChartBookmark } from '../features/chart-bookmarks';
+import { ResearchContextLedger, executeRecordedTrial } from '../features/research-context-ledger';
+import { createSharedCapitalRouter } from './shared-capital-routes';
+import { createResearchContextRouter } from './research-context-routes';
 import type { RevisionImpactRecord } from '../features/research-revision-impact';
 import { compareExperiments } from '../features/experiment-comparison';
 import { compareOptionSnapshotPair, compareOptionSnapshots, summarizeMarketHistory } from '../features/market-history-comparison';
@@ -400,15 +407,28 @@ app.get('/login', (req, res) => {
 });
 registerAuthRoutes(app);
 registerApiAuthProtection(app);
+app.use('/api/chart/bookmarks',createChartBookmarkRouter({list:market=>decisionIntelligenceStore.listWorkspaces(market as MarketId|undefined),get:id=>decisionIntelligenceStore.getWorkspace(id),save:row=>stateStore.transaction(()=>{if(decisionIntelligenceStore.listWorkspaces().length>=200)throw Error('工作区容量已达上限，未删除旧记录');return decisionIntelligenceStore.saveWorkspace(row);}),base:()=>process.env.PUBLIC_WEB_BASE_URL||telegramPublicBaseUrl()}));
+const researchBasisStore=new ResearchBasisStore(stateStore,scope=>{
+  const market=scope.market as MarketId,ref=dataLakeCatalog.resolveInstrument(market,scope.instrument);
+  if(!ref||ref.id!==scope.instrument)return [];
+  return dataLakeCatalog.listPartitionEvidence(market,ref.symbol,scope.timeframe).map(row=>({...row,market,instrument:scope.instrument,timeframe:scope.timeframe}));
+});
+app.use('/api/research/basis',createResearchBasisRouter(researchBasisStore,scope=>{
+  const market=scope.market as MarketId,ref=dataLakeCatalog.resolveInstrument(market,scope.instrument);
+  return ref?.id===scope.instrument?dataLakeCatalog.listDiscrepancies(market,ref.symbol).filter(row=>row.timeframe===scope.timeframe).slice(0,200):[];
+}));
 app.use('/api/workspace/records/search',createWorkspaceRecordSearchRouter({
   experiments:()=>researchRepository.listExperiments(200).map(row=>row.experiment).filter(Boolean).map(row=>({id:row.id,market:row.market,instrument:row.instrument||'',strategyVersion:row.strategyVersion,updatedAt:row.createdAt})),
   orders:()=>unifiedPaperLedgerStore.get().orders.slice(-200).map(row=>({id:row.id||'',market:({stock:'stocks',option:'options',crypto:'crypto',prediction:'prediction'} as Record<string,string>)[row.instrumentType]||'',instrument:row.instrumentId,strategyVersion:row.strategyVersion,updatedAt:row.timestamp})),
 }));
 const watchlistMetadataStore = new WatchlistMetadataStore(stateStore, () => unifiedAlertStore.listWatchlist());
+const researchContextLedger=new ResearchContextLedger(stateStore);
+app.use('/api/research/context-ledger',createResearchContextRouter(researchContextLedger,()=>unifiedAlertStore.listWatchlist()));
 app.use('/api/operations/history',createOperationHistoryRouter({actionHistory:()=>actionCenterStore.history('admin',{limit:500}),metadata:()=>watchlistMetadataStore.read(),undoAction:(id,version)=>actionCenterStore.undo('admin',id,version),undoMetadata:(id,revision)=>watchlistMetadataStore.undo(id,revision)}));
 const instrumentSilences = new InstrumentSilenceStore(stateStore);
 app.use('/api/watchlist/metadata', createWatchlistMetadataRouter(watchlistMetadataStore));
 app.use('/api/research/experiments',createResearchRobustnessRouter({get:id=>researchRepository.getExperiment(id),save:(id,result)=>researchRepository.saveExperiment(id,result)}));
+app.use('/api/research/shared-capital',createSharedCapitalRouter({get:id=>researchRepository.getExperiment(id)}));
 app.use('/api/research/experiments',createResearchRevisionRouter({load:id=>{
   const saved=researchRepository.getExperiment(id),e=saved?.experiment;
   if(!e||!MARKET_IDS.includes(e.market)||!e.instrument)return null;
@@ -5004,6 +5024,7 @@ const TELEGRAM_HELP = [
   '/inbox   查看私聊提醒并确认/重试',
   '/pending 待处理自选行动；已读、置顶、稍后处理同步网页',
   '/changes 今日变化摘要 · /why 为何未下单 · /comparison 已保存模拟对照结果',
+  '/bookmarks 私人图表书签及研究批注网页入口（不自动下单）',
   '/digest   查看或配置定时摘要',
   '/ops     查看自动化任务状态',
   '/strategies 查看 AI 模拟策略',
@@ -6935,6 +6956,12 @@ export function getTelegramCommandHandlers(): Record<string, TelegramCommandHand
         : '<b>最近操作审计</b>\n暂无记录。';
     },
     whoami: ({ chatId }) => `当前 Chat ID：<code>${escapeTelegramHtml(chatId)}</code>\n已在允许列表中。`,
+    bookmarks: ({chatId}) => {
+      if(!isTelegramAdmin(chatId))return '仅管理员私聊可查看私人图表书签。';
+      const market=telegramScopeForChat(chatId);if(!['stocks','crypto'].includes(market))return '当前市场暂不支持图表研究书签；请切换股票或虚拟币。';
+      const rows=decisionIntelligenceStore.listWorkspaces(market as MarketId).map(readChartBookmark).filter((row):row is NonNullable<typeof row>=>!!row).slice(0,10);
+      return ['<b>当前市场私人图表书签</b>','网页与Telegram读取相同SavedWorkspace；链接仍需管理员登录。',...rows.map(row=>`${escapeTelegramHtml(row.name)} · ${escapeTelegramHtml(row.instrument||'')} · ${escapeTelegramHtml(row.timeframe||'')}\n${escapeTelegramHtml(chartBookmarkLink(process.env.PUBLIC_WEB_BASE_URL||telegramPublicBaseUrl(),row)||'未配置可用公网HTTPS地址，暂不生成深链')}`),rows.length?'':'当前市场没有保存的图表书签。'].filter(Boolean).join('\n');
+    },
     web: () => {
       const publicUrl = telegramPublicBaseUrl();
       return publicUrl
@@ -8549,6 +8576,7 @@ app.post('/api/research/candidates/:id/reject', express.json(), (req, res) => {
 });
 
 app.post('/api/research/experiments', express.json(), (req, res) => {
+  if(!adminOnly(req,res))return;
   try {
     const body = req.body || {};
     const context = {
@@ -8563,21 +8591,20 @@ app.post('/api/research/experiments', express.json(), (req, res) => {
       dataSnapshotHash: body.dataSnapshotHash ? String(body.dataSnapshotHash) : undefined,
       strategyId: body.strategyId ? String(body.strategyId) : undefined,
       strategyVersion: body.strategyVersion ? String(body.strategyVersion) : undefined,
+      parameters: body.parameters,
       feeRate: body.feeRate == null ? undefined : Number(body.feeRate), slippage: body.slippage == null ? undefined : Number(body.slippage), seed: body.seed,
     };
-    const result = runResearchExperiment({
+    const input={
       context,
       prices: Array.isArray(body.prices) ? body.prices.map(Number) : [],
       signals: Array.isArray(body.signals) ? body.signals : [],
       split: body.split,
       promotion: body.promotion,
-    });
-
-    // Save to SQLite for persistence
-    researchRepository.saveExperiment(result.experiment.id, {
-      ...result,
+    };
+    const result = executeRecordedTrial(researchContextLedger,input,()=>runResearchExperiment(input),saved=>researchRepository.saveExperiment(saved.experiment.id, {
+      ...saved,
       input: { context, prices: body.prices || [], signals: body.signals || [], split: body.split, promotion: body.promotion },
-    });
+    }));
 
     return res.json({ success: true, data: result });
   } catch (error) {
@@ -8678,8 +8705,8 @@ app.post('/api/research/experiments/:id/rerun', express.json(), (req, res) => {
   try {
     const previous = researchRepository.getExperiment(String(req.params.id)) as any;
     if (!previous?.input) return res.status(409).json({ success: false, error: '实验缺少可复现输入，无法重跑' });
-    const result = rerunSavedExperiment(previous,req.body?.overrides || {});
-    researchRepository.saveExperiment(result.experiment.id, result);
+    const overrides=req.body?.overrides||{};
+    const result = executeRecordedTrial(researchContextLedger,{...previous.input,...overrides,context:{...previous.input.context,...(overrides.context||{})}},()=>rerunSavedExperiment(previous,overrides),saved=>researchRepository.saveExperiment(saved.experiment.id,saved));
     res.json({ success: true, data: result, rerunOf: String(req.params.id) });
   } catch (error: any) {
     res.status(400).json({ success: false, error: error?.message || '实验重跑失败' });

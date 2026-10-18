@@ -6166,12 +6166,54 @@ function setChartStrategyParameters(kind, id, parameters) {
   if(stock){if(stockChartKlines.length)drawStockKline(document.getElementById('stock-kline'),stockChartKlines);}
   else if(bnKlineData.length)drawCandles(document.getElementById('bn-candlestick'),bnKlineData);
 }
+async function restorePrivateChartBookmark(kind,context,saved) {
+  const b=saved?.filters?.chartBookmark,canvas=document.getElementById(kind==='stock'?'stock-kline':'bn-candlestick');
+  const current=()=>activeMarketScope===context.market&&saved.market===context.market&&saved.instrument===context.instrument&&saved.timeframe===context.timeframe&&context.instrument===(kind==='stock'?stockChartEventInstrumentId():`crypto:binance:${bnCurrentSymbol}`)&&context.timeframe===(kind==='stock'?currentStockKlinePeriod:bnCurrentInterval);
+  if(!b||!current())throw Error('书签与当前市场、标的或周期不一致，未跨市场恢复');
+  if(kind==='stock'){
+    stockChartOverlayConfig=window.MoneyChartAnalysis.normalizeOverlayConfig(b.chartConfig||{});saveChartLayoutPreference(stockChartStorageKey(),stockChartOverlayConfig);loadStockChartOverlayConfig();
+    const asOf=b.asOf==null?'':new Date(b.asOf).toISOString();
+    if(stockChartAsOf!==asOf){stockChartAsOf=asOf;stockChartAsOfRevision++;try{localStorage.setItem(stockKlineAsOfStorageKey(),asOf);}catch{}syncStockKlineAsOfControl();await loadStockKline();}
+    if(!current())throw Error('恢复期间上下文已变化，未覆盖新选择');
+    if(b.view){
+      if(!stockChartKlines.length||b.view.anchor<stockChartKlines[0].time||b.view.anchor>stockChartKlines.at(-1).time)throw Error('书签视窗不在当前加载区间，请主动加载更早数据；未替换为其他日期');
+      stockChartFocusEnabled=false;stockChartReplayIndex=stockChartKlines.length-1;drawStockKline(canvas,stockChartKlines);
+      if(!window.MoneyTradingChart?.applySavedView(canvas,b.view,currentStockSymbol+'|'+currentStockKlinePeriod))throw Error('当前模式无法恢复交互视窗；图层已载入，未声称日期恢复成功');
+    }else {const i=stockChartKlines.findIndex(row=>row.time===b.at);if(i<0)throw Error('书签日期不在当前已加载数据中，未跳转其他日期');stockChartFocusIndex=i;stockChartFocusEnabled=true;drawStockKline(canvas,stockChartKlines);}
+  }else{
+    if(b.asOf!=null)throw Error('当前虚拟币主图没有已接线历史时点模式，不混用当前数据');
+    cryptoChartOverlayConfig={...b.chartConfig};cryptoChartStrategyConfig={...(b.chartConfig?.strategies||{})};saveChartLayoutPreference(cryptoChartOverlayStorageKey(),cryptoChartOverlayConfig);saveChartLayoutPreference(cryptoChartStorageKey(),cryptoChartStrategyConfig);loadCryptoChartOverlayConfig();loadCryptoChartStrategyConfig();
+    drawCandles(canvas,bnKlineData);if(b.view){if(!bnKlineData.length||b.view.anchor<bnKlineData[0].time||b.view.anchor>bnKlineData.at(-1).time)throw Error('书签日期不在当前加载区间，请主动加载更早数据');if(!window.MoneyTradingChart?.applySavedView(canvas,b.view,bnCurrentSymbol+'|'+bnCurrentInterval))throw Error('当前模式无法恢复交互视窗');}else throw Error('该虚拟币书签没有可恢复的交互视窗，未用当前数据冒充历史定位');
+  }
+  window.showToast?.('已恢复私人图表书签；数据缺口与来源状态仍按当前实际证据显示','info');return {reason:'书签已恢复；未创建订单、模型调用或自动回补。'};
+}
+function restoreChartBookmarkFromUrl(kind,context){
+  const id=new URLSearchParams(location.search).get('bookmark');if(!id||window.mmBookmarkUrlAttempted===id||window.mm_isGuest||!window.mm_isLoggedIn)return;
+  window.mmBookmarkUrlAttempted=id;
+  fetch('/api/chart/bookmarks/'+encodeURIComponent(id),{cache:'no-store',signal:AbortSignal.timeout(10000)}).then(async response=>{const body=await response.json();if(!response.ok)throw Error(body.reason||'私人书签不可用');return restorePrivateChartBookmark(kind,context,body.data);}).catch(error=>window.showToast?.(error.message,'info'));
+}
 function renderChartResearchTools(kind,bars,points,metadata,context) {
   const host=document.getElementById(kind==='stock'?'stock-chart-research':'bn-chart-research');
   if(!host||!window.MoneyChartResearchControls)return;
   const config=kind==='stock'?stockChartOverlayConfig:cryptoChartOverlayConfig;
   const key=JSON.stringify([context.market,context.instrument,context.timeframe,config.strategies,config.strategyParameters,bars.length,bars.at(-1)?.time,kind==='stock'?stockChartAsOf:null]);
   window.MoneyChartResearchControls.render({host,key,
+    onTimeframeNavigate:request=>{
+      if(activeMarketScope!==context.market||request.market!==context.market||request.instrument!==context.instrument)return false;
+      for(const canvas of document.querySelectorAll('canvas[data-chart-sync-group]'))if(canvas.getClientRects().length&&window.MoneyTradingChart?.navigateClosedEvidence(canvas,request)){canvas.scrollIntoView({block:'nearest'});return true;}return false;
+    },
+    onBookmark:window.mm_isLoggedIn===true&&!window.mm_isGuest?async(input,action,options)=>{
+      if(action?.kind==='restore')return restorePrivateChartBookmark(kind,context,action.bookmark);
+      const scope={market:input.market,instrument:input.instrument,timeframe:input.timeframe},cookie=document.cookie.split(';').map(row=>row.trim()).find(row=>row.startsWith('mm_csrf='));
+      const view=input.chartView?{...input.chartView,follow:false,anchor:input.chartView.follow?input.bars.at(-1)?.time:input.chartView.anchor}:null;
+      const payload=action?{...scope,name:action.name,note:action.note,at:input.at,asOf:input.asOf??null,view,chartConfig:input.chartConfig}:null;
+      const response=await fetch('/api/chart/bookmarks'+(action?'':'?'+new URLSearchParams(scope)),{cache:'no-store',signal:options.signal,...(action?{method:'POST',headers:{'Content-Type':'application/json',...(cookie?{'x-csrf-token':decodeURIComponent(cookie.slice(8))}:{})},body:JSON.stringify(payload)}:{})});const body=await response.json();if(!response.ok)throw Error(body.reason||'书签不可用');return body.data;
+    }:null,
+    onBasis:window.mm_isLoggedIn===true&&!window.mm_isGuest?async (input,change,options)=>{
+      const scope={market:input.market,instrument:input.instrument,timeframe:input.timeframe},cookie=document.cookie.split(';').map(row=>row.trim()).find(row=>row.startsWith('mm_csrf='));
+      const response=await fetch('/api/research/basis'+(change?'':'?'+new URLSearchParams(scope)),{cache:'no-store',signal:options.signal,...(change?{method:'POST',body:JSON.stringify({...scope,...change}),headers:{'Content-Type':'application/json',...(cookie?{'x-csrf-token':decodeURIComponent(cookie.slice(8))}:{})}}:{})});
+      const body=await response.json();if(!response.ok||body.success===false)throw Error(body.reason||'研究口径不可用');return body.data;
+    }:null,
     onSessionAudit:kind==='stock'&&window.mm_isLoggedIn===true&&!window.mm_isGuest?async (input,options)=>{
       const query=new URLSearchParams({market:input.market,instrument:input.instrument,timeframe:input.timeframe,gaps:JSON.stringify(input.gaps)});
       if(input.asOf!=null)query.set('asOf',String(input.asOf));
@@ -6190,7 +6232,7 @@ function renderChartResearchTools(kind,bars,points,metadata,context) {
       return {reason:'回补任务 '+(data.data?.id||data.id||'已提交')+'；按现有Worker预算执行，查询结果保留新抓取时间，不覆盖历史时点证据。'};
     }:null,
     isCurrent:()=>!document.hidden&&activeMarketScope===context.market&&context.instrument===(kind==='stock'?stockChartEventInstrumentId():`crypto:binance:${bnCurrentSymbol}`)&&context.timeframe===(kind==='stock'?currentStockKlinePeriod:bnCurrentInterval)&&host.getClientRects().length>0,
-    getInput:()=>({...context,source:metadata.source||'',sourceTime:metadata.sourceTime||null,dataStatus:metadata.dataStatus||'unknown',chartConfig:kind==='stock'?config:{...config,strategies:cryptoChartStrategyConfig},buildVersion:document.querySelector('meta[name="moneymoney-build"]')?.content||null,evidenceRefs:metadata.evidenceRefs||[],points,
+    getInput:()=>({...context,source:metadata.source||'',sourceTime:metadata.sourceTime||null,dataStatus:metadata.dataStatus||'unknown',chartView:context.live?window.MoneyTradingChart?.snapshotView(document.getElementById(kind==='stock'?'stock-kline':'bn-candlestick')):null,chartConfig:kind==='stock'?config:{...config,strategies:cryptoChartStrategyConfig},buildVersion:document.querySelector('meta[name="moneymoney-build"]')?.content||null,evidenceRefs:metadata.evidenceRefs||[],points,
       requestTiming:metadata.requestTiming||null,providerTelemetry:metadata.providerTelemetry||null,
       pageTiming:window.MoneyMoneyPerformance.snapshot().pageTiming,
       layout:document.getElementById(kind==='stock'?'stock-kline':'bn-candlestick')?.moneyResearchLayout||null,
@@ -6201,6 +6243,7 @@ function renderChartResearchTools(kind,bars,points,metadata,context) {
       asOf:kind==='stock'&&stockChartAsOf?Date.parse(stockChartAsOf):undefined}),
     onSelect:id=>{const signal=points.find(point=>point.id===id);if(signal)handleChartSignalSelection(signal,kind==='stock'?'stock-chart-signal-markers':'bn-chart-signal-markers');},
   });
+  restoreChartBookmarkFromUrl(kind,context);
 }
 function updateStockSupportResistanceStatus(message) {
   const host = document.getElementById('stock-sr-status');
@@ -6414,6 +6457,26 @@ function showStockChartEvidence(item, kind = 'event') {
   if (Array.isArray(item.evidenceRefs) && item.evidenceRefs.length) details.push(`证据引用：${item.evidenceRefs.join(' · ')}`);
   host.innerHTML = `<strong>${stockEscapeHtml(item.title || item.label || item.headline || (kind === 'signal' ? '策略点位' : '图表证据'))}</strong><div>${stockEscapeHtml(timeKind)}：${stockEscapeHtml(time ? formatChartTime(time) : '未提供')} · ${stockEscapeHtml(sourceName)}</div>${details.map(line => `<div>${stockEscapeHtml(line)}</div>`).join('')}${safeUrl ? `<a href="${stockEscapeHtml(safeUrl)}" target="_blank" rel="noopener noreferrer">查看原始证据 ↗</a>` : ''}`;
   if (status) status.textContent = kind === 'signal' ? '策略研究信号 · 不构成订单' : '来源证据';
+  if(kind==='signal')appendPointLifecycleAction(host,item,'stock');
+}
+function appendPointLifecycleAction(host,point,kind){
+  if(!window.MoneyChartResearchControls?.openPointLifecycle||!point?.id)return;
+  const button=document.createElement('button');button.type='button';button.className='tab';button.dataset.pointLifecycleOpen=point.id;button.textContent='完整生命周期与关联成交';host.append(button);
+  button.onclick=()=>{
+    const current=()=>activeMarketScope===point.market&&point.instrument===(kind==='stock'?stockChartEventInstrumentId():`crypto:binance:${bnCurrentSymbol}`)&&point.timeframe===(kind==='stock'?currentStockKlinePeriod:bnCurrentInterval)&&host.getClientRects().length>0;
+    if(!current())return;
+    let bars=kind==='stock'?stockChartKlines:bnKlineData;
+    const cryptoReplay=kind==='crypto'&&Boolean(window.cryptoMoneyKLine?.timer),replay=cryptoReplay||(kind==='stock'&&stockChartReplayIndex>=0&&stockChartReplayIndex<bars.length-1);
+    let at=kind==='stock'&&stockChartAsOf?Date.parse(stockChartAsOf):kind==='stock'&&replay?bars[stockChartReplayIndex]?.time:Date.now();
+    if(cryptoReplay){
+      const series=window.MoneyTradingChart?.getTemporalSeries(document.getElementById('bn-candlestick'));
+      if(!series||series.market!==point.market||series.instrument!==point.instrument||series.timeframe!==point.timeframe||!series.points?.length)return;
+      const times=new Set(series.points.map(row=>row.time));bars=bars.filter(row=>times.has(row.time));
+      at=series.points[series.points.length-1].time;if(!bars.length||!Number.isFinite(at))return;
+    }
+    window.MoneyChartResearchControls.openPointLifecycle({host,isCurrent:current,input:{market:point.market,instrument:point.instrument,timeframe:point.timeframe,point,bars,at,live:!replay&&!(kind==='stock'&&stockChartAsOf)},
+      loadFills:window.mm_isLoggedIn&&!window.mm_isGuest?async options=>{const response=await fetch('/api/paper/chart-markers?'+new URLSearchParams({market:point.market,instrument:point.instrument}),{cache:'no-store',signal:options.signal}),body=await response.json();if(!response.ok||body.success===false)throw Error(body.reason||'关联成交不可用');if(body.market!==point.market||body.instrument!==point.instrument)throw Error('成交身份不一致，未合并');return body.data?.markers||[];}:null});
+  };
 }
 function redrawStockChartEventMarkers() {
   const host = document.getElementById('stock-chart-event-markers');
@@ -6493,6 +6556,7 @@ function handleChartSignalSelection(signal, targetId) {
       ? `OHLC ${signal.open} / ${signal.high} / ${signal.low} / ${signal.close}` : 'OHLC 未提供';
     detail.textContent = `${signal.side === 'buy' ? '买入' : '卖出'} · ${signal.label || signal.strategy || '策略信号'} · ${time} · 触发价 ${priceText} · ${ohlc} · ${signal.status === 'forming' ? '形成中' : '已确认'} · ${signal.reason || '触发原因未提供'} · 来源 ${signal.source || '来源未知'}${signal.sourceTime ? ` · 来源时间 ${formatChartTime(signal.sourceTime)}` : ''}${signal.strategyVersion ? ` · 策略版本 ${signal.strategyVersion}` : ''}${signal.parameters ? ` · 策略参数 ${JSON.stringify(signal.parameters)}` : ''}${signal.outcomes ? '\n'+chartSignalOutcomeLines(signal.outcomes).join('\n') : ''}`;
     detail.textContent+='\n'+chartPointEvolutionLines(signal.evolution||[]).join('\n');
+    appendPointLifecycleAction(detail,signal,'crypto');
     window.mmSelectedCryptoChartSignal = signal;
   }
 }

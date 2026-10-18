@@ -85,7 +85,7 @@ async function main(){
     const robustnessPrices=Array.from({length:240},(_,i)=>100+i*.1+Math.sin(i/4));
     const fixtureHash=require('node:crypto').createHash('sha256').update(JSON.stringify(robustnessPrices)).digest('hex');
     for(const feeRate of [.001,.002]){
-      const response=await page.request.post(base+'/api/research/experiments',{headers,data:{market:'stocks',instrument:'stock:us:AAPL',workspace:'research',dataSource:'isolated fixture, not market data',dataSnapshotHash:fixtureHash,seed:42,strategyVersion:'fixture-v1',feeRate,slippage:.001,prices:robustnessPrices,signals:Array.from({length:8},(_,i)=>[{timeIndex:25+i*25,direction:'buy'},{timeIndex:30+i*25,direction:'sell'}]).flat(),split:{trainSize:100,testSize:40}}});
+      const response=await page.request.post(base+'/api/research/experiments',{headers,data:{market:'stocks',instrument:'stock:us:AAPL',workspace:'research',timeframe:'1d',dataSource:'isolated fixture, not market data',dataSnapshotHash:fixtureHash,seed:42,strategyVersion:'fixture-v1',feeRate,slippage:.001,prices:robustnessPrices,signals:Array.from({length:8},(_,i)=>[{timeIndex:25+i*25,direction:'buy'},{timeIndex:30+i*25,direction:'sell'}]).flat(),split:{trainSize:100,testSize:40}}});
       assert.ok(response.ok());const row=(await response.json()).data;assert.equal(row.costStress.scenarios.length,3);experiments.push(row.experiment.id);
     }
     await page.evaluate(()=>openWorkspace('research-lab'));
@@ -112,6 +112,15 @@ async function main(){
     await page.waitForFunction(id=>document.querySelector('.mm-revision-impact')?.textContent.includes(id),replay.data.experiment.id);
     const untouched=await page.request.get(base+'/api/research/experiments/'+revisionId).then(r=>r.json());assert.deepEqual(untouched.data,original.data,'manual rerun must preserve the parent including saved robustness evidence');
     assert.equal((await page.request.get(base+'/api/research/experiments/'+replay.data.experiment.id).then(r=>r.json())).data.rerunOf,revisionId);
+    const contextLedger=page.locator('[data-context-ledger]');await contextLedger.locator('..').locator('summary').click();await contextLedger.click();await page.waitForFunction(()=>document.querySelector('[data-universe-capture]'));
+    assert.match(await contextLedger.locator('..').innerText(),/旧尝试|幸存者/);
+    const trialReport=await page.request.get(base+'/api/research/context-ledger?market=stocks').then(r=>r.json());assert.equal(trialReport.data.attempts,4);assert.equal(trialReport.data.trials.filter(r=>r.status==='succeeded').length,4);assert.ok(trialReport.data.trials.some(r=>r.experimentId===replay.data.experiment.id));
+    const invalidTrial=await page.request.post(base+'/api/research/experiments',{headers,data:{market:'stocks',instrument:'stock:us:AAPL',prices:[],signals:[]}});assert.equal(invalidTrial.status(),400);const afterFailure=await page.request.get(base+'/api/research/context-ledger?market=stocks').then(r=>r.json());assert.equal(afterFailure.data.attempts,5);assert.equal(afterFailure.data.trials.at(-1).status,'failed');
+    const mismatch=await page.request.post(base+'/api/research/shared-capital',{headers,data:{ids:experiments}});assert.equal(mismatch.status(),400,'different cost bases are not silently combined');
+    await page.locator('#mm-experiment-load').click();await page.locator('#mm-experiment-options input[value="'+replay.data.experiment.id+'"]').waitFor();
+    for(const input of await page.locator('#mm-experiment-options input').all())await input.uncheck();
+    for(const id of [revisionId,replay.data.experiment.id])await page.locator('#mm-experiment-options input[value="'+id+'"]').check();
+    await page.locator('#mm-experiment-compare').click();const shared=page.locator('[data-shared-capital]');await shared.waitFor({state:'attached'});await shared.locator('..').locator('summary').click();await shared.click();await page.waitForFunction(()=>document.querySelector('[data-shared-capital]')?.parentElement.textContent.includes('配置 Hash'));assert.match(await shared.locator('..').innerText(),/增量贡献不是收益相加/);
     assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+2),'mobile cost comparison fits viewport');
     await page.evaluate(()=>{setMarketScope('crypto');openWorkspace('fundamentals');});assert.equal(await panel.isVisible(),false);
     const guest=await browser.newPage();await guest.goto(base+'/login');await Promise.all([guest.waitForURL(url=>url.pathname==='/'),guest.click('#guestBtn')]);
@@ -119,6 +128,7 @@ async function main(){
     assert.equal(await guest.evaluate(()=>fetch('/api/research/committee?market=stocks&instrument=stock:us:AAPL').then(r=>r.status)),403);
     assert.equal(await guest.evaluate(id=>fetch('/api/research/experiments/'+id+'/robustness',{method:'POST'}).then(r=>r.status),experiments[0]),403);
     assert.equal(await guest.evaluate(id=>fetch('/api/research/experiments/'+id+'/revision-impact').then(r=>r.status),experiments[0]),403);
+    assert.equal(await guest.evaluate(()=>fetch('/api/research/shared-capital',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({ids:['a','b']})}).then(r=>r.status)),403);
     assert.deepEqual(errors,[]);
     console.log(JSON.stringify({ok:true,fixtureOnly:true,themes,privateStatus,dataDirectory:data}));
   }finally{if(browser)await browser.close();child.kill();}
