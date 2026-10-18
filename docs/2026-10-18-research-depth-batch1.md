@@ -33,3 +33,11 @@
 独占重复测量：CPU 4倍降速，80ms延迟、750kbps，每视口冷热各3次。1440宽度首屏/图表冷加载中位数1739/2898ms、热加载389/704ms；390宽度冷加载1474/2934ms、热加载373/724ms。绝对预算通过，热加载脚本传输0；没有同环境旧版本配对，本批改善百分比仍未知。前一轮与相关单测短暂重叠的测量不作为此处独占数据。
 
 本机未跟踪 `data/research.db` 仍为 SHA256 `27fd475e523568daa4cdcabf3146917023335a62affe00429babd721b3b79fd1`，不纳入提交。
+
+## 发布记录
+
+代码提交 `34ad8db180cef1d303853214d2187b0db195c293` 已推送并部署。正式域名只读Chromium巡检通过四市场、SNDK、K线身份及历史模式、访客私有接口限制、右侧收缩/恢复和移动中心区。28个公开版本化资源逐一匹配SHA256，TLS及健康接口通过。现有10个跑单发布前后配置指纹完全一致；无模型调用、通知测试或订单创建。
+
+发布包 SHA256 `9b070c62f7ced99474729301f730f8d824d6480915d5c120ca6bf7976a3e161c`；server `f62dc2904cc8417b3a2a05419aceb522ba2fd7d704e5dcf102bbe5f501ddf70f`；index `a6e351d71f4794081ef14f0f0294942e3a3b355b4c4dfdc1c35c4acd902ae84f`；manifest `167adb3626e06b89ef8771162e75aa2600ca1d0c96ee8358ede6d3825fd68fc6`。
+
+仅重启 `moneymoney.service`，旧产物备份 `/opt/moneymoney/backups/dist-pre-34ad8db-20261018-depth1`，回滚目录 `/opt/moneymoney/dist.rollback-34ad8db-20261018-depth1`，两处server Hash均保持旧版 `e9842c20657f8ccfaca8cf94792f009060c5f6994cc8b6587905612ce0571b34`。上传的部署辅助脚本CRLF在执行前规范为LF；首个失败发生在参数校验前，未停服务。包内包含本提交39项通过的隔离可靠性演练报告，不把Windows夹具称为Linux生产故障演练。
