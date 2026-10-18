@@ -27,6 +27,9 @@ function identity(market:string,symbol:string){
 }
 interface Snapshot extends PaperChartSnapshotReference {market:MarketId;hash:string;payload:Record<string,any>}
 interface Signal extends PaperChartSignalReference {runnerId:string;accountId:string;orderId:string;hash:string;decision:AiRunnerDecisionRecord}
+export interface RunnerDecisionObservation {
+  runnerId:string;accountId:string;decision:AiRunnerDecisionRecord;snapshot:Snapshot;hash:string;
+}
 export interface ExecutionEvidenceLookup {market:MarketId;instrument:string;accountId:string;orderId:string;signalId:string;snapshotId:string}
 export interface VerifiedExecutionEvidence {
   market:MarketId;instrument:string;orderId:string;accountId:string;signalId:string;snapshotId:string;
@@ -38,6 +41,32 @@ export interface VerifiedExecutionEvidence {
 /** Immutable execution evidence in the SAME SQLite transaction as runner fills. Not another account ledger. */
 export class RunnerExecutionEvidenceStore {
   constructor(private readonly store:Store){}
+  /** Bounded input archive, not an order signal. Uses the same retained-round limit as history. */
+  observe(row:Record<string,any>,decision:AiRunnerDecisionRecord,instrument:string,accountId:string):void {
+    const hash=runnerSnapshotHash(row);
+    if(row.snapshotHash!==hash||decision.snapshotHash!==hash)throw Error('观察快照 Hash 不一致');
+    if(decision.market!==row.market||decision.instrument!==row.instrument||identity(row.market,String(row.instrument))!==instrument||accountId!=='ai-runner:'+decision.runnerId||!decision.runnerId||!decision.id||!Number.isFinite(Date.parse(decision.at)))throw Error('观察决策或标的账户身份不一致');
+    const snapshot:Snapshot={id:runnerExecutionSnapshotId(hash),hash,market:decision.market,instrument,at:decision.at,payload:JSON.parse(JSON.stringify(payload(row)))};
+    const base={runnerId:decision.runnerId,accountId,decision:JSON.parse(JSON.stringify(decision)) as AiRunnerDecisionRecord,snapshot};
+    const observation:RunnerDecisionObservation={...base,hash:digest(base)},key='ai-runner:decision-observations:'+decision.runnerId;
+    this.store.transaction(()=>{
+      const rows=this.store.get<RunnerDecisionObservation[]>(key)||[];
+      if(!Array.isArray(rows))throw Error('观察归档格式损坏，不覆盖原件');
+      const prior=rows.find(item=>item?.decision?.id===decision.id);
+      if(prior){if(prior.hash!==observation.hash)throw Error('观察决策不可变，引用冲突');return;}
+      this.store.set(key,[observation,...rows].slice(0,2000));
+    });
+  }
+  observations(runnerId:string):RunnerDecisionObservation[] {
+    const rows=this.store.get<RunnerDecisionObservation[]>('ai-runner:decision-observations:'+runnerId);
+    if(!Array.isArray(rows))return [];
+    return rows.slice(0,2000).filter(row=>{
+      try{
+        const {hash,...base}=row,d=row.decision,s=row.snapshot;
+        return digest(base)===hash&&row.runnerId===runnerId&&row.accountId==='ai-runner:'+runnerId&&d.runnerId===runnerId&&!!d.id&&Number.isFinite(Date.parse(d.at))&&s.at===d.at&&s.id==='rs_'+d.snapshotHash&&s.hash===d.snapshotHash&&digest(s.payload)===s.hash&&s.market===d.market&&s.payload.market===d.market&&s.payload.instrument===d.instrument&&identity(d.market,d.instrument)===s.instrument;
+      }catch{return false;}
+    });
+  }
   save(row:Record<string,any>,decision:AiRunnerDecisionRecord,instrument:string,accountId:string):string{
     const hash=runnerSnapshotHash(row),id=runnerExecutionSnapshotId(hash);
     if(row.snapshotHash!==hash||decision.snapshotHash!==hash)throw Error('跑单快照 Hash 不一致');

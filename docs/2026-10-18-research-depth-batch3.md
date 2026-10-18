@@ -28,4 +28,6 @@
 - 全量 `npm test` 已通过；新增Telegram书签处理器独立回归通过（无真实消息）。`smoke:web/auth/browser/live-kline/contracts`、安全扫描（870个跟踪文件）及差异检查均通过。
 - 补充多周期证据实际点击定位浏览器记录：`mm-depth-acceptance-bPNnXH`。
 - 独立 `smoke:chart-path`：CPU 4倍、80ms/750kbps，桌面/手机冷暖各3次，绝对预算通过；桌面冷中位数可操作2200ms/图表3335ms、暖515ms/832ms；手机冷1664ms/3365ms、暖437ms/788ms，暖脚本传输0字节。没有同环境配对基线，不宣称提速20%，性能目标继续保留。
-- 尚未提交、推送或部署本批；下述运行证据将在发布后补录。
+- 已提交并推送 `b2dc5aae2ec3127141a5eae4216e596c16f42c0b`，部署标签 `b2dc5aa-20261018-depth3`。正式域名版本、28项静态资源Hash及只读生产抽检通过。
+- 发布包SHA256：`bb8d87f04afe163fdcb20f3dcfc11a36c3098fb0c188f4d8c23d18efd469bd41`。旧产物保留于 `backups/dist-pre-b2dc5aa-20261018-depth3` 和 `dist.rollback-b2dc5aa-20261018-depth3`；仅操作 `moneymoney.service`。
+- 发布前后10个跑单的配置指纹保持 `5125162b35c9893e4a9ac7d11c40eeaca7297bd95d7434d6bec70712aa144181`；未调用生产模型、发送测试通知或创建验收订单。隔离恢复演练39项通过。

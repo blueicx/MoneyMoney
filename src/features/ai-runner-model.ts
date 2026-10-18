@@ -1,4 +1,5 @@
 import type { AiRuntimeConfig } from './ai-runtime-config';
+import { createHash } from 'node:crypto';
 import { validateAiRunnerModelIntent, type AiRunner, type AiRunnerDataEvidence, type AiRunnerModelIntent } from './ai-paper-runner';
 
 export interface AiRunnerModelSnapshot {
@@ -25,6 +26,13 @@ export interface AiRunnerModelSnapshot {
   reason?: string;
 }
 
+export interface AiRunnerModelEvidence {
+  promptVersion:string;promptHash:string;inputHash:string;outputHash:string;
+  requestedModel:string;returnedModel:string;
+  input:Record<string,unknown>;output:AiRunnerModelIntent;
+}
+const evidenceHash=(value:unknown)=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
+
 function unwrapSingleJsonFence(content: unknown): unknown {
   if (typeof content !== 'string') return content;
   const text = content.trim();
@@ -40,7 +48,7 @@ export async function requestAiRunnerIntent(
   snapshots: AiRunnerModelSnapshot[],
   fetchImpl: typeof fetch = fetch,
   beforeAttempt?: (model: string, attempt: number) => void,
-): Promise<{ ok: true; intent: AiRunnerModelIntent; model: string } | { ok: false; reason: string; model?: string }> {
+): Promise<{ ok: true; intent: AiRunnerModelIntent; model: string;evidence:AiRunnerModelEvidence } | { ok: false; reason: string; model?: string }> {
   if (!runtime.configured || !runtime.apiKey) return { ok: false, reason: '未配置 OpenRouter，AI 跑单不可用' };
   if (runner.modelSelection === 'available-free' && !runner.comparisonControl) {
     if (runtime.apiUrl !== 'https://openrouter.ai/api/v1/chat/completions') return { ok: false, reason: '免费自动切换仅支持 OpenRouter 官方接口' };
@@ -120,7 +128,12 @@ export async function requestAiRunnerIntent(
     const validated = validateAiRunnerModelIntent(unwrapSingleJsonFence(content), runner);
     if (!validated.ok) return { ok: false, reason: validated.reason, model };
     if (validated.intent.market && validated.intent.market !== runner.universe?.market) return { ok: false, reason: 'AI 意图市场与冻结范围不一致', model };
-    return { ok: true, intent: validated.intent, model: String(payload.model || model).slice(0, 160) };
+    const returnedModel=String(payload.model||model).slice(0,160),input=JSON.parse(messages[1].content) as Record<string,unknown>;
+    return { ok: true, intent: validated.intent, model:returnedModel,evidence:{
+      promptVersion:'ai-runner-intent-v1',promptHash:evidenceHash(messages[0].content),
+      inputHash:evidenceHash(input),outputHash:evidenceHash(validated.intent),
+      requestedModel:model,returnedModel:typeof payload.model==='string'?payload.model.trim().slice(0,160):'',input,output:validated.intent,
+    } };
   } catch {
     return { ok: false, reason: 'AI 请求失败或超时', model };
   }

@@ -57,5 +57,8 @@ test('diagnostic and read-only replay routes require administrator and exact arc
  const empty=await fetch(base+'/a/history/decision-a/replay',{headers}).then(r=>r.json());assert.equal(empty.dataStatus,'unavailable');assert.match(empty.reason,/未关联/);
  savedSignal={runnerId:'other',decision:row,snapshotIds:['rs_'+row.snapshotHash]};assert.equal((await fetch(base+'/a/history/decision-a/replay',{headers}).then(r=>r.json())).dataStatus,'unavailable');
  savedSignal={runnerId:'a',decision:row,snapshotIds:['rs_'+row.snapshotHash]};const replay=await fetch(base+'/a/history/decision-a/replay',{headers}).then(r=>r.json());assert.equal(replay.data.decision.id,'decision-a');assert.equal(replay.readOnly,true);assert.equal(replay.modelCalls,0);
+ assert.equal(replay.evidenceGraph.nodes.find(n=>n.kind==='snapshot').recordId,'rs_'+row.snapshotHash);
+ assert.equal(replay.evidenceGraph.nodes.find(n=>n.kind==='order').status,'unlinked');
+ assert.equal((await fetch(base+'/a/history/decision-a/replay')).status,403);
  }finally{await new Promise(r=>server.close(r));}
 });

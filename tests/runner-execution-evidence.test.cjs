@@ -1,4 +1,29 @@
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),os=require('node:os'),path=require('node:path');require('ts-node/register/transpile-only');
+test('legacy accounts keep decision history without inventing an independent account association',()=>{
+ const source=fs.readFileSync('src/web/server.ts','utf8'),start=source.indexOf('  records.forEach((record,index) => {'),end=source.indexOf('  return { actions, decisions: records };',start);
+ const execute=new Function('records','prepared','runnerExecutionEvidence','runnerLedgerInstrumentId','initialRunner','appendAiRunnerDecision',source.slice(start,end));
+ let archived=0,history=0;const records=[{id:'legacy-decision'}],prepared={snapshots:[{ref:{}}]};
+ execute(records,prepared,{observe:()=>archived++},()=> 'stock:us:AAPL',{id:'r',accountId:'legacy-shared'},()=>history++);
+ assert.equal(archived,0,'unverified legacy account must not be linked');assert.equal(history,1);
+ execute(records,prepared,{observe:()=>archived++},()=> 'stock:us:AAPL',{id:'r',accountId:'ai-runner:r'},()=>history++);
+ assert.equal(archived,1);assert.equal(history,2);
+});
+test('unfilled decisions retain immutable original input without pretending an execution signal exists',()=>{
+ const {SQLiteStateStore}=require('../src/storage/sqlite-state'),{RunnerExecutionEvidenceStore,runnerSnapshotHash}=require('../src/features/runner-execution-evidence');
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'mm-observed-decision-')),file=path.join(root,'state.sqlite');let db=new SQLiteStateStore(file,root),store=new RunnerExecutionEvidenceStore(db);
+ const snapshot={market:'stocks',instrument:'AAPL',dataStatus:'delayed',source:'fixture',dataAt:'2026-10-01T00:00:00Z',price:100};snapshot.snapshotHash=runnerSnapshotHash(snapshot);
+ const decision={id:'no-fill',runnerId:'r',market:'stocks',instrument:'AAPL',snapshotHash:snapshot.snapshotHash,action:'REJECTED',at:'2026-10-01T00:01:00Z',riskChecks:[{name:'budget',passed:false}],signals:[],reason:'budget',idempotencyKey:'round',requestedIntent:{action:'BUY',side:'LONG'}};
+ try{
+  assert.equal(typeof store.observe,'function');store.observe(snapshot,decision,'stock:us:AAPL','ai-runner:r');store.observe(snapshot,decision,'stock:us:AAPL','ai-runner:r');
+  db.close();db=new SQLiteStateStore(file,root);store=new RunnerExecutionEvidenceStore(db);
+  assert.equal(store.observations('r').length,1);assert.equal(store.observations('r')[0].decision.requestedIntent.action,'BUY');
+  assert.equal(store.signal('no-fill'),null,'observation must not become a fill signal');
+  assert.throws(()=>store.observe(snapshot,{...decision,reason:'changed'},'stock:us:AAPL','ai-runner:r'),/不可变|冲突/);
+  assert.throws(()=>store.observe(snapshot,decision,'stock:us:MU','ai-runner:r'),/身份|标的/);
+  assert.equal(store.observations('other').length,0);
+  const rows=db.get('ai-runner:decision-observations:r');rows[0].snapshot.payload.price=999;db.set('ai-runner:decision-observations:r',rows);assert.equal(store.observations('r').length,0);
+ }finally{db.close();}
+});
 test('filled runner evidence persists immutable snapshot and decision, survives restart and rejects tampering',()=>{
  assert.ok(fs.existsSync('src/features/runner-execution-evidence.ts'),'durable runner evidence missing');
  const {SQLiteStateStore}=require('../src/storage/sqlite-state'),{RunnerExecutionEvidenceStore,runnerSnapshotHash}=require('../src/features/runner-execution-evidence');

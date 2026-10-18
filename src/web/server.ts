@@ -24,6 +24,9 @@ import { FinancialTextIndex } from '../storage/financial-text-index';
 import { createFinancialResearchRouter } from './financial-research-routes';
 import { createWatchlistMetadataRouter } from './watchlist-metadata-routes';
 import { createAiRunnerDiagnosticsRouter } from './ai-runner-diagnostics-routes';
+import { AiRunnerSandboxStore } from '../features/ai-runner-sandbox';
+import { AiRunnerRecovery } from '../features/ai-runner-recovery';
+import { createAiRunnerRecoveryRouter } from './ai-runner-recovery-routes';
 import { createResearchRobustnessRouter } from './research-robustness-routes';
 import { WatchlistMetadataStore } from '../features/watchlist-metadata';
 import { handleWatchlistMetadataCommand } from '../features/watchlist-metadata-telegram';
@@ -460,10 +463,25 @@ app.use('/api/research/experiments',createResearchRevisionRouter({load:id=>{
   }
   return {market,instrument,timeframe,asOf:new Date().toISOString(),partitions,records,revisions:dataLakeCatalog.listRevisions(market).filter(r=>identity(r.instrument)===instrument&&(!timeframe||r.timeframe===timeframe)).slice(-2000).map(r=>({...r,instrument}))};
 }}));
+app.use('/api/ai-runners',createAiRunnerRecoveryRouter(new AiRunnerRecovery(stateStore,{
+  runner:id=>getAiRunners().find(row=>row.id===id)||null,
+  account:id=>unifiedPaperLedgerStore.getRunnerAccount(id),resume:id=>resumeAiRunner(id),
+  enabled:()=>config.aiPaperTradingEnabled,
+})));
 app.use('/api/ai-runners', createAiRunnerDiagnosticsRouter({
+  sandboxes:new AiRunnerSandboxStore(stateStore),
   runner: id => { const runner=getAiRunners().find(row=>row.id===id),market=runner&&diagnosticRunnerMarket(runner);return runner&&market?{id:runner.id,market}:null; },
   history: (id,cursor,limit)=>listAiRunnerHistory(id,cursor,limit),
   signal:id=>runnerExecutionEvidence.signal(id),snapshot:id=>runnerExecutionEvidence.snapshot(id),
+  observations:id=>runnerExecutionEvidence.observations(id),
+  execution: decision => {
+    const signal=runnerExecutionEvidence.signal(decision.id);
+    if(!signal||!decision.orderId||!decision.snapshotHash)return null;
+    return runnerExecutionEvidence.executionForOrder(unifiedPaperLedgerStore.get(),{
+      market:decision.market,instrument:signal.instrument,accountId:signal.accountId,
+      orderId:decision.orderId,signalId:decision.id,snapshotId:'rs_'+decision.snapshotHash,
+    });
+  },
   closedPositions: id => {
     const runner=getAiRunners().find(row=>row.id===id);if(!runner)return [];
     const account=unifiedPaperLedgerStore.getRunnerAccount(runner.accountId||`ai-runner:${id}`);if(!account||account.runnerId!==id)return [];
@@ -9797,6 +9815,8 @@ async function prepareAiRunnerTick(runnerId: string, idempotencyKey: string, sam
   let intent: PreparedAiRunnerTick['intent'];
   let modelVersion: string | undefined;
   let modelLatencyMs: number | undefined;
+  let modelEvidence: AiRunnerDecisionRecord['modelEvidence'];
+  let modelRequestRef:string|undefined;
   let modelCallStatus: NonNullable<PreparedAiRunnerTick['modelCallStatus']> = 'skipped';
   let aiStatusReason: string | undefined;
   if(runner.comparisonControl&&snapshots.some(snapshot=>snapshot.market!==runner.universe?.market||!snapshot.quote||!evaluateRunnerQuoteGate(runner.policy,snapshot.quote,now).allowed))aiStatusReason='共享行情未通过市场身份或新鲜报价门槛，对照不调用模型';
@@ -9824,12 +9844,13 @@ async function prepareAiRunnerTick(runnerId: string, idempotencyKey: string, sam
             const current=getAiRunners().find(item=>item.id===runner.id);
             if (!current || current.status!=='RUNNING') throw new Error('跑单已暂停或停止');
             if(current.comparisonControl&&(!comparisonRoundKey||!comparisonModelBudget.consume(comparisonRoundKey,`${runner.id}:${attempt}`))){comparisonQuotaDenied=true;throw new Error('对照请求缺少有效整轮额度或已消费，整轮等待');}
-            recordAiRunnerModelCall(runner.id, { at:new Date().toISOString(),model,decisionId:`${decisionId}:attempt:${attempt}` });
+            modelRequestRef=`${decisionId}:attempt:${attempt}`;
+            recordAiRunnerModelCall(runner.id, { at:new Date().toISOString(),model,decisionId:modelRequestRef });
           });
           modelLatencyMs = Math.max(0, Date.now() - modelStartedAt);
           modelCallStatus = result.ok ? 'success' : 'failed';
           if(comparisonQuotaDenied)throw new Error('对照额度不再有效，整轮等待，未提交规则或AI订单');
-          if (result.ok) { intent = result.intent; modelVersion = result.model; }
+          if (result.ok) { intent = result.intent; modelVersion = result.model;modelEvidence=result.evidence; }
           else { aiStatusReason = result.reason; modelVersion = result.model; }
         } catch (error) { modelLatencyMs = Math.max(0, Date.now() - modelStartedAt); modelCallStatus = 'failed'; if(comparisonQuotaDenied)throw error;aiStatusReason = error instanceof Error ? error.message : 'AI 调用失败'; }
       }
@@ -9902,6 +9923,9 @@ async function prepareAiRunnerTick(runnerId: string, idempotencyKey: string, sam
       dataStatus: snapshot.dataStatus, source: snapshot.source, dataAt: snapshot.dataAt,
       evidence: snapshot.evidence, snapshotHash: snapshot.snapshotHash, strategyVersion: runner.strategyVersion,
       modelVersion, modelConfidence: intent && intent.instrument === snapshot.instrument ? intent.confidence : undefined,
+      modelRequestRef,modelEvidence:isChosen?modelEvidence:undefined,
+      requestedIntent: snapshot.requestedAction ? { action:snapshot.requestedAction,side:snapshot.requestedSide as 'YES'|'NO'|'LONG'|'SHORT'|undefined } : undefined,
+      evaluationBasis: { maxAgeMs:runner.policy.minFreshnessMs,feeRateBps:runner.policy.feeRateBps!,additionalSlippageBps:runner.policy.additionalSlippageBps! },
       modelLatencyMs, modelCallStatus, signals: signals.slice(0, 20), riskChecks, action, reason,
     };
   });
@@ -10003,7 +10027,14 @@ function executePreparedRunnerTick(prepared: PreparedAiRunnerTick): { actions: A
       actions.push({ id: runner.id, actionZh: `SELL ${ref.symbolOrMarketId} @ ${fill.price} PnL=${pnl.toFixed(2)}` });
     }
   }
-  records.forEach(record => appendAiRunnerDecision(record));
+  records.forEach((record,index) => {
+    const snapshot=prepared.snapshots[index];
+    // Legacy/shared accounts remain unlinked history; never invent an account association.
+    if (initialRunner.accountId === 'ai-runner:'+initialRunner.id) {
+      runnerExecutionEvidence.observe(snapshot,record,runnerLedgerInstrumentId(snapshot.ref),initialRunner.accountId);
+    }
+    appendAiRunnerDecision(record);
+  });
   return { actions, decisions: records };
 }
 

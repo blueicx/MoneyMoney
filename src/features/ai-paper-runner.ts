@@ -166,6 +166,11 @@ export interface AiRunnerDecisionRecord {
   modelConfidence?: number;
   modelLatencyMs?: number;
   modelCallStatus?: 'success' | 'failed' | 'skipped';
+  /** Original explicit proposal, independent from the final gate/execution result. Never inferred for legacy rows. */
+  requestedIntent?: { action:'BUY'|'SELL';side?:'YES'|'NO'|'LONG'|'SHORT' };
+  evaluationBasis?: { maxAgeMs:number;feeRateBps:number;additionalSlippageBps:number };
+  modelRequestRef?:string;
+  modelEvidence?:import('./ai-runner-model').AiRunnerModelEvidence;
   /** Explicit outcome/position direction used to bind the paper fill to its decision. */
   side?: 'YES' | 'NO' | 'LONG' | 'SHORT';
   signals: string[];

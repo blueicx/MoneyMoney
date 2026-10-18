@@ -726,6 +726,7 @@ async function loadAiRunners() {
           <button onclick="stopRunner('${r.id}')" style="padding:4px 12px;border-radius:8px;border:none;background:var(--bg-secondary);color:var(--text-secondary);font-size:11px;cursor:pointer;">⏹ 停止</button>
           <button onclick="loadAiRunnerHistory('${r.id}', this)" style="padding:4px 12px;border-radius:8px;border:1px solid var(--border);background:var(--bg-secondary);color:var(--text);font-size:11px;cursor:pointer;">查看决策时间线</button>
           <button type="button" class="tab" data-ai-diagnostics="${safeNewsText(r.id)}" onclick="loadAiRunnerDiagnosticsUi(this.dataset.aiDiagnostics)">为何未下单 / 只读回放</button>
+          <button type="button" class="tab" data-ai-recovery="${safeNewsText(r.id)}" onclick="resumeRunner(this.dataset.aiRecovery)">账户对账 / 恢复前复核</button>
         </div>
         <label class="mm-action-tools"><input type="checkbox" data-ai-compare-id value="${safeNewsText(r.id)}" ${selected.includes(r.id) ? 'checked':''}>加入本市场对照</label>
         <div id="ai-runner-history-${r.id}" style="margin-top:8px;"></div>
@@ -822,13 +823,58 @@ function renderAiRunnerSelectionAttribution(data) {
   const markStatus = ({ live: '实时估值', delayed: '延迟估值', closed: '全部平仓', stale: '估值过期', unavailable: '估值不可用' })[data.markStatus] || '估值状态未知';
   return `${frame}<div data-runner-attribution-chart role="img" aria-label="冻结自选基准与跑单权益盈亏简化归因，非标准 Brinson" style="margin-top:5px;">${bar('选股基准 · 冻结自选等权持有', selection)}${bar('配置/择时/摩擦差额 · 账户权益盈亏减基准', configuration)}<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;color:var(--text);"><span>已实现净盈亏 <strong>${realized >= 0 ? '+' : ''}$${realized.toFixed(2)}</strong></span><span>未平仓净盈亏 <strong>${unrealized >= 0 ? '+' : ''}$${unrealized.toFixed(2)}</strong></span><span>权益盈亏 <strong>${equity >= 0 ? '+' : ''}$${equity.toFixed(2)}</strong></span></div></div><div style="margin-top:6px;">${safeNewsText(data.method || '')}</div><div style="margin-top:4px;">已平仓 ${Number(data.closedPositionCount || 0)} 笔 · 未平仓 ${Number(data.openPositionCount || 0)} 笔 · ${markStatus} · 基准起点 ${baseline} · 行情截至 ${asOf} · 报价时间差 ${Number(data.quoteSkewMs || 0)} ms · 来源 ${sources}</div><div style="margin-top:4px;">冻结范围哈希 ${safeNewsText(String(data.universeHash || '').slice(0,16))}；已实现与未实现分别展示，未平仓只有来源新鲜且账本一致时纳入权益；等权基准不计交易摩擦，不代表标准化绩效归因。</div></section>`;
 }
+function renderAiDecisionEvidence(host,replay,saveSandbox) {
+  host.replaceChildren();
+  host.style.whiteSpace='normal';host.style.lineHeight='1.65';host.setAttribute('role','region');host.setAttribute('aria-label','只读决策证据及后续观察');
+  const el=(tag,text)=>{const node=document.createElement(tag);if(text!=null)node.textContent=String(text);return node;};
+  host.append(el('p',replay.reason||'只读归档，不调用模型或提交订单'));
+  const graph=replay.evidenceGraph;
+  if(graph){
+    const list=el('ol');list.setAttribute('aria-label','决策证据关联链');list.style.cssText='padding-inline-start:22px;line-height:1.65;overflow-wrap:anywhere';
+    const states={recorded:'已保存',verified:'已核验',blocked:'已阻止',unlinked:'未关联'};
+    for(const node of (graph.nodes||[]).slice(0,40)){
+      const item=el('li');item.style.cssText='padding:8px;margin:6px 0;border:1px solid var(--border);border-radius:8px;background:var(--bg-card);color:var(--text)';
+      item.append(el('strong',node.label+' · '+(states[node.status]||'未知')),el('p',node.reason));
+      if(node.recordId)item.append(el('small','记录ID：'+node.recordId+(node.at?' · '+node.at:'')));
+      list.append(item);
+    }
+    host.append(list,el('p',graph.reason||'仅沿明确ID关联；缺失不猜测'));
+    if(graph.edges?.length){const links=el('details');links.append(el('summary','查看明确关联（'+graph.edges.length+'）'));const labels=new Map(graph.nodes.map(n=>[n.id,n.label]));for(const edge of graph.edges)links.append(el('p',(labels.get(edge.from)||'未知')+' → '+(labels.get(edge.to)||'未知')+' · '+edge.relation));host.append(links);}
+  }
+  if(replay.rejectedPath){
+    const path=replay.rejectedPath,section=el('section');section.dataset.aiRejectedPath='';
+    section.append(el('h4','拒单后假设路径 · 非实际成交'),el('p',path.reason),el('p',path.coverageReason||''));
+    if(path.horizons?.length){
+      const wrap=el('div');wrap.className='mm-table-scroll';const table=el('table'),head=el('thead'),header=el('tr'),body=el('tbody');
+      for(const label of ['观察期限','状态','毛回报','成本后假设回报','原因'])header.append(el('th',label));head.append(header);
+      for(const point of path.horizons){const row=el('tr');for(const value of [point.minutes+' 分钟',({historical:'已有采样',pending:'未成熟',unavailable:'暂无可靠数据'})[point.dataStatus]||point.dataStatus,Number.isFinite(point.grossReturnPct)?point.grossReturnPct.toFixed(2)+'%':'不可用',Number.isFinite(point.netReturnPct)?point.netReturnPct.toFixed(2)+'%':'不可用',point.reason])row.append(el('td',value));body.append(row);}
+      table.style.cssText='width:100%;min-width:640px;border-collapse:collapse;table-layout:fixed';
+      wrap.style.cssText='max-width:100%;overflow-x:auto;overscroll-behavior:contain';wrap.tabIndex=0;wrap.setAttribute('aria-label','拒单假设路径表，可横向滚动');
+      table.append(head,body);for(const cell of table.querySelectorAll('th,td'))cell.style.cssText='padding:10px 12px;vertical-align:top;text-align:left;white-space:normal;overflow-wrap:break-word;border-bottom:1px solid var(--border)';
+      wrap.append(table);section.append(wrap);
+    }
+    host.append(section);
+  }
+  const evidence=replay.data?.decision?.modelEvidence;
+  if(evidence&&saveSandbox){
+    const panel=el('section'),label=el('label','只读实验名称 '),name=el('input');name.type='text';name.maxLength=120;name.value='模型证据只读实验';label.append(name);
+    const button=el('button','冻结固定模型输出（不调用模型）');button.type='button';button.className='tab';button.dataset.aiSandboxSave='';
+    const result=el('p');result.setAttribute('role','status');
+    panel.append(el('h4','保存为独立只读实验'),el('p','请求模型：'+evidence.requestedModel+' · 提示词：'+evidence.promptVersion+'。只保存原输出，不修改正在运行的模型或预算。'),label,button,result);
+    button.onclick=async()=>{
+      if(!confirm('冻结这轮保存的模型输入/输出用于只读复盘？不会调用模型或改变跑单配置。'))return;
+      button.disabled=true;try{const saved=await saveSandbox({name:name.value,model:evidence.requestedModel,promptVersion:evidence.promptVersion,decisionIds:[replay.data.decision.id]});if(saved)result.textContent='已保存只读实验 '+saved.data.id+'，没有新增模型调用或订单。';}catch(error){if(error.name!=='AbortError')result.textContent=error.message;}finally{button.disabled=false;}
+    };host.append(panel);
+  }
+  if(replay.data){const raw=el('details'),pre=el('pre',JSON.stringify(replay.data,null,2));pre.style.cssText='white-space:pre-wrap;overflow-wrap:anywhere;max-height:300px;overflow:auto';raw.append(el('summary','原始保存记录（只读）'),pre);host.append(raw);}
+}
 async function loadAiRunnerDiagnosticsUi(id) {
   const host=document.getElementById('ai-runner-history-'+id),market=activeMarketScope;if(!host)return;
   window.mmAiRunnerDiagnosticAbort?.abort();window.mmAiRunnerDiagnosticUnbind?.();const controller=new AbortController();window.mmAiRunnerDiagnosticAbort=controller;
   const abort=()=>controller.abort();window.addEventListener('mm-workspace-context',abort,{once:true});
   window.mmAiRunnerDiagnosticUnbind=()=>window.removeEventListener('mm-workspace-context',abort);
   host.textContent='正在读取保存的门控和模型记录；不调用模型…';
-  const read=async path=>{const response=await fetch(path,{cache:'no-store',signal:controller.signal});const payload=await response.json();if(!response.ok||!payload.success)throw Error(payload.reason||'诊断不可用');return payload;};
+  const read=async(path,init={})=>{const response=await fetch(path,{...init,cache:'no-store',signal:controller.signal});const payload=await response.json();if(!response.ok||!payload.success)throw Error(payload.reason||'诊断不可用');return payload;};
   try {
     const payload=await read('/api/ai-runners/'+encodeURIComponent(id)+'/diagnostics');
     if(controller.signal.aborted||market!==activeMarketScope)return;
@@ -844,9 +890,22 @@ async function loadAiRunnerDiagnosticsUi(id) {
     inaction.innerHTML='<h4>未下单原因汇总</h4><p>'+safeNewsText(data.inaction?.durationReason||'无结构化统计')+' · 未动作 '+Number(data.inaction?.total||0)+' 轮 · 排除 '+Number(data.excludedRecords||0)+' 条无效/重复/其他上下文记录</p><div class="mm-table-scroll"><table class="workspace-watchlist-table"><thead><tr><th>记录原因</th><th>轮次</th><th>首次 / 最近</th><th>下一步</th></tr></thead><tbody>'+(data.inaction?.categories||[]).map(row=>'<tr><td>'+safeNewsText(row.label)+'</td><td>'+Number(row.count)+'</td><td>'+safeNewsText(row.firstAt)+'<br>'+safeNewsText(row.lastAt)+'</td><td>'+safeNewsText(row.nextAction)+'</td></tr>').join('')+'</tbody></table></div>';host.prepend(inaction);
     const maturity=document.createElement('section');maturity.className='mm-action-tools';
     maturity.innerHTML=(data.groups||[]).map(group=>`<p>${safeNewsText(group.instrument)} · ${safeNewsText(group.strategyVersion)} · ${safeNewsText(group.modelVersion)}：${group.maturedResult?`已成熟 ${group.maturedResult.closedCount} 笔 · 净结果 USD ${group.maturedResult.netPnlUsd.toFixed(2)} · 已知费用/滑点 USD ${group.maturedResult.recordedCostsUsd.toFixed(2)} · 胜率 ${(group.maturedResult.winRate*100).toFixed(1)}%`:safeNewsText(group.reason)}</p>`).join('');host.prepend(maturity);
+    const sandboxes=document.createElement('section');sandboxes.className='mm-action-tools';sandboxes.innerHTML='<h4>固定模型只读实验</h4><button type="button" class="tab" data-ai-sandbox-list>读取已保存实验（不调用模型）</button><div data-ai-sandbox-results></div>';host.append(sandboxes);
+    sandboxes.querySelector('button').onclick=async event=>{
+      const target=sandboxes.querySelector('[data-ai-sandbox-results]');event.target.disabled=true;
+      try{
+        const saved=await read('/api/ai-runners/'+encodeURIComponent(id)+'/sandboxes');if(controller.signal.aborted||market!==activeMarketScope)return;
+        target.replaceChildren();const message=document.createElement('p');message.textContent=saved.reason;target.append(message);
+        for(const experiment of saved.data||[]){
+          const detail=document.createElement('details'),summary=document.createElement('summary');summary.textContent=experiment.name+' · '+experiment.model+' · '+experiment.promptVersion+' · '+experiment.createdAt;detail.append(summary);
+          for(const round of experiment.rounds){const output=document.createElement('section');renderAiDecisionEvidence(output,{reason:'冻结的原始模型输出，不重新调用模型或重建旧成交。快照及执行引用见原决策；本实验不创建账户。',data:{decision:round}});detail.append(output);}
+          target.append(detail);
+        }
+      }catch(error){if(error.name!=='AbortError')target.textContent=error.message;}finally{event.target.disabled=false;}
+    };
     for(const button of host.querySelectorAll('[data-ai-round-replay]'))button.onclick=async()=>{
       const output=button.parentElement.querySelector('[data-ai-round-output]');button.disabled=true;
-      try{const replay=await read('/api/ai-runners/'+encodeURIComponent(id)+'/history/'+encodeURIComponent(button.dataset.aiRoundReplay)+'/replay');if(controller.signal.aborted||market!==activeMarketScope)return;output.textContent=replay.reason+'\n'+(replay.data?JSON.stringify(replay.data,null,2):'');}
+      try{const replay=await read('/api/ai-runners/'+encodeURIComponent(id)+'/history/'+encodeURIComponent(button.dataset.aiRoundReplay)+'/replay');if(controller.signal.aborted||market!==activeMarketScope)return;renderAiDecisionEvidence(output,replay,async config=>{if(controller.signal.aborted||market!==activeMarketScope)return null;const saved=await read('/api/ai-runners/'+encodeURIComponent(id)+'/sandboxes',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(config)});return controller.signal.aborted||market!==activeMarketScope?null:saved;});}
       catch(error){if(error.name!=='AbortError')output.textContent=error.message;}
       finally{button.disabled=false;}
     };
@@ -9029,10 +9088,35 @@ async function pauseRunner(id) {
   showToast('⏸ 策略已暂停', 'info', 1500); loadAiRunners();
 }
 async function resumeRunner(id) {
-  const res = await fetch('/api/ai-runners/resume', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) });
-  const body = await res.json();
-  if (!body.success) { showToast(body.error || '策略仍处于熔断状态', 'error'); return; }
-  showToast('▶ 策略已恢复', 'success', 1500); loadAiRunners();
+  window.mmRunnerRecoveryClose?.();
+  const market=activeMarketScope,controller=new AbortController(),origin=document.activeElement;let dialog;
+  const close=()=>{controller.abort();window.removeEventListener('mm-workspace-context',close);dialog?.remove();if(origin?.isConnected)origin.focus();};
+  window.mmRunnerRecoveryClose=close;window.addEventListener('mm-workspace-context',close,{once:true});
+  const read=async(init={})=>{const response=await fetch('/api/ai-runners/'+encodeURIComponent(id)+'/recovery',{...init,cache:'no-store',signal:controller.signal});const result=await response.json();if(!response.ok||!result.success)throw Error(result.reason||'账户复核失败');return result;};
+  try{
+    const result=await read();if(controller.signal.aborted||market!==activeMarketScope)return;
+    const report=result.data,el=(tag,text)=>{const node=document.createElement(tag);if(text!=null)node.textContent=String(text);return node;};
+    dialog=el('dialog');dialog.dataset.aiRecoveryDialog='';dialog.setAttribute('aria-label','模拟账户对账与人工恢复');dialog.style.cssText='background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:16px;padding:20px;width:min(620px,calc(100vw - 24px));max-height:calc(100dvh - 24px);overflow:auto;line-height:1.65';
+    dialog.append(el('h3','模拟账户对账与恢复前检查'),el('p','本页不修复余额、不修改预算、风控、模型或标的范围，也不提交订单。'));
+    dialog.append(el('p','账本现金 '+(report.cash??'未知')+' · 跑单现金 '+(report.runnerCash??'未知')+' · 持仓 '+(report.openPositions??'未知')+' · 订单 '+(report.orderCount??'未知')));
+    const risk=el('details'),pre=el('pre',JSON.stringify(report.riskParameters,null,2));pre.style.cssText='white-space:pre-wrap;overflow-wrap:anywhere';risk.append(el('summary','保持不变的原风险参数'),pre);dialog.append(risk);
+    for(const reason of report.blocked||[]){const p=el('p','阻止恢复：'+reason);p.style.color='var(--red)';dialog.append(p);}
+    for(const reason of report.warnings||[])dialog.append(el('p','注意：'+reason));
+    const fingerprints=el('small','配置Hash '+report.configurationHash+'；账本Hash '+report.ledgerHash+'。复核有效期5分钟。');fingerprints.style.overflowWrap='anywhere';dialog.append(fingerprints);
+    const label=el('label'),check=el('input');label.style.cssText='display:flex;align-items:center;gap:8px;min-height:44px;margin-top:12px';check.type='checkbox';check.disabled=!report.canResume;label.append(check,el('span','我已核对账户，并保持原预算及全部风控条件不变'));dialog.append(label);
+    const actions=el('div');actions.className='mm-action-tools';const confirm=el('button','确认恢复原调度（不立即执行）'),cancel=el('button','关闭 / 不恢复'),status=el('p');
+    confirm.type=cancel.type='button';confirm.className=cancel.className='tab';confirm.dataset.aiRecoveryConfirm='';confirm.disabled=true;status.setAttribute('role','status');check.onchange=()=>{confirm.disabled=!report.canResume||!check.checked;};
+    cancel.onclick=()=>dialog.close();dialog.addEventListener('close',close,{once:true});actions.append(confirm,cancel);dialog.append(actions,status);
+    confirm.onclick=async()=>{
+      if(controller.signal.aborted||!report.canResume||!check.checked)return;confirm.disabled=true;check.disabled=true;
+      try{
+        await read({method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({confirmed:true,expectedHash:report.reviewHash,reviewedAt:report.reviewedAt})});
+        if(controller.signal.aborted||market!==activeMarketScope)return;
+        dialog.close();showToast('已按人工复核恢复；下一轮重新校验行情和风险', 'success',2200);loadAiRunners();
+      }catch(error){if(error.name!=='AbortError')status.textContent=error.message+'；请关闭后重新复核，不复用旧确认。';}
+    };
+    document.body.append(dialog);dialog.showModal();cancel.focus();
+  }catch(error){close();if(error.name!=='AbortError')showToast(error.message||'账户复核失败','error');}
 }
 async function resetRunnerCircuit(id) {
   const res = await fetch('/api/ai-runners/reset-circuit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) });
