@@ -6,12 +6,14 @@ test('paper and order deep links activate their own tabs, not the market cockpit
 });
 
 test('opening stock fundamentals loads its shared financial research module on demand',()=>{
- const source=fs.readFileSync('src/web/public/modules/dashboard-runtime.js','utf8'),start=source.indexOf('window.openWorkspace = function(id)'),end=source.indexOf('\n(function initWorkspaceSidebar',start),loaded=[];
+ const source=fs.readFileSync('src/web/public/modules/dashboard-runtime.js','utf8'),start=source.indexOf('window.openWorkspace = function(id,'),end=source.indexOf('\n(function initWorkspaceSidebar',start),loaded=[];
  const context=vm.createContext({activeMarketScope:'stocks',activeWorkspaceId:'overview',currentInstrumentId:null,currentStockSymbol:'AAPL',workspaceNavigationState:new Map(),workspaceFallbackNavigation:()=>[{items:[{id:'fundamentals'},{id:'events'}]}],
    syncWorkspaceContextUrl(){},renderWorkspaceMenu(){},applyWorkspaceView(){},updateStockLibraryCurrent(){},workspaceTabFor:()=>null,closeWorkspaceDrawer(){},loadEventTimelineWorkspace(){},document:{querySelector:()=>null},
    window:{MoneyWorkspaceModules:{ensure:group=>{loaded.push(group);return Promise.resolve();}}}});
  vm.runInContext(source.slice(start,end),context);context.window.openWorkspace('events');assert.deepEqual(loaded,[]);
  context.window.openWorkspace('fundamentals');assert.deepEqual(loaded,['research']);
+ context.window.openWorkspace('events',{fromHistory:true});assert.equal(context.window.mm_workspaceFromHistory,true);
+ context.window.openWorkspace('events');assert.equal(context.window.mm_workspaceFromHistory,false,'explicit navigation restores normal default selection behavior');
 });
 
 test('shared registry declares existing paper/order workspaces as private and supports all four markets',()=>{

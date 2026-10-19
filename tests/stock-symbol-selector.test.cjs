@@ -150,7 +150,7 @@ test('instrument selection refreshes the active workspace with the selected inst
   assert.match(html, /function loadEventTimelineWorkspace\(\)[\s\S]*MoneyWorkspaceModules\.invoke\('events', 'loadMarketTimeline'/);
   assert.match(html, /function loadActiveWorkspaceInstrument\([\s\S]*activeWorkspaceId === 'events'[\s\S]*loadEventTimelineWorkspace/);
   assert.match(html, /function selectStockFromInstrumentLibrary\([\s\S]*loadActiveWorkspaceInstrument/);
-  assert.match(html, /window\.openWorkspace = function\(id\)[\s\S]*loadActiveWorkspaceInstrument/);
+  assert.match(html, /window\.openWorkspace = function\(id, options = \{\}\)[\s\S]*loadActiveWorkspaceInstrument/);
   assert.match(html, /function selectCryptoLibraryAsset\([\s\S]*activeWorkspaceId = 'crypto-quotes'/);
   assert.match(html, /function selectOptionLibraryAsset\([\s\S]*activeWorkspaceId = 'option-chain'/);
 });
@@ -162,7 +162,8 @@ test('collapsed instrument library keeps a visible expand control', () => {
 test('restored stock context is not overwritten by the default AAPL loader', () => {
   assert.match(html, /restoreWorkspaceContextFromUrl\(\)[\s\S]*currentInstrumentId = String\(params\.get\('instrument'\)/);
   assert.match(html, /function loadStockQuotes\(\{\s*refreshChart = true\s*\} = \{\}\)[\s\S]*const selectedSymbol = window\._stockSelectedSymbol \|\| currentInstrumentId \|\| 'AAPL'/);
-  assert.match(html, /if \(refreshChart && !signal\.aborted[\s\S]*selectStockSymbol\(selectedSymbol, stockNameForSymbol\(selectedSymbol\)/);
+  assert.match(html, /const allowSelection = refreshChart && !window\.mm_workspaceFromHistory/);
+  assert.match(html, /if \(allowSelection && !window\.mm_workspaceFromHistory && !signal\.aborted[\s\S]*selectStockSymbol\(selectedSymbol, stockNameForSymbol\(selectedSymbol\)/);
   assert.match(html, /activeWorkspaceId === 'stock-quotes' && currentInstrumentId/,
     'restored stock-chart context must refresh index cards without reloading the selected chart');
   assert.match(html, /restoreWorkspaceContextFromUrl\(\)[\s\S]*const restoredSymbol = currentInstrumentId\.replace\(\/\^stock:us:\/i, ''\)\.replace\(\/\^us\/i, ''\)\.toUpperCase\(\)[\s\S]*window\._stockSelectedSymbol = restoredSymbol/);

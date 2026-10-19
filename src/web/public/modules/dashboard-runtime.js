@@ -3817,6 +3817,7 @@ async function loadStockIndices(signal) {
   } catch(e) { if (e.name !== 'AbortError') console.warn('股票指数加载失败', e); }
 }
 async function loadStockQuotes({ refreshChart = true } = {}) {
+  const allowSelection = refreshChart && !window.mm_workspaceFromHistory;
   if (currentStockDashboardController) currentStockDashboardController.abort();
   const controller = new AbortController();
   currentStockDashboardController = controller;
@@ -3825,7 +3826,7 @@ async function loadStockQuotes({ refreshChart = true } = {}) {
   try {
     await Promise.allSettled([loadStockIndices(signal)]);
     const selectedSymbol = window._stockSelectedSymbol || currentInstrumentId || 'AAPL';
-    if (refreshChart && !signal.aborted && activeMarketScope === originScope && activeWorkspaceId === originWorkspace && currentInstrumentId === originInstrument && ['stocks', 'overview', 'watchlist'].includes(activeMarketScope)) selectStockSymbol(selectedSymbol, stockNameForSymbol(selectedSymbol), undefined, { refreshRelated: false });
+    if (allowSelection && !window.mm_workspaceFromHistory && !signal.aborted && activeMarketScope === originScope && activeWorkspaceId === originWorkspace && currentInstrumentId === originInstrument && ['stocks', 'overview', 'watchlist'].includes(activeMarketScope)) selectStockSymbol(selectedSymbol, stockNameForSymbol(selectedSymbol), undefined, { refreshRelated: false });
   } finally {
     if (currentStockDashboardController === controller) currentStockDashboardController = null;
   }
@@ -11284,9 +11285,12 @@ function loadActiveWorkspaceInstrument() {
   if (activeMarketScope === 'prediction' && activeWorkspaceId === 'events') return loadEventTimelineWorkspace(), true;
   return false;
 }
-window.openWorkspace = function(id) {
+window.openWorkspace = function(id, options = {}) {
   const groups = workspaceNavigationState.get(activeMarketScope)?.groups || workspaceFallbackNavigation(activeMarketScope);
   if (!groups.some(group => group.items.some(item => item.id === id))) return;
+  // Restoring history must preserve even an explicitly empty instrument context.
+  // Delayed section loaders may refresh indices, but must not select the last stock.
+  window.mm_workspaceFromHistory = options.fromHistory === true;
   activeWorkspaceId = id;
   syncWorkspaceContextUrl();
   renderWorkspaceMenu(groups);
@@ -11593,6 +11597,7 @@ function renderNavigationState() {
 }
 function setMarketScope(scope, options = {}) {
   if (!isMarketScope(scope)) return;
+  window.mm_workspaceFromHistory = false;
   abortMarketScopedRequests();
   activeMarketScope = scope;
   activeWorkspaceId = defaultWorkspaceForMarketScope(scope);
@@ -13473,7 +13478,7 @@ async function startDashboard() {
   window.MoneyWorkspaceHistory?.install({window,
     current:()=>({market:activeMarketScope,workspace:activeWorkspaceId,instrument:currentInstrumentId}),
     canRestore:entry=>(workspaceNavigationState.get(entry.market)?.groups||workspaceFallbackNavigation(entry.market)).some(group=>group.items.some(item=>item.id===entry.workspace&&(!item.requiresAdmin||window.mm_isLoggedIn===true&&!window.mm_isGuest)))&&(!window.mm_isGuest||!['paper','orders','positions','action-center','research-lab'].includes(entry.workspace)),
-    restore:entry=>{setMarketScope(entry.market,{openTab:false});history.replaceState({mmWorkspace:entry},'',entry.url);restoreWorkspaceContextFromUrl();renderNavigationState();window.openWorkspace(activeWorkspaceId);},
+    restore:entry=>{setMarketScope(entry.market,{openTab:false});history.replaceState({mmWorkspace:entry},'',entry.url);restoreWorkspaceContextFromUrl();renderNavigationState();window.openWorkspace(activeWorkspaceId,{fromHistory:true});},
     onError:reason=>window.showToast?.(reason,'info'),
   });
 }

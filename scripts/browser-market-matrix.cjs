@@ -978,6 +978,8 @@ async function main() {
     await page.waitForFunction(() => document.querySelector('#source-slo-panel')?.textContent?.includes('连续空结果 2'), null, { timeout: 15_000 });
     assert.match(await page.locator('#source-slo-panel').innerText(), /连续空结果 2/);
     await page.evaluate(()=>{setMarketScope('stocks',{openTab:false});openWorkspace('stock-quotes');});
+    for(let navigationRound=0;navigationRound<12;navigationRound++){
+    if(navigationRound>0)await page.evaluate(()=>openWorkspace('stock-quotes'));
     await page.waitForFunction(()=>history.state?.mmWorkspace?.workspace==='stock-quotes');
     await page.evaluate(()=>openWorkspace('events'));
     await page.waitForFunction(()=>history.state?.mmWorkspace?.workspace==='events');
@@ -985,6 +987,7 @@ async function main() {
     await page.waitForFunction(()=>activeMarketScope==='stocks'&&activeWorkspaceId==='stock-quotes'&&history.state?.mmWorkspace?.workspace==='stock-quotes');
     await page.goForward();
     try{await page.waitForFunction(()=>activeMarketScope==='stocks'&&activeWorkspaceId==='events'&&history.state?.mmWorkspace?.workspace==='events');}catch(error){const evidence=await page.evaluate(()=>({market:activeMarketScope,workspace:activeWorkspaceId,url:location.href,state:history.state,length:history.length}));fs.writeFileSync(path.join(isolatedDataDir,'navigation-diagnostic.json'),JSON.stringify(evidence,null,2));console.error(JSON.stringify(evidence));throw error;}
+    }
     assert.equal(await page.evaluate(()=>!!window.mmPreferenceJournal),true,'owner preference history is installed after authentication');
     await page.setViewportSize({ width: 390, height: 844 });
     assert.equal(await page.locator('#center-workspace').isVisible(), true);

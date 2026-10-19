@@ -36,3 +36,16 @@ test('a newer browser history target is not dropped while an earlier restore is 
   assert.equal(current.workspace,'events','latest navigation must win');assert.equal(w.history.state.mmWorkspace.workspace,'events');assert.equal(w.history.length,1,'restoration must never push new history');
  }finally{api.dispose();w.close();}
 });
+test('an in-flight restore cannot overwrite a newer native traversal before its popstate arrives',async()=>{
+ const {install}=require('../src/web/public/workspace-history'),dom=new JSDOM('<main></main>',{url:'https://test.invalid/?market=stocks&workspace=stock-quotes'}),w=dom.window;w.scrollTo=()=>{};
+ let current={market:'stocks',workspace:'stock-quotes',instrument:'stock:us:AAPL'},release,attempts=0;
+ const api=install({window:w,current:()=>current,canRestore:()=>true,restore:async target=>{if(++attempts===1)await new Promise(resolve=>release=resolve);current={market:target.market,workspace:target.workspace,instrument:target.instrument};w.dispatchEvent(new w.Event('mm-workspace-context'));}});
+ try{const back={...w.history.state.mmWorkspace},forward={...back,workspace:'events',url:'/?market=stocks&workspace=events'};
+ w.dispatchEvent(new w.PopStateEvent('popstate',{state:{mmWorkspace:back}}));
+ // A native traversal changes the active entry before delivering popstate.
+ w.history.replaceState({mmWorkspace:forward},'',forward.url);release();await new Promise(r=>setImmediate(r));
+ assert.equal(w.history.state.mmWorkspace.workspace,'events','late Back completion must not rewrite the Forward entry');
+ assert.match(w.location.search,/workspace=events/);
+ w.dispatchEvent(new w.PopStateEvent('popstate',{state:{mmWorkspace:forward}}));await new Promise(r=>setImmediate(r));assert.equal(current.workspace,'events');
+ }finally{api.dispose();w.close();}
+});

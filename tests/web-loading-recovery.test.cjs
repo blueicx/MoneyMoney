@@ -238,6 +238,26 @@ test('stock quote refresh still selects the default instrument when no chart con
   } finally { dom.window.close(); }
 });
 
+test('history-restored empty stock context cannot auto-select the previous stock after indices arrive', async () => {
+  for (const restoredBeforeRequest of [true, false]) {
+    const dom = new JSDOM(source, { url: 'http://localhost/', runScripts: 'outside-only' });
+    const w = dom.window, calls = [];
+    w.eval("var currentStockDashboardController=null,activeMarketScope='stocks',activeWorkspaceId='stock-quotes',currentInstrumentId=null;window._stockSelectedSymbol='SNDK';");
+    let release;
+    w.loadStockIndices = () => new Promise(resolve => { calls.push('indices'); release = resolve; });
+    w.stockNameForSymbol = symbol => symbol;
+    w.selectStockSymbol = symbol => calls.push(symbol);
+    w.eval(sourceFunction('loadStockQuotes'));
+    try {
+      w.mm_workspaceFromHistory = restoredBeforeRequest;
+      const pending = w.loadStockQuotes();
+      w.mm_workspaceFromHistory = true;
+      release(); await pending;
+      assert.deepEqual(calls, ['indices'], 'background refresh must preserve the saved null instrument and Forward history');
+    } finally { dom.window.close(); }
+  }
+});
+
 test('changing markets does not eagerly load the event timeline workspace', () => {
   const dom = new JSDOM(source, { url: 'http://localhost/', runScripts: 'outside-only' });
   const w = dom.window;

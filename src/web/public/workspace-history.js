@@ -41,7 +41,13 @@
       try{
         while(queuedTarget&&!disposed){
         const target=queuedTarget;queuedTarget=null;if(!valid(target))continue;
-        await options.restore(target);if(disposed)return;if(queuedTarget)continue;last={...target};write(last,target.url);
+        const result=options.restore(target),waitingState=history.state,waitingUrl=w.location.href;
+        await result;if(disposed)return;if(queuedTarget)continue;
+        // Native traversal changes the active entry before its popstate is delivered.
+        // A late completion must not replace that newer entry with the previous target.
+        const active=history.state?.mmWorkspace;
+        if((history.state!==waitingState||w.location.href!==waitingUrl)&&valid(active)&&contextKey(active)!==contextKey(target)){queuedTarget=active;continue;}
+        last={...target};write(last,target.url);
         const apply=()=>{if(disposed||!last||contextKey(last)!==contextKey(target))return;w.scrollTo({top:Number.isFinite(target.scroll)?Math.max(0,target.scroll):0});const center=w.document.getElementById('center-workspace');if(center)center.scrollTop=Number.isFinite(target.centerScroll)?Math.max(0,target.centerScroll):0;};
         apply();w.requestAnimationFrame?.(apply);
         }
