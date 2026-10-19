@@ -915,9 +915,9 @@ test('loading benchmark uses an isolated real-data page and waits for a settled 
     'the report must show whether compatibility asset downloads started together');
   assert.match(benchmark, /resourceCount\s*:/);
   assert.match(benchmark, /transferBytes\s*:/);
-  assert.match(benchmark, /page\.evaluate\(\(\{\s*shellReadyMs\s*,\s*chartReadyMs\s*\}\)\s*=>/,
+  assert.match(benchmark, /page\.evaluate\(\(\{\s*shellReadyMs\s*,\s*paintedShellReadyMs\s*,\s*chartReadyMs\s*\}\)\s*=>/,
     'the benchmark should pass timing values as one Playwright evaluate argument');
-  assert.match(benchmark, /\},\s*\{\s*shellReadyMs\s*,\s*chartReadyMs\s*\}\);/,
+  assert.match(benchmark, /\},\s*\{\s*shellReadyMs\s*,\s*paintedShellReadyMs\s*,\s*chartReadyMs\s*\}\);/,
     'Playwright evaluate accepts one serialized argument object');
   assert.doesNotMatch(benchmark, /\},\s*shellReadyMs\s*,\s*chartReadyMs\s*\);/,
     'multiple positional evaluate arguments fail on the current Playwright API');

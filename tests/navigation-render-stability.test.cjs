@@ -17,7 +17,7 @@ function fixture() {
     var UTILITY_NAV_ITEMS=[['news','新闻']];var CORE_NAV_ITEMS=[['paper','模拟盘'],['radar','雷达']];var GUEST_ADMIN_TABS=new Set(['paper']);`);
   w.marketResearchEscape = value => String(value);
   w.marketRadarTab = () => 'stocks';w.marketRadarLabel=()=>'股票雷达';
-  for(const name of ['setNavigationMarkup','workspaceMenuMarkup','renderWorkspaceMenu','renderMarketScopeBar','renderUtilityNav','renderCoreNav'])w.eval(declaration(name));
+  for(const name of ['setNavigationMarkup','workspaceMenuMarkup','renderWorkspaceMenu','bindCompactNavigation','renderMarketScopeBar','renderUtilityNav','renderCoreNav'])w.eval(declaration(name));
   return dom;
 }
 test('unchanged navigation preserves DOM nodes and focused controls without repeat mutations', () => {

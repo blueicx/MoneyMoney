@@ -11526,6 +11526,29 @@ function readInitialMarketScope() {
   } catch (e) {}
   return 'overview';
 }
+function bindCompactNavigation(bar) {
+  if (bar.dataset.compactBound === '1') return;
+  bar.dataset.compactBound = '1';
+  const close = () => bar.querySelectorAll('details[open]').forEach(menu => { menu.open = false; });
+  bar.addEventListener('click', event => { if (event.target.closest('button')) close(); });
+  bar.addEventListener('toggle', event => {
+    if (!event.target.open) return;
+    bar.querySelectorAll('details[open]').forEach(menu => { if (menu !== event.target) menu.open = false; });
+  }, true);
+  document.addEventListener('pointerdown', event => { if (!bar.contains(event.target)) close(); });
+  document.addEventListener('keydown', event => {
+    if (event.key !== 'Escape') return;
+    const menu = bar.querySelector('details[open]');
+    if (!menu) return;
+    const restoreFocus = menu.contains(document.activeElement);
+    close();
+    if (restoreFocus) {
+      event.preventDefault();
+      event.stopPropagation();
+      menu.querySelector('summary')?.focus();
+    }
+  }, true);
+}
 function renderMarketScopeBar() {
   const bar = document.getElementById('market-scope-bar');
   if (!bar) return;
@@ -11535,12 +11558,15 @@ function renderMarketScopeBar() {
     '<button class="market-scope-btn market-scope-action admin" data-admin-entry="settings" onclick="showTab(\'settings\')">⚙️ 总设置</button>',
     '<button class="market-scope-btn market-scope-action admin" data-admin-entry="ops" onclick="showTab(\'ops\')">🤖 自动化运营</button>',
   ].filter((_, index) => !window.mm_isGuest || index === 0).join('');
-  setNavigationMarkup(bar, `<span class="market-scope-label">市场</span>${scopes}<span class="market-scope-actions">${actions}</span>`);
+  const current = MARKET_SCOPES.find(scope => scope.id === activeMarketScope) || MARKET_SCOPES[0];
+  const utilities = UTILITY_NAV_ITEMS.map(([tab, label]) => `<button class="utility-nav-btn" data-tab="${tab}" onclick="showTab('${tab}', this)">${label}</button>`).join('');
+  setNavigationMarkup(bar, `<details class="compact-nav-menu" data-compact-market><summary class="market-scope-btn">${current.label} · 切换市场</summary><div class="compact-nav-panel">${scopes}</div></details><details class="compact-nav-menu" data-compact-tools><summary class="market-scope-btn">通用工具与设置</summary><div class="compact-nav-panel">${utilities}${actions}</div></details>`);
+  bindCompactNavigation(bar);
 }
 function renderUtilityNav() {
   const bar = document.getElementById('utility-nav-bar');
   if (!bar) return;
-  setNavigationMarkup(bar, `<span class="utility-nav-label">通用工具</span>${UTILITY_NAV_ITEMS.map(([tab, label]) => `<button class="utility-nav-btn" data-tab="${tab}" onclick="showTab('${tab}', this)">${label}</button>`).join('')}`);
+  if (!bar.hidden) bar.hidden = true;
 }
 function renderCoreNav() {
   const items = CORE_NAV_ITEMS.filter(([tab]) => !(window.mm_isGuest && GUEST_ADMIN_TABS.has(tab)));

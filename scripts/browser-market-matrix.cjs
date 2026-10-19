@@ -474,6 +474,7 @@ async function main() {
       const input = document.querySelector('#stock-chart-pattern-controls input');
       return ready && input && !input.disabled;
     }, null, { timeout: 10_000 });
+    await page.locator('#stock-chart-layer-tools > summary').click();
     const patternControlsStable=await page.evaluate(()=>{
       const input=document.querySelector('#stock-chart-pattern-controls input');
       if(!input)return false;
@@ -634,7 +635,12 @@ async function main() {
     await page.waitForTimeout(500);
     assert.ok(await page.locator('#workspace-sidebar-content [data-workspace-id="guru-holdings"]').count(), 'a late prediction navigation response must not overwrite the stocks menu');
     for (const market of ['stocks', 'options', 'crypto', 'prediction']) {
-      await page.evaluate(scope => setMarketScope(scope), market);
+      await page.locator('[data-compact-market] > summary').click();
+      await page.locator(`[data-compact-market] button[data-market-scope="${market}"]`).click().catch(async error=>{
+        console.error(JSON.stringify(await page.evaluate(scope=>({scope,scrollY,viewport:[innerWidth,innerHeight],nodes:['#market-scope-bar','[data-compact-market] > summary','[data-compact-market] .compact-nav-panel',`button[data-market-scope="${scope}"]`,'#top-market-bar'].map(selector=>{const n=document.querySelector(selector),r=n?.getBoundingClientRect();return {selector,rect:r?.toJSON(),z:n&&getComputedStyle(n).zIndex};})}),market)));
+        throw error;
+      });
+      assert.equal(await page.locator('[data-compact-market]').getAttribute('open'), null, 'choosing a market closes the compact menu');
       await page.waitForFunction(scope => document.body.dataset.marketScope === scope, market);
       const state = await page.locator('#market-workspace-shell').getAttribute('data-market-scope');
       assert.equal(state, market);
@@ -791,6 +797,7 @@ async function main() {
     await page.waitForFunction(() => document.querySelector('#stock-chart-card')?.getAttribute('aria-busy') !== 'true', null, { timeout: 10_000 });
     assert.equal(await page.evaluate(() => focusStockKlineDate('2026-09-24')), 2);
     assert.equal(await page.locator('[data-chart-candle-date]').inputValue(), '2026-09-24', 'daily chart selection and date input must use the same session date');
+    await page.locator('#stock-chart-history-tools > summary').click();
     await page.locator('[data-chart-candle-focus]').click();
     await page.waitForFunction(() => document.querySelector('[data-intraday-controls]')?.hidden === false, null, { timeout: 10_000 });
     await page.waitForFunction(() => document.querySelector('#stock-chart-card')?.getAttribute('aria-busy') !== 'true', null, { timeout: 10_000 });

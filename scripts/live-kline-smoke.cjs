@@ -55,6 +55,22 @@ async function main() {
     assert.match(await page.locator('#stock-chart-card .mm-trading-readout').innerText(),/开 .*高 .*低 .*收 .*MA5/);
     for(const width of [1440,390])for(const theme of ['light','dark','money']){
       await page.setViewportSize({width,height:900});await page.evaluate(theme=>theme==='light'?document.documentElement.removeAttribute('data-theme'):document.documentElement.setAttribute('data-theme',theme),theme);
+      const menu=page.locator('[data-compact-tools]'), summary=menu.locator(':scope > summary');
+      await summary.focus();await page.keyboard.press('Enter');
+      assert.equal(await menu.getAttribute('open'),'');
+      const menuBounds=await menu.locator('.compact-nav-panel').boundingBox();
+      assert.ok(menuBounds.x>=0&&menuBounds.x+menuBounds.width<=width+1,`compact menu must fit the viewport (${width}): ${JSON.stringify(menuBounds)}`);
+      await menu.locator('button').first().focus();await page.keyboard.press('Escape');
+      assert.equal(await menu.getAttribute('open'),null);
+      assert.equal(await summary.evaluate(node=>node===document.activeElement),true);
+      for(const id of ['stock-chart-history-tools','stock-chart-layer-tools']){
+        const details=page.locator('#'+id);assert.equal(await details.getAttribute('open'),null);
+        await details.locator(':scope > summary').focus();await page.keyboard.press('Space');
+        assert.equal(await details.getAttribute('open'),'');
+        await details.locator(':scope > summary').click();assert.equal(await details.getAttribute('open'),null);
+      }
+      assert.equal(await page.locator('.stock-kline-period.active').isVisible(),true);
+      assert.equal(await page.locator('#stock-chart-data-status').isVisible(),true);
       const tool=page.locator('#stock-chart-card [data-chart-measure]'),layer=page.locator('#stock-chart-card .mm-trading-crosshair');await tool.click();await layer.scrollIntoViewIfNeeded();
       const rect=await layer.boundingBox();assert.ok(rect&&rect.width>100);
       await page.mouse.click(rect.x+rect.width*.25,rect.y+Math.min(rect.height*.3,120));await page.mouse.click(rect.x+rect.width*.65,rect.y+Math.min(rect.height*.3,120));
@@ -162,6 +178,7 @@ async function main() {
     const stockSupportOverlay = await page.evaluate(() => window.__supportResistanceDraws.findLast(draw => draw.canvas === 'stock-kline'));
     assert.deepEqual(stockSupportOverlay?.prices, [90, 110], 'stock chart must project confirmed pivots from its selected K-line dataset');
     assert.deepEqual(stockSupportOverlay?.types, ['support', 'resistance']);
+    await page.locator('#stock-chart-layer-tools > summary').click();
     assert.match(await page.locator('#stock-sr-status').innerText(), /已确认 Pivot 2 条（支撑 90 \/ 阻力 110）.*不使用未来K线/);
     assert.match(await page.locator('#stock-sr-status').innerText(), /来源时间/);
     const replayPivot = await page.evaluate(() => {

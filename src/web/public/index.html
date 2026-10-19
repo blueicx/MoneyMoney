@@ -600,26 +600,14 @@
             <div style="font-weight:700;font-size:13px;margin-bottom:10px;">🌍 主要指数</div>
             <div id="stock-indices" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-bottom:20px;"></div>
             <div id="stock-chart-card" style="background:var(--bg-card);border-radius:12px;padding:16px;border:1px solid var(--border);margin-bottom:20px;">
-              <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px;">
+              <div class="compact-chart-header" data-kline-controls="stocks" aria-label="股票K线周期">
+                <div class="compact-chart-title-row">
                 <div id="stock-chart-title" style="font-weight:700;font-size:15px;"></div>
-                <div class="kline-toolbar" data-kline-controls="stocks" aria-label="股票K线周期">
                   <button class="tab" type="button" data-chart-layout-toggle onclick="toggleStockChartCompanion()" aria-expanded="false" title="打开同步双图工作区">▤ 双图</button>
                   <button class="tab chart-fullscreen-button" type="button" data-chart-fullscreen="stocks" onclick="toggleChartFullscreen('stocks')" title="放大查看股票K线">⛶ 全屏</button>
-                  <span class="kline-data-status" aria-label="K线数据时间机器">
-                    <label>数据时点 <input type="date" data-chart-as-of onchange="applyStockKlineAsOf(this.value)" aria-label="选择股票历史数据时点"></label>
-                    <button class="tab" type="button" data-chart-as-of-apply onclick="applyStockKlineAsOf(document.querySelector('[data-chart-as-of]')?.value || '')">应用</button>
-                    <button class="tab" type="button" data-chart-as-of-clear onclick="clearStockKlineAsOf()">退出时点</button>
-                  </span>
-                  <button class="tab" type="button" data-chart-candle-focus onclick="toggleStockKlineDrilldown()" disabled title="先点击图中的某一根日K">🔎 查看当日日内</button>
-                  <span class="kline-control-group" data-intraday-controls hidden aria-label="日内周期与日期导航">
-                    <span class="kline-control-label">日内</span>
-                    <button class="tab intraday-period" data-intraday-period="1m" onclick="setStockIntradayPeriod('1m')">1分</button>
-                    <button class="tab intraday-period active" data-intraday-period="5m" onclick="setStockIntradayPeriod('5m')">5分</button>
-                    <button class="tab intraday-period" data-intraday-period="15m" onclick="setStockIntradayPeriod('15m')">15分</button>
-                    <button class="tab" type="button" data-intraday-prev onclick="moveStockIntradayDate(-1)" title="上一可用交易日">前一日</button>
-                    <button class="tab" type="button" data-intraday-next onclick="moveStockIntradayDate(1)" title="下一可用交易日">后一日</button>
-                  </span>
-                  <div class="kline-control-group" aria-label="K线周期"><span class="kline-control-label">周期</span>
+                </div>
+                <div class="kline-toolbar">
+                  <div class="kline-control-group compact-chart-periods" aria-label="K线周期"><span class="kline-control-label">周期</span>
                     <button class="tab stock-kline-period" data-kline-period="1m" onclick="setStockKlinePeriod('1m')">1分</button>
                     <button class="tab stock-kline-period active" data-kline-period="5m" onclick="setStockKlinePeriod('5m')">5分</button>
                     <button class="tab stock-kline-period" data-kline-period="15m" onclick="setStockKlinePeriod('15m')">15分</button>
@@ -636,14 +624,35 @@
                     <span data-kline-status></span>
                     <span data-stock-coverage title="当前股票各数据能力的覆盖状态"></span>
                   </span>
+                  <details id="stock-chart-history-tools" class="compact-chart-tools">
+                    <summary>历史时点 / 日期定位 / 日内下钻</summary>
+                    <div class="compact-chart-tool-body">
+                  <span class="kline-data-status" aria-label="K线数据时间机器">
+                    <label>数据时点 <input type="date" data-chart-as-of onchange="applyStockKlineAsOf(this.value)" aria-label="选择股票历史数据时点"></label>
+                    <button class="tab" type="button" data-chart-as-of-apply onclick="applyStockKlineAsOf(document.querySelector('[data-chart-as-of]')?.value || '')">应用</button>
+                    <button class="tab" type="button" data-chart-as-of-clear onclick="clearStockKlineAsOf()">退出时点</button>
+                  </span>
+                  <button class="tab" type="button" data-chart-candle-focus onclick="toggleStockKlineDrilldown()" disabled title="先点击图中的某一根日K">🔎 查看当日日内</button>
+                  <span class="kline-control-group" data-intraday-controls hidden aria-label="日内周期与日期导航">
+                    <span class="kline-control-label">日内</span>
+                    <button class="tab intraday-period" data-intraday-period="1m" onclick="setStockIntradayPeriod('1m')">1分</button>
+                    <button class="tab intraday-period active" data-intraday-period="5m" onclick="setStockIntradayPeriod('5m')">5分</button>
+                    <button class="tab intraday-period" data-intraday-period="15m" onclick="setStockIntradayPeriod('15m')">15分</button>
+                    <button class="tab" type="button" data-intraday-prev onclick="moveStockIntradayDate(-1)" title="上一可用交易日">前一日</button>
+                    <button class="tab" type="button" data-intraday-next onclick="moveStockIntradayDate(1)" title="下一可用交易日">后一日</button>
+                  </span>
                   <span id="stock-chart-candle-selection" class="kline-data-status" aria-live="polite">点击图中某一根日K，可聚焦查看该日附近走势</span>
                   <span class="kline-data-status" aria-label="日K定位控制">
                     <button class="tab" type="button" data-chart-candle-prev onclick="moveStockKlineSelection(-1)" title="上一根K线">‹</button>
                     <label>定位日期 <input type="date" data-chart-candle-date onchange="focusStockKlineDate(this.value)" aria-label="定位股票K线日期"></label>
                     <button class="tab" type="button" data-chart-candle-next onclick="moveStockKlineSelection(1)" title="下一根K线">›</button>
                   </span>
+                    </div>
+                  </details>
                 </div>
               </div>
+              <details id="stock-chart-layer-tools" class="compact-chart-tools">
+                <summary>图层与策略 · 保留当前选择</summary>
               <div id="stock-chart-overlays" class="stock-chart-overlays" aria-current="page" aria-label="K线显示选项">
                 <label><input type="checkbox" data-chart-overlay="signals" checked="" onchange="setStockChartOverlay('signals', this.checked)"> 策略点位</label>
                 <span style="color:var(--border-light);">|</span>
@@ -667,6 +676,7 @@
                 <button class="tab" type="button" data-chart-replay="next" onclick="stepStockChartReplay('next')">›</button>
                 <span id="stock-chart-replay-status" class="stock-chart-replay-status" aria-live="polite"></span>
               </div>
+              </details>
               <div id="stock-chart-workspace-b" class="mm-stock-chart-workspace" data-layout="B" aria-label="事件时间轴、K线与证据工作区">
                 <aside class="mm-stock-chart-region mm-stock-chart-events" data-stock-chart-region="events" aria-label="当前标的事件时间轴">
                   <header><strong>事件时间轴</strong><button class="tab" type="button" data-stock-chart-events-refresh onclick="loadStockChartEventRail(true)" aria-label="刷新事件时间轴">刷新</button></header>

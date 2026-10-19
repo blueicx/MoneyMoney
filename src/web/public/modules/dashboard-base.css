@@ -2396,3 +2396,33 @@
 .chart-research-panel [data-research-heat="negative"] { color: var(--red); font-weight: 600; }
 .chart-research-panel [data-research-heat="unknown"] { color: var(--text-secondary); }
 @media (max-width: 640px) { [data-risk-budget] button, [data-risk-budget] input { min-height: 44px; } }
+
+/* Compact controls retain the original handlers and theme tokens. */
+#utility-nav-bar[hidden] { display: none; }
+.compact-nav-menu { position: relative; min-width: 0; }
+.compact-nav-menu > summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 8px; min-height: 36px; }
+.compact-nav-menu > summary::-webkit-details-marker { display: none; }
+.compact-nav-menu > summary::after { content: '▾'; font-size: 11px; }
+.compact-nav-menu[open] > summary { background: var(--purple-light); }
+.compact-nav-panel { position: absolute; top: calc(100% + 6px); left: 0; z-index: 80; width: min(290px, calc(100vw - 40px)); display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; padding: 10px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg); box-shadow: 0 12px 30px rgba(0,0,0,.18); max-height: 70vh; overflow-y: auto; }
+.compact-nav-panel button { white-space: normal; text-align: left; margin: 0; min-height: 36px; }
+#market-scope-bar { position: relative; z-index: 10; overflow: visible; }
+.compact-chart-header { margin-bottom: 8px; min-width: 0; }
+.compact-chart-title-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 8px; }
+.compact-chart-title-row #stock-chart-title { flex: 1 1 auto; min-width: 0; }
+.compact-chart-header .kline-toolbar { width: 100%; justify-content: flex-start; }
+.compact-chart-header .compact-chart-periods { flex: 1 1 100%; flex-wrap: wrap; }
+.compact-chart-header #stock-chart-data-status { flex: 1 1 100%; }
+.compact-chart-tools { width: 100%; min-width: 0; margin: 6px 0; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-card); }
+.compact-chart-tools > summary { cursor: pointer; padding: 10px 12px; color: var(--text-secondary); font-size: 12px; font-weight: 600; }
+.compact-chart-tool-body { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px; border-top: 1px solid var(--border); }
+.compact-chart-tools #stock-chart-overlays { padding: 10px; margin: 0; }
+.compact-nav-menu > summary:focus-visible, .compact-chart-tools > summary:focus-visible { outline: 2px solid var(--purple); outline-offset: 2px; }
+@media (max-width: 640px) {
+  #market-scope-bar { position: relative; }
+  .compact-nav-menu { position: static; }
+  .compact-nav-panel { left: 8px; right: 8px; width: auto; }
+  .compact-nav-menu > summary, .compact-nav-panel button, .compact-chart-tools > summary { min-height: 44px; }
+  .compact-chart-tool-body { align-items: stretch; }
+  .compact-chart-tool-body .kline-data-status { flex-wrap: wrap; min-width: 0; }
+}

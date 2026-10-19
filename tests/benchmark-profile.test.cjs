@@ -35,3 +35,10 @@ test('CPU summaries count self and inclusive time without retaining URLs or page
   assert.equal(chart.path, '/assets/chart.js');
   assert.ok(!JSON.stringify(summary).includes('private'));
 });
+test('loading observations keep the original ready timestamp and independently wait for a rendered frame',()=>{
+ const fs=require('node:fs'),source=fs.readFileSync('scripts/web-loading-benchmark.cjs','utf8');
+ assert.match(source,/const shellReadyMs = await page\.evaluate\(\(\) => performance\.now\(\)\)/);
+ assert.match(source,/const paintedShellReadyTask = page\.evaluate\([\s\S]*?requestAnimationFrame\([\s\S]*?requestAnimationFrame\(/);
+ assert.ok(source.indexOf('const chartReadyMs =') < source.indexOf('const paintedShellReadyMs = await paintedShellReadyTask'), 'paint observation must not delay the independent chart timestamp');
+ assert.match(source,/return \{ shellReadyMs, paintedShellReadyMs, chartReadyMs/);
+});

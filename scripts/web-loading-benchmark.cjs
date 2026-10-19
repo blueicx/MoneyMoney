@@ -194,12 +194,15 @@ const median = values => [...values].sort((a, b) => a - b)[Math.floor(values.len
             && document.getElementById('market-workspace-shell')?.dataset.workspace === 'stock-quotes', 'workspace-ready')
             .catch(error => reportWaitFailure('workspace-ready', error));
           const shellReadyMs = await page.evaluate(() => performance.now());
+          const paintedShellReadyTask = page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve(performance.now())))));
+          paintedShellReadyTask.catch(() => {});
           console.log(`benchmark workspace ready: viewport=${viewport.width} run=${run + 1} mode=${temperature} shell=${Math.round(shellReadyMs)}ms`);
           await waitForPageCondition(page, () => ['ready', 'empty', 'failed'].includes(document.getElementById('stock-chart-card')?.dataset.klineState)
             && document.getElementById('stock-chart-card')?.getAttribute('aria-busy') !== 'true'
             && !!window.MoneyTradingChart, 'chart-settled')
             .catch(error => reportWaitFailure('chart-settled', error));
           const chartReadyMs = await page.evaluate(() => performance.now());
+          const paintedShellReadyMs = await paintedShellReadyTask;
           let layoutDiagnostics;
           if (traceLayout) {
             const complete = new Promise(resolve => cdp.once('Tracing.tracingComplete', resolve));
@@ -239,7 +242,7 @@ const median = values => [...values].sort((a, b) => a - b)[Math.floor(values.len
             }), 'stock-indices-settled').catch(error => reportWaitFailure('stock-indices-settled', error));
             await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 0)));
           }
-          const result = await page.evaluate(({ shellReadyMs, chartReadyMs }) => {
+          const result = await page.evaluate(({ shellReadyMs, paintedShellReadyMs, chartReadyMs }) => {
             const resources = performance.getEntriesByType('resource');
             const js = resources.filter(row => /\.js(?:\?|$)/.test(row.name));
             const startupCompatibility = js.filter(row => {
@@ -250,7 +253,7 @@ const median = values => [...values].sort((a, b) => a - b)[Math.floor(values.len
             const startupStarts = startupCompatibility.map(row => row.startTime);
             const startupEnds = startupCompatibility.map(row => row.responseEnd);
             const navigation = performance.getEntriesByType('navigation')[0];
-            return { shellReadyMs, chartReadyMs, chartState: document.getElementById('stock-chart-card')?.dataset.klineState,
+            return { shellReadyMs, paintedShellReadyMs, chartReadyMs, chartState: document.getElementById('stock-chart-card')?.dataset.klineState,
               chartMessage: document.getElementById('stock-chart-card')?.innerText.slice(0, 500) || '',
               bytes: resources.reduce((sum, row) => sum + row.transferSize, 0), jsBytes: js.reduce((sum, row) => sum + row.transferSize, 0),
               jsResources: js.map(row => ({ path: new URL(row.name).pathname, startTime: row.startTime, duration: row.duration, transferSize: row.transferSize })),
@@ -264,7 +267,7 @@ const median = values => [...values].sort((a, b) => a - b)[Math.floor(values.len
               navigationTiming: navigation ? { responseStart: navigation.responseStart, responseEnd: navigation.responseEnd, domInteractive: navigation.domInteractive, domContentLoadedEventEnd: navigation.domContentLoadedEventEnd } : null,
               startupResources: resources.filter(row => ['script', 'link', 'fetch'].includes(row.initiatorType)).map(row => ({ path:new URL(row.name).pathname, startTime:row.startTime, responseStart:row.responseStart, responseEnd:row.responseEnd, transferSize:row.transferSize })),
               };
-          }, { shellReadyMs, chartReadyMs });
+          }, { shellReadyMs, paintedShellReadyMs, chartReadyMs });
           result.phaseMarks = chartResult.phaseMarks;
           if (cpuDiagnostics) result.cpuDiagnostics = cpuDiagnostics;
           if (layoutDiagnostics) result.layoutDiagnostics = layoutDiagnostics;
