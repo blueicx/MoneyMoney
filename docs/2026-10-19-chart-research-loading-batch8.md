@@ -63,3 +63,15 @@ efef9e2干净源码构建、Web和认证通过，但四市场验收再次遇到�
 发布前重新只读核验生产：仍为91d3333、服务active、磁盘约47%；10个原AI跑单配置指纹仍为5125162b35c9893e4a9ac7d11c40eeaca7297bd95d7434d6bec70712aa144181。临时部署脚本已不存在，不推测清理原因，也不据此改变服务配置；从本仓库重新校验部署脚本后上传。用户未跟踪数据库Hash未变。
 
 最终修复构建串行复测（CPU4x、弱网、各设备冷/热各3次）：桌面页面/图表中位数2559/3808ms，热603/955ms；手机冷1952/3292ms，热569/923ms。冷JS106940字节、热0，四组绝对预算全部通过；仍未证实相对原基线整页冷加载改善20%，31继续未完成。日志mm-depth8-release-loading.log，不以绝对预算替代相对目标。
+
+## 实际生产发布
+
+运行代码4cf33a733237d4ad0f32d6a7db2c2e494017ecfd已推送GitHub并部署当前VPS。独立git archive导出、重新构建后，Web/认证/四市场12轮导航/合约/研究深度全部通过；产物29项资源。
+
+- 正式域名https://bluetrade.bbroot.com与本机健康接口版本一致，服务active；正式域名全部29项静态资源SHA-256匹配干净构建。
+- 归档SHA-256：4aff1fedf51d57ca884b45d454f28b4816459b9a58904b1f12bca65bf530a2d5。
+- server.js：32287ffbe31dd3e8b1621654fea58503aaab90c73bb66cbc997a578d7abc83d6；index.html：d09098f10f4a030fc211927bb50e19c78a6e99875cc42243eac0647f4922175a；远端一致。
+- 备份/opt/moneymoney/backups/dist-pre-4cf33a7-20261019-depth8，回滚/opt/moneymoney/dist.rollback-4cf33a7-20261019-depth8，均实际存在。
+- 生产只读Chromium巡检四市场及SNDK通过，未发验收Telegram消息；10个跑单配置指纹保持5125162b35c9893e4a9ac7d11c40eeaca7297bd95d7434d6bec70712aa144181。
+
+仅重启moneymoney.service、仅切换dist；数据库、数据湖、未跟踪用户文件及跑单设置未修改。临时部署脚本规范化为LF并核对Hash后才执行。31仍继续优化，未宣称32项全部完成。
