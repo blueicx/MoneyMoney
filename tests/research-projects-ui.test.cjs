@@ -13,3 +13,20 @@ test('embedded projects are manual private workflows and preserve explicit refer
  w.document.getElementById('market-workspace-shell').dataset.workspace='stock-quotes';w.dispatchEvent(new w.Event('mm-workspace-context'));assert.equal(root.hidden,true);assert.equal(root.querySelector('[data-project-detail]').textContent,'');
  }finally{await new Promise(r=>setTimeout(r,0));dom.window.close();}
 });
+
+test('project references expose manual task progress and restore only the same market after returning, clearing private context on logout',async()=>{
+ const dom=new JSDOM('<div id="market-workspace-shell" data-market-scope="stocks" data-workspace="research-lab"></div><section id="mm-research-lab"></section>',{url:'http://localhost/',runScripts:'outside-only',pretendToBeVisual:true});
+ try{const w=dom.window,calls=[];w.mm_isLoggedIn=true;w.mm_isGuest=false;w.scrollTo=()=>{};
+ const p={id:'project-one',market:'stocks',title:'进度研究',version:2,links:[{linkId:'task-link',kind:'task',id:'job-one',hash:'a'.repeat(64),market:'stocks',updatedAt:'2026-01-01'}],conclusions:[],reviews:[],timeline:[]};
+ w.fetch=async(url,options={})=>{calls.push([url,options]);return {ok:true,json:async()=>({success:true,data:url.includes('/references?')?[{id:'job-one',kind:'task',dataStatus:'historical',changed:true,current:{status:'paused',progress:30,updatedAt:'2026-01-02'},reason:'只读已保存任务'}]:p})};};
+ w.eval(fs.readFileSync('src/web/public/research-projects-workspace.js','utf8'));w.document.dispatchEvent(new w.Event('DOMContentLoaded'));const root=w.document.querySelector('[data-research-projects]'),shell=w.document.getElementById('market-workspace-shell');
+ await w.MoneyResearchProjects.open({market:'stocks',id:p.id});
+ for(const kind of ['strategy','task','account'])assert.ok(root.querySelector(`[name=referenceKind] option[value="${kind}"]`),'explicit reference kind '+kind);
+ assert.equal(calls.length,1,'opening must not poll task states');await root.querySelector('[data-project-progress]').onclick();assert.match(root.querySelector('[data-project-progress-results]').textContent,/30%/);assert.match(root.querySelector('[data-project-progress-results]').textContent,/paused/);assert.ok(calls.every(([,o])=>o.method!=='POST'),'progress is read-only');
+ root.querySelector('[name=projectSearch]').value='现金流';root.open=true;shell.dataset.workspace='stock-quotes';w.dispatchEvent(new w.Event('mm-workspace-context'));assert.equal(root.querySelector('[data-project-detail]').textContent,'');
+ shell.dataset.marketScope='crypto';shell.dataset.workspace='research-lab';w.dispatchEvent(new w.Event('mm-workspace-context'));await new Promise(r=>setTimeout(r,10));assert.equal(root.querySelector('[data-project-detail]').textContent,'');assert.equal(calls.length,2,'another market must not request saved stock project');
+ shell.dataset.marketScope='stocks';w.dispatchEvent(new w.Event('mm-workspace-context'));await new Promise(r=>setTimeout(r,20));assert.match(root.querySelector('[data-project-detail]').textContent,/进度研究/);assert.equal(root.querySelector('[name=projectSearch]').value,'现金流');assert.equal(root.open,true);assert.equal(calls.length,3,'return revalidates one explicit project, without polling');
+ assert.equal(w.localStorage.length,0,'private projects must not enter persistent offline cache');w.mm_isLoggedIn=false;w.dispatchEvent(new w.Event('mm-workspace-context'));assert.equal(root.hidden,true);assert.equal(root.querySelector('[data-project-detail]').textContent,'');
+ w.mm_isLoggedIn=true;w.dispatchEvent(new w.Event('mm-workspace-context'));await new Promise(r=>setTimeout(r,10));assert.equal(calls.length,3,'logout must discard all return context');assert.equal(root.querySelector('[name=projectSearch]').value,'');
+ }finally{dom.window.close();}
+});

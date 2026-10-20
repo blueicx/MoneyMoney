@@ -1,11 +1,24 @@
 (() => {
  'use strict';
  let root,controller,context='',project=null;
+ const returns=new Map();
+ const authorized=()=>window.mm_isLoggedIn===true&&window.mm_isGuest!==true;
  const scope=()=>{const shell=document.getElementById('market-workspace-shell');return {market:shell?.dataset.marketScope||'',workspace:shell?.dataset.workspace||''};};
- const active=()=>window.mm_isLoggedIn===true&&window.mm_isGuest!==true&&scope().workspace==='research-lab';
+ const active=()=>authorized()&&scope().workspace==='research-lab';
  const esc=v=>String(v??'未知').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
  const field=(name,label,max=4000)=>`<label>${label}<textarea name="${name}" required maxlength="${max}" rows="2"></textarea></label>`;
- function sync(){const key=JSON.stringify(scope());if(key!==context||!active()){controller?.abort();context=key;project=null;if(root){root.querySelector('[data-project-detail]').replaceChildren();root.querySelector('[data-project-results]').replaceChildren();root.querySelector('[data-project-status]').textContent='';root.querySelector('[data-project-create]').reset();}}if(root)root.hidden=!active();}
+ function sync(){
+  const next=scope(),key=JSON.stringify(next),changed=key!==context;
+  if(changed||!active()){
+   if(authorized()&&context&&root){const previous=JSON.parse(context);if(previous.workspace==='research-lab')returns.set(previous.market,{id:project?.id||null,query:root.querySelector('[name=projectSearch]').value,open:root.open,scrollY:window.scrollY});}
+   if(!authorized())returns.clear();
+   controller?.abort();context=key;project=null;
+   if(root){root.querySelector('[data-project-detail]').replaceChildren();root.querySelector('[data-project-results]').replaceChildren();root.querySelector('[data-project-status]').textContent='';root.querySelector('[data-project-create]').reset();root.querySelector('[name=projectSearch]').value='';root.open=false;}
+   const saved=active()&&returns.get(next.market);
+   if(saved&&root){root.open=saved.open;root.querySelector('[name=projectSearch]').value=saved.query;if(saved.id)run(async()=>{if(await openProject({market:next.market,id:saved.id},false)){requestAnimationFrame(()=>{if(context===key&&active()&&project?.id===saved.id)window.scrollTo({top:saved.scrollY,behavior:'instant'});});}});}
+  }
+  if(root)root.hidden=!active();
+ }
  async function request(url,body){
   if(!active()||document.hidden)return null;controller?.abort();controller=new AbortController();const signal=controller.signal,key=JSON.stringify(scope());
   const token=document.cookie.split(';').map(v=>v.trim()).find(v=>v.startsWith('mm_csrf='));
@@ -14,16 +27,19 @@
  }
  async function run(work){try{await work();}catch(error){if(error.name!=='AbortError'&&active())root.querySelector('[data-project-status]').textContent=error.message;}}
  async function mutate(path,body){if(!project)return;const value=await request(`/api/research/projects/${encodeURIComponent(project.id)}/${path}`,{market:scope().market,version:project.version,...body});if(value){project=value.data;render();}}
- async function openProject(target){
+ async function openProject(target,scroll=true){
   if(!target||!active()||target.market!==scope().market||typeof target.id!=='string'||!target.id||target.id.length>200)return false;
   const value=await request(`/api/research/projects/${encodeURIComponent(target.id)}?`+new URLSearchParams({market:target.market}));
-  if(!value)return false;project=value.data;root.open=true;render();root.querySelector('[data-project-detail]').scrollIntoView?.({block:'nearest'});return true;
+  if(!value)return false;if(value.data?.market!==target.market||value.data?.id!==target.id)throw Error('研究项目身份与当前市场不一致');project=value.data;if(scroll)root.open=true;render();if(scroll)root.querySelector('[data-project-detail]').scrollIntoView?.({block:'nearest'});return true;
  }
  window.MoneyResearchProjects={open:openProject};
  function render(){
   const host=root.querySelector('[data-project-detail]');if(!project){host.replaceChildren();return;}
   host.innerHTML=`<h4>${esc(project.title)} · v${esc(project.version)}</h4><dl><dt>研究问题</dt><dd>${esc(project.question)}</dd><dt>假设</dt><dd>${esc(project.hypothesis)}</dd><dt>反证</dt><dd>${esc(project.counterEvidence)}</dd><dt>验收条件</dt><dd>${esc(project.acceptance)}</dd></dl><p>仅保存明确引用；旧记录未关联时不按时间猜配对。</p><form data-project-reference><label>引用类型<select name="referenceKind"><option value="evidence">证据快照</option><option value="partition">数据分区</option><option value="experiment">已保存实验</option><option value="decision">决策日记</option><option value="signal">信号结果</option><option value="project-conclusion">其他项目只读结论</option></select></label><label>明确 ID<input name="referenceId" maxlength="200" required></label><label>结论 ID（仅跨项目）<input name="conclusionId" maxlength="200"></label><button type="button" data-project-link>关联引用</button></form><form data-project-conclusion>${field('conclusion','新阶段结论（只追加）')}<fieldset><legend>选择此结论使用的引用</legend>${project.links.map(r=>`<label><input type="checkbox" name="linkId" value="${esc(r.linkId)}">${esc(r.kind)} ${esc(r.id)} · ${esc(r.market)}${r.inputEligible===false?' · 只读结论，不作为行情输入':''}<small>Hash ${esc(r.hash)} · 来源时间 ${esc(r.updatedAt)}</small></label>`).join('')||'<p>尚无引用，不能发布有依据的结论。</p>'}</fieldset><button type="button" data-project-conclude>保存新结论</button></form><h4>结论历史</h4>${project.conclusions.map(c=>`<article><p>${esc(c.text)}</p><small>${esc(c.at)} · ${esc(c.id)}</small></article>`).join('')||'<p>尚无阶段结论</p>'}<h4>引用复查</h4><button type="button" data-project-refresh>检查引用修订/过期</button>${project.reviews.map(r=>`<article><p>${esc(r.status)} · ${esc(r.reason)}</p><small>${esc(r.previousHash)} → ${esc(r.currentHash||'不可核验')}</small>${r.status==='open'?`<label>人工复查说明<textarea data-review-note="${esc(r.id)}" maxlength="2000"></textarea></label><button type="button" data-review-resolve="${esc(r.id)}">确认已复查（不改写原结论）</button>`:`<p>${esc(r.resolution)}</p>`}</article>`).join('')||'<p>尚无复查记录；需手动检查引用，不代表来源持续有效。</p>'}<details><summary>项目操作时间线</summary>${project.timeline.map(r=>`<p>${esc(r.at)} · ${esc(r.action)}</p>`).join('')}</details><button type="button" data-project-export="markdown">导出 Markdown</button><button type="button" data-project-export="json">导出 JSON</button><pre data-project-report></pre>`;
   host.querySelector('[name=referenceKind]').add(new Option('已归档事件（明确事件 ID）','event'));
+  for(const [kind,label] of [['strategy','策略候选及明确版本'],['task','已有研究任务'],['account','明确关联的独立模拟账户']])host.querySelector('[name=referenceKind]').add(new Option(label,kind));
+  const progress=document.createElement('section');progress.innerHTML='<h4>关联状态与任务进度</h4><p>手动读取已有记录，不启动任务；变化不会覆盖原引用或结论。</p><button type="button" data-project-progress>读取关联状态</button><div data-project-progress-results role="status"></div>';host.querySelector('[data-project-reference]').after(progress);
+  progress.querySelector('[data-project-progress]').onclick=()=>run(async()=>{const id=project?.id;if(!id)return;const value=await request(`/api/research/projects/${encodeURIComponent(id)}/references?`+new URLSearchParams({market:scope().market}));if(!value||project?.id!==id)return;const results=progress.querySelector('[data-project-progress-results]');results.replaceChildren();if(!value.data.length)results.textContent='尚无关联记录';for(const r of value.data){const item=document.createElement('article');item.innerHTML=`<p>${esc(r.kind)} · ${esc(r.id)} · ${esc(r.dataStatus)}</p><p>${esc(r.current?.status||'状态未提供')}${Number.isFinite(r.current?.progress)?` · ${esc(r.current.progress)}%`:''}</p><small>${esc(r.current?.updatedAt||'来源时间不可核验')} · ${esc(r.reason)}${r.changed===true?' · 当前记录已变化，固定引用未改写':''}</small>`;results.append(item);}});
   host.querySelector('[data-project-link]').onclick=()=>run(async()=>{const f=host.querySelector('[data-project-reference]');if(!f.reportValidity())return;const kind=f.elements.referenceKind.value,reference={kind,id:f.elements.referenceId.value.trim(),...(kind==='project-conclusion'?{conclusionId:f.elements.conclusionId.value.trim()}:{})};await mutate('links',{reference});});
   host.querySelector('[data-project-conclude]').onclick=()=>run(async()=>{const f=host.querySelector('[data-project-conclusion]');if(!f.reportValidity())return;await mutate('conclusions',{text:f.elements.conclusion.value,linkIds:[...f.querySelectorAll('[name=linkId]:checked')].map(v=>v.value)});});
   host.querySelector('[data-project-refresh]').onclick=()=>run(()=>mutate('reviews/refresh',{}));

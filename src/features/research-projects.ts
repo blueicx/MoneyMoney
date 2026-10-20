@@ -3,10 +3,10 @@ import type {SQLiteStateStore} from '../storage/sqlite-state';
 import type {MarketId} from './research-contracts';
 
 const markets=['stocks','options','crypto','prediction'];
-const kinds=['evidence','partition','experiment','decision','signal','strategy','account','event','project-conclusion'];
+const kinds=['evidence','partition','experiment','decision','signal','strategy','account','event','task','project-conclusion'];
 type Store=Pick<SQLiteStateStore,'get'|'set'|'transaction'|'appendAudit'|'health'>;
 export interface ProjectReference {kind:string;id:string;conclusionId?:string}
-export interface ProjectReferenceState {market:MarketId;instrument?:string;hash:string;updatedAt:string;expired?:boolean;revisionHash?:string}
+export interface ProjectReferenceState {market:MarketId;instrument?:string;hash:string;updatedAt:string;expired?:boolean;revisionHash?:string;status?:string;progress?:number}
 interface ProjectLink extends ProjectReference,ProjectReferenceState {linkId:string;linkedAt:string;readOnly:boolean;inputEligible:boolean}
 interface Conclusion {id:string;text:string;at:string;references:ProjectLink[]}
 interface Review {id:string;conclusionId:string;linkId:string;reason:string;previousHash:string;currentHash:string|null;at:string;status:'open'|'resolved';resolution?:string;resolvedAt?:string}
@@ -55,16 +55,24 @@ export class ResearchProjectStore {
   }else state=this.resolve(ref);
   if(!state||!markets.includes(state.market)||!/^[a-f0-9]{64}$/.test(state.hash)||!Number.isFinite(Date.parse(state.updatedAt))||Date.parse(state.updatedAt)>this.now()+1000)throw Error('引用不存在、Hash或来源时间不可核验');
   if(state.revisionHash!==undefined&&!/^[a-f0-9]{64}$/.test(state.revisionHash))throw Error('修订Hash不可核验');
-  return {market:state.market,...(state.instrument?{instrument:state.instrument}:{}),hash:state.hash,updatedAt:state.updatedAt,...(state.expired?{expired:true}:{}),...(state.revisionHash?{revisionHash:state.revisionHash}:{})};
+  if(state.status!==undefined&&(typeof state.status!=='string'||state.status.length>60)||state.progress!==undefined&&(!Number.isFinite(state.progress)||state.progress<0||state.progress>100))throw Error('引用状态或任务进度不可核验');
+  return {market:state.market,...(state.instrument?{instrument:state.instrument}:{}),hash:state.hash,updatedAt:state.updatedAt,...(state.expired?{expired:true}:{}),...(state.revisionHash?{revisionHash:state.revisionHash}:{}),...(state.status!==undefined?{status:state.status}:{}),...(state.progress!==undefined?{progress:state.progress}:{})};
+ }
+ private pinnedReference(link:ProjectLink){
+  const current=this.reference({kind:link.kind,id:link.id,...(link.conclusionId?{conclusionId:link.conclusionId}:{})});
+  if(current.market!==link.market||current.instrument!==link.instrument)throw Error('固定引用的市场或标的身份发生变化，当前不可核验');return current;
+ }
+ referenceStates(projectId:string){
+  return this.read(projectId).links.map(link=>{try{const current=this.pinnedReference(link);return {linkId:link.linkId,kind:link.kind,id:link.id,pinnedHash:link.hash,current,changed:(current.revisionHash||current.hash)!==link.hash,dataStatus:current.expired?'unavailable':'historical',reason:current.expired?'已保存的来源状态过期；未更新原引用':'只读当前记录；进度变化不启动、暂停或修改任务'};}catch{return {linkId:link.linkId,kind:link.kind,id:link.id,pinnedHash:link.hash,current:null,changed:null,dataStatus:'unavailable',reason:'明确引用当前不可核验，未猜测配对或改写原引用'};}});
  }
  link(projectId:string,version:number,ref:ProjectReference) {
   return this.change(projectId,version,'linked',p=>{const state=this.reference(ref);if(ref.kind!=='project-conclusion'&&state.market!==p.market)throw Error('研究输入不得跨市场引用');if(ref.id===p.id)throw Error('项目不得引用自身结论');if(p.links.some(r=>r.kind===ref.kind&&r.id===ref.id&&r.conclusionId===ref.conclusionId&&r.hash===state.hash))throw Error('研究引用此版本已关联，不重复建立');if(p.links.length>=200)throw Error('项目引用已达上限');p.links.push({...ref,...state,linkId:randomUUID(),linkedAt:this.clock(),readOnly:true,inputEligible:ref.kind!=='project-conclusion'});});
  }
  conclude(projectId:string,version:number,input:{text:string;linkIds:string[]}) {
-  return this.change(projectId,version,'conclusion-added',p=>{const value=text(input?.text,'阶段结论');if(!Array.isArray(input.linkIds)||!input.linkIds.length||input.linkIds.length>50||new Set(input.linkIds).size!==input.linkIds.length)throw Error('结论必须选择1–50个明确引用');const refs=input.linkIds.map(key=>{const ref=p.links.find(r=>r.linkId===key);if(!ref)throw Error('结论引用未关联到本项目');const current=this.reference({kind:ref.kind,id:ref.id,...(ref.conclusionId?{conclusionId:ref.conclusionId}:{})});if(current.hash!==ref.hash||current.expired||current.revisionHash&&current.revisionHash!==ref.hash)throw Error('引用已修订或过期，请先复查并明确关联新的证据版本');return ref;});if(p.conclusions.length>=100)throw Error('阶段结论已达上限，未覆盖旧结论');p.conclusions.push({id:'conclusion_'+randomUUID(),text:value,at:this.clock(),references:structuredClone(refs)});});
+  return this.change(projectId,version,'conclusion-added',p=>{const value=text(input?.text,'阶段结论');if(!Array.isArray(input.linkIds)||!input.linkIds.length||input.linkIds.length>50||new Set(input.linkIds).size!==input.linkIds.length)throw Error('结论必须选择1–50个明确引用');const refs=input.linkIds.map(key=>{const ref=p.links.find(r=>r.linkId===key);if(!ref)throw Error('结论引用未关联到本项目');const current=this.pinnedReference(ref);if(current.hash!==ref.hash||current.expired||current.revisionHash&&current.revisionHash!==ref.hash)throw Error('引用已修订或过期，请先复查并明确关联新的证据版本');return ref;});if(p.conclusions.length>=100)throw Error('阶段结论已达上限，未覆盖旧结论');p.conclusions.push({id:'conclusion_'+randomUUID(),text:value,at:this.clock(),references:structuredClone(refs)});});
  }
  refresh(projectId:string,version:number) {
-  return this.change(projectId,version,'references-reviewed',p=>{for(const c of p.conclusions)for(const r of c.references){let current:ProjectReferenceState|null=null;try{current=this.reference({kind:r.kind,id:r.id,...(r.conclusionId?{conclusionId:r.conclusionId}:{})});}catch{/* Keep the pinned reference; absence is not evidence of no change. */}
+  return this.change(projectId,version,'references-reviewed',p=>{for(const c of p.conclusions)for(const r of c.references){let current:ProjectReferenceState|null=null;try{current=this.pinnedReference(r);}catch{/* Keep the pinned reference; absence is not evidence of no change. */}
    const currentHash=current?.revisionHash||current?.hash||null;
    const reason=!current?'引用缺失或来源状态不可用':current.expired?'来源证据已过期':currentHash!==r.hash?'引用存在内容变化或明确的后续目录修订，原结论未覆盖':null;if(!reason)continue;
    const reviewId='review_'+digest({conclusion:c.id,link:r.linkId,hash:currentHash,reason});if(p.reviews.some(t=>t.id===reviewId))continue;if(p.reviews.length>=300)throw Error('项目复查任务已达上限');p.reviews.push({id:reviewId,conclusionId:c.id,linkId:r.linkId,reason,previousHash:r.hash,currentHash,at:this.clock(),status:'open'});

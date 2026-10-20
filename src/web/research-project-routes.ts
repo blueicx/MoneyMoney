@@ -10,6 +10,7 @@ export function createResearchProjectRouter(store:ResearchProjectStore){
  router.get('/',(req,res)=>{try{const m=String(req.query.market||'');res.json({success:true,market:m,data:store.list(m,String(req.query.q||''))});}catch(e){fail(res,e);}});
  router.post('/',(req,res)=>{try{res.json(envelope(store.create(req.body)));}catch(e){fail(res,e);}});
  router.get('/:id',(req,res)=>{try{res.json(envelope(scoped(req)));}catch(e){fail(res,e);}});
+ router.get('/:id/references',(req,res)=>{try{const p=scoped(req),data=store.referenceStates(p.id);res.json({success:true,market:p.market,instrument:null,dataStatus:data.some(r=>r.dataStatus==='unavailable')?'partial':data.length?'historical':'empty',source:'现有记录的只读关联状态',updatedAt:new Date().toISOString(),reason:'仅检查明确 ID；不更新固定引用、不创建或执行任务',evidenceRefs:p.links.filter(r=>r.kind==='evidence').map(r=>r.id),data});}catch(e){fail(res,e);}});
  router.post('/:id/links',(req,res)=>{try{const p=scoped(req);res.json(envelope(store.link(p.id,req.body.version,req.body.reference)));}catch(e){fail(res,e);}});
  router.post('/:id/conclusions',(req,res)=>{try{const p=scoped(req);res.json(envelope(store.conclude(p.id,req.body.version,{text:req.body.text,linkIds:req.body.linkIds})));}catch(e){fail(res,e);}});
  router.post('/:id/reviews/refresh',(req,res)=>{try{const p=scoped(req);res.json(envelope(store.refresh(p.id,req.body.version)));}catch(e){fail(res,e);}});

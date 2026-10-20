@@ -3,10 +3,20 @@ require('ts-node/register/transpile-only');process.env.MONEYMONEY_DATA_DIR ||=fs
 const {SQLiteStateStore}=require('../src/storage/sqlite-state');
 function fixture(){const dir=fs.mkdtempSync(path.join(os.tmpdir(),'mm-projects-')),state=new SQLiteStateStore(path.join(dir,'state.sqlite'),dir),records=new Map([['evidence:e1',{market:'stocks',instrument:'stock:us:AAPL',hash:'a'.repeat(64),updatedAt:'2026-01-01T00:00:00Z'}],['experiment:x1',{market:'crypto',instrument:'crypto:binance:BTCUSDT',hash:'b'.repeat(64),updatedAt:'2026-01-01T00:00:00Z'}]]);let Store;try{Store=require('../src/features/research-projects').ResearchProjectStore;}catch(e){if(e.code!=='MODULE_NOT_FOUND')throw e;}assert.equal(typeof Store,'function','private projects must persist links instead of copying business records');return {state,records,store:new Store(state,ref=>records.get(`${ref.kind}:${ref.id}`)||null),close(){state.close();fs.rmSync(dir,{recursive:true,force:true});}};}
 const input={market:'stocks',title:'现金流变化研究',question:'披露变化是否影响收益？',hypothesis:'披露后超额收益提高',counterEvidence:'行业整体上涨',acceptance:'样本外与成本证据齐全'};
+test('project reference progress is read-only, bounded and does not overwrite pinned links or start tasks',()=>{const s=fixture();try{
+ s.records.set('task:task-one',{market:'stocks',hash:'f'.repeat(64),updatedAt:'2026-01-01T00:00:00Z',status:'running',progress:25});let p=s.store.create(input);p=s.store.link(p.id,p.version,{kind:'task',id:'task-one'});const pinned=JSON.stringify(p),version=p.version;
+ s.records.set('task:task-one',{...s.records.get('task:task-one'),hash:'e'.repeat(64),status:'succeeded',progress:100});const states=s.store.referenceStates(p.id);assert.equal(states[0].current.progress,100);assert.equal(states[0].changed,true);assert.equal(JSON.stringify(s.store.read(p.id)),pinned);assert.equal(s.store.read(p.id).version,version);
+ s.records.delete('task:task-one');assert.equal(s.store.referenceStates(p.id)[0].dataStatus,'unavailable');
+ }finally{s.close();}});
 test('private project survives restart, uses version guards and rejects mixed market references',()=>{const s=fixture();try{
  const p=s.store.create(input);assert.equal(p.version,1);assert.equal(p.market,'stocks');assert.throws(()=>s.store.create({...input,market:'all'}),/市场/);assert.throws(()=>s.store.link(p.id,1,{kind:'experiment',id:'x1'}),/市场/);assert.throws(()=>s.store.link(p.id,1,{kind:'evidence',id:'missing'}),/引用|不存在/);
  const linked=s.store.link(p.id,1,{kind:'evidence',id:'e1'});assert.equal(linked.links.length,1);assert.equal(linked.links[0].hash,'a'.repeat(64));assert.throws(()=>s.store.link(p.id,1,{kind:'evidence',id:'e1'}),/版本/);
  assert.equal(s.store.list('crypto').length,0);assert.equal(s.store.list('stocks','现金流').length,1);const {ResearchProjectStore}=require('../src/features/research-projects');const restored=new ResearchProjectStore(s.state,ref=>s.records.get(`${ref.kind}:${ref.id}`)||null).read(p.id);assert.equal(restored.links[0].id,'e1');assert.ok(!('fields' in restored.links[0]));
+ }finally{s.close();}});
+
+test('a pinned reference whose stored market changes is unavailable and cannot leak into a conclusion',()=>{const s=fixture();try{
+ let p=s.store.create(input);p=s.store.link(p.id,p.version,{kind:'evidence',id:'e1'});p=s.store.conclude(p.id,p.version,{text:'固定股票依据',linkIds:[p.links[0].linkId]});s.records.set('evidence:e1',{...s.records.get('evidence:e1'),market:'crypto',instrument:'crypto:binance:BTCUSDT'});
+ const result=s.store.referenceStates(p.id)[0];assert.equal(result.dataStatus,'unavailable');assert.equal(result.current,null,'do not disclose another market record through a stored stock link');assert.throws(()=>s.store.conclude(p.id,p.version,{text:'不得使用变更市场',linkIds:[p.links[0].linkId]}),/市场/);p=s.store.refresh(p.id,p.version);assert.equal(p.reviews[0].currentHash,null);assert.equal(p.conclusions[0].references[0].market,'stocks');
  }finally{s.close();}});
 test('explicitly linking a revised reference creates a new pinned version without rewriting prior conclusions',()=>{const s=fixture();try{
  let p=s.store.create(input);p=s.store.link(p.id,p.version,{kind:'evidence',id:'e1'});p=s.store.conclude(p.id,p.version,{text:'原结论',linkIds:[p.links[0].linkId]});const old=p.conclusions[0].references[0].hash;
@@ -34,6 +44,10 @@ test('project HTTP API denies guests, enforces market scope and serves private e
  assert.equal((await fetch(base+`/${pid}?market=crypto`,{headers})).status,400);const read=await fetch(base+`/${pid}?market=stocks`,{headers});assert.match(read.headers.get('cache-control'),/no-store/);assert.equal((await read.json()).data.id,pid);
  const wrong=await fetch(base+`/${pid}/links`,{method:'POST',headers,body:JSON.stringify({market:'stocks',version:0,reference:{kind:'evidence',id:'e1'}})});assert.equal(wrong.status,409);
  const linked=await fetch(base+`/${pid}/links`,{method:'POST',headers,body:JSON.stringify({market:'stocks',version:1,reference:{kind:'evidence',id:'e1'}})}).then(r=>r.json());assert.equal(linked.data.links.length,1);
+ const before=JSON.stringify(s.store.read(pid));
+ assert.equal((await fetch(base+`/${pid}/references?market=stocks`)).status,403);
+ assert.equal((await fetch(base+`/${pid}/references?market=crypto`,{headers})).status,400);
+ const referenceResponse=await fetch(base+`/${pid}/references?market=stocks`,{headers});assert.equal(referenceResponse.status,200);assert.match(referenceResponse.headers.get('cache-control'),/no-store/);const references=await referenceResponse.json();assert.equal(references.market,'stocks');assert.equal(references.data[0].id,'e1');assert.equal(references.data[0].current.hash,'a'.repeat(64));assert.equal(JSON.stringify(s.store.read(pid)),before,'GET progress must not mutate project or create review tasks');
  const report=await fetch(base+`/${pid}/export?market=stocks&format=markdown`,{headers});assert.match(await report.text(),/现金流变化研究/);assert.match(report.headers.get('cache-control'),/no-store/);assert.equal((await fetch(base+`/${pid}/export?market=stocks`,{headers:{'x-role':'guest'}})).status,403);
  const source=fs.readFileSync('src/web/server.ts','utf8');assert.ok(source.indexOf('registerApiAuthProtection(app);')<source.indexOf("app.use('/api/research/projects'"));
  }finally{if(server)await new Promise(r=>server.close(r));s.close();}});

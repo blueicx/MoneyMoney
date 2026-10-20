@@ -424,6 +424,8 @@ const researchProjects=new ResearchProjectStore(stateStore,createProjectReferenc
   partition:id=>dataLakeCatalog.listPartitions().find(row=>row.id===id)||null,experiment:id=>researchRepository.getExperiment(id),
   decision:id=>decisionIntelligenceStore.getDecision(id),signal:id=>decisionIntelligenceStore.getSignalOutcome(id),
   revisions:market=>dataLakeCatalog.listRevisions(market),partitions:()=>dataLakeCatalog.listPartitions(),
+  strategy:id=>{try{return strategyCandidateRegistry.get(id);}catch{return null;}},task:id=>researchRepository.getJob(id),
+  account:id=>{const account=unifiedPaperLedgerStore.getAccount(id);const runners=stateStore.get<import('../features/ai-paper-runner').AiRunner[]>('ai-paper-runners');if(!account||!('runnerId' in account)||!Array.isArray(runners))return null;const runner=runners.find(r=>r.id===account.runnerId&&r.accountId===id);return runner?{account,runner}:null;},
 }));
 app.use('/api/research/projects',createResearchProjectRouter(researchProjects));
 app.use('/api/chart/bookmarks',createChartBookmarkRouter({list:market=>decisionIntelligenceStore.listWorkspaces(market as MarketId|undefined),get:id=>decisionIntelligenceStore.getWorkspace(id),save:row=>stateStore.transaction(()=>{if(decisionIntelligenceStore.listWorkspaces().length>=200)throw Error('工作区容量已达上限，未删除旧记录');return decisionIntelligenceStore.saveWorkspace(row);}),base:()=>process.env.PUBLIC_WEB_BASE_URL||telegramPublicBaseUrl()}));
