@@ -25,11 +25,13 @@
   const data=bars.filter(b=>b.time+interval<=asOf&&b.closed!==false),observations=[],points=[];
   // Daily observations follow trading days; intraday gaps must restart warm-up.
   const starts=data.map((b,i)=>i===0?0:null);for(let i=1;i<data.length;i++)starts[i]=interval<86400000&&data[i].time-data[i-1].time!==interval?i:starts[i-1];
+  const rsiCache=new Map();
+  function rsiValues(period){if(rsiCache.has(period))return rsiCache.get(period);let gain=0,loss=0;const result=data.map((b,j)=>{const distance=j-starts[j];if(!distance){gain=0;loss=0;return null;}const diff=b.close-data[j-1].close,g=Math.max(0,diff),l=Math.max(0,-diff);if(distance<=period){gain+=g/period;loss+=l/period;}else{gain=(gain*(period-1)+g)/period;loss=(loss*(period-1)+l)/period;}return distance<period?null:gain===0&&loss===0?50:loss===0?100:100-100/(1+gain/loss);});rsiCache.set(period,result);return result;}
   function value(expr,index){
    if(Object.hasOwn(expr,'value'))return expr.value;const end=index-expr.lag;if(end<0)return null;
    if(!expr.indicator)return Number.isFinite(data[end]?.[expr.field])?data[end][expr.field]:null;
    if(expr.indicator==='sma'){if(end-starts[end]+1<expr.period)return null;let sum=0;for(let j=end-expr.period+1;j<=end;j++){const v=data[j]?.[expr.field];if(!Number.isFinite(v))return null;sum+=v;}return sum/expr.period;}
-   const start=starts[end];if(end-start<expr.period)return null;let gain=0,loss=0;for(let j=start+1;j<=end;j++){const diff=data[j].close-data[j-1].close,g=Math.max(0,diff),l=Math.max(0,-diff);if(j-start<=expr.period){gain+=g/expr.period;loss+=l/expr.period;}else{gain=(gain*(expr.period-1)+g)/expr.period;loss=(loss*(expr.period-1)+l)/expr.period;}}return gain===0&&loss===0?50:loss===0?100:100-100/(1+gain/loss);
+   return rsiValues(expr.period)[end];
   }
   function inspect(c,index){
    if(c.children){const children=c.children.map(v=>inspect(v,index));return {op:c.op,state:children.some(v=>v.state==='insufficient')?'insufficient':(c.op==='all'?children.every(v=>v.state==='met'):children.some(v=>v.state==='met'))?'met':'not-met',children,reason:children.some(v=>v.state==='insufficient')?'必要数据不足，禁止产生信号':null};}

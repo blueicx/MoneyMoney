@@ -38,3 +38,14 @@ test('RSI warms up again after gaps while daily trading observations may span we
  const r=engine().evaluate(d,gap,start+9*300000);assert.equal(r.observations[4].entry.state,'insufficient');assert.equal(r.observations[7].entry.state,'met');
  d.timeframe='1d';const daily=bars.map((b,i)=>({...b,time:start+(i+(i>=4?2:0))*86400000}));assert.equal(engine().evaluate(d,daily,start+11*86400000).observations[4].entry.state,'met');
 });
+
+test('long RSI previews read each candle a bounded number of times rather than re-running every prefix',()=>{
+ const d=definition();d.entry={op:'gt',left:{indicator:'rsi',field:'close',period:14,lag:0},right:{value:50}};let reads=0;
+ const long=Array.from({length:500},(_,i)=>({time:start+i*300000,open:20+i%7,high:30,low:10,get close(){reads++;return 20+i%7;},volume:100}));
+ const result=engine().evaluate(d,long,start+501*300000);assert.equal(result.observations.length,500);assert.ok(reads<500*50,`RSI should use a causal cached series, read count ${reads}`);
+});
+
+test('cached RSI retains exact Wilder values across periods, lags and gap warm-up',()=>{
+ const data=Array.from({length:120},(_,i)=>({time:start+(i+(i>=60?1:0))*300000,open:20+i%7,high:30,low:10,close:20+i%7,volume:100}));
+ for(const period of [3,14,21])for(const lag of [0,2]){const d=definition();d.entry={op:'gt',left:{indicator:'rsi',field:'close',period,lag},right:{value:50}};const result=engine().evaluate(d,data,start+122*300000);for(let i=0;i<data.length;i++){const end=i-lag,begin=end>=60?60:0;let expected=null;if(end-begin>=period){let gain=0,loss=0;for(let j=begin+1;j<=end;j++){const delta=data[j].close-data[j-1].close,g=Math.max(0,delta),l=Math.max(0,-delta);if(j-begin<=period){gain+=g/period;loss+=l/period;}else{gain=(gain*(period-1)+g)/period;loss=(loss*(period-1)+l)/period;}}expected=gain===0&&loss===0?50:loss===0?100:100-100/(1+gain/loss);}assert.equal(result.observations[i].entry.left,expected);}}
+});
