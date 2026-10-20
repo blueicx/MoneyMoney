@@ -37,6 +37,8 @@ import { createResearchCommitteeRouter } from './research-committee-routes';
 import { ResearchProjectStore } from '../features/research-projects';
 import { ResearchProjectReviewWorker } from '../features/research-project-review-worker';
 import { createResearchProjectRouter } from './research-project-routes';
+import { StrategyDefinitionStore } from '../features/strategy-definitions';
+import { createStrategyDefinitionRouter } from './strategy-definition-routes';
 import { createProjectReferenceResolver } from '../features/research-project-references';
 import { LiveKlineHub, liveKlineScope } from '../features/live-kline-stream';
 import { createLiveKlineRouter } from './live-kline-routes';
@@ -430,6 +432,7 @@ const researchProjects=new ResearchProjectStore(stateStore,createProjectReferenc
 }));
 const projectReviewWorker=new ResearchProjectReviewWorker(stateStore,researchProjects,Date.now,error=>logger.warn('local project reference review failed',{reason:error instanceof Error?error.message:'本地复查失败'}));
 app.use('/api/research/projects',createResearchProjectRouter(researchProjects,()=>projectReviewWorker.status()));
+app.use('/api/strategies/definitions',createStrategyDefinitionRouter(new StrategyDefinitionStore(stateStore),input=>dataLakeCatalog.queryBarsAsOf(input),(market,instrument)=>dataLakeCatalog.resolveInstrument(market,instrument)));
 app.use('/api/chart/bookmarks',createChartBookmarkRouter({list:market=>decisionIntelligenceStore.listWorkspaces(market as MarketId|undefined),get:id=>decisionIntelligenceStore.getWorkspace(id),save:row=>stateStore.transaction(()=>{if(decisionIntelligenceStore.listWorkspaces().length>=200)throw Error('工作区容量已达上限，未删除旧记录');return decisionIntelligenceStore.saveWorkspace(row);}),base:()=>process.env.PUBLIC_WEB_BASE_URL||telegramPublicBaseUrl()}));
 const researchBasisStore=new ResearchBasisStore(stateStore,scope=>{
   const market=scope.market as MarketId,ref=dataLakeCatalog.resolveInstrument(market,scope.instrument);
