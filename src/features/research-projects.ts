@@ -71,12 +71,22 @@ export class ResearchProjectStore {
  conclude(projectId:string,version:number,input:{text:string;linkIds:string[]}) {
   return this.change(projectId,version,'conclusion-added',p=>{const value=text(input?.text,'阶段结论');if(!Array.isArray(input.linkIds)||!input.linkIds.length||input.linkIds.length>50||new Set(input.linkIds).size!==input.linkIds.length)throw Error('结论必须选择1–50个明确引用');const refs=input.linkIds.map(key=>{const ref=p.links.find(r=>r.linkId===key);if(!ref)throw Error('结论引用未关联到本项目');const current=this.pinnedReference(ref);if(current.hash!==ref.hash||current.expired||current.revisionHash&&current.revisionHash!==ref.hash)throw Error('引用已修订或过期，请先复查并明确关联新的证据版本');return ref;});if(p.conclusions.length>=100)throw Error('阶段结论已达上限，未覆盖旧结论');p.conclusions.push({id:'conclusion_'+randomUUID(),text:value,at:this.clock(),references:structuredClone(refs)});});
  }
- refresh(projectId:string,version:number) {
-  return this.change(projectId,version,'references-reviewed',p=>{for(const c of p.conclusions)for(const r of c.references){let current:ProjectReferenceState|null=null;try{current=this.pinnedReference(r);}catch{/* Keep the pinned reference; absence is not evidence of no change. */}
+ private pendingReviews(p:ResearchProject,coalesceOpen=false){
+  const pending:Review[]=[],seen=new Set(p.reviews.map(r=>r.id)),resolved=new Map<string,ProjectReferenceState|null>();
+  for(const c of p.conclusions)for(const r of c.references){let current:ProjectReferenceState|null=null;
+   if(resolved.has(r.linkId))current=resolved.get(r.linkId)!;else{try{current=this.pinnedReference(r);}catch{/* Keep pinned history; an unavailable record is a review reason. */}resolved.set(r.linkId,current);}
    const currentHash=current?.revisionHash||current?.hash||null;
    const reason=!current?'引用缺失或来源状态不可用':current.expired?'来源证据已过期':currentHash!==r.hash?'引用存在内容变化或明确的后续目录修订，原结论未覆盖':null;if(!reason)continue;
-   const reviewId='review_'+digest({conclusion:c.id,link:r.linkId,hash:currentHash,reason});if(p.reviews.some(t=>t.id===reviewId))continue;if(p.reviews.length>=300)throw Error('项目复查任务已达上限');p.reviews.push({id:reviewId,conclusionId:c.id,linkId:r.linkId,reason,previousHash:r.hash,currentHash,at:this.clock(),status:'open'});
-  }});
+   if(coalesceOpen&&p.reviews.some(review=>review.status==='open'&&review.conclusionId===c.id&&review.linkId===r.linkId&&review.reason===reason))continue;
+   const reviewId='review_'+digest({conclusion:c.id,link:r.linkId,hash:currentHash,reason});if(seen.has(reviewId))continue;if(p.reviews.length+pending.length>=300)throw Error('项目复查任务已达上限');seen.add(reviewId);pending.push({id:reviewId,conclusionId:c.id,linkId:r.linkId,reason,previousHash:r.hash,currentHash,at:this.clock(),status:'open'});
+  }
+  return pending;
+ }
+ refresh(projectId:string,version:number) {
+  return this.change(projectId,version,'references-reviewed',p=>{p.reviews.push(...this.pendingReviews(p));});
+ }
+ refreshAffected(projectId:string){
+  return this.store.transaction(()=>{const current=this.read(projectId),pending=this.pendingReviews(current,true);if(!pending.length)return {project:current,added:0};const project=this.change(projectId,current.version,'local-revision-review',p=>{p.reviews.push(...pending);});return {project,added:pending.length};});
  }
  resolveReview(projectId:string,version:number,reviewId:string,note:string) {
   const resolution=text(note,'人工复查说明',2000);return this.change(projectId,version,'review-resolved',p=>{const row=p.reviews.find(r=>r.id===reviewId);if(!row||row.status!=='open')throw Error('复查任务不存在或已处理');row.status='resolved';row.resolution=resolution;row.resolvedAt=this.clock();});

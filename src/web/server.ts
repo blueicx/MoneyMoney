@@ -35,6 +35,7 @@ import { previewPortfolioRiskBudget } from '../features/portfolio-risk-budget';
 import { ResearchCommittee } from '../features/research-committee';
 import { createResearchCommitteeRouter } from './research-committee-routes';
 import { ResearchProjectStore } from '../features/research-projects';
+import { ResearchProjectReviewWorker } from '../features/research-project-review-worker';
 import { createResearchProjectRouter } from './research-project-routes';
 import { createProjectReferenceResolver } from '../features/research-project-references';
 import { LiveKlineHub, liveKlineScope } from '../features/live-kline-stream';
@@ -427,7 +428,8 @@ const researchProjects=new ResearchProjectStore(stateStore,createProjectReferenc
   strategy:id=>{try{return strategyCandidateRegistry.get(id);}catch{return null;}},task:id=>researchRepository.getJob(id),
   account:id=>{const account=unifiedPaperLedgerStore.getAccount(id);const runners=stateStore.get<import('../features/ai-paper-runner').AiRunner[]>('ai-paper-runners');if(!account||!('runnerId' in account)||!Array.isArray(runners))return null;const runner=runners.find(r=>r.id===account.runnerId&&r.accountId===id);return runner?{account,runner}:null;},
 }));
-app.use('/api/research/projects',createResearchProjectRouter(researchProjects));
+const projectReviewWorker=new ResearchProjectReviewWorker(stateStore,researchProjects,Date.now,error=>logger.warn('local project reference review failed',{reason:error instanceof Error?error.message:'本地复查失败'}));
+app.use('/api/research/projects',createResearchProjectRouter(researchProjects,()=>projectReviewWorker.status()));
 app.use('/api/chart/bookmarks',createChartBookmarkRouter({list:market=>decisionIntelligenceStore.listWorkspaces(market as MarketId|undefined),get:id=>decisionIntelligenceStore.getWorkspace(id),save:row=>stateStore.transaction(()=>{if(decisionIntelligenceStore.listWorkspaces().length>=200)throw Error('工作区容量已达上限，未删除旧记录');return decisionIntelligenceStore.saveWorkspace(row);}),base:()=>process.env.PUBLIC_WEB_BASE_URL||telegramPublicBaseUrl()}));
 const researchBasisStore=new ResearchBasisStore(stateStore,scope=>{
   const market=scope.market as MarketId,ref=dataLakeCatalog.resolveInstrument(market,scope.instrument);
@@ -11019,6 +11021,7 @@ async function main() {
 
   const PORT = config.appPort;
   const server = app.listen(PORT, config.appHost, () => {
+    projectReviewWorker.start();
     console.log(`  ╔══════════════════════════════════════════════╗`);
 
     console.log(`  ║  💰 MONEYMONEY TRADING DASHBOARD                   ║`);
@@ -11069,6 +11072,7 @@ async function main() {
     shuttingDown = true;
     console.log('\n  Shutting down...');
     liveKlineHub.close();
+    projectReviewWorker.stop();
     stopTelegramCommandCenterMonitor();
     stopUnifiedAlertMonitor();
     stopCoverageCanaryMonitor();
