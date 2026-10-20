@@ -25,3 +25,12 @@
 本地构建、Web/认证/四市场/实时图表/专业研究/合约/研究深度七类冒烟均已有通过结果；研究深度连续三次重跑通过。数据资产/项目/构建器专用浏览器通过（mm-assets-browser-wE6BjQ）；安全扫描941个跟踪文件、差异检查通过。干净导出及生产验收完成后追加发布凭据。
 
 受限策略的历史成交实验、前向模拟和候选晋级仍未接线，其他平台批次继续按执行账本保留未完成状态。整页冷加载改善至少20%尚未证实，不以解释器CPU优化或局部绘图测试替代。
+
+## 2026-10-21 发布核验
+
+- 提交00a47c3c0744dee89ca049f041d0df41543d2d0d已推送并部署。干净导出moneymoney-chart-clean-00a47c3-20261020重建及七类冒烟、专用数据资产/项目/构建器浏览器全部通过；研究深度本次通过。专用研究截图mm-assets-browser-1h4ooB，实时图表截图mm-live-kline-4lNJ0j。
+- 正式域名有效TLS、版本、29个静态资源SHA256及immutable缓存通过；未登录私人策略目录返回401。生产只读Chromium通过四市场、SNDK及手机布局，报告moneymoney-canary-1792516878968/production-canary-report.json，未发送Telegram消息。
+- 发布归档SHA256：b6cf63e03c950905f6d763efa724df562615a8892a0d7862b521f8c95ca1db26。
+- server.js SHA256：425f239b90067b4e4f1837399a0462b1cb4cfde1ccec9c30759c1c2577a05c13；index.html SHA256：05c64b9f075bd702d2d13ef443d0f6683a69306a344d2f3873a71ead70194e08，部署脚本已核对远端一致。
+- 备份/opt/moneymoney/backups/dist-pre-00a47c3-20261021-chart；回滚/opt/moneymoney/dist.rollback-00a47c3-20261021-chart保留17c0ca1。仅操作moneymoney.service；启动前两次健康连接尚未就绪，重试后alive，未触发回滚。
+- 10个跑单配置指纹前后均5125162b35c9893e4a9ac7d11c40eeaca7297bd95d7434d6bec70712aa144181；用户data/research.db仍为27fd475e523568daa4cdcabf3146917023335a62affe00429babd721b3b79fd1，未纳入提交；没有清理数据库、数据湖、scratch或用户文件。
