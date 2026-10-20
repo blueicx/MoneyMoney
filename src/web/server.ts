@@ -34,6 +34,9 @@ import { reviewAiRunnerDecisions, diagnosticRunnerMarket } from '../features/ai-
 import { previewPortfolioRiskBudget } from '../features/portfolio-risk-budget';
 import { ResearchCommittee } from '../features/research-committee';
 import { createResearchCommitteeRouter } from './research-committee-routes';
+import { ResearchProjectStore } from '../features/research-projects';
+import { createResearchProjectRouter } from './research-project-routes';
+import { createProjectReferenceResolver } from '../features/research-project-references';
 import { LiveKlineHub, liveKlineScope } from '../features/live-kline-stream';
 import { createLiveKlineRouter } from './live-kline-routes';
 
@@ -167,6 +170,8 @@ import { testNotificationChannels } from '../features/notification-channels';
 import { runResearchExperiment, rerunSavedExperiment } from '../features/experiment-runner';
 import { createResearchRevisionRouter } from './research-revision-routes';
 import { createResearchBasisRouter } from './research-basis-routes';
+import { createDataAssetRouter } from './data-asset-routes';
+import { DataAssetService } from '../features/data-assets';
 import { ResearchBasisStore } from '../features/research-basis';
 import { createChartBookmarkRouter } from './chart-bookmark-routes';
 import { chartBookmarkLink, readChartBookmark } from '../features/chart-bookmarks';
@@ -413,6 +418,14 @@ app.get('/login', (req, res) => {
 });
 registerAuthRoutes(app);
 registerApiAuthProtection(app);
+app.use('/api/data',createDataAssetRouter(new DataAssetService(dataLakeCatalog,stateStore,dataLakeWorker)));
+const researchProjects=new ResearchProjectStore(stateStore,createProjectReferenceResolver({
+  evidence:id=>decisionIntelligenceStore.getEvidence(id),verifyEvidence:verifyEvidenceSnapshotHash,
+  partition:id=>dataLakeCatalog.listPartitions().find(row=>row.id===id)||null,experiment:id=>researchRepository.getExperiment(id),
+  decision:id=>decisionIntelligenceStore.getDecision(id),signal:id=>decisionIntelligenceStore.getSignalOutcome(id),
+  revisions:market=>dataLakeCatalog.listRevisions(market),partitions:()=>dataLakeCatalog.listPartitions(),
+}));
+app.use('/api/research/projects',createResearchProjectRouter(researchProjects));
 app.use('/api/chart/bookmarks',createChartBookmarkRouter({list:market=>decisionIntelligenceStore.listWorkspaces(market as MarketId|undefined),get:id=>decisionIntelligenceStore.getWorkspace(id),save:row=>stateStore.transaction(()=>{if(decisionIntelligenceStore.listWorkspaces().length>=200)throw Error('工作区容量已达上限，未删除旧记录');return decisionIntelligenceStore.saveWorkspace(row);}),base:()=>process.env.PUBLIC_WEB_BASE_URL||telegramPublicBaseUrl()}));
 const researchBasisStore=new ResearchBasisStore(stateStore,scope=>{
   const market=scope.market as MarketId,ref=dataLakeCatalog.resolveInstrument(market,scope.instrument);
@@ -424,6 +437,7 @@ app.use('/api/research/basis',createResearchBasisRouter(researchBasisStore,scope
   return ref?.id===scope.instrument?dataLakeCatalog.listDiscrepancies(market,ref.symbol).filter(row=>row.timeframe===scope.timeframe).slice(0,200):[];
 }));
 app.use('/api/workspace/records/search',createWorkspaceRecordSearchRouter({
+  projects:market=>researchProjects.list(market),
   experiments:()=>researchRepository.listExperiments(200).map(row=>row.experiment).filter(Boolean).map(row=>({id:row.id,market:row.market,instrument:row.instrument||'',strategyVersion:row.strategyVersion,updatedAt:row.createdAt})),
   orders:()=>unifiedPaperLedgerStore.get().orders.slice(-200).map(row=>({id:row.id||'',market:({stock:'stocks',option:'options',crypto:'crypto',prediction:'prediction'} as Record<string,string>)[row.instrumentType]||'',instrument:row.instrumentId,strategyVersion:row.strategyVersion,updatedAt:row.timestamp})),
 }));

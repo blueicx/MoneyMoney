@@ -1,0 +1,15 @@
+const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),{JSDOM}=require('jsdom');
+test('embedded projects are manual private workflows and preserve explicit references without starting experiments',async()=>{
+ const dom=new JSDOM('<div id="market-workspace-shell" data-market-scope="stocks" data-workspace="research-lab" data-instrument="stock:us:AAPL"></div><section id="mm-research-lab"></section>',{url:'http://localhost/',runScripts:'outside-only',pretendToBeVisual:true});
+ try{assert.ok(fs.existsSync('src/web/public/research-projects-workspace.js'),'embedded project UI missing');const w=dom.window,calls=[];w.mm_isLoggedIn=true;w.mm_isGuest=false;
+ let p={id:'project_saved',market:'stocks',title:'<研究>',question:'研究问题',hypothesis:'假设',counterEvidence:'反证',acceptance:'验收',version:1,links:[],conclusions:[],reviews:[],timeline:[]};
+ w.fetch=async(url,options={})=>{calls.push([url,options]);if(options.method==='POST'&&url.endsWith('/links')){p={...p,version:2,links:[{linkId:'l1',kind:'evidence',id:'e1',hash:'a'.repeat(64),updatedAt:'2026-01-01',market:'stocks'}]};}return {ok:true,json:async()=>({success:true,data:url.includes('?market=stocks')&&!url.includes('project_saved')?[p]:p})};};
+ w.eval(fs.readFileSync('src/web/public/research-projects-workspace.js','utf8'));w.document.dispatchEvent(new w.Event('DOMContentLoaded'));const root=w.document.querySelector('[data-research-projects]');assert.ok(root);assert.equal(calls.length,0);assert.equal(root.open,false);
+ assert.equal(typeof w.MoneyResearchProjects?.open,'function','lazy project panel needs an explicit command-search destination');
+ assert.equal(await w.MoneyResearchProjects.open({market:'crypto',id:'project_saved'}),false);assert.equal(calls.length,0);
+ await root.querySelector('[data-project-list]').onclick();assert.equal(calls.length,1);await w.MoneyResearchProjects.open({market:'stocks',id:'project_saved'});assert.equal(root.open,true);assert.match(root.textContent,/<研究>/);assert.equal(root.querySelector('研究'),null);assert.ok(root.querySelector('[name=referenceKind] option[value=event]'));
+ root.querySelector('[name=referenceId]').value='e1';await root.querySelector('[data-project-link]').onclick();assert.match(root.textContent,/e1/);assert.equal(calls.length,3);assert.ok(calls.every(([url])=>url.startsWith('/api/research/projects')));
+ let release;w.fetch=()=>new Promise(r=>release=r);const pending=root.querySelector('[data-project-list]').onclick();w.document.getElementById('market-workspace-shell').dataset.marketScope='crypto';w.dispatchEvent(new w.Event('mm-workspace-context'));release({ok:true,json:async()=>({success:true,data:[p]})});await pending;assert.doesNotMatch(root.querySelector('[data-project-results]').textContent,/<研究>/);
+ w.document.getElementById('market-workspace-shell').dataset.workspace='stock-quotes';w.dispatchEvent(new w.Event('mm-workspace-context'));assert.equal(root.hidden,true);assert.equal(root.querySelector('[data-project-detail]').textContent,'');
+ }finally{await new Promise(r=>setTimeout(r,0));dom.window.close();}
+});

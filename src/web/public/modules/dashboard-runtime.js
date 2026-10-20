@@ -10525,7 +10525,7 @@ async function runGlobalSearchNow() {
   }
   const searchScope = activeMarketScope === 'watchlist' ? 'overview' : activeMarketScope;
   const searchKey = `${searchScope}:${query.toLowerCase()}`;
-  const privateMatch=query.match(/^(?:实验|订单|记录|#)\s*(.+)$/),privateAllowed=window.mm_isLoggedIn===true&&window.mm_isGuest!==true&&['stocks','options','crypto','prediction'].includes(searchScope);
+  const privateMatch=query.match(/^(?:项目|实验|订单|记录|#)\s*(.+)$/),privateAllowed=window.mm_isLoggedIn===true&&window.mm_isGuest!==true&&['stocks','options','crypto','prediction'].includes(searchScope);
   const privatePromise=privateMatch&&privateAllowed?fetch('/api/workspace/records/search?'+new URLSearchParams({market:searchScope,q:privateMatch[1]}),{signal,cache:'no-store'}).then(response=>response.json()).catch(()=>({success:false,reason:'私人记录查询失败或已取消'})):Promise.resolve(null);
   const cached = globalSearchState.cache.get(searchKey);
   const unifiedPromise = privateMatch?Promise.resolve(null):cached?.unified ? Promise.resolve(cached.unified)
@@ -10556,8 +10556,16 @@ async function runGlobalSearchNow() {
   }));
   renderGlobalSearchResults([
     { label: '功能与页面', items: localGlobalSearch(query).map(item => ({ ...item, badge: item.kind === 'page' ? '页面' : '功能' })) },
-    { label: privateBody?.success?'私人保存记录（非实时）':privateMatch?'私人查询：'+(privateBody?.reason||'需管理员登录并选择一个市场'):'',items:(privateBody?.success&&Array.isArray(privateBody.data)?privateBody.data:[]).map(row=>({kind:'record',title:row.id,badge:row.kind==='experiment'?'实验':'模拟订单',sub:row.instrument+' · '+(row.status||row.strategyVersion||'未关联'),action:()=>{
+    { label: privateBody?.success?'私人保存记录（非实时）':privateMatch?'私人查询：'+(privateBody?.reason||'需管理员登录并选择一个市场'):'',items:(privateBody?.success&&Array.isArray(privateBody.data)?privateBody.data:[]).map(row=>({kind:'record',title:row.kind==='project'?row.title:row.id,badge:row.kind==='project'?'研究项目':row.kind==='experiment'?'实验':'模拟订单',sub:(row.instrument||row.market)+' · '+(row.status||row.strategyVersion||'未关联'),action:()=>{
       if(window.mm_isGuest||!window.mm_isLoggedIn)return;
+      if(row.kind==='project'){
+        setMarketScope(row.market,{openTab:false});window.openWorkspace('research-lab');
+        window.MoneyWorkspaceModules?.ensure('research').then(()=>{
+          if(activeMarketScope!==row.market||activeWorkspaceId!=='research-lab')return;
+          return window.MoneyResearchProjects?.open({market:row.market,id:row.id});
+        }).catch(()=>window.showToast?.('项目详情加载失败，请在研究工作区重试','error'));
+        return;
+      }
       setMarketScope(row.market,{openTab:false});setWorkspaceInstrument(row.instrument);window.openWorkspace(row.kind==='experiment'?'research-lab':'orders');
       window.MoneyMoneyExperience?.createModal('保存记录摘要','<p>'+globalSearchEscape(row.id)+'</p><p>'+globalSearchEscape(row.instrument)+' · '+globalSearchEscape(row.status||'状态未提供')+'</p><p>策略版本 '+globalSearchEscape(row.strategyVersion||'未关联')+' · 记录时间 '+globalSearchEscape(row.updatedAt||'未知')+'</p><p>仅保存记录摘要；没有修改实验、账户或订单。使用当前工作区查看对应详情。</p>');
     }})) },

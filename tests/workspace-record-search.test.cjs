@@ -1,4 +1,13 @@
 const test=require('node:test'),assert=require('node:assert/strict');require('ts-node/register/transpile-only');
+
+test('private command search includes single-market project summaries without leaking hypotheses or requiring an instrument',async()=>{
+ const express=require('express'),{createWorkspaceRecordSearchRouter}=require('../src/web/workspace-record-search-routes');let reads=0;
+ const app=express();app.use((req,res,next)=>{req.user={role:req.headers['x-owner']==='yes'?'admin':'guest'};next();});
+ app.use(createWorkspaceRecordSearchRouter({experiments:()=>[],orders:()=>[],projects:market=>{reads++;assert.equal(market,'stocks');return [{id:'project_one',market:'stocks',title:'Capital revision project',updatedAt:'2026-01-01',question:'private hypothesis',budget:1000},{id:'project_other',market:'crypto',title:'Capital revision project'}];}}));
+ const server=app.listen(0,'127.0.0.1');await new Promise(r=>server.once('listening',r));const base='http://127.0.0.1:'+server.address().port;
+ try{assert.equal((await fetch(base+'?market=stocks&q=capital')).status,403);assert.equal(reads,0);const r=await fetch(base+'?market=stocks&q=capital',{headers:{'x-owner':'yes'}}),body=await r.json();assert.equal(body.data.length,1);assert.equal(body.data[0].kind,'project');assert.equal(body.data[0].title,'Capital revision project');assert.equal(body.data[0].instrument,null);assert.doesNotMatch(JSON.stringify(body),/private hypothesis|budget|project_other/);assert.match(r.headers.get('cache-control'),/no-store/);
+ }finally{await new Promise(r=>server.close(r));}
+});
 test('command search includes registered current workspaces and removes private destinations for guests',()=>{
  const source=require('./helpers/dashboard-source.cjs').readDashboardSource(),fn=source.match(/function globalSearchCommands\(\) \{[\s\S]*?\n\}/)[0],vm=require('node:vm');
  const context={window:{mm_isGuest:true,mm_isLoggedIn:true},activeMarketScope:'stocks',workspaceNavigationState:new Map(),workspaceFallbackNavigation:()=>[{items:[{id:'guru-holdings',label:'大神持仓'},{id:'paper',label:'模拟盘',requiresAdmin:true}]}]};

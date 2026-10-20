@@ -1,6 +1,7 @@
 import { createBinanceKlineAdapter, CRYPTO_KLINE_PERIODS, type CryptoKlineBar } from '../data/binance-kline-adapter';
 import { createYahooStockHistoryAdapter, createYahooStockKlineAdapter, normalizeYahooSymbol, STOCK_KLINE_PERIODS, type StockKlineBar, type YahooCorporateAction, type YahooStockHistory } from '../data/yahoo-adapter';
 import type { DataSourceAdapter } from '../data/source-adapter';
+import { randomUUID } from 'node:crypto';
 import { dataLakeCatalog, type BarRow, type DataBackfillJob, type DataLakeCatalog } from './data-lake';
 
 type BackfillBar = StockKlineBar | CryptoKlineBar;
@@ -46,6 +47,10 @@ export class DataLakeBackfillWorker {
   private readonly workerId: string;
   private readonly leaseMs: number;
 
+  capabilities() {
+    return this.providers.map(provider => ({ id: provider.id, market: provider.market, datasets: [...provider.datasets], timeframes: [...(provider.timeframes || [])] }));
+  }
+
   constructor(private readonly catalog: DataLakeCatalog, adapterOrOptions?: KlineAdapterFactory | DataLakeBackfillWorkerOptions) {
     if (typeof adapterOrOptions === 'function') {
       this.legacyAdapterFactory = adapterOrOptions;
@@ -75,7 +80,8 @@ export class DataLakeBackfillWorker {
     this.active = true;
     let job: DataBackfillJob | null;
     try {
-      job = this.catalog.claimNextBackfill(this.workerId, this.leaseMs);
+      this.catalog.recoverStaleBackfills();
+      job = this.catalog.claimNextBackfill(`${this.workerId}:${randomUUID()}`, this.leaseMs);
     } catch (error) {
       this.active = false;
       throw error;
@@ -84,17 +90,25 @@ export class DataLakeBackfillWorker {
       this.active = false;
       return null;
     }
+    let heartbeatFailed=false;
+    const heartbeat = setInterval(() => { try { if(!this.catalog.heartbeatBackfill(job!.id, job!.leaseOwner!, undefined, this.leaseMs))heartbeatFailed=true; } catch { heartbeatFailed=true; } }, Math.max(250, Math.floor(this.leaseMs / 3)));
+    heartbeat.unref();
     try {
-      await this.execute(job);
+      await this.execute(job,()=>!heartbeatFailed);
       return this.catalog.getBackfill(job.id);
     } catch (error: any) {
-      return this.catalog.updateBackfill(job.id, 'failed', error?.message || '数据回补失败', this.workerId);
+      return this.catalog.updateBackfill(job.id, 'failed', error?.message || '数据回补失败', job.leaseOwner);
     } finally {
+      clearInterval(heartbeat);
       this.active = false;
     }
   }
 
-  private async execute(job: DataBackfillJob): Promise<void> {
+  private async execute(job: DataBackfillJob, heartbeatValid=()=>true): Promise<void> {
+    const canPublish = () => {
+      const current = this.catalog.getBackfill(job.id);
+      return heartbeatValid() && !!current && current.status === 'running' && current.leaseOwner === job.leaseOwner && Date.parse(current.leaseExpiresAt || '') > Date.now();
+    };
     let provider: DataLakeBackfillProvider | undefined;
     let adapter: DataSourceAdapter<BackfillBar[] | YahooStockHistory>;
     if (this.legacyAdapterFactory) {
@@ -109,7 +123,10 @@ export class DataLakeBackfillWorker {
     }
     const from = Date.parse(job.from);
     const to = Date.parse(job.to);
-    const snapshot = await adapter.fetch({ symbol: job.instrument, period: job.timeframe });
+    const inRange=(time:number)=>time>=from&&(job.id.startsWith('backfill_plan_')?time<to:time<=to);
+    const aggregateDays = job.market === 'stocks' ? STOCK_KLINE_PERIODS[job.timeframe]?.aggregateDays : undefined;
+    const snapshot = await adapter.fetch({ symbol: job.instrument, period: job.timeframe, ...(!aggregateDays ? { startTime: from, endTime: to, ...(job.market==='crypto'?{limit:1000}:{}) } : {}) });
+    if (!canPublish()) throw new Error('任务已暂停、取消或租约已失效');
     const historyData = snapshot.data && !Array.isArray(snapshot.data) ? snapshot.data as YahooStockHistory : null;
     const sourceBars = Array.isArray(snapshot.data) ? snapshot.data as BackfillBar[] : historyData?.bars || [];
     const corporateActions = (historyData?.corporateActions || []) as YahooCorporateAction[];
@@ -126,9 +143,9 @@ export class DataLakeBackfillWorker {
     }
     const actionsToPersist = corporateActions.filter(action => {
       const effectiveAt = Date.parse(action.effectiveAt);
-      return effectiveAt >= from && effectiveAt <= to;
+      return inRange(effectiveAt);
     }).map(action => ({ ...action, instrument: job.instrument }));
-    const bars = sourceBars.filter(isFiniteBar).filter(bar => bar.time >= from && bar.time <= to);
+    const bars = sourceBars.filter(isFiniteBar).filter(bar => inRange(bar.time));
     if (!bars.length) throw new Error('来源未返回指定区间内的历史K线');
     const groups = new Map<string, BarRow[]>();
     for (const bar of bars) {
@@ -139,19 +156,22 @@ export class DataLakeBackfillWorker {
       groups.set(key, rows);
     }
     const source = snapshot.status === 'live' ? snapshot.source : `${snapshot.source}:${snapshot.status}`;
-    let rowCount = 0;
-    let partitionsCommitted = 0;
+    let rowCount = job.checkpoint.rowsWritten;
+    let partitionsCommitted = job.checkpoint.partitionsCommitted;
     for (const rows of groups.values()) {
-      await this.catalog.stageBars({ market: job.market, dataset: job.dataset, instrument: job.instrument, timeframe: job.timeframe, source, publishedAt: snapshot.fetchedAt, timezone: 'UTC', adjustment: historyData?.adjustment, units: { timestamp: 'UTC', price: 'native', volume: 'native' }, rows });
+      if (job.checkpoint.cursor && Date.parse(rows[rows.length - 1].timestamp) <= Date.parse(job.checkpoint.cursor)) continue;
+      await this.catalog.stageBars({ market: job.market, dataset: job.dataset, instrument: job.instrument, timeframe: job.timeframe, source, publishedAt: snapshot.fetchedAt, timezone: 'UTC', adjustment: historyData?.adjustment, units: { timestamp: 'UTC', price: 'native', volume: 'native' }, rows }, canPublish,()=>{
+        const checkpoint = this.catalog.heartbeatBackfill(job.id, job.leaseOwner!, { cursor: rows[rows.length - 1]?.timestamp, rowsWritten: rowCount+rows.length, partitionsCommitted:partitionsCommitted+1 }, this.leaseMs);
+        if (!checkpoint) throw new Error('回补任务租约已失效，请重新排队后重试');
+      });
       rowCount += rows.length;
       partitionsCommitted += 1;
-      const checkpoint = this.catalog.heartbeatBackfill(job.id, this.workerId, { cursor: rows[rows.length - 1]?.timestamp, rowsWritten: rowCount, partitionsCommitted });
-      if (!checkpoint) throw new Error('回补任务租约已失效，请重新排队后重试');
     }
     for (const action of actionsToPersist) {
+      if (!canPublish()) throw new Error('任务已暂停、取消或租约失效，未保存公司行动');
       this.catalog.saveCorporateAction({ ...action, observedAt: snapshot.fetchedAt });
     }
-    this.catalog.updateBackfill(job.id, 'succeeded', `已写入 ${groups.size} 个 Parquet 分区，共 ${rowCount} 根K线，来源 ${source}`, this.workerId);
+    this.catalog.updateBackfill(job.id, 'succeeded', `累计写入 ${partitionsCommitted} 个 Parquet 分区，共 ${rowCount} 根K线，来源 ${source}`, job.leaseOwner);
   }
 
   start(intervalMs = 5000): void {

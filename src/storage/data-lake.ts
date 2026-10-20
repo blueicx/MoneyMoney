@@ -18,7 +18,7 @@ export interface CorporateAction { id: string; market: 'stocks'; instrument: str
 export interface ProviderContract { id: string; provider: string; market: MarketId; datasets: string[]; timezone: string; units: Record<string, string>; revisionPolicy: 'point-in-time' | 'latest'; }
 export interface DataQualityReport { valid: boolean; rowCount: number; duplicateTimestamps: number; outOfOrderRows: number; missingFields: string[]; futureRows: number; errors: string[]; checkedAt: string; }
 export interface BackfillCheckpoint { cursor?: string; rowsWritten: number; partitionsCommitted: number; }
-export interface DataBackfillJob { id: string; market: MarketId; dataset: string; instrument: string; timeframe: string; from: string; to: string; status: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled'; reason?: string; createdAt: string; updatedAt: string; leaseOwner?: string; leaseExpiresAt?: string; checkpoint: BackfillCheckpoint; }
+export interface DataBackfillJob { id: string; market: MarketId; dataset: string; instrument: string; timeframe: string; from: string; to: string; status: 'queued' | 'running' | 'paused' | 'succeeded' | 'failed' | 'cancelled'; reason?: string; createdAt: string; updatedAt: string; leaseOwner?: string; leaseExpiresAt?: string; checkpoint: BackfillCheckpoint; }
 export interface BarRow { timestamp: string; open: number; high: number; low: number; close: number; volume?: number; publishedAt?: string; }
 export interface DataLakeDiagnostics {
   filesystem?:ReturnType<typeof inspectStorageCapacity>;
@@ -288,7 +288,8 @@ export class DataLakeCatalog {
     } finally { connection.closeSync(); instance.closeSync(); }
   }
 
-  async stageBars(input: { market: MarketId; dataset: string; instrument: string; timeframe: string; source: string; publishedAt: string; rows: BarRow[]; fieldVersion?: string; timezone?: string; adjustment?: string; units?: Record<string, string> }): Promise<DatasetPartition & { quality: DataQualityReport }> {
+  async stageBars(input: { market: MarketId; dataset: string; instrument: string; timeframe: string; source: string; publishedAt: string; rows: BarRow[]; fieldVersion?: string; timezone?: string; adjustment?: string; units?: Record<string, string> }, canPublish?: () => boolean, onPublished?: () => void): Promise<DatasetPartition & { quality: DataQualityReport }> {
+    if (canPublish && !canPublish()) throw new Error('任务已暂停、取消或租约失效，禁止发布');
     if (!MARKET_IDS.includes(input.market)) throw new Error('invalid market');
     validateInstrument(input.market, input.instrument);
     this.resolveInstrument(input.market, input.instrument);
@@ -318,7 +319,10 @@ export class DataLakeCatalog {
     const finalPath = path.join(this.lakeRoot, relative);
     const stagePath = path.join(this.lakeRoot, '.staging', `${contentHash}.parquet.tmp`);
     ensureDir(path.dirname(finalPath));
-    if (fs.existsSync(finalPath)) return { id: partitionId, manifestId, path: finalPath, dataset: input.dataset, market: input.market, instrument: input.instrument, timeframe: input.timeframe, periodStart: new Date(first).toISOString(), periodEnd: new Date(last).toISOString(), publishedAt: new Date(publishedAt).toISOString(), fetchedAt: new Date().toISOString(), rowCount: input.rows.length, status: 'committed', contentHash, quality };
+    if (fs.existsSync(finalPath) && this.db.prepare('SELECT id FROM dataset_partitions WHERE id = ? AND status = ?').get(partitionId,'committed')) {
+      this.db.transaction(()=>{if(canPublish && !canPublish())throw Error('任务已暂停、取消或租约失效，禁止发布');onPublished?.();})();
+      return { id: partitionId, manifestId, path: finalPath, dataset: input.dataset, market: input.market, instrument: input.instrument, timeframe: input.timeframe, periodStart: new Date(first).toISOString(), periodEnd: new Date(last).toISOString(), publishedAt: new Date(publishedAt).toISOString(), fetchedAt: new Date().toISOString(), rowCount: input.rows.length, status: 'committed', contentHash, quality };
+    }
 
     assertStorageCapacity(this.lakeRoot,Math.max(1024*1024,input.rows.length*512));
     const budget=this.getDiagnostics();
@@ -337,16 +341,18 @@ export class DataLakeCatalog {
       appender.closeSync();
       await connection.run(`COPY bars TO '${sqlPath(stagePath)}' (FORMAT PARQUET, COMPRESSION ZSTD)`);
     } finally { connection.closeSync(); instance.closeSync(); }
-    fs.renameSync(stagePath, finalPath);
     const manifest: DatasetManifest = { id: manifestId, dataset: input.dataset, market: input.market, source: input.source, fieldVersion: input.fieldVersion || 'bars-v1', timezone: input.timezone || 'UTC', adjustment, createdAt: new Date().toISOString(), contentHash };
     const partition: DatasetPartition = { id: partitionId, manifestId, path: finalPath, dataset: input.dataset, market: input.market, instrument: input.instrument, timeframe: input.timeframe, periodStart: new Date(first).toISOString(), periodEnd: new Date(last).toISOString(), publishedAt: new Date(publishedAt).toISOString(), fetchedAt: manifest.createdAt, rowCount: input.rows.length, status: 'committed', contentHash };
     const previous = this.db.prepare('SELECT id FROM data_revisions WHERE market = ? AND dataset = ? AND instrument = ? AND timeframe = ? ORDER BY published_at DESC, id DESC LIMIT 1').get(input.market, input.dataset, input.instrument, input.timeframe) as { id?: string } | undefined;
     const revision: DataRevision = { id: `revision_${partitionId}`, dataset: input.dataset, market: input.market, instrument: input.instrument, timeframe: input.timeframe, partitionId, publishedAt: partition.publishedAt, contentHash, ...(previous?.id ? { supersedes: String(previous.id) } : {}) };
     this.db.transaction(() => {
+      if (canPublish && !canPublish()) throw new Error('任务已暂停、取消或租约失效，禁止发布');
+      fs.renameSync(stagePath, finalPath);
       this.db.prepare('INSERT OR REPLACE INTO dataset_manifests (id,dataset,market,source,field_version,timezone,adjustment,created_at,content_hash) VALUES (?,?,?,?,?,?,?,?,?)').run(manifest.id, manifest.dataset, manifest.market, manifest.source, manifest.fieldVersion, manifest.timezone, manifest.adjustment, manifest.createdAt, manifest.contentHash);
       this.db.prepare('INSERT OR REPLACE INTO dataset_partitions (id,manifest_id,path,dataset,market,instrument,timeframe,period_start,period_end,published_at,fetched_at,row_count,status,content_hash) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run(partition.id, partition.manifestId, partition.path, partition.dataset, partition.market, partition.instrument, partition.timeframe, partition.periodStart, partition.periodEnd, partition.publishedAt, partition.fetchedAt, partition.rowCount, partition.status, partition.contentHash);
       this.db.prepare('INSERT OR REPLACE INTO data_quality_reports (partition_id, report, checked_at) VALUES (?, ?, ?)').run(partition.id, JSON.stringify(quality), quality.checkedAt);
       this.db.prepare('INSERT OR REPLACE INTO data_revisions (id,dataset,market,instrument,timeframe,partition_id,published_at,content_hash,supersedes,reason) VALUES (?,?,?,?,?,?,?,?,?,?)').run(revision.id, revision.dataset, revision.market, revision.instrument, revision.timeframe, revision.partitionId, revision.publishedAt, revision.contentHash, revision.supersedes || null, revision.reason || null);
+      onPublished?.();
     })();
     if ((input.market === 'stocks' && /^[A-Z][A-Z0-9.]{0,9}$/.test(input.instrument)) ||
         (input.market === 'crypto' && /binance/i.test(input.source))) {
@@ -673,7 +679,7 @@ export class DataLakeCatalog {
     }
     let stagingFileCount = 0;
     try { stagingFileCount = fs.readdirSync(path.join(this.lakeRoot, '.staging'), { withFileTypes: true }).filter(item => item.isFile()).length; } catch { /* the constructor normally creates it */ }
-    const backfills: Record<DataBackfillJob['status'], number> = { queued: 0, running: 0, succeeded: 0, failed: 0, cancelled: 0 };
+    const backfills: Record<DataBackfillJob['status'], number> = { queued: 0, running: 0, paused: 0, succeeded: 0, failed: 0, cancelled: 0 };
     for (const job of this.listBackfills()) backfills[job.status] += 1;
     const quotaBytes = Math.max(1, Number(options.quotaBytes ?? process.env.MONEYMONEY_DATA_LAKE_MAX_BYTES ?? 8 * 1024 ** 3));
     const usagePercent = usageBytes / quotaBytes * 100;
@@ -685,6 +691,7 @@ export class DataLakeCatalog {
 
   claimNextBackfill(owner = '', leaseMs = 5 * 60 * 1000): DataBackfillJob | null {
     const transaction = this.db.transaction(() => {
+      if (this.db.prepare('SELECT id FROM data_backfill_jobs WHERE status = ? LIMIT 1').get('running')) return null;
       const row = this.db.prepare('SELECT id,market,dataset,instrument,timeframe,from_at AS "from",to_at AS "to",status,reason,created_at AS createdAt,updated_at AS updatedAt,lease_owner AS leaseOwner,lease_expires_at AS leaseExpiresAt,checkpoint FROM data_backfill_jobs WHERE status = ? ORDER BY created_at ASC LIMIT 1').get('queued') as Record<string, any> | undefined;
       if (!row) return null;
       const now = new Date().toISOString();
@@ -699,7 +706,7 @@ export class DataLakeCatalog {
 
   heartbeatBackfill(id: string, owner: string, checkpoint?: Partial<BackfillCheckpoint>, leaseMs = 5 * 60 * 1000): DataBackfillJob | null {
     const current = this.getBackfill(id);
-    if (!current || current.status !== 'running' || current.leaseOwner !== owner) return null;
+    if (!current || current.status !== 'running' || current.leaseOwner !== owner || !current.leaseExpiresAt || Date.parse(current.leaseExpiresAt) <= Date.now()) return null;
     const nextCheckpoint: BackfillCheckpoint = { ...current.checkpoint, ...checkpoint, rowsWritten: Number(checkpoint?.rowsWritten ?? current.checkpoint.rowsWritten), partitionsCommitted: Number(checkpoint?.partitionsCommitted ?? current.checkpoint.partitionsCommitted) };
     const now = new Date().toISOString();
     const leaseExpiresAt = new Date(Date.now() + Math.max(1_000, leaseMs)).toISOString();
@@ -709,15 +716,31 @@ export class DataLakeCatalog {
 
   updateBackfill(id: string, status: DataBackfillJob['status'], reason?: string, owner?: string): DataBackfillJob | null {
     const now = new Date().toISOString();
+    if (owner) {
+      const current = this.getBackfill(id);
+      if (!current || current.status !== 'running' || current.leaseOwner !== owner || !current.leaseExpiresAt || Date.parse(current.leaseExpiresAt) <= Date.now()) return current;
+    }
     const terminal = ['succeeded', 'failed', 'cancelled'].includes(status);
     const query = owner
-      ? 'UPDATE data_backfill_jobs SET status = ?, reason = ?, updated_at = ?, lease_owner = ?, lease_expires_at = ? WHERE id = ? AND (? IS NULL OR lease_owner = ?)'
+      ? 'UPDATE data_backfill_jobs SET status = ?, reason = ?, updated_at = ?, lease_owner = ?, lease_expires_at = ? WHERE id = ? AND (? IS NULL OR lease_owner = ?) AND status = \'running\''
       : 'UPDATE data_backfill_jobs SET status = ?, reason = ?, updated_at = ?, lease_owner = ?, lease_expires_at = ? WHERE id = ?';
     const args = owner
       ? [status, reason || null, now, terminal ? null : owner, terminal ? null : new Date(Date.now() + 5 * 60 * 1000).toISOString(), id, owner, owner]
       : [status, reason || null, now, terminal ? null : null, terminal ? null : null, id];
     this.db.prepare(query).run(...args);
     return this.getBackfill(id);
+  }
+
+  controlBackfill(id: string, action: 'pause' | 'resume' | 'cancel'): DataBackfillJob {
+    return this.db.transaction(() => {
+      const job = this.getBackfill(id);
+      if (!job) throw new Error('回补任务不存在');
+      const allowed = action === 'pause' ? ['queued', 'running'] : action === 'resume' ? ['paused'] : action === 'cancel' ? ['queued', 'running', 'paused'] : [];
+      if (!allowed.includes(job.status)) throw new Error('当前任务状态不允许此操作或恢复');
+      const status = action === 'pause' ? 'paused' : action === 'resume' ? 'queued' : 'cancelled';
+      this.db.prepare('UPDATE data_backfill_jobs SET status=?,reason=?,updated_at=?,lease_owner=NULL,lease_expires_at=NULL WHERE id=?').run(status, {pause:'管理员暂停；已提交分区和检查点保留',resume:'管理员恢复；等待新租约从检查点继续',cancel:'管理员取消；已提交历史保留'}[action], new Date().toISOString(), id);
+      return this.getBackfill(id)!;
+    })();
   }
 
   recoverStaleBackfills(staleAfterMs = 10 * 60 * 1000): number {
@@ -732,18 +755,29 @@ export class DataLakeCatalog {
     return rows.map(row => ({ ...row, leaseOwner: row.leaseOwner || undefined, leaseExpiresAt: row.leaseExpiresAt || undefined, checkpoint: parseCheckpoint(row.checkpoint), market: row.market as MarketId } as DataBackfillJob));
   }
 
-  createBackfill(input: { market: MarketId; dataset: string; instrument: string; timeframe: string; from: string; to: string }): DataBackfillJob {
+  createBackfill(input: { market: MarketId; dataset: string; instrument: string; timeframe: string; from: string; to: string; requestId?: string }): DataBackfillJob {
     if (!MARKET_IDS.includes(input.market)) throw new Error('invalid market');
     validateInstrument(input.market, input.instrument);
     if (!input.dataset || !input.timeframe || !Number.isFinite(Date.parse(input.from)) || !Number.isFinite(Date.parse(input.to)) || Date.parse(input.from) >= Date.parse(input.to)) throw new Error('invalid backfill range');
-    const existing=this.db.prepare("SELECT id FROM data_backfill_jobs WHERE market=? AND dataset=? AND instrument=? AND timeframe=? AND from_at=? AND to_at=? AND status IN ('queued','running','paused') ORDER BY created_at DESC LIMIT 1").get(input.market,input.dataset,input.instrument,input.timeframe,input.from,input.to) as {id:string}|undefined;
+    if (input.requestId !== undefined && !/^[a-zA-Z0-9_-]{1,100}$/.test(input.requestId)) throw new Error('无效采集请求身份');
+    return this.db.transaction(() => {
+    const requestedId = input.requestId ? `backfill_plan_${crypto.createHash('sha256').update(input.requestId).digest('hex')}` : undefined;
+    if (requestedId) {
+      const prior = this.getBackfill(requestedId);
+      if (prior) {
+        if (['market','dataset','instrument','timeframe','from','to'].some(key => prior[key as keyof DataBackfillJob] !== input[key as keyof typeof input])) throw new Error('采集请求身份与原范围冲突');
+        return prior;
+      }
+    }
+    const existing=!requestedId ? this.db.prepare("SELECT id FROM data_backfill_jobs WHERE market=? AND dataset=? AND instrument=? AND timeframe=? AND from_at=? AND to_at=? AND status IN ('queued','running','paused') ORDER BY created_at DESC LIMIT 1").get(input.market,input.dataset,input.instrument,input.timeframe,input.from,input.to) as {id:string}|undefined : undefined;
     if(existing)return this.getBackfill(existing.id)!;
     const queue=this.db.prepare("SELECT COUNT(*) AS count FROM data_backfill_jobs WHERE status IN ('queued','running','paused')").get() as {count:number};
     if(queue.count>=16)throw new Error('回补任务预算已满（最多16个待完成任务），请等待当前任务或取消不需要的任务');
     const now = new Date().toISOString();
-    const job: DataBackfillJob = { id: `backfill_${crypto.randomUUID()}`, ...input, status: 'queued', reason: '已登记，等待单并发数据 Worker 按 Provider 契约执行', createdAt: now, updatedAt: now, checkpoint: { rowsWritten: 0, partitionsCommitted: 0 } };
+    const job: DataBackfillJob = { id: requestedId || `backfill_${crypto.randomUUID()}`, market:input.market,dataset:input.dataset,instrument:input.instrument,timeframe:input.timeframe,from:input.from,to:input.to, status: 'queued', reason: '已登记，等待单并发数据 Worker 按 Provider 契约执行', createdAt: now, updatedAt: now, checkpoint: { rowsWritten: 0, partitionsCommitted: 0 } };
     this.db.prepare('INSERT INTO data_backfill_jobs (id,market,dataset,instrument,timeframe,from_at,to_at,status,reason,created_at,updated_at,lease_owner,lease_expires_at,checkpoint) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run(job.id, job.market, job.dataset, job.instrument, job.timeframe, job.from, job.to, job.status, job.reason, job.createdAt, job.updatedAt, null, null, JSON.stringify(job.checkpoint));
     return job;
+    })();
   }
 
   getBackfill(id: string): DataBackfillJob | null {
