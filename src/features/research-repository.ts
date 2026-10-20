@@ -212,6 +212,12 @@ export const researchRepository = {
     stmt.run(id, JSON.stringify(data));
   },
 
+  saveExperimentOnce(id:string,data:any){
+    db.prepare('INSERT OR IGNORE INTO experiments (id,data) VALUES (?,?)').run(id,JSON.stringify(data));
+    const row=db.prepare('SELECT data FROM experiments WHERE id = ?').get(id) as {data:string};
+    return JSON.parse(row.data);
+  },
+
   getExperiment(id: string) {
     const stmt = db.prepare('SELECT data FROM experiments WHERE id = ?');
     const row = stmt.get(id) as any;

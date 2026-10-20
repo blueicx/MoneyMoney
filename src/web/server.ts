@@ -432,7 +432,7 @@ const researchProjects=new ResearchProjectStore(stateStore,createProjectReferenc
 }));
 const projectReviewWorker=new ResearchProjectReviewWorker(stateStore,researchProjects,Date.now,error=>logger.warn('local project reference review failed',{reason:error instanceof Error?error.message:'本地复查失败'}));
 app.use('/api/research/projects',createResearchProjectRouter(researchProjects,()=>projectReviewWorker.status()));
-app.use('/api/strategies/definitions',createStrategyDefinitionRouter(new StrategyDefinitionStore(stateStore),input=>dataLakeCatalog.queryBarsAsOf(input),(market,instrument)=>dataLakeCatalog.resolveInstrument(market,instrument)));
+app.use('/api/strategies/definitions',createStrategyDefinitionRouter(new StrategyDefinitionStore(stateStore),input=>dataLakeCatalog.queryBarsAsOf(input),(market,instrument)=>dataLakeCatalog.resolveInstrument(market,instrument),{get:id=>researchRepository.getExperiment(id),save:(id,result)=>researchRepository.saveExperimentOnce(id,result)}));
 app.use('/api/chart/bookmarks',createChartBookmarkRouter({list:market=>decisionIntelligenceStore.listWorkspaces(market as MarketId|undefined),get:id=>decisionIntelligenceStore.getWorkspace(id),save:row=>stateStore.transaction(()=>{if(decisionIntelligenceStore.listWorkspaces().length>=200)throw Error('工作区容量已达上限，未删除旧记录');return decisionIntelligenceStore.saveWorkspace(row);}),base:()=>process.env.PUBLIC_WEB_BASE_URL||telegramPublicBaseUrl()}));
 const researchBasisStore=new ResearchBasisStore(stateStore,scope=>{
   const market=scope.market as MarketId,ref=dataLakeCatalog.resolveInstrument(market,scope.instrument);
@@ -8688,7 +8688,7 @@ app.get('/api/research/experiments/:id', (req, res) => {
   const result = researchRepository.getExperiment(String(req.params.id));
   if (!result) return res.status(404).json({ success: false, error: '实验不存在' });
   const experiment = result.experiment || {};
-  res.json({ success: true, data: result, market: experiment.market || null, instrument: experiment.instrument || null, dataStatus: result.evidence?.checks?.data?.passed ? 'live' : 'unavailable', source: experiment.dataSource || null, updatedAt: experiment.createdAt || null, reason: result.evidence?.checks?.data?.passed ? null : '实验未声明可用数据源' });
+  res.json({ success: true, data: result, market: experiment.market || null, instrument: experiment.instrument || null, dataStatus: result.executionModel ? 'historical' : result.evidence?.checks?.data?.passed ? 'live' : 'unavailable', source: experiment.dataSource || null, updatedAt: experiment.createdAt || null, reason: result.executionModel ? result.reason : result.evidence?.checks?.data?.passed ? null : '实验未声明可用数据源',evidenceRefs:result.evidenceRefs||[] });
 });
 app.get('/api/research/experiments/:id/links',(req,res)=>{
   if(!adminOnly(req,res))return;

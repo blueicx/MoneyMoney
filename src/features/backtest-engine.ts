@@ -19,6 +19,7 @@ export interface BacktestSignal {
 }
 
 export interface BacktestRules {
+  targetAllocationPct?: number;
   maxOpenPositions?: number;
   minTradeVolume?: number;
   cooldownBars?: number;
@@ -110,6 +111,8 @@ export class BacktestEngine {
   private readonly cache = new Map<string, BacktestResult>();
 
   constructor(private readonly options: BacktestOptions) {
+    const allocation=options.rules.targetAllocationPct;
+    if(allocation!==undefined&&(!Number.isFinite(allocation)||allocation<=0||allocation>100))throw new Error('targetAllocationPct must be within (0,100]');
     if (!Number.isFinite(options.feeRate) || options.feeRate < 0) throw new Error('feeRate must be a non-negative number');
     if (!Number.isFinite(options.slippage) || options.slippage < 0) throw new Error('slippage must be a non-negative number');
     if (options.startingBalance !== undefined && (!Number.isFinite(options.startingBalance) || options.startingBalance <= 0)) throw new Error('startingBalance must be positive');
@@ -261,6 +264,13 @@ export class BacktestEngine {
 
         const perUnitSlippage = fillPrice * this.options.slippage;
         const executionPrice = order.direction === 'buy' ? fillPrice + perUnitSlippage : fillPrice - perUnitSlippage;
+
+        if(order.direction==='buy'&&this.options.rules.targetAllocationPct!==undefined){
+          const allowance=Math.max(0,(cashBalance+positions*currentPrice)*this.options.rules.targetAllocationPct/100-positions*currentPrice);
+          const sized=Math.floor(allowance/(executionPrice+fillPrice*this.options.feeRate));
+          volume=Math.min(order.volume??sized,sized);
+          if(volume<minTradeVolume)continue;
+        }
 
         if (order.direction === 'buy' && cashBalance < (executionPrice + fillPrice * this.options.feeRate) * volume) {
            volume = Math.floor(cashBalance / (executionPrice + fillPrice * this.options.feeRate));

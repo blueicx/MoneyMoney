@@ -23,7 +23,7 @@ export function compareExperiments(input: ResearchExperimentResult[]) {
         outOfSample: row.evidence.outOfSample, folds: row.folds,
         freshnessReason: row.experiment.dataTo ? '历史实验；数据时间不代表当前行情' : '未声明数据截止时间' };
     }), differences, ranking: null,
-    warnings: differences.some(row => ['dataFrom', 'dataTo', 'feeRate', 'slippage'].includes(row.field)) ? ['区间或成本模型不同，不可直接按收益排名'] : [],
+    warnings: [...new Set([...(differences.some(row => ['dataFrom', 'dataTo', 'feeRate', 'slippage'].includes(row.field)) ? ['区间或成本模型不同，不可直接按收益排名'] : []),...input.flatMap(row=>Array.isArray((row as any).warnings)?(row as any).warnings.filter((v:unknown)=>typeof v==='string'):[])])],
     reason: '展示原始实验结果；未对不同配置自动排名',
   };
 }
