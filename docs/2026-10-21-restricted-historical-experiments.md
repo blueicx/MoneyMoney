@@ -27,3 +27,17 @@
 - 首次浏览器脚本误选comparison（标的比较）而不是experiments（实验比较），导致按钮不可见；修正脚本后通过，没有修改产品显隐规则绕过检查。产物mm-restricted-study-browser-cRzgnu，已目视检查金色主题手机结果。
 
 完整回归373个隔离测试文件、1793项、失败0，退出码0（mm-restricted-study-full-tests.log）。构建、Web/认证/四市场/实时图表/专业研究/合约/研究深度七类冒烟及数据资产、历史实验两类专用浏览器均通过（mm-restricted-study-gate-*）。安全扫描948个跟踪文件、差异检查通过。干净导出及生产验收尚待完成，不提前声明本切片已发布。整页冷加载20%仍未完成，前向、晋级及其余平台批次保留未完成状态。
+
+## 发布凭据
+
+上节“尚待完成”为提交前状态；现已发布运行提交1cb54c370c1e045aa676816e5f0683d31d479bb4，GitHub已推送。
+
+- 干净导出moneymoney-study-clean-1cb54c3-20261021重建后再次通过七类冒烟和两类专用浏览器；日志mm-restricted-study-clean-*，研究截图mm-assets-browser-HGqWg5、历史模型截图mm-restricted-study-browser-FJ4DQO。
+- 正式域名有效TLS、构建版本、29个静态资源SHA256及immutable缓存通过；私人定义及实验目录拒绝未登录读取。生产只读Chromium四市场/SNDK/手机与右侧库检查通过，报告moneymoney-canary-1792518172211/production-canary-report.json，errors为空。
+- 发布归档SHA256：e7d9f70910f51d4ac03712eb3e440eca5536f4da8692cd36492ed7a426f3f2a2。
+- server.js SHA256：9de0ddb965947176e9c56d11fd3d7f10cf8a718cd95ebabec6232bb38982346a；index.html SHA256：cf5c9d06e6e59b659866a8b362ac6580ff2db76098b28c11422ad75eccc87bdf，远端一致。
+- 备份/opt/moneymoney/backups/dist-pre-1cb54c3-20261021-study；回滚/opt/moneymoney/dist.rollback-1cb54c3-20261021-study保留00a47c3。仅重启moneymoney.service；启动初期两次健康连接未就绪，之后alive，未触发回滚。
+- 10个现有跑单配置指纹前后均5125162b35c9893e4a9ac7d11c40eeaca7297bd95d7434d6bec70712aa144181。用户data/research.db仍27fd475e523568daa4cdcabf3146917023335a62affe00429babd721b3b79fd1，未提交；没有清理数据库、数据湖、scratch或用户文件。
+- 未在生产创建验收策略/实验/订单、调用模型或发送Telegram消息。没有不可逆迁移，旧实验格式保持兼容；新实验未设置input时既有复跑/稳健性接口继续明确拒绝，不猜测填补旧输入。
+
+本切片已上线，但受限策略前向、候选晋级、其余平台批次和整页冷加载20%仍未完成。
