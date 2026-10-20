@@ -154,6 +154,7 @@ modules.research.push(
   fs.readFileSync(path.join(source, 'interactive-history.js'), 'utf8'),
   fs.readFileSync(path.join(source, 'professional-research.js'), 'utf8'),
   fs.readFileSync(path.join(source, 'action-research-workspace.js'), 'utf8'),
+  fs.readFileSync(path.join(source, 'restricted-forward-workspace.js'), 'utf8'),
   fs.readFileSync(path.join(source, 'strategy-builder-workspace.js'), 'utf8'),
   fs.readFileSync(path.join(source, 'data-assets-workspace.js'), 'utf8'),
   fs.readFileSync(path.join(source, 'research-projects-workspace.js'), 'utf8'),

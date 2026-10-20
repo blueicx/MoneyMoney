@@ -39,6 +39,8 @@ import { ResearchProjectReviewWorker } from '../features/research-project-review
 import { createResearchProjectRouter } from './research-project-routes';
 import { StrategyDefinitionStore } from '../features/strategy-definitions';
 import { createStrategyDefinitionRouter } from './strategy-definition-routes';
+import {RestrictedForwardStore} from '../features/restricted-forward';
+import {createRestrictedForwardRouter} from './restricted-forward-routes';
 import { createProjectReferenceResolver } from '../features/research-project-references';
 import { LiveKlineHub, liveKlineScope } from '../features/live-kline-stream';
 import { createLiveKlineRouter } from './live-kline-routes';
@@ -432,7 +434,9 @@ const researchProjects=new ResearchProjectStore(stateStore,createProjectReferenc
 }));
 const projectReviewWorker=new ResearchProjectReviewWorker(stateStore,researchProjects,Date.now,error=>logger.warn('local project reference review failed',{reason:error instanceof Error?error.message:'本地复查失败'}));
 app.use('/api/research/projects',createResearchProjectRouter(researchProjects,()=>projectReviewWorker.status()));
-app.use('/api/strategies/definitions',createStrategyDefinitionRouter(new StrategyDefinitionStore(stateStore),input=>dataLakeCatalog.queryBarsAsOf(input),(market,instrument)=>dataLakeCatalog.resolveInstrument(market,instrument),{get:id=>researchRepository.getExperiment(id),save:(id,result)=>researchRepository.saveExperimentOnce(id,result)}));
+const strategyDefinitionStore=new StrategyDefinitionStore(stateStore);
+app.use('/api/strategies/definitions',createStrategyDefinitionRouter(strategyDefinitionStore,input=>dataLakeCatalog.queryBarsAsOf(input),(market,instrument)=>dataLakeCatalog.resolveInstrument(market,instrument),{get:id=>researchRepository.getExperiment(id),save:(id,result)=>researchRepository.saveExperimentOnce(id,result)}));
+app.use('/api/research/forward-observations',createRestrictedForwardRouter(new RestrictedForwardStore(stateStore,{definition:(id,hash)=>strategyDefinitionStore.read(id,hash),experiment:id=>researchRepository.getExperiment(id),resolve:(market,instrument)=>dataLakeCatalog.resolveInstrument(market as MarketId,instrument),signals:{get:id=>decisionIntelligenceStore.getSignalOutcome(id),list:()=>decisionIntelligenceStore.listSignalOutcomes(),save:signal=>decisionIntelligenceStore.saveSignalOutcome(signal)}}),input=>dataLakeCatalog.queryBarsAsOf(input)));
 app.use('/api/chart/bookmarks',createChartBookmarkRouter({list:market=>decisionIntelligenceStore.listWorkspaces(market as MarketId|undefined),get:id=>decisionIntelligenceStore.getWorkspace(id),save:row=>stateStore.transaction(()=>{if(decisionIntelligenceStore.listWorkspaces().length>=200)throw Error('工作区容量已达上限，未删除旧记录');return decisionIntelligenceStore.saveWorkspace(row);}),base:()=>process.env.PUBLIC_WEB_BASE_URL||telegramPublicBaseUrl()}));
 const researchBasisStore=new ResearchBasisStore(stateStore,scope=>{
   const market=scope.market as MarketId,ref=dataLakeCatalog.resolveInstrument(market,scope.instrument);
