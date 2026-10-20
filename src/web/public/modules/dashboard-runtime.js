@@ -2521,8 +2521,9 @@ function buildCryptoStrategySignals(bars, live = false) {
     source: metadata.source || 'Binance Spot Kline WebSocket', sourceTime: metadata.sourceTime, live, sourceFresh,
     currentBarClosed: bars[bars.length - 1]?.closed === true, evidenceRefs: metadata.evidenceRefs || [],
   }) || signals;
+  points.push(...(window.MoneyRestrictedChart?.points('crypto',bars,{...restrictedChartContext('crypto'),source:metadata.source,sourceTime:metadata.sourceTime,sourceFresh,historical:bars.length<bnKlineData.length,evidenceRefs:metadata.evidenceRefs||[]}).points||[]));
   renderChartResearchTools('crypto',bars,points,metadata,{market:'crypto',instrument:`crypto:binance:${bnCurrentSymbol}`,timeframe:bnCurrentInterval,live,exchangeTimeZone:'UTC',sessionStartMinutes:0});
-  return filterChartSignalLifecycle(recordChartPointEvolution(points,{market:'crypto',instrument:`crypto:binance:${bnCurrentSymbol}`,timeframe:bnCurrentInterval,live,sourceFresh,sourceTime,barTimes:bars.map(row=>row.time),enabledStrategies:Object.keys(cryptoChartStrategyConfig).filter(key=>cryptoChartStrategyConfig[key])}),`crypto:binance:${bnCurrentSymbol}`,bnCurrentInterval);
+  return filterChartSignalLifecycle(recordChartPointEvolution(points,{market:'crypto',instrument:`crypto:binance:${bnCurrentSymbol}`,timeframe:bnCurrentInterval,live,sourceFresh,sourceTime,barTimes:bars.map(row=>row.time),enabledStrategies:[...Object.keys(cryptoChartStrategyConfig).filter(key=>cryptoChartStrategyConfig[key]),...(window.MoneyRestrictedChart?.enabled('crypto')||[])]}),`crypto:binance:${bnCurrentSymbol}`,bnCurrentInterval);
 }
 function drawCandles(canvas, klines) {
   if (document.hidden) return;
@@ -6235,6 +6236,10 @@ function loadStockChartOverlayConfig() {
   syncChartPatternControls(stockChartOverlayConfig, 'stock');
   renderAdvancedChartStrategyControls('stock');
 }
+function restrictedChartContext(kind) {
+  const stock=kind==='stock';
+  return {market:stock?'stocks':'crypto',instrument:stock?stockChartEventInstrumentId():`crypto:binance:${bnCurrentSymbol}`,timeframe:stock?currentStockKlinePeriod:bnCurrentInterval,workspace:document.getElementById('market-workspace-shell')?.dataset.workspace||''};
+}
 function renderAdvancedChartStrategyControls(kind, statuses = {}) {
   if (!window.MoneyChartStrategyControls) return;
   const stock=kind==='stock',host=document.getElementById(stock?'stock-advanced-strategies':'bn-advanced-strategies');
@@ -6246,6 +6251,7 @@ function renderAdvancedChartStrategyControls(kind, statuses = {}) {
       }else setChartStrategyParameters(kind,change.id,change.parameters);
     },
   });
+  window.MoneyRestrictedChart?.render({host,kind,getContext:()=>restrictedChartContext(kind),onChange(){if(stock)redrawStockKlineSelection();else if(window.cryptoMoneyKLine?.render)window.cryptoMoneyKLine.render();else if(bnKlineData.length)drawCandles(document.getElementById('bn-candlestick'),bnKlineData);}});
 }
 function setChartStrategyParameters(kind, id, parameters) {
   const checked=window.MoneyChartStrategies?.normalizeParameters(id,parameters);
@@ -6402,17 +6408,15 @@ function buildStockStrategySignals(bars, live = false) {
   })||{signals:analysis?.detectStrategySignals(bars,stockChartOverlayConfig.strategies||{})||[],statuses:{}};
   const signals=result.signals;
   renderAdvancedChartStrategyControls('stock',result.statuses);
-  const rawInstrument = String(currentStockApiSymbol || currentStockSymbol).replace(/^us/i, '').toUpperCase();
-  const instrument = /^(SH|SZ|BJ)\d{6}$/.test(rawInstrument)
-    ? `stock:cn:${rawInstrument}`
-    : /^[A-Z][A-Z0-9.-]{0,14}$/.test(rawInstrument) ? `stock:us:${rawInstrument}` : '';
+  const instrument = stockChartEventInstrumentId();
   const points = analysis?.buildStrategyChartPoints?.({
     bars, signals, market: 'stocks', instrument,
     timeframe: currentStockKlinePeriod, source: metadata.source || '股票行情来源', sourceTime: metadata.sourceTime,
     live, sourceFresh, currentBarClosed: bars[bars.length - 1]?.closed === true, evidenceRefs: metadata.evidenceRefs || [],
   }) || signals;
+  points.push(...(window.MoneyRestrictedChart?.points('stock',bars,{...restrictedChartContext('stock'),source:metadata.source,sourceTime:metadata.sourceTime,sourceFresh,historical:Boolean(stockChartAsOf)||stockChartReplayIndex<stockChartKlines.length-1,asOf:stockChartAsOf?Date.parse(stockChartAsOf):Date.now(),evidenceRefs:metadata.evidenceRefs||[]}).points||[]));
   renderChartResearchTools('stock',bars,points,metadata,{market:'stocks',instrument,timeframe:currentStockKlinePeriod,live,exchangeTimeZone:metadata.exchangeTimeZone,sessionStartMinutes:metadata.exchangeTimeZone&&['America/New_York','Asia/Shanghai','Asia/Hong_Kong'].includes(metadata.exchangeTimeZone)?570:null});
-  return filterChartSignalLifecycle(recordChartPointEvolution(points,{market:'stocks',instrument,timeframe:currentStockKlinePeriod,live,sourceFresh,sourceTime,barTimes:bars.map(row=>row.time),enabledStrategies:Object.keys(stockChartOverlayConfig.strategies||{}).filter(key=>stockChartOverlayConfig.strategies[key])}),instrument,currentStockKlinePeriod);
+  return filterChartSignalLifecycle(recordChartPointEvolution(points,{market:'stocks',instrument,timeframe:currentStockKlinePeriod,live,sourceFresh,sourceTime,barTimes:bars.map(row=>row.time),enabledStrategies:[...Object.keys(stockChartOverlayConfig.strategies||{}).filter(key=>stockChartOverlayConfig.strategies[key]),...(window.MoneyRestrictedChart?.enabled('stock')||[])]}),instrument,currentStockKlinePeriod);
 }
 function stockChartEventInstrumentId() {
   const raw = String(currentStockSymbol || '').trim().replace(/^stock:[^:]+:/i, '').replace(/^us(?=[A-Z])/, '').toUpperCase();
@@ -6647,6 +6651,7 @@ function handleChartSignalSelection(signal, targetId) {
       ? `OHLC ${signal.open} / ${signal.high} / ${signal.low} / ${signal.close}` : 'OHLC 未提供';
     detail.textContent = `${signal.side === 'buy' ? '买入' : '卖出'} · ${signal.label || signal.strategy || '策略信号'} · ${time} · 触发价 ${priceText} · ${ohlc} · ${signal.status === 'forming' ? '形成中' : '已确认'} · ${signal.reason || '触发原因未提供'} · 来源 ${signal.source || '来源未知'}${signal.sourceTime ? ` · 来源时间 ${formatChartTime(signal.sourceTime)}` : ''}${signal.strategyVersion ? ` · 策略版本 ${signal.strategyVersion}` : ''}${signal.parameters ? ` · 策略参数 ${JSON.stringify(signal.parameters)}` : ''}${signal.outcomes ? '\n'+chartSignalOutcomeLines(signal.outcomes).join('\n') : ''}`;
     detail.textContent+='\n'+chartPointEvolutionLines(signal.evolution||[]).join('\n');
+    if(signal.condition)detail.textContent+='\n'+signal.condition;
     appendPointLifecycleAction(detail,signal,'crypto');
     window.mmSelectedCryptoChartSignal = signal;
   }
@@ -6752,8 +6757,8 @@ function renderChartSignalLifecycleControls(el,targetId) {
   const stock=targetId==='stock-chart-signals',instrument=stock?stockChartEventInstrumentId():`crypto:binance:${bnCurrentSymbol}`,timeframe=stock?currentStockKlinePeriod:bnCurrentInterval;
   const {key,filters}=chartSignalLifecyclePreferences(instrument,timeframe),panel=document.createElement('div');panel.className='mm-action-tools';panel.dataset.chartSignalFilters='';
   const selected=stock?stockChartOverlayConfig.strategies||{}:cryptoChartStrategyConfig||{};
-  const strategies=Object.keys(selected).filter(key=>selected[key]===true);if(filters.strategy&&!strategies.includes(filters.strategy))strategies.push(filters.strategy);
-  const strategyLabel=value=>window.MoneyChartAnalysis?.STRATEGY_CATALOG?.find(row=>row.id===value)?.label||value;
+  const strategies=[...Object.keys(selected).filter(key=>selected[key]===true),...(window.MoneyRestrictedChart?.enabled(stock?'stock':'crypto')||[])];if(filters.strategy&&!strategies.includes(filters.strategy))strategies.push(filters.strategy);
+  const strategyLabel=value=>window.MoneyRestrictedChart?.label(value)||window.MoneyChartAnalysis?.STRATEGY_CATALOG?.find(row=>row.id===value)?.label||value;
   panel.innerHTML=[['strategy','策略',[['','全部已选策略'],...strategies.map(value=>[value,strategyLabel(value)])]],['side','方向',[['','全部方向'],['buy','买入'],['sell','卖出']]],['status','确认状态',[['','全部状态'],['forming','形成中'],['confirmed','已确认']]]].map(([field,label,options])=>'<label>'+label+' <select data-signal-filter="'+field+'" aria-label="信号'+label+'">'+options.map(([value,text])=>'<option value="'+stockEscapeHtml(value)+'"'+(filters[field]===value?' selected':'')+'>'+stockEscapeHtml(text)+'</option>').join('')+'</select></label>').join('');
   panel.addEventListener('change',event=>{const field=event.target.dataset.signalFilter;if(!['strategy','side','status'].includes(field))return;filters[field]=event.target.value;try{localStorage.setItem(key,JSON.stringify(filters));}catch{}if(stock)redrawStockKlineSelection();else if(bnKlineData.length)drawCandles(document.getElementById('bn-candlestick'),bnKlineData);});
   el.prepend(panel);

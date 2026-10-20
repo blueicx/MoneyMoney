@@ -522,6 +522,9 @@
     .chart-strategy-entry summary { cursor:pointer; padding:5px 0; }
     .chart-strategy-entry p { white-space:normal; line-height:1.6; }
     .chart-strategy-entry > small { display:block; overflow-wrap:anywhere; }
+    [data-restricted-chart] { overflow-wrap:anywhere; }
+    [data-restricted-chart] button { min-height:44px; max-width:100%; white-space:normal; overflow-wrap:anywhere; }
+    [data-restricted-chart] button:focus-visible { outline:2px solid var(--purple); outline-offset:2px; }
     .chart-strategy-parameters { display:flex; flex-wrap:wrap; gap:8px; margin-top:8px; }
     .chart-strategy-parameters label { display:flex; align-items:center; gap:5px; }
     .chart-strategy-parameters input { width:78px; min-height:36px; }

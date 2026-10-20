@@ -23,12 +23,12 @@ async function main() {
     rows[50].low = 90;
     let requests = 0, supportRequests = 0;const stockKlineQueries=[];
     const olderRows=Array.from({length:20},(_,i)=>({...rows[0],time:rows[0].time-(20-i)*300000}));let historyRequests=0;
-    await page.route('**/api/stock/kline?**', route => { requests++;const query=new URL(route.request().url()).searchParams;stockKlineQueries.push(query.toString());const paged=query.has('before');if(paged)historyRequests++; return route.fulfill({ json: { success: true,market:'stocks',instrument:query.get('api')||query.get('symbol'),timeframe:query.get('period'), data:paged?olderRows:rows, source: 'Isolated chart fixture, not market data', updatedAt: new Date().toISOString(), dataStatus: 'delayed' } }); });
+    await page.route('**/api/stock/kline?**', route => { requests++;const query=new URL(route.request().url()).searchParams;stockKlineQueries.push(query.toString());const paged=query.has('before');if(paged)historyRequests++; return route.fulfill({ json: { success: true,market:'stocks',instrument:query.get('api')||query.get('symbol'),timeframe:query.get('period'), data:paged?olderRows:rows, source: 'Isolated chart fixture, not market data', sourceTime:new Date().toISOString(), updatedAt: new Date().toISOString(), dataStatus: 'delayed' } }); });
     await page.route('**/api/stock/indices', async route => {
       await new Promise(resolve => setTimeout(resolve, 700));
       return route.fulfill({ json: { success: true, data: [{ name: 'Isolated index fixture', price: 100, changePct: 0.1 }] } });
     });
-    await page.route('**/api/binance/klines?**', route => {const query=new URL(route.request().url()).searchParams,paged=query.has('before');if(paged)historyRequests++;return route.fulfill({ json: { success: true,market:'crypto',instrument:'crypto:binance:'+query.get('symbol'),timeframe:query.get('interval'), data:paged?olderRows:rows, source: 'Isolated chart fixture', updatedAt: new Date().toISOString(), dataStatus: 'delayed' } });});
+    await page.route('**/api/binance/klines?**', route => {const query=new URL(route.request().url()).searchParams,paged=query.has('before');if(paged)historyRequests++;return route.fulfill({ json: { success: true,market:'crypto',instrument:'crypto:binance:'+query.get('symbol'),timeframe:query.get('interval'), data:paged?olderRows:rows, source: 'Isolated chart fixture', sourceTime:new Date().toISOString(), updatedAt: new Date().toISOString(), dataStatus: 'delayed' } });});
     await page.route('**/api/support-resistance?**', route => { supportRequests++; return route.fulfill({ status: 410, json: { success: false, reason: 'chart Pivot must not use a second data source' } }); });
     await page.goto(base + '/login'); await page.fill('#username', 'live-fixture-owner'); await page.fill('#password', 'isolated-live-fixture-password');
     await Promise.all([page.waitForURL(url => url.pathname === '/'), page.click('#submitBtn')]);
@@ -53,6 +53,7 @@ async function main() {
     });
     assert.equal(await page.evaluate(()=>currentStockKlinePeriod),'5m');
     assert.match(await page.locator('#stock-chart-card .mm-trading-readout').innerText(),/开 .*高 .*低 .*收 .*MA5/);
+    await checkRestrictedChart(page,'stock');
     for(const width of [1440,390])for(const theme of ['light','dark','money']){
       await page.setViewportSize({width,height:900});await page.evaluate(theme=>theme==='light'?document.documentElement.removeAttribute('data-theme'):document.documentElement.setAttribute('data-theme',theme),theme);
       const menu=page.locator('[data-compact-tools]'), summary=menu.locator(':scope > summary');
@@ -243,6 +244,7 @@ async function main() {
       return { initial, updated, final: bnKlineData.length, status: document.getElementById('mm-live-status-crypto').textContent };
     }, start);
     assert.equal(push.updated, 103); assert.equal(push.final, push.initial + 1); assert.match(push.status, /蜡烛形成中/);
+    await checkRestrictedChart(page,'crypto');
     const strategyLifecycle=await page.evaluate(start=>{
       const canvas=document.getElementById('bn-candlestick'),previous={rows:bnKlineData,metadata:canvas.moneySourceMetadata,config:{...cryptoChartStrategyConfig},timer:window.cryptoMoneyKLine};
       const strategyBars=Array.from({length:31},(_,index)=>{const close=index<29?100:index===29?90:130;return{time:start-(30-index)*300000,open:close,high:close+1,low:close-1,close,volume:100,closed:false};});
@@ -337,8 +339,22 @@ async function main() {
     await page.evaluate(() => { setMarketScope('options'); MoneyLiveKline.sync(); }); assert.equal(await page.evaluate(() => window.__fixtureStreams.every(s => s.closed)), true);
     const guest = await browser.newPage(); await guest.goto(base + '/login'); await Promise.all([guest.waitForURL(url => url.pathname === '/'), guest.click('#guestBtn')]);
     assert.equal(await guest.evaluate(() => fetch('/api/kline-stream?market=crypto&instrument=BTCUSDT&interval=5m').then(r => r.status)), 403);
+    assert.equal(await guest.evaluate(() => fetch('/api/strategies/definitions?market=stocks').then(r => r.status)),403);
     assert.equal(supportRequests, 0, 'chart overlays must remain derived from chart-scoped bars through workspace changes');
     assert.deepEqual(errors, []); console.log(JSON.stringify({ ok: true, transportFixtureOnly: true, supportRequests, replayPivot, focus, push, performance, themes, dataDirectory: data }));
   } finally { await browser?.close(); child.kill(); }
+}
+async function checkRestrictedChart(page,kind){
+ const market=kind==='stock'?'stocks':'crypto',hostId=kind==='stock'?'stock-advanced-strategies':'bn-advanced-strategies',name='Isolated '+kind+' restricted chart — not market data';
+ const initial=await page.evaluate(async({market,name})=>{const definition={name,market,timeframe:'5m',entry:{op:'gt',left:{field:'close',lag:0},right:{value:99}},exit:{op:'lt',left:{field:'close',lag:0},right:{value:0}},position:{maxAllocationPct:20},costs:{feeBps:10,slippageBps:10}},csrf=document.cookie.split(';').map(v=>v.trim()).find(v=>v.startsWith('mm_csrf='));const r=await fetch('/api/strategies/definitions',{method:'POST',headers:{'content-type':'application/json','x-csrf-token':decodeURIComponent(csrf.slice(8))},body:JSON.stringify({definition})});if(!r.ok)throw Error('Isolated strategy creation failed');return (await r.json()).data;},{market,name});
+ await page.evaluate(id=>{const node=document.querySelector('#'+id+' [data-restricted-chart]');window.__restrictedPreviouslyClosed=[];for(let p=node;p;p=p.parentElement)if(p.tagName==='DETAILS'&&!p.open){window.__restrictedPreviouslyClosed.push(p);p.open=true;}},hostId);
+ const panel=page.locator('#'+hostId+' [data-restricted-chart]');await panel.locator('[data-restricted-load]').click();await panel.locator('[data-restricted-choice]').filter({hasText:name}).click();
+ const list=page.locator(kind==='stock'?'#stock-chart-signals':'#bn-chart-signals');await list.locator('.chart-signal-item').filter({hasText:name}).first().waitFor().catch(async error=>{console.error(JSON.stringify({kind,status:await panel.innerText(),list:await list.textContent(),context:await page.evaluate(kind=>({enabled:MoneyRestrictedChart.enabled(kind),context:restrictedChartContext(kind),metadata:document.getElementById(kind==='stock'?'stock-kline':'bn-candlestick')?.moneySourceMetadata}),kind)}));throw error;});await list.locator('.chart-signal-item').filter({hasText:name}).first().click();
+ const detail=page.locator(kind==='stock'?'#stock-chart-evidence-detail':'#bn-chart-signal-detail');assert.match(await detail.innerText(),/OHLC/);assert.match(await detail.innerText(),/gt\(100, 99\)/);assert.ok((await detail.innerText()).includes(initial.hash));
+ await page.evaluate(async row=>{const csrf=document.cookie.split(';').map(v=>v.trim()).find(v=>v.startsWith('mm_csrf='));const response=await fetch('/api/strategies/definitions/'+row.id+'/versions',{method:'POST',headers:{'content-type':'application/json','x-csrf-token':decodeURIComponent(csrf.slice(8))},body:JSON.stringify({market:row.market,hash:row.hash,definition:{...row.definition,name:row.definition.name+' second version'}})});if(!response.ok)throw Error('Isolated version save failed');},initial);
+ await panel.locator('[data-restricted-load]').click();await panel.locator('[data-restricted-choice]').filter({hasText:'second version'}).waitFor();assert.ok((await page.evaluate(kind=>MoneyRestrictedChart.enabled(kind),kind))[0].endsWith(initial.hash),'saved new version must not replace the manually frozen chart version');
+ for(const width of [1440,390])for(const theme of ['light','dark','money']){await page.setViewportSize({width,height:900});await page.evaluate(theme=>theme==='light'?document.documentElement.removeAttribute('data-theme'):document.documentElement.setAttribute('data-theme',theme),theme);await panel.scrollIntoViewIfNeeded();const bounds=await panel.boundingBox();assert.ok(bounds.width<=width);assert.ok(await panel.locator('[data-restricted-load]').evaluate(el=>el.getBoundingClientRect().height>=44));await page.screenshot({path:path.join(data,`restricted-chart-${kind}-${theme}-${width}.png`)});}
+ await panel.locator('[data-restricted-clear]').click();assert.equal(await list.locator('.chart-signal-item').filter({hasText:name}).count(),0);
+ await page.evaluate(kind=>{for(const p of window.__restrictedPreviouslyClosed||[])p.open=false;window.__restrictedPreviouslyClosed=[];if(kind==='stock'){stockChartReplayIndex=stockChartKlines.length-1;window.stockMoneyKLine?.setReplayCursor(stockChartReplayIndex);}},kind);await page.setViewportSize({width:1440,height:900});await page.evaluate(()=>document.documentElement.removeAttribute('data-theme'));
 }
 main().catch(e => { console.error(e); process.exitCode = 1; });
