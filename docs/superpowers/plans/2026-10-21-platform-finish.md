@@ -57,3 +57,14 @@
 - 尚待固定源码全量回归、全部冒烟及发布；不把该安全切片当作全平台完成。
 
 更新：固定源码385个隔离文件/1864项完整回归失败0、退出0（mm-candidate-full-tests.log）；构建、七类冒烟和数据资产/历史实验/双轨候选/AI质量四类专用Chromium全部通过（mm-candidate-gate-*）。候选三主题截图mm-restricted-forward-browser-9J5AfF；访客/CSRF/手机/图表/合约/研究检查通过。安全扫描980跟踪文件、差异检查、原数据库Hash通过；自审已修正证据不一致、Hash丢失、退役并发及切换观察的迟到响应。准备提交推送和干净导出，不代表生产验收已完成。
+
+## 晋级门控切片发布凭据
+
+已推送并部署dfb4d5b7fc5f81881847593554ab50f87ac38fb7。干净导出moneymoney-candidate-clean-dfb4d5b-20261021重建，再次通过七类与四类专用冒烟（mm-candidate-clean-*）；没有生产模型、实验或订单写入。
+
+- 归档SHA256 a792a5e18cc803e927367001c554b1b2ebc5b3d5a2ecad9fca4ae1d032b243ec；server.js 4fa2ad4c18884b6667e0ab91361544c5856ed00027ecb54d7cab12d7fb78b547；index.html 828fe2e1b6c1ab786266ba2b302050bb1fca47da904cd335895f1b691986d356。
+- 备份/opt/moneymoney/backups/dist-pre-dfb4d5b-20261021-candidates，回滚/opt/moneymoney/dist.rollback-dfb4d5b-20261021-candidates保留21d706d。仅重启moneymoney.service；初始两次启动探针尚未连接，随后active/alive，最终健康通过。
+- 正式域名TLS、登录页、版本、29个资源SHA256/immutable及私人接口401/403通过；生产只读canary四市场、SNDK与手机检查通过（mm-candidate-production-canary.log）。10个跑单配置指纹和用户数据库Hash与前述完全一致，未修改运行配置或清理业务数据。
+- 固定CPU4x/弱网，21d706d与dfb4d5b桌面/手机冷热各3次，均通过绝对预算（mm-candidate-perf-baseline.log/current.log）。冷页面中位数桌面1758.1→1634.8ms、手机1449.5→1381ms；冷图表2670.4→2680.7ms、2873.1→2878ms；热页面384.7→402.2ms、320.8→384.8ms，热图表703→674.5ms、593.8→717.3ms，热JS传输0字节。没有整体20%改善，也没有证明变化由此切片引起；不宣称全面提速或非退化，性能目标保持未完成。
+
+当前部署完成的是候选证据安全切片，不是完整晋级或十二组收尾；下一步仍需事前验证结果明确关联、实际成交证明和剩余平台能力。
