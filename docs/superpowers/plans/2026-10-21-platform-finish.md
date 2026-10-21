@@ -101,3 +101,13 @@
 源码冻结执行完整回归；尚未提交或部署盲测切片。生产仍是4b29cd6，原跑单配置保持不变。
 
 更新：冻结源码388个隔离文件、1884项完整回归通过，失败0、退出0（mm-blind-full-tests.log）。构建、七类冒烟及数据资产/历史实验/前向候选/AI质量/盲测五类专用Chromium全部通过（mm-blind-gate-*），最新盲测截图mm-blind-browser-r1SOCR。安全扫描988跟踪文件、差异检查、用户数据库Hash通过；自审补齐未确认即停止的数据泄漏、日内缺口和进度跳跃的失败回归。准备提交推送与干净导出复验，尚不作为生产上线声明。
+
+## 盲测切片发布凭据
+
+已推送并部署8d280e450e674d97375a63acb99da7bf08ee9d19。干净导出moneymoney-blind-clean-8d280e4-20261021重建，再通过七类及五类专用冒烟（mm-blind-clean-*）。只操作moneymoney.service，最终active/alive；正式域名TLS、登录、版本、29资源SHA256/immutable、私人接口拒绝和四市场/SNDK/手机只读canary全部通过（mm-blind-production-canary.log）。没有生产盲测会话、采集、模型调用、订单或Telegram测试消息。
+
+- 归档SHA256：707727f737785038f59b555b626d061537e2df7e42a66a88ad8ce73de5b4be75；server.js：8756734e154360f155f204ff0d49004d92ea993d056a726c6447e3cedac21e28；index.html：05a639086e31a13dc1dbdd008837a8e5f410e4716780b63c9ebf22d7be8fefd7。
+- 备份/opt/moneymoney/backups/dist-pre-8d280e4-20261021-blind；回滚/opt/moneymoney/dist.rollback-8d280e4-20261021-blind保留4b29cd6。10个跑单指纹仍5125162b35c9893e4a9ac7d11c40eeaca7297bd95d7434d6bec70712aa144181；用户数据库Hash仍27fd475e523568daa4cdcabf3146917023335a62affe00429babd721b3b79fd1。数据库、数据湖、scratch及未跟踪文件未清理。
+- 固定CPU4x/弱网、桌面手机冷热各3次，旧4b29cd6/新8d280e4均通过加载预算（mm-blind-perf-baseline.log/current.log）。冷页面中位数桌面2284/2227.5ms、手机1759.6/1730.2ms；冷图表3477.7/3447.8ms、3297.2/3354ms。热页面565.6/553.1ms、510.4/518.8ms；热图表906.4/857.8ms、836.8/829.7ms；热JS传输0。冷页面改善约2.5%/1.7%，没有达到20%，不宣称整体非退化或因果提速。
+
+仍待完成：整页20%性能目标；真实撮合/公司行动与成熟样本支持的完整晋级；AI固定预测目标及成熟校准；四市场研究深化；持久共享资金模拟、盲测事件时点和失效条件评估、Telegram项目订阅等。不会因新面板已上线把六批总项勾选完成，也不会自动启动管理员尚未确认的研究任务。
