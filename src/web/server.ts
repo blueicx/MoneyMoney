@@ -35,6 +35,7 @@ import { previewPortfolioRiskBudget } from '../features/portfolio-risk-budget';
 import { ResearchCommittee } from '../features/research-committee';
 import { createResearchCommitteeRouter } from './research-committee-routes';
 import { ResearchProjectStore } from '../features/research-projects';
+import { TelegramProjectSubscriptions, telegramProjectCommandReply } from '../features/telegram-project-subscriptions';
 import { ResearchProjectReviewWorker } from '../features/research-project-review-worker';
 import { createResearchProjectRouter } from './research-project-routes';
 import { StrategyDefinitionStore } from '../features/strategy-definitions';
@@ -443,6 +444,7 @@ const researchProjects=new ResearchProjectStore(stateStore,createProjectReferenc
   account:id=>{const account=unifiedPaperLedgerStore.getAccount(id);const runners=stateStore.get<import('../features/ai-paper-runner').AiRunner[]>('ai-paper-runners');if(!account||!('runnerId' in account)||!Array.isArray(runners))return null;const runner=runners.find(r=>r.id===account.runnerId&&r.accountId===id);return runner?{account,runner}:null;},
 }));
 const projectReviewWorker=new ResearchProjectReviewWorker(stateStore,researchProjects,Date.now,error=>logger.warn('local project reference review failed',{reason:error instanceof Error?error.message:'本地复查失败'}));
+const telegramProjectSubscriptions=new TelegramProjectSubscriptions(stateStore,researchProjects,researchRepository,{isOwner:chat=>telegramAdminChatIds().has(chat),suppressed:chat=>!telegramInteractionBot||telegramAlertSuppressed(chat,'normal'),link:market=>buildTelegramDeepLink(process.env.PUBLIC_WEB_BASE_URL||telegramPublicBaseUrl(),{market,instrument:'',workspace:'research-lab'})});
 app.use('/api/research/projects',createResearchProjectRouter(researchProjects,()=>projectReviewWorker.status()));
 const strategyDefinitionStore=new StrategyDefinitionStore(stateStore);
 const blindSessionStore=new BlindSessionStore(stateStore,{resolve:(market,instrument)=>dataLakeCatalog.resolveInstrument(market as MarketId,instrument),load:input=>dataLakeCatalog.queryBarsAsOf(input)});
@@ -5097,6 +5099,7 @@ const TELEGRAM_HELP = [
   '/alert   直接建提醒；/alert draft 先预览再确认',
   '/inbox   查看私聊提醒并确认/重试',
   '/pending 待处理自选行动；已读、置顶、稍后处理同步网页',
+  '/projects 当前市场私人项目；show/subscribe/unsubscribe/status，订阅默认关闭',
   '/changes 今日变化摘要 · /why 为何未下单 · /comparison 已保存模拟对照结果',
   '/bookmarks 私人图表书签及研究批注网页入口（不自动下单）',
   '/digest   查看或配置定时摘要',
@@ -5781,6 +5784,7 @@ async function stockSignalsForChat(chatId: string, args: string[], automatic = f
 
 export function getTelegramCommandHandlers(): Record<string, TelegramCommandHandler> {
   const rawHandlers: Record<string, TelegramCommandHandler> = {
+    projects: ({chatId,args,message}) => telegramProjectCommandReply(telegramProjectSubscriptions,String(chatId),telegramScopeForChat(chatId),args,message.chat.type),
     pending: context => rawHandlers.actioncenter(context),
     changes: context => rawHandlers.digest({...context,args:['now']}),
     comparison: ({chatId}) => {
@@ -7069,6 +7073,7 @@ export function getTelegramCommandHandlers(): Record<string, TelegramCommandHand
       if(!item || item.payload?.chatId!==chatId) return '未找到属于当前私聊的投递记录。';
       if(action==='ack') {const updated=researchRepository.updateAlertDeliveryStatus(id,'acknowledged',new Date().toISOString());return updated?'✅ 已确认该提醒。':'提醒记录不存在。';}
       if(action==='retry') {
+        if(item.id.startsWith('stock-signal:')||item.id.startsWith('research-project:'))return '该通知由受权限、暂停和订阅检查的outbox自动重试，不通过通用入口绕过策略。';
         try { const queued=researchRepository.retryAlertDelivery(id);if(!queued?.payload?.chatId || !telegramInteractionBot) return 'Telegram 暂不可用，投递保留在队列中。';
           await telegramInteractionBot.sendToChat(chatId,telegramReply(escapeTelegramHtml(queued.payload.message||'MoneyMoney 提醒')));
           researchRepository.saveAlertDelivery({...queued,status:'sent',deliveredAt:new Date().toISOString(),lastError:undefined});return '✅ 提醒已重试并发送。';
@@ -7926,12 +7931,21 @@ async function monitorTelegramSlowAlerts(): Promise<void> {
   }
 }
 
+async function monitorTelegramProjectSubscriptions():Promise<void> {
+  if(!telegramInteractionBot)return;
+  const config=getRuntimeTelegramConfig(),allowed=new Set(parseChatIds(config.allowedChatIds,config.chatId));
+  for(const chat of telegramAdminChatIds()){
+    if(!allowed.has(chat)||!telegramInteractionBot)continue;
+    try{telegramProjectSubscriptions.collect(chat);await telegramProjectSubscriptions.flush(chat,async text=>{if(!telegramInteractionBot)throw Error('Telegram暂停');await telegramInteractionBot.sendToChat(chat,telegramReply(text));});}
+    catch{logger.warn('telegram_project_subscription_failed',{reason:'私人项目订阅检查失败；保留原项目及投递记录'});}
+  }
+}
 function startTelegramCommandCenterMonitor(): void {
   if (!telegramInteractionBot) return;
   if (!telegramPriceMonitor) telegramPriceMonitor = setInterval(() => { void monitorTelegramPriceAlerts().catch(() => {}); }, 60_000);
   if (!telegramDigestMonitor) telegramDigestMonitor = setInterval(() => { void monitorTelegramDigests().catch(() => {}); }, 60_000);
   if (!telegramEventMonitor) telegramEventMonitor = setInterval(() => { void monitorTelegramEventAlerts().catch(() => {}); }, 60_000);
-  if (!telegramSlowMonitor) telegramSlowMonitor = setInterval(() => { void Promise.all([monitorTelegramSlowAlerts(), monitorTelegramSmartAlerts()]).catch(() => {}); }, 10 * 60_000);
+  if (!telegramSlowMonitor) telegramSlowMonitor = setInterval(() => { void Promise.all([monitorTelegramSlowAlerts(), monitorTelegramSmartAlerts(), monitorTelegramProjectSubscriptions()]).catch(() => {}); }, 10 * 60_000);
 }
 
 function stopTelegramCommandCenterMonitor(): void {
@@ -10810,7 +10824,7 @@ app.get('/api/alerts/deliveries', (req, res) => {
 app.post('/api/alerts/deliveries/:id/retry', express.json(), async (req, res) => {
   if (!adminOnly(req, res)) return;
   const saved=researchRepository.getAlertDelivery(String(req.params.id));
-  if(saved?.id.startsWith('stock-signal:'))return res.status(409).json({success:false,error:'股票信号由带过期与静默检查的outbox自动重试，不通过通用投递入口绕过策略'});
+  if(saved?.id.startsWith('stock-signal:')||saved?.id.startsWith('research-project:'))return res.status(409).json({success:false,error:'此通知由带权限、订阅、过期与静默检查的outbox自动重试，不通过通用投递入口绕过策略'});
   if(saved?.context.instrument&&['alerts','signals'].includes(saved.context.workspace)&&instrumentSilences.suppresses(saved.context.instrument))return res.status(409).json({success:false,error:'标的处于共享静默状态，请先恢复；未消耗投递次数'});
   let queued: any;
   try {

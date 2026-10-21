@@ -4,7 +4,7 @@ import type { researchRepository } from './research-repository';
 import type { SQLiteStateStore } from '../storage/sqlite-state';
 
 export class TelegramSignalOutbox {
-  constructor(private readonly repository:Pick<typeof researchRepository,'getAlertDelivery'|'saveAlertDelivery'|'listAlertDeliveries'>,private readonly store:Pick<SQLiteStateStore,'acquireLease'|'refreshLease'|'releaseLease'>,private readonly clock=Date.now) {}
+  constructor(private readonly repository:Pick<typeof researchRepository,'getAlertDelivery'|'saveAlertDelivery'|'listAlertDeliveries'>,private readonly store:Pick<SQLiteStateStore,'acquireLease'|'refreshLease'|'releaseLease'>,private readonly clock=Date.now,private readonly namespace:'stock-signal'|'research-project'='stock-signal') {}
   enqueue(delivery:AlertDelivery) {
     if(delivery.expiresAt && !Number.isFinite(Date.parse(delivery.expiresAt)))throw new Error('信号通知过期时间无效');
     const existing=this.repository.getAlertDelivery(delivery.id);if(existing)return existing;
@@ -12,11 +12,11 @@ export class TelegramSignalOutbox {
   }
   async flush(chat:string,allowed:()=>boolean,send:(text:string)=>Promise<unknown>,render:(item:AlertDelivery)=>string|null=item=>item.payload?.message || '信号内容不可用') {
     if(!allowed())return;
-    const key='telegram:stock-signal-outbox:'+chat,owner=randomUUID();
+    const key='telegram:'+this.namespace+'-outbox:'+chat,owner=randomUUID();
     if(!this.store.acquireLease(key,owner,this.clock(),120000))return;
     const timer=setInterval(()=>this.store.refreshLease(key,owner,this.clock(),120000),30000);timer.unref();
     try {
-      for(const item of this.repository.listAlertDeliveries(200).filter(row=>row.id.startsWith('stock-signal:') && row.channel==='telegram' && row.payload?.chatId===chat).slice(0,20)) {
+      for(const item of this.repository.listAlertDeliveries(200).filter(row=>row.id.startsWith(this.namespace+':') && row.channel==='telegram' && row.payload?.chatId===chat).slice(0,20)) {
         if(!allowed() || !this.store.refreshLease(key,owner,this.clock(),120000))break;
         const current=this.repository.getAlertDelivery(item.id);if(!current || !['queued','failed'].includes(current.status) || (current.attempts || 0)>=7)continue;
         if(current.expiresAt && (!Number.isFinite(Date.parse(current.expiresAt)) || this.clock()>=Date.parse(current.expiresAt))){this.repository.saveAlertDelivery({...current,status:'failed',attempts:7,lastError:'信号通知已过期或时间无效，不发送旧信号；可重新扫描'});continue;}
