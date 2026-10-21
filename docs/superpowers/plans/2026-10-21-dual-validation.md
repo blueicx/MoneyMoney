@@ -68,3 +68,17 @@
 - 当前进入其余完整冒烟及安全扫描；尚未提交、推送或部署。上节任务4仍待发布凭据，不能使用旧版本门禁代替本次结果。整页20%目标未完成。
 
 更新：固定源码已通过构建、Web/认证/四市场/实时图表/专业研究/合约/研究深度七类冒烟，以及数据资产、历史实验、双轨验证三类专用Chromium（mm-dual-gate-*）。双轨截图mm-restricted-forward-browser的最终路径见对应日志；安全扫描966个跟踪文件、git diff --check和用户数据库Hash核对通过。自审确认无新增定时器、模型调用、账户或订单，旧历史输入不增加windowStart参数。接下来才进行提交、干净导出和生产发布；尚不把真实未来窗口的观察结果视为已取得。
+
+## 发布凭据
+
+前文“尚未”为对应检查点状态。本切片已提交推送并发布运行提交`ba1fc01f38e990f24863db822236f47bbb97180a`。
+
+- 干净导出moneymoney-dual-clean-ba1fc01-20261021固定构建身份，重新通过七类冒烟及三类专用浏览器（mm-dual-clean-*）；最终双轨截图mm-restricted-forward-browser-NJdwsU。依赖仅通过现有node_modules链接复用，未打包用户数据库/数据湖或凭据。
+- 发布包SHA256：da428b716ad0acf2800fb553e2d2dd07a6d3cd3bfe7e704cdddd4d8f71617a12。
+- server.js SHA256：d78e5b2d925751dedbb2be34723f782e5dd1618acb0dfdb85a4764a10f212430；index.html SHA256：e79ad9c4c43fac986522bba2141cbadca34569e9617bc4cda9e70d536b7864b2。远端重新核对一致。
+- 备份/opt/moneymoney/backups/dist-pre-ba1fc01-20261021-dual；回滚/opt/moneymoney/dist.rollback-ba1fc01-20261021-dual，核验保留d95e913。发布脚本Hash仍04da12b215aa5816ed7739225ac3a2c261b3cf845f924a221a2874296cbf804e；仅操作moneymoney.service，初始两次健康连接未就绪后alive，没有触发回滚。
+- 正式域名TLS、登录页、构建版本、29资源SHA256和immutable缓存通过。无登录访问新验证/前向/项目接口均401，符合认证边界；初次临时验收断言误要求403，修正为未登录401或403后完整重跑，并非放宽私人读取。生产访客只读浏览器验证返回403。
+- 生产只读canary通过四市场、K线别名、SNDK、手机、右侧库及结算证据/真实空状态，errors为空，报告moneymoney-canary-1792571091846/production-canary-report.json。未在生产创建验收计划、策略、模型请求或订单，未发Telegram验收消息。
+- 10个跑单配置指纹发布前后及最终复核均5125162b35c9893e4a9ac7d11c40eeaca7297bd95d7434d6bec70712aa144181。未跟踪data/research.db仍27fd475e523568daa4cdcabf3146917023335a62affe00429babd721b3b79fd1，未纳入提交；保留数据湖/scratch/用户文件/工作树，不删除业务历史。
+
+本次完成双轨验证切片，不代表真实未来窗口已经成熟、实际前向撮合或第三批晋级系统完成。旧晋级审计、候选强制门控、公司行动归因和整页冷加载20%目标继续未完成。后续复查还需关注多观察复用相同历史模型ID时的明确归属拒绝，以及非对齐历史截止点的覆盖说明；当前不会猜测配对或因此自动放行。
