@@ -27,3 +27,17 @@
 - 自审进一步补齐期权重复比较时清除旧事件说明、重叠年度不得归因；4项先失败后通过。两次中途停止的全测只用于发现问题，不算最终通过。最终冻结源码完整测试400文件/1926项、失败0、退出0（mm-platform-completion-release-tests.log）。
 - 最终构建、Web/认证/四市场/实时图表/专业研究/合约/研究深度以及数据资产/受限实验/前向/AI质量/盲测/Telegram项目/共享资金/本轮闭环共16项检查全部退出0（mm-completion-gate-*）。安全扫描1013跟踪文件、暂存差异检查通过。用户数据库Hash仍不变，服务器预检active、根盘50%/15GB可用、原10跑单指纹不变。
 - 完成前自审和分支收尾均由主Agent执行，未使用子Agent；仅将已通过功能准备发布，六批总项保持未勾选。AI真实成熟观测、公司行动及真实前向成交晋级、四市场剩余深化和整页20%性能不得用夹具或理论撮合冒充完成。
+
+## 本批发布凭据
+
+代码提交27b0858269c56f35479bda83737a62228ba8104a；CI修复432256280861fa190103fbcf4060432eef15a632，均已推送。GitHub CI 39660274165 已最终success：Linux Node22.22.1、npm11.17.0，401文件/1927项测试失败0，构建/安全/差异/Web冒烟通过。此前Node20/npm10不兼容已核验失败日志；只调整CI运行时，不改锁文件或生产Node。
+
+干净导出 moneymoney-completion-clean-4322562-20261022 重建并复验全部16项标准/专用检查。正式域名只读canary通过四市场、SNDK与手机；29资源SHA256及immutable全部一致、重试0，新私人接口未登录拒绝。日志 mm-completion-clean-*、mm-completion-production-canary.log、mm-completion-production-assets.log。
+
+- 发布归档：moneymoney-4322562-20261022-completion.tar.gz；SHA256 4b8b7c403221064c245128e35c35c2fac88104503ebd138effd6b563492b00a0。
+- server.js SHA256 51df7fd70e7e6968ed9889eb70fae6c80f752e140ec30be48ac098ae73df6d74；index.html SHA256 60030e5f0dae586ca9c80bcf92865742fa5c1a552cf3a175278af83b52f6b0ad，远端一致。
+- 备份 /opt/moneymoney/backups/dist-pre-4322562-20261022-completion；回滚 /opt/moneymoney/dist.rollback-4322562-20261022-completion 保留f45b06a。仅操作moneymoney.service，启动阶段两次连接拒绝后最终active/alive，正式域名版本4322562。
+- 原10跑单配置Hash仍5125162b35c9893e4a9ac7d11c40eeaca7297bd95d7434d6bec70712aa144181；用户未跟踪research.db仍27fd475e523568daa4cdcabf3146917023335a62affe00429babd721b3b79fd1。未创建生产研究任务/订阅/模型调用或订单，数据库、数据湖、scratch未清理。
+- 最终固定环境冷热各3次结果：桌面冷shell/chart 2154.3/3298.6ms、热588.2/918.5ms；手机冷1635.1/3299.5ms、热485.5/770.3ms；热JS传输0。绝对加载预算通过，但对f45基线冷shell分别慢约3.9%/7.1%，20%目标未达成，不宣称整体非退化、因果提速或全部完成。日志 mm-platform-completion-perf-final.log。
+
+本批共享资金、盲测事件/响应、AI事前目标功能已发布；真实未来样本不能即时制造，四市场研究进一步闭环、跨模块项目引用和性能20%仍须继续，不勾选六批整体。
