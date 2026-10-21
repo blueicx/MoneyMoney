@@ -10,6 +10,7 @@ interface Manifest {observationId:string;market:'stocks';instrument:string;strat
 interface Plan extends Manifest {id:string;hash:string;resultId:string;revision:number;status:'preview'|'registered'|'paused'|'cancelled'|'completed';confirmedAt?:number;reason:string;updatedAt:number;lease?:{owner:string};attempts:number}
 const digest=(value:unknown)=>createHash('sha256').update(JSON.stringify(value)).digest('hex'),time=(value:unknown)=>value instanceof Date?value.getTime():Date.parse(String(value));
 const manifest=(p:Manifest):Manifest=>({observationId:p.observationId,market:p.market,instrument:p.instrument,strategyId:p.strategyId,strategyHash:p.strategyHash,timeframe:p.timeframe,source:p.source,trainingExperimentId:p.trainingExperimentId,trainingHash:p.trainingHash,trainingRecordHash:p.trainingRecordHash,from:p.from,to:p.to,count:p.count,createdAt:p.createdAt,mode:p.mode});
+export { manifest as restrictedValidationManifest };
 /** Explicit administrator research, no worker, model, upstream provider or order executor. */
 export class RestrictedValidationStore {
  constructor(private state:State,private deps:Dependencies,private now=Date.now){}

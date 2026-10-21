@@ -1,6 +1,7 @@
 import {createHash} from 'node:crypto';
 import type {DatasetPartition,DataRevision,PointInTimeSnapshot} from '../storage/data-lake';
 import {buildResearchRevisionImpact} from './research-revision-impact';
+import type { RegisteredWindowProof } from './restricted-validation-proof';
 
 interface Input {session:any;version:any;experiment:any;snapshot:PointInTimeSnapshot|null;partitions:DatasetPartition[];revisions:DataRevision[];signals:any[];identity?:{id:string;symbol:string}|null}
 /** Read-only metadata audit. Never publishes candidates or treats observed prices as executed trades. */
@@ -31,6 +32,6 @@ export function buildRestrictedReadiness(input:Input,now=Date.now()){
  check('forward',false,`手动走势信号 ${forward.signals} 个，20根成熟 ${forward.mature20} 个；未关联模拟成交，不能当作成交样本或收益排名`);
  checks.push({id:'corporate-actions',status:'unknown',reason:'本成交模型未完成拆股、分红及退市收益归因验收'});
  check('approval',false,'当前观察没有明确关联的人工审批记录；不按版本或时间猜测配对，不修改已有审批或监控状态');
- const pack={schemaVersion:1,market:s.market,instrument:s.instrument,timeframe:s.timeframe,checkedAt:new Date(now).toISOString(),source:s.source,dataStatus:'partial',strategyId:s.strategyId,strategyHash:s.strategyHash,experimentId:s.experimentId,observationId:s.id,snapshot:p?{id:p.id,contentHash:p.contentHash,asOf:p.asOf}:null,evidenceRefs:[...new Set([...(r?.evidenceRefs||[]),...signals.flatMap(signal=>signal.evidenceRefs||[])])],checks,blockers:checks.filter(row=>row.status!=='met').map(row=>row.reason),forward,revisions,promotionAllowed:false,monitoringAllowed:false,orderChanges:0,modelCalls:0,reason:'只读证据检查，不是策略审批；无新采集、模型调用、任务或订单'};
+ const pack={schemaVersion:1,market:s.market,instrument:s.instrument,timeframe:s.timeframe,checkedAt:new Date(now).toISOString(),source:s.source,dataStatus:'partial',strategyId:s.strategyId,strategyHash:s.strategyHash,experimentId:s.experimentId,observationId:s.id,snapshot:p?{id:p.id,contentHash:p.contentHash,asOf:p.asOf}:null,evidenceRefs:[...new Set([...(r?.evidenceRefs||[]),...signals.flatMap(signal=>signal.evidenceRefs||[])])],checks,blockers:checks.filter(row=>row.status!=='met').map(row=>row.reason),forward,revisions,validation:null as RegisteredWindowProof|null,promotionAllowed:false,monitoringAllowed:false,orderChanges:0,modelCalls:0,reason:'只读证据检查，不是策略审批；无新采集、模型调用、任务或订单'};
  return {...pack,contentHash:createHash('sha256').update(JSON.stringify(pack)).digest('hex')};
 }

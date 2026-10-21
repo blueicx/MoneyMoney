@@ -21,17 +21,18 @@
    v.row=row;const out=q('[data-candidate-detail]');out.replaceChildren();
    function add(text){const p=document.createElement('p');p.textContent=text;out.append(p);}
    add(`${row.id} · ${row.instrument||'未关联标的'} · ${row.status}`);add('固定策略版本 '+row.version);
-   add('观察引用 '+(row.evidenceRef?.observationId||'未关联')+'；旧批准不代表当前证据有效');
+   add('观察引用 '+(row.evidenceRef?.observationId||'未关联')+'；验证引用 '+(row.evidenceRef?.validationId||'未关联')+'；旧批准不代表当前证据有效');
    for(const reason of proof?.reasons||row.gate?.reasons||[])add(reason);
    add('评估证据 Hash '+(row.gate?.evidenceHash||'未核验')+'；批准证据 Hash '+(row.approvalEvidenceHash||'未批准'));
-   for(const h of row.history||[])add(new Date(h.at).toLocaleString()+' · '+h.action+(h.reason?' · '+h.reason:''));
+   for(const h of row.history||[])add(new Date(h.at).toLocaleString()+' · '+h.action+(h.reason?' · '+h.reason:'')+' · 当时观察 '+(h.evidenceRef?.observationId||'旧记录未留存')+' · 当时验证 '+(h.evidenceRef?.validationId||'未关联')+' · 当时指标 '+(h.metrics?JSON.stringify(h.metrics):'旧记录未留存'));
    q('[data-candidate-status]').textContent=proof?.passed?'服务端证据达标，仍需人工批准':'仅记录核验状态；没有启动监控或创建订单';sync();
   }
   q('[data-candidate-create]').onclick=run(async()=>{
    const o=getObservation();if(!o||o.market!=='stocks')throw Error('请先选择明确的股票前向观察');
-   if(!root.confirm(`将观察 ${o.id}\n${o.instrument}\n版本 ${o.strategyHash}\n保存为私人候选草稿并核验；不启动监控、不创建订单。确认？`))return;
+   const selectedValidation=root.MoneyRestrictedValidation?.selectedPlan(host);if(selectedValidation&&selectedValidation.observationId!==o.id)throw Error('所选验证不属于当前观察');
+   if(!root.confirm(`将观察 ${o.id}\n${o.instrument}\n版本 ${o.strategyHash}\n验证引用 ${selectedValidation?.id||'未选择'}（不会按时间猜测）\n保存为私人候选草稿并核验；不启动监控、不创建订单。确认？`))return;
    v.nonce??='candidate_'+root.crypto.randomUUID();
-   const row=await request('',{id:v.nonce,market:'stocks',instrument:o.instrument,version:o.strategyHash,metrics:{},evidenceRef:{observationId:o.id}});if(!row)return;
+   const row=await request('',{id:v.nonce,market:'stocks',instrument:o.instrument,version:o.strategyHash,metrics:{},evidenceRef:{observationId:o.id,...(selectedValidation?{validationId:selectedValidation.id}:{})}});if(!row)return;
    v.nonce=null;display(row);const evaluated=await request('/'+encodeURIComponent(row.id)+'/evaluate',{market:'stocks'});if(evaluated)display(evaluated);
   });
   q('[data-candidate-list]').onclick=run(async()=>{const rows=await request('?market=stocks');if(!rows)return;q('[data-candidate-choices]').replaceChildren();q('[data-candidate-status]').textContent=rows.length?'选择明确候选查看证据':'本市场尚无已保存候选';for(const row of rows){const b=document.createElement('button');b.type='button';b.textContent=`${row.instrument||'未关联'} · ${row.status} · ${row.id}`;b.onclick=run(async()=>{const proof=await request('/'+encodeURIComponent(row.id)+'/proof?market=stocks');if(proof)display(row,proof);});q('[data-candidate-choices]').append(b);}});

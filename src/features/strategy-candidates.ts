@@ -4,7 +4,8 @@ import { researchRepository } from './research-repository';
 export type CandidateStatus = 'draft' | 'pending' | 'candidate' | 'approved' | 'rejected';
 interface Metrics { oosReturnPct?:number;trades?:number }
 export interface CandidateEvidence {passed:boolean;contentHash:string;metrics:Metrics;reasons:string[]}
-export interface StrategyCandidate { id: string; market: MarketId; instrument?: string; version: string; metrics: Metrics; status: CandidateStatus; gate: { passed: boolean; reasons: string[];evidenceHash?:string }; updatedAt: number;evidenceRef?:{observationId:string;validationId?:string};approvalEvidenceHash?:string;rules?:{minTrades:number;minOutOfSampleReturnPct:number};metricsSource?:'server-evidence'|'unverified';history?:Array<{at:number;action:string;evidenceHash?:string;reason?:string}> }
+type CandidateAudit = {at:number;action:string;evidenceHash?:string;reason?:string;evidenceRef?:{observationId:string;validationId?:string};metrics?:Metrics};
+export interface StrategyCandidate { id: string; market: MarketId; instrument?: string; version: string; metrics: Metrics; status: CandidateStatus; gate: { passed: boolean; reasons: string[];evidenceHash?:string }; updatedAt: number;evidenceRef?:{observationId:string;validationId?:string};approvalEvidenceHash?:string;rules?:{minTrades:number;minOutOfSampleReturnPct:number};metricsSource?:'server-evidence'|'unverified';history?:CandidateAudit[] }
 
 export class StrategyCandidateRegistry {
   constructor(private verify?:(candidate:StrategyCandidate)=>CandidateEvidence){}
@@ -24,7 +25,13 @@ export class StrategyCandidateRegistry {
       return { passed: false, contentHash: '', metrics: {}, reasons: [error instanceof Error ? error.message : '证据当前不可核验'] };
     }
   }
-  private event(c:StrategyCandidate,action:string,reason?:string){c.history??=[];if(c.history.length>=100)throw Error('候选审计已达100条，未删除历史');c.history.push({at:Date.now(),action,evidenceHash:c.gate.evidenceHash,...(reason?{reason}:{})});}
+  private event(c:StrategyCandidate,action:string,reason?:string){
+    c.history??=[];
+    if(c.history.length>=100)throw Error('候选审计已达100条，未删除历史');
+    c.history.push({at:Date.now(),action,evidenceHash:c.gate.evidenceHash,
+      ...(c.evidenceRef?{evidenceRef:structuredClone(c.evidenceRef)}:{}),metrics:{...c.metrics},
+      ...(reason?{reason}:{})});
+  }
   saveDraft(input: { id: string; market: MarketId; instrument?: string; version: string; metrics: Metrics;evidenceRef?:{observationId:string;validationId?:string} }): StrategyCandidate {
     if (!input.id?.trim() || !input.version?.trim()) throw new Error('Candidate id and version are required');
     assertMarketContext({ market: input.market, workspace: 'research', instrument: input.instrument });
@@ -33,7 +40,7 @@ export class StrategyCandidateRegistry {
     }
     const previous=(researchRepository as any).getCandidate(input.id);if(previous?.status==='approved')throw Error('已批准候选需先人工退役，不能覆盖');if(previous&&(previous.market!==input.market||previous.instrument!==input.instrument||previous.version!==input.version))throw Error('候选身份与版本固定，请使用新的ID');
     const ref=input.evidenceRef;if(ref&&(Object.keys(ref).some(k=>!['observationId','validationId'].includes(k))||[ref.observationId,...(ref.validationId===undefined?[]:[ref.validationId])].some(v=>typeof v!=='string'||!v||v.length>200)))throw Error('需要明确的观察/验证引用，不接受客户端证据或指标作为证明');
-    const candidate: StrategyCandidate = { id: input.id, market: input.market, instrument: input.instrument, version: input.version, metrics: { ...input.metrics }, status: 'draft', gate: { passed: false, reasons: ['未执行；客户端指标尚未核验'] }, updatedAt: Date.now(),metricsSource:'unverified',...(ref?{evidenceRef:{...ref}}:{}),history:previous?.history||[],...(previous?.approvalEvidenceHash?{approvalEvidenceHash:previous.approvalEvidenceHash}:{}) };this.event(candidate,'draft');
+    const candidate: StrategyCandidate = { id: input.id, market: input.market, instrument: input.instrument, version: input.version, metrics: { ...input.metrics }, status: 'draft', gate: { passed: false, reasons: ['未执行；客户端指标尚未核验'] }, updatedAt: Date.now(),metricsSource:'unverified',...(ref?{evidenceRef:{...ref}}:{}),history:structuredClone(previous?.history||[]),...(previous?.approvalEvidenceHash?{approvalEvidenceHash:previous.approvalEvidenceHash}:{}) };this.event(candidate,'draft');
     researchRepository.compareAndSaveCandidate(input.id, previous ? JSON.stringify(previous) : null, candidate); return this.get(input.id);
   }
 
