@@ -45,6 +45,8 @@ import {RestrictedValidationStore} from '../features/restricted-validation';
 import {createRestrictedValidationRouter} from './restricted-validation-routes';
 import {AiEvaluationLab} from '../features/ai-evaluation-lab';
 import {createAiEvaluationRouter} from './ai-evaluation-routes';
+import {BlindSessionStore} from '../features/blind-sessions';
+import {createBlindSessionRouter} from './blind-session-routes';
 import { createProjectReferenceResolver } from '../features/research-project-references';
 import { LiveKlineHub, liveKlineScope } from '../features/live-kline-stream';
 import { createLiveKlineRouter } from './live-kline-routes';
@@ -443,6 +445,8 @@ const researchProjects=new ResearchProjectStore(stateStore,createProjectReferenc
 const projectReviewWorker=new ResearchProjectReviewWorker(stateStore,researchProjects,Date.now,error=>logger.warn('local project reference review failed',{reason:error instanceof Error?error.message:'本地复查失败'}));
 app.use('/api/research/projects',createResearchProjectRouter(researchProjects,()=>projectReviewWorker.status()));
 const strategyDefinitionStore=new StrategyDefinitionStore(stateStore);
+const blindSessionStore=new BlindSessionStore(stateStore,{resolve:(market,instrument)=>dataLakeCatalog.resolveInstrument(market as MarketId,instrument),load:input=>dataLakeCatalog.queryBarsAsOf(input)});
+app.use('/api/research/blind-sessions',createBlindSessionRouter(blindSessionStore));
 const aiEvaluationRunners=()=>{const rows=stateStore.get<AiRunner[]>('ai-paper-runners')||[];if(!stateStore.health.ok||!Array.isArray(rows))throw Error('跑单只读目录不可用');return rows;};
 const aiEvaluationLab=new AiEvaluationLab(stateStore,{
  load:ref=>{const runner=aiEvaluationRunners().find(r=>r.id===ref.runnerId),rows=stateStore.get<AiRunnerDecisionRecord[]>('ai-paper-runner-history:'+ref.runnerId)||[];if(!runner||!Array.isArray(rows))throw Error('原跑单或决策记录不可用');const decision=rows.find(d=>d.id===ref.decisionId);if(!decision)throw Error('未找到明确决策引用');return {runner,decision};},

@@ -155,6 +155,7 @@ modules.research.push(
   fs.readFileSync(path.join(source, 'professional-research.js'), 'utf8'),
   fs.readFileSync(path.join(source, 'action-research-workspace.js'), 'utf8'),
   fs.readFileSync(path.join(source, 'ai-evaluation-workspace.js'), 'utf8'),
+  fs.readFileSync(path.join(source, 'blind-session-workspace.js'), 'utf8'),
   fs.readFileSync(path.join(source, 'restricted-validation-workspace.js'), 'utf8'),
   fs.readFileSync(path.join(source, 'candidate-workspace.js'), 'utf8'),
   fs.readFileSync(path.join(source, 'restricted-forward-workspace.js'), 'utf8'),
