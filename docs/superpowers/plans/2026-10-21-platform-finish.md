@@ -78,3 +78,13 @@
 - 新增8项失败回归先红后绿，相关63项定向测试及TypeScript通过；隔离Parquet/SQLite Chromium验证明确计划→证据导出→新候选引用，原候选未被覆盖、缺口结果继续pending。截图mm-restricted-forward-browser-SVz7ok。正在准备当前源码完整回归，尚未提交/部署本补充。
 
 更新：当前源码385文件1872项完整回归退出0、失败0（mm-window-link-full-tests.log）；构建、七类及四类专用冒烟全部通过（mm-window-link-gate-*），最新隔离浏览器截图mm-restricted-forward-browser-dkdx7i。安全扫描981跟踪文件、差异检查通过。没有使用旧版测试替代此补充；准备提交及干净导出，性能20%目标、实际成交证据及其余平台批次保持未完成。
+
+## 事前窗口血缘发布凭据
+
+已推送并部署4b29cd699f946ebdf8bee0e553ea30e811a5ac0c。干净导出moneymoney-window-clean-4b29cd6-20261021重建并再次通过七类及四类专用冒烟（mm-window-link-clean-*）。正式域名TLS、登录页、版本、健康、29资源SHA256/immutable和私人接口拒绝访问通过；只读Chromium四市场、SNDK与手机检查通过（mm-window-link-production-canary.log）。没有生产模型调用、实验、订单或Telegram测试消息。
+
+- 归档SHA256：8bcf3d10db56cc641cf655355cde6d905ca7c748653c5ed6d549a87510089806；server.js：456c057447a00bd996fa66e211a635010b56ebb3d78dc3d5b4a3bbb251647fd6；index.html：65142c20a0c20dc8dd7b5673462ea25ae11c95c0bc1cfdc425ddd25e080a67f1。
+- 备份/opt/moneymoney/backups/dist-pre-4b29cd6-20261021-window；回滚/opt/moneymoney/dist.rollback-4b29cd6-20261021-window保留dfb4d5b。仅操作moneymoney.service，最终active/alive。10个原跑单指纹及用户数据库Hash与前述完全一致。
+- CPU4x/弱网、桌面手机冷热各3次：旧/新冷页面桌面2383.7/1676.7ms、手机1478.9/1372.7ms；冷图表3355.2/2747ms、3149.4/3063.2ms；热页面530.1/392.3ms、421.4/431.9ms，热图表890.3/727.1ms、786.4/801.2ms。旧版桌面基线及传输量波动明显，手机不足20%；没有证实整页20%改善或稳定因果收益，该目标仍未完成。
+
+继续实施历史盲测的手动归档切片；不把理论窗口、候选安全门控或新面板等同于完整平台交付。
