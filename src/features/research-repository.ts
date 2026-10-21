@@ -237,6 +237,13 @@ export const researchRepository = {
   saveCandidate(id: string, data: any) {
     db.prepare('INSERT OR REPLACE INTO strategy_candidates (id, data) VALUES (?, ?)').run(id, JSON.stringify(data));
   },
+  compareAndSaveCandidate(id: string, previous: string | null, data: unknown) {
+    const encoded = JSON.stringify(data);
+    const result = previous === null
+      ? db.prepare('INSERT OR IGNORE INTO strategy_candidates (id, data) VALUES (?, ?)').run(id, encoded)
+      : db.prepare('UPDATE strategy_candidates SET data = ? WHERE id = ? AND data = ?').run(encoded, id, previous);
+    if (result.changes !== 1) throw new Error('候选记录已被并发修改，请读取新状态后重试');
+  },
   getCandidate(id: string) {
     const row = db.prepare('SELECT data FROM strategy_candidates WHERE id = ?').get(id) as any;
     return row ? JSON.parse(row.data) : null;

@@ -3,7 +3,8 @@ const { strict: assert } = require('node:assert');
 const { StrategyCandidateRegistry } = require('../dist/features/strategy-candidates.js');
 
 test('candidate registry requires a passing gate and explicit approval before monitoring', () => {
-  const registry = new StrategyCandidateRegistry();
+  let evidence = {passed: false, contentHash:'a'.repeat(64), metrics:{oosReturnPct:-2,trades:2},reasons:['未达标']};
+  const registry = new StrategyCandidateRegistry(() => evidence);
   const draft = registry.saveDraft({ id: 's1', market: 'stocks', instrument: 'AAPL', version: '1.0.0', metrics: { oosReturnPct: -2, trades: 2 } });
   assert.equal(draft.status, 'draft');
   const pending = registry.evaluate('s1', { minOutOfSampleReturnPct: 0, minTrades: 5 });
@@ -11,6 +12,9 @@ test('candidate registry requires a passing gate and explicit approval before mo
   assert.equal(registry.canMonitor('s1'), false);
   assert.throws(() => registry.approve('s1'), /gate/);
   registry.evaluate('s1', { minOutOfSampleReturnPct: -5, minTrades: 1 });
+  assert.throws(() => registry.approve('s1'), /gate/);
+  evidence = {passed: true, contentHash:'b'.repeat(64), metrics:{oosReturnPct:2,trades:30},reasons:[]};
+  registry.evaluate('s1', { minOutOfSampleReturnPct: 0, minTrades: 20 });
   assert.equal(registry.approve('s1').status, 'approved');
   assert.equal(registry.canMonitor('s1'), true);
 });

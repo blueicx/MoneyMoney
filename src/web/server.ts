@@ -219,6 +219,8 @@ import { buildDecisionMobileSummary } from '../features/decision-mobile-summary'
 import { researchRepository } from '../features/research-repository';
 import { analyzeFactor, getFactorCatalog } from '../features/factor-lab';
 import { StrategyCandidateRegistry } from '../features/strategy-candidates';
+import { createCandidateEvidenceVerifier } from '../features/candidate-evidence';
+import { createCandidateHandlers } from './candidate-routes';
 import { globalStrategyRegistry } from '../features/strategy-registry';
 import { riskPatrol } from '../features/risk-patrol';
 import { createAccessMiddleware, validateAccessConfiguration } from './access-control';
@@ -297,7 +299,9 @@ const telegramStockSignalScanner = new TelegramStockSignalScanner({ store: state
 const stockSignalSchedule = new StockSignalSchedule(stateStore);
 const telegramStockSignalOutbox = new TelegramSignalOutbox(researchRepository,stateStore);
 dataLakeWorker.start();
-const strategyCandidateRegistry = new StrategyCandidateRegistry();
+const strategyCandidateRegistry = new StrategyCandidateRegistry(createCandidateEvidenceVerifier({
+  observation: id => restrictedForwardStore.read(id), readiness: id => restrictedForwardStore.readiness(id),
+}));
 const eventStudyRepository = new EventStudyRepository(stateStore);
 const predictionSettlementRepository = new PredictionSettlementRepository(stateStore);
 const marketHistoryCaptureScheduler = new MarketHistoryCaptureScheduler(stateStore, 3);
@@ -8592,53 +8596,14 @@ app.post('/api/research/factors/analyze', express.json(), (req, res) => {
   } catch (error: any) { return res.status(400).json({ success: false, error: error?.message || '因子分析失败' }); }
 });
 
-app.get('/api/research/candidates', (req, res) => {
-  if (!adminOnly(req, res)) return;
-  try {
-    const rawMarket = String(req.query.market || '').trim();
-    const market = rawMarket ? rawMarket as MarketId : undefined;
-    if (market && !MARKET_IDS.includes(market)) return res.status(400).json({ success: false, error: '市场范围无效' });
-    const data = strategyCandidateRegistry.list(market);
-    return res.json({ success: true, data, market: market || 'all', instrument: null, dataStatus: 'live', source: 'research-repository', updatedAt: new Date().toISOString(), reason: null });
-  } catch (error: any) { return res.status(400).json({ success: false, error: error?.message || '候选策略读取失败' }); }
-});
-
-app.post('/api/research/candidates', express.json(), (req, res) => {
-  try {
-    const body = req.body || {};
-    const metrics = body.metrics && typeof body.metrics === 'object' ? {
-      ...(body.metrics.oosReturnPct !== undefined ? { oosReturnPct: Number(body.metrics.oosReturnPct) } : {}),
-      ...(body.metrics.trades !== undefined ? { trades: Number(body.metrics.trades) } : {}),
-    } : {};
-    const candidate = strategyCandidateRegistry.saveDraft({ id: String(body.id || '').trim(), market: String(body.market || '').trim() as MarketId, instrument: body.instrument ? String(body.instrument).trim() : undefined, version: String(body.version || '').trim(), metrics });
-    return res.status(201).json({ success: true, data: candidate, market: candidate.market, instrument: candidate.instrument || null, dataStatus: 'live', source: 'research-repository', updatedAt: new Date(candidate.updatedAt).toISOString(), reason: null });
-  } catch (error: any) { return res.status(400).json({ success: false, error: error?.message || '候选策略无效' }); }
-});
-
-app.post('/api/research/candidates/:id/evaluate', express.json(), (req, res) => {
-  try {
-    const body = req.body || {};
-    const candidate = strategyCandidateRegistry.evaluate(String(req.params.id), {
-      minOutOfSampleReturnPct: body.minOutOfSampleReturnPct === undefined ? 0 : Number(body.minOutOfSampleReturnPct),
-      minTrades: body.minTrades === undefined ? 1 : Number(body.minTrades),
-    });
-    return res.json({ success: true, data: candidate, market: candidate.market, instrument: candidate.instrument || null, dataStatus: 'live', source: 'research-repository', updatedAt: new Date(candidate.updatedAt).toISOString(), reason: candidate.gate.passed ? null : candidate.gate.reasons.join('、') });
-  } catch (error: any) { return res.status(400).json({ success: false, error: error?.message || '候选策略评估失败' }); }
-});
-
-app.post('/api/research/candidates/:id/approve', express.json(), (req, res) => {
-  try {
-    const candidate = strategyCandidateRegistry.approve(String(req.params.id));
-    return res.json({ success: true, data: candidate, market: candidate.market, instrument: candidate.instrument || null, dataStatus: 'live', source: 'research-repository', updatedAt: new Date(candidate.updatedAt).toISOString(), reason: null });
-  } catch (error: any) { return res.status(409).json({ success: false, error: error?.message || '候选策略未达到发布门槛' }); }
-});
-
-app.post('/api/research/candidates/:id/reject', express.json(), (req, res) => {
-  try {
-    const candidate = strategyCandidateRegistry.reject(String(req.params.id));
-    return res.json({ success: true, data: candidate, market: candidate.market, instrument: candidate.instrument || null, dataStatus: 'live', source: 'research-repository', updatedAt: new Date(candidate.updatedAt).toISOString(), reason: null });
-  } catch (error: any) { return res.status(400).json({ success: false, error: error?.message || '候选策略处理失败' }); }
-});
+const candidateHandlers = createCandidateHandlers(strategyCandidateRegistry);
+app.get('/api/research/candidates', candidateHandlers.list);
+app.post('/api/research/candidates', express.json(), candidateHandlers.create);
+app.post('/api/research/candidates/:id/evaluate', express.json(), candidateHandlers.evaluate);
+app.post('/api/research/candidates/:id/approve', express.json(), candidateHandlers.approve);
+app.post('/api/research/candidates/:id/reject', express.json(), candidateHandlers.reject);
+app.get('/api/research/candidates/:id/proof', candidateHandlers.proof);
+app.post('/api/research/candidates/:id/retire', express.json(), candidateHandlers.retire);
 
 app.post('/api/research/experiments', express.json(), (req, res) => {
   if(!adminOnly(req,res))return;
