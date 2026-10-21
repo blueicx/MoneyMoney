@@ -4,7 +4,7 @@ import {restrictedStrategy} from './strategy-definitions';
 import {createExperimentRecord} from './research-contracts';
 
 interface Bar {time:number;open:number;high:number;low:number;close:number;volume?:number;closed?:boolean;publishedAt:number|null}
-interface Input {version:{id:string;hash:string;version:number;market:string;interpreterVersion:string;definition:Record<string,any>};market:string;instrument:string;asOf:number;source:string;snapshotId:string;dataHash:string;bars:Bar[]}
+interface Input {version:{id:string;hash:string;version:number;market:string;interpreterVersion:string;definition:Record<string,any>};market:string;instrument:string;asOf:number;source:string;snapshotId:string;dataHash:string;bars:Bar[];windowStart?:number}
 /** Private deterministic research only. Reuses the existing backtest cash/cost engine, never the paper executor. */
 export function runRestrictedHistoricalExperiment(input:Input){
  const d=restrictedStrategy.validate(input.version.definition),executionModel='restricted-next-open-v1';
@@ -14,17 +14,20 @@ export function runRestrictedHistoricalExperiment(input:Input){
  const interval=restrictedStrategy.capabilities.intervals[d.timeframe],evaluated=restrictedStrategy.evaluate(d,input.bars,input.asOf);
  const bars=input.bars.filter(b=>b.time+interval<=input.asOf&&b.closed!==false);
  if(!bars.length)throw Error('没有可用于研究的已完成K线');
+ if(input.windowStart!==undefined&&(!Number.isFinite(input.windowStart)||input.windowStart>input.asOf))throw Error('验证窗口起点无效');
+ const windowIndex=input.windowStart===undefined?0:bars.findIndex(b=>b.time>=input.windowStart!);if(windowIndex<0)throw Error('验证窗口没有已完成K线');const windowBars=bars.slice(windowIndex);
  let knownAt=-Infinity;const publication=bars.map(b=>{knownAt=Math.max(knownAt,b.publishedAt==null||!Number.isFinite(b.publishedAt)?Infinity:b.publishedAt);return knownAt;});
  const rejections:Array<{time:number;reason:string}>=[],signals:Array<BacktestSignal&{signalTime:number;knownAt:number}>=[];
  for(const p of evaluated.points){const next=bars[p.index+1],decisionTime=p.time+interval;
+  if(p.index<windowIndex)continue;
   const reason=!next?'没有下一根已完成K线，不强制成交':publication[p.index]>decisionTime?'条件所用数据尚未发布或发布时间未知，不使用事后数据':interval<86400000&&next.time!==decisionTime?'下一根存在日内缺口，不跨缺口假定成交':!Number.isFinite(next.volume)||Math.floor(Number(next.volume))<1?'下一根成交量不足或未知，无法建立成交模型':null;
   if(reason){rejections.push({time:p.time,reason});continue;}
-  signals.push({timeIndex:p.index+1,direction:p.direction,price:next.open,timeoutBars:1,volume:Math.min(Number.MAX_SAFE_INTEGER,Math.floor(next.volume!)),strategyId:input.version.id,source:input.source,tag:'restricted:'+p.time,signalTime:p.time,knownAt:publication[p.index]});
+  signals.push({timeIndex:p.index+1-windowIndex,direction:p.direction,price:next.open,timeoutBars:1,volume:Math.min(Number.MAX_SAFE_INTEGER,Math.floor(next.volume!)),strategyId:input.version.id,source:input.source,tag:'restricted:'+p.time,signalTime:p.time,knownAt:publication[p.index]});
  }
- const experiment=createExperimentRecord({market:'stocks',instrument:input.instrument,timeframe:d.timeframe,strategyId:input.version.id,strategyVersion:input.version.hash,dataSource:input.source,dataSnapshotHash:input.dataHash,dataFrom:new Date(bars[0].time).toISOString(),dataTo:new Date(bars.at(-1)!.time).toISOString(),feeRate:d.costs.feeBps/10000,slippage:d.costs.slippageBps/10000,seed:0,parameters:{executionModel,allocationPct:d.position.maxAllocationPct,startingBalance:1000,asOf:new Date(input.asOf).toISOString()}});
+ const experiment=createExperimentRecord({market:'stocks',instrument:input.instrument,timeframe:d.timeframe,strategyId:input.version.id,strategyVersion:input.version.hash,dataSource:input.source,dataSnapshotHash:input.dataHash,dataFrom:new Date(windowBars[0].time).toISOString(),dataTo:new Date(bars.at(-1)!.time).toISOString(),feeRate:d.costs.feeBps/10000,slippage:d.costs.slippageBps/10000,seed:0,parameters:{executionModel,allocationPct:d.position.maxAllocationPct,startingBalance:1000,asOf:new Date(input.asOf).toISOString(),...(input.windowStart===undefined?{}:{windowStart:new Date(input.windowStart).toISOString()})}});
  // Strong idempotent identity; the existing legacy experiment ID is a short configuration checksum.
  experiment.id='exp_restricted_'+createHash('sha256').update(JSON.stringify({...experiment,id:undefined,createdAt:undefined,snapshotId:input.snapshotId})).digest('hex');
- const backtest=new BacktestEngine({marketId:'stocks',rules:{maxOpenPositions:1,targetAllocationPct:d.position.maxAllocationPct},feeRate:experiment.feeRate,slippage:experiment.slippage,startingBalance:1000,preventFutureData:true,useCache:false,experimentContext:{marketId:'stocks',instrumentId:input.instrument,timeframe:d.timeframe,strategyId:input.version.id,strategyVersion:input.version.hash,dataSource:input.source,dataSnapshotId:input.snapshotId,costModel:executionModel,seed:0}}).run(bars.map(b=>b.close),signals);
+ const backtest=new BacktestEngine({marketId:'stocks',rules:{maxOpenPositions:1,targetAllocationPct:d.position.maxAllocationPct},feeRate:experiment.feeRate,slippage:experiment.slippage,startingBalance:1000,preventFutureData:true,useCache:false,experimentContext:{marketId:'stocks',instrumentId:input.instrument,timeframe:d.timeframe,strategyId:input.version.id,strategyVersion:input.version.hash,dataSource:input.source,dataSnapshotId:input.snapshotId,costModel:executionModel,seed:0}}).run(windowBars.map(b=>b.close),signals);
  let units=0,roundPnl=0,closed=0,wins=0;
  for(const trade of backtest.trades){units+=trade.direction==='buy'?trade.volume:-trade.volume;if(trade.direction==='sell'){roundPnl+=trade.pnl;if(units===0){closed++;if(roundPnl>0)wins++;roundPnl=0;}}}
  const metrics={...backtest.metrics,tradesCount:closed,winRatePct:closed>=20?100*wins/closed:null,profitFactor:closed>=20?backtest.metrics.profitFactor:null};
