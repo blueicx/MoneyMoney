@@ -3,9 +3,11 @@ import type {SQLiteStateStore} from '../storage/sqlite-state';
 import type {SignalOutcome} from './decision-intelligence';
 import {restrictedStrategy} from './strategy-definitions';
 import {observeForwardSignal} from './signal-forward';
+import {buildRestrictedReadiness} from './restricted-readiness';
+import type {PointInTimeSnapshot,DatasetPartition,DataRevision} from '../storage/data-lake';
 type State=Pick<SQLiteStateStore,'get'|'set'|'transaction'|'appendAudit'|'health'|'acquireLease'|'getLease'|'releaseLease'>;
 type History={dataStatus:string;source:string|null;updatedAt:string|null;reason?:string;snapshot?:{id:string;contentHash:string};rows:Array<Record<string,any>>};
-type Dependencies={definition:(id:string,hash:string)=>any;experiment:(id:string)=>any;resolve:(market:string,instrument:string)=>{id:string;symbol:string}|null;signals:{get:(id:string)=>SignalOutcome|null;list:()=>SignalOutcome[];save:(s:SignalOutcome)=>unknown}};
+type Dependencies={definition:(id:string,hash:string)=>any;experiment:(id:string)=>any;resolve:(market:string,instrument:string)=>{id:string;symbol:string}|null;signals:{get:(id:string)=>SignalOutcome|null;list:()=>SignalOutcome[];save:(s:SignalOutcome)=>unknown};catalog?:{snapshot:(id:string)=>PointInTimeSnapshot|null;partitions:()=>DatasetPartition[];revisions:()=>DataRevision[]}};
 interface Session {id:string;mode:'observation-only';market:'stocks';instrument:string;strategyId:string;strategyHash:string;timeframe:string;experimentId:string;source:string;startedAt:number;observingSince:number;status:'active'|'paused'|'stopped';revision:number;signalIds:string[];captures:Array<{id:string;at:number;snapshotId:string|null;dataHash:string|null;reason:string}>;reason:string;dataStatus:string;lastBarTime:number|null;lease?:{owner:string;expiresAt:number};updatedAt:number}
 const hash=(v:unknown)=>createHash('sha256').update(JSON.stringify(v)).digest('hex');
 const timestamp=(v:unknown)=>v instanceof Date?v.getTime():Date.parse(String(v));
@@ -16,6 +18,7 @@ export class RestrictedForwardStore {
  list(market:string){if(!['stocks','crypto','options','prediction'].includes(market))throw Error('市场无效');return this.index().map(id=>this.read(id)).filter(row=>row.market===market);}
  private linkedSignal(row:Session,key:string){const signal=this.deps.signals.get(key);if(!signal||signal.id!==key||signal.market!=='stocks'||signal.instrument!==row.instrument||signal.strategyVersion!==row.strategyHash||signal.strategyId!==row.strategyId||signal.experimentId!==row.experimentId||signal.timeframe!==row.timeframe||signal.source!==row.source||signal.triggeredAt<row.startedAt||signal.triggeredAt>this.now()||(signal as any).forwardObservation?.sessionId!==row.id)throw Error('已有信号血缘不一致，不猜测配对或更新');return signal;}
  signals(id:string){const row=this.read(id);return row.signalIds.map(key=>this.linkedSignal(row,key));}
+ readiness(id:string){const session=this.read(id),catalog=this.deps.catalog;if(!catalog)throw Error('目录核验服务未配置');const experiment=this.deps.experiment(session.experimentId);return buildRestrictedReadiness({session,identity:this.deps.resolve(session.market,session.instrument),version:this.deps.definition(session.strategyId,session.strategyHash),experiment,snapshot:experiment?.evidenceRefs?.length===1?catalog.snapshot(experiment.evidenceRefs[0]):null,partitions:catalog.partitions(),revisions:catalog.revisions(),signals:this.signals(id)},this.now());}
  start(strategyId:string,input:{market:string;instrument:string;hash:string;experimentId:string;requestId:string}){
   if(input.market!=='stocks'||!/^[a-f0-9]{64}$/.test(input.hash)||!/^[a-f0-9-]{36}$/.test(input.requestId))throw Error('仅支持明确股票版本及有效请求ID的手动前向观察');
   const version=this.deps.definition(strategyId,input.hash),e=this.deps.experiment(input.experimentId),ref=this.deps.resolve(input.market,input.instrument);
