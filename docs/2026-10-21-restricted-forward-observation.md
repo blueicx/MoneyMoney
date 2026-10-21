@@ -28,3 +28,17 @@
 完整回归376个隔离测试文件、1808项、失败0，退出码0（mm-restricted-forward-full-tests.log）。构建、Web/认证/四市场/实时图表/专业研究/合约/研究深度七类冒烟及数据资产、历史实验、手动前向三类专用浏览器全部通过（mm-restricted-forward-gate-*）。安全扫描957个跟踪文件及差异检查通过；现有不透明来源/JSDOM警告不作为零警告声明。
 
 干净导出和生产验收结果待发布记录；此时不宣称发布。本批没有完成自动前向模拟、候选晋级、其他平台批次或整页冷加载20%目标。
+
+## 发布记录
+
+上节为提交前状态。运行提交 `19e9c93e3d7a9d2946fc5f2b88919f6af046b3ac` 已推送GitHub；干净导出moneymoney-forward-clean-19e9c93-20261021重建，并再次通过七类冒烟与三类专用浏览器（mm-restricted-forward-clean-*）。手动前向截图mm-restricted-forward-browser-0eFQkd，历史实验mm-restricted-study-browser-efNgyg；均为明确标注的隔离夹具，不是生产市场验收。
+
+- 发布归档SHA256：10833bd54dfa7cb29871f9b39924c640e9ae2f2fa46b7f87100209444c0c7610。
+- server.js SHA256：174cb251f951ad35c47cdd072fae5190c05a77bc49e1623cc801d734972b66ab；index.html SHA256：e3d89dcb8518bbd4aeceec644889e82d6d197c6148d779a3258c9cd337855b42，远端校验一致。
+- 备份/opt/moneymoney/backups/dist-pre-19e9c93-20261021-forward；回滚/opt/moneymoney/dist.rollback-19e9c93-20261021-forward保留1cb54c3。仅重启moneymoney.service；启动初期两次健康连接未就绪，随后alive，未触发回滚。
+- 部署前临时守卫与脚本已不存在，预检中止且没有执行切换。重新上传已有只读守卫与原部署脚本，仅规范临时脚本CRLF为LF；Hash恢复04da12b215aa5816ed7739225ac3a2c261b3cf845f924a221a2874296cbf804e，bash语法检查及跑单预检通过后部署。
+- 正式域名有效TLS、健康/构建版本、29项静态资源SHA256及immutable缓存通过；私人观察、项目和策略接口拒绝未登录读取。生产只读Chromium四市场、SNDK、手机及右侧库通过，报告moneymoney-canary-1792564355167/production-canary-report.json，errors为空。
+- 10个跑单配置指纹前后均5125162b35c9893e4a9ac7d11c40eeaca7297bd95d7434d6bec70712aa144181。未跟踪data/research.db仍27fd475e523568daa4cdcabf3146917023335a62affe00429babd721b3b79fd1；未提交或清理数据库、数据湖、scratch及用户文件。
+- 没有生产验收写入、模型调用或Telegram消息，没有启动新观察或自动采集；旧程序兼容新文档键，不含破坏性迁移。
+
+手动前向观察不是自动模拟成交或策略晋级。其余平台批次及整页冷加载20%目标仍未完成。
