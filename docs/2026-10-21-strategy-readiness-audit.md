@@ -27,3 +27,16 @@
 隔离Chromium首次因快照误判失败；按系统化调试对照SQLite发现历史查询保存快照的标的是规范化`AAPL`，观察使用完整`stock:us:AAPL`。增加失败回归后改为既有注册表核对，两种合法编码关联同一身份，外国身份仍拒绝；未放宽Hash或发布时间规则。隔离SQLite/Parquet浏览器及JSON下载检查通过，截图mm-restricted-forward-browser-r0B6Bv；已检查金色手机截图，无Hash溢出。外网阻断、模型和Telegram关闭；夹具不冒充真实市场数据。
 
 最终源码完整回归377个隔离测试文件、1820项、失败0，退出码0（mm-readiness-final-tests.log）。构建、Web/认证/四市场/实时图表/专业研究/合约/研究深度七类冒烟及数据资产、历史实验、手动观察/证据导出三类专用浏览器全部通过（mm-readiness-gate-*）。安全扫描960个跟踪文件及差异检查通过；既有JSDOM警告未作为零警告声明。最终证据检查截图mm-restricted-forward-browser-JvpnXD。尚待干净导出复验及生产发布，整页冷加载20%目标仍未达成。
+
+## 发布凭据
+
+上节“尚待”为提交前状态；现已推送GitHub并上线运行提交`d95e913d04172d563a217fe1953deca03b84b05d`。
+
+- 干净导出moneymoney-readiness-clean-d95e913-20261021重建，并再次通过七类冒烟及三类专用浏览器（mm-readiness-clean-*）。研究截图mm-assets-browser-j4MUQ6、历史实验mm-restricted-study-browser-IV3lVH、观察/证据导出mm-restricted-forward-browser-yxLmpb；均为隔离夹具。
+- 正式域名有效TLS、登录页/健康/构建版本、29项静态资源SHA256及immutable缓存通过；观察目录、证据检查与项目接口拒绝未登录读取。
+- 生产只读Chromium通过四市场、SNDK、手机及右侧库检查；报告moneymoney-canary-1792568247315/production-canary-report.json，运行版本为d95e913，errors为空。没有在生产创建验收策略、观察、实验或订单，没有验收模型调用或Telegram消息。
+- 归档SHA256：65ac7a26b7700f80bc46cf2e2101b880ca6a46c419fad375a6a2996b4e17c651；server.js SHA256：da66d2567538b2abec0d45b4cb7b142813905f295c61210e659d4ea1e8e6af3a；index.html SHA256：f90c7090c31ca8483e69054ce8fc54acccd3d50d958c677f3c0093dfaebd2861。远端一致。
+- 备份/opt/moneymoney/backups/dist-pre-d95e913-20261021-readiness；回滚/opt/moneymoney/dist.rollback-d95e913-20261021-readiness保留19e9c93。发布脚本Hash04da12b215aa5816ed7739225ac3a2c261b3cf845f924a221a2874296cbf804e。只重启moneymoney.service；启动前两次连接未就绪后alive，未触发回滚。
+- 10个跑单配置指纹前后均5125162b35c9893e4a9ac7d11c40eeaca7297bd95d7434d6bec70712aa144181。用户data/research.db仍27fd475e523568daa4cdcabf3146917023335a62affe00429babd721b3b79fd1且未提交。保留数据湖、scratch、工作树及用户文件，无破坏性迁移或清理。
+
+本切片已发布；受控样本外、明确候选/审批关联、自动前向模拟、其余平台批次及整页冷加载20%目标继续保留未完成。
