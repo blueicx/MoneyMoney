@@ -35,3 +35,14 @@
 固定源码完整回归381个隔离测试文件、1849项、失败0、退出码0，mm-ai-lab-final-tests.log。既有JSDOM输出警告不等于新增浏览器错误；新浏览器pageErrors为空。七类及四类专用冒烟正在串行执行，构建/Web/认证/四市场门禁已通过，不拿旧版本测试代替新版本。完整通过后再提交推送和部署。
 
 更新：构建及全部七类冒烟、数据资产/历史实验/双轨/AI质量四类专用Chromium通过（mm-ai-lab-gate-*）；最新AI截图mm-ai-evaluation-browser-qVwvuo，暗金手机截图已目视检查。安全扫描973个跟踪文件、git diff --check、用户数据库Hash通过。已自审模型调用链：只有管理员手动run入口发起，固定官方端点/固定模型，不改现有跑单；未知费用必须确认。开始提交与干净导出，尚未宣称生产验收。
+
+## AI质量切片发布凭据
+
+已推送并部署`21d706d31c8000a8aebf67f3f6bb64d6760f826c`；干净导出moneymoney-ai-lab-clean-21d706d-20261021重建，再次通过七类及四类专用浏览器（mm-ai-lab-clean-*），没有真实模型调用。
+
+- 归档SHA256：9e5077e74f3d618a9d216c4f8bad08bd4dd3c45e042919def3b20f1a8bb1e51b；server.js：face6d6b3343dac9129547c0ab6b5285a784641774d8baf816fdfbbef267fb26；index.html：6b4f227edd3e6db149e2d952b9395595ae5e04b4243bf22e48f9ea099bad0cea。
+- 备份/opt/moneymoney/backups/dist-pre-21d706d-20261021-ai-lab；回滚/opt/moneymoney/dist.rollback-21d706d-20261021-ai-lab保留ba1fc01。只操作moneymoney.service，健康启动后active/alive。
+- 正式域名有效TLS、版本、29资源SHA256/immutable及私人接口未登录401通过。生产只读canary通过四市场、SNDK、手机/右侧库/真实空状态，报告moneymoney-canary-1792574224391/production-canary-report.json。没有生产测试实验、模型调用、订单或Telegram消息。
+- 跑单10个，配置指纹前后5125162b35c9893e4a9ac7d11c40eeaca7297bd95d7434d6bec70712aa144181；用户数据库Hash仍27fd475e523568daa4cdcabf3146917023335a62affe00429babd721b3b79fd1，未提交或清理业务数据。
+
+此切片已发布，不等于十二组完成；继续处理晋级证据关联、成熟结果统计、其余模块和未达标的20%性能目标。
