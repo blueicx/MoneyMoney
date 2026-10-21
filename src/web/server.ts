@@ -43,6 +43,8 @@ import {RestrictedForwardStore} from '../features/restricted-forward';
 import {createRestrictedForwardRouter} from './restricted-forward-routes';
 import {RestrictedValidationStore} from '../features/restricted-validation';
 import {createRestrictedValidationRouter} from './restricted-validation-routes';
+import {AiEvaluationLab} from '../features/ai-evaluation-lab';
+import {createAiEvaluationRouter} from './ai-evaluation-routes';
 import { createProjectReferenceResolver } from '../features/research-project-references';
 import { LiveKlineHub, liveKlineScope } from '../features/live-kline-stream';
 import { createLiveKlineRouter } from './live-kline-routes';
@@ -437,6 +439,14 @@ const researchProjects=new ResearchProjectStore(stateStore,createProjectReferenc
 const projectReviewWorker=new ResearchProjectReviewWorker(stateStore,researchProjects,Date.now,error=>logger.warn('local project reference review failed',{reason:error instanceof Error?error.message:'本地复查失败'}));
 app.use('/api/research/projects',createResearchProjectRouter(researchProjects,()=>projectReviewWorker.status()));
 const strategyDefinitionStore=new StrategyDefinitionStore(stateStore);
+const aiEvaluationRunners=()=>{const rows=stateStore.get<AiRunner[]>('ai-paper-runners')||[];if(!stateStore.health.ok||!Array.isArray(rows))throw Error('跑单只读目录不可用');return rows;};
+const aiEvaluationLab=new AiEvaluationLab(stateStore,{
+ load:ref=>{const runner=aiEvaluationRunners().find(r=>r.id===ref.runnerId),rows=stateStore.get<AiRunnerDecisionRecord[]>('ai-paper-runner-history:'+ref.runnerId)||[];if(!runner||!Array.isArray(rows))throw Error('原跑单或决策记录不可用');const decision=rows.find(d=>d.id===ref.decisionId);if(!decision)throw Error('未找到明确决策引用');return {runner,decision};},
+ resolve:(market,instrument)=>dataLakeCatalog.resolveInstrument(market as MarketId,instrument),
+ configured:()=>{const runtime=getAiRuntimeConfig('openrouter');return runtime.configured&&runtime.apiUrl==='https://openrouter.ai/api/v1/chat/completions';},
+ request:(model,frozen)=>{const venue=({stocks:'Stocks',options:'Options',crypto:'Binance',prediction:'Predict.fun'} as const)[frozen.market as AiRunnerMarket];return requestAiRunnerIntent({model,modelSelection:'fixed',universe:{kind:'watchlist',market:frozen.market as AiRunnerMarket,instruments:frozen.input.allowedInstruments.map((symbolOrMarketId:string)=>({venue,symbolOrMarketId})),hash:crypto.createHash('sha256').update(JSON.stringify(frozen.input)).digest('hex'),frozenAt:new Date().toISOString()}},getAiRuntimeConfig('openrouter'),frozen.input.snapshots);},
+});
+app.use('/api/research/ai-evaluations',createAiEvaluationRouter(aiEvaluationLab,market=>{const rows=[];for(const runner of aiEvaluationRunners().filter(r=>r.universe?.market===market)){const decisions=stateStore.get<AiRunnerDecisionRecord[]>('ai-paper-runner-history:'+runner.id)||[];if(!Array.isArray(decisions))continue;for(const decision of decisions){if(!decision.modelEvidence||decision.market!==market)continue;rows.push({reference:{runnerId:runner.id,decisionId:decision.id},instrument:decision.instrument,at:decision.at,model:decision.modelEvidence.returnedModel||'未关联'});if(rows.length>=100)return rows;}}return rows;}));
 app.use('/api/strategies/definitions',createStrategyDefinitionRouter(strategyDefinitionStore,input=>dataLakeCatalog.queryBarsAsOf(input),(market,instrument)=>dataLakeCatalog.resolveInstrument(market,instrument),{get:id=>researchRepository.getExperiment(id),save:(id,result)=>researchRepository.saveExperimentOnce(id,result)}));
 const restrictedForwardStore=new RestrictedForwardStore(stateStore,{definition:(id,hash)=>strategyDefinitionStore.read(id,hash),experiment:id=>researchRepository.getExperiment(id),resolve:(market,instrument)=>dataLakeCatalog.resolveInstrument(market as MarketId,instrument),signals:{get:id=>decisionIntelligenceStore.getSignalOutcome(id),list:()=>decisionIntelligenceStore.listSignalOutcomes(),save:signal=>decisionIntelligenceStore.saveSignalOutcome(signal)},catalog:{snapshot:id=>dataLakeCatalog.getSnapshot(id),partitions:()=>dataLakeCatalog.listPartitions(),revisions:()=>dataLakeCatalog.listRevisions('stocks')}});
 app.use('/api/research/forward-observations',createRestrictedForwardRouter(restrictedForwardStore,input=>dataLakeCatalog.queryBarsAsOf(input)));
