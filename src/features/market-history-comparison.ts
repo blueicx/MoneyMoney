@@ -1,11 +1,12 @@
 import { assertMarketContext, type MarketId } from './research-contracts';
+import {verifyEvidenceSnapshotHash,type EvidenceSnapshot} from './decision-intelligence';
 
 interface OptionSnapshot { id: string; market: 'options'; instrument: string; source: string; fetchedAt: string; snapshot: { expiries: Array<{ expiryMs: number; rows: Array<Record<string, any>> }> } }
 export function compareOptionSnapshots(input: OptionSnapshot[]) {
   for (const row of input) assertMarketContext({ market: row.market, instrument: row.instrument, workspace: 'options-history' });
   if (new Set(input.map(row => `${row.instrument}|${row.source}`)).size > 1) throw new Error('仅可比较同一标的和来源的快照');
   const ordered = input.slice().sort((a,b) => Date.parse(a.fetchedAt) - Date.parse(b.fetchedAt));
-  const fields = ['bidPrice', 'askPrice', 'markPrice', 'premiumUsd', 'impliedVolPct', 'volume', 'openInterest'];
+  const fields = ['bidPrice', 'askPrice', 'markPrice', 'premiumUsd', 'impliedVolPct', 'volume', 'openInterest','delta','gamma','vega','theta'];
   const contracts = (snapshot: OptionSnapshot) => {
     const entries: Array<[string, Record<string, any>]> = [];
     for (const expiry of snapshot.snapshot.expiries) for (const row of expiry.rows) {
@@ -43,6 +44,16 @@ export function compareOptionSnapshotPair(input: OptionSnapshot[], beforeId: str
 }
 
 interface HistoryEvidence { id: string; market: MarketId; instrument?: string; source: { id: string; name: string; url?: string | null }; observedAt: string; fields: Record<string, unknown>; dataStatus?: string }
+/** Descriptive before/after study only: explicit event identity, no invented entry condition. */
+export function compareOptionEventSnapshots(input:OptionSnapshot[],beforeId:string,afterId:string,evidence:EvidenceSnapshot|null){
+  const comparison=compareOptionSnapshotPair(input,beforeId,afterId),before=input.find(r=>r.id===beforeId)!,after=input.find(r=>r.id===afterId)!,symbol=/^option:cboe:([A-Z][A-Z0-9.-]{0,9})$/.exec(before.instrument)?.[1];
+  if(!symbol)throw Error('当前事件链只支持有明确股票身份的CBOE期权，不跨市场填充事件');
+  if(!evidence||!verifyEvidenceSnapshotHash(evidence)||evidence.market!=='stocks'||evidence.instrument!=='stock:us:'+symbol||evidence.workspace!=='event-intelligence'||evidence.dataStatus!=='historical')throw Error('期权事件证据Hash、来源或标的身份不可核验');
+  const occurredAt=Date.parse(String(evidence.fields.occurredAt)),publishedAt=Date.parse(String(evidence.fields.publishedAt)),retrievedAt=Date.parse(evidence.fetchedAt),from=Date.parse(before.fetchedAt),to=Date.parse(after.fetchedAt);
+  if(![occurredAt,publishedAt,retrievedAt].every(Number.isFinite)||typeof evidence.fields.title!=='string'||!evidence.fields.title.trim()||occurredAt<=from||occurredAt>to||publishedAt>retrievedAt||retrievedAt>to||occurredAt>retrievedAt)throw Error('事件时间不明确、并非夹在两快照之间或证据晚于所选窗口，不推测配对');
+  const entryInformationAvailable=Math.max(publishedAt,retrievedAt)<=from;
+  return {...comparison,event:{id:evidence.id,hash:evidence.hash,title:evidence.fields.title,instrument:evidence.instrument,source:evidence.source,occurredAt:new Date(occurredAt).toISOString(),publishedAt:new Date(publishedAt).toISOString(),retrievedAt:new Date(retrievedAt).toISOString(),entryInformationAvailable},executionEnabled:false,evidenceRefs:[before.id,after.id,evidence.id],reason:'明确事件的历史快照前后差异，不是因果或可成交收益；报价非同步、除息及其他同期事件可能影响变化。事件证据在之前快照后才可知时，禁止当作事前入场信息；理论情景与实测差异分开，不推算缺失Greeks、IV或成交。'};
+}
 export function summarizeMarketHistory(input: HistoryEvidence[], market: MarketId, instrument: string) {
   assertMarketContext({ market, instrument, workspace: 'market-history' });
   const series = input.filter(row => row.market === market && row.instrument === instrument && !['failed','empty','unavailable'].includes(row.dataStatus || '') && Number.isFinite(Date.parse(row.observedAt)))

@@ -35,6 +35,10 @@ import { previewPortfolioRiskBudget } from '../features/portfolio-risk-budget';
 import { ResearchCommittee } from '../features/research-committee';
 import { createResearchCommitteeRouter } from './research-committee-routes';
 import { ResearchProjectStore } from '../features/research-projects';
+import { PortfolioSimulationStore } from '../features/portfolio-simulations';
+import { AiForecastLab, requestResearchForecast } from '../features/ai-forecast-lab';
+import { createAiForecastRouter } from './ai-forecast-routes';
+import { createPortfolioSimulationRouter } from './portfolio-simulation-routes';
 import { TelegramProjectSubscriptions, telegramProjectCommandReply } from '../features/telegram-project-subscriptions';
 import { ResearchProjectReviewWorker } from '../features/research-project-review-worker';
 import { createResearchProjectRouter } from './research-project-routes';
@@ -192,7 +196,7 @@ import { createSharedCapitalRouter } from './shared-capital-routes';
 import { createResearchContextRouter } from './research-context-routes';
 import type { RevisionImpactRecord } from '../features/research-revision-impact';
 import { compareExperiments } from '../features/experiment-comparison';
-import { compareOptionSnapshotPair, compareOptionSnapshots, summarizeMarketHistory } from '../features/market-history-comparison';
+import { compareOptionEventSnapshots, compareOptionSnapshotPair, compareOptionSnapshots, summarizeMarketHistory } from '../features/market-history-comparison';
 import { MarketHistoryCaptureScheduler } from '../features/market-history-scheduler';
 import { mergeStockDisclosureTimeline } from '../features/stock-disclosure-timeline';
 import { observeForwardSignal } from '../features/signal-forward';
@@ -447,7 +451,9 @@ const projectReviewWorker=new ResearchProjectReviewWorker(stateStore,researchPro
 const telegramProjectSubscriptions=new TelegramProjectSubscriptions(stateStore,researchProjects,researchRepository,{isOwner:chat=>telegramAdminChatIds().has(chat),suppressed:chat=>!telegramInteractionBot||telegramAlertSuppressed(chat,'normal'),link:market=>buildTelegramDeepLink(process.env.PUBLIC_WEB_BASE_URL||telegramPublicBaseUrl(),{market,instrument:'',workspace:'research-lab'})});
 app.use('/api/research/projects',createResearchProjectRouter(researchProjects,()=>projectReviewWorker.status()));
 const strategyDefinitionStore=new StrategyDefinitionStore(stateStore);
-const blindSessionStore=new BlindSessionStore(stateStore,{resolve:(market,instrument)=>dataLakeCatalog.resolveInstrument(market as MarketId,instrument),load:input=>dataLakeCatalog.queryBarsAsOf(input)});
+const portfolioSimulationStore=new PortfolioSimulationStore(stateStore,unifiedPaperLedgerStore,{definition:(id,hash)=>strategyDefinitionStore.read(id,hash),resolve:(market,instrument)=>dataLakeCatalog.resolveInstrument(market as MarketId,instrument),load:input=>dataLakeCatalog.queryBarsAsOf(input as any)});
+app.use('/api/research/portfolio-simulations',createPortfolioSimulationRouter(portfolioSimulationStore,market=>strategyDefinitionStore.list(market)));
+const blindSessionStore=new BlindSessionStore(stateStore,{resolve:(market,instrument)=>dataLakeCatalog.resolveInstrument(market as MarketId,instrument),evidence:id=>decisionIntelligenceStore.getEvidence(id),load:input=>dataLakeCatalog.queryBarsAsOf(input)});
 app.use('/api/research/blind-sessions',createBlindSessionRouter(blindSessionStore));
 const aiEvaluationRunners=()=>{const rows=stateStore.get<AiRunner[]>('ai-paper-runners')||[];if(!stateStore.health.ok||!Array.isArray(rows))throw Error('跑单只读目录不可用');return rows;};
 const aiEvaluationLab=new AiEvaluationLab(stateStore,{
@@ -456,6 +462,8 @@ const aiEvaluationLab=new AiEvaluationLab(stateStore,{
  configured:()=>{const runtime=getAiRuntimeConfig('openrouter');return runtime.configured&&runtime.apiUrl==='https://openrouter.ai/api/v1/chat/completions';},
  request:(model,frozen)=>{const venue=({stocks:'Stocks',options:'Options',crypto:'Binance',prediction:'Predict.fun'} as const)[frozen.market as AiRunnerMarket];return requestAiRunnerIntent({model,modelSelection:'fixed',universe:{kind:'watchlist',market:frozen.market as AiRunnerMarket,instruments:frozen.input.allowedInstruments.map((symbolOrMarketId:string)=>({venue,symbolOrMarketId})),hash:crypto.createHash('sha256').update(JSON.stringify(frozen.input)).digest('hex'),frozenAt:new Date().toISOString()}},getAiRuntimeConfig('openrouter'),frozen.input.snapshots);},
 });
+const aiForecastLab=new AiForecastLab(stateStore,{resolve:(market,instrument)=>dataLakeCatalog.resolveInstrument(market as MarketId,instrument),load:input=>dataLakeCatalog.queryBarsAsOf(input as any),configured:()=>{const r=getAiRuntimeConfig('openrouter');return r.configured&&r.apiUrl==='https://openrouter.ai/api/v1/chat/completions';},request:(model,input)=>requestResearchForecast(getAiRuntimeConfig('openrouter'),model,input)});
+app.use('/api/research/ai-evaluations/forecasts',createAiForecastRouter(aiForecastLab));
 app.use('/api/research/ai-evaluations',createAiEvaluationRouter(aiEvaluationLab,market=>{const rows=[];for(const runner of aiEvaluationRunners().filter(r=>r.universe?.market===market)){const decisions=stateStore.get<AiRunnerDecisionRecord[]>('ai-paper-runner-history:'+runner.id)||[];if(!Array.isArray(decisions))continue;for(const decision of decisions){if(!decision.modelEvidence||decision.market!==market)continue;rows.push({reference:{runnerId:runner.id,decisionId:decision.id},instrument:decision.instrument,at:decision.at,model:decision.modelEvidence.returnedModel||'未关联'});if(rows.length>=100)return rows;}}return rows;}));
 app.use('/api/strategies/definitions',createStrategyDefinitionRouter(strategyDefinitionStore,input=>dataLakeCatalog.queryBarsAsOf(input),(market,instrument)=>dataLakeCatalog.resolveInstrument(market,instrument),{get:id=>researchRepository.getExperiment(id),save:(id,result)=>researchRepository.saveExperimentOnce(id,result)}));
 const restrictedForwardStore=new RestrictedForwardStore(stateStore,{definition:(id,hash)=>strategyDefinitionStore.read(id,hash),experiment:id=>researchRepository.getExperiment(id),resolve:(market,instrument)=>dataLakeCatalog.resolveInstrument(market as MarketId,instrument),signals:{get:id=>decisionIntelligenceStore.getSignalOutcome(id),list:()=>decisionIntelligenceStore.listSignalOutcomes(),save:signal=>decisionIntelligenceStore.saveSignalOutcome(signal)},catalog:{snapshot:id=>dataLakeCatalog.getSnapshot(id),partitions:()=>dataLakeCatalog.listPartitions(),revisions:()=>dataLakeCatalog.listRevisions('stocks')},validation:{plan:id=>restrictedValidationStore.read(id),result:id=>restrictedValidationStore.resultFor(id)}});
@@ -3558,7 +3566,9 @@ app.get('/api/options/history/compare', (req, res) => {
     const snapshots = dataLakeCatalog.listOptionSnapshots({ market: 'options', instrument, from: req.query.from ? String(req.query.from) : undefined, to: req.query.to ? String(req.query.to) : undefined });
     const fromId = String(req.query.fromId || ''), toId = String(req.query.toId || '');
     if (Boolean(fromId) !== Boolean(toId)) throw new Error('fromId 与 toId 必须同时提供');
-    const data = fromId ? compareOptionSnapshotPair(snapshots, fromId, toId) : compareOptionSnapshots(snapshots);
+    const eventRef=String(req.query.eventRef||'');
+    if(eventRef&&(!fromId||eventRef.length>200))throw Error('事件比较需要两个明确快照及有效证据ID');
+    const data = eventRef ? compareOptionEventSnapshots(snapshots,fromId,toId,decisionIntelligenceStore.getEvidence(eventRef)) : fromId ? compareOptionSnapshotPair(snapshots, fromId, toId) : compareOptionSnapshots(snapshots);
     return res.json({ success: true, market: 'options', instrument, data, dataStatus: data.coverage.length ? 'historical' : 'empty', source: data.coverage.at(-1)?.source || '本地真实期权快照', updatedAt: data.coverage.at(-1)?.at || null, reason: data.reason });
   } catch (error) { return res.status(400).json({ success: false, dataStatus: 'failed', reason: error instanceof Error ? error.message : '比较失败' }); }
 });

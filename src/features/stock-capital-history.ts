@@ -3,7 +3,8 @@ type Facts={cik?:number;facts?:Record<string,Record<string,{units?:Record<string
 type Evidence={tag:string;unit:string;start:string|null;end:string;filed:string;accession:string|null};
 type Field={value:number|null;unit:string;reason:string|null;evidence:Evidence[]};
 export type PerShareBridge={netIncomeUsd:Field;weightedDilutedShares:Field;reportedDilutedEps:Field;impliedIncomePerDilutedShare:number|null;epsDifference:number|null;dataStatus:'historical'|'partial';reason:string};
-export type CapitalPoint={periodStart:string;periodEnd:string;operatingCashFlowUsd:Field;repurchasesUsd:Field;dividendsUsd:Field;cashUsd:Field;debtUsd:Field;shares:Field;shareChangePct:number|null;perShareBridge?:PerShareBridge};
+export type PerShareChangeBridge={fromPeriodEnd:string;toPeriodEnd:string;numeratorEffect:number|null;denominatorEffect:number|null;totalChange:number|null;unit:'USD/shares';evidence:Evidence[];dataStatus:'historical'|'partial';reason:string};
+export type CapitalPoint={periodStart:string;periodEnd:string;operatingCashFlowUsd:Field;repurchasesUsd:Field;dividendsUsd:Field;cashUsd:Field;debtUsd:Field;shares:Field;shareChangePct:number|null;perShareBridge?:PerShareBridge;perShareChangeBridge?:PerShareChangeBridge};
 type RevisionValue={value:number|null;filed:string;accession:string|null;form:string|null};
 export type CapitalRevision={tag:string;unit:string;periodStart:string|null;periodEnd:string;before:RevisionValue;after:RevisionValue;change:number|null;reason:string};
 export type CapitalHistory={points:CapitalPoint[];revisions?:CapitalRevision[];asOf:string;source:string;dataStatus:'historical'|'partial'|'empty';reason:string};
@@ -60,6 +61,13 @@ export function buildCapitalHistory(facts:Facts,asOf=new Date().toISOString()):C
     return {...point,perShareBridge:{netIncomeUsd,weightedDilutedShares,reportedDilutedEps,impliedIncomePerDilutedShare,epsDifference,dataStatus:agreement?'historical':'partial',reason:'仅同起止日期、USD/加权稀释股数及同一申报证据；不使用期末股数代替。净利润除以加权稀释股数是研究比值，不一定等于披露EPS（普通股归属、稀释分子调整及四舍五入可能有差异），保留差异，不推断原因。'+(!sameFiling?' 缺少同一申报引用，禁止跨申报拼接。':'')}};
   });
   for(let i=1;i<bridgedPoints.length;i++){const prior=bridgedPoints[i-1],row=bridgedPoints[i],gap=(Date.parse(row.periodEnd)-Date.parse(prior.periodEnd))/86400000;if(gap>=300&&gap<=400&&prior.shares.value!==null&&prior.shares.value>0&&row.shares.value!==null)row.shareChangePct=(row.shares.value/prior.shares.value-1)*100;}
+  for(let i=1;i<bridgedPoints.length;i++){
+    const before=bridgedPoints[i-1],after=bridgedPoints[i],a=before.perShareBridge!,b=after.perShareBridge!,gap=(Date.parse(after.periodEnd)-Date.parse(before.periodEnd))/86400000;
+    const fields=[a.netIncomeUsd,a.weightedDilutedShares,a.reportedDilutedEps,b.netIncomeUsd,b.weightedDilutedShares,b.reportedDilutedEps],evidence=fields.flatMap(f=>f.evidence),filings=new Set(evidence.map(e=>e.accession&&e.filed?e.accession+'|'+e.filed:null));
+    const comparable=gap>=300&&gap<=400&&Date.parse(after.periodStart)-Date.parse(before.periodEnd)===86400000&&a.dataStatus==='historical'&&b.dataStatus==='historical'&&fields.every(f=>f.value!==null&&f.evidence.length>0)&&filings.size===1&&!filings.has(null)&&a.weightedDilutedShares.value!>0&&b.weightedDilutedShares.value!>0;
+    const numerator=comparable?(b.netIncomeUsd.value!-a.netIncomeUsd.value!)/a.weightedDilutedShares.value!:null,denominator=comparable?b.netIncomeUsd.value!*(1/b.weightedDilutedShares.value!-1/a.weightedDilutedShares.value!):null;
+    after.perShareChangeBridge={fromPeriodEnd:before.periodEnd,toPeriodEnd:after.periodEnd,numeratorEffect:numerator,denominatorEffect:denominator,totalChange:comparable?b.impliedIncomePerDilutedShare!-a.impliedIncomePerDilutedShare!:null,unit:'USD/shares',evidence,dataStatus:comparable?'historical':'partial',reason:comparable?'同一申报披露的相邻年度，按先改变净利润分子、再改变加权稀释股数分母的固定顺序分解，二者之和等于研究比值变化；不是因果分析，净利润变化不等于经营利润变化，不推断回购是股数变化的原因。':'缺少相邻年度同一申报、同口径净利润/加权稀释股数/EPS核对证据，不跨申报拼接，不按期末股数猜测归因。'};
+  }
   const complete=points.every(row=>[row.operatingCashFlowUsd,row.repurchasesUsd,row.dividendsUsd,row.cashUsd,row.debtUsd,row.shares].every(field=>field.value!==null));
   return {points:bridgedPoints,revisions:revisions.sort((a,b)=>a.after.filed.localeCompare(b.after.filed)).slice(-200),asOf,source:'SEC EDGAR XBRL companyfacts · us-gaap',dataStatus:points.length?(complete?'historical':'partial'):'empty',reason:'仅精确年报区间及USD/股数单位；股数变化不等于实际融资稀释，长期债务不等于全部债务。申报日期没有时分秒时，时点查询保守等待次日06:00 UTC（纽约整日结束之后）；保留后续修订证据，最多列出最近200项字段变化。'};
 }

@@ -299,7 +299,8 @@ export function summarizeAiRunnerQuality(input: {
     group.brier += (row.confidence - row.outcome) ** 2;
     versionGroups.set(key, group);
   }
-  const enough = matured.length >= Math.max(1, Math.floor(minimumSamples));
+  const threshold=Number.isFinite(minimumSamples)?Math.max(20,Math.floor(minimumSamples)):20;
+  const enough = matured.length >= threshold;
   const unlinkedDecisions = decisions.filter(row => row.modelConfidence != null && (!row.orderId || !positionByEntryOrder.has(row.orderId))).length;
   return {
     decisions: decisions.length,
@@ -310,13 +311,13 @@ export function summarizeAiRunnerQuality(input: {
     latency: { samples: sortedLatencies.length, averageMs: sortedLatencies.length ? sortedLatencies.reduce((sum, value) => sum + value, 0) / sortedLatencies.length : null, p95Ms: percentile(0.95) },
     matured: {
       count: matured.length,
-      calibrationAvailable: enough,
-      brierScore: enough ? matured.reduce((sum, row) => sum + (row.confidence - row.outcome) ** 2, 0) / matured.length : null,
+      calibrationAvailable: false,
+      brierScore: null,
       winRate: enough ? matured.filter(row => row.outcome === 1).length / matured.length : null,
-      reason: enough ? undefined : `已成熟且明确关联订单的样本 ${matured.length} 笔；至少 20 笔后才显示置信度校准和胜率`,
+      reason: `已成熟且明确关联订单的样本 ${matured.length} 笔；至少 20 笔后才显示胜率。旧动作confidence未事前声明预测目标/期限，不当作获利概率，不计算Brier校准。`,
       modelVersionGroups: [...versionGroups.values()].map(row => ({ strategyVersion: row.strategyVersion, modelVersion: row.modelVersion, count: row.count,
-        brierScore: enough && row.count >= Math.max(1, Math.floor(minimumSamples)) ? row.brier / row.count : null,
-        winRate: enough && row.count >= Math.max(1, Math.floor(minimumSamples)) ? row.wins / row.count : null })),
+        brierScore: null,
+        winRate: enough && row.count >= threshold ? row.wins / row.count : null })),
     },
   };
 }

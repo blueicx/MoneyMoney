@@ -4075,6 +4075,8 @@ function renderStockCapitalHistory(host, data) {
       return '<section style="padding:12px;margin:8px 0;border:1px solid var(--border);border-radius:8px;line-height:1.65;overflow-wrap:anywhere"><h4>'+stockEscapeHtml(row.periodStart+' – '+row.periodEnd)+' · '+stockEscapeHtml(bridge.dataStatus==='historical'?'同申报可核对':'部分字段不可比或有差异')+'</h4><p>净利润：'+stockEscapeHtml(fieldText(bridge.netIncomeUsd))+'<br>加权稀释股数：'+stockEscapeHtml(fieldText(bridge.weightedDilutedShares))+'<br>披露稀释EPS：'+stockEscapeHtml(fieldText(bridge.reportedDilutedEps))+'<br>净利润 / 加权稀释股数：'+stockEscapeHtml(Number.isFinite(bridge.impliedIncomePerDilutedShare)?bridge.impliedIncomePerDilutedShare.toFixed(4)+' USD/股':'不可用，缺少同申报可比字段')+'<br>与披露EPS差异：'+stockEscapeHtml(Number.isFinite(bridge.epsDifference)?bridge.epsDifference.toFixed(4)+' USD/股':'未关联可比口径')+'</p><p>'+stockEscapeHtml(bridge.reason)+'</p><details><summary>原字段与申报引用</summary>'+refs.map(ref=>'<p>'+stockEscapeHtml(ref.tag+' · '+ref.unit+' · '+ref.start+' – '+ref.end+' · 申报 '+ref.filed+' · accession '+(ref.accession||'未关联'))+'</p>').join('')+'</details></section>';
     }).join('');section.append(details);
   }
+  const changeBridges=(capital?.points||[]).filter(row=>row.perShareChangeBridge);
+  if(changeBridges.length){const details=document.createElement('details');details.dataset.perShareAttribution='';const summary=document.createElement('summary');summary.textContent='相邻年度每股变化拆解 · 同申报核验';details.append(summary);for(const row of changeBridges){const b=row.perShareChangeBridge,p=document.createElement('p'),value=v=>Number.isFinite(v)?v.toFixed(4)+' USD/股':'不可用';p.textContent=b.fromPeriodEnd+' → '+b.toPeriodEnd+' · 净利润分子影响 '+value(b.numeratorEffect)+' · 加权股数分母影响 '+value(b.denominatorEffect)+' · 合计 '+value(b.totalChange)+' · '+b.reason;details.append(p);}section.append(details);}
   const fitTables=()=>{for(const table of section.querySelectorAll('table')){table.style.cssText='min-width:1050px;width:100%;border-collapse:collapse;font-size:12px';table.parentElement.style.cssText='max-width:100%;overflow:auto';for(const cell of table.querySelectorAll('th,td'))cell.style.cssText='padding:10px 12px;text-align:left;vertical-align:top;white-space:normal;line-height:1.6;border-bottom:1px solid var(--border)';}};
   host.append(section);fitTables();let controller;
   section.querySelector('[data-capital-compare]').onclick=async event=>{const output=section.querySelector('[data-capital-comparison]'),symbols=section.querySelector('[data-capital-peers]').value.trim().toUpperCase(),captured=data.symbol;controller?.abort();controller=new AbortController();const current=controller;event.target.disabled=true;output.textContent='读取对应SEC来源，不使用其他市场补位…';
@@ -5965,6 +5967,7 @@ async function loadOptionIvSnapshotHistory(snapshot) {
     const optionRows = snapshots.map((row, index) => `<option value="${stockEscapeHtml(row.id)}">${stockEscapeHtml(row.tradeDate || row.fetchedAt)} · ${stockEscapeHtml(new Date(row.fetchedAt).toLocaleTimeString('zh-CN'))} · ${stockEscapeHtml(row.contentHash?.slice(0, 8) || row.id.slice(-8))}</option>`).join('');
     host.innerHTML = `<section class="option-iv-history"><div class="option-iv-history-heading"><div><strong>真实快照对照</strong><p>${snapshots.length} 个 ${stockEscapeHtml(snapshot.source)} 快照 · ${stockEscapeHtml(snapshots[0].tradeDate)} 至 ${stockEscapeHtml(snapshots.at(-1).tradeDate)}</p></div><span>同一合约身份</span></div><div class="option-iv-history-controls"><label>之前<select data-option-iv-snapshot-before>${optionRows}</select></label><label>之后<select data-option-iv-snapshot-after>${optionRows}</select></label><button type="button" class="tab" data-option-iv-compare>比较所选快照</button></div><div data-option-iv-compare-output role="status">仅比较相同标的、来源和合约身份；历史不足或合约不匹配时不插值。</div></section>`;
     if (quarantineNote) host.querySelector('section').insertAdjacentHTML('beforeend', quarantineNote);
+    const eventLabel=document.createElement('label'),eventInput=document.createElement('input');eventLabel.textContent='可选：明确股票事件证据ID ';eventInput.dataset.optionEventEvidence='';eventInput.maxLength=200;eventInput.placeholder='event-evidence-…；不按日期猜关联';eventLabel.append(eventInput);host.querySelector('.option-iv-history-controls').append(eventLabel);
     const before = host.querySelector('[data-option-iv-snapshot-before]');
     const after = host.querySelector('[data-option-iv-snapshot-after]');
     before.selectedIndex = Math.max(0, snapshots.length - 2);
@@ -5972,6 +5975,7 @@ async function loadOptionIvSnapshotHistory(snapshot) {
     const compareButton = host.querySelector('[data-option-iv-compare]');
     compareButton.addEventListener('click', async () => {
       const output = host.querySelector('[data-option-iv-compare-output]');
+      host.querySelector('[data-option-event-output]')?.remove();
       const beforeRow = snapshots.find(row => row.id === before.value), afterRow = snapshots.find(row => row.id === after.value);
       if (!beforeRow || !afterRow || Date.parse(afterRow.fetchedAt) <= Date.parse(beforeRow.fetchedAt)) {
         output.textContent = '请选择时间先后明确的两个不同真实快照。'; return;
@@ -5979,11 +5983,14 @@ async function loadOptionIvSnapshotHistory(snapshot) {
       compareButton.disabled = true; output.textContent = '正在比较所选真实快照…';
       try {
         const compareQuery = new URLSearchParams({ instrument, fromId: beforeRow.id, toId: afterRow.id });
+        if(eventInput.value.trim())compareQuery.set('eventRef',eventInput.value.trim());
         const compareResponse = await fetch(`/api/options/history/compare?${compareQuery}`, { cache: 'no-store' });
         const compared = await compareResponse.json();
+        if(requestId!==optionHistoryRequestId||snapshot!==optionsSnapshot||!host.isConnected)return;
         if (!compareResponse.ok || !compared.success) throw new Error(compared.reason || '所选快照无法比较；管理员权限或来源校验失败');
         const change = compared.data?.changes?.[0];
         if (!change?.contracts?.length) { output.textContent = compared.reason || '两个真实快照之间没有相同合约身份；不推算差值。'; return; }
+        if(compared.data.event){const e=compared.data.event,p=document.createElement('p');p.dataset.optionEventOutput='';p.textContent=e.title+' · 发生 '+e.occurredAt+' · 发布 '+e.publishedAt+' · 抓取 '+e.retrievedAt+' · 证据 '+e.id+' / '+e.hash+' · '+compared.reason;host.querySelector('section').append(p);}
         const fields = ['impliedVolPct', 'bidPrice', 'askPrice', 'volume', 'openInterest'];
         const rows = change.contracts.map(contract => `<tr><th>${stockEscapeHtml(contract.contract)}</th>${fields.map(field => { const value = contract.fields?.[field]; return `<td>${value?.before == null ? '--' : stockEscapeHtml(value.before)} → ${value?.after == null ? '--' : stockEscapeHtml(value.after)}${value?.delta == null ? `<small>${stockEscapeHtml(value?.reason || '缺少字段')}</small>` : `<small>${value.delta > 0 ? '+' : ''}${stockEscapeHtml(value.delta)}</small>`}</td>`; }).join('')}</tr>`).join('');
         output.innerHTML = `<p>${stockEscapeHtml(change.fromAt)} → ${stockEscapeHtml(change.toAt)} · ${change.contracts.length} 个相同合约</p><div class="option-iv-term-table-wrap"><table><thead><tr><th>合约</th><th>IV</th><th>买价</th><th>卖价</th><th>成交量</th><th>持仓量</th></tr></thead><tbody>${rows}</tbody></table></div><small>来源 ${stockEscapeHtml(compared.source || snapshot.source)} · 仅按相同合约 ID 比较；缺失字段不补齐，不生成历史曲线。</small>`;

@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 require('ts-node/register/transpile-only');
 const { summarizeAiRunnerQuality } = require('../src/features/ai-paper-runner');
 
-test('AI runner quality only calibrates confidence from explicitly linked matured closed positions', () => {
+test('AI runner quality reports explicit matured trade outcomes but never reinterprets action confidence as profit probability', () => {
   const decisions = Array.from({ length: 20 }, (_, index) => ({
     id: `decision-${index}`, runnerId: 'runner-1', idempotencyKey: `tick-${index}:AAPL`,
     at: `2026-01-${String(index + 1).padStart(2, '0')}T00:00:00.000Z`, market: 'stocks', instrument: 'AAPL',
@@ -16,9 +16,11 @@ test('AI runner quality only calibrates confidence from explicitly linked mature
   }));
   const output = summarizeAiRunnerQuality({ decisions, positions, aiCalls: [] }, 20);
   assert.equal(output.matured.count, 20);
-  assert.equal(output.matured.calibrationAvailable, true);
+  assert.equal(output.matured.calibrationAvailable, false);
   assert.equal(output.matured.modelVersionGroups[0].modelVersion, 'model-fixed');
-  assert.ok(output.matured.brierScore >= 0 && output.matured.brierScore <= 1);
+  assert.equal(output.matured.brierScore, null);
+  assert.equal(output.matured.winRate, .75);
+  assert.match(output.matured.reason, /目标|期限/);
   assert.equal(output.latency.averageMs, 109.5);
   assert.equal(output.unlinkedDecisions, 0);
 });
