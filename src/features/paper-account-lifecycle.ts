@@ -4,6 +4,7 @@ export interface PaperCorporateActionEvidence {
   instrument: string;
   kind: 'split' | 'dividend' | 'symbol-change' | 'delisting';
   effectiveAt: string;
+  paymentAt?: string;
   factor?: number;
   currency?: string;
   oldSymbol?: string;
@@ -19,7 +20,7 @@ export interface PaperLifecycleEvent {
   effectiveAt: string;
   source: string;
   factor?: number;
-  status: 'applied' | 'pending-review' | 'receivable-created';
+  status: 'applied' | 'pending-review' | 'receivable-created' | 'cash-paid';
   reason: string;
 }
 
@@ -31,11 +32,16 @@ export interface PaperCorporateReceivable {
   currency: string;
   effectiveAt: string;
   source: string;
-  status: 'awaiting-payment-date';
+  perShare?: number;
+  entitledShares?: number;
+  paymentAt?: string;
+  paidAt?: string;
+  status: 'awaiting-payment-date' | 'awaiting-payment' | 'paid';
   reason: string;
 }
 
 type LifecycleLedger = {
+  cash: number;
   positions: Array<Record<string, any>>;
   orders: Array<Record<string, any>>;
   lifecycleEvents?: PaperLifecycleEvent[];
@@ -62,19 +68,21 @@ function sameStock(left: unknown, right: unknown): boolean {
 function heldSharesAt(ledger: LifecycleLedger, instrument: string, asOf: number): number | null {
   const orders = ledger.orders.filter(order => order.instrumentType === 'stock' && sameStock(order.instrumentId, instrument)
     && Number.isFinite(Date.parse(String(order.timestamp || ''))) && Date.parse(String(order.timestamp)) <= asOf)
-    .sort((a, b) => Date.parse(String(a.timestamp)) - Date.parse(String(b.timestamp)));
+    .reverse().sort((a, b) => Date.parse(String(a.timestamp)) - Date.parse(String(b.timestamp)));
   if (!orders.length) return null;
   const priorSplits = (ledger.lifecycleEvents || []).filter(event => event.kind === 'split' && Date.parse(event.effectiveAt) <= asOf && sameStock(event.instrument, instrument));
+  if(priorSplits.some(event=>event.status!=='applied'))return null;
   let quantity = 0;
   for (const order of orders) {
     let amount = Number(order.quantity);
-    if (!Number.isFinite(amount) || amount <= 0) continue;
+    if (!Number.isFinite(amount) || amount <= 0 || !['BUY','SELL'].includes(order.side)) return null;
     const orderAt = Date.parse(String(order.timestamp));
     for (const split of priorSplits) {
       const splitAt = Date.parse(split.effectiveAt), factor = Number((split as any).factor);
       if (splitAt > orderAt && splitAt <= asOf && Number.isFinite(factor) && factor > 0) amount *= factor;
     }
     quantity += order.side === 'SELL' ? -amount : order.side === 'BUY' ? amount : 0;
+    if(quantity < -1e-8)return null;
   }
   return Math.max(0, quantity);
 }
@@ -85,15 +93,17 @@ export function reconcilePaperCorporateActions<T extends LifecycleLedger>(source
   applied: number;
   pending: number;
   alreadyApplied: number;
+  updated: number;
 } {
   const ledger = { ...source, positions: source.positions.map(position => ({ ...position })), orders: source.orders.map(order => ({ ...order })),
-    lifecycleEvents: [...(source.lifecycleEvents || [])], corporateReceivables: [...(source.corporateReceivables || [])] } as T;
-  let applied = 0, pending = 0, alreadyApplied = 0;
+    lifecycleEvents: (source.lifecycleEvents || []).map(event=>({...event})), corporateReceivables: (source.corporateReceivables || []).map(row=>({...row})) } as T;
+  let applied = 0, pending = 0, alreadyApplied = 0, updated=0;
   const sorted = [...(Array.isArray(actions) ? actions : [])].filter(action => action.market === 'stocks'
-    && action.id && Number.isFinite(Date.parse(action.effectiveAt)) && Date.parse(action.effectiveAt) <= now)
+    && action.id && typeof action.source==='string' && action.source.trim() && Number.isFinite(Date.parse(action.effectiveAt)) && Date.parse(action.effectiveAt) <= now)
     .sort((a, b) => Date.parse(a.effectiveAt) - Date.parse(b.effectiveAt));
   for (const action of sorted) {
-    if (ledger.lifecycleEvents!.some(event => event.actionId === action.id)) { alreadyApplied += 1; continue; }
+    const prior=ledger.lifecycleEvents!.find(event=>event.actionId===action.id);
+    if(prior){alreadyApplied+=1;if(action.kind!=='dividend'||prior.kind!=='dividend')continue;}
     if (!stockIdentity(action.instrument)) continue;
     const matchingPositions = ledger.positions.filter(position => position.instrumentType === 'stock' && sameStock(position.instrumentId, action.instrument));
     const effectiveAt = Date.parse(action.effectiveAt);
@@ -102,6 +112,10 @@ export function reconcilePaperCorporateActions<T extends LifecycleLedger>(source
       if (!Number.isFinite(factor) || factor <= 0) { pending += 1; continue; }
       const eligible = matchingPositions.filter(position => Date.parse(String(position.openedAt || '')) <= effectiveAt);
       if (!eligible.length) continue;
+      if(ledger.orders.some(order=>order.instrumentType==='stock'&&sameStock(order.instrumentId,action.instrument)&&Date.parse(String(order.timestamp))>=effectiveAt)){
+        ledger.lifecycleEvents!.push({id:`corporate:${action.id}`,actionId:action.id,kind:action.kind,instrument:action.instrument,effectiveAt:action.effectiveAt,source:action.source,status:'pending-review',factor,reason:'拆股生效后已有成交，需核验历史重放和成本归因；未直接缩放整笔当前仓位'});
+        pending+=1;continue;
+      }
       for (const position of eligible) {
         position.quantity = roundQuantity(Number(position.quantity) * factor);
         position.averageEntryPrice = Number(position.averageEntryPrice) / factor;
@@ -117,7 +131,7 @@ export function reconcilePaperCorporateActions<T extends LifecycleLedger>(source
       const shares = heldSharesAt(ledger, action.instrument, effectiveAt);
       const currency = String(action.currency || '').trim().toUpperCase();
       if (!Number.isFinite(perShare) || perShare < 0 || shares == null || !/^[A-Z]{3}$/.test(currency)) {
-        if (matchingPositions.length) {
+        if (matchingPositions.length && !prior) {
           ledger.lifecycleEvents!.push({ id: `corporate:${action.id}`, actionId: action.id, kind: action.kind, instrument: action.instrument,
             effectiveAt: action.effectiveAt, source: action.source, status: 'pending-review', reason: !/^[A-Z]{3}$/.test(currency) ? '来源未提供可核验的 ISO 币种；未创建应收或换算现金' : shares == null ? '缺少可核验的除息日持仓订单历史；未推算股数或入账' : '来源股息数值无效' });
           pending += 1;
@@ -126,13 +140,35 @@ export function reconcilePaperCorporateActions<T extends LifecycleLedger>(source
       }
       if (shares <= 0) continue;
       const identity = stockIdentity(action.instrument)!;
-      const receivable: PaperCorporateReceivable = { id: `dividend:${action.id}`, corporateActionId: action.id,
+      let receivable=ledger.corporateReceivables!.find(row=>row.corporateActionId===action.id);
+      if(!receivable&&prior){pending+=1;continue;}
+      if(!receivable){receivable = { id: `dividend:${action.id}`, corporateActionId: action.id,
         instrumentId: `stock:${identity.venue}:${identity.symbol}`, amount: roundMoney(shares * perShare), currency, effectiveAt: action.effectiveAt,
+        perShare,entitledShares:shares,
         source: action.source, status: 'awaiting-payment-date', reason: '来源只提供除息日，未提供可核验付款日；暂记应收，不增加现金余额' };
       ledger.corporateReceivables!.push(receivable);
       ledger.lifecycleEvents!.push({ id: `corporate:${action.id}`, actionId: action.id, kind: action.kind, instrument: action.instrument,
         effectiveAt: action.effectiveAt, source: action.source, status: 'receivable-created', reason: receivable.reason });
       applied += 1;
+      }
+      if(receivable.instrumentId!==`stock:${identity.venue}:${identity.symbol}`||receivable.source!==action.source||receivable.currency!==currency||receivable.effectiveAt!==action.effectiveAt||receivable.perShare!==perShare||receivable.entitledShares!==shares||receivable.amount!==roundMoney(shares*perShare)){
+        pending+=1;continue;
+      }
+      if(receivable.status==='paid')continue;
+      if(!action.paymentAt)continue;
+      const payAt=Date.parse(action.paymentAt);
+      if(!Number.isFinite(payAt)||payAt<effectiveAt){pending+=1;continue;}
+      if(receivable.paymentAt&&Date.parse(receivable.paymentAt)!==payAt){pending+=1;continue;}
+      if(receivable.paymentAt!==new Date(payAt).toISOString()||receivable.status!=='awaiting-payment')updated+=1;
+      receivable.paymentAt=new Date(payAt).toISOString();
+      receivable.status='awaiting-payment';receivable.reason='已保存来源付款日，未到付款日或币种尚不能核验；现金未增加';
+      if(payAt>now)continue;
+      // The existing unified ledger is USD-denominated; no FX conversion is implied.
+      if(currency!=='USD'||!Number.isFinite(ledger.cash)){pending+=1;continue;}
+      ledger.cash=roundMoney(ledger.cash+receivable.amount);
+      receivable.status='paid';receivable.paidAt=new Date(now).toISOString();receivable.reason='按已核验除息权益及来源付款日计入USD模拟现金，非真实到账证明';
+      ledger.lifecycleEvents!.push({id:`payment:${action.id}`,actionId:`payment:${action.id}`,kind:action.kind,instrument:action.instrument,effectiveAt:receivable.paymentAt,source:action.source,status:'cash-paid',reason:receivable.reason});
+      applied+=1;
       continue;
     }
     if (matchingPositions.length) {
@@ -143,7 +179,7 @@ export function reconcilePaperCorporateActions<T extends LifecycleLedger>(source
       pending += 1;
     }
   }
-  return { ledger, applied, pending, alreadyApplied };
+  return { ledger, applied, pending, alreadyApplied, updated };
 }
 
 function roundQuantity(value: number): number { return Math.round(value * 1e8) / 1e8; }

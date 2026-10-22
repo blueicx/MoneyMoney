@@ -244,7 +244,7 @@ import { renderTelegramKline } from '../features/telegram-kline-image';
 import { DATA_ROOT } from '../utils/paths';
 import { paperTradingExecutor } from '../features/trading-executor';
 import { unifiedPaperLedgerStore, calculateUnifiedPerformance, replayUnifiedPaperOrders, type UnifiedPaperOrder } from '../features/unified-paper-trading';
-import { pendingOptionSettlements } from '../features/paper-account-lifecycle';
+import { createPaperLifecycleRouter } from './paper-lifecycle-routes';
 import { createPaperChartReferences, paperChartLineage, resolvePaperChartInstrument } from '../features/paper-chart-lineage';
 import { RunnerExecutionEvidenceStore, runnerSnapshotHash, runnerExecutionSnapshotId } from '../features/runner-execution-evidence';
 import { diagnoseAlertDelivery } from '../features/telegram-delivery-diagnostics';
@@ -9171,34 +9171,7 @@ app.post('/api/ai-runners/:id/routing', express.json(), (req,res) => {
   } catch(error:any) { res.status(400).json({success:false,reason:error.message}); }
 });
 
-app.get('/api/paper/accounts/:id/lifecycle', (req, res) => {
-  if (!adminOnly(req, res)) return;
-  const accountId = String(req.params.id || '');
-  const account = unifiedPaperLedgerStore.getAccount(accountId);
-  if (!account) return res.status(404).json({ success: false, market: 'all', instrument: null, dataStatus: 'empty', reason: '模拟账户不存在' });
-  const pendingOptions = pendingOptionSettlements(account.positions);
-  const events = account.lifecycleEvents || [];
-  const receivables = account.corporateReceivables || [];
-  res.json({ success: true, market: 'all', instrument: null, dataStatus: pendingOptions.length || events.some(event => event.status === 'pending-review') ? 'partial' : events.length || receivables.length ? 'historical' : 'empty',
-    source: 'unified paper ledger + verified corporate-action registry', updatedAt: new Date().toISOString(),
-    reason: pendingOptions.length ? '存在等待官方结算证据的期权持仓；未自动结算' : events.length || receivables.length ? null : '暂无账户生命周期事件',
-    data: { accountId, events, receivables, pendingOptionSettlements: pendingOptions } });
-});
-
-app.post('/api/paper/accounts/:id/reconcile', express.json(), (req, res) => {
-  if (!adminOnly(req, res)) return;
-  const accountId = String(req.params.id || '');
-  if (!unifiedPaperLedgerStore.getAccount(accountId)) return res.status(404).json({ success: false, dataStatus: 'empty', reason: '模拟账户不存在' });
-  try {
-    const actions = dataLakeCatalog.listCorporateActions('stocks');
-    const result = unifiedPaperLedgerStore.reconcileCorporateActions(accountId, actions);
-    const lifecycle = unifiedPaperLedgerStore.getAccount(accountId)!;
-    stateStore.appendAudit({ id: `paper-reconcile-${accountId}-${Date.now()}`, action: 'paper_account_lifecycle_reconcile', detail: JSON.stringify({ accountId, applied: result.applied, pending: result.pending, alreadyApplied: result.alreadyApplied }) });
-    res.json({ success: true, market: 'all', instrument: null, dataStatus: result.pending ? 'partial' : result.applied || result.alreadyApplied ? 'historical' : 'empty',
-      source: 'verified corporate-action registry', updatedAt: new Date().toISOString(), reason: result.pending ? '部分事件因身份映射、持仓历史或付款/结算证据不足而保留待核验' : result.applied ? null : '没有适用于该账户当前/历史持仓的新增公司行动',
-      data: { accountId, ...result, events: lifecycle.lifecycleEvents || [], receivables: lifecycle.corporateReceivables || [], pendingOptionSettlements: pendingOptionSettlements(lifecycle.positions) } });
-  } catch (error: any) { res.status(400).json({ success: false, dataStatus: 'failed', reason: error?.message || '账户生命周期对账失败' }); }
-});
+app.use('/api/paper/accounts', express.json(), createPaperLifecycleRouter({ ledger: unifiedPaperLedgerStore, state: stateStore, actions: () => dataLakeCatalog.listCorporateActions('stocks') }));
 app.get('/api/paper/chart-markers',(req,res)=>{
   if(!adminOnly(req,res))return;
   try {

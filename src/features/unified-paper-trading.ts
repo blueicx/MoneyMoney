@@ -182,6 +182,7 @@ export function calculateUnifiedPerformance(ledger: UnifiedPaperLedger): {
   maxDrawdownPct: number;
   positions: number;
   feeSlippageTotal: number;
+  corporateIncome: number;
   isRecovered: boolean;
   concentrationPct: number;
   attributionByAsset: Record<UnifiedPaperInstrumentType, number>;
@@ -198,9 +199,11 @@ export function calculateUnifiedPerformance(ledger: UnifiedPaperLedger): {
   const closed = orders.filter(order => order.side === 'SELL' && Number.isFinite(order.pnlUsd));
   const wins = closed.filter(order => (order.pnlUsd || 0) > 0).length;
   const feeSlippageTotal = orders.reduce((sum, order) => sum + orderCosts(order), 0);
+  const corporateIncome=(ledger.corporateReceivables||[]).filter(row=>row.status==='paid'&&row.currency==='USD'&&Number.isFinite(row.amount)&&row.amount>=0).reduce((sum,row)=>sum+row.amount,0);
   const attributionByAsset: Record<UnifiedPaperInstrumentType, number> = { stock: 0, option: 0, crypto: 0, prediction: 0 };
   const marketExposure: Record<UnifiedPaperInstrumentType, number> = { stock: 0, option: 0, crypto: 0, prediction: 0 };
   const strategyAttribution: Record<string, number> = {};
+  attributionByAsset.stock+=corporateIncome;
   for (const order of closed) if (order.instrumentType) attributionByAsset[order.instrumentType] += Number(order.pnlUsd) || 0;
   for (const position of positions) {
     if (position.instrumentType) attributionByAsset[position.instrumentType] += ((position.currentPrice || 0) - (position.averageEntryPrice || 0)) * (position.quantity || 0) * (position.contractMultiplier ?? 1);
@@ -215,19 +218,20 @@ export function calculateUnifiedPerformance(ledger: UnifiedPaperLedger): {
   const stressTests = [-10, -5, 5].map(shockPct => ({
     shockPct,
     equity: round(equity + positionsValue * (shockPct / 100), 2),
-    totalPnl: round(ledger.realizedPnl + unrealizedPnl + positionsValue * (shockPct / 100) - feeSlippageTotal, 2),
+    totalPnl: round(ledger.realizedPnl + unrealizedPnl + corporateIncome + positionsValue * (shockPct / 100) - feeSlippageTotal, 2),
   }));
   return {
     cash: round(ledger.cash, 2),
     equity: round(equity, 2),
     realizedPnl: round(ledger.realizedPnl, 2),
     unrealizedPnl: round(unrealizedPnl, 2),
-    totalPnl: round(ledger.realizedPnl + unrealizedPnl - feeSlippageTotal, 2),
+    totalPnl: round(ledger.realizedPnl + unrealizedPnl + corporateIncome - feeSlippageTotal, 2),
     totalTrades: ledger.orders.length,
     winRate: closed.length ? round(wins / closed.length, 4) : 0,
     maxDrawdownPct: round(ledger.maxDrawdownPct, 2),
     positions: ledger.positions.length,
     feeSlippageTotal: round(feeSlippageTotal, 2),
+    corporateIncome: round(corporateIncome,2),
     isRecovered: equity >= ledger.peakEquity,
     concentrationPct: equity > 0 ? round((largestPositionValue / equity) * 100, 2) : 0,
     attributionByAsset: {
@@ -269,13 +273,13 @@ export class UnifiedPaperLedgerStore {
       const root = this.get();
       if (['main', 'unified-paper-ledger'].includes(accountId)) {
         const result = reconcilePaperCorporateActions(root, actions, now);
-        if (result.applied || result.pending) this.store.set('paper-ledger', result.ledger, 2);
+        if (result.applied || result.pending || result.updated) this.store.set('paper-ledger', result.ledger, 2);
         return result;
       }
       const current = root.runnerAccounts?.[accountId];
       if (!current || !current.runnerId) throw new Error('模拟账户不存在或未关联有效跑单');
       const result = reconcilePaperCorporateActions(current, actions, now);
-      if (result.applied || result.pending) this.store.set('paper-ledger', { ...root, runnerAccounts: { ...(root.runnerAccounts || {}), [accountId]: result.ledger } }, 2);
+      if (result.applied || result.pending || result.updated) this.store.set('paper-ledger', { ...root, runnerAccounts: { ...(root.runnerAccounts || {}), [accountId]: result.ledger } }, 2);
       return result;
     });
   }

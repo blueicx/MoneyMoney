@@ -169,6 +169,7 @@ html = html.replace(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi, (tag, attributes,
   return `<script${deferredAttributes} src="${emit(`dashboard-${++number}`, splitWorkspaces(code), 'js')}"></script>`;
 });
 modules.guru.push(fs.readFileSync(path.join(source, 'guru-replay.js'), 'utf8'));
+modules.ai.push(fs.readFileSync(path.join(source, 'paper-lifecycle-workspace.js'), 'utf8'));
 modules.tables.push(fs.readFileSync(path.join(source, 'table-tools.js'), 'utf8'));
 modules.research.push(
   fs.readFileSync(path.join(source, 'restricted-strategy.js'), 'utf8'),

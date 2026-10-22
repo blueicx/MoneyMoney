@@ -14,7 +14,7 @@ export interface DatasetManifest { id: string; dataset: string; market: MarketId
 export interface DatasetPartition { id: string; manifestId: string; path: string; dataset: string; market: MarketId; instrument: string; timeframe: string; periodStart: string; periodEnd: string; publishedAt: string; fetchedAt: string; rowCount: number; status: DatasetStatus; contentHash: string; }
 export interface PointInTimeSnapshot { id: string; market: MarketId; instrument: string; dataset: string; timeframe: string; asOf: string; partitionId: string; contentHash: string; source: string | null; createdAt: string; }
 export interface DataRevision { id: string; dataset: string; market: MarketId; instrument: string; timeframe: string; partitionId: string; publishedAt: string; contentHash: string; supersedes?: string; reason?: string; }
-export interface CorporateAction { id: string; market: 'stocks'; instrument: string; kind: 'split' | 'dividend' | 'symbol-change' | 'delisting'; effectiveAt: string; publishedAt?: string; observedAt?: string; factor?: number; currency?: string; oldSymbol?: string; newSymbol?: string; source: string; }
+export interface CorporateAction { id: string; market: 'stocks'; instrument: string; kind: 'split' | 'dividend' | 'symbol-change' | 'delisting'; effectiveAt: string; paymentAt?: string; publishedAt?: string; observedAt?: string; factor?: number; currency?: string; oldSymbol?: string; newSymbol?: string; source: string; }
 export interface ProviderContract { id: string; provider: string; market: MarketId; datasets: string[]; timezone: string; units: Record<string, string>; revisionPolicy: 'point-in-time' | 'latest'; }
 export interface DataQualityReport { valid: boolean; rowCount: number; duplicateTimestamps: number; outOfOrderRows: number; missingFields: string[]; futureRows: number; errors: string[]; checkedAt: string; }
 export interface BackfillCheckpoint { cursor?: string; rowsWritten: number; partitionsCommitted: number; }
@@ -191,6 +191,7 @@ export class DataLakeCatalog {
     if (!(this.db.prepare('PRAGMA table_info(corporate_actions)').all() as Array<{name:string}>).some(row=>row.name==='published_at')) this.db.exec('ALTER TABLE corporate_actions ADD COLUMN published_at TEXT');
     if (!(this.db.prepare('PRAGMA table_info(corporate_actions)').all() as Array<{name:string}>).some(row=>row.name==='observed_at')) this.db.exec('ALTER TABLE corporate_actions ADD COLUMN observed_at TEXT');
     if (!(this.db.prepare('PRAGMA table_info(corporate_actions)').all() as Array<{name:string}>).some(row=>row.name==='currency')) this.db.exec('ALTER TABLE corporate_actions ADD COLUMN currency TEXT');
+    if (!(this.db.prepare('PRAGMA table_info(corporate_actions)').all() as Array<{name:string}>).some(row=>row.name==='payment_at')) this.db.exec('ALTER TABLE corporate_actions ADD COLUMN payment_at TEXT');
     this.migrateLegacyInstrumentIdentities();
   }
 
@@ -426,27 +427,34 @@ export class DataLakeCatalog {
     if (input.kind === 'split' && (!Number.isFinite(input.factor) || Number(input.factor) <= 0)) throw new Error('Split factor must be positive');
     if (input.kind === 'dividend' && (!Number.isFinite(input.factor) || Number(input.factor) < 0)) throw new Error('Dividend amount must be nonnegative');
     if (input.kind === 'symbol-change' && (!input.oldSymbol || !input.newSymbol || input.oldSymbol === input.newSymbol)) throw new Error('Symbol change requires distinct old and new symbols');
+    return this.db.transaction(() => {
     const effectiveAt = new Date(input.effectiveAt).toISOString();
     const publishedAt = input.publishedAt ? new Date(input.publishedAt).toISOString() : null;
     const observedAt = input.observedAt ? new Date(input.observedAt).toISOString() : null;
+    if(input.paymentAt!==undefined&&(input.kind!=='dividend'||!Number.isFinite(Date.parse(input.paymentAt))||Date.parse(input.paymentAt)<Date.parse(effectiveAt)))throw Error('Dividend payment date invalid or precedes ex-date');
+    const paymentAt=input.paymentAt?new Date(input.paymentAt).toISOString():null;
+    const prior=this.db.prepare('SELECT payment_at FROM corporate_actions WHERE id=?').get(input.id) as {payment_at:string|null}|undefined;
+    if(prior?.payment_at&&paymentAt&&prior.payment_at!==paymentAt)throw Error('Corporate payment date conflict; preserve original evidence for review');
     if (input.currency && !/^[A-Z]{3}$/.test(input.currency.trim().toUpperCase())) throw new Error('Corporate action currency must be an ISO 4217 code');
-    this.db.prepare(`INSERT INTO corporate_actions (id,market,instrument,kind,effective_at,factor,old_symbol,new_symbol,source,published_at,observed_at,currency)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET
+    this.db.prepare(`INSERT INTO corporate_actions (id,market,instrument,kind,effective_at,factor,old_symbol,new_symbol,source,published_at,observed_at,currency,payment_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET
       market=excluded.market,instrument=excluded.instrument,kind=excluded.kind,effective_at=excluded.effective_at,factor=excluded.factor,
       old_symbol=excluded.old_symbol,new_symbol=excluded.new_symbol,source=excluded.source,
       published_at=COALESCE(corporate_actions.published_at,excluded.published_at),
       observed_at=CASE WHEN corporate_actions.observed_at IS NULL THEN excluded.observed_at WHEN excluded.observed_at IS NULL THEN corporate_actions.observed_at ELSE MIN(corporate_actions.observed_at,excluded.observed_at) END,
-      currency=COALESCE(corporate_actions.currency,excluded.currency)`).run(input.id,input.market,input.instrument,input.kind,effectiveAt,input.factor ?? null,input.oldSymbol || null,input.newSymbol || null,input.source.trim(),publishedAt,observedAt,input.currency?.trim().toUpperCase() || null);
+      currency=COALESCE(corporate_actions.currency,excluded.currency),
+      payment_at=COALESCE(corporate_actions.payment_at,excluded.payment_at)`).run(input.id,input.market,input.instrument,input.kind,effectiveAt,input.factor ?? null,input.oldSymbol || null,input.newSymbol || null,input.source.trim(),publishedAt,observedAt,input.currency?.trim().toUpperCase() || null,paymentAt);
     return this.listCorporateActions('stocks', input.instrument).find(action => action.id === input.id)!;
+    }).immediate();
   }
 
   listCorporateActions(market?: MarketId, instrument?: string): CorporateAction[] {
     const rows = (market && instrument
-      ? this.db.prepare('SELECT id,market,instrument,kind,effective_at AS effectiveAt,factor,currency,old_symbol AS oldSymbol,new_symbol AS newSymbol,source,published_at AS publishedAt,observed_at AS observedAt FROM corporate_actions WHERE market = ? AND instrument = ? ORDER BY effective_at').all(market, instrument)
+      ? this.db.prepare('SELECT id,market,instrument,kind,effective_at AS effectiveAt,payment_at AS paymentAt,factor,currency,old_symbol AS oldSymbol,new_symbol AS newSymbol,source,published_at AS publishedAt,observed_at AS observedAt FROM corporate_actions WHERE market = ? AND instrument = ? ORDER BY effective_at').all(market, instrument)
       : market
-        ? this.db.prepare('SELECT id,market,instrument,kind,effective_at AS effectiveAt,factor,currency,old_symbol AS oldSymbol,new_symbol AS newSymbol,source,published_at AS publishedAt,observed_at AS observedAt FROM corporate_actions WHERE market = ? ORDER BY effective_at').all(market)
-        : this.db.prepare('SELECT id,market,instrument,kind,effective_at AS effectiveAt,factor,currency,old_symbol AS oldSymbol,new_symbol AS newSymbol,source,published_at AS publishedAt,observed_at AS observedAt FROM corporate_actions ORDER BY effective_at').all()) as Array<Record<string, unknown>>;
-    return rows.map(row => ({ id: String(row.id), market: row.market as 'stocks', instrument: String(row.instrument), kind: row.kind as CorporateAction['kind'], effectiveAt: String(row.effectiveAt), ...(row.publishedAt == null ? {} : { publishedAt: String(row.publishedAt) }), ...(row.observedAt == null ? {} : { observedAt: String(row.observedAt) }), ...(row.factor == null ? {} : { factor: Number(row.factor) }), ...(row.currency ? { currency: String(row.currency) } : {}), ...(row.oldSymbol ? { oldSymbol: String(row.oldSymbol) } : {}), ...(row.newSymbol ? { newSymbol: String(row.newSymbol) } : {}), source: String(row.source) }));
+        ? this.db.prepare('SELECT id,market,instrument,kind,effective_at AS effectiveAt,payment_at AS paymentAt,factor,currency,old_symbol AS oldSymbol,new_symbol AS newSymbol,source,published_at AS publishedAt,observed_at AS observedAt FROM corporate_actions WHERE market = ? ORDER BY effective_at').all(market)
+        : this.db.prepare('SELECT id,market,instrument,kind,effective_at AS effectiveAt,payment_at AS paymentAt,factor,currency,old_symbol AS oldSymbol,new_symbol AS newSymbol,source,published_at AS publishedAt,observed_at AS observedAt FROM corporate_actions ORDER BY effective_at').all()) as Array<Record<string, unknown>>;
+    return rows.map(row => ({ id: String(row.id), market: row.market as MarketId as 'stocks', instrument: String(row.instrument), kind: row.kind as CorporateAction['kind'], effectiveAt: String(row.effectiveAt), ...(row.paymentAt == null ? {} : { paymentAt: String(row.paymentAt) }), ...(row.publishedAt == null ? {} : { publishedAt: String(row.publishedAt) }), ...(row.observedAt == null ? {} : { observedAt: String(row.observedAt) }), ...(row.factor == null ? {} : { factor: Number(row.factor) }), ...(row.currency ? { currency: String(row.currency) } : {}), ...(row.oldSymbol ? { oldSymbol: String(row.oldSymbol) } : {}), ...(row.newSymbol ? { newSymbol: String(row.newSymbol) } : {}), source: String(row.source) }));
   }
 
   registerProviderContract(input: ProviderContract): ProviderContract {

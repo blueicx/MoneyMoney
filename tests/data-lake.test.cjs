@@ -338,6 +338,22 @@ test('corporate action first-observed time is immutable to later refetches while
   } finally { catalog.close(); fs.rmSync(root, { recursive: true, force: true }); }
 });
 
+test('corporate payment date is optional, survives reopening, and rejects impossible or conflicting dates',()=>{
+  const {root,catalog}=tempCatalog();
+  try{
+    const base={id:'payment-evidence',market:'stocks',instrument:'AAPL',kind:'dividend',effectiveAt:'2026-09-01T00:00:00.000Z',factor:0.25,currency:'USD',source:'issuer record'};
+    assert.equal(catalog.saveCorporateAction(base).paymentAt,undefined);
+    const enriched=catalog.saveCorporateAction({...base,paymentAt:'2026-09-15T00:00:00Z'});
+    assert.equal(enriched.paymentAt,'2026-09-15T00:00:00.000Z');
+    const second=new DataLakeCatalog({lakeRoot:path.join(root,'lake'),databasePath:path.join(root,'catalog.sqlite')});
+    try{assert.equal(second.listCorporateActions('stocks','AAPL')[0].paymentAt,enriched.paymentAt);}finally{second.close();}
+    assert.throws(()=>catalog.saveCorporateAction({...base,paymentAt:'not-a-date'}),/payment/i);
+    assert.throws(()=>catalog.saveCorporateAction({...base,paymentAt:'2026-08-15T00:00:00Z'}),/payment/i);
+    assert.throws(()=>catalog.saveCorporateAction({...base,paymentAt:'2026-09-16T00:00:00Z'}),/payment|conflict/i);
+    assert.equal(catalog.saveCorporateAction(base).paymentAt,enriched.paymentAt);
+  }finally{catalog.close();fs.rmSync(root,{recursive:true,force:true});}
+});
+
 test('corporate-action observed timestamp migrates an existing catalog schema without losing records', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'moneymoney-corporate-migration-'));
   const databasePath = path.join(root, 'catalog.sqlite');

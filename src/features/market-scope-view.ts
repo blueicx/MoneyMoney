@@ -41,19 +41,22 @@ export function filterUnifiedPaperLedger<T extends {
   realizedPnl: number;
   peakEquity: number;
   maxDrawdownPct: number;
+  corporateReceivables?: Array<{ instrumentId: string; status: string; currency: string; amount: number }>;
 }>(ledger: T, scope: MarketScope): T {
   if (scope === 'overview' || scope === 'watchlist') return ledger;
   const positions = filterByMarketScope(ledger.positions, scope);
   const orders = filterByMarketScope(ledger.orders, scope);
+  const corporateReceivables = scope === 'stocks' ? ledger.corporateReceivables || [] : [];
+  const income = corporateReceivables.reduce((sum, item) => sum + (item.status === 'paid' && item.currency === 'USD' && Number.isFinite(item.amount) && item.amount >= 0 ? item.amount : 0), 0);
   const cash = orders.reduce((balance, order) => {
     const notional = Number(order.price) * Number(order.quantity);
     const fee = Number.isFinite(Number(order.feeUsd)) ? Math.abs(Number(order.feeUsd)) : 0;
     const slippage = Number.isFinite(Number(order.slippageUsd)) ? Math.abs(Number(order.slippageUsd)) : 0;
     const costs = fee + slippage;
     return order.side === 'SELL' ? balance + notional - costs : balance - notional - costs;
-  }, Number(ledger.startingCash) || 0);
+  }, (Number(ledger.startingCash) || 0) + income);
   const realizedPnl = orders.reduce((sum, order) => sum + (Number(order.pnlUsd) || 0), 0);
-  return { ...ledger, cash, positions, orders, realizedPnl, peakEquity: Math.max(Number(ledger.startingCash) || 0, cash), maxDrawdownPct: 0 };
+  return { ...ledger, cash, positions, orders, realizedPnl, ...(ledger.corporateReceivables ? { corporateReceivables } : {}), peakEquity: Math.max(Number(ledger.startingCash) || 0, cash), maxDrawdownPct: 0 };
 }
 
 function actionScope(action: { venue?: string; id?: string }): MarketScope | null {
