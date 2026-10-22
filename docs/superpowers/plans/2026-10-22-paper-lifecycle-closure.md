@@ -27,7 +27,18 @@
 
 ## 发布记录
 
-待本批完整测试、构建、标准/专用浏览器、安全扫描、干净导出及正式域名验收后填写；当前不声称已部署。
+本批代码 c2b885df1e8aae332c303d2674f021b3c8ad90cc 已推送并部署；以下为实际发布证据，不代表十二组路线和独立性能目标全部完成。
+
+### 正式发布验收
+
+- 最终代码 GitHub Actions 运行 39792930792 已 completed/success，包含最终兼容回归的完整测试。干净导出重新构建、安全扫描及 15 项标准/专用冒烟全部退出 0。
+- 发布包 moneymoney-c2b885d-20261022-lifecycle.tar.gz SHA256：f9bfb42dda2db5a8f97509fb4a9f1bef9b1ba022bddf857b1e83236ba6c39e3e。本地与远端一致。首次手工参数多写一个字符，被停止服务前的校验拦住；改为从文件自动读取 Hash 后发布成功。
+- 当前正式域名 https://bluetrade.bbroot.com 返回上述代码版本；29 个版本化静态资源 Hash 与干净导出一致，immutable 缓存通过，未发生重试。四个私人研究接口拒绝访客，新增生命周期接口未认证访问返回 401。
+- 正式域名只读 Chromium 验收通过 stocks、options、crypto、prediction 与 SNDK；未向生产创建订单、对账付款、模型调用或订阅。日志 mm-lifecycle-production-assets.log、mm-lifecycle-production-canary.log。
+- 远端 server.js SHA256：6440f94537047bae04a4898f96647dc019d5f44a284731e2ad2f73a30cd6f061；index.html SHA256：f2112542cfd0a8b910b89b49409da3ded40223b303ec9099cbb2b9bea478c9a0，均与本地构建一致。moneymoney.service active，健康接口 alive。
+- 只操作 moneymoney.service。原 10 个跑单配置指纹发布前后均为 5125162b35c9893e4a9ac7d11c40eeaca7297bd95d7434d6bec70712aa144181，数据库、数据湖及用户文件未清理。
+- 产物备份 /opt/moneymoney/backups/dist-pre-c2b885d-20261022-lifecycle；回滚产物 /opt/moneymoney/dist.rollback-c2b885d-20261022-lifecycle，保留旧版 6189ad6。隔离旧版兼容探针通过新增列读取、已付现金保留和重复对账不重复付款；没有在生产进行回滚演练。
+- 备份恢复仍为 partial：15 个既有损坏文件保留隔离原件，并未修复。冷加载改善至少 20% 未证实；晚拆股成本重放、缺少真实来源的结算和未成熟观察样本继续保持待核验，不冒充完成。
 
 ### 源码验证与性能实验
 
