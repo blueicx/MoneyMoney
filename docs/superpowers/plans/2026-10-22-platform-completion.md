@@ -60,3 +60,12 @@
 - 备份/opt/moneymoney/backups/dist-pre-331c725-20261022-project-cycle，回滚/opt/moneymoney/dist.rollback-331c725-20261022-project-cycle保留4322562。只操作moneymoney.service，启动阶段两次连接拒绝后最终active/alive。正式域名版本331c725、29项资源SHA及immutable通过，重试0；4个私人接口未登录拒绝。只读canary通过四市场、SNDK及手机（mm-project-cycle-production-assets.log / mm-project-cycle-production-canary.log）。
 - 原10跑单Hash仍5125162b35c9893e4a9ac7d11c40eeaca7297bd95d7434d6bec70712aa144181；未跟踪research.db Hash仍27fd475e523568daa4cdcabf3146917023335a62affe00429babd721b3b79fd1；没有生产新任务、模型调用、通知或订单，没有删除数据。旧/tmp部署工具已不存在，从仓库重新生成LF脚本，Hash与上批一致后使用。
 - 后续单样本Profiler仅诊断：启动历史读取仍触发243个布局对象约289.8ms，首次图表布局约128.1ms。额外隔离字体/Emoji试验中，原布局177.3ms、文字化Emoji191.3ms、无Emoji115.8ms；只是局部假设证据，不是整页提速，也没有因此删除或替换线上图标。20%冷加载及真实前向成熟/公司行动证明等余项仍未完成。
+
+## 后续批次：研究记录选择器（验证中）
+
+- 项目引用表单增加明确类型的已有记录选择器。手动读取盲测、共享资金或AI固定目标目录，核验当前市场、ID命名空间及清单Hash；不合格条目隔离计数。选择只填入引用，仍需管理员点击关联，不确认或执行任何实验。
+- 市场、工作区、权限或所选类型变化时取消/丢弃迟到读取，不写入localStorage或离线缓存；来源失败与成功空目录区分，不残留无限加载文案。
+- AI目录可选summary=1只返回ID、市场、标的、模型、周期、清单Hash及状态等元数据，不返回冻结OHLCV、模型输入输出或结果；原列表格式不变，其他summary值拒绝，仍为管理员private/no-store接口。
+- 9项定向测试通过；扩展Chromium验证真实SQLite目录选择、AI摘要不含明细、未运行模型、三个主题和桌面/手机，截图mm-completion-browser-try2F9，已目视检查金色手机布局。新增验收步骤因表单重建后details默认关闭而超时，改为显式展开并以Promise.all等待响应后通过；不是放宽生产校验。完整回归进行中，尚未发布此批。
+- 两个性能候选均只在临时干净导出试验，没有修改生产源码：字体测量预热（前/候选/后，桌面手机冷热各3次）桌面冷shell1663.2/1698.1/1714.6ms，手机1455.7/1431.8/1452.7ms；不足以证实目标收益，放弃。核心脚本高下载优先级候选桌面1728.7ms/手机1434.7ms，也没有稳定20%改善，放弃。日志mm-font-prewarm-{before,candidate,after}.log、mm-core-priority-candidate.log。功能发布不关闭独立性能目标。
+- 源码冻结后全测404文件/1950项、失败0、退出0（mm-project-picker-full-tests.log）。构建、15项标准/专用冒烟、安全1019跟踪文件及暂存差异检查通过；浏览器额外摘要查询步骤修正后单独重跑通过，没有修改冻结业务代码。未跟踪数据库Hash不变。准备干净导出和生产发布验证。
