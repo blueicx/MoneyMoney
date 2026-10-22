@@ -8,6 +8,7 @@ const ts = require('typescript');
 const { expandDashboardRuntime } = require('./dashboard-source-transform.cjs');
 const { optimizeWebAsset } = require('./optimize-web-assets.cjs');
 const { deferStockChartMarkup } = require('./stock-workspace-markup.cjs');
+const { inferWorkspaceHelpers } = require('./workspace-helper-ownership.cjs');
 
 const root = path.join(__dirname, '..');
 const source = path.join(root, 'src', 'web', 'public');
@@ -92,6 +93,7 @@ const deferredActionGroups = [
 function splitWorkspaces(code) {
   const ast = ts.createSourceFile('dashboard.js', code, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
   const changes = [];
+  const knownGroups = new Map();
   for (const node of ast.statements) {
     if (!ts.isFunctionDeclaration(node) || !node.name) continue;
     const name = node.name.text;
@@ -101,13 +103,33 @@ function splitWorkspaces(code) {
       : /^(?:renderResearchEntryUi|loadResearchWorkspace|createResearchEntryUi|addResearchNoteUi|addResearchSnapshotUi|openEventResearchFromTimeline)$/.test(name) ? 'research'
         : isAsync ? asyncWorkspaceGroups.find(([, pattern]) => pattern.test(name))?.[0] || deferredGroup || null
           : syncWorkspaceGroups.find(([, pattern]) => pattern.test(name))?.[0] || null;
+    if (group) knownGroups.set(name, group);
+  }
+  const helpers = inferWorkspaceHelpers(code, knownGroups, externalWorkspaceReferences);
+  for (const node of ast.statements) {
+    if (!ts.isFunctionDeclaration(node) || !node.name) continue;
+    const name = node.name.text, group = knownGroups.get(name) || helpers.get(name);
     if (!group) continue;
+    const isAsync = Boolean(node.modifiers?.some(modifier => modifier.kind === ts.SyntaxKind.AsyncKeyword));
+    const deferredGroup = isAsync ? deferredActionGroups.find(([, pattern]) => pattern.test(name))?.[0] : null;
     modules[group].push(code.slice(node.getStart(ast), node.end));
     changes.push({ start: node.getStart(ast), end: node.end, body: `function ${name}(...args) { return window.MoneyWorkspaceModules.invoke('${group}', '${name}', args${deferredGroup ? ', true' : ''}); }` });
   }
   for (const change of changes.reverse()) code = code.slice(0, change.start) + change.body + code.slice(change.end);
   return code;
 }
+
+// Other scripts and inline handlers are public consumers, not proof that a
+// helper belongs to one lazy module. Keep any referenced helper in core.
+const externalWorkspaceReferences = [];
+function collectExternalWorkspaceReferences(directory) {
+  for (const entry of fs.readdirSync(directory, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+    const file = path.join(directory, entry.name);
+    if (entry.isDirectory()) collectExternalWorkspaceReferences(file);
+    else if (/\.(?:html|js)$/.test(file) && file !== path.join(source, 'modules', 'dashboard-runtime.js')) externalWorkspaceReferences.push(fs.readFileSync(file, 'utf8'));
+  }
+}
+collectExternalWorkspaceReferences(source);
 
 let html = fs.readFileSync(path.join(source, 'index.html'), 'utf8');
 html = expandDashboardRuntime(html, source);

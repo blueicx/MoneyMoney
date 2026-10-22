@@ -3,7 +3,7 @@ import type {DatasetPartition,DataRevision,PointInTimeSnapshot} from '../storage
 import {buildResearchRevisionImpact} from './research-revision-impact';
 import type { RegisteredWindowProof } from './restricted-validation-proof';
 
-interface Input {session:any;version:any;experiment:any;snapshot:PointInTimeSnapshot|null;partitions:DatasetPartition[];revisions:DataRevision[];signals:any[];identity?:{id:string;symbol:string}|null}
+interface Input {session:any;version:any;experiment:any;snapshot:PointInTimeSnapshot|null;partitions:DatasetPartition[];revisions:DataRevision[];signals:any[];identity?:{id:string;symbol:string}|null;execution?:Record<string,any>}
 /** Read-only metadata audit. Never publishes candidates or treats observed prices as executed trades. */
 export function buildRestrictedReadiness(input:Input,now=Date.now()){
  const {session:s,version:v,experiment:r,snapshot:p,signals}=input,e=r?.experiment;
@@ -28,10 +28,14 @@ export function buildRestrictedReadiness(input:Input,now=Date.now()){
  if(sampleOk)for(const trade of trades){units+=trade.direction==='buy'?trade.volume:-trade.volume;if(trade.direction==='sell'&&units===0)closed++;if(units<0)break;}
  check('sample',experimentOk&&sampleOk&&units>=0&&closed===r.quality?.closedTrades&&closed>=20,!experimentOk?'历史实验未明确关联，不采纳该记录的样本':sampleOk&&units>=0&&closed===r.quality?.closedTrades?`历史模型完整平仓 ${closed} 笔；${closed<20?'不足20笔，不提供可靠胜率或排名':'样本门槛不等于统计或样本外验证'}`:'历史模型成交和报告的完整平仓样本不可核验');
  check('oos',false,'此历史实验未实现受控样本外流程；即使记录附带汇总OOS数值也不采信为晋级证据');
- const forward={signals:signals.length,mature20:signals.filter(signal=>signal.forwardObservation?.horizons?.[20]?.mature===true).length,pairedFills:0};
- check('forward',false,`手动走势信号 ${forward.signals} 个，20根成熟 ${forward.mature20} 个；未关联模拟成交，不能当作成交样本或收益排名`);
+ // Input is supplied only by the server's immutable receipt verifier, never by
+ // readiness query parameters or client metrics. The original observation stays read-only.
+ const x=input.execution,executionOk=x?.model==='bilateral-quote-paper-v1'&&x.observationId===s.id&&x.accountId==='research-forward:'+s.id&&x.market===s.market&&x.instrument===s.instrument&&x.strategyHash===s.strategyHash&&Number.isSafeInteger(x.closedTrades)&&x.closedTrades>=0&&x.closedTrades===x.pairedFills&&Number.isSafeInteger(x.orders)&&x.orders>=2*x.closedTrades&&Array.isArray(x.evidenceRefs)&&x.evidenceRefs.length===x.orders&&new Set(x.evidenceRefs).size===x.orders;
+ const forward={signals:signals.length,mature20:signals.filter(signal=>signal.forwardObservation?.horizons?.[20]?.mature===true).length,pairedFills:executionOk?x!.closedTrades:0};
+ check('forward',!!executionOk&&forward.pairedFills>=20,executionOk?`同一版本已核验双边报价纸面模型完整平仓 ${forward.pairedFills} 笔；${forward.pairedFills<20?'不足20笔，不排名':'仅为模拟执行证据，不是实盘成交或深度证明'}`:x?.reason?String(x.reason).slice(0,500):`手动走势信号 ${forward.signals} 个，20根成熟 ${forward.mature20} 个；未关联模拟成交，不能当作成交样本或收益排名`);
  checks.push({id:'corporate-actions',status:'unknown',reason:'本成交模型未完成拆股、分红及退市收益归因验收'});
  check('approval',false,'当前观察没有明确关联的人工审批记录；不按版本或时间猜测配对，不修改已有审批或监控状态');
  const pack={schemaVersion:1,market:s.market,instrument:s.instrument,timeframe:s.timeframe,checkedAt:new Date(now).toISOString(),source:s.source,dataStatus:'partial',strategyId:s.strategyId,strategyHash:s.strategyHash,experimentId:s.experimentId,observationId:s.id,snapshot:p?{id:p.id,contentHash:p.contentHash,asOf:p.asOf}:null,evidenceRefs:[...new Set([...(r?.evidenceRefs||[]),...signals.flatMap(signal=>signal.evidenceRefs||[])])],checks,blockers:checks.filter(row=>row.status!=='met').map(row=>row.reason),forward,revisions,validation:null as RegisteredWindowProof|null,promotionAllowed:false,monitoringAllowed:false,orderChanges:0,modelCalls:0,reason:'只读证据检查，不是策略审批；无新采集、模型调用、任务或订单'};
+ if(executionOk)pack.evidenceRefs=[...new Set([...pack.evidenceRefs,...x!.evidenceRefs])];
  return {...pack,contentHash:createHash('sha256').update(JSON.stringify(pack)).digest('hex')};
 }

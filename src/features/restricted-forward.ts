@@ -8,7 +8,7 @@ import {attachRegisteredWindowAudit} from './restricted-validation-proof';
 import type {PointInTimeSnapshot,DatasetPartition,DataRevision} from '../storage/data-lake';
 type State=Pick<SQLiteStateStore,'get'|'set'|'transaction'|'appendAudit'|'health'|'acquireLease'|'getLease'|'releaseLease'>;
 type History={dataStatus:string;source:string|null;updatedAt:string|null;reason?:string;snapshot?:{id:string;contentHash:string};rows:Array<Record<string,any>>};
-type Dependencies={definition:(id:string,hash:string)=>any;experiment:(id:string)=>any;resolve:(market:string,instrument:string)=>{id:string;symbol:string}|null;signals:{get:(id:string)=>SignalOutcome|null;list:()=>SignalOutcome[];save:(s:SignalOutcome)=>unknown};catalog?:{snapshot:(id:string)=>PointInTimeSnapshot|null;partitions:()=>DatasetPartition[];revisions:()=>DataRevision[]};validation?:{plan:(id:string)=>any;result:(id:string)=>any}};
+type Dependencies={definition:(id:string,hash:string)=>any;experiment:(id:string)=>any;resolve:(market:string,instrument:string)=>{id:string;symbol:string}|null;signals:{get:(id:string)=>SignalOutcome|null;list:()=>SignalOutcome[];save:(s:SignalOutcome)=>unknown};catalog?:{snapshot:(id:string)=>PointInTimeSnapshot|null;partitions:()=>DatasetPartition[];revisions:()=>DataRevision[]};validation?:{plan:(id:string)=>any;result:(id:string)=>any};execution?:(id:string)=>Record<string,any>};
 interface Session {id:string;mode:'observation-only';market:'stocks';instrument:string;strategyId:string;strategyHash:string;timeframe:string;experimentId:string;source:string;startedAt:number;observingSince:number;status:'active'|'paused'|'stopped';revision:number;signalIds:string[];captures:Array<{id:string;at:number;snapshotId:string|null;dataHash:string|null;reason:string}>;reason:string;dataStatus:string;lastBarTime:number|null;lease?:{owner:string;expiresAt:number};updatedAt:number}
 const hash=(v:unknown)=>createHash('sha256').update(JSON.stringify(v)).digest('hex');
 const timestamp=(v:unknown)=>v instanceof Date?v.getTime():Date.parse(String(v));
@@ -25,7 +25,9 @@ export class RestrictedForwardStore {
   const experiment=this.deps.experiment(session.experimentId),version=this.deps.definition(session.strategyId,session.strategyHash);
   const shared={identity:this.deps.resolve(session.market,session.instrument),version,partitions:catalog.partitions(),revisions:catalog.revisions()};
   const snapshot=(result:any)=>result?.evidenceRefs?.length===1?catalog.snapshot(result.evidenceRefs[0]):null;
-  const audit=buildRestrictedReadiness({...shared,session,experiment,snapshot:snapshot(experiment),signals:this.signals(id)},this.now());
+  let execution:Record<string,any>|undefined;
+  try{execution=this.deps.execution?.(id);}catch(error){execution={reason:error instanceof Error?error.message:'模拟执行证据不可核验'};}
+  const audit=buildRestrictedReadiness({...shared,session,experiment,snapshot:snapshot(experiment),signals:this.signals(id),execution},this.now());
   if(validationId===undefined)return audit;
   if(typeof validationId!=='string'||!validationId||!this.deps.validation)throw Error('需要明确验证引用且验证服务已配置');
   const plan=this.deps.validation.plan(validationId);
