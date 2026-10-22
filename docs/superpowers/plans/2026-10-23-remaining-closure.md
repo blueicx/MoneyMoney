@@ -29,7 +29,7 @@
 
 ## 发布记录
 
-当前新增代码尚未部署；实际域名与提交信息在执行后追加。
+代码 43aed1b9e866f9e9457f67a4a6966b0a08304319 已提交、推送并部署。以下只证明本批安全修复及发布，不把独立性能、未来样本和无来源数据自动勾为完成。
 
 ### 冻结源码门禁
 
@@ -41,3 +41,14 @@
 - 单样本 profiler 与单色图标副本仅作诊断，不能作为提速验收；没有将其图标替换或不匹配 Hash 的临时产物纳入提交/发布。
 - 生产一致性备份 2026-10-22T17-50-34-364Z（UTC）：72 文件、325586937 字节；两个 SQLite、53 个数据湖文件及隔离恢复检查通过。15 个既有损坏文件仍为隔离原件，dataStatus=partial。
 - 发布前服务 active，根盘 51%，10 个原跑单配置指纹 5125162b35c9893e4a9ac7d11c40eeaca7297bd95d7434d6bec70712aa144181。没有向生产发送测试通知、模型调用、新实验或订单。
+
+### 实际生产验收
+
+- GitHub Actions 39826992465 最终 completed/success，最终提交的 Linux 构建、全测、安全、差异检查和 Web 冒烟通过；存在 runner/actions 弃用提示，不声称零警告。
+- 干净导出 moneymoney-split-clean-43aed1b-20261023 重新构建，全部 15 项标准/专用冒烟通过；按提交跟踪清单扫描 1034 文件通过。未把带 node_modules 联接的临时目录递归清理。
+- 隔离回滚兼容探针通过：c2b885d 可读取新仓位、现金和成本证据，不重复应用拆股；旧版写入不会维护新历史指纹，新版后续重放因此保守拒绝。旧版收益归因不读取新修正，并非全部旧界面统计完全兼容；没有在线回滚或生产订单测试。
+- 发布归档 SHA256 b9b4a42ef6a116bca1bbbe0614221b8a5321ab1c95a158ecd05ce2128b6dc1c1；server.js 6440f94537047bae04a4898f96647dc019d5f44a284731e2ad2f73a30cd6f061；index.html ec064bced32c6372da68defd28770307f849563c9fbffe527a05e147997a60b6。
+- 新 paper-split-replay.js c4ba87e9bd6f94089a861986454bc05dcc824bf5f12782f9982201f90ab0c2da、unified-paper-trading.js 74707b93720fece2fccb67259c2d9d9972406ff8ae89f962ddd098125fe4aecd、paper-lifecycle-routes.js 451779f0be2b3138aa4c16081a151c7f2d94d702a7783df655da3283841175f5；本地干净构建与远端逐项一致。
+- 正式域名 https://bluetrade.bbroot.com 版本为 43aed1b；29 项静态资源 SHA256 与 immutable 缓存通过、重试 0。4 个私人研究接口拒绝未登录，生命周期接口返回 401。只读 Chromium 通过股票、期权、虚拟币、预测市场及 SNDK/手机；未创建生产模型请求、实验或订单。
+- 只替换 dist 并操作 moneymoney.service，最终 active/alive；启动初期两次连接拒绝后恢复，并非持续故障。备份 /opt/moneymoney/backups/dist-pre-43aed1b-20261023-split-replay，回滚 /opt/moneymoney/dist.rollback-43aed1b-20261023-split-replay 保留 c2b885d。发布后磁盘 52%，原 10 跑单配置指纹与前述完全一致。
+- 后续三次冷热单色图标临时副本测量：桌面/手机冷首屏 1302.5/1179.7ms，热 296.6/288.5ms，冷图表 2558.4/2596.5ms；相对旧对照不足 20%，不证明稳定因果改善。无源码/线上图标替换，临时文件只留作诊断，日志 mm-split-perf-monochrome-three.log。主题初始化和导航重复布局的后续核对未找到可直接证明目标收益的新修复，不提交猜测式改动。
