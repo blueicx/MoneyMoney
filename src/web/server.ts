@@ -440,6 +440,7 @@ registerAuthRoutes(app);
 registerApiAuthProtection(app);
 app.use('/api/data',createDataAssetRouter(new DataAssetService(dataLakeCatalog,stateStore,dataLakeWorker)));
 const researchProjects=new ResearchProjectStore(stateStore,createProjectReferenceResolver({
+  study:id=>{if(/^psim_[a-f0-9]{64}$/.test(id))return portfolioSimulationStore.reference(id);if(/^blind_[a-f0-9]{64}$/.test(id))return blindSessionStore.reference(id);if(/^aif_[a-f0-9]{64}$/.test(id))return aiForecastLab.reference(id);return null;},
   evidence:id=>decisionIntelligenceStore.getEvidence(id),verifyEvidence:verifyEvidenceSnapshotHash,
   partition:id=>dataLakeCatalog.listPartitions().find(row=>row.id===id)||null,experiment:id=>researchRepository.getExperiment(id),
   decision:id=>decisionIntelligenceStore.getDecision(id),signal:id=>decisionIntelligenceStore.getSignalOutcome(id),

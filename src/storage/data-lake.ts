@@ -588,13 +588,16 @@ export class DataLakeCatalog {
     if(!Number.isFinite(at)||at>Date.now()+5000||sourceTime!==null&&(!Number.isFinite(sourceTime)||sourceTime>at))throw Error('合约历史时间无效或来自未来');
     const openInterestUsd=snapshot.quote?.openInterestUsd??null,basisPct=snapshot.quote?.basisPct??null;
     if(openInterestUsd!==null&&(!Number.isFinite(openInterestUsd)||openInterestUsd<0)||basisPct!==null&&!Number.isFinite(basisPct)||openInterestUsd===null&&basisPct===null)throw Error('合约历史字段无效或缺失');
+    const priceFields=['lastPrice','markPrice','indexPrice'] as const;
+    if(priceFields.some(key=>snapshot.quote?.[key]!=null&&(typeof snapshot.quote[key]!=='number'||!Number.isFinite(snapshot.quote[key])||snapshot.quote[key]<=0)))throw Error('来源合约报价价格无效，未归档猜测价格');
+    const quoteJson=priceFields.some(key=>snapshot.quote?.[key]!=null)?JSON.stringify({currency:'USDT',lastPrice:snapshot.quote?.lastPrice??null,markPrice:snapshot.quote?.markPrice??null,indexPrice:snapshot.quote?.indexPrice??null}):null;
     const previous=this.db.prepare("SELECT * FROM dataset_partitions WHERE market='crypto' AND dataset='contract-metrics' AND instrument=? AND status='committed' ORDER BY fetched_at DESC LIMIT 1").get(snapshot.instrument) as any;
     if(previous&&at<Date.parse(previous.fetched_at)+300000)return this.listPartitions().find(row=>row.id===previous.id)!;
     const rules=snapshot.contractRules;
     if(rules&&((rules.multiplier!=null&&(!Number.isFinite(rules.multiplier)||rules.multiplier<=0))||(rules.fundingIntervalSeconds!=null&&(!Number.isFinite(rules.fundingIntervalSeconds)||rules.fundingIntervalSeconds<=0))||rules.settlementCurrency!=='USDT'||(rules.inDelisting!=null&&typeof rules.inDelisting!=='boolean')||(rules.status!=null&&(typeof rules.status!=='string'||rules.status.length>80))))throw Error('来源合约规则字段无效，未归档猜测值');
     if(rules&&((rules.leverageMax!=null&&(typeof rules.leverageMax!=='number'||!Number.isFinite(rules.leverageMax)||rules.leverageMax<=0))||(rules.maintenanceRate!=null&&(typeof rules.maintenanceRate!=='number'||!Number.isFinite(rules.maintenanceRate)||rules.maintenanceRate<0||rules.maintenanceRate>=1))||(rules.takerFeeRate!=null&&(typeof rules.takerFeeRate!=='number'||!Number.isFinite(rules.takerFeeRate)||rules.takerFeeRate<0||rules.takerFeeRate>.1))))throw Error('来源杠杆/保证金/费率字段无效');
     const rulesJson=rules?JSON.stringify({multiplier:rules.multiplier??null,fundingIntervalSeconds:rules.fundingIntervalSeconds??null,settlementCurrency:rules.settlementCurrency,inDelisting:rules.inDelisting??null,status:rules.status??null,leverageMax:rules.leverageMax??null,maintenanceRate:rules.maintenanceRate??null,takerFeeRate:rules.takerFeeRate??null}):null;
-    const row={market:'crypto',instrument:snapshot.instrument,source,retrievedAt:new Date(at).toISOString(),sourceTime:sourceTime===null?null:new Date(sourceTime).toISOString(),openInterestUsd,basisPct,openInterestUnit:'USDT',basisUnit:'%',rulesJson};
+    const row={market:'crypto',instrument:snapshot.instrument,source,retrievedAt:new Date(at).toISOString(),sourceTime:sourceTime===null?null:new Date(sourceTime).toISOString(),openInterestUsd,basisPct,openInterestUnit:'USDT',basisUnit:'%',rulesJson,...(quoteJson?{quoteJson}:{})};
     const contentHash=hash(row),id='contract_metrics_'+contentHash.slice(0,24),manifestId='manifest_'+id;
     const target=path.join(this.lakeRoot,'crypto','contract-metrics',match[1],match[2],String(new Date(at).getUTCFullYear()),String(new Date(at).getUTCMonth()+1).padStart(2,'0'),contentHash+'.parquet');
     const stage=path.join(this.lakeRoot,'.staging',id+'-'+crypto.randomUUID()+'.tmp');
@@ -603,18 +606,19 @@ export class DataLakeCatalog {
     ensureDir(path.dirname(target));
     const instance=await DuckDBInstance.create(':memory:',{memory_limit:'512MB',threads:'1'}),connection=await instance.connect();
     try{
-      await connection.run('CREATE TABLE metrics (market VARCHAR,instrument VARCHAR,source VARCHAR,retrievedAt VARCHAR,sourceTime VARCHAR,openInterestUsd DOUBLE,basisPct DOUBLE,openInterestUnit VARCHAR,basisUnit VARCHAR,rulesJson VARCHAR)');
+      await connection.run('CREATE TABLE metrics (market VARCHAR,instrument VARCHAR,source VARCHAR,retrievedAt VARCHAR,sourceTime VARCHAR,openInterestUsd DOUBLE,basisPct DOUBLE,openInterestUnit VARCHAR,basisUnit VARCHAR,rulesJson VARCHAR'+(quoteJson?',quoteJson VARCHAR':'')+')');
       const appender=await connection.createAppender('metrics');
       for(const value of [row.market,row.instrument,row.source,row.retrievedAt,row.sourceTime]){if(value===null)appender.appendNull();else appender.appendVarchar(value);}
       for(const value of [openInterestUsd,basisPct]){if(value===null)appender.appendNull();else appender.appendDouble(value);}
       appender.appendVarchar(row.openInterestUnit);appender.appendVarchar(row.basisUnit);
       if(rulesJson===null)appender.appendNull();else appender.appendVarchar(rulesJson);
+      if(quoteJson)appender.appendVarchar(quoteJson);
       appender.endRow();appender.closeSync();await connection.run(`COPY metrics TO '${sqlPath(stage)}' (FORMAT PARQUET,COMPRESSION ZSTD)`);
       const diagnostics=this.getDiagnostics();if(diagnostics.usageBytes+fs.statSync(stage).size>=diagnostics.quotaBytes*.9)throw Error('数据湖容量不足，未发布合约历史分区');
       fs.renameSync(stage,target);
       const partition:DatasetPartition={id,manifestId,path:target,dataset:'contract-metrics',market:'crypto',instrument:row.instrument,timeframe:'snapshot-5m',periodStart:row.retrievedAt,periodEnd:row.retrievedAt,publishedAt:row.retrievedAt,fetchedAt:row.retrievedAt,rowCount:1,status:'committed',contentHash};
       this.db.transaction(()=>{
-        this.db.prepare('INSERT OR IGNORE INTO dataset_manifests (id,dataset,market,source,field_version,timezone,adjustment,created_at,content_hash) VALUES (?,?,?,?,?,?,?,?,?)').run(manifestId,'contract-metrics','crypto',source,'contract-metrics-v2-units','UTC','not-applicable',row.retrievedAt,contentHash);
+        this.db.prepare('INSERT OR IGNORE INTO dataset_manifests (id,dataset,market,source,field_version,timezone,adjustment,created_at,content_hash) VALUES (?,?,?,?,?,?,?,?,?)').run(manifestId,'contract-metrics','crypto',source,quoteJson?'contract-metrics-v3-quotes':'contract-metrics-v2-units','UTC','not-applicable',row.retrievedAt,contentHash);
         this.db.prepare('INSERT OR IGNORE INTO dataset_partitions (id,manifest_id,path,dataset,market,instrument,timeframe,period_start,period_end,published_at,fetched_at,row_count,status,content_hash) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run(id,manifestId,target,'contract-metrics','crypto',row.instrument,'snapshot-5m',row.retrievedAt,row.retrievedAt,row.retrievedAt,row.retrievedAt,1,'committed',contentHash);
       })();return partition;
     }catch(error){if(fs.existsSync(target)&&!this.db.prepare('SELECT 1 FROM dataset_partitions WHERE path=?').get(target))fs.rmSync(target,{force:true});throw error;

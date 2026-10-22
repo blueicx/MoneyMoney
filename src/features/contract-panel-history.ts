@@ -1,5 +1,6 @@
 import { contractIdentity } from './contract-research';
 import { reviewContractCostAttribution } from './contract-cost-attribution';
+import {buildContractCycleReplay} from './contract-cycle-replay';
 
 /** Observed source revisions, not a reconstruction of exchange effective dates. */
 export function compareArchivedContractRules(input:{instrument:string;rows:any[];asOf?:string}){
@@ -108,6 +109,7 @@ export function reviewContractPositionCosts(input:{market:string;instrument:stri
   return {
     market:'crypto',instrument:input.instrument,from:Number.isFinite(from)?new Date(from).toISOString():orders[0]?new Date(orders[0].at).toISOString():null,to:new Date(to).toISOString(),
     attribution:input.accountId?reviewContractCostAttribution({accountId:input.accountId,instrument:input.instrument,orders,asOf:new Date(to).toISOString()}):null,
+    cycleReplay:input.accountId?buildContractCycleReplay({market:input.market,instrument:input.instrument,accountId:input.accountId,orders:input.orders,history:{...input.history,rows:Array.isArray(input.history?.rows)?input.history.rows:[]},settlements:input.fundingSettlements||[],from:input.from,to:new Date(to).toISOString()},now):null,
     dataStatus:orders.length?(orders.some(row=>!costValue(row.feeUsd)||!costValue(row.slippageUsd))?'partial':'historical'):'empty',
     ledger:{orderCount:orders.length,orderIds:orders.flatMap(row=>row.id?[String(row.id)]:[]),firstOrderAt:orders[0]?new Date(orders[0].at).toISOString():null,lastOrderAt:orders.at(-1)?new Date(orders.at(-1).at).toISOString():null,feeUsd:knownFees.reduce((sum,value)=>sum+value,0),slippageUsd:knownSlippage.reduce((sum,value)=>sum+value,0),incompleteCostOrders:orders.filter(row=>!costValue(row.feeUsd)||!costValue(row.slippageUsd)).length,openPositions:positions,reason:orders.length?'仅汇总该规范合约的显式模拟账本费用与滑点；缺失字段不按零成本处理':'区间内没有该合约的明确模拟订单'},
     funding:{observationCount:funding.length,from:funding.length?new Date(funding[0].at).toISOString():null,to:funding.length?new Date(funding[funding.length-1].at).toISOString():null,source:input.fundingSource||null,averageRatePct:funding.length?funding.reduce((sum,row)=>sum+row.ratePct,0)/funding.length:null,

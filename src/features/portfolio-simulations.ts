@@ -17,6 +17,7 @@ export function portfolioDrawdownPct(curve:number[],current:number){let peak=0,d
 /** Frozen research metadata only; all balances, positions and fills use the existing unified ledger. */
 export class PortfolioSimulationStore {
  constructor(private state:State,private ledger:UnifiedPaperLedgerStore,private deps:Deps,private now=Date.now){}
+ reference(id:string){const r=this.read(id);return {market:r.manifest.market,hash:r.stateHash!,updatedAt:new Date(r.updatedAt).toISOString(),status:r.status,progress:r.cursor/r.manifest.arms[0].bars.length*100};}
  private index(){if(!this.state.health.ok)throw Error('共享资金研究状态不可用');const rows=this.state.get<string[]>('portfolio-simulation:index')||[];if(!Array.isArray(rows)||rows.length>50)throw Error('组合研究目录不可核验');return rows;}
  private read(id:string):Row {this.index();if(!/^psim_[a-f0-9]{64}$/.test(id))throw Error('组合实验ID无效');const r=this.state.get<Row>('portfolio-simulation:'+id);if(!r||r.id!==id||digest(r.manifest)!==r.manifestHash||!Number.isSafeInteger(r.cursor)||r.cursor<0||r.cursor>r.manifest.arms[0].bars.length||!r.curves||!r.rounds||!Array.isArray(r.rejections))throw Error('组合清单Hash或进度不可核验');const {stateHash,...content}=r;if(stateHash!==digest(content))throw Error('组合运行记录Hash不可核验');for(const [accountId,hash]of Object.entries(r.accountHashes||{})){if(digest(this.ledger.getRunnerAccount(accountId))!==hash)throw Error('研究账户账本Hash已变化；不能静默重置或继续执行');}return structuredClone(r);}
  private accountId(r:Row,arm?:Arm){return 'research-portfolio:'+r.id+':'+(arm?.id||'shared');}

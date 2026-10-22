@@ -3,7 +3,7 @@ import type {SQLiteStateStore} from '../storage/sqlite-state';
 import type {MarketId} from './research-contracts';
 
 const markets=['stocks','options','crypto','prediction'];
-const kinds=['evidence','partition','experiment','decision','signal','strategy','account','event','task','project-conclusion'];
+const kinds=['evidence','partition','experiment','decision','signal','strategy','account','event','task','study','project-conclusion'];
 type Store=Pick<SQLiteStateStore,'get'|'set'|'transaction'|'appendAudit'|'health'>;
 export interface ProjectReference {kind:string;id:string;conclusionId?:string}
 export interface ProjectReferenceState {market:MarketId;instrument?:string;hash:string;updatedAt:string;expired?:boolean;revisionHash?:string;status?:string;progress?:number}
