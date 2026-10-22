@@ -69,3 +69,13 @@
 - 9项定向测试通过；扩展Chromium验证真实SQLite目录选择、AI摘要不含明细、未运行模型、三个主题和桌面/手机，截图mm-completion-browser-try2F9，已目视检查金色手机布局。新增验收步骤因表单重建后details默认关闭而超时，改为显式展开并以Promise.all等待响应后通过；不是放宽生产校验。完整回归进行中，尚未发布此批。
 - 两个性能候选均只在临时干净导出试验，没有修改生产源码：字体测量预热（前/候选/后，桌面手机冷热各3次）桌面冷shell1663.2/1698.1/1714.6ms，手机1455.7/1431.8/1452.7ms；不足以证实目标收益，放弃。核心脚本高下载优先级候选桌面1728.7ms/手机1434.7ms，也没有稳定20%改善，放弃。日志mm-font-prewarm-{before,candidate,after}.log、mm-core-priority-candidate.log。功能发布不关闭独立性能目标。
 - 源码冻结后全测404文件/1950项、失败0、退出0（mm-project-picker-full-tests.log）。构建、15项标准/专用冒烟、安全1019跟踪文件及暂存差异检查通过；浏览器额外摘要查询步骤修正后单独重跑通过，没有修改冻结业务代码。未跟踪数据库Hash不变。准备干净导出和生产发布验证。
+
+### 选择器发布凭据
+
+- 96d6a05e3c4c46663c0d35384ec8f0ec1fba994b已推送，GitHub CI 39741379269最终success。干净导出moneymoney-picker-clean-96d6a05-20261022重新构建及全部15项标准/专用冒烟通过。
+- 发布包moneymoney-96d6a05-20261022-picker.tar.gz SHA256 ac3614746d7560f45844055586dddaca36dc6288985317058018bf37de57933c；server.js 1a659596935c8090bfb34391307fd06f222d293b8841e08f2301d429d4541371；index.html 610bc5f0e548d71dffc86e6fe53e4146216252f8c0831d68d75d7415164bc0da；ai-forecast-routes.js 4978e82eed3e09615c83521b89ed62f33d29fec727bfba6196ae698d7b00a957。远端一致。
+- 备份/opt/moneymoney/backups/dist-pre-96d6a05-20261022-picker；回滚/opt/moneymoney/dist.rollback-96d6a05-20261022-picker保留331c725。仅重启moneymoney.service，两次启动期连接拒绝后active/alive；正式域名版本96d6a05、29资源SHA/immutable（重试0）、4个私人接口未登录拒绝均通过；只读canary通过四市场、SNDK及手机。日志mm-picker-production-assets.log / mm-picker-production-canary.log。
+- 10跑单配置Hash仍5125162b35c9893e4a9ac7d11c40eeaca7297bd95d7434d6bec70712aa144181，用户research.db Hash仍27fd475e523568daa4cdcabf3146917023335a62affe00429babd721b3b79fd1；磁盘50%，没有修改跑单、创建生产模型请求/研究任务/通知/订单或删除业务历史。
+- 额外隔离回滚读检查退出0（mm-contract-rollback-probe.log）：4322562读者加载新代码写入的真实Parquet夹具（含新增价格列和v3清单），原OI/基差及价格仍可读、文件字节未改写。初次Windows清理因模块单例SQLite仍打开而EPERM，不算完整通过；正确关闭两个版本导入的目录和状态单例后重跑退出0。不是在线服务回滚演练，没有访问生产数据库。
+
+两批新增功能已交付；原十二组总账仍按各项证据验收，整页冷加载20%与真实前向/公司行动/成熟样本等未满足项不勾选，不以测试夹具、接口存在或单次速度波动冒充完成。
