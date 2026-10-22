@@ -12,10 +12,10 @@
 ## 当前状态
 
 - [x] 核对隔离工作区、旧stash保留、未跟踪research.db保留；当前基线完整npm test退出0。
-- [ ] 首屏依赖与性能结构修复。
-- [ ] 前向/公司行动证据操作链接线与门控。
+- [x] 首屏帮助函数依赖切分和兼容验收；整页20%性能目标另列未完成。
+- [x] 手动前向纸面执行操作链及真实收据门控；公司行动收益归因另列未完成。
 - [ ] 十二组逐项端到端核对与总账更新。
-- [ ] 最终完整门禁、干净复验、GitHub/VPS发布及回滚凭据。
+- [x] 本批最终完整门禁、干净复验、GitHub/VPS发布及回滚凭据。
 
 本文件不是完成声明。当前基线测试日志mm-final-closure-baseline.log，后续所有通过声明均需新鲜输出。
 
@@ -37,3 +37,11 @@
 - 旧版 96d6a05 读取新独立研究账户的隔离兼容检查通过；账户、订单及账本 Hash 未变。线上发布与域名复验尚待完成，后续另记实际版本。
 
 仍需独立验收：整页冷加载 20% 目标、真实成熟前向样本、公司行动/修订覆盖及收益归因。不得将本批功能发布等同于十二组路线全部完成。
+
+## 本批发布凭据
+
+- 功能提交6189ad66531f9a0f76030b156d4b055643607518已推送。GitHub CI 39779037785最终success（Linux测试、构建、安全和Web冒烟）。干净导出重新构建及15项标准/专用冒烟均退出0；安全扫描使用原提交的Git跟踪清单扫描导出文件，1026文件通过。初次直接在无.git导出目录扫描无法启动，未将该次计为通过。
+- 发布包moneymoney-6189ad6-20261022-consolidated.tar.gz SHA256 55ed4f60a11114101cb7c81a03737532ce57ada5a788ce281c6390c9afb744cc；server.js e8845b8c53fe0d4019ef5abebdba18b2822591719ae8049f81f14f8156f20734；index.html a21cefeadc9d7a75dc148cfb8bd3281d9876c300b6a71aca7fa5122d0a73dee9。远端完全一致。
+- 备份/opt/moneymoney/backups/dist-pre-6189ad6-20261022-consolidated；回滚/opt/moneymoney/dist.rollback-6189ad6-20261022-consolidated保留96d6a05。只操作moneymoney.service；启动期两次连接拒绝后active/alive，未发生自动回滚。磁盘51%。
+- 正式域名https://bluetrade.bbroot.com版本为6189ad6，29项资源SHA及immutable通过（重试0）；4个私人接口未登录拒绝。只读Chromium canary通过股票、期权、虚拟币、预测市场、SNDK及手机。日志mm-consolidated-production-assets.log、mm-consolidated-production-canary.log、mm-consolidated-production-deploy.log。
+- 原10个AI跑单配置Hash仍5125162b35c9893e4a9ac7d11c40eeaca7297bd95d7434d6bec70712aa144181；用户未跟踪research.db仍27fd475e523568daa4cdcabf3146917023335a62affe00429babd721b3b79fd1。不修改现有跑单，不创建生产模型请求、新研究任务、订阅、通知或订单；不清理业务历史。
