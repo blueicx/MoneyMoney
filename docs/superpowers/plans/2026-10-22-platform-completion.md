@@ -52,3 +52,11 @@
 - 独立字体布局诊断scripts/font-layout-probe.cjs：相同CPU4x、交替三次，原字体中位214.1ms，CJK优先274.6ms。候选更慢，因此没有更改生产字体。该诊断不是整页冷加载基准，20%目标仍未完成。
 - 最终源码全测403文件/1945项、失败0、退出0（mm-project-cycle-full-tests.log）。构建、16项标准/专用冒烟、安全扫描1018跟踪文件及暂存差异检查通过；项目回链截图mm-completion-browser-zOd0K3，合约回放截图moneymoney-contract-smoke-GyuuJD，已目视检查金色手机布局。访客拒绝与市场隔离通过，用户research.db Hash不变，线上预检原10跑单指纹不变、磁盘50%。
 - 无其他本地测试并行时固定CPU4x/弱网、桌面手机冷热各3次（mm-project-cycle-loading.log）：桌面冷shell/chart1590.0/2469.2ms、热298.4/573.0ms；手机冷1431.8/2680.3ms、热290.6/612.5ms；热JS传输0。强制绝对加载预算退出0。该复测没有同期配对基线，不能用与旧日志的波动宣称因果提速或20%达标；性能目标保持未完成。
+
+### 项目回链与合约回放发布凭据
+
+- 提交331c725ffa512799a7ca9708c827454c8b0260d9已推送；GitHub CI 39738176031最终success，Linux完整测试/构建/安全/Web冒烟通过。干净导出moneymoney-project-cycle-clean-331c725-20261022重新构建并通过全部15项标准/专用冒烟；构建作为独立第16门禁。
+- 发布包moneymoney-331c725-20261022-project-cycle.tar.gz，SHA256 0fb1d3c4e8cae93c6c1c0f7b51313b1a2549069601102f0572ec0f7980c91062；server.js 1a659596935c8090bfb34391307fd06f222d293b8841e08f2301d429d4541371；index.html 4eb1e380d698a94cc8e56e7a977a869b192a4cc33bbfc1a62f7dfe5c0801a50d。远端完全一致。
+- 备份/opt/moneymoney/backups/dist-pre-331c725-20261022-project-cycle，回滚/opt/moneymoney/dist.rollback-331c725-20261022-project-cycle保留4322562。只操作moneymoney.service，启动阶段两次连接拒绝后最终active/alive。正式域名版本331c725、29项资源SHA及immutable通过，重试0；4个私人接口未登录拒绝。只读canary通过四市场、SNDK及手机（mm-project-cycle-production-assets.log / mm-project-cycle-production-canary.log）。
+- 原10跑单Hash仍5125162b35c9893e4a9ac7d11c40eeaca7297bd95d7434d6bec70712aa144181；未跟踪research.db Hash仍27fd475e523568daa4cdcabf3146917023335a62affe00429babd721b3b79fd1；没有生产新任务、模型调用、通知或订单，没有删除数据。旧/tmp部署工具已不存在，从仓库重新生成LF脚本，Hash与上批一致后使用。
+- 后续单样本Profiler仅诊断：启动历史读取仍触发243个布局对象约289.8ms，首次图表布局约128.1ms。额外隔离字体/Emoji试验中，原布局177.3ms、文字化Emoji191.3ms、无Emoji115.8ms；只是局部假设证据，不是整页提速，也没有因此删除或替换线上图标。20%冷加载及真实前向成熟/公司行动证明等余项仍未完成。
