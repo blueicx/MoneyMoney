@@ -21,13 +21,14 @@ export function createPaperLifecycleRouter(deps: {
     if (!account) return null;
     const events = market === 'options' ? [] : account.lifecycleEvents || [];
     const receivables = market === 'options' ? [] : account.corporateReceivables || [];
+    const costAdjustments = market === 'options' ? [] : account.corporateCostAdjustments || [];
     const pendingOptions = market === 'stocks' ? [] : pendingOptionSettlements(account.positions);
     const partial = pendingOptions.length || events.some(event => event.status === 'pending-review') || receivables.some(row => row.status !== 'paid');
     return {
       success: true, market, instrument: null, dataStatus: partial ? 'partial' : events.length || receivables.length ? 'historical' : 'empty',
       source: 'unified paper ledger + verified corporate-action registry', updatedAt: new Date().toISOString(),
       reason: partial ? '存在待核验的公司行动、付款日或官方期权结算证据；未推测入账' : events.length || receivables.length ? null : '暂无已关联账户生命周期事件；不代表没有发生',
-      data: { accountId, events, receivables, pendingOptionSettlements: pendingOptions, performance: calculateUnifiedPerformance(market === 'all' ? account : filterUnifiedPaperLedger(account, market as 'stocks' | 'options')) },
+      data: { accountId, events, receivables, costAdjustments, pendingOptionSettlements: pendingOptions, performance: calculateUnifiedPerformance(market === 'all' ? account : filterUnifiedPaperLedger(account, market as 'stocks' | 'options')) },
     };
   }
   const valid = (id: string, market: string) => id.length > 0 && id.length <= 200 && ['all', 'stocks', 'options'].includes(market);
@@ -44,11 +45,12 @@ export function createPaperLifecycleRouter(deps: {
     if (!deps.ledger.getAccount(id)) { res.status(404).json({ success: false, market, dataStatus: 'empty', reason: '模拟账户不存在' }); return; }
     try {
       const result = deps.state.transaction(() => {
-        const { applied, pending, alreadyApplied, updated } = deps.ledger.reconcileCorporateActions(id, deps.actions());
-        const counts = { applied, pending, alreadyApplied, updated };
+        const { applied, pending, alreadyApplied, updated, blockedReason } = deps.ledger.reconcileCorporateActions(id, deps.actions());
+        const counts = { applied, pending, alreadyApplied, updated, ...(blockedReason ? { blockedReason } : {}) };
         deps.state.appendAudit({ id: randomUUID(), action: 'paper_account_lifecycle_reconcile', detail: JSON.stringify({ accountId: id, market, ...counts }) });
         return counts;
       });
+      if (result.blockedReason) { res.status(409).json({ success: false, market, dataStatus: 'unavailable', reason: result.blockedReason }); return; }
       const response = view(id, market)!;
       if (result.pending) { response.dataStatus = 'partial'; response.reason = '部分事件证据不足或修订冲突，未猜测股数、汇率或现金'; }
       res.json({ ...response, data: { ...response.data, ...result, ...(market === 'all' ? { ledger: deps.ledger.getAccount(id) } : {}) } });

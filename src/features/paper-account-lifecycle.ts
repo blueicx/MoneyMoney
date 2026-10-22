@@ -1,3 +1,5 @@
+import { replayLatePaperSplit, matchesPaperOrderHistoryProof, type PaperOrderHistoryProof, type PaperCorporateCostAdjustment } from './paper-split-replay';
+
 export interface PaperCorporateActionEvidence {
   id: string;
   market: 'stocks';
@@ -22,6 +24,7 @@ export interface PaperLifecycleEvent {
   factor?: number;
   status: 'applied' | 'pending-review' | 'receivable-created' | 'cash-paid';
   reason: string;
+  previousReason?: string;
 }
 
 export interface PaperCorporateReceivable {
@@ -42,10 +45,13 @@ export interface PaperCorporateReceivable {
 
 type LifecycleLedger = {
   cash: number;
+  realizedPnl: number;
   positions: Array<Record<string, any>>;
   orders: Array<Record<string, any>>;
   lifecycleEvents?: PaperLifecycleEvent[];
   corporateReceivables?: PaperCorporateReceivable[];
+  corporateCostAdjustments?: PaperCorporateCostAdjustment[];
+  orderHistoryProof?: PaperOrderHistoryProof;
   [key: string]: any;
 };
 
@@ -94,6 +100,7 @@ export function reconcilePaperCorporateActions<T extends LifecycleLedger>(source
   pending: number;
   alreadyApplied: number;
   updated: number;
+  blockedReason?: string;
 } {
   const ledger = { ...source, positions: source.positions.map(position => ({ ...position })), orders: source.orders.map(order => ({ ...order })),
     lifecycleEvents: (source.lifecycleEvents || []).map(event=>({...event})), corporateReceivables: (source.corporateReceivables || []).map(row=>({...row})) } as T;
@@ -103,17 +110,45 @@ export function reconcilePaperCorporateActions<T extends LifecycleLedger>(source
     .sort((a, b) => Date.parse(a.effectiveAt) - Date.parse(b.effectiveAt));
   for (const action of sorted) {
     const prior=ledger.lifecycleEvents!.find(event=>event.actionId===action.id);
-    if(prior){alreadyApplied+=1;if(action.kind!=='dividend'||prior.kind!=='dividend')continue;}
+    const retrySplit = prior?.kind === 'split' && prior.status === 'pending-review' && action.kind === 'split'
+      && prior.factor === action.factor && prior.instrument === action.instrument && prior.effectiveAt === action.effectiveAt && prior.source === action.source;
+    if(prior && !retrySplit){alreadyApplied+=1;if(action.kind!=='dividend'||prior.kind!=='dividend')continue;}
     if (!stockIdentity(action.instrument)) continue;
     const matchingPositions = ledger.positions.filter(position => position.instrumentType === 'stock' && sameStock(position.instrumentId, action.instrument));
     const effectiveAt = Date.parse(action.effectiveAt);
     if (action.kind === 'split') {
       const factor = Number(action.factor);
       if (!Number.isFinite(factor) || factor <= 0) { pending += 1; continue; }
+      const matchingOrders = ledger.orders.filter(order=>order.instrumentType==='stock'&&sameStock(order.instrumentId,action.instrument));
       const eligible = matchingPositions.filter(position => Date.parse(String(position.openedAt || '')) <= effectiveAt);
-      if (!eligible.length) continue;
+      if (!eligible.length && !matchingOrders.some(order=>Date.parse(String(order.timestamp))<effectiveAt)) continue;
       if(ledger.orders.some(order=>order.instrumentType==='stock'&&sameStock(order.instrumentId,action.instrument)&&Date.parse(String(order.timestamp))>=effectiveAt)){
-        ledger.lifecycleEvents!.push({id:`corporate:${action.id}`,actionId:action.id,kind:action.kind,instrument:action.instrument,effectiveAt:action.effectiveAt,source:action.source,status:'pending-review',factor,reason:'拆股生效后已有成交，需核验历史重放和成本归因；未直接缩放整笔当前仓位'});
+        const relatedSplits = ledger.lifecycleEvents!.filter(event=>event.kind==='split'&&event.actionId!==action.id&&sameStock(event.instrument,action.instrument));
+        const replay = !matchesPaperOrderHistoryProof(ledger.orders, ledger.orderHistoryProof)
+          || relatedSplits.some(event=>event.status!=='applied') || !Number.isFinite(ledger.realizedPnl)
+          || matchingOrders.some(order=>Date.parse(order.timestamp)>now) ? null : replayLatePaperSplit({
+          orders: matchingOrders, positions: matchingPositions, priorSplits: relatedSplits,
+          split: {actionId:action.id,effectiveAt:action.effectiveAt,factor}, corrections: ledger.corporateCostAdjustments || [], now,
+        });
+        if(replay){
+          ledger.positions=ledger.positions.filter(position=>!matchingPositions.includes(position));
+          if(replay.position)ledger.positions.push(replay.position);
+          ledger.realizedPnl=roundMoney(ledger.realizedPnl+replay.realizedPnlDelta);
+          const ids=new Set(matchingOrders.map(order=>order.id));
+          ledger.corporateCostAdjustments=[...(ledger.corporateCostAdjustments||[]).filter(row=>!ids.has(row.orderId)),...replay.adjustments];
+          const event:PaperLifecycleEvent={id:`corporate:${action.id}`,actionId:action.id,kind:'split',instrument:action.instrument,effectiveAt:action.effectiveAt,source:action.source,status:'applied',factor,
+            reason:'按已识别成交历史重放拆股数量和成本；现金及原成交记录不变，卖出成本修正独立留痕',...(prior?{previousReason:prior.reason}:{})};
+          if(prior)Object.assign(prior,event);else ledger.lifecycleEvents!.push(event);
+          applied+=1;continue;
+        }
+        if(!prior)ledger.lifecycleEvents!.push({id:`corporate:${action.id}`,actionId:action.id,kind:action.kind,instrument:action.instrument,effectiveAt:action.effectiveAt,source:action.source,status:'pending-review',factor,
+          reason:!matchesPaperOrderHistoryProof(ledger.orders,ledger.orderHistoryProof)?'拆股生效后已有成交，但旧账户未保留从空账本开始的成交历史指纹，或指纹不一致；不事后补造完整性证明，等待人工历史重放核验':'拆股生效后已有成交，历史身份、成本或时间边界未通过核验；未直接缩放整笔当前仓位'});
+        pending+=1;continue;
+      }
+      if (eligible.some(position => !Number.isFinite(roundQuantity(Number(position.quantity) * factor))
+        || !(roundQuantity(Number(position.quantity) * factor) > 0) || !Number.isFinite(Number(position.averageEntryPrice) / factor)
+        || !(Number(position.averageEntryPrice) / factor > 0) || !Number.isFinite(Number(position.currentPrice) / factor))) {
+        if(!prior)ledger.lifecycleEvents!.push({id:`corporate:${action.id}`,actionId:action.id,kind:'split',instrument:action.instrument,effectiveAt:action.effectiveAt,source:action.source,status:'pending-review',factor,reason:'拆股比例超出账本数值精度或会使持仓归零；没有零股处置证据，不丢弃权益'});
         pending+=1;continue;
       }
       for (const position of eligible) {
@@ -121,8 +156,9 @@ export function reconcilePaperCorporateActions<T extends LifecycleLedger>(source
         position.averageEntryPrice = Number(position.averageEntryPrice) / factor;
         position.currentPrice = Number(position.currentPrice) / factor;
       }
-      ledger.lifecycleEvents!.push({ id: `corporate:${action.id}`, actionId: action.id, kind: action.kind, instrument: action.instrument,
-        effectiveAt: action.effectiveAt, source: action.source, status: 'applied', factor, reason: `按来源拆股比例 ${factor}:1 调整持仓数量与单位成本` });
+      const event:PaperLifecycleEvent={ id: `corporate:${action.id}`, actionId: action.id, kind: action.kind, instrument: action.instrument,
+        effectiveAt: action.effectiveAt, source: action.source, status: 'applied', factor, reason: `按来源拆股比例 ${factor}:1 调整持仓数量与单位成本`,...(prior?{previousReason:prior.reason}:{}) };
+      if(prior)Object.assign(prior,event);else ledger.lifecycleEvents!.push(event);
       applied += 1;
       continue;
     }

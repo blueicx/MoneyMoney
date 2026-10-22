@@ -1,4 +1,5 @@
 import { MARKET_SCOPES, type MarketScope } from './market-scope';
+import { effectivePaperOrderPnl, type PaperCorporateCostAdjustment } from './paper-split-replay';
 
 const VALID_SCOPES = new Set<string>(MARKET_SCOPES);
 
@@ -37,11 +38,12 @@ export function filterUnifiedPaperLedger<T extends {
   startingCash: number;
   cash: number;
   positions: Array<{ instrumentId: string; instrumentType?: string }>;
-  orders: Array<{ instrumentId: string; instrumentType?: string; side?: string; price: number; quantity: number; pnlUsd?: number; feeUsd?: number; slippageUsd?: number }>;
+  orders: Array<{ id?: string; instrumentId: string; instrumentType?: string; side?: string; price: number; quantity: number; pnlUsd?: number; feeUsd?: number; slippageUsd?: number }>;
   realizedPnl: number;
   peakEquity: number;
   maxDrawdownPct: number;
   corporateReceivables?: Array<{ instrumentId: string; status: string; currency: string; amount: number }>;
+  corporateCostAdjustments?: PaperCorporateCostAdjustment[];
 }>(ledger: T, scope: MarketScope): T {
   if (scope === 'overview' || scope === 'watchlist') return ledger;
   const positions = filterByMarketScope(ledger.positions, scope);
@@ -55,8 +57,9 @@ export function filterUnifiedPaperLedger<T extends {
     const costs = fee + slippage;
     return order.side === 'SELL' ? balance + notional - costs : balance - notional - costs;
   }, (Number(ledger.startingCash) || 0) + income);
-  const realizedPnl = orders.reduce((sum, order) => sum + (Number(order.pnlUsd) || 0), 0);
-  return { ...ledger, cash, positions, orders, realizedPnl, ...(ledger.corporateReceivables ? { corporateReceivables } : {}), peakEquity: Math.max(Number(ledger.startingCash) || 0, cash), maxDrawdownPct: 0 };
+  const corporateCostAdjustments=scope==='stocks'?ledger.corporateCostAdjustments||[]:[];
+  const realizedPnl = orders.reduce((sum, order) => sum + (effectivePaperOrderPnl(order,corporateCostAdjustments) || 0), 0);
+  return { ...ledger, cash, positions, orders, realizedPnl, ...(ledger.corporateReceivables ? { corporateReceivables } : {}), ...(ledger.corporateCostAdjustments?{corporateCostAdjustments}:{}), peakEquity: Math.max(Number(ledger.startingCash) || 0, cash), maxDrawdownPct: 0 };
 }
 
 function actionScope(action: { venue?: string; id?: string }): MarketScope | null {

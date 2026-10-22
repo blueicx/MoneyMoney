@@ -1,6 +1,7 @@
 import { stateStore, SQLiteStateStore } from '../storage/sqlite-state';
 import { randomUUID } from 'node:crypto';
 import { reconcilePaperCorporateActions, type PaperCorporateActionEvidence } from './paper-account-lifecycle';
+import { effectivePaperOrderPnl, createPaperOrderHistoryProof, matchesPaperOrderHistoryProof, type PaperOrderHistoryProof, type PaperCorporateCostAdjustment } from './paper-split-replay';
 
 export type UnifiedPaperInstrumentType = 'stock' | 'option' | 'crypto' | 'prediction';
 export type UnifiedPaperSide = 'BUY' | 'SELL' | 'YES' | 'NO';
@@ -61,6 +62,8 @@ export interface UnifiedPaperLedger {
   runnerAccounts?: Record<string, UnifiedPaperRunnerAccount>;
   lifecycleEvents?: import('./paper-account-lifecycle').PaperLifecycleEvent[];
   corporateReceivables?: import('./paper-account-lifecycle').PaperCorporateReceivable[];
+  corporateCostAdjustments?: PaperCorporateCostAdjustment[];
+  orderHistoryProof?: PaperOrderHistoryProof;
   /** Explicit account settlement evidence, never inferred from public funding rates. */
   fundingSettlements?: import('./contract-panel-history').ContractFundingSettlement[];
 }
@@ -75,7 +78,7 @@ export interface UnifiedPaperRunnerAccount extends Omit<UnifiedPaperLedger, 'run
 
 export function emptyUnifiedPaperLedger(startingCash = 1000): UnifiedPaperLedger {
   const cash = Math.max(0, Number(startingCash) || 1000);
-  return { startingCash: cash, cash, positions: [], orders: [], realizedPnl: 0, peakEquity: cash, maxDrawdownPct: 0, lifecycleEvents: [], corporateReceivables: [] };
+  return { startingCash: cash, cash, positions: [], orders: [], realizedPnl: 0, peakEquity: cash, maxDrawdownPct: 0, lifecycleEvents: [], corporateReceivables: [], orderHistoryProof: createPaperOrderHistoryProof([]) };
 }
 
 export function validateUnifiedPaperOrder(input: Partial<UnifiedPaperOrder>): { ok: boolean; error?: string } {
@@ -156,6 +159,10 @@ export function applyUnifiedPaperOrder(source: UnifiedPaperLedger, order: Unifie
     }
   }
   ledger.orders.unshift(recordedOrder);
+  // Only extend provenance that began at an empty account. Never certify legacy
+  // or edited order arrays retrospectively merely by hashing what remains.
+  if (matchesPaperOrderHistoryProof(source.orders, source.orderHistoryProof)) ledger.orderHistoryProof = createPaperOrderHistoryProof(ledger.orders);
+  else delete ledger.orderHistoryProof;
   const performance = calculateUnifiedPerformance(ledger);
   ledger.peakEquity = Math.max(ledger.peakEquity, performance.equity);
   ledger.maxDrawdownPct = Math.max(ledger.maxDrawdownPct, ledger.peakEquity > 0 ? ((ledger.peakEquity - performance.equity) / ledger.peakEquity) * 100 : 0);
@@ -196,22 +203,22 @@ export function calculateUnifiedPerformance(ledger: UnifiedPaperLedger): {
   const positionValues = positions.map(position => (position.currentPrice || 0) * (position.quantity || 0) * (position.contractMultiplier ?? 1));
   const positionsValue = positionValues.reduce((sum, value) => sum + value, 0);
   const equity = (ledger.cash || 0) + positionsValue;
-  const closed = orders.filter(order => order.side === 'SELL' && Number.isFinite(order.pnlUsd));
-  const wins = closed.filter(order => (order.pnlUsd || 0) > 0).length;
+  const closed = orders.filter(order => order.side === 'SELL' && Number.isFinite(effectivePaperOrderPnl(order,ledger.corporateCostAdjustments)));
+  const wins = closed.filter(order => (effectivePaperOrderPnl(order,ledger.corporateCostAdjustments) || 0) > 0).length;
   const feeSlippageTotal = orders.reduce((sum, order) => sum + orderCosts(order), 0);
   const corporateIncome=(ledger.corporateReceivables||[]).filter(row=>row.status==='paid'&&row.currency==='USD'&&Number.isFinite(row.amount)&&row.amount>=0).reduce((sum,row)=>sum+row.amount,0);
   const attributionByAsset: Record<UnifiedPaperInstrumentType, number> = { stock: 0, option: 0, crypto: 0, prediction: 0 };
   const marketExposure: Record<UnifiedPaperInstrumentType, number> = { stock: 0, option: 0, crypto: 0, prediction: 0 };
   const strategyAttribution: Record<string, number> = {};
   attributionByAsset.stock+=corporateIncome;
-  for (const order of closed) if (order.instrumentType) attributionByAsset[order.instrumentType] += Number(order.pnlUsd) || 0;
+  for (const order of closed) if (order.instrumentType) attributionByAsset[order.instrumentType] += effectivePaperOrderPnl(order,ledger.corporateCostAdjustments) || 0;
   for (const position of positions) {
     if (position.instrumentType) attributionByAsset[position.instrumentType] += ((position.currentPrice || 0) - (position.averageEntryPrice || 0)) * (position.quantity || 0) * (position.contractMultiplier ?? 1);
     if (position.instrumentType) marketExposure[position.instrumentType] += (position.currentPrice || 0) * (position.quantity || 0) * (position.contractMultiplier ?? 1);
   }
   for (const order of orders) {
     const strategy = String(order.strategy || 'unattributed');
-    strategyAttribution[strategy] = (strategyAttribution[strategy] || 0) + (order.side === 'SELL' ? Number(order.pnlUsd) || 0 : 0) - orderCosts(order);
+    strategyAttribution[strategy] = (strategyAttribution[strategy] || 0) + (order.side === 'SELL' ? effectivePaperOrderPnl(order,ledger.corporateCostAdjustments) || 0 : 0) - orderCosts(order);
     if (order.instrumentType) attributionByAsset[order.instrumentType] -= orderCosts(order);
   }
   const largestPositionValue = positionValues.length ? Math.max(...positionValues) : 0;
@@ -278,6 +285,11 @@ export class UnifiedPaperLedgerStore {
       }
       const current = root.runnerAccounts?.[accountId];
       if (!current || !current.runnerId) throw new Error('模拟账户不存在或未关联有效跑单');
+      const registered = this.store.get<Array<{ id: string; accountId?: string }>>('ai-paper-runners') || [];
+      if (registered.some(runner => runner.id === current.runnerId && (runner.accountId || `ai-runner:${runner.id}`) === accountId)) {
+        return { ledger: current, applied: 0, pending: actions.length, alreadyApplied: 0, updated: 0,
+          blockedReason: '该账户关联已注册跑单的独立执行状态，尚无公司行动同步适配；未改变跑单、持仓或现金。请勿单独对账造成状态不一致。' };
+      }
       const result = reconcilePaperCorporateActions(current, actions, now);
       if (result.applied || result.pending || result.updated) this.store.set('paper-ledger', { ...root, runnerAccounts: { ...(root.runnerAccounts || {}), [accountId]: result.ledger } }, 2);
       return result;
