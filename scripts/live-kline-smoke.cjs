@@ -31,7 +31,7 @@ async function main() {
     await page.route('**/api/binance/klines?**', route => {const query=new URL(route.request().url()).searchParams,paged=query.has('before');if(paged)historyRequests++;return route.fulfill({ json: { success: true,market:'crypto',instrument:'crypto:binance:'+query.get('symbol'),timeframe:query.get('interval'), data:paged?olderRows:rows, source: 'Isolated chart fixture', sourceTime:new Date().toISOString(), updatedAt: new Date().toISOString(), dataStatus: 'delayed' } });});
     await page.route('**/api/support-resistance?**', route => { supportRequests++; return route.fulfill({ status: 410, json: { success: false, reason: 'chart Pivot must not use a second data source' } }); });
     await page.goto(base + '/login'); await page.fill('#username', 'live-fixture-owner'); await page.fill('#password', 'isolated-live-fixture-password');
-    await Promise.all([page.waitForURL(url => url.pathname === '/'), page.click('#submitBtn')]);
+    await Promise.all([page.waitForURL(url => url.pathname === '/', {waitUntil:'domcontentloaded'}), page.click('#submitBtn')]);
     await page.waitForFunction(() => window.mm_isLoggedIn);
     await page.waitForFunction(() => window.mm_dashboardCoreReady === true && typeof window.setMarketScope === 'function', null, { timeout: 15_000 });
     assert.equal(await page.evaluate(() => !!window.MoneyLiveKline), false, 'the live chart transport should remain unloaded before entering a chart workspace');
