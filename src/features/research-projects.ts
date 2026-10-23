@@ -2,6 +2,8 @@ import {createHash,randomUUID} from 'node:crypto';
 import type {SQLiteStateStore} from '../storage/sqlite-state';
 import type {MarketId} from './research-contracts';
 import {buildProjectRetrospective} from './research-assistance';
+import {preserveResearchSummary} from './research-summary';
+import {buildProjectReport,renderProjectReport} from './project-retrospective-report';
 
 const markets=['stocks','options','crypto','prediction'];
 const kinds=['evidence','partition','experiment','decision','signal','strategy','account','event','task','study','project-conclusion'];
@@ -9,8 +11,8 @@ type Store=Pick<SQLiteStateStore,'get'|'set'|'transaction'|'appendAudit'|'health
 export interface ProjectReference {kind:string;id:string;conclusionId?:string}
 export interface ProjectReferenceState {market:MarketId;instrument?:string;hash:string;updatedAt:string;expired?:boolean;revisionHash?:string;status?:string;progress?:number;summary?:Record<string,unknown>}
 interface ProjectLink extends ProjectReference,ProjectReferenceState {linkId:string;linkedAt:string;readOnly:boolean;inputEligible:boolean}
-interface Conclusion {id:string;text:string;at:string;references:ProjectLink[]}
-interface Review {id:string;conclusionId:string;linkId:string;reason:string;previousHash:string;currentHash:string|null;at:string;status:'open'|'resolved';resolution?:string;resolvedAt?:string}
+export interface Conclusion {id:string;text:string;at:string;references:ProjectLink[]}
+export interface Review {id:string;conclusionId:string;linkId:string;reason:string;previousHash:string;currentHash:string|null;at:string;status:'open'|'resolved';resolution?:string;resolvedAt?:string}
 export interface ResearchProject {
  id:string;market:MarketId;title:string;question:string;hypothesis:string;counterEvidence:string;acceptance:string;
  version:number;createdAt:string;updatedAt:string;links:ProjectLink[];conclusions:Conclusion[];reviews:Review[];
@@ -57,7 +59,7 @@ export class ResearchProjectStore {
   if(!state||!markets.includes(state.market)||!/^[a-f0-9]{64}$/.test(state.hash)||!Number.isFinite(Date.parse(state.updatedAt))||Date.parse(state.updatedAt)>this.now()+1000)throw Error('引用不存在、Hash或来源时间不可核验');
   if(state.revisionHash!==undefined&&!/^[a-f0-9]{64}$/.test(state.revisionHash))throw Error('修订Hash不可核验');
   if(state.status!==undefined&&(typeof state.status!=='string'||state.status.length>60)||state.progress!==undefined&&(!Number.isFinite(state.progress)||state.progress<0||state.progress>100))throw Error('引用状态或任务进度不可核验');
-  return {market:state.market,...(state.instrument?{instrument:state.instrument}:{}),hash:state.hash,updatedAt:state.updatedAt,...(state.expired?{expired:true}:{}),...(state.revisionHash?{revisionHash:state.revisionHash}:{}),...(state.status!==undefined?{status:state.status}:{}),...(state.progress!==undefined?{progress:state.progress}:{})};
+  return {market:state.market,...(preserveResearchSummary(state.summary)?{summary:preserveResearchSummary(state.summary)!}:{}),...(state.instrument?{instrument:state.instrument}:{}),hash:state.hash,updatedAt:state.updatedAt,...(state.expired?{expired:true}:{}),...(state.revisionHash?{revisionHash:state.revisionHash}:{}),...(state.status!==undefined?{status:state.status}:{}),...(state.progress!==undefined?{progress:state.progress}:{})};
  }
  private pinnedReference(link:ProjectLink){
   const current=this.reference({kind:link.kind,id:link.id,...(link.conclusionId?{conclusionId:link.conclusionId}:{})});
@@ -74,6 +76,8 @@ export class ResearchProjectStore {
   });
   return buildProjectRetrospective(project,states,linkIds);
  }
+ report(projectId:string,linkIds:string[]){const p=this.read(projectId);return buildProjectReport(p,this.retrospective(projectId,linkIds));}
+ exportReport(projectId:string,linkIds:string[],format:'json'|'html'){const report=this.report(projectId,linkIds);return format==='html'?renderProjectReport(report):JSON.stringify(report,null,2);}
  link(projectId:string,version:number,ref:ProjectReference) {
   return this.change(projectId,version,'linked',p=>{const state=this.reference(ref);if(ref.kind!=='project-conclusion'&&state.market!==p.market)throw Error('研究输入不得跨市场引用');if(ref.id===p.id)throw Error('项目不得引用自身结论');if(p.links.some(r=>r.kind===ref.kind&&r.id===ref.id&&r.conclusionId===ref.conclusionId&&r.hash===state.hash))throw Error('研究引用此版本已关联，不重复建立');if(p.links.length>=200)throw Error('项目引用已达上限');p.links.push({...ref,...state,linkId:randomUUID(),linkedAt:this.clock(),readOnly:true,inputEligible:ref.kind!=='project-conclusion'});});
  }

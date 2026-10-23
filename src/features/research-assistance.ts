@@ -1,3 +1,4 @@
+import {preserveResearchSummary,compareResearchSummaries} from './research-summary';
 import {createHash} from 'node:crypto';
 import type {ResearchProject} from './research-projects';
 
@@ -28,9 +29,10 @@ export function buildProjectRetrospective(project:Pick<ResearchProject,'id'|'mar
  const columns=linkIds.map(linkId=>{
   const pinned=project.links.find(row=>row.linkId===linkId);if(!pinned||pinned.market!==project.market)throw Error('复盘引用必须属于同一项目和市场');
   const state=states.find(row=>row.linkId===linkId),currentHash=state?.current?.revisionHash||state?.current?.hash||state?.currentHash||null;
-  return {linkId,kind:pinned.kind,id:pinned.id,instrument:pinned.instrument||null,pinnedHash:pinned.hash,pinnedAt:pinned.updatedAt,currentHash,
+  const pinnedSummary=preserveResearchSummary(pinned.summary),summary=preserveResearchSummary(state?.current?.summary),fieldChanges=compareResearchSummaries(pinnedSummary,summary);
+  return {pinnedSummary,comparisonStatus:pinnedSummary&&summary?'comparable':'unavailable',fieldChanges,linkId,kind:pinned.kind,id:pinned.id,instrument:pinned.instrument||null,pinnedHash:pinned.hash,pinnedAt:pinned.updatedAt,currentHash,
    changed:currentHash?currentHash!==pinned.hash:null,dataStatus:state?.dataStatus||'unavailable',reason:state?.reason||'当前引用不可核验，不推测后续结果',
-   summary:state?.current?.summary||null,
+   summary,
    conclusions:project.conclusions.filter(row=>row.references.some(ref=>ref.linkId===linkId&&ref.hash===pinned.hash)).map(({id,text,at})=>({id,text,at})),
    openReviews:project.reviews.filter(row=>row.linkId===linkId&&row.status==='open').map(({id,reason})=>({id,reason}))};
  });

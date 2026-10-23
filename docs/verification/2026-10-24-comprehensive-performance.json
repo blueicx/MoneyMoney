@@ -1,0 +1,131 @@
+{
+  "status": "target-unmet",
+  "baseline": "1987bd7",
+  "candidate": "authenticated workspace CSS and chart preload concurrency; withdrawn",
+  "settings": {
+    "cpuRate": 4,
+    "networkProfile": "weak",
+    "latencyMs": 80,
+    "downloadKbps": 750
+  },
+  "runsPerCondition": 3,
+  "medians": {
+    "before": [
+      {
+        "viewport": 1440,
+        "temperature": "cold",
+        "shellReadyMs": 1448.800000011921,
+        "chartReadyMs": 2700.699999988079,
+        "jsBytes": 122907,
+        "compatibilityRequestStartSpreadMs": 188.9000000357628,
+        "compatibilityDownloadSpanMs": 562.1000000238419
+      },
+      {
+        "viewport": 1440,
+        "temperature": "warm",
+        "shellReadyMs": 337.19999998807907,
+        "chartReadyMs": 618.6000000238419,
+        "jsBytes": 0,
+        "compatibilityRequestStartSpreadMs": 135.20000004768372,
+        "compatibilityDownloadSpanMs": 135.20000004768372
+      },
+      {
+        "viewport": 390,
+        "temperature": "cold",
+        "shellReadyMs": 1277.7000000476837,
+        "chartReadyMs": 2922.800000011921,
+        "jsBytes": 122907,
+        "compatibilityRequestStartSpreadMs": 198.19999998807907,
+        "compatibilityDownloadSpanMs": 558.8000000119209
+      },
+      {
+        "viewport": 390,
+        "temperature": "warm",
+        "shellReadyMs": 461.5,
+        "chartReadyMs": 697.7000000476837,
+        "jsBytes": 0,
+        "compatibilityRequestStartSpreadMs": 281.89999997615814,
+        "compatibilityDownloadSpanMs": 281.89999997615814
+      }
+    ],
+    "candidate": [
+      {
+        "viewport": 1440,
+        "temperature": "cold",
+        "shellReadyMs": 1450.8999999761581,
+        "chartReadyMs": 2640.2000000476837,
+        "jsBytes": 124584,
+        "compatibilityRequestStartSpreadMs": 189.30000001192093,
+        "compatibilityDownloadSpanMs": 553.9000000357628
+      },
+      {
+        "viewport": 1440,
+        "temperature": "warm",
+        "shellReadyMs": 321.80000001192093,
+        "chartReadyMs": 584.9000000357628,
+        "jsBytes": 0,
+        "compatibilityRequestStartSpreadMs": 125.09999996423721,
+        "compatibilityDownloadSpanMs": 125.09999996423721
+      },
+      {
+        "viewport": 390,
+        "temperature": "cold",
+        "shellReadyMs": 1225.699999988079,
+        "chartReadyMs": 2724.5,
+        "jsBytes": 124584,
+        "compatibilityRequestStartSpreadMs": 205.80000001192093,
+        "compatibilityDownloadSpanMs": 570.3000000119209
+      },
+      {
+        "viewport": 390,
+        "temperature": "warm",
+        "shellReadyMs": 318,
+        "chartReadyMs": 648,
+        "jsBytes": 0,
+        "compatibilityRequestStartSpreadMs": 115.5,
+        "compatibilityDownloadSpanMs": 115.5
+      }
+    ],
+    "after": [
+      {
+        "viewport": 1440,
+        "temperature": "cold",
+        "shellReadyMs": 1952.199999988079,
+        "chartReadyMs": 3005.2999999523163,
+        "jsBytes": 106749,
+        "compatibilityRequestStartSpreadMs": 1.5,
+        "compatibilityDownloadSpanMs": 163.19999998807907
+      },
+      {
+        "viewport": 1440,
+        "temperature": "warm",
+        "shellReadyMs": 468.30000001192093,
+        "chartReadyMs": 736.1999999880791,
+        "jsBytes": 0,
+        "compatibilityRequestStartSpreadMs": 340.60000002384186,
+        "compatibilityDownloadSpanMs": 340.60000002384186
+      },
+      {
+        "viewport": 390,
+        "temperature": "cold",
+        "shellReadyMs": 1648.4000000357628,
+        "chartReadyMs": 3424,
+        "jsBytes": 122907,
+        "compatibilityRequestStartSpreadMs": 201.9000000357628,
+        "compatibilityDownloadSpanMs": 559.9000000357628
+      },
+      {
+        "viewport": 390,
+        "temperature": "warm",
+        "shellReadyMs": 480.80000001192093,
+        "chartReadyMs": 746.6000000238419,
+        "jsBytes": 0,
+        "compatibilityRequestStartSpreadMs": 220.9000000357628,
+        "compatibilityDownloadSpanMs": 220.9000000357628
+      }
+    ]
+  },
+  "requiredColdImprovementPct": 20,
+  "hotAllowedRegression": "max(5%,50ms)",
+  "reason": "Neither viewport demonstrates 20% cold improvement against before/after baseline; keep functional releases separate."
+}
