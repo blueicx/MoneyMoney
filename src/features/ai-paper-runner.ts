@@ -352,6 +352,8 @@ export interface AiRunner {
   title: string;
   budgetUsd: number;
   cashUsd: number;
+  /** Verified paid corporate income; not a trade result or a win-rate sample. */
+  corporateIncomeUsd?: number;
   status: AiRunnerStatus;
   createdAt: string;
   stoppedAt?: string;
@@ -1397,6 +1399,7 @@ export function resetAiRunnerCircuit(id: string): AiRunner | null {
 
 export interface AiRunnerSummary {
   totalPnlUsd: number;
+  corporateIncomeUsd: number;
   realizedPnlUsd: number;
   unrealizedPct: number | null;
   openPositionQty: number;
@@ -1457,7 +1460,8 @@ export function summarizeRunner(runner: AiRunner, currentPrice?: number): AiRunn
   const benchmarkComplete = expectedBenchmarks > 0 && benchmarkRows.length >= expectedBenchmarks;
   const account = unifiedPaperLedgerStore.getRunnerAccount(runner.accountId || `ai-runner:${runner.id}`);
   return {
-    totalPnlUsd: parseFloat((realizedPnl + unrealizedPnl - costs).toFixed(2)),
+    totalPnlUsd: parseFloat((realizedPnl + unrealizedPnl - costs + (runner.corporateIncomeUsd || 0)).toFixed(2)),
+    corporateIncomeUsd: runner.corporateIncomeUsd || 0,
     realizedPnlUsd: Math.round(realizedPnl * 100) / 100,
     unrealizedPct: unrealizedPct != null ? Math.round(unrealizedPct * 100) / 100 : null,
     openPositionQty: open.reduce((sum, position) => sum + position.quantity, 0),

@@ -1,5 +1,7 @@
 import { stateStore, SQLiteStateStore } from '../storage/sqlite-state';
 import { randomUUID } from 'node:crypto';
+import { synchronizeRunnerDividend } from './runner-dividend-sync';
+import type { AiRunner } from './ai-paper-runner';
 import { reconcilePaperCorporateActions, type PaperCorporateActionEvidence } from './paper-account-lifecycle';
 import { effectivePaperOrderPnl, createPaperOrderHistoryProof, matchesPaperOrderHistoryProof, type PaperOrderHistoryProof, type PaperCorporateCostAdjustment } from './paper-split-replay';
 
@@ -285,12 +287,15 @@ export class UnifiedPaperLedgerStore {
       }
       const current = root.runnerAccounts?.[accountId];
       if (!current || !current.runnerId) throw new Error('模拟账户不存在或未关联有效跑单');
-      const registered = this.store.get<Array<{ id: string; accountId?: string }>>('ai-paper-runners') || [];
-      if (registered.some(runner => runner.id === current.runnerId && (runner.accountId || `ai-runner:${runner.id}`) === accountId)) {
-        return { ledger: current, applied: 0, pending: actions.length, alreadyApplied: 0, updated: 0,
-          blockedReason: '该账户关联已注册跑单的独立执行状态，尚无公司行动同步适配；未改变跑单、持仓或现金。请勿单独对账造成状态不一致。' };
-      }
+      const registered = this.store.get<AiRunner[]>('ai-paper-runners') || [];
+      const matches = registered.filter(runner => runner.id === current.runnerId || (runner.accountId || `ai-runner:${runner.id}`) === accountId);
       const result = reconcilePaperCorporateActions(current, actions, now);
+      if (matches.length) {
+        const synchronized = matches.length === 1 ? synchronizeRunnerDividend(matches[0], current, result.ledger) : null;
+        if (!synchronized) return { ledger: current, applied: 0, pending: actions.length, alreadyApplied: 0, updated: 0,
+          blockedReason: '跑单执行状态、成交血缘或公司行动未通过同步核验；目前仅支持已核验股息同步，拆股等操作仍被阻止。未改变跑单、持仓或现金。' };
+        if (result.applied || result.pending || result.updated) this.store.set('ai-paper-runners', registered.map(row => row === matches[0] ? synchronized : row), 1);
+      }
       if (result.applied || result.pending || result.updated) this.store.set('paper-ledger', { ...root, runnerAccounts: { ...(root.runnerAccounts || {}), [accountId]: result.ledger } }, 2);
       return result;
     });

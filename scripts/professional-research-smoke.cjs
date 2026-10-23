@@ -15,6 +15,13 @@ dataLakeCatalog.close();
 const {unifiedPaperLedgerStore}=require('../dist/features/unified-paper-trading');
 unifiedPaperLedgerStore.ensureRunnerAccount('lifecycle-fixture','isolated-lifecycle',1000);
 unifiedPaperLedgerStore.applyRunnerOrder('lifecycle-fixture','isolated-lifecycle',{id:'isolated-stock-order',instrumentType:'stock',instrumentId:'stock:us:AAPL',side:'BUY',price:100,quantity:2,timestamp:'2025-01-01T00:00:00.000Z'});
+require('../dist/storage/sqlite-state').stateStore.set('ai-paper-runners',[{
+ id:'isolated-lifecycle',accountId:'lifecycle-fixture',venue:'Stocks',symbolOrMarketId:'AAPL',title:'Isolated runner, not real data',
+ universe:{market:'stocks',hash:'isolated',instruments:[{venue:'Stocks',symbolOrMarketId:'AAPL',title:'Isolated'}]},policy:{},mode:'rules',
+ model:'isolated/fixed',budgetUsd:1000,cashUsd:800,status:'STOPPED',executionState:'ready',createdAt:'2025-01-01T00:00:00.000Z',peakEquityUsd:1000,
+ positions:[{id:'isolated-lot',instrumentId:'stock:us:AAPL',entryOrderId:'isolated-stock-order',entryTime:'2025-01-01T00:00:00.000Z',entryPrice:100,quantity:2,currentPrice:100,status:'OPEN'}],
+ trades:[{id:'isolated-trade',orderId:'isolated-stock-order',action:'BUY',price:100,quantity:2,timestamp:'2025-01-01T00:00:00.000Z'}]
+}],1);
 unifiedPaperLedgerStore.ensureRunnerAccount('split-fixture','isolated-split',10000);
 for(const order of [
   {id:'split-pre',side:'BUY',price:100,quantity:10,timestamp:'2025-01-01T00:00:00.000Z'},
@@ -144,6 +151,8 @@ async function main(){
     page.once('dialog',dialog=>dialog.accept());await page.locator('[data-lifecycle-reconcile]').click();
     await page.waitForFunction(()=>document.querySelector('[data-lifecycle-output]')?.textContent.includes('模拟现金已入账'));
     const after=await page.evaluate(()=>fetch('/api/paper/accounts/lifecycle-fixture/lifecycle?market=stocks').then(r=>r.json()));
+    const verifyState=new (require('../dist/storage/sqlite-state').SQLiteStateStore)(path.join(data,'moneymoney.sqlite'),data);
+    try{const runner=verifyState.get('ai-paper-runners')[0];assert.equal(runner.cashUsd,800.5);assert.equal(runner.corporateIncomeUsd,.5);assert.equal(runner.model,'isolated/fixed');assert.equal(runner.status,'STOPPED');}finally{verifyState.close();}
     assert.equal(after.data.performance.corporateIncome,.5);assert.equal(after.data.receivables[0].status,'paid');
     await page.locator('[data-lifecycle-account]').fill('split-fixture');
     page.once('dialog',dialog=>dialog.accept());await page.locator('[data-lifecycle-reconcile]').click();

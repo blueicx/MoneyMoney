@@ -5,6 +5,9 @@ const express=require('express'),{SQLiteStateStore}=require('../src/storage/sqli
 test('lifecycle API scopes private reads and commits dividend cash together with its audit',async()=>{
  const state=new SQLiteStateStore(path.join(root,'isolated.sqlite'),root),ledger=new UnifiedPaperLedgerStore(state);
  ledger.ensureRunnerAccount('account','runner',1000);ledger.applyRunnerOrder('account','runner',{id:'buy',instrumentType:'stock',instrumentId:'stock:us:AAPL',side:'BUY',quantity:2,price:100,timestamp:'2024-01-01T00:00:00Z'});
+ const runner={id:'runner',accountId:'account',venue:'Stocks',universe:{market:'stocks'},executionState:'ready',cashUsd:800,status:'RUNNING',model:'fixed-model',budgetUsd:1000,
+  positions:[{id:'lot',instrumentId:'stock:us:AAPL',entryOrderId:'buy',entryTime:'2024-01-01T00:00:00Z',entryPrice:100,quantity:2,status:'OPEN'}],
+  trades:[{orderId:'buy',action:'BUY',price:100,quantity:2,timestamp:'2024-01-01T00:00:00Z'}]};state.set('ai-paper-runners',[runner],1);
  const actions=[{id:'dividend',market:'stocks',instrument:'AAPL',kind:'dividend',factor:.25,currency:'USD',source:'isolated issuer fixture',effectiveAt:'2024-02-01T00:00:00Z',paymentAt:'2024-02-15T00:00:00Z'}];
  let rejectAudit=true;const app=express();app.use(express.json(),(req,res,next)=>{req.user={role:req.headers['x-role']||'guest'};next();});
  app.use('/api/paper/accounts',createPaperLifecycleRouter({ledger,actions:()=>actions,state:{transaction:fn=>state.transaction(fn),appendAudit:row=>{if(rejectAudit)throw Error('isolated audit failure');state.appendAudit(row);}}}));
@@ -13,7 +16,9 @@ test('lifecycle API scopes private reads and commits dividend cash together with
  try{
   assert.equal((await get('/lifecycle?market=stocks','guest')).status,403);assert.equal((await get('/lifecycle?market=crypto')).status,400);
   assert.equal((await post()).status,400);assert.equal(ledger.getAccount('account').cash,800);assert.equal(state.listAudits().length,0);
+  assert.deepEqual(state.get('ai-paper-runners')[0],runner);
   rejectAudit=false;assert.equal((await post()).status,200);assert.equal(ledger.getAccount('account').cash,800.5);assert.equal(state.listAudits().length,1);
+  assert.equal(state.get('ai-paper-runners')[0].cashUsd,800.5);assert.equal(state.get('ai-paper-runners')[0].corporateIncomeUsd,.5);assert.equal(state.get('ai-paper-runners')[0].model,'fixed-model');
   await post();assert.equal(ledger.getAccount('account').cash,800.5);
   const legacy=await (await fetch(base+'/reconcile',{method:'POST',headers:{'x-role':'admin','content-type':'application/json'},body:'{}'})).json();
   assert.equal(legacy.market,'all');assert.equal(legacy.data.ledger.cash,800.5);

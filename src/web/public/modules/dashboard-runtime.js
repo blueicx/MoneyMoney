@@ -710,7 +710,7 @@ async function loadAiRunners() {
           <span>报价 ${quoteRoutingLabel} · ${safeNewsText(r.lastDataSource || '等待首次报价')}</span>
           <span>已平仓 ${s.closedCount ?? 0}</span><span>胜率 ${s.winRateReliable ? `${s.winRatePct}%` : `样本不足（${s.closedCount || 0}/20）`}</span>
           <span>单笔≤$${r.policy?.maxTradeUsd ?? '—'}</span><span>持仓≤${r.policy?.maxPositions ?? '—'}</span><span>日损≤$${r.policy?.maxDailyLossUsd ?? '—'}</span>
-          <span>费用/额外滑点 $${Number(s.feeSlippageUsd || 0).toFixed(2)}</span><span>点差估算 $${Number(s.spreadCostUsd || 0).toFixed(2)}（成交价已计入）</span><span>估值 ${safeNewsText(s.valuationStatus || r.lastDataStatus || '暂无')}</span>
+          <span>费用/额外滑点 $${Number(s.feeSlippageUsd || 0).toFixed(2)}</span><span>股息收入 $${Number(s.corporateIncomeUsd || 0).toFixed(2)}（不计入平仓胜率）</span><span>点差估算 $${Number(s.spreadCostUsd || 0).toFixed(2)}（成交价已计入）</span><span>估值 ${safeNewsText(s.valuationStatus || r.lastDataStatus || '暂无')}</span>
           <span>最大回撤 ${Number(s.maxDrawdownPct || 0).toFixed(2)}%</span>
           <span>今日模型调用 ${(r.aiCalls || []).filter(call => String(call.at || '').slice(0,10) === new Date().toISOString().slice(0,10)).length}/24（UTC）</span>
           ${s.unrealizedPct != null ? `<span>浮盈 ${s.unrealizedPct >= 0 ? '+' : ''}${s.unrealizedPct}%</span>` : ''}
