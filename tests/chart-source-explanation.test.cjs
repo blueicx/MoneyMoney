@@ -10,6 +10,16 @@ test('axis labels respect interval, selected timezone, day and year boundaries',
  assert.equal(c.axisLabel(first,{...info,interval:'1y'},state,first),'2026');
  assert.match(c.axisLabel(next,info,{timeZone:'exchange'},first),/12.*31/);
 });
+test('time-axis labels fit the actual plot and retain a gap on narrow and resized charts',()=>{
+ const c=load();assert.equal(typeof c.drawTimeAxis,'function');
+ const first=Date.parse('2026-12-31T23:30:00Z'),rows=Array.from({length:60},(_,index)=>({time:first+index*300000}));
+ for(const width of [140,170,200,640,1200,170])for(const interval of ['5m','1d','1y']){
+  const drawn=[],ctx={save(){},restore(){},measureText:label=>({width:label.length*7}),fillText:(label,x,y)=>drawn.push({label,x,y,width:label.length*7})};
+  c.drawTimeAxis(ctx,rows,{W:width+140,padL:52,padR:88},{interval},{timeZone:'UTC'},245);
+  assert.ok(drawn.length>=1,'a fitting date remains visible');
+  for(let i=0;i<drawn.length;i++){const tick=drawn[i];assert.ok(tick.x>=52&&tick.x+tick.width<=width+52+.001,'label stays within plot');assert.equal(tick.y,245);if(i)assert.ok(tick.x>=drawn[i-1].x+drawn[i-1].width+8,'adjacent labels never overlap');}
+ }
+});
 test('source explanations keep source, server fetch and browser receipt distinct, and never infer a closed session',()=>{
  const c=load(),now=1792770000000,source=now-120000;
  const result=c.explainSource({source:'Provider',sourceTime:source,fetchedAt:now-2000,retrievedAt:now-1000,dataStatus:'cached',providerTelemetry:{cacheMode:'cache'},interactive:true,interval:'1d'}, {time:source,closed:false},now);

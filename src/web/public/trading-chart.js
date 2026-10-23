@@ -185,6 +185,17 @@
     if(intraday)return (at.year!==first.year?at.year+'-'+date+' ':date!==first.month+'-'+first.day?date+' ':'')+formats.clock.format(new Date(time));
     return (at.year!==first.year?at.year+'-':'')+date;
   }
+  function drawTimeAxis(ctx,rows,geometry,info,state,y){
+    if(!rows.length)return;const left=geometry.padL,right=geometry.W-geometry.padR,span=right-left;if(span<=0)return;
+    ctx.save?.();ctx.textAlign='left';let edge=left-8,previous=-1;
+    for(let tick=0;tick<Math.min(6,rows.length);tick++){
+      const index=Math.round(tick*(rows.length-1)/Math.max(1,Math.min(6,rows.length)-1));if(index===previous)continue;previous=index;
+      const label=axisLabel(rows[index].time,info,state,rows[0].time),measured=ctx.measureText(label)?.width,width=Number.isFinite(measured)?measured:label.length*7;
+      if(width>span)continue;const center=left+(index+.5)*span/rows.length,x=Math.max(left,Math.min(right-width,center-width/2));
+      if(x<edge+8)continue;ctx.fillText(label,x,y);edge=x+width;
+    }
+    ctx.restore?.();
+  }
   function explainSource(info={},bar,now=Date.now()){
     const stamp=value=>value==null?null:typeof value==='number'&&Number.isFinite(value)?value:typeof value==='string'&&Number.isFinite(Date.parse(value))?Date.parse(value):null;
     const status=statusFor({...info,sourceTime:stamp(info.sourceTime)},bar,now);
@@ -375,14 +386,15 @@
     const y=p=>padT+(maxP-p)/(maxP-minP)*priceH,cw=(W-padL-padR)/rows.length,maxV=Math.max(1,...rows.map(r=>r.volume||0));
     c.font='11px system-ui';c.fillStyle=getComputedStyle(canvas).getPropertyValue('--text-secondary').trim()||'#a6adbf';c.strokeStyle=getComputedStyle(canvas).getPropertyValue('--border').trim()||'#30394a';
     for(let j=0;j<5;j++){const p=minP+(maxP-minP)*j/4;c.beginPath();c.moveTo(padL,y(p));c.lineTo(W-padR,y(p));c.stroke();c.fillText(priceFmt(p,options),2,y(p));}
-    rows.forEach((r,j)=>{const x=padL+(j+.5)*cw;c.strokeStyle=c.fillStyle=r.close>=r.open?'#18bf78':'#ef5350';c.beginPath();c.moveTo(x,y(r.high));c.lineTo(x,y(r.low));c.stroke();c.fillRect(x-cw*.3,Math.min(y(r.open),y(r.close)),Math.max(1,cw*.6),Math.max(1,Math.abs(y(r.open)-y(r.close))));if(options.showVolume!==false){c.globalAlpha=.65;const volumeHeight=(H-priceH-70)*(r.volume||0)/maxV;c.fillRect(x-cw*.3,H-40-volumeHeight,Math.max(1,cw*.6),volumeHeight);c.globalAlpha=1;}if(j%Math.max(1,Math.floor(rows.length/5))===0){c.fillStyle=getComputedStyle(canvas).getPropertyValue('--text-secondary').trim()||'#9da9bc';c.fillText(axisLabel(r.time,options,selected.state,rows[0].time),x-18,H-15);}});
+    rows.forEach((r,j)=>{const x=padL+(j+.5)*cw;c.strokeStyle=c.fillStyle=r.close>=r.open?'#18bf78':'#ef5350';c.beginPath();c.moveTo(x,y(r.high));c.lineTo(x,y(r.low));c.stroke();c.fillRect(x-cw*.3,Math.min(y(r.open),y(r.close)),Math.max(1,cw*.6),Math.max(1,Math.abs(y(r.open)-y(r.close))));if(options.showVolume!==false){c.globalAlpha=.65;const volumeHeight=(H-priceH-70)*(r.volume||0)/maxV;c.fillRect(x-cw*.3,H-40-volumeHeight,Math.max(1,cw*.6),volumeHeight);c.globalAlpha=1;}});
+    c.fillStyle=getComputedStyle(canvas).getPropertyValue('--text-secondary').trim()||'#9da9bc';drawTimeAxis(c,rows,{W,padL,padR},options,selected.state,H-15);
     (options.showMovingAverages===false?[]:[5,10,30,60]).forEach((n,j)=>{c.strokeStyle=['#ffad00','#18bf78','#29b6f6','#a778ff'][j];c.beginPath();let started=false;rows.forEach((r,k)=>{const index=selected.start+k;if(index<n-1)return;const avg=full.slice(index-n+1,index+1).reduce((s,b)=>s+b.close,0)/n,x=padL+(k+.5)*cw;if(!started){c.moveTo(x,y(avg));started=true;}else c.lineTo(x,y(avg));});c.stroke();});
     decorate(canvas,{...options,canvas,full,rows,interval:options.interval,volumeUnit:options.volumeUnit,ma:options.showMovingAverages===false?[]:[5,10,30,60],maColors:['#ffad00','#18bf78','#29b6f6','#a778ff'],interactive:options.interactive!==false,geometry:{W,H,padL,padR,padT,priceH,minP,maxP},redraw:()=>render(canvas,full,options)});
     options.onViewport?.({rows,geometry:{W,H,padL,padR,padT,priceH,minP,maxP}});
   }
   window.MoneyTradingChart={createView,windowFor,pan,latest,zoom,countdown,select,decorate,clear,render,statusFor,restoreView,scheduleFrame,scalePrice,resetPrice,priceRange,pivotLevels,supportResistanceLineLayout,drawSupportResistance,paperMarkersFor,mergeHistory,measureRange,verifyPaperEvidenceEnvelope,verifyPaperExecutionEvidenceEnvelope,formatPaperExecutionEvidence};
   window.MoneyTradingChart.priceAlertDraft=priceAlertDraft;
-  Object.assign(window.MoneyTradingChart,{axisLabel,explainSource,sourceExplanationText,renderSourceDetails,showSourceState,cursorIndexAtTime,getCursor,pickCandle,temporalEvidenceRows,getTemporalSeries,snapshotView,applySavedView,navigateClosedEvidence});
+  Object.assign(window.MoneyTradingChart,{axisLabel,drawTimeAxis,explainSource,sourceExplanationText,renderSourceDetails,showSourceState,cursorIndexAtTime,getCursor,pickCandle,temporalEvidenceRows,getTemporalSeries,snapshotView,applySavedView,navigateClosedEvidence});
   window.MoneyTradingChart.redraw=canvas=>mounts.get(canvas)?.info?.redraw();
   function whenDomReady(callback) {
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', callback, { once: true });

@@ -14,6 +14,11 @@ async function main() {
     for (const theme of ['light','dark','money']) for (const width of [375, 390, 1003, 1440]) {
       const page = await browser.newPage({ viewport: { width, height: 1000 }, hasTouch: width < 500 });
       await page.setContent(`<style>${css}</style><div class="stock-chart-companion-panel" data-stock-chart-companion><div class="stock-chart-companion-toolbar">同步双图 视图 同标的·不同周期</div><div class="stock-chart-companion-stage"><canvas id="stock-kline-companion"></canvas></div><section class="mm-stock-multi-chart"><div class="mm-stock-multi-grid"><article data-mm-multi-period="1d"><header>日线</header><canvas></canvas></article></div></section></div><p id="after">后续内容</p>`);
+      await page.evaluate(() => {
+        window.axisDraws=new WeakMap();const proto=CanvasRenderingContext2D.prototype,scale=proto.scale,fillText=proto.fillText;
+        proto.scale=function(...args){window.axisDraws.set(this.canvas,[]);return scale.apply(this,args);};
+        proto.fillText=function(label,x,y,...args){if(y>=this.canvas.clientHeight-20){const width=this.measureText(label).width,left=this.textAlign==='center'?x-width/2:this.textAlign==='right'?x-width:x;window.axisDraws.get(this.canvas)?.push({label,left,right:left+width});}return fillText.call(this,label,x,y,...args);};
+      });
       await page.addScriptTag({ path: 'src/web/public/trading-chart.js' });
       await page.addScriptTag({ content: `var stockChartCompanionPeriod='1d',stockChartCompanionMode='same',stockChartExchangeTimezone='America/New_York',stockChartAsOf=''; function stockChartEventInstrumentId(){return 'stock:us:SNDK';} ${source.slice(draw.getStart(ast), draw.end)}` });
       await page.evaluate(theme => document.documentElement.dataset.theme = theme, theme);
@@ -24,7 +29,7 @@ async function main() {
         const stage = document.querySelector('.stock-chart-companion-stage').getBoundingClientRect();
         const host = document.querySelector('#stock-kline-companion').parentElement.getBoundingClientRect();
         const multi = document.querySelector('.mm-stock-multi-chart').getBoundingClientRect();
-        return { stageBottom: stage.bottom, hostBottom: host.bottom, multiTop: multi.top, text: document.querySelector('.mm-trading-readout').textContent, plotHeights: [...document.querySelectorAll('canvas:not(.mm-trading-crosshair)')].map(canvas => canvas.getBoundingClientRect().height), overlayDelta: document.querySelector('.mm-trading-crosshair').getBoundingClientRect().top - document.querySelector('#stock-kline-companion').getBoundingClientRect().top, overflow: document.documentElement.scrollWidth > innerWidth };
+        return { axis:window.axisDraws.get(document.getElementById('stock-kline-companion')),stageBottom: stage.bottom, hostBottom: host.bottom, multiTop: multi.top, text: document.querySelector('.mm-trading-readout').textContent, plotHeights: [...document.querySelectorAll('canvas:not(.mm-trading-crosshair)')].map(canvas => canvas.getBoundingClientRect().height), overlayDelta: document.querySelector('.mm-trading-crosshair').getBoundingClientRect().top - document.querySelector('#stock-kline-companion').getBoundingClientRect().top, overflow: document.documentElement.scrollWidth > innerWidth };
       });
       assert.ok(result.stageBottom >= result.hostBottom - 1, `${width}px: chart toolbar, readout and canvas must fit inside stage: ${JSON.stringify(result)}`);
       assert.ok(result.multiTop >= result.hostBottom - 1, `${width}px: four-period panel must follow the full companion chart`);
@@ -32,16 +37,22 @@ async function main() {
       assert.equal(result.overflow, false, `${width}px: chart must fit viewport`);
       assert.ok(result.plotHeights.every(height => height <= 260), 'secondary plots retain compact height');
       assert.doesNotMatch(result.text, /1269\.001953|1,269\.001953/);
+      assert.ok(result.axis.length>0,'time axis remains visible');
+      result.axis.forEach((tick,index)=>{if(index)assert.ok(tick.left>=result.axis[index-1].right+8-.01,`${width}px: date labels must have a readable gap: ${JSON.stringify(result.axis)}`);});
       for (const nextWidth of [Math.max(320,width-60),width]) {
         await page.setViewportSize({width:nextWidth,height:1000});
-        await page.waitForTimeout(50);
+        await page.waitForFunction(()=>{
+          const canvas=document.getElementById('stock-kline-companion'),layer=canvas.parentElement.querySelector('.mm-trading-crosshair'),plot=canvas.getBoundingClientRect(),overlay=layer.getBoundingClientRect();
+          return Math.abs(overlay.top-plot.top)<1&&Math.abs(overlay.width-plot.width)<1;
+        },{},{timeout:5000});
         const picked=await page.evaluate(()=>{
           const canvas=document.getElementById('stock-kline-companion'),layer=canvas.parentElement.querySelector('.mm-trading-crosshair'),plot=canvas.getBoundingClientRect(),overlay=layer.getBoundingClientRect();
           const selected=MoneyTradingChart.pickCandle(canvas,plot.left+plot.width/2);
-          return {delta:overlay.top-plot.top,widthDelta:overlay.width-plot.width,time:selected?.time};
+          return {axis:window.axisDraws.get(canvas),delta:overlay.top-plot.top,widthDelta:overlay.width-plot.width,time:selected?.time};
         });
         assert.ok(Math.abs(picked.delta)<1&&Math.abs(picked.widthDelta)<1,'resize keeps drawing, cursor and click geometry aligned');
         assert.ok(Number.isFinite(picked.time),'a touch/click position selects an actual loaded candle');
+        picked.axis.forEach((tick,index)=>{if(index)assert.ok(tick.left>=picked.axis[index-1].right+8-.01,'resizing retains readable time-axis labels');});
       }
       await page.close();
       console.log(`Secondary chart layout passed at ${width}px (${theme})`);

@@ -2787,14 +2787,7 @@ function calcBollinger(data, period = 20, multiplier = 2) {
   }
   // Time labels
   ctx.fillStyle = textColor;
-  const labelStep = Math.max(1, Math.floor(klines.length / 6));
-  klines.forEach((k, idx) => {
-    if (idx % labelStep !== 0) return;
-    const d = new Date(k.time);
-    const lbl = window.MoneyTradingChart?.axisLabel(k.time,{interval:bnCurrentInterval,exchangeTimeZone:'UTC'},window.MoneyTradingChart?.snapshotView(canvas)||{},klines[0].time) || d.toLocaleTimeString();
-    const x = padL + idx * cw + cw / 2;
-    ctx.fillText(lbl, x - 14, H - 25);
-  });
+  window.MoneyTradingChart?.drawTimeAxis(ctx,klines,{W,padL,padR},{interval:bnCurrentInterval,exchangeTimeZone:'UTC'},window.MoneyTradingChart.snapshotView(canvas)||{},H-25);
   window.MoneyTradingChart?.decorate(canvas, {...canvas.moneySourceMetadata,alertContext:{market:'crypto',instrument:'crypto:binance:'+bnCurrentSymbol},identity:bnCurrentSymbol+'|'+bnCurrentInterval,canvas,full:tradingFull,rows:klines,interval:bnCurrentInterval,exchangeTimeZone:'UTC',ma:[7,25],volumeUnit:'基础币',interactive:!window.cryptoMoneyKLine?.timer,retry:signal=>loadBinanceKlines({signal}),loadEarlier:loadEarlierCryptoKline,geometry:{W,H,padL,padR,padT,priceH:chartH,minP,maxP},redraw:()=>drawCandles(canvas,bnKlineData)});
   renderChartPatternMarkers('bn-chart-patterns', cryptoPatterns, item => {
     const bar = klines[item.index];
@@ -7719,15 +7712,9 @@ function drawStockKline(canvas, klines) {
     ctx.fillStyle = secondary;
     ctx.fillText(fmtPrice(value), padL - 6, y);
   }
-  const labelStep = Math.max(1, Math.ceil(klines.length / 6));
   ctx.textAlign = 'center'; ctx.textBaseline = 'top';
-  klines.forEach((k, idx) => {
-    if (idx % labelStep && idx !== klines.length - 1) return;
-    const date = new Date(k.time);
-    const label = window.MoneyTradingChart?.axisLabel(k.time,{interval:currentStockKlinePeriod,exchangeTimeZone:stockChartExchangeTimezone},window.MoneyTradingChart?.snapshotView(canvas)||{},klines[0].time) || formatStockKlineTime(k.time);
-    ctx.fillStyle = secondary;
-    ctx.fillText(label, xCenter(idx), H - padB + 7);
-  });
+  ctx.fillStyle = secondary;
+  window.MoneyTradingChart?.drawTimeAxis(ctx,klines,{W,padL,padR},{interval:currentStockKlinePeriod,exchangeTimeZone:stockChartExchangeTimezone},window.MoneyTradingChart.snapshotView(canvas)||{},H-padB+7);
   klines.forEach((k, idx) => {
     const x = xCenter(idx), isUp = k.close >= k.open, color = isUp ? green : red;
     if (idx === selectedVisibleIndex) {
