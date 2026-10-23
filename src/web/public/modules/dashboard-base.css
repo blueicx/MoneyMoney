@@ -2313,7 +2313,7 @@
     .stock-chart-companion-toolbar label { display: inline-flex; align-items: center; gap: 5px; color: var(--text-secondary); }
     .stock-chart-companion-toolbar select { min-height: 30px; padding: 4px 8px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg-card); color: var(--text); }
     .stock-chart-companion-toolbar [data-stock-chart-companion-status] { margin-left: auto; color: var(--text-secondary); }
-    .stock-chart-companion-stage { height: 260px; min-height: 190px; }
+    .stock-chart-companion-stage { height: auto; min-height: 190px; }
     #stock-kline-companion { display: block; width: 100%; height: 100%; cursor: crosshair; }
     .chart-card-fullscreen {
       position: relative !important;
@@ -2345,7 +2345,7 @@
       body[data-chart-fullscreen="stocks"] #stock-chart-workspace-b .mm-stock-chart-center { order:1; }
       body[data-chart-fullscreen="stocks"] #stock-chart-workspace-b .mm-stock-chart-events { order:2; }
       body[data-chart-fullscreen="stocks"] #stock-chart-workspace-b .mm-stock-chart-evidence { order:3; }
-      .stock-chart-companion-stage { height: 220px; }
+      .stock-chart-companion-stage { min-height: 220px; }
       .stock-chart-companion-toolbar [data-stock-chart-companion-status] { width: 100%; margin-left: 0; }
     }
 @media (max-width: 768px) {

@@ -230,6 +230,31 @@ async function runProductionCanary({ baseUrl, artifactDir } = {}) {
     }
     await selectAndCheckNonPopularStock(page);
     report.nonPopularStock = 'SNDK';
+    if (process.env.CHECK_SECONDARY_CHART_LAYOUT === 'true') {
+      await page.locator('[data-chart-layout-toggle]').click();
+      await page.locator('[data-stock-chart-companion]').waitFor({ state: 'visible' });
+      await page.locator('[data-chart-companion-period]').selectOption('1d');
+      await page.waitForFunction(() => Boolean(document.querySelector('#stock-kline-companion')?.parentElement.querySelector('.mm-trading-readout')?.textContent), null, { timeout: 30_000 });
+      report.secondaryChartLayout = [];
+      for (const width of [1440, 390]) {
+        await page.setViewportSize({ width, height: 900 });
+        await page.evaluate(() => window.MoneyTradingChart.redraw(document.getElementById('stock-kline-companion')));
+        const geometry = await page.evaluate(() => {
+          const canvas = document.getElementById('stock-kline-companion');
+          const host = canvas.parentElement.getBoundingClientRect();
+          const stage = canvas.closest('.stock-chart-companion-stage').getBoundingClientRect();
+          const panel = canvas.closest('[data-stock-chart-companion]').getBoundingClientRect();
+          const text = canvas.parentElement.querySelector('.mm-trading-readout').textContent;
+          return { hostBottom: host.bottom, stageBottom: stage.bottom, panelBottom: panel.bottom, plotHeight: canvas.getBoundingClientRect().height, text };
+        });
+        assert.ok(geometry.hostBottom <= geometry.stageBottom + 1 && geometry.hostBottom <= geometry.panelBottom + 1, `secondary chart overflows its container at ${width}px`);
+        assert.equal(geometry.plotHeight, 260);
+        assert.match(geometry.text, /开 [\d,]+\.\d{2}(?!\d)/, 'stock readout must display cents');
+        report.secondaryChartLayout.push({ width, ...geometry });
+        await page.locator('[data-stock-chart-companion]').screenshot({ path: path.join(outputDir, `stock-companion-${width}.png`) });
+      }
+      await page.setViewportSize({ width: 1440, height: 900 });
+    }
     for (const market of ['options', 'crypto', 'prediction']) {
       await selectMarket(page, market);
       const libraryResult = await selectRightLibraryItem(page, market);
