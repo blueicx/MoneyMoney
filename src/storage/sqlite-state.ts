@@ -91,6 +91,9 @@ export class SQLiteStateStore {
   listAudits(limit = 200): Array<{ id: string; chatId?: string; action: string; detail: string; at: string }> {
     return this.db.prepare('SELECT id, chat_id AS chatId, action, detail, at FROM audit_log ORDER BY at DESC LIMIT ?').all(Math.max(1, Math.min(limit, 1000))) as Array<{ id: string; chatId?: string; action: string; detail: string; at: string }>;
   }
+  getAudit(id:string): {id:string;action:string;detail:string;at:string}|null {
+    return this.db.prepare('SELECT id, action, detail, at FROM audit_log WHERE id = ?').get(id) as {id:string;action:string;detail:string;at:string}|undefined || null;
+  }
 
   getIdempotent<T>(key: string): T | null {
     const row = this.db.prepare('SELECT result FROM idempotency_keys WHERE key = ?').get(key) as { result?: string } | undefined;

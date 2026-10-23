@@ -109,6 +109,8 @@ async function backup() {
   // Check before creating the snapshot; never delete live data to make a backup fit.
   const sources=['moneymoney.sqlite','moneymoney.sqlite-wal','research.db','research.db-wal',...fs.readdirSync(dataRoot).filter(name=>name.endsWith('.json'))].map(name=>path.join(dataRoot,name)).filter(file=>fs.existsSync(file)&&fs.statSync(file).isFile());
   const lake=path.join(dataRoot,'lake');if(fs.existsSync(lake))sources.push(...walkFiles(lake).filter(name=>!name.startsWith('.staging/')).map(name=>path.join(lake,name)));
+  const recoveryFiles=['recovery-operations','recovery-evidence'].flatMap(folder=>walkFiles(path.join(dataRoot,folder)).filter(name=>!name.endsWith('.tmp')).map(name=>({relative:folder+'/'+name,source:path.join(dataRoot,folder,name)})));
+  sources.push(...recoveryFiles.map(row=>row.source));
   const expectedBytes=sources.reduce((sum,file)=>sum+fs.statSync(file).size,0)*1.1+512*1024**2;
   let available;try{const volume=fs.statfsSync(dataRoot);available=volume.bavail*volume.bsize;}catch{throw new Error('无法核验备份磁盘空间，未创建新备份');}
   if(!Number.isFinite(available)||available<expectedBytes)throw new Error('备份磁盘空间不足：保留512MiB并预留源数据110%，未创建新备份，不删除线上数据');
@@ -137,6 +139,7 @@ async function backup() {
     }
   }
   const lakeSource = path.join(dataRoot, 'lake');
+  for(const row of recoveryFiles){const output=path.join(target,row.relative);fs.mkdirSync(path.dirname(output),{recursive:true});fs.copyFileSync(row.source,output);}
   if (fs.existsSync(lakeSource)) fs.cpSync(lakeSource, path.join(target, 'lake'), {
     recursive: true,
     dereference: false,
