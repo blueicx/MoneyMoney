@@ -1,0 +1,89 @@
+{
+  "status": "target-unmet",
+  "requiredColdImprovementPct": 20,
+  "cpuRate": 4,
+  "networkProfile": "weak",
+  "latencyMs": 80,
+  "downloadKbps": 750,
+  "runsPerCondition": 3,
+  "baseline": "f86663d46ee08531336ad0af88f5e3bd3ae4d834",
+  "baselineMedians": [
+    {
+      "viewport": 1440,
+      "temperature": "cold",
+      "shellReadyMs": 1389.199999988079,
+      "chartReadyMs": 2560.5,
+      "jsBytes": 122812,
+      "compatibilityRequestStartSpreadMs": 191.5,
+      "compatibilityDownloadSpanMs": 555.0999999642372
+    },
+    {
+      "viewport": 1440,
+      "temperature": "warm",
+      "shellReadyMs": 301.7999999523163,
+      "chartReadyMs": 557.5999999642372,
+      "jsBytes": 0,
+      "compatibilityRequestStartSpreadMs": 106.69999998807907,
+      "compatibilityDownloadSpanMs": 106.69999998807907
+    },
+    {
+      "viewport": 390,
+      "temperature": "cold",
+      "shellReadyMs": 1229.3999999761581,
+      "chartReadyMs": 2682.699999988079,
+      "jsBytes": 122812,
+      "compatibilityRequestStartSpreadMs": 194.19999998807907,
+      "compatibilityDownloadSpanMs": 565.6000000238419
+    },
+    {
+      "viewport": 390,
+      "temperature": "warm",
+      "shellReadyMs": 286.39999997615814,
+      "chartReadyMs": 542.8000000119209,
+      "jsBytes": 0,
+      "compatibilityRequestStartSpreadMs": 98.30000001192093,
+      "compatibilityDownloadSpanMs": 98.30000001192093
+    }
+  ],
+  "rejectedCandidateMedians": [
+    {
+      "viewport": 1440,
+      "temperature": "cold",
+      "shellReadyMs": 1411.6000000238419,
+      "chartReadyMs": 2640.2999999523163,
+      "jsBytes": 122813,
+      "compatibilityRequestStartSpreadMs": 181.30000001192093,
+      "compatibilityDownloadSpanMs": 554.9000000357628
+    },
+    {
+      "viewport": 1440,
+      "temperature": "warm",
+      "shellReadyMs": 307.10000002384186,
+      "chartReadyMs": 564.5,
+      "jsBytes": 0,
+      "compatibilityRequestStartSpreadMs": 109.69999998807907,
+      "compatibilityDownloadSpanMs": 109.69999998807907
+    },
+    {
+      "viewport": 390,
+      "temperature": "cold",
+      "shellReadyMs": 1205.5999999642372,
+      "chartReadyMs": 2576.099999964237,
+      "jsBytes": 122813,
+      "compatibilityRequestStartSpreadMs": 216.4000000357628,
+      "compatibilityDownloadSpanMs": 581.3000000119209
+    },
+    {
+      "viewport": 390,
+      "temperature": "warm",
+      "shellReadyMs": 284.19999998807907,
+      "chartReadyMs": 556.6000000238419,
+      "jsBytes": 0,
+      "compatibilityRequestStartSpreadMs": 104,
+      "compatibilityDownloadSpanMs": 104
+    }
+  ],
+  "candidate": "public chart preload during auth (withdrawn)",
+  "comparisonOrder": "baseline initial, candidate, baseline repeat; initial baseline was slower and not stable",
+  "reason": "Desktop cold chart candidate regressed 3.12%; mobile improved 3.97%; neither demonstrates 20%."
+}

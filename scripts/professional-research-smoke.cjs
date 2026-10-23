@@ -153,23 +153,23 @@ async function main(){
     await page.evaluate(()=>{setMarketScope('crypto');openWorkspace('fundamentals');});assert.equal(await panel.isVisible(),false);
     await page.evaluate(()=>{setMarketScope('stocks');openWorkspace('paper');});
     const lifecycle=page.locator('[data-paper-lifecycle]');await lifecycle.waitFor({state:'visible'});await lifecycle.locator('summary').click();
-    await page.locator('[data-lifecycle-account]').fill('lifecycle-fixture');await page.locator('[data-lifecycle-read]').click();
+    assert.ok(await page.locator('[data-lifecycle-reconcile]').isDisabled());await page.locator('[data-lifecycle-account]').fill('lifecycle-fixture');await page.locator('[data-lifecycle-read]').click();
     await page.waitForFunction(()=>document.querySelector('[data-lifecycle-output]')?.textContent.includes('暂无已关联公司行动'));
     const before=await page.evaluate(()=>fetch('/api/paper/accounts/lifecycle-fixture/lifecycle?market=stocks').then(r=>r.json()));
     assert.equal(before.market,'stocks');assert.equal(before.data.performance.corporateIncome,0);
-    page.once('dialog',dialog=>dialog.accept());await page.locator('[data-lifecycle-reconcile]').click();
+    await page.locator('[data-lifecycle-preview]').click();await page.locator('[data-lifecycle-status]').filter({hasText:'只读预览已完成'}).waitFor();page.once('dialog',dialog=>dialog.accept());await page.locator('[data-lifecycle-reconcile]').click();
     await page.waitForFunction(()=>document.querySelector('[data-lifecycle-output]')?.textContent.includes('模拟现金已入账'));
     const after=await page.evaluate(()=>fetch('/api/paper/accounts/lifecycle-fixture/lifecycle?market=stocks').then(r=>r.json()));
     const verifyState=new (require('../dist/storage/sqlite-state').SQLiteStateStore)(path.join(data,'moneymoney.sqlite'),data);
     try{const runner=verifyState.get('ai-paper-runners')[0];assert.equal(runner.cashUsd,800.5);assert.equal(runner.corporateIncomeUsd,.5);assert.equal(runner.model,'isolated/fixed');assert.equal(runner.status,'STOPPED');}finally{verifyState.close();}
     assert.equal(after.data.performance.corporateIncome,.5);assert.equal(after.data.receivables[0].status,'paid');
     await page.locator('[data-lifecycle-account]').fill('split-fixture');
-    page.once('dialog',dialog=>dialog.accept());await page.locator('[data-lifecycle-reconcile]').click();
+    await page.locator('[data-lifecycle-preview]').click();await page.locator('[data-lifecycle-status]').filter({hasText:'只读预览已完成'}).waitFor();page.once('dialog',dialog=>dialog.accept());await page.locator('[data-lifecycle-reconcile]').click();
     await page.waitForFunction(()=>document.querySelector('[data-lifecycle-output]')?.textContent.includes('拆股成本修正 60 USD'));
     const splitResult=await page.evaluate(()=>fetch('/api/paper/accounts/split-fixture/lifecycle?market=stocks').then(r=>r.json()));
     assert.equal(splitResult.data.costAdjustments[0].orderId,'split-sale');assert.equal(splitResult.data.performance.realizedPnl,60);
     assert.match(await lifecycle.innerText(),/现金及原成交不变/);
-    await page.locator('[data-lifecycle-account]').fill('runner-split-fixture');page.once('dialog',dialog=>dialog.accept());await page.locator('[data-lifecycle-reconcile]').click();
+    await page.locator('[data-lifecycle-account]').fill('runner-split-fixture');await page.locator('[data-lifecycle-preview]').click();await page.locator('[data-lifecycle-status]').filter({hasText:'只读预览已完成'}).waitFor();page.once('dialog',dialog=>dialog.accept());await page.locator('[data-lifecycle-reconcile]').click();
     await page.waitForFunction(()=>document.querySelector('[data-lifecycle-output]')?.textContent.includes('按来源拆股比例'));
     const splitState=new (require('../dist/storage/sqlite-state').SQLiteStateStore)(path.join(data,'moneymoney.sqlite'),data);
     try{const raw=splitState.get('ai-paper-runners').find(row=>row.id==='isolated-split-runner');assert.equal(raw.positions[0].quantity,4);assert.equal(raw.positions[0].entryPrice,50);assert.equal(raw.cashUsd,800);assert.equal(raw.status,'STOPPED');assert.equal(raw.model,'isolated/fixed');assert.equal(raw.lastDataStatus,'stale');}finally{splitState.close();}

@@ -4,6 +4,7 @@ import type {SignalOutcome} from './decision-intelligence';
 import {restrictedStrategy} from './strategy-definitions';
 import {observeForwardSignal} from './signal-forward';
 import {buildRestrictedReadiness} from './restricted-readiness';
+import {buildResearchGaps} from './research-assistance';
 import {attachRegisteredWindowAudit} from './restricted-validation-proof';
 import type {PointInTimeSnapshot,DatasetPartition,DataRevision} from '../storage/data-lake';
 type State=Pick<SQLiteStateStore,'get'|'set'|'transaction'|'appendAudit'|'health'|'acquireLease'|'getLease'|'releaseLease'>;
@@ -19,6 +20,7 @@ export class RestrictedForwardStore {
  list(market:string){if(!['stocks','crypto','options','prediction'].includes(market))throw Error('市场无效');return this.index().map(id=>this.read(id)).filter(row=>row.market===market);}
  private linkedSignal(row:Session,key:string){const signal=this.deps.signals.get(key);if(!signal||signal.id!==key||signal.market!=='stocks'||signal.instrument!==row.instrument||signal.strategyVersion!==row.strategyHash||signal.strategyId!==row.strategyId||signal.experimentId!==row.experimentId||signal.timeframe!==row.timeframe||signal.source!==row.source||signal.triggeredAt<row.startedAt||signal.triggeredAt>this.now()||(signal as any).forwardObservation?.sessionId!==row.id)throw Error('已有信号血缘不一致，不猜测配对或更新');return signal;}
  signals(id:string){const row=this.read(id);return row.signalIds.map(key=>this.linkedSignal(row,key));}
+  gaps(id:string,validationId?:string){return buildResearchGaps(this.readiness(id,validationId));}
  readiness(id:string,validationId?:string){
   const session=this.read(id),catalog=this.deps.catalog;
   if(!catalog)throw Error('目录核验服务未配置');

@@ -62,6 +62,10 @@ export function createProjectReferenceResolver(sources:Sources,now=Date.now){
   const time=row.updatedAt??row.createdAt??row.triggeredAt;
   if(typeof time!=='string'&&typeof time!=='number')return null;
   const updatedAt=new Date(time);if(!Number.isFinite(updatedAt.getTime()))return null;
-  return {market:row.market as MarketId,instrument:row.instrument,hash:createHash('sha256').update(JSON.stringify(saved||row)).digest('hex'),updatedAt:updatedAt.toISOString(),expired:ref.kind==='signal'&&Number.isFinite(row.expiresAt)&&row.expiresAt<=now(),...(['strategy','task'].includes(ref.kind)?{status:row.status}:{}),...(ref.kind==='task'?{progress:row.progress}:{})};
+  const fields=ref.kind==='decision'?['direction','thesis','horizonAt','status','review']:ref.kind==='signal'?['action','entryPrice','triggeredAt','status','exitPrice','exitAt','realizedPnlPct','forwardObservation']:ref.kind==='experiment'?['strategyId','strategyVersion','timeframe','dataSource']:ref.kind==='strategy'?['version','status']:['status','progress'];
+  const summary:Record<string,unknown>={};for(const key of fields){const value=row[key];if(typeof value==='string')summary[key]=value.slice(0,2000);else if(typeof value==='number'&&Number.isFinite(value)||typeof value==='boolean')summary[key]=value;}
+  if(ref.kind==='decision'&&row.review)summary.review={at:row.review.at,invalidationBreached:row.review.invalidationBreached};
+  if(ref.kind==='signal'&&row.forwardObservation?.horizons){const horizons=row.forwardObservation.horizons;summary.outcomes=[1,3,5,20].map(n=>({bars:n,mature:horizons[n]?.mature===true,returnPct:Number.isFinite(horizons[n]?.returnPct)?horizons[n].returnPct:null}));}
+  return {market:row.market as MarketId,instrument:row.instrument,hash:createHash('sha256').update(JSON.stringify(saved||row)).digest('hex'),updatedAt:updatedAt.toISOString(),summary,expired:ref.kind==='signal'&&Number.isFinite(row.expiresAt)&&row.expiresAt<=now(),...(['strategy','task'].includes(ref.kind)?{status:row.status}:{}),...(ref.kind==='task'?{progress:row.progress}:{})};
  };
 }

@@ -1,12 +1,13 @@
 import {createHash,randomUUID} from 'node:crypto';
 import type {SQLiteStateStore} from '../storage/sqlite-state';
 import type {MarketId} from './research-contracts';
+import {buildProjectRetrospective} from './research-assistance';
 
 const markets=['stocks','options','crypto','prediction'];
 const kinds=['evidence','partition','experiment','decision','signal','strategy','account','event','task','study','project-conclusion'];
 type Store=Pick<SQLiteStateStore,'get'|'set'|'transaction'|'appendAudit'|'health'>;
 export interface ProjectReference {kind:string;id:string;conclusionId?:string}
-export interface ProjectReferenceState {market:MarketId;instrument?:string;hash:string;updatedAt:string;expired?:boolean;revisionHash?:string;status?:string;progress?:number}
+export interface ProjectReferenceState {market:MarketId;instrument?:string;hash:string;updatedAt:string;expired?:boolean;revisionHash?:string;status?:string;progress?:number;summary?:Record<string,unknown>}
 interface ProjectLink extends ProjectReference,ProjectReferenceState {linkId:string;linkedAt:string;readOnly:boolean;inputEligible:boolean}
 interface Conclusion {id:string;text:string;at:string;references:ProjectLink[]}
 interface Review {id:string;conclusionId:string;linkId:string;reason:string;previousHash:string;currentHash:string|null;at:string;status:'open'|'resolved';resolution?:string;resolvedAt?:string}
@@ -64,6 +65,14 @@ export class ResearchProjectStore {
  }
  referenceStates(projectId:string){
   return this.read(projectId).links.map(link=>{try{const current=this.pinnedReference(link);return {linkId:link.linkId,kind:link.kind,id:link.id,pinnedHash:link.hash,current,changed:(current.revisionHash||current.hash)!==link.hash,dataStatus:current.expired?'unavailable':'historical',reason:current.expired?'已保存的来源状态过期；未更新原引用':'只读当前记录；进度变化不启动、暂停或修改任务'};}catch{return {linkId:link.linkId,kind:link.kind,id:link.id,pinnedHash:link.hash,current:null,changed:null,dataStatus:'unavailable',reason:'明确引用当前不可核验，未猜测配对或改写原引用'};}});
+ }
+ retrospective(projectId:string,linkIds:string[]){
+  const project=this.read(projectId),states=this.referenceStates(projectId).map(row=>{
+   const link=project.links.find(link=>link.linkId===row.linkId)!;
+   if(!row.current||!linkIds.includes(row.linkId)||link.kind==='project-conclusion')return row;
+   try{const current=this.resolve({kind:link.kind,id:link.id});return {...row,current:{...row.current,...(current?.hash===row.current.hash&&current.market===project.market&&current.summary?{summary:current.summary}:{})}};}catch{return row;}
+  });
+  return buildProjectRetrospective(project,states,linkIds);
  }
  link(projectId:string,version:number,ref:ProjectReference) {
   return this.change(projectId,version,'linked',p=>{const state=this.reference(ref);if(ref.kind!=='project-conclusion'&&state.market!==p.market)throw Error('研究输入不得跨市场引用');if(ref.id===p.id)throw Error('项目不得引用自身结论');if(p.links.some(r=>r.kind===ref.kind&&r.id===ref.id&&r.conclusionId===ref.conclusionId&&r.hash===state.hash))throw Error('研究引用此版本已关联，不重复建立');if(p.links.length>=200)throw Error('项目引用已达上限');p.links.push({...ref,...state,linkId:randomUUID(),linkedAt:this.clock(),readOnly:true,inputEligible:ref.kind!=='project-conclusion'});});

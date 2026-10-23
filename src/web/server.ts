@@ -188,6 +188,7 @@ import { runResearchExperiment, rerunSavedExperiment } from '../features/experim
 import { createResearchRevisionRouter } from './research-revision-routes';
 import { createResearchBasisRouter } from './research-basis-routes';
 import { createDataAssetRouter } from './data-asset-routes';
+import {OptionSnapshotRecovery} from '../features/option-snapshot-recovery';
 import { DataAssetService } from '../features/data-assets';
 import { ResearchBasisStore } from '../features/research-basis';
 import { createChartBookmarkRouter } from './chart-bookmark-routes';
@@ -439,7 +440,7 @@ app.get('/login', (req, res) => {
 });
 registerAuthRoutes(app);
 registerApiAuthProtection(app);
-app.use('/api/data',createDataAssetRouter(new DataAssetService(dataLakeCatalog,stateStore,dataLakeWorker)));
+app.use('/api/data',createDataAssetRouter(new DataAssetService(dataLakeCatalog,stateStore,dataLakeWorker),new OptionSnapshotRecovery(DATA_ROOT,dataLakeCatalog,stateStore)));
 const researchProjects=new ResearchProjectStore(stateStore,createProjectReferenceResolver({
   study:id=>{if(/^psim_[a-f0-9]{64}$/.test(id))return portfolioSimulationStore.reference(id);if(/^blind_[a-f0-9]{64}$/.test(id))return blindSessionStore.reference(id);if(/^aif_[a-f0-9]{64}$/.test(id))return aiForecastLab.reference(id);return null;},
   evidence:id=>decisionIntelligenceStore.getEvidence(id),verifyEvidence:verifyEvidenceSnapshotHash,

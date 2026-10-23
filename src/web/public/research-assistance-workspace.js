@@ -1,0 +1,46 @@
+(function(root){'use strict';
+ const text=(tag,value)=>{const node=document.createElement(tag);node.textContent=String(value??'未知');return node;};
+ const button=(label,action)=>{const b=text('button',label);b.type='button';b.className='tab';b.onclick=action;return b;};
+ async function navigate(target){
+  if(root.mm_isLoggedIn!==true||root.mm_isGuest||!['paper','research-lab'].includes(target.workspace))return;
+  root.setMarketScope?.(target.market);if(target.instrument)root.setWorkspaceInstrument?.(target.instrument);root.openWorkspace?.(target.workspace);
+  await root.MoneyWorkspaceModules?.ensure(target.workspace==='paper'?'ai':'research');
+  const selectors={'lifecycle':'[data-paper-lifecycle]','data-assets':'[data-data-assets]','forward-paper':'[data-restricted-forward]','validation':'[data-restricted-validation]','candidate-proof':'[data-candidate-proof]','strategies':'[data-strategy-builder]','experiments':'[data-restricted-forward]'};
+  const panel=document.querySelector(selectors[target.section]||'[data-restricted-forward]');if(!panel)return;
+  for(let p=panel;p;p=p.parentElement)if(p.tagName==='DETAILS')p.open=true;
+  if(target.section==='lifecycle'&&target.observationId){const input=panel.querySelector('[data-lifecycle-account]');if(input){input.value='research-forward:'+target.observationId;input.dispatchEvent(new Event('input',{bubbles:true}));}}
+  panel.scrollIntoView?.({block:'nearest'});panel.querySelector('summary,button,input')?.focus();
+ }
+ function renderGaps(out,data){
+  out.replaceChildren();const p=data.progress;
+  out.append(text('p',`已核验完整平仓 ${p.verifiedClosedTrades} / ${p.required} · 还差 ${p.remaining} 笔`),text('p',`走势成熟 ${p.matureObservations} 个（不计作成交） · ${p.reason}`));
+  const progress=document.createElement('progress');progress.max=p.required;progress.value=Math.min(p.required,p.verifiedClosedTrades);progress.setAttribute('aria-label','已核验完整平仓样本');out.append(progress);
+  for(const row of data.gaps){const item=document.createElement('section');item.style.cssText='padding:10px 0;border-bottom:1px solid var(--border);overflow-wrap:anywhere';item.append(text('p',`${row.status==='unknown'?'待核验':'待补'} · ${row.reason}`));if(row.target)item.append(button(row.target.label,()=>navigate(row.target).catch(e=>root.showToast?.(e.message,'error'))));out.append(item);}
+  out.append(text('small','数量门槛满足也不自动晋级；本次读取没有采集、模型调用、通知或订单。'));
+ }
+ function installRetrospective(host,getProject,request,run){
+  const project=getProject(),panel=document.createElement('details');panel.dataset.projectRetrospective='';panel.append(text('summary','同一假设 · 研究结果对照与复盘'),text('p','选择2–6个本项目引用；固定版本、判断和当前结果并排，缺失不推断。'));
+  for(const row of project.links){const label=document.createElement('label'),input=document.createElement('input');input.type='checkbox';input.value=row.linkId;input.dataset.retrospectiveLink='';label.append(input,document.createTextNode(`${row.kind} · ${row.id}`));panel.append(label);}
+  const out=document.createElement('div');out.dataset.retrospectiveOutput='';let report=null,revision=0;
+  const download=button('导出本次复盘 JSON',()=>{if(!report||getProject()?.id!==report.projectId)return;const url=URL.createObjectURL(new Blob([JSON.stringify(report,null,2)],{type:'application/json'})),a=document.createElement('a');a.href=url;a.download='research-retrospective-'+report.projectId+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);});download.disabled=true;
+  panel.addEventListener('change',()=>{revision++;report=null;download.disabled=true;out.replaceChildren();});
+  const compare=button('比较所选引用（只读）',()=>run(async()=>{const current=getProject();if(!current||current.id!==project.id)return;const ids=[...panel.querySelectorAll('[data-retrospective-link]:checked')].map(n=>n.value);if(ids.length<2||ids.length>6)throw Error('请选择2–6个不同引用');const captured=++revision;download.disabled=true;report=null;
+   const response=await request('/api/research/projects/'+encodeURIComponent(current.id)+'/retrospective?'+new URLSearchParams({market:current.market,linkIds:ids.join(',')}));if(!response||captured!==revision||getProject()?.id!==current.id||!panel.isConnected)return;report=response.data;out.replaceChildren();
+   out.append(text('p','项目假设：'+report.hypothesis));const columns=document.createElement('div');columns.style.cssText='display:grid;grid-template-columns:repeat(auto-fit,minmax(min(240px,100%),1fr));gap:10px';
+   for(const col of report.columns){const item=document.createElement('section');item.style.cssText='min-width:0;overflow-wrap:anywhere;padding:12px;border:1px solid var(--border);border-radius:8px;background:var(--bg-secondary)';item.append(text('strong',`${col.kind} · ${col.id}`),text('p','固定 Hash '+col.pinnedHash),text('p','当前 Hash '+(col.currentHash||'不可核验')),text('p',col.changed?'引用已变化，固定结论不覆盖':'当前状态：'+col.dataStatus));
+    if(col.summary){const summary=text('pre',JSON.stringify(col.summary,null,2));summary.style.cssText='white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px';item.append(summary);}else item.append(text('p','此引用没有可读结果摘要，不猜测判断或收益。'));
+    for(const c of col.conclusions)item.append(text('p','固定人工结论：'+c.text+' · '+c.at));for(const r of col.openReviews)item.append(text('p','待复查：'+r.reason));columns.append(item);}
+   out.append(columns,text('p',report.reason));download.disabled=false;
+  }));compare.dataset.retrospectiveCompare='';panel.append(compare,download,out);host.append(panel);
+ }
+ function installRecovery(host,request,run,scope){
+  const panel=document.createElement('details');panel.dataset.snapshotRecovery='';panel.append(text('summary','数据健康与单文件恢复'),text('p','仅检查当前期权标的；有身份和Hash完整匹配的备份才可预览恢复，损坏原件保留。其他市场使用上方覆盖与来源检查。'));
+  const out=document.createElement('div');out.dataset.recoveryOutput='';let preview=null,revision=0;
+  const read=button('检查损坏快照与有效备份',()=>run(async()=>{preview=null;const captured=++revision,s=scope();const value=await request('/api/data/recovery?'+new URLSearchParams({market:s.market,instrument:s.instrument}));if(!value||captured!==revision)return;out.replaceChildren();out.append(text('p',value.data.reason));if(!value.data.failures.length)out.append(text('p','当前没有已登记的损坏快照；不代表来源覆盖完整。'));
+   for(const row of value.data.failures){const item=document.createElement('section');item.style.cssText='overflow-wrap:anywhere;border-bottom:1px solid var(--border);padding:8px 0';item.append(text('p',row.id+' · '+row.reason));if(!row.candidates.length)item.append(text('p','没有通过核验的副本，保持待恢复；不猜测重建历史。'));
+    for(const candidate of row.candidates){const input={market:s.market,instrument:s.instrument,snapshotId:row.id,backupId:candidate.backupId};const b=button('预览副本 '+candidate.backupId,()=>run(async()=>{const r=await request('/api/data/recovery/preview',input);if(!r||captured!==revision||!panel.isConnected)return;preview={...input,...r.data};const saved=preview;panel.querySelectorAll('[data-recovery-confirm]').forEach(old=>old.disabled=true);const detail=document.createElement('div');detail.append(text('p',`仅此快照 · ${preview.bytes} B · 原字节Hash ${preview.beforeHash||'文件缺失'} → 副本Hash ${preview.candidateHash} · 有效至 ${new Date(preview.expiresAt).toLocaleString()}`));const confirm=button('确认恢复此预览',()=>run(async()=>{if(preview!==saved||captured!==revision||!root.confirm('确认仅恢复预览中的单份历史快照？保留损坏原件，不还原数据库或其他文件。'))return;preview=null;confirm.disabled=true;const result=await request('/api/data/recovery/confirm',{...input,hash:saved.hash,previewedAt:saved.previewedAt});if(result&&captured===revision)detail.replaceChildren(text('p',result.data.reason));}));confirm.dataset.recoveryConfirm='';detail.append(confirm);item.append(detail);}));b.dataset.recoveryPreview='';item.append(b);}out.append(item);}
+  }));read.dataset.recoveryRead='';panel.append(read,out);host.append(panel);
+  root.addEventListener('mm-workspace-context',()=>{revision++;preview=null;out.replaceChildren();});
+ }
+ root.MoneyResearchAssistance={renderGaps,installRetrospective,installRecovery};
+})(window);

@@ -1,5 +1,5 @@
 import { stateStore, SQLiteStateStore } from '../storage/sqlite-state';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import { synchronizeRunnerCorporateActions } from './runner-dividend-sync';
 import type { AiRunner } from './ai-paper-runner';
 import { reconcilePaperCorporateActions, type PaperCorporateActionEvidence } from './paper-account-lifecycle';
@@ -276,6 +276,25 @@ export class UnifiedPaperLedgerStore {
     if (['main', 'unified-paper-ledger'].includes(accountId)) return ledger;
     const account = ledger.runnerAccounts?.[accountId];
     return account && account.runnerId ? account : null;
+  }
+  previewCorporateActions(accountId: string, actions: PaperCorporateActionEvidence[], now = Date.now()) {
+    if (!Number.isSafeInteger(now) || now < 0) throw Error('预览时间无效');
+    const before = this.getAccount(accountId);if (!before) throw Error('模拟账户不存在');
+    const registered = this.store.get<AiRunner[]>('ai-paper-runners') || [];
+    const bound = registered.filter(row=>row.id === ('runnerId' in before ? before.runnerId : null) || (row.accountId || `ai-runner:${row.id}`) === accountId);
+    let result: ReturnType<UnifiedPaperLedgerStore['reconcileCorporateActions']> | undefined;
+    const rollback = new Error('preview rollback');
+    try { this.store.transaction(()=>{result=structuredClone(this.reconcileCorporateActions(accountId,actions,now));throw rollback;}); }
+    catch(error){if(error!==rollback)throw error;}
+    if(!result)throw Error('无法核验预览');
+    const expiresAt=now+300000,after=result.ledger;
+    const identity={accountId,before,registered:bound,actions,previewedAt:now,expiresAt};
+    return {accountId,previewedAt:now,expiresAt,hash:createHash('sha256').update(JSON.stringify(identity)).digest('hex'),before,after,
+      changes:{cash:{before:before.cash,after:after.cash},positions:after.positions.map(row=>({instrumentId:row.instrumentId,before:before.positions.find(p=>p.instrumentId===row.instrumentId)||null,after:row})),
+        realizedPnl:{before:before.realizedPnl,after:after.realizedPnl},ordersUnchanged:JSON.stringify(before.orders)===JSON.stringify(after.orders)},
+      actions:actions.map(({id,instrument,kind,effectiveAt,source,paymentAt})=>({id,instrument,kind,effectiveAt,source,paymentAt})),
+      applied:result.applied,pending:result.pending,blockedReason:result.blockedReason||null,
+      reason:'预览事务已回滚；现金、持仓、跑单和审计均未保存，确认前重新核对账户及来源Hash'};
   }
   reconcileCorporateActions(accountId: string, actions: PaperCorporateActionEvidence[], now = Date.now()) {
     return this.store.transaction(() => {

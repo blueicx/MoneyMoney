@@ -172,6 +172,7 @@ modules.guru.push(fs.readFileSync(path.join(source, 'guru-replay.js'), 'utf8'));
 modules.ai.push(fs.readFileSync(path.join(source, 'paper-lifecycle-workspace.js'), 'utf8'));
 modules.tables.push(fs.readFileSync(path.join(source, 'table-tools.js'), 'utf8'));
 modules.research.push(
+  fs.readFileSync(path.join(source, 'research-assistance-workspace.js'), 'utf8'),
   fs.readFileSync(path.join(source, 'restricted-strategy.js'), 'utf8'),
   fs.readFileSync(path.join(source, 'workflow-polish.js'), 'utf8'),
   fs.readFileSync(path.join(source, 'interactive-history.js'), 'utf8'),

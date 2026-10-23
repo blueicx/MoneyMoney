@@ -546,6 +546,21 @@ export class DataLakeCatalog {
     return payload;
   }
 
+  /** Internal recovery metadata; callers must never expose physical paths to HTTP clients. */
+  optionSnapshotRecord(id:string):Record<string,any>|null {
+    if(!/^option_snapshot_[a-f0-9]{24}$/.test(id))throw Error('快照ID无效');
+    return this.db.prepare('SELECT id,path,market,instrument,source,trade_date AS tradeDate,fetched_at AS fetchedAt,underlying_market AS underlyingMarket,mode,content_hash AS contentHash,row_count AS rowCount,size_bytes AS sizeBytes FROM options_chain_partitions WHERE id=?').get(id) as Record<string,any> || null;
+  }
+  optionSnapshotMatches(id:string,bytes:Buffer):boolean {
+    try{const row=this.optionSnapshotRecord(id);if(!row)return false;const content=JSON.parse(bytes.toString('utf8')),snapshot=content.snapshot;
+      if(content.id!==row.id||content.contentHash!==row.contentHash||hash(snapshot)!==row.contentHash)return false;
+      for(const key of ['market','instrument','source','underlyingMarket','fetchedAt','tradeDate','mode','rowCount'])if(content[key]!==row[key])return false;
+      if(snapshot?.source!==row.source||String(snapshot?.asset).toUpperCase()!==row.instrument.split(':').at(-1).toUpperCase()||snapshot?.market!==(row.underlyingMarket==='stocks'?'us_equity':'crypto')||Date.parse(snapshot?.fetchedAt)!==Date.parse(row.fetchedAt)||!Array.isArray(snapshot?.expiries))return false;
+      const count=snapshot.expiries.reduce((n:number,e:any)=>n+(Array.isArray(e?.rows)?e.rows.length:0),0);
+      if(count!==row.rowCount||count<=0||!['CBOE Delayed Quotes','Deribit Public API'].includes(row.source))return false;
+      validateOptionsChainIdentity(row.instrument,row.source,String(snapshot.asset).toUpperCase(),snapshot.expiries);return true;
+    }catch{return false;}
+  }
   listOptionSnapshots(input: { market: 'options'; instrument: string; from?: string; to?: string }) {
     if (input.market !== 'options' || !/^(option:cboe:[A-Z0-9.]+|option:deribit:(BTC|ETH))$/i.test(input.instrument)) throw new Error('invalid options market/instrument context');
     const clauses = ['market = ?', 'instrument = ?'];
