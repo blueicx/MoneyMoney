@@ -28,6 +28,15 @@ for(const order of [
   {id:'split-post',side:'BUY',price:40,quantity:5,timestamp:'2025-02-02T00:00:00.000Z'},
   {id:'split-sale',side:'SELL',price:60,quantity:5,timestamp:'2025-02-03T00:00:00.000Z'},
 ])unifiedPaperLedgerStore.applyRunnerOrder('split-fixture','isolated-split',{...order,instrumentType:'stock',instrumentId:'stock:us:MU'});
+unifiedPaperLedgerStore.ensureRunnerAccount('runner-split-fixture','isolated-split-runner',1000);
+unifiedPaperLedgerStore.applyRunnerOrder('runner-split-fixture','isolated-split-runner',{id:'runner-split-entry',instrumentType:'stock',instrumentId:'stock:us:MU',side:'BUY',price:100,quantity:2,timestamp:'2025-01-01T00:00:00.000Z'});
+const fixtureState=require('../dist/storage/sqlite-state').stateStore;
+fixtureState.set('ai-paper-runners',[...fixtureState.get('ai-paper-runners'),{
+ id:'isolated-split-runner',accountId:'runner-split-fixture',venue:'Stocks',symbolOrMarketId:'MU',title:'Isolated split runner',universe:{market:'stocks',hash:'isolated-mu',instruments:[{venue:'Stocks',symbolOrMarketId:'MU'}]},
+ policy:{},mode:'rules',model:'isolated/fixed',budgetUsd:1000,cashUsd:800,status:'STOPPED',executionState:'ready',createdAt:'2025-01-01T00:00:00.000Z',peakEquityUsd:1000,
+ positions:[{id:'split-lot',instrumentId:'stock:us:MU',entryOrderId:'runner-split-entry',entryTime:'2025-01-01T00:00:00.000Z',entryPrice:100,quantity:2,currentPrice:100,status:'OPEN'}],
+ trades:[{id:'split-trade',orderId:'runner-split-entry',action:'BUY',price:100,quantity:2,timestamp:'2025-01-01T00:00:00.000Z'}],
+}],1);
 require('../dist/storage/sqlite-state').stateStore.close();
 const index = new FinancialTextIndex(path.join(data, 'moneymoney.sqlite'));
 index.index({instrument:'stock:us:AAPL',accession:'0000320193-25-000001',form:'10-K',sourceUrl:'https://www.sec.gov/Archives/edgar/data/320193/000032019325000001/fixture.htm',publishedAt:'2025-01-01T12:00:00Z',retrievedAt:'2025-01-02T12:00:00Z',text:'Isolated browser fixture: tariffs may affect liquidity. This is not a real filing.'});
@@ -160,6 +169,10 @@ async function main(){
     const splitResult=await page.evaluate(()=>fetch('/api/paper/accounts/split-fixture/lifecycle?market=stocks').then(r=>r.json()));
     assert.equal(splitResult.data.costAdjustments[0].orderId,'split-sale');assert.equal(splitResult.data.performance.realizedPnl,60);
     assert.match(await lifecycle.innerText(),/现金及原成交不变/);
+    await page.locator('[data-lifecycle-account]').fill('runner-split-fixture');page.once('dialog',dialog=>dialog.accept());await page.locator('[data-lifecycle-reconcile]').click();
+    await page.waitForFunction(()=>document.querySelector('[data-lifecycle-output]')?.textContent.includes('按来源拆股比例'));
+    const splitState=new (require('../dist/storage/sqlite-state').SQLiteStateStore)(path.join(data,'moneymoney.sqlite'),data);
+    try{const raw=splitState.get('ai-paper-runners').find(row=>row.id==='isolated-split-runner');assert.equal(raw.positions[0].quantity,4);assert.equal(raw.positions[0].entryPrice,50);assert.equal(raw.cashUsd,800);assert.equal(raw.status,'STOPPED');assert.equal(raw.model,'isolated/fixed');assert.equal(raw.lastDataStatus,'stale');}finally{splitState.close();}
     for(const {theme} of themes){for(const width of [1440,390]){await page.setViewportSize({width,height:900});await page.evaluate(theme=>{if(theme==='light')document.documentElement.removeAttribute('data-theme');else document.documentElement.setAttribute('data-theme',theme);},theme);await lifecycle.screenshot({path:path.join(data,`lifecycle-${theme}-${width}.png`)});}}
     await page.evaluate(()=>setMarketScope('crypto'));await lifecycle.waitFor({state:'hidden'});
     const guest=await browser.newPage();await guest.goto(base+'/login');await Promise.all([guest.waitForURL(url=>url.pathname==='/'),guest.click('#guestBtn')]);

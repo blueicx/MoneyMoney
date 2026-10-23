@@ -52,14 +52,14 @@ test('dividend income belongs to net return but never to closed-trade win rate',
  }finally{state.close();}
 });
 
-test('duplicate bindings, missing trade lineage and split effects stay blocked',()=>{
- for(const variant of ['binding','trade','split','proof']){
+test('duplicate bindings, missing trade lineage and unsupported identity migrations stay blocked',()=>{
+ for(const variant of ['binding','trade','migration','proof']){
   const {state,store,runner}=fixture('blocked-'+variant);try{
    if(variant==='binding')state.set('ai-paper-runners',[runner,{...runner,id:'other'}]);
    if(variant==='trade'){runner.trades[0].orderId='unknown';state.set('ai-paper-runners',[runner]);}
    if(variant==='proof'){const root=store.get();delete root.runnerAccounts[runner.accountId].orderHistoryProof;state.set('paper-ledger',root);}
    const before=store.getAccount(runner.accountId),raw=state.get('ai-paper-runners');
-   const result=store.reconcileCorporateActions(runner.accountId,[variant==='split'?{...action,kind:'split',factor:2}:action],at);
+   const result=store.reconcileCorporateActions(runner.accountId,[variant==='migration'?{...action,kind:'symbol-change',newSymbol:'NEW'}:action],at);
    assert.ok(result.blockedReason,variant);assert.deepEqual(store.getAccount(runner.accountId),before);assert.deepEqual(state.get('ai-paper-runners'),raw);
   }finally{state.close();}
  }

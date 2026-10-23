@@ -70,6 +70,7 @@ function sameStock(left: unknown, right: unknown): boolean {
   const a = stockIdentity(left), b = stockIdentity(right);
   return Boolean(a && b && a.venue === b.venue && a.symbol === b.symbol);
 }
+export { sameStock as samePaperStock };
 
 function heldSharesAt(ledger: LifecycleLedger, instrument: string, asOf: number): number | null {
   const orders = ledger.orders.filter(order => order.instrumentType === 'stock' && sameStock(order.instrumentId, instrument)
@@ -154,7 +155,14 @@ export function reconcilePaperCorporateActions<T extends LifecycleLedger>(source
       for (const position of eligible) {
         position.quantity = roundQuantity(Number(position.quantity) * factor);
         position.averageEntryPrice = Number(position.averageEntryPrice) / factor;
-        position.currentPrice = Number(position.currentPrice) / factor;
+        const markAt = Date.parse(String(position.markUpdatedAt || ''));
+        const verifiedPostActionMark = ['live','delayed','cached','stale'].includes(String(position.markStatus))
+          && markAt >= effectiveAt && markAt <= now && typeof position.markSource === 'string' && position.markSource.trim();
+        if (!verifiedPostActionMark) {
+          position.currentPrice = Number(position.currentPrice) / factor;
+          position.markStatus = 'stale';
+          position.markSource = '拆股调整历史参考估值；非当前市场报价';
+        }
       }
       const event:PaperLifecycleEvent={ id: `corporate:${action.id}`, actionId: action.id, kind: action.kind, instrument: action.instrument,
         effectiveAt: action.effectiveAt, source: action.source, status: 'applied', factor, reason: `按来源拆股比例 ${factor}:1 调整持仓数量与单位成本`,...(prior?{previousReason:prior.reason}:{}) };

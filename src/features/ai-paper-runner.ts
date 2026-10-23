@@ -232,6 +232,7 @@ export interface AiRunnerTrade {
 
 export interface AiRunnerPosition {
   id: string;
+  corporateActionIds?: string[];
   instrumentId?: string;
   instrument?: AiRunnerInstrumentRef;
   entryOrderId?: string;
@@ -323,6 +324,9 @@ export function summarizeAiRunnerQuality(input: {
 }
 
 export interface AiRunnerBenchmark {
+  corporateActionIds?: string[];
+  corporateAdjustmentAt?: string;
+  corporateAdjustmentPendingQuote?: boolean;
   market: AiRunnerMarket;
   instrument: string;
   startPrice: number;
@@ -1114,7 +1118,8 @@ export function updateAiRunnerMarketState(id: string, input: AiRunnerMarketState
         const allocationUsd = runner.budgetUsd / Math.max(1, runner.universe?.instruments.length || 1);
         const existing = benchmarks[symbol];
         benchmarks[symbol] = existing
-          ? { ...existing, currentPrice: mark, updatedAt: input.dataAt || now.toISOString(), source: input.source }
+          ? { ...existing, currentPrice: mark, updatedAt: input.dataAt || now.toISOString(), source: input.source,
+              ...(existing.corporateAdjustmentAt ? { corporateAdjustmentPendingQuote: !(Date.parse(input.dataAt || '') >= Date.parse(existing.corporateAdjustmentAt)) } : {}) }
           : { market: scope, instrument: symbol, startPrice: mark, currentPrice: mark, allocationUsd, observedAt: input.dataAt || now.toISOString(), updatedAt: input.dataAt || now.toISOString(), source: input.source };
         runner.benchmarks = benchmarks;
       }
@@ -1457,7 +1462,8 @@ export function summarizeRunner(runner: AiRunner, currentPrice?: number): AiRunn
   const benchmarkPnl = benchmarkRows.reduce((sum, item) => sum + item.allocationUsd * (item.currentPrice / item.startPrice - 1), 0);
   const predictionMarket = (runner.universe?.market || venueMarket(runner.venue)) === 'prediction';
   const expectedBenchmarks = predictionMarket ? 0 : Math.max(1, runner.universe?.instruments.length || 1);
-  const benchmarkComplete = expectedBenchmarks > 0 && benchmarkRows.length >= expectedBenchmarks;
+  const benchmarkPendingQuote = benchmarkRows.some(row => row.corporateAdjustmentPendingQuote);
+  const benchmarkComplete = expectedBenchmarks > 0 && benchmarkRows.length >= expectedBenchmarks && !benchmarkPendingQuote;
   const account = unifiedPaperLedgerStore.getRunnerAccount(runner.accountId || `ai-runner:${runner.id}`);
   return {
     totalPnlUsd: parseFloat((realizedPnl + unrealizedPnl - costs + (runner.corporateIncomeUsd || 0)).toFixed(2)),
@@ -1479,7 +1485,7 @@ export function summarizeRunner(runner: AiRunner, currentPrice?: number): AiRunn
     benchmarkReturnPct: benchmarkComplete && runner.budgetUsd > 0 ? Math.round(benchmarkPnl / runner.budgetUsd * 10_000) / 100 : null,
     benchmarkCount: benchmarkRows.length,
     benchmarkExpectedCount: expectedBenchmarks,
-    benchmarkReason: predictionMarket ? 'YES/NO 方向不同，当前没有可验证的同方向持有基准' : benchmarkComplete ? undefined : '等待所有冻结标的获得首次有效报价后再比较',
+    benchmarkReason: predictionMarket ? 'YES/NO 方向不同，当前没有可验证的同方向持有基准' : benchmarkPendingQuote ? '基准已调整拆股单位，等待拆股后的有效报价再比较' : benchmarkComplete ? undefined : '等待所有冻结标的获得首次有效报价后再比较',
     maxDrawdownPct: Math.round(Math.max(0, ...((runner.equityHistory || []).map(point => point.drawdownPct))) * 100) / 100,
   };
 }
