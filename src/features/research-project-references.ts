@@ -64,6 +64,13 @@ export function createProjectReferenceResolver(sources:Sources,now=Date.now){
   const updatedAt=new Date(time);if(!Number.isFinite(updatedAt.getTime()))return null;
   const fields=ref.kind==='decision'?['direction','thesis','horizonAt','status','review']:ref.kind==='signal'?['action','entryPrice','triggeredAt','status','exitPrice','exitAt','realizedPnlPct','forwardObservation']:ref.kind==='experiment'?['strategyId','strategyVersion','timeframe','dataSource']:ref.kind==='strategy'?['version','status']:['status','progress'];
   const summary:Record<string,unknown>={};for(const key of fields){const value=row[key];if(typeof value==='string')summary[key]=value.slice(0,2000);else if(typeof value==='number'&&Number.isFinite(value)||typeof value==='boolean')summary[key]=value;}
+  if(ref.kind==='experiment'&&saved.backtest?.metrics){
+   const modelResult:Record<string,unknown>={kind:'theoretical-backtest',reason:'已保存历史模型结果；不是实际成交或事前验证，不自动排名或晋级'};
+   for(const key of ['tradesCount','totalReturnPct','maxDrawdownPct']){const value=saved.backtest.metrics[key];if(typeof value==='number'&&Number.isFinite(value))modelResult[key]=value;else if(value===null)modelResult[key]=null;}
+   for(const key of ['feeRate','slippage'])if(typeof row[key]==='number'&&Number.isFinite(row[key]))modelResult[key]=row[key];
+   summary.modelResult=modelResult;
+   if(Array.isArray(saved.gate?.reasons))summary.pendingReasons=saved.gate.reasons.filter((s:unknown)=>typeof s==='string').slice(0,6).map((s:string)=>s.slice(0,1000));
+  }
   if(ref.kind==='decision'&&row.review)summary.review={at:row.review.at,invalidationBreached:row.review.invalidationBreached};
   if(ref.kind==='signal'&&row.forwardObservation?.horizons){const horizons=row.forwardObservation.horizons;summary.outcomes=[1,3,5,20].map(n=>({bars:n,mature:horizons[n]?.mature===true,returnPct:Number.isFinite(horizons[n]?.returnPct)?horizons[n].returnPct:null}));}
   return {market:row.market as MarketId,instrument:row.instrument,hash:createHash('sha256').update(JSON.stringify(saved||row)).digest('hex'),updatedAt:updatedAt.toISOString(),summary,expired:ref.kind==='signal'&&Number.isFinite(row.expiresAt)&&row.expiresAt<=now(),...(['strategy','task'].includes(ref.kind)?{status:row.status}:{}),...(ref.kind==='task'?{progress:row.progress}:{})};
