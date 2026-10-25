@@ -923,6 +923,7 @@ async function attachChineseBriefs(markets: PredictionMarket[]): Promise<void> {
   const translations = await translateEnglishTitles(
     markets.map(item => item.title),
     Math.max(400, markets.length),
+    { budgetMs: 2_000 },
   );
   for (const market of markets) {
     market.categoryZh = chineseCategory(market.category, market.group);

@@ -73,14 +73,18 @@ function savePersistentCache(): void {
   }
 }
 
-async function refreshSogouSession(): Promise<SogouSession> {
+function translationSignal(timeoutMs: number, signal?: AbortSignal): AbortSignal {
+  return signal ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs);
+}
+
+async function refreshSogouSession(signal?: AbortSignal): Promise<SogouSession> {
   const pageUrl = 'https://fanyi.sogou.com/text?keyword=MoneyMoney&transfrom=en&transto=zh-CHS&model=general&fr=default';
   const response = await fetch(pageUrl, {
     headers: {
       accept: 'text/html,application/xhtml+xml',
       'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) MoneyMoney/1.0',
     },
-    signal: AbortSignal.timeout(8_000),
+    signal: translationSignal(8_000, signal),
   });
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   const html = await response.text();
@@ -89,12 +93,13 @@ async function refreshSogouSession(): Promise<SogouSession> {
   const cookies = ((response.headers as any).getSetCookie?.() || []) as string[];
   const cookie = cookies.map(item => item.split(';')[0]).filter(Boolean).join('; ');
   if (!uuid || !secretCode || !cookie) throw new Error('Sogou session unavailable');
+  signal?.throwIfAborted();
   const session = { cookie, uuid, secretCode, expiresAt: Date.now() + 30 * 60_000 };
   sogouSession = session;
   return session;
 }
 
-async function requestSogouOnce(text: string, session: SogouSession): Promise<string> {
+async function requestSogouOnce(text: string, session: SogouSession, signal?: AbortSignal): Promise<string> {
   const from = 'en';
   const to = 'zh-CHS';
   // Sogou's web endpoint sometimes eats a leading "$100" as a template token.
@@ -129,7 +134,7 @@ async function requestSogouOnce(text: string, session: SogouSession): Promise<st
       'x-requested-with': 'XMLHttpRequest',
     },
     body,
-    signal: AbortSignal.timeout(7_000),
+    signal: translationSignal(7_000, signal),
   });
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   const payload = await response.json() as any;
@@ -141,20 +146,21 @@ async function requestSogouOnce(text: string, session: SogouSession): Promise<st
   return translated;
 }
 
-async function requestSogou(text: string): Promise<string | undefined> {
+async function requestSogou(text: string, signal?: AbortSignal): Promise<string | undefined> {
   const session = !sogouSession || sogouSession.expiresAt < Date.now()
-    ? await refreshSogouSession()
+    ? await refreshSogouSession(signal)
     : sogouSession;
   try {
-    return await requestSogouOnce(text, session);
+    return await requestSogouOnce(text, session, signal);
   } catch (error) {
     // A short-lived browser session can expire mid-refresh; establish it once.
-    const fresh = await refreshSogouSession();
-    return await requestSogouOnce(text, fresh);
+    signal?.throwIfAborted();
+    const fresh = await refreshSogouSession(signal);
+    return await requestSogouOnce(text, fresh, signal);
   }
 }
 
-async function requestYoudao(text: string): Promise<string | undefined> {
+async function requestYoudao(text: string, signal?: AbortSignal): Promise<string | undefined> {
   const params = new URLSearchParams({
     q: text.slice(0, 450),
     from: 'en',
@@ -166,7 +172,7 @@ async function requestYoudao(text: string): Promise<string | undefined> {
       referer: 'https://aidemo.youdao.com/',
       'user-agent': 'MoneyMoney/1.0 (+https://github.com/blueicx/MoneyMoney)',
     },
-    signal: AbortSignal.timeout(7_000),
+    signal: translationSignal(7_000, signal),
   });
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   const payload = await response.json() as any;
@@ -175,7 +181,7 @@ async function requestYoudao(text: string): Promise<string | undefined> {
   return translated;
 }
 
-async function requestMyMemory(text: string): Promise<string | undefined> {
+async function requestMyMemory(text: string, signal?: AbortSignal): Promise<string | undefined> {
   const params = new URLSearchParams({
     q: text.slice(0, 480),
     langpair: 'en|zh-CN',
@@ -185,7 +191,7 @@ async function requestMyMemory(text: string): Promise<string | undefined> {
 
   const response = await fetch(`https://api.mymemory.translated.net/get?${params}`, {
     headers: { accept: 'application/json' },
-    signal: AbortSignal.timeout(5_000),
+    signal: translationSignal(5_000, signal),
   });
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   const payload = await response.json() as any;
@@ -194,14 +200,16 @@ async function requestMyMemory(text: string): Promise<string | undefined> {
   return translated;
 }
 
-async function requestAnyTranslation(text: string): Promise<string | undefined> {
+async function requestAnyTranslation(text: string, signal?: AbortSignal): Promise<string | undefined> {
   try {
-    return await requestSogou(text);
+    return await requestSogou(text, signal);
   } catch {
+    signal?.throwIfAborted();
     try {
-      return await requestYoudao(text);
+      return await requestYoudao(text, signal);
     } catch {
-      return await requestMyMemory(text);
+      signal?.throwIfAborted();
+      return await requestMyMemory(text, signal);
     }
   }
 }
@@ -213,7 +221,12 @@ async function requestAnyTranslation(text: string): Promise<string | undefined> 
 export async function translateEnglishTitles(
   titles: string[],
   limit = MAX_TRANSLATIONS_PER_REFRESH,
+  options: { budgetMs?: number } = {},
 ): Promise<Map<string, string>> {
+  if (options.budgetMs !== undefined && (!Number.isInteger(options.budgetMs) || options.budgetMs < 1 || options.budgetMs > 10_000)) {
+    throw new Error('Translation budget must be an integer from 1 to 10000 ms');
+  }
+  const signal = options.budgetMs === undefined ? undefined : AbortSignal.timeout(options.budgetMs);
   loadPersistentCache();
   const unique = [...new Set(titles.map(item => item.trim()).filter(Boolean))];
   const pending = unique.filter(item => !isChinese(item)).slice(0, limit);
@@ -221,7 +234,7 @@ export async function translateEnglishTitles(
   let cursor = 0;
 
   async function worker(): Promise<void> {
-    while (cursor < pending.length) {
+    while (cursor < pending.length && !signal?.aborted) {
       const index = cursor++;
       const source = pending[index];
       const cached = cache.get(source.toLowerCase());
@@ -230,7 +243,8 @@ export async function translateEnglishTitles(
         continue;
       }
       try {
-        const translated = await requestAnyTranslation(source);
+        const translated = await requestAnyTranslation(source, signal);
+        if (signal?.aborted) break;
         // A provider sometimes echoes a phrase when it has no useful model.
         // Keeping the local Chinese summary is better than pretending it was translated.
         if (translated && translated.toLowerCase() !== source.toLowerCase()) {
