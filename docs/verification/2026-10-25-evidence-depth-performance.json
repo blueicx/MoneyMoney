@@ -1,0 +1,181 @@
+{
+  "runtimeCommit": "b26584d491ee5d0d814d25ce57659456aaa8cd9c",
+  "baselineCommit": "1987bd7",
+  "settings": {
+    "cpuRate": 4,
+    "latencyMs": 80,
+    "downloadKbps": 750,
+    "runsPerCondition": 3,
+    "viewports": [
+      1440,
+      390
+    ],
+    "isolated": true,
+    "auxiliaryGate": false
+  },
+  "comparisons": [
+    {
+      "viewport": 1440,
+      "temperature": "cold",
+      "beforeMs": 2700.399999976158,
+      "candidateMs": 2898.2999999523163,
+      "afterMs": 2888.8000000715256,
+      "conservativeBaselineMs": 2700.399999976158,
+      "improvementPercent": -7.328543918601138,
+      "pass": false
+    },
+    {
+      "viewport": 1440,
+      "temperature": "warm",
+      "beforeMs": 617.4000000953674,
+      "candidateMs": 710.8000000715256,
+      "afterMs": 728.0999999046326,
+      "conservativeBaselineMs": 617.4000000953674,
+      "improvementPercent": -15.127955938084071,
+      "pass": false
+    },
+    {
+      "viewport": 390,
+      "temperature": "cold",
+      "beforeMs": 3130.7999999523163,
+      "candidateMs": 3296.2000000476837,
+      "afterMs": 3190.9000000953674,
+      "conservativeBaselineMs": 3130.7999999523163,
+      "improvementPercent": -5.282994764848814,
+      "pass": false
+    },
+    {
+      "viewport": 390,
+      "temperature": "warm",
+      "beforeMs": 758.7000000476837,
+      "candidateMs": 852.1999999284744,
+      "afterMs": 777.1999999284744,
+      "conservativeBaselineMs": 758.7000000476837,
+      "improvementPercent": -12.323711595481,
+      "pass": false
+    }
+  ],
+  "performanceAccepted": false,
+  "claim": "Functional release only; cold improvement and warm regression budgets not met. No performance candidate claimed accepted.",
+  "rawLogs": [
+    "E:/MYC/mm-depth-performance-before.log",
+    "E:/MYC/mm-depth-performance-candidate.log",
+    "E:/MYC/mm-depth-performance-after.log"
+  ],
+  "medians": {
+    "before": [
+      {
+        "viewport": 1440,
+        "temperature": "cold",
+        "shellReadyMs": 1439.7000000476837,
+        "chartReadyMs": 2700.399999976158,
+        "jsBytes": 122907,
+        "compatibilityRequestStartSpreadMs": 185.5,
+        "compatibilityDownloadSpanMs": 514.3999999761581
+      },
+      {
+        "viewport": 1440,
+        "temperature": "warm",
+        "shellReadyMs": 353,
+        "chartReadyMs": 617.4000000953674,
+        "jsBytes": 0,
+        "compatibilityRequestStartSpreadMs": 114.30000007152557,
+        "compatibilityDownloadSpanMs": 114.30000007152557
+      },
+      {
+        "viewport": 390,
+        "temperature": "cold",
+        "shellReadyMs": 1378.3999999761581,
+        "chartReadyMs": 3130.7999999523163,
+        "jsBytes": 122907,
+        "compatibilityRequestStartSpreadMs": 193.20000004768372,
+        "compatibilityDownloadSpanMs": 548
+      },
+      {
+        "viewport": 390,
+        "temperature": "warm",
+        "shellReadyMs": 441.2000000476837,
+        "chartReadyMs": 758.7000000476837,
+        "jsBytes": 0,
+        "compatibilityRequestStartSpreadMs": 196.39999997615814,
+        "compatibilityDownloadSpanMs": 196.39999997615814
+      }
+    ],
+    "candidate": [
+      {
+        "viewport": 1440,
+        "temperature": "cold",
+        "shellReadyMs": 1908.3999999761581,
+        "chartReadyMs": 2898.2999999523163,
+        "jsBytes": 109017,
+        "compatibilityRequestStartSpreadMs": 0.8999999761581421,
+        "compatibilityDownloadSpanMs": 177.70000004768372
+      },
+      {
+        "viewport": 1440,
+        "temperature": "warm",
+        "shellReadyMs": 431.8000000715256,
+        "chartReadyMs": 710.8000000715256,
+        "jsBytes": 0,
+        "compatibilityRequestStartSpreadMs": 1.899999976158142,
+        "compatibilityDownloadSpanMs": 1.899999976158142
+      },
+      {
+        "viewport": 390,
+        "temperature": "cold",
+        "shellReadyMs": 1436.8000000715256,
+        "chartReadyMs": 3296.2000000476837,
+        "jsBytes": 125175,
+        "compatibilityRequestStartSpreadMs": 200,
+        "compatibilityDownloadSpanMs": 562.2999999523163
+      },
+      {
+        "viewport": 390,
+        "temperature": "warm",
+        "shellReadyMs": 460,
+        "chartReadyMs": 852.1999999284744,
+        "jsBytes": 0,
+        "compatibilityRequestStartSpreadMs": 215.5,
+        "compatibilityDownloadSpanMs": 215.5
+      }
+    ],
+    "after": [
+      {
+        "viewport": 1440,
+        "temperature": "cold",
+        "shellReadyMs": 1933.5,
+        "chartReadyMs": 2888.8000000715256,
+        "jsBytes": 106749,
+        "compatibilityRequestStartSpreadMs": 0.8999999761581421,
+        "compatibilityDownloadSpanMs": 165.60000002384186
+      },
+      {
+        "viewport": 1440,
+        "temperature": "warm",
+        "shellReadyMs": 467,
+        "chartReadyMs": 728.0999999046326,
+        "jsBytes": 0,
+        "compatibilityRequestStartSpreadMs": 1.399999976158142,
+        "compatibilityDownloadSpanMs": 1.399999976158142
+      },
+      {
+        "viewport": 390,
+        "temperature": "cold",
+        "shellReadyMs": 1420.2999999523163,
+        "chartReadyMs": 3190.9000000953674,
+        "jsBytes": 122907,
+        "compatibilityRequestStartSpreadMs": 193.29999995231628,
+        "compatibilityDownloadSpanMs": 562.5
+      },
+      {
+        "viewport": 390,
+        "temperature": "warm",
+        "shellReadyMs": 481.3000000715256,
+        "chartReadyMs": 777.1999999284744,
+        "jsBytes": 0,
+        "compatibilityRequestStartSpreadMs": 196.09999990463257,
+        "compatibilityDownloadSpanMs": 196.09999990463257
+      }
+    ]
+  }
+}
