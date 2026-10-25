@@ -240,6 +240,7 @@
       }
       document.getElementById('mm-action-center').hidden=!privateAccess || !['watchlist','action-center'].includes(current.workspace);
       document.getElementById('mm-research-lab').hidden=!privateAccess || current.workspace!=='research-lab';
+      window.MoneyRuntimeDiagnostics?.install();
     };
     if (shell) new MutationObserver(sync).observe(shell,{ attributes:true,attributeFilter:['data-market-scope','data-workspace','data-instrument'] });
     window.addEventListener('mm-workspace-context',sync);sync();

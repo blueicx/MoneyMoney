@@ -1,0 +1,11 @@
+const test=require('node:test'),assert=require('node:assert/strict');require('ts-node/register/transpile-only');
+const {createRuntimeObservability}=require('../src/features/runtime-observability');
+test('diagnostics retain only bounded, recent, sanitized request categories and correlation IDs',()=>{
+ const r=createRuntimeObservability({maxSamples:10,startedAt:100});assert.equal(typeof r.diagnostics,'function');
+ for(let i=0;i<15;i++)r.recordHttp({method:'GET',path:'/api/research/projects/private-id?token=private-secret',status:503,latencyMs:i,at:1000+i,requestId:'11111111-1111-4111-8111-111111111111'});
+ const d=r.diagnostics(2000);assert.equal(d.recent.length,10);assert.doesNotMatch(JSON.stringify(d),/private-id|private-secret|token=/);assert.equal(d.recent[0].requestId,'11111111-1111-4111-8111-111111111111');assert.equal(d.recent[0].category,'/api/research/projects/:id');assert.equal(r.diagnostics(1000000).recent.length,0);
+ r.recordHttp({method:'GET',path:'https://private.example/key',status:0,latencyMs:10,at:1000001,requestId:'secret-value',outcome:'aborted'});const last=r.diagnostics(1000002).recent.at(-1);assert.equal(last.requestId,null);assert.equal(last.outcome,'aborted');assert.doesNotMatch(JSON.stringify(last),/private.example|secret-value/);
+});
+test('diagnostic HTTP endpoint is read-only, private and rejects arbitrary query parameters',async()=>{
+ const express=require('express'),{createRuntimeDiagnosticsRouter}=require('../src/web/runtime-diagnostics-routes');const app=express(),r=createRuntimeObservability();let role='guest';app.use((req,res,next)=>{req.user={role};next();});app.use('/diagnostics',createRuntimeDiagnosticsRouter(r,()=>({commit:'a'.repeat(40)})));const server=app.listen(0,'127.0.0.1');await new Promise(resolve=>server.once('listening',resolve));try{const base='http://127.0.0.1:'+server.address().port+'/diagnostics';assert.equal((await fetch(base)).status,403);role='admin';assert.equal((await fetch(base+'?url=http://elsewhere')).status,400);const response=await fetch(base);assert.equal(response.status,200);assert.equal(response.headers.get('cache-control'),'private, no-store');const body=await response.json();assert.equal(body.data.build.commit,'a'.repeat(40));assert.equal(body.data.networkRootCause,'unknown');}finally{await new Promise(resolve=>server.close(resolve));}
+});

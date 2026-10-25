@@ -254,6 +254,8 @@ const runnerExecutionEvidence = new RunnerExecutionEvidenceStore(stateStore);
 import { stockChartAdjustmentRequestReason, stockChartDisclosure } from '../features/stock-chart-disclosure';
 import { logger } from '../utils/logger';
 import { buildSourceSlo, runtimeObservability } from '../features/runtime-observability';
+import {createRuntimeDiagnosticsRouter} from './runtime-diagnostics-routes';
+import {createResearchReproducibilityRouter} from './research-reproducibility-routes';
 import { createDataEnvelope } from '../features/data-status';
 import { dataLakeCatalog } from '../storage/data-lake';
 import { dataLakeWorker } from '../storage/data-lake-worker';
@@ -373,9 +375,12 @@ app.use('/api', (req, res, next) => {
 });
 app.use((req, res, next) => {
   const startedAt = Date.now();
+  let recorded=false;
+  const record=(outcome:'completed'|'aborted')=>{if(recorded)return;recorded=true;runtimeObservability.recordHttp({method:req.method,path:req.path,status:outcome==='aborted'?0:res.statusCode,latencyMs:Date.now()-startedAt,requestId:String(res.getHeader('X-Request-Id')||''),outcome});};
+  res.on('close',()=>record(res.writableFinished?'completed':'aborted'));
   res.on('finish', () => {
     const latencyMs = Date.now() - startedAt;
-    runtimeObservability.recordHttp({ method: req.method, path: req.path, status: res.statusCode, latencyMs });
+    record('completed');
     logger.info('http_request', {
       requestId: res.getHeader('X-Request-Id') || null,
       method: req.method,
@@ -465,7 +470,7 @@ const aiEvaluationLab=new AiEvaluationLab(stateStore,{
  configured:()=>{const runtime=getAiRuntimeConfig('openrouter');return runtime.configured&&runtime.apiUrl==='https://openrouter.ai/api/v1/chat/completions';},
  request:(model,frozen)=>{const venue=({stocks:'Stocks',options:'Options',crypto:'Binance',prediction:'Predict.fun'} as const)[frozen.market as AiRunnerMarket];return requestAiRunnerIntent({model,modelSelection:'fixed',universe:{kind:'watchlist',market:frozen.market as AiRunnerMarket,instruments:frozen.input.allowedInstruments.map((symbolOrMarketId:string)=>({venue,symbolOrMarketId})),hash:crypto.createHash('sha256').update(JSON.stringify(frozen.input)).digest('hex'),frozenAt:new Date().toISOString()}},getAiRuntimeConfig('openrouter'),frozen.input.snapshots);},
 });
-const aiForecastLab=new AiForecastLab(stateStore,{resolve:(market,instrument)=>dataLakeCatalog.resolveInstrument(market as MarketId,instrument),load:input=>dataLakeCatalog.queryBarsAsOf(input as any),configured:()=>{const r=getAiRuntimeConfig('openrouter');return r.configured&&r.apiUrl==='https://openrouter.ai/api/v1/chat/completions';},request:(model,input)=>requestResearchForecast(getAiRuntimeConfig('openrouter'),model,input)});
+const aiForecastLab=new AiForecastLab(stateStore,{resolve:(market,instrument)=>dataLakeCatalog.resolveInstrument(market as MarketId,instrument),load:input=>dataLakeCatalog.queryBarsAsOf(input as any),configured:()=>{const r=getAiRuntimeConfig('openrouter');return r.configured&&r.apiUrl==='https://openrouter.ai/api/v1/chat/completions';},request:(model,input)=>requestResearchForecast(getAiRuntimeConfig('openrouter'),model,input,fetch,true)});
 app.use('/api/research/ai-evaluations/forecasts',createAiForecastRouter(aiForecastLab));
 app.use('/api/research/ai-evaluations',createAiEvaluationRouter(aiEvaluationLab,market=>{const rows=[];for(const runner of aiEvaluationRunners().filter(r=>r.universe?.market===market)){const decisions=stateStore.get<AiRunnerDecisionRecord[]>('ai-paper-runner-history:'+runner.id)||[];if(!Array.isArray(decisions))continue;for(const decision of decisions){if(!decision.modelEvidence||decision.market!==market)continue;rows.push({reference:{runnerId:runner.id,decisionId:decision.id},instrument:decision.instrument,at:decision.at,model:decision.modelEvidence.returnedModel||'未关联'});if(rows.length>=100)return rows;}}return rows;}));
 app.use('/api/strategies/definitions',createStrategyDefinitionRouter(strategyDefinitionStore,input=>dataLakeCatalog.queryBarsAsOf(input),(market,instrument)=>dataLakeCatalog.resolveInstrument(market,instrument),{get:id=>researchRepository.getExperiment(id),save:(id,result)=>researchRepository.saveExperimentOnce(id,result)}));
@@ -493,9 +498,11 @@ const watchlistMetadataStore = new WatchlistMetadataStore(stateStore, () => unif
 const researchContextLedger=new ResearchContextLedger(stateStore);
 app.use('/api/research/context-ledger',createResearchContextRouter(researchContextLedger,()=>unifiedAlertStore.listWatchlist()));
 app.use('/api/operations/history',createOperationHistoryRouter({actionHistory:()=>actionCenterStore.history('admin',{limit:500}),metadata:()=>watchlistMetadataStore.read(),undoAction:(id,version)=>actionCenterStore.undo('admin',id,version),undoMetadata:(id,revision)=>watchlistMetadataStore.undo(id,revision)}));
+app.use('/api/operations/diagnostics',createRuntimeDiagnosticsRouter(runtimeObservability,()=>{try{const info=JSON.parse(fs.readFileSync(path.resolve(__dirname,'..','build-info.json'),'utf8'));return {commit:/^[a-f0-9]{40}$/.test(info.commit)?info.commit:'unknown',version:String(info.version||'unknown'),builtAt:String(info.builtAt||'')};}catch{return {commit:'unknown'};}}));
 const instrumentSilences = new InstrumentSilenceStore(stateStore);
 app.use('/api/watchlist/metadata', createWatchlistMetadataRouter(watchlistMetadataStore));
 app.use('/api/research/experiments',createResearchRobustnessRouter({get:id=>researchRepository.getExperiment(id),save:(id,result)=>researchRepository.saveExperiment(id,result)}));
+app.use('/api/research/experiments',createResearchReproducibilityRouter({get:id=>researchRepository.getExperiment(id),commit:()=>{try{return JSON.parse(fs.readFileSync(path.resolve(__dirname,'..','build-info.json'),'utf8')).commit||'unknown';}catch{return 'unknown';}}}));
 app.use('/api/research/shared-capital',createSharedCapitalRouter({get:id=>researchRepository.getExperiment(id)}));
 app.use('/api/research/experiments',createResearchRevisionRouter({load:id=>{
   const saved=researchRepository.getExperiment(id),e=saved?.experiment;

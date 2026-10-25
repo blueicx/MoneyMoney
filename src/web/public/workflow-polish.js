@@ -56,6 +56,7 @@
     for(const experiment of experiments.slice(0,6)){
       const article=document.createElement('article'),button=document.createElement('button'),output=document.createElement('div');
       button.type='button';button.className='tab';button.dataset.revisionImpact=experiment.id;button.textContent='检查快照修订影响 · '+experiment.id;output.setAttribute('role','status');article.append(button,output);section.append(article);
+      const portable=document.createElement('button');portable.type='button';portable.className='tab';portable.dataset.experimentReproducibility=experiment.id;portable.textContent='导出此实验离线复现包';article.append(portable);portable.onclick=async()=>{if(stale())return;portable.disabled=true;try{const body=await request('/api/research/experiments/'+encodeURIComponent(experiment.id)+'/reproducibility?'+new URLSearchParams({market:ctx().market}));if(stale())return;const url=URL.createObjectURL(new Blob([JSON.stringify(body.data,null,2)],{type:'application/json'})),a=document.createElement('a');a.href=url;a.download='research-package-'+experiment.id+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);output.textContent='复现包已导出；使用 verify-research-package.cjs 在隔离环境校验并重新计算。';}catch(error){if(!stale()&&error.name!=='AbortError')output.textContent=error.message;}finally{portable.disabled=false;}};
       button.onclick=async()=>{
         if(stale())return;button.disabled=true;output.textContent='读取明确分区与快照引用…';
         try{

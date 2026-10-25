@@ -6,3 +6,7 @@ test('forecast adapter uses only fixed target inputs and requires actual returne
  const value=await requestResearchForecast(runtime,model,{target:'close-above-reference',targetCloseAt:123},fetch);assert.deepEqual(value,output);assert.equal(sent.model,model);assert.match(sent.messages[0].content,/no actions, orders/);assert.doesNotMatch(JSON.stringify(sent),/isolated-test-token/);
  await assert.rejects(requestResearchForecast({...runtime,apiUrl:'https://untrusted.example'},model,{},fetch),/端点/);await assert.rejects(requestResearchForecast(runtime,model,{},async()=>({ok:true,json:async()=>({model:'other',choices:[]})})),/身份/);
 });
+test('optional usage envelope keeps provider credits separate and missing billing unknown',async()=>{
+ const {requestResearchForecast}=require('../src/features/ai-forecast-lab'),runtime={configured:true,apiKey:'fixture',apiUrl:'https://openrouter.ai/api/v1/chat/completions'},model='fixture/model',forecast={model,probability:.6,rationale:'Saved bar',counterEvidence:[],citations:[]};
+ for(const cost of [0,.012,null,-1]){const response=await requestResearchForecast(runtime,model,{},async()=>({ok:true,json:async()=>({model,usage:cost===null?{}:{cost},choices:[{message:{content:JSON.stringify(forecast)}}]})}),true);assert.deepEqual(response.forecast,forecast);assert.equal(response.usage.costCredits,cost!==null&&cost>=0?cost:null);}
+});

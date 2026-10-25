@@ -1,4 +1,4 @@
-export interface HttpObservation { method: string; path: string; status: number; latencyMs: number; at?: number }
+export interface HttpObservation { method: string; path: string; status: number; latencyMs: number; at?: number; requestId?: string|null; outcome?: 'completed'|'aborted' }
 export interface SourceObservation { id: string; ok: boolean; latencyMs: number | null; checkedAt: string; status: string }
 
 function percentile95(values: number[]): number | null {
@@ -30,13 +30,20 @@ export function buildSourceSlo(items: SourceObservation[], now = Date.now()): Re
 }
 
 export function createRuntimeObservability(options?: { maxSamples?: number; startedAt?: number }) {
-  const maxSamples = Math.max(10, options?.maxSamples ?? 2_000);
+  const maxSamples = Math.max(10, Math.min(2000, options?.maxSamples ?? 2_000));
   const startedAt = options?.startedAt ?? Date.now();
   const http: HttpObservation[] = [];
   return {
     recordHttp(observation: HttpObservation): void {
-      http.push({ ...observation, at: observation.at ?? Date.now() });
+      if(!Number.isFinite(observation.latencyMs)||observation.latencyMs<0||!Number.isInteger(observation.status)||observation.status<0||observation.status>599)return;
+      const allowed=new Set(['api','health','live','version','readiness','stock','stocks','kline','crypto','options','prediction','research','projects','experiments','forward-observations','ai-evaluations','forecasts','quality','operations','history','diagnostics','data','coverage','recovery','auth','status','login','watchlist','paper','positions']);
+      const category=observation.path.startsWith('/')?observation.path.split('?')[0].split('/').slice(1,6).map(p=>allowed.has(p)?p:':id').join('/'):'other';
+      http.push({method:['GET','POST','PUT','DELETE','PATCH','HEAD','OPTIONS'].includes(observation.method)?observation.method:'OTHER',path:'/'+category,status:observation.status,latencyMs:observation.latencyMs,at:observation.at??Date.now(),requestId:/^[a-f0-9-]{36}$/i.test(observation.requestId||'')?observation.requestId:null,outcome:observation.outcome==='aborted'?'aborted':'completed'});
       if (http.length > maxSamples) http.splice(0, http.length - maxSamples);
+    },
+    diagnostics(now=Date.now()){
+      const recent=http.filter(row=>row.at!<=now&&row.at!>=now-900000).slice(-100).map(({path,...row})=>({...row,category:path}));
+      return {windowMs:900000,capacity:maxSamples,recent,retention:'process-memory-only',networkRootCause:'unknown',reason:'仅为服务器已收到的请求；DNS、TCP、TLS握手失败可能完全到不了应用，不凭这些记录推断根因'};
     },
     snapshot(now = Date.now()) {
       const errors = http.filter(item => item.status >= 500).length;

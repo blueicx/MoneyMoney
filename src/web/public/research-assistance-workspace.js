@@ -48,5 +48,23 @@
   }));read.dataset.recoveryRead='';panel.append(read,out);host.append(panel);
   root.addEventListener('mm-workspace-context',()=>{revision++;preview=null;out.replaceChildren();});
  }
+ function connectionTimings(entry){const elapsed=(start,end)=>Number.isFinite(start)&&Number.isFinite(end)&&start>0&&end>=start?end-start:null;return {dnsMs:entry?elapsed(entry.domainLookupStart,entry.domainLookupEnd):null,tcpMs:entry?elapsed(entry.connectStart,entry.secureConnectionStart||entry.connectEnd):null,tlsMs:entry?elapsed(entry.secureConnectionStart,entry.connectEnd):null,responseMs:entry?elapsed(entry.requestStart,entry.responseStart):null,reason:'复用连接、缓存或未暴露的阶段保持未知；阶段时长不证明失败根因'};}
+ let diagnosticsPanel=null,diagnosticsController=null;
+ function installDiagnostics(){
+  const host=document.getElementById('mm-research-lab');if(!host||diagnosticsPanel?.isConnected||!root.mm_isLoggedIn||root.mm_isGuest)return;
+  const panel=diagnosticsPanel=document.createElement('details');panel.className='mm-data-assets';panel.dataset.runtimeDiagnostics='';panel.append(text('summary','运行与连接诊断（只读）'));const out=text('pre','点击才读取当前进程记录并探测健康接口；不修改网络。');out.style.cssText='white-space:pre-wrap;overflow-wrap:anywhere';let report=null;
+  const download=button('导出本次诊断 JSON',()=>{if(!report)return;const url=URL.createObjectURL(new Blob([JSON.stringify(report,null,2)],{type:'application/json'})),a=document.createElement('a');a.href=url;a.download='moneymoney-runtime-diagnostics.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);});download.disabled=true;
+  const read=button('读取并探测一次',async()=>{if(diagnosticsController||root.mm_isGuest||!root.mm_isLoggedIn)return;const controller=diagnosticsController=new AbortController();let timedOut=false;const timer=setTimeout(()=>{timedOut=true;controller.abort();},15000);read.disabled=true;download.disabled=true;report=null;const scope=document.getElementById('market-workspace-shell')?.dataset.marketScope;
+   try{const response=await fetch('/api/operations/diagnostics',{cache:'no-store',signal:controller.signal}),body=await response.json();if(!response.ok||!body.success)throw Error(body.reason||'诊断读取失败');const started=performance.now();let probe;
+    try{const health=await fetch('/api/health/live',{cache:'no-store',signal:controller.signal});await health.arrayBuffer();const entries=performance.getEntriesByType('resource').filter(e=>e.name===new URL('/api/health/live',location.origin).href&&e.startTime>=started),id=health.headers.get('x-request-id');probe={status:health.status,requestId:/^[a-f0-9-]{36}$/i.test(id||'')?id:null,elapsedMs:performance.now()-started,...connectionTimings(entries.at(-1))};}catch(error){if(controller.signal.aborted)throw error;probe={status:null,elapsedMs:performance.now()-started,dnsMs:null,tcpMs:null,tlsMs:null,reason:'浏览器请求失败；fetch未提供失败阶段，不能断言TLS或服务器故障'};}
+    if(controller.signal.aborted||!panel.isConnected||document.getElementById('market-workspace-shell')?.dataset.marketScope!==scope)return;
+    report={schemaVersion:1,checkedAt:new Date().toISOString(),server:body.data,probe};out.textContent=JSON.stringify(report,null,2);download.disabled=false;
+   }catch(error){if(!controller.signal.aborted||timedOut)out.textContent=timedOut?'诊断读取或探测超时；失败阶段未知':error.message;}finally{clearTimeout(timer);if(diagnosticsController===controller){diagnosticsController=null;read.disabled=false;}}
+  });panel.append(read,download,out);host.append(panel);
+ }
+ root.addEventListener('mm-workspace-context',()=>{diagnosticsController?.abort();diagnosticsController=null;if(diagnosticsPanel){diagnosticsPanel.remove();diagnosticsPanel=null;}installDiagnostics();});
+ document.addEventListener('visibilitychange',()=>{if(document.hidden)diagnosticsController?.abort();});
+ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',installDiagnostics,{once:true});else installDiagnostics();
+ root.MoneyRuntimeDiagnostics={connectionTimings,install:installDiagnostics};
  root.MoneyResearchAssistance={renderGaps,installRetrospective,installRecovery};
 })(window);

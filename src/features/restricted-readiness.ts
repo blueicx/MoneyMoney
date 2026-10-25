@@ -1,6 +1,7 @@
 import {createHash} from 'node:crypto';
 import type {DatasetPartition,DataRevision,PointInTimeSnapshot} from '../storage/data-lake';
 import {buildResearchRevisionImpact} from './research-revision-impact';
+import {buildForwardEvidenceTimeline} from './forward-evidence-timeline';
 import type { RegisteredWindowProof } from './restricted-validation-proof';
 
 interface Input {session:any;version:any;experiment:any;snapshot:PointInTimeSnapshot|null;partitions:DatasetPartition[];revisions:DataRevision[];signals:any[];identity?:{id:string;symbol:string}|null;execution?:Record<string,any>}
@@ -37,5 +38,7 @@ export function buildRestrictedReadiness(input:Input,now=Date.now()){
  check('approval',false,'当前观察没有明确关联的人工审批记录；不按版本或时间猜测配对，不修改已有审批或监控状态');
  const pack={schemaVersion:1,market:s.market,instrument:s.instrument,timeframe:s.timeframe,checkedAt:new Date(now).toISOString(),source:s.source,dataStatus:'partial',strategyId:s.strategyId,strategyHash:s.strategyHash,experimentId:s.experimentId,observationId:s.id,snapshot:p?{id:p.id,contentHash:p.contentHash,asOf:p.asOf}:null,evidenceRefs:[...new Set([...(r?.evidenceRefs||[]),...signals.flatMap(signal=>signal.evidenceRefs||[])])],checks,blockers:checks.filter(row=>row.status!=='met').map(row=>row.reason),forward,revisions,validation:null as RegisteredWindowProof|null,promotionAllowed:false,monitoringAllowed:false,orderChanges:0,modelCalls:0,reason:'只读证据检查，不是策略审批；无新采集、模型调用、任务或订单'};
  if(executionOk)pack.evidenceRefs=[...new Set([...pack.evidenceRefs,...x!.evidenceRefs])];
- return {...pack,contentHash:createHash('sha256').update(JSON.stringify(pack)).digest('hex')};
+ const evidenceTimeline=(()=>{try{return buildForwardEvidenceTimeline({session:s,signals,execution:x,executionVerified:!!executionOk});}catch{return {schemaVersion:1,signals:[],costCoverage:'unknown',actualTradingVerified:false,promotionAllowed:false,reason:'旧记录缺少可核验的完整信号血缘，无法生成逐信号明细；原证据检查和阻止项保留'};}})();
+ const enriched={...pack,evidenceTimeline};
+ return {...enriched,contentHash:createHash('sha256').update(JSON.stringify(enriched)).digest('hex')};
 }

@@ -154,7 +154,7 @@ export class RestrictedPaperExecutionStore {
     }
     return {model:'bilateral-quote-paper-v1',accountId:accountFor(id),market:s.market,instrument:s.instrument,strategyHash:s.strategyHash,
       observationId:id,orders:orders.length,closedTrades,pairedFills:closedTrades,reliableWinRate:closedTrades>=20?100*wins/closedTrades:null,realizedNetPnl:money(realizedNetPnl),totalFees:money(totalFees),totalSlippage:money(totalSlippage),
-      evidenceRefs:filled.map(r=>r.id),reason:'核验同一观察的显式订单/信号/快照引用；纸面报价模型，不是实盘成交或深度保证；少于20笔不排名'};
+      evidenceRefs:filled.map(r=>r.id),receipts:filled.map(r=>({id:r.id,signalId:r.signalId,orderId:r.order.id,side:r.order.side,snapshotId:r.snapshotId,confirmedAt:r.confirmedAt,feeUsd:r.order.feeUsd??null,slippageUsd:r.order.slippageUsd??null})),reason:'核验同一观察的显式订单/信号/快照引用；纸面报价模型，不是实盘成交或深度保证；少于20笔不排名'};
   }
   view(id:string){const {s}=this.context(id,false);return {evidence:this.evidence(id),account:this.account(s),rounds:this.index(id).map(key=>this.read(key)),warning:'手动研究，1000 USD独立虚拟预算；不会启动自动调度、调用模型或修改已有跑单'};}
   private audit(action:string,r:Round){this.state.appendAudit({id:randomUUID(),action:'restricted-paper-'+action,at:new Date(this.now()).toISOString(),detail:JSON.stringify({id:r.id,observationId:r.observationId,hash:r.hash,signalId:r.signalId,orderId:r.status==='confirmed'?r.order.id:null})});}

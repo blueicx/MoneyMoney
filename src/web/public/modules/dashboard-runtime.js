@@ -2802,27 +2802,32 @@ function calcBollinger(data, period = 20, multiplier = 2) {
   });
 }
 let bnKlineController = null;
+let bnDepthController = null;
+let bnTradesController = null;
 let bnKlineRequestRevision = 0;
 let bnKlineContextRevision = 0;
 async function loadBinanceKlines(options = {}) {
+  if (document.hidden || activeMarketScope !== 'crypto' || activeWorkspaceId !== 'crypto-quotes') return;
   const live = options.live === true;
   const initialRows = bnKlineData;
   if (!live) { bnKlineContextRevision++; window.MoneyLiveKline?.stop(); }
   if (bnKlineController) bnKlineController.abort();
   const controller = new AbortController(); bnKlineController = controller;
-  if(options.signal){if(options.signal.aborted)controller.abort();else options.signal.addEventListener('abort',()=>controller.abort(),{once:true});}
-  if (options.signal) { if (options.signal.aborted) return; options.signal.addEventListener('abort', () => controller.abort(), { once: true }); }
+  const cancel = () => controller.abort();
+  if (options.signal) { if (options.signal.aborted) { controller.abort(); return; } options.signal.addEventListener('abort', cancel, { once: true }); }
   const revision = ++bnKlineRequestRevision, symbol = bnCurrentSymbol, interval = bnCurrentInterval;
+  const scopeToken = marketScopeRequestToken();
   const titleEl = document.getElementById('bn-chart-title');
   const canvas = document.getElementById('bn-candlestick');
-  if (!canvas) return;
+  if (!canvas) { options.signal?.removeEventListener('abort', cancel); return; }
+  const current = () => !controller.signal.aborted && revision === bnKlineRequestRevision && symbol === bnCurrentSymbol && interval === bnCurrentInterval && isCurrentMarketScopeToken(scopeToken) && activeWorkspaceId === 'crypto-quotes' && !document.hidden && canvas.isConnected !== false && document.getElementById('bn-candlestick') === canvas;
   if (titleEl) {
       titleEl.textContent = bnCurrentSymbol.replace('USDT','/USDT') + ' · ' + bnCurrentInterval.toUpperCase();
     }
   try {
     const startedAt=performance.now(),res = await fetch('/api/binance/klines?symbol=' + symbol + '&interval=' + interval + '&limit=80', { signal: controller.signal }),headersAt=performance.now();
     const data = await res.json(),requestTiming={prefetched:false,waitMs:headersAt-startedAt,decodeMs:performance.now()-headersAt,requestId:res.headers.get('x-request-id')};
-    if (controller.signal.aborted || revision !== bnKlineRequestRevision || symbol !== bnCurrentSymbol || interval !== bnCurrentInterval) return;
+    if (!current()) return;
     if (live && bnKlineData !== initialRows) return; // A newer push supersedes an in-flight REST snapshot.
     if (!data.success || !data.data?.length) {
       window.MoneyLiveKline?.note('crypto', (data.reason || '来源不可用') + (live ? ' · 保留最后快照（缓存）' : ' · 暂无K线'));
@@ -2840,9 +2845,9 @@ async function loadBinanceKlines(options = {}) {
       const macdCanvas = document.getElementById('bn-macd');
       if (macdCanvas) drawMACD(macdCanvas, bnKlineData);
     }
-    if (!live) loadAlertsForChart().then(() => { if (revision === bnKlineRequestRevision) drawCandles(canvas, bnKlineData); });
-  } catch(e) { if (!controller.signal.aborted) window.MoneyLiveKline?.note('crypto', '来源请求失败 · 保留最后可用快照'); }
-  finally { if (!live) window.MoneyLiveKline?.sync(); }
+    if (!live) loadAlertsForChart().then(() => { if (current()) drawCandles(canvas, bnKlineData); });
+  } catch(e) { if (current()) window.MoneyLiveKline?.note('crypto', '来源请求失败 · 保留最后可用快照'); }
+  finally { options.signal?.removeEventListener('abort', cancel); if (!live && current()) window.MoneyLiveKline?.sync(); }
 }
 async function loadEarlierCryptoKline(signal) {
   const symbol=bnCurrentSymbol,interval=bnCurrentInterval,revision=bnKlineContextRevision,before=bnKlineData[0]?.time;
@@ -2855,11 +2860,16 @@ async function loadEarlierCryptoKline(signal) {
   return bnKlineData.length>count?'已加载更早记录 · '+body.source+' · 缺口不补值':'来源在请求区间没有更早有效记录；保留当前图表（最多2000根）';
 }
 async function loadBinanceDepth() {
+  if (document.hidden || activeMarketScope !== 'crypto' || activeWorkspaceId !== 'crypto-quotes') return;
   const el = document.getElementById('bn-depth');
   if (!el) return;
+  bnDepthController?.abort();
+  const controller = new AbortController(), symbol = bnCurrentSymbol, token = marketScopeRequestToken();
+  bnDepthController = controller;
   try {
-    const res = await fetch('/api/binance/depth?symbol=' + bnCurrentSymbol + '&limit=10');
+    const res = await fetch('/api/binance/depth?symbol=' + symbol + '&limit=10', { signal: controller.signal });
     const data = await res.json();
+    if (controller.signal.aborted || bnDepthController !== controller || symbol !== bnCurrentSymbol || !isCurrentMarketScopeToken(token) || activeWorkspaceId !== 'crypto-quotes' || document.hidden || el.isConnected === false || document.getElementById('bn-depth') !== el) return;
     if (!data.success || !data.data) { el.innerHTML = '<div style="color:var(--text-secondary);font-size:12px;">暂无数据</div>'; return; }
     const { bids, asks } = data.data;
     const maxQty = Math.max(...bids.map(b => b[1]), ...asks.map(a => a[1]));
@@ -2882,6 +2892,7 @@ async function loadBinanceDepth() {
     // Draw depth area chart
     drawDepthChart(bids, asks);
   } catch(e) {}
+  finally { if (bnDepthController === controller) bnDepthController = null; }
 }
 function drawDepthChart(bids, asks) {
   const canvas = document.getElementById('bn-depth-chart');
@@ -2928,11 +2939,16 @@ function drawDepthChart(bids, asks) {
   ctx.setLineDash([]);
 }
 async function loadBinanceTrades() {
+  if (document.hidden || activeMarketScope !== 'crypto' || activeWorkspaceId !== 'crypto-quotes') return;
   const el = document.getElementById('bn-trades');
   if (!el) return;
+  bnTradesController?.abort();
+  const controller = new AbortController(), symbol = bnCurrentSymbol, token = marketScopeRequestToken();
+  bnTradesController = controller;
   try {
-    const res = await fetch('/api/binance/trades?symbol=' + bnCurrentSymbol + '&limit=10');
+    const res = await fetch('/api/binance/trades?symbol=' + symbol + '&limit=10', { signal: controller.signal });
     const data = await res.json();
+    if (controller.signal.aborted || bnTradesController !== controller || symbol !== bnCurrentSymbol || !isCurrentMarketScopeToken(token) || activeWorkspaceId !== 'crypto-quotes' || document.hidden || el.isConnected === false || document.getElementById('bn-trades') !== el) return;
     if (!data.success || !data.data?.length) { el.innerHTML = '<div style="color:var(--text-secondary);font-size:12px;">暂无数据</div>'; return; }
     let h = data.data.reverse().map(t => {
       const cls = t.isBuyerMaker ? 'bn-down' : 'bn-up';
@@ -2942,6 +2958,7 @@ async function loadBinanceTrades() {
     }).join('');
     el.innerHTML = h;
   } catch(e) {}
+  finally { if (bnTradesController === controller) bnTradesController = null; }
 }
 async function loadMovers() {
   try {
@@ -8699,7 +8716,34 @@ async function loadMarketTimeline() {
   }
 }
 
+function abortQuoteAndForecastReads() {
+  bnKlineContextRevision++;
+  bnKlineRequestRevision++;
+  bnKlineController?.abort();
+  bnKlineController = null;
+  bnDepthController?.abort();
+  bnDepthController = null;
+  bnTradesController?.abort();
+  bnTradesController = null;
+  currentForecastLabController?.abort();
+  currentForecastLabController = null;
+  forecastLabLoading = false;
+}
+function bindQuoteAndForecastReadLifecycle() {
+  let previous = null;
+  window.addEventListener('mm-workspace-context', event => {
+    const context = event.detail || {}, next = [context.market, context.workspace, context.instrument || ''].join('|');
+    if (next === previous) return;
+    previous = next;
+    abortQuoteAndForecastReads();
+  });
+  document.addEventListener('visibilitychange', () => { if (document.hidden) abortQuoteAndForecastReads(); });
+  window.addEventListener('pagehide', abortQuoteAndForecastReads);
+}
+bindQuoteAndForecastReadLifecycle();
+
 function abortMarketScopedRequests() {
+  abortQuoteAndForecastReads();
   currentTimelineController?.abort();
   marketResearchController?.abort();
   currentMarketOverviewController?.abort();
@@ -13138,24 +13182,30 @@ function renderForecastLab(d) {
     <p style="margin-top:10px;font-size:11px;line-height:1.6;color:var(--text-secondary);">${radarEscape(d.noteZh)}</p>`;
 }
 let forecastLabLoading = false;
+let currentForecastLabController = null;
 async function loadForecastLab(force = false) {
   const token = marketScopeRequestToken();
 
-  if (!['overview', 'prediction'].includes(activeMarketScope)) return;
+  if (document.hidden || !['overview', 'prediction'].includes(activeMarketScope)) return;
   const host = document.getElementById('forecast-lab-panel');
   if (!host || (forecastLabLoading && !force)) return;
+  currentForecastLabController?.abort();
+  const controller = new AbortController(), workspace = activeWorkspaceId;
+  currentForecastLabController = controller;
+  const current = () => !controller.signal.aborted && currentForecastLabController === controller && isCurrentMarketScopeToken(token) && workspace === activeWorkspaceId && !document.hidden && host.isConnected !== false && document.getElementById('forecast-lab-panel') === host;
   forecastLabLoading = true;
   if (force) host.innerHTML = '<div style="font-size:12px;color:var(--text-secondary);">⏳ 正在读取复盘数据...</div>';
   try {
-    const res = await fetch('/api/forecast-lab', { cache: 'no-store' });
+    const res = await fetch('/api/forecast-lab', { cache: 'no-store', signal: controller.signal });
     const body = await res.json();
-    if (!isCurrentMarketScopeToken(token)) return;
+    if (!current()) return;
     if (!body.success) throw new Error(body.error || '策略实验室暂不可用');
     host.innerHTML = renderForecastLab(body.data);
   } catch (error) {
+    if (!current()) return;
     host.innerHTML = `<div style="font-size:12px;color:var(--red);">❌ ${radarEscape(error.message)} <button class="tab" onclick="loadForecastLab(true)">重试</button></div>`;
   } finally {
-    forecastLabLoading = false;
+    if (currentForecastLabController === controller) { forecastLabLoading = false; currentForecastLabController = null; }
   }
 }
 async function resolveForecastLabCase(encodedKey, outcome, verify = false) {
