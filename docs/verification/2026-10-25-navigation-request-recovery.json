@@ -1,0 +1,198 @@
+{
+  "schemaVersion": 1,
+  "runtimeCommit": "0ced177846c3f13403cb41a5c26d7109b88f325a",
+  "localRegression": {
+    "tests": 2088,
+    "failures": 0,
+    "files": 429
+  },
+  "ci": {
+    "run": 40179968017,
+    "conclusion": "success"
+  },
+  "navigationFixture": {
+    "iconHttpRequests": 0,
+    "pending": 0,
+    "historyChanges": 40,
+    "preservesOriginalSvgBytes": true
+  },
+  "liveSourceShortRuns": [
+    {
+      "name": "original-no-market-warmup",
+      "sourceArtifact": "C:\\Users\\blueice\\AppData\\Local\\Temp\\mm-long-session-9hEmEC\\soak-report.json",
+      "sha256": "15840e243fd1f20344f11c6978d2e644cb537d13b4d562fa6d5c5849611dd03c",
+      "status": "passed",
+      "measuredElapsedMs": 300589,
+      "totalElapsedMs": 301962,
+      "initialLoads": [],
+      "cycles": 218,
+      "firstStable": {
+        "round": 3,
+        "elapsedMs": 5480,
+        "nodes": 20210,
+        "listeners": 1024,
+        "documents": 3,
+        "heapBytes": 3963128,
+        "pendingRequests": 2,
+        "transportPending": 1
+      },
+      "last": {
+        "round": 218,
+        "elapsedMs": 301961,
+        "nodes": 21013,
+        "listeners": 1061,
+        "documents": 3,
+        "heapBytes": 4944032,
+        "pendingRequests": 1,
+        "transportPending": 1
+      },
+      "peakPending": {
+        "count": 7,
+        "round": 1,
+        "paths": {
+          "/api/events/entities": 1,
+          "/api/workspace/navigation": 1,
+          "/api/prediction-radar": 2,
+          "/api/market-ticker": 1,
+          "/api/forecast-lab": 1,
+          "/api/kline-stream": 1
+        }
+      },
+      "remainingPaths": {
+        "/api/kline-stream": 1
+      },
+      "pageErrors": []
+    },
+    {
+      "name": "all-markets-loaded-steady-navigation",
+      "sourceArtifact": "C:\\Users\\blueice\\AppData\\Local\\Temp\\mm-long-session-5JhEbL\\soak-report.json",
+      "sha256": "a2568d54b4be7864390c4981ee6fc95f5ae0ae5c35f4eba882f1462dd9630c5f",
+      "status": "passed",
+      "measuredElapsedMs": 300096,
+      "totalElapsedMs": 329308,
+      "initialLoads": [
+        {
+          "market": "stocks",
+          "elapsedMs": 7448,
+          "pendingPaths": []
+        },
+        {
+          "market": "options",
+          "elapsedMs": 17635,
+          "pendingPaths": []
+        },
+        {
+          "market": "crypto",
+          "elapsedMs": 1987,
+          "pendingPaths": []
+        },
+        {
+          "market": "prediction",
+          "elapsedMs": 350,
+          "pendingPaths": []
+        }
+      ],
+      "cycles": 214,
+      "firstStable": {
+        "round": 3,
+        "elapsedMs": 33930,
+        "nodes": 20947,
+        "listeners": 1058,
+        "documents": 3,
+        "heapBytes": 4228796,
+        "pendingRequests": 1,
+        "transportPending": 1
+      },
+      "last": {
+        "round": 214,
+        "elapsedMs": 329307,
+        "nodes": 21043,
+        "listeners": 1061,
+        "documents": 3,
+        "heapBytes": 4975424,
+        "pendingRequests": 1,
+        "transportPending": 1
+      },
+      "peakPending": {
+        "count": 2,
+        "round": 118,
+        "paths": {
+          "/api/events/entities": 1,
+          "/api/kline-stream": 1
+        }
+      },
+      "remainingPaths": {
+        "/api/kline-stream": 1
+      },
+      "pageErrors": []
+    }
+  ],
+  "unchangedGrowthLimits": {
+    "pendingRequests": 8,
+    "listeners": 40,
+    "nodes": 1000,
+    "heapBytes": 25165824
+  },
+  "release": {
+    "serverSha256": "8fa0b51360364c3e54fb39db035d39ff2eb7f7912cea931b6f9dd7bdc1a616e5",
+    "anonymousPrivateEndpointsDenied": 7,
+    "backup": "/opt/moneymoney/data/backups/2026-10-25T08-59-13-507Z",
+    "rollback": "/opt/moneymoney/dist.rollback-navigation-0ced177-20261025",
+    "hashedAssets": 29,
+    "indexSha256": "038135062f6b5c9f7faffbfd4ab4106bac5d39acfc33182ae8dc80448b65899a",
+    "archiveSha256": "c788e329021958ebcc4ab4c25439d257b599dea9565a062abea5ce3a97747484",
+    "runnerConfigurationHash": "5125162b35c9893e4a9ac7d11c40eeaca7297bd95d7434d6bec70712aa144181"
+  },
+  "boundaries": {
+    "twentyFourHourStabilityVerified": false,
+    "realOrders": false,
+    "coldStart20PercentAchieved": false,
+    "providerHealthProven": false,
+    "paidModelCalls": false
+  },
+  "onlineCanary": {
+    "status": "passed",
+    "markets": [
+      "stocks",
+      "options",
+      "crypto",
+      "prediction"
+    ],
+    "secondaryChartLayout": [
+      {
+        "width": 1440,
+        "hostBottom": 1565.90625,
+        "stageBottom": 1565.90625,
+        "panelBottom": 1578.90625,
+        "plotHeight": 260,
+        "text": "2026/10/23 21:30:00  开 1,271.62  高 1,299.99  低 1,228.89  收 1,238.03  -2.64%  成交量 7,876,100 股 MA5: 1,322.74 MA10: 1,368.08 MA30: 1,587.67 MA60: 1,546.76"
+      },
+      {
+        "width": 390,
+        "hostBottom": 1069.546875,
+        "stageBottom": 1069.546875,
+        "panelBottom": 1082.546875,
+        "plotHeight": 260,
+        "text": "2026/10/23 21:30:00  开 1,271.62  高 1,299.99  低 1,228.89  收 1,238.03  -2.64%  成交量 7,876,100 股 MA5: 1,322.74 MA10: 1,368.08 MA30: 1,587.67 MA60: 1,546.76"
+      }
+    ],
+    "reportSha256": "471b57eaeb71dfa5b89625b7c5bfe487a23d23a531c547f0e01ae0f8c07f5ffe",
+    "errors": []
+  },
+  "onlineIcon": {
+    "historyChanges": 40,
+    "iconHttpRequests": 0,
+    "originalIconSha256": "d1596d34b5c18f012077e0b79d44bedd3bf24edbd1193f5909f4e5d121bc590f",
+    "privateEndpointsDenied": [
+      {
+        "endpoint": "/api/operations/diagnostics",
+        "status": 403
+      },
+      {
+        "endpoint": "/api/research/projects/project_00000000-0000-0000-0000-000000000000/reproducibility",
+        "status": 403
+      }
+    ],
+    "readonly": true
+  }
+}

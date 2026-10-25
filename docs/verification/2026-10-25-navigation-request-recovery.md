@@ -38,4 +38,16 @@
 
 真实来源初始加载分别为股票7448ms、期权17635ms、虚拟币1987ms、预测350ms，有限请求全部结束；总预热29211ms。随后正式300096ms/214轮通过：第3轮至末轮节点20947→21043、监听器1058→1061、堆4228796→4975424字节；峰值2份请求，末轮仅1份行情EventSource，无浏览器未捕获错误。报告 `C:/Users/blueice/AppData/Local/Temp/mm-long-session-5JhEbL/soak-report.json`，日志 `E:/MYC/mm-follow-real-warmed.log`。这是稳定阶段检查，不是启动性能夹测。
 
-CI、无预热原场景复查、干净构建、部署与线上只读结果在对应门禁完成后追加。
+新增翻译预算后，不带逐市场预热的原场景也通过：正式300589ms/218轮；第3轮至末轮节点20210→21013、监听器1024→1061、堆3963128→4944032字节；峰值7份请求，末轮仅1份行情EventSource，无未捕获错误。报告 `C:/Users/blueice/AppData/Local/Temp/mm-long-session-9hEmEC/soak-report.json`，日志 `E:/MYC/mm-follow-real-original-final.log`。本次单次5分钟结果不外推为24小时稳定性；两份旧失败报告均保留。
+
+## 发布与线上只读验收
+
+运行代码提交 `0ced177846c3f13403cb41a5c26d7109b88f325a`；[CI 40179968017](https://github.com/blueicx/MoneyMoney/actions/runs/40179968017) 全部门禁成功，包括完整测试、构建、密钥扫描、web smoke及新增原生导航浏览器复现。1084个跟踪文件扫描通过。
+
+使用git archive导出上述提交，注入完整构建标识后独立构建；在干净目录复验40次导航0份图标请求及43项翻译/加载测试通过。发布归档SHA-256 `c788e329021958ebcc4ab4c25439d257b599dea9565a062abea5ce3a97747484`，server文件 `8fa0b51360364c3e54fb39db035d39ff2eb7f7912cea931b6f9dd7bdc1a616e5`，index文件 `038135062f6b5c9f7faffbfd4ab4106bac5d39acfc33182ae8dc80448b65899a`。脚本校验归档和关键文件后仅替换dist，服务重启探活重试两次后成功并保持active；未触发自动回滚。
+
+生产 `https://bluetrade.bbroot.com` 版本为上述提交，29份压缩/Hash资源逐份匹配且immutable，7个匿名私有入口被拒绝。只读浏览器覆盖股票、期权、虚拟币、预测、SNDK、历史K线及双图：1440/390px图高260px，画布底部等于容器底部，无溢出；截图人工检查确认底部时间轴与成交量完整。预测标的可选择，无浏览器错误。浏览器报告与截图 `E:/MYC/mm-follow-production-canary-0ced177/`。
+
+线上另验40次原生地址切换，图标HTTP请求为0，内嵌图标与原SVG字节完全一致（SHA-256 `d1596d34b5c18f012077e0b79d44bedd3bf24edbd1193f5909f4e5d121bc590f`）；访客访问新增运行诊断及研究复现包均403。日志 `E:/MYC/mm-follow-online-icon.log`。发布前后10个跑单配置指纹一致，原未跟踪数据库Hash不变。
+
+本次回滚目录 `/opt/moneymoney/dist.rollback-navigation-0ced177-20261025`，另保留 `/opt/moneymoney/backups/dist-pre-navigation-0ced177-20261025`。结构化摘要及原始短时巡检报告Hash见 [JSON证据](2026-10-25-navigation-request-recovery.json)。功能及本轮短时真实来源门禁通过；原20%冷启动收益、24小时稳定性、真实未来样本和已有损坏历史的完整性仍按各自证据单独记录，未由本次发布标记完成。
