@@ -133,6 +133,11 @@ function collectExternalWorkspaceReferences(directory) {
 collectExternalWorkspaceReferences(source);
 
 let html = fs.readFileSync(path.join(source, 'index.html'), 'utf8');
+// Chromium refetches a URL favicon on each native history change; when its
+// connection stalls, workspace navigation can retain hundreds of requests.
+// Keep the identical local icon without an HTTP request per history entry.
+const navigationIcon = `data:image/svg+xml;base64,${fs.readFileSync(path.join(source, 'icon.svg')).toString('base64')}`;
+html = html.replace(/(<link\b[^>]*rel="icon"[^>]*href=")\/icon\.svg(")/, `$1${navigationIcon}$2`);
 html = expandDashboardRuntime(html, source);
 const lazyScripts = /<script\b[^>]*src="\/(?:restricted-strategy|restricted-chart|chart-strategies|chart-strategy-controls|chart-analysis|chart-research|chart-research-controls|live-kline|trading-chart|interactive-history|guru-replay|workflow-polish|action-research-workspace|professional-research|automatic-comparison|contracts-workspace)\.js[^"\s]*"[^>]*><\/script>/g;
 html = html.replace(lazyScripts, '');

@@ -35,6 +35,16 @@ test('the existing auth status request can start while public assets download', 
   } finally { dom.window.close(); }
 });
 
+test('workspace history uses the original icon without issuing repeated HTTP reads', () => {
+  const dom=new JSDOM(fs.readFileSync('dist/web/public/index.html','utf8'));
+  try {
+    const icon=dom.window.document.querySelector('link[rel="icon"]');
+    assert.equal(icon.type,'image/svg+xml');
+    assert.ok(icon.href.startsWith('data:image/svg+xml;base64,'));
+    assert.equal(Buffer.from(icon.href.split(',')[1],'base64').toString(),fs.readFileSync('src/web/public/icon.svg','utf8'));
+  } finally {dom.window.close();}
+});
+
 test('auth and the dependency-only loader do not wait for document parsing', () => {
   const dom = new JSDOM(fs.readFileSync('dist/web/public/index.html', 'utf8'));
   try {
