@@ -1,0 +1,2306 @@
+{
+  "schemaVersion": 1,
+  "baseline": "1987bd7",
+  "sourceBaseline": "d7fcfdb107b20f721b18ac104403645d448ac8a0",
+  "comparison": "before candidate after; conservative min of before/after median",
+  "conditions": {
+    "cpuRate": 4,
+    "layoutTraceDuringComparison": false,
+    "profileDuringComparison": false,
+    "mobileWidth": 390,
+    "desktopWidth": 1440,
+    "downloadKbps": 750,
+    "runsPerTemperatureAndWidth": 3,
+    "latencyMs": 80
+  },
+  "totalSamples": 72,
+  "experiments": [
+    {
+      "assessment": [
+        {
+          "viewport": 1440,
+          "temperature": "cold",
+          "before": 3296.2000000476837,
+          "after": 4201.900000095367,
+          "conservativeBaseline": 3296.2000000476837,
+          "candidate": 3366.5,
+          "improvementPct": -2.1327589330532026,
+          "passed": false
+        },
+        {
+          "viewport": 1440,
+          "temperature": "warm",
+          "before": 702.2999999523163,
+          "after": 1061.2999999523163,
+          "conservativeBaseline": 702.2999999523163,
+          "candidate": 813.8999999761581,
+          "improvementPct": -15.890645027967976,
+          "passed": false
+        },
+        {
+          "viewport": 390,
+          "temperature": "cold",
+          "before": 3324.5,
+          "after": 4304.200000047684,
+          "conservativeBaseline": 3324.5,
+          "candidate": 3239.899999976158,
+          "improvementPct": 2.5447435711788757,
+          "passed": false
+        },
+        {
+          "viewport": 390,
+          "temperature": "warm",
+          "before": 836.6000000238419,
+          "after": 1108.4000000953674,
+          "conservativeBaseline": 836.6000000238419,
+          "candidate": 739.2000000476837,
+          "improvementPct": 11.642361938008893,
+          "passed": true
+        }
+      ],
+      "name": "preload",
+      "decision": "withdrawn"
+    },
+    {
+      "assessment": [
+        {
+          "viewport": 1440,
+          "temperature": "cold",
+          "before": 3735.899999976158,
+          "after": 3892.0999999046326,
+          "conservativeBaseline": 3735.899999976158,
+          "candidate": 4097.299999952316,
+          "improvementPct": -9.67370646908281,
+          "passed": false
+        },
+        {
+          "viewport": 1440,
+          "temperature": "warm",
+          "before": 796.2999999523163,
+          "after": 943.2999999523163,
+          "conservativeBaseline": 796.2999999523163,
+          "candidate": 1107.3999999761581,
+          "improvementPct": -39.068190385843394,
+          "passed": false
+        },
+        {
+          "viewport": 390,
+          "temperature": "cold",
+          "before": 3227.5,
+          "after": 3399.100000023842,
+          "conservativeBaseline": 3227.5,
+          "candidate": 3732.7000000476837,
+          "improvementPct": -15.652982185830645,
+          "passed": false
+        },
+        {
+          "viewport": 390,
+          "temperature": "warm",
+          "before": 1187.8999999761581,
+          "after": 821.3000000715256,
+          "conservativeBaseline": 821.3000000715256,
+          "candidate": 1037.8000000715256,
+          "improvementPct": -26.36064775126572,
+          "passed": false
+        }
+      ],
+      "name": "stock",
+      "decision": "withdrawn"
+    }
+  ],
+  "runs": [
+    {
+      "experiment": "preload",
+      "phase": "before",
+      "logSha256": "bb9cd53848158c5a0c4cbfff8d397177d3f18aa9fdc50804dfaae99339f13655",
+      "medians": [
+        {
+          "viewport": 1440,
+          "temperature": "cold",
+          "shellReadyMs": 2215.100000023842,
+          "chartReadyMs": 3296.2000000476837,
+          "jsBytes": 106749,
+          "compatibilityRequestStartSpreadMs": 1.2000000476837158,
+          "compatibilityDownloadSpanMs": 177.10000002384186
+        },
+        {
+          "viewport": 1440,
+          "temperature": "warm",
+          "shellReadyMs": 441.59999990463257,
+          "chartReadyMs": 702.2999999523163,
+          "jsBytes": 0,
+          "compatibilityRequestStartSpreadMs": 162.79999995231628,
+          "compatibilityDownloadSpanMs": 162.79999995231628
+        },
+        {
+          "viewport": 390,
+          "temperature": "cold",
+          "shellReadyMs": 1478.7999999523163,
+          "chartReadyMs": 3324.5,
+          "jsBytes": 122907,
+          "compatibilityRequestStartSpreadMs": 185.89999997615814,
+          "compatibilityDownloadSpanMs": 566
+        },
+        {
+          "viewport": 390,
+          "temperature": "warm",
+          "shellReadyMs": 494.39999997615814,
+          "chartReadyMs": 836.6000000238419,
+          "jsBytes": 0,
+          "compatibilityRequestStartSpreadMs": 1.100000023841858,
+          "compatibilityDownloadSpanMs": 1.100000023841858
+        }
+      ],
+      "samples": [
+        {
+          "viewport": 1440,
+          "run": 0,
+          "temperature": "cold",
+          "shellReadyMs": 2528.2000000476837,
+          "paintedShellReadyMs": 3431.3000000715256,
+          "chartReadyMs": 4041.9000000953674,
+          "chartState": "ready",
+          "chartMessage": "Apple · usAAPL\n▤ 双图\n⛶ 全屏\n周期\n1分\n5分\n15分\n1小时\n1日\n3日\n5日\n60日\n120日\n1年\n5年\n最新可用行情（实时性未声明） · K线时间 2026-10-23 · yahoo-finance-history · 抓取 2026/10/25 21:35 · 源站耗时 1259ms · origin AAPL · 1d · 普通行情 · K线：最新可用（实时性未声明） · 300 根\n历史时点 / 日期定位 / 日内下钻\n图层与策略 · 保留当前选择\n事件时间轴\n刷新\n正在读取该标的事件与证据…\n正在加载当前标的事件…\nMA5 344.48\nMA10 343.30\nMA20 338.91\n周期非短线 · 连接：来源快照 · 时效：来源过期 · 蜡烛：已完成\n本地时区\n自动价格轴\n加载更早K线\n区间测量\n价格提醒\n 模拟成交\n价格口径 \n来源口径 · 未声明\n前复权（Yahoo Adj Close 系数推导）\n后复权（不可用）\n2026/10/23 21:30:00 开 349.12 高 351.73 低 345.75 收 347.73 -0.40% 成",
+          "jsBytes": 106749,
+          "klineResponseMetadata": [
+            {
+              "status": 200,
+              "dataStatus": "live",
+              "source": "yahoo-finance-history",
+              "reason": null,
+              "updatedAt": "2026-10-25T13:35:36.022Z",
+              "recordCount": 300
+            }
+          ],
+          "prefetchStartedBeforeCore": true
+        },
+        {
+          "viewport": 1440,
+          "run": 0,
+          "temperature": "warm",
+          "shellReadyMs": 441.59999990463257,
+          "paintedShellReadyMs": 540.2999999523163,
+          "chartReadyMs": 674.3999999761581,
+          "chartState": "ready",
+          "chartMessage": "Apple · usAAPL\n▤ 双图\n⛶ 全屏\n周期\n1分\n5分\n15分\n1小时\n1日\n3日\n5日\n60日\n120日\n1年\n5年\n缓存数据 · K线时间 2026-10-23 · yahoo-finance-history · 抓取 2026/10/25 21:35 · 上次源站耗时 1259ms · cache · 显示受限范围内的缓存快照；来源时间单独标示 AAPL · 1d · 普通行情 · K线：缓存 · 300 根 · 显示受限范围内的缓存快照；来源时间单独标示\n历史时点 / 日期定位 / 日内下钻\n图层与策略 · 保留当前选择\n事件时间轴\n刷新\n正在读取该标的事件与证据…\n正在加载当前标的事件…\nMA5 344.48\nMA10 343.30\nMA20 338.91\n周期非短线 · 连接：来源快照 · 时效：来源过期 · 蜡烛：已完成\n本地时区\n自动价格轴\n加载更早K线\n区间测量\n价格提醒\n 模拟成交\n价格口径 \n来源口径 · 未声明\n前复权（Yahoo Adj Close 系数推导）\n后复权（不可用）\n2026/10/23 21:30:00 开 349.12 高 351.",
+          "jsBytes": 0,
+          "klineResponseMetadata": [
+            {
+              "status": 200,
+              "dataStatus": "cached",
+              "source": "yahoo-finance-history",
+              "reason": "显示受限范围内的缓存快照；来源时间单独标示",
+              "updatedAt": "2026-10-25T13:35:36.022Z",
+              "recordCount": 300
+            }
+          ],
+          "prefetchStartedBeforeCore": true
+        },
+        {
+          "viewport": 1440,
+          "run": 1,
+          "temperature": "cold",
+          "shellReadyMs": 1836.8000000715256,
+          "paintedShellReadyMs": 1876.1000000238419,
+          "chartReadyMs": 3296.2000000476837,
+          "chartState": "ready",
+          "chartMessage": "Apple · usAAPL\n▤ 双图\n⛶ 全屏\n周期\n1分\n5分\n15分\n1小时\n1日\n3日\n5日\n60日\n120日\n1年\n5年\n缓存数据 · K线时间 2026-10-23 · yahoo-finance-history · 抓取 2026/10/25 21:35 · 上次源站耗时 1259ms · cache · 显示受限范围内的缓存快照；来源时间单独标示 AAPL · 1d · 普通行情 · K线：缓存 · 300 根 · 显示受限范围内的缓存快照；来源时间单独标示\n历史时点 / 日期定位 / 日内下钻\n图层与策略 · 保留当前选择\n事件时间轴\n刷新\n正在读取该标的事件与证据…\n正在加载当前标的事件…\nMA5 344.48\nMA10 343.30\nMA20 338.91\n周期非短线 · 连接：来源快照 · 时效：来源过期 · 蜡烛：已完成\n本地时区\n自动价格轴\n加载更早K线\n区间测量\n价格提醒\n 模拟成交\n价格口径 \n来源口径 · 未声明\n前复权（Yahoo Adj Close 系数推导）\n后复权（不可用）\n2026/10/23 21:30:00 开 349.12 高 351.",
+          "jsBytes": 122907,
+          "klineResponseMetadata": [
+            {
+              "status": 200,
+              "dataStatus": "cached",
+              "source": "yahoo-finance-history",
+              "reason": "显示受限范围内的缓存快照；来源时间单独标示",
+              "updatedAt": "2026-10-25T13:35:36.022Z",
+              "recordCount": 300
+            }
+          ],
+          "prefetchStartedBeforeCore": true
+        },
+        {
+          "viewport": 1440,
+          "run": 1,
+          "temperature": "warm",
+          "shellReadyMs": 402.39999997615814,
+          "paintedShellReadyMs": 504.39999997615814,
+          "chartReadyMs": 702.2999999523163,
+          "chartState": "ready",
+          "chartMessage": "Apple · usAAPL\n▤ 双图\n⛶ 全屏\n周期\n1分\n5分\n15分\n1小时\n1日\n3日\n5日\n60日\n120日\n1年\n5年\n缓存数据 · K线时间 2026-10-23 · yahoo-finance-history · 抓取 2026/10/25 21:35 · 上次源站耗时 1259ms · cache · 显示受限范围内的缓存快照；来源时间单独标示 AAPL · 1d · 普通行情 · K线：缓存 · 300 根 · 显示受限范围内的缓存快照；来源时间单独标示\n历史时点 / 日期定位 / 日内下钻\n图层与策略 · 保留当前选择\n事件时间轴\n刷新\n正在读取该标的事件与证据…\n正在加载当前标的事件…\nMA5 344.48\nMA10 343.30\nMA20 338.91\n周期非短线 · 连接：来源快照 · 时效：来源过期 · 蜡烛：已完成\n本地时区\n自动价格轴\n加载更早K线\n区间测量\n价格提醒\n 模拟成交\n价格口径 \n来源口径 · 未声明\n前复权（Yahoo Adj Close 系数推导）\n后复权（不可用）\n2026/10/23 21:30:00 开 349.12 高 351.",
+          "jsBytes": 0,
+          "klineResponseMetadata": [
+            {
+              "status": 200,
+              "dataStatus": "cached",
+              "source": "yahoo-finance-history",
+              "reason": "显示受限范围内的缓存快照；来源时间单独标示",
+              "updatedAt": "2026-10-25T13:35:36.022Z",
+              "recordCount": 300
+            }
+          ],
+          "prefetchStartedBeforeCore": true
+        },
+        {
+          "viewport": 1440,
+          "run": 2,
+          "temperature": "cold",
+          "shellReadyMs": 2215.100000023842,
+          "paintedShellReadyMs": 3129.4000000953674,
+          "chartReadyMs": 3131,
+          "chartState": "ready",
+          "chartMessage": "Apple · usAAPL\n▤ 双图\n⛶ 全屏\n周期\n1分\n5分\n15分\n1小时\n1日\n3日\n5日\n60日\n120日\n1年\n5年\n缓存数据 · K线时间 2026-10-23 · yahoo-finance-history · 抓取 2026/10/25 21:35 · 上次源站耗时 1259ms · cache · 显示受限范围内的缓存快照；来源时间单独标示 AAPL · 1d · 普通行情 · K线：缓存 · 300 根 · 显示受限范围内的缓存快照；来源时间单独标示\n历史时点 / 日期定位 / 日内下钻\n图层与策略 · 保留当前选择\n事件时间轴\n刷新\n正在读取该标的事件与证据…\n正在加载当前标的事件…\nMA5 344.48\nMA10 343.30\nMA20 338.91\n周期非短线 · 连接：来源快照 · 时效：来源过期 · 蜡烛：已完成\n本地时区\n自动价格轴\n加载更早K线\n区间测量\n价格提醒\n 模拟成交\n价格口径 \n来源口径 · 未声明\n前复权（Yahoo Adj Close 系数推导）\n后复权（不可用）\n2026/10/23 21:30:00 开 349.12 高 351.",
+          "jsBytes": 106749,
+          "klineResponseMetadata": [
+            {
+              "status": 200,
+              "dataStatus": "cached",
+              "source": "yahoo-finance-history",
+              "reason": "显示受限范围内的缓存快照；来源时间单独标示",
+              "updatedAt": "2026-10-25T13:35:36.022Z",
+              "recordCount": 300
+            }
+          ],
+          "prefetchStartedBeforeCore": true
+        },
+        {
+          "viewport": 1440,
+          "run": 2,
+          "temperature": "warm",
+          "shellReadyMs": 459.7999999523163,
+          "paintedShellReadyMs": 563.8999999761581,
+          "chartReadyMs": 745,
+          "chartState": "ready",
+          "chartMessage": "Apple · usAAPL\n▤ 双图\n⛶ 全屏\n周期\n1分\n5分\n15分\n1小时\n1日\n3日\n5日\n60日\n120日\n1年\n5年\n缓存数据 · K线时间 2026-10-23 · yahoo-finance-history · 抓取 2026/10/25 21:35 · 上次源站耗时 1259ms · cache · 显示受限范围内的缓存快照；来源时间单独标示 AAPL · 1d · 普通行情 · K线：缓存 · 300 根 · 显示受限范围内的缓存快照；来源时间单独标示\n历史时点 / 日期定位 / 日内下钻\n图层与策略 · 保留当前选择\n事件时间轴\n刷新\n正在读取该标的事件与证据…\n正在加载当前标的事件…\nMA5 344.48\nMA10 343.30\nMA20 338.91\n周期非短线 · 连接：来源快照 · 时效：来源过期 · 蜡烛：已完成\n本地时区\n自动价格轴\n加载更早K线\n区间测量\n价格提醒\n 模拟成交\n价格口径 \n来源口径 · 未声明\n前复权（Yahoo Adj Close 系数推导）\n后复权（不可用）\n2026/10/23 21:30:00 开 349.12 高 351.",
+          "jsBytes": 4306,
+          "klineResponseMetadata": [
+            {
+              "status": 200,
+              "dataStatus": "cached",
+              "source": "yahoo-finance-history",
+              "reason": "显示受限范围内的缓存快照；来源时间单独标示",
+              "updatedAt": "2026-10-25T13:35:36.022Z",
+              "recordCount": 300
+            }
+          ],
+          "prefetchStartedBeforeCore": true
+        },
+        {
+          "viewport": 390,
+          "run": 0,
+          "temperature": "cold",
+          "shellReadyMs": 1674.5,
+          "paintedShellReadyMs": 1698.8999999761581,
+          "chartReadyMs": 3324.5,
+          "chartState": "ready",
+          "chartMessage": "Apple · usAAPL\n▤ 双图\n⛶ 全屏\n周期\n1分\n5分\n15分\n1小时\n1日\n3日\n5日\n60日\n120日\n1年\n5年\n缓存数据 · K线时间 2026-10-23 · yahoo-finance-history · 抓取 2026/10/25 21:35 · 上次源站耗时 1259ms · cache · 显示受限范围内的缓存快照；来源时间单独标示 AAPL · 1d · 普通行情 · K线：缓存 · 300 根 · 显示受限范围内的缓存快照；来源时间单独标示\n历史时点 / 日期定位 / 日内下钻\n图层与策略 · 保留当前选择\n事件时间轴\n刷新\n正在读取该标的事件与证据…\n正在加载当前标的事件…\nMA5 344.48\nMA10 343.30\nMA20 338.91\n周期非短线 · 连接：来源快照 · 时效：来源过期 · 蜡烛：已完成\n本地时区\n自动价格轴\n加载更早K线\n区间测量\n价格提醒\n 模拟成交\n价格口径 \n来源口径 · 未声明\n前复权（Yahoo Adj Close 系数推导）\n后复权（不可用）\n2026/10/23 21:30:00 开 349.12 高 351.",
+          "jsBytes": 122907,
+          "klineResponseMetadata": [
+            {
+              "status": 200,
+              "dataStatus": "cached",
+              "source": "yahoo-finance-history",
+              "reason": "显示受限范围内的缓存快照；来源时间单独标示",
+              "updatedAt": "2026-10-25T13:35:36.022Z",
+              "recordCount": 300
+            }
+          ],
+          "prefetchStartedBeforeCore": true
+        },
+        {
+          "viewport": 390,
+          "run": 0,
+          "temperature": "warm",
+          "shellReadyMs": 494.39999997615814,
+          "paintedShellReadyMs": 775.7999999523163,
+          "chartReadyMs": 775.0999999046326,
+          "chartState": "ready",
+          "chartMessage": "Apple · usAAPL\n▤ 双图\n⛶ 全屏\n周期\n1分\n5分\n15分\n1小时\n1日\n3日\n5日\n60日\n120日\n1年\n5年\n缓存数据 · K线时间 2026-10-23 · yahoo-finance-history · 抓取 2026/10/25 21:35 · 上次源站耗时 1259ms · stale · 显示受限范围内的缓存快照；正在后台刷新来源 AAPL · 1d · 普通行情 · K线：缓存 · 300 根 · 显示受限范围内的缓存快照；正在后台刷新来源\n历史时点 / 日期定位 / 日内下钻\n图层与策略 · 保留当前选择\n事件时间轴\n刷新\n正在读取该标的事件与证据…\n正在加载当前标的事件…\nMA5 344.48\nMA10 343.30\nMA20 338.91\n周期非短线 · 连接：来源快照 · 时效：来源过期 · 蜡烛：已完成\n本地时区\n自动价格轴\n加载更早K线\n区间测量\n价格提醒\n 模拟成交\n价格口径 \n来源口径 · 未声明\n前复权（Yahoo Adj Close 系数推导）\n后复权（不可用）\n2026/10/23 21:30:00 开 349.12 高 351.",
+          "jsBytes": 0,
+          "klineResponseMetadata": [
+            {
+              "status": 200,
+              "dataStatus": "cached",
+              "source": "yahoo-finance-history",
+              "reason": "显示受限范围内的缓存快照；正在后台刷新来源",
+              "updatedAt": "2026-10-25T13:35:36.022Z",
+              "recordCount": 300
+            }
+          ],
+          "prefetchStartedBeforeCore": true
+        },
+        {
+          "viewport": 390,
+          "run": 1,
+          "temperature": "cold",
+          "shellReadyMs": 1478.7999999523163,
+          "paintedShellReadyMs": 1505.7999999523163,
+          "chartReadyMs": 3278.0999999046326,
+          "chartState": "ready",
+          "chartMessage": "Apple · usAAPL\n▤ 双图\n⛶ 全屏\n周期\n1分\n5分\n15分\n1小时\n1日\n3日\n5日\n60日\n120日\n1年\n5年\n缓存数据 · K线时间 2026-10-23 · yahoo-finance-history · 抓取 2026/10/25 21:35 · 上次源站耗时 2ms · cache · 显示受限范围内的缓存快照；来源时间单独标示 AAPL · 1d · 普通行情 · K线：缓存 · 300 根 · 显示受限范围内的缓存快照；来源时间单独标示\n历史时点 / 日期定位 / 日内下钻\n图层与策略 · 保留当前选择\n事件时间轴\n刷新\n正在读取该标的事件与证据…\n正在加载当前标的事件…\nMA5 344.48\nMA10 343.30\nMA20 338.91\n周期非短线 · 连接：来源快照 · 时效：来源过期 · 蜡烛：已完成\n本地时区\n自动价格轴\n加载更早K线\n区间测量\n价格提醒\n 模拟成交\n价格口径 \n来源口径 · 未声明\n前复权（Yahoo Adj Close 系数推导）\n后复权（不可用）\n2026/10/23 21:30:00 开 349.12 高 351.73 ",
+          "jsBytes": 122907,
+          "klineResponseMetadata": [
+            {
+              "status": 200,
+              "dataStatus": "cached",
+              "source": "yahoo-finance-history",
+              "reason": "显示受限范围内的缓存快照；来源时间单独标示",
+              "updatedAt": "2026-10-25T13:35:36.022Z",
+              "recordCount": 300
+            }
+          ],
+          "prefetchStartedBeforeCore": true
+        },
+        {
+          "viewport": 390,
+          "run": 1,
+          "temperature": "warm",
+          "shellReadyMs": 477.2000000476837,
+          "paintedShellReadyMs": 580.8999999761581,
+          "chartReadyMs": 1049.2000000476837,
+          "chartState": "ready",
+          "chartMessage": "Apple · usAAPL\n▤ 双图\n⛶ 全屏\n周期\n1分\n5分\n15分\n1小时\n1日\n3日\n5日\n60日\n120日\n1年\n5年\n缓存数据 · K线时间 2026-10-23 · yahoo-finance-history · 抓取 2026/10/25 21:35 · 上次源站耗时 2ms · cache · 显示受限范围内的缓存快照；来源时间单独标示 AAPL · 1d · 普通行情 · K线：缓存 · 300 根 · 显示受限范围内的缓存快照；来源时间单独标示\n历史时点 / 日期定位 / 日内下钻\n图层与策略 · 保留当前选择\n事件时间轴\n刷新\npartial · events ok · news ok · filings unavailable · secForm4 partial · sec13f unavailable\nIn 1985, He Was Forced Out of the Company He Founded. Months Later He Bet $10 Million On A Graphics Unit He Bought From George L",
+          "jsBytes": 0,
+          "klineResponseMetadata": [
+            {
+              "status": 200,
+              "dataStatus": "cached",
+              "source": "yahoo-finance-history",
+              "reason": "显示受限范围内的缓存快照；来源时间单独标示",
+              "updatedAt": "2026-10-25T13:35:36.022Z",
+              "recordCount": 300
+            }
+          ],
+          "prefetchStartedBeforeCore": true
+        },
+        {
+          "viewport": 390,
+          "run": 2,
+          "temperature": "cold",
+          "shellReadyMs": 1430.8999999761581,
+          "paintedShellReadyMs": 1448.2000000476837,
+          "chartReadyMs": 3409.399999976158,
+          "chartState": "ready",
+          "chartMessage": "Apple · usAAPL\n▤ 双图\n⛶ 全屏\n周期\n1分\n5分\n15分\n1小时\n1日\n3日\n5日\n60日\n120日\n1年\n5年\n最新可用行情（实时性未声明） · K线时间 2026-10-23 · yahoo-finance-history · 抓取 2026/10/25 21:36 · 源站耗时 660ms · origin AAPL · 1d · 普通行情 · K线：最新可用（实时性未声明） · 300 根\n历史时点 / 日期定位 / 日内下钻\n图层与策略 · 保留当前选择\n事件时间轴\n刷新\npartial · events ok · news ok · filings unavailable · secForm4 partial · sec13f unavailable\nIn 1985, He Was Forced Out of the Company He Founded. Months Later He Bet $10 Million On A Graphics Unit He Bought From George Lucas. By 2006, That Bet Was",
+          "jsBytes": 122907,
+          "klineResponseMetadata": [
+            {
+              "status": 200,
+              "dataStatus": "live",
+              "source": "yahoo-finance-history",
+              "reason": null,
+              "updatedAt": "2026-10-25T13:36:01.751Z",
+              "recordCount": 300
+            }
+          ],
+          "prefetchStartedBeforeCore": true
+        },
+        {
+          "viewport": 390,
+          "run": 2,
+          "temperature": "warm",
+          "shellReadyMs": 541.3000000715256,
+          "paintedShellReadyMs": 807.4000000953674,
+          "chartReadyMs": 836.6000000238419,
+          "chartState": "ready",
+          "chartMessage": "Apple · usAAPL\n▤ 双图\n⛶ 全屏\n周期\n1分\n5分\n15分\n1小时\n1日\n3日\n5日\n60日\n120日\n1年\n5年\n缓存数据 · K线时间 2026-10-23 · yahoo-finance-history · 抓取 2026/10/25 21:36 · 上次源站耗时 660ms · cache · 显示受限范围内的缓存快照；来源时间单独标示 AAPL · 1d · 普通行情 · K线：缓存 · 300 根 · 显示受限范围内的缓存快照；来源时间单独标示\n历史时点 / 日期定位 / 日内下钻\n图层与策略 · 保留当前选择\n事件时间轴\n刷新\npartial · events ok · news ok · filings unavailable · secForm4 partial · sec13f unavailable\nIn 1985, He Was Forced Out of the Company He Founded. Months Later He Bet $10 Million On A Graphics Unit He Bought From George",
+          "jsBytes": 0,
+          "klineResponseMetadata": [
+            {
+              "status": 200,
+              "dataStatus": "cached",
+              "source": "yahoo-finance-history",
+              "reason": "显示受限范围内的缓存快照；来源时间单独标示",
+              "updatedAt": "2026-10-25T13:36:01.751Z",
+              "recordCount": 300
+            }
+          ],
+          "prefetchStartedBeforeCore": true
+        }
+      ],
+      "firstColdPhaseMarks": [
+        {
+          "name": "moneymoney:auth-ready",
+          "atMs": 1439.9
+        },
+        {
+          "name": "moneymoney:chart-preload-start",
+          "atMs": 1441.1
+        },
+        {
+          "name": "moneymoney:stock-kline-prefetch-start",
+          "atMs": 1445.4
+        },
+        {
+          "name": "moneymoney:dashboard-start",
+          "atMs": 1625.9
+        },
+        {
+          "name": "moneymoney:dashboard-auth-ready",
+          "atMs": 1627
+        },
+        {
+          "name": "moneymoney:dashboard-context-ready",
+          "atMs": 1699.1
+        },
+        {
+          "name": "moneymoney:dashboard-core-ready",
+          "atMs": 2465.8
+        },
+        {
+          "name": "moneymoney:chart-module-start",
+          "atMs": 2472.6
+        },
+        {
+          "name": "moneymoney:chart-preload-ready",
+          "atMs": 2536.9
+        },
+        {
+          "name": "moneymoney:chart-module-ready",
+          "atMs": 2556.7
+        },
+        {
+          "name": "moneymoney:stock-kline-request-start",
+          "atMs": 2644.8
+        },
+        {
+          "name": "moneymoney:stock-kline-response-parsed",
+          "atMs": 3471.2
+        },
+        {
+          "name": "moneymoney:stock-kline-first-render",
+          "atMs": 3965.2
+        }
+      ]
+    },
+    {
+      "experiment": "preload",
+      "phase": "candidate",
+      "logSha256": "830bf229e112fce4ee2896f3413f80062a0f07dfc0815d9e6b9137cebd3d3255",
+      "medians": [
+        {
+          "viewport": 1440,
+          "temperature": "cold",
+          "shellReadyMs": 2333.2000000476837,
+          "chartReadyMs": 3366.5,
+          "jsBytes": 109076,
+          "compatibilityRequestStartSpreadMs": 1,
+          "compatibilityDownloadSpanMs": 159.89999997615814
+        },
+        {
+          "viewport": 1440,
+          "temperature": "warm",
+          "shellReadyMs": 558.2000000476837,
+          "chartReadyMs": 813.8999999761581,
+          "jsBytes": 0,
+          "compatibilityRequestStartSpreadMs": 1.100000023841858,
+          "compatibilityDownloadSpanMs": 1.100000023841858
+        },
+        {
+          "viewport": 390,
+          "temperature": "cold",
+          "shellReadyMs": 1754,
+          "chartReadyMs": 3239.899999976158,
+          "jsBytes": 109076,
+          "compatibilityRequestStartSpreadMs": 1.8000000715255737,
+          "compatibilityDownloadSpanMs": 166.60000002384186
+        },
+        {
+          "viewport": 390,
+          "temperature": "warm",
+          "shellReadyMs": 437.7000000476837,
+          "chartReadyMs": 739.2000000476837,
+          "jsBytes": 0,
+          "compatibilityRequestStartSpreadMs": 2.399999976158142,
+          "compatibilityDownloadSpanMs": 2.399999976158142
+        }
+      ],
+      "samples": [
+        {
+          "viewport": 1440,
+          "run": 0,
+          "temperature": "cold",
+          "shellReadyMs": 2289.7000000476837,
+          "paintedShellReadyMs": 3231.8000000715256,
+          "chartReadyMs": 3366.5,
+          "chartState": "ready",
+          "chartMessage": "Apple · usAAPL\n▤ 双图\n⛶ 全屏\n周期\n1分\n5分\n15分\n1小时\n1日\n3日\n5日\n60日\n120日\n1年\n5年\n最新可用行情（实时性未声明） · K线时间 2026-10-23 · yahoo-finance-history · 抓取 2026/10/25 21:36 · 源站耗时 364ms · origin AAPL · 1d · 普通行情 · K线：最新可用（实时性未声明） · 300 根\n历史时点 / 日期定位 / 日内下钻\n图层与策略 · 保留当前选择\n事件时间轴\n刷新\n正在读取该标的事件与证据…\n正在加载当前标的事件…\nMA5 344.48\nMA10 343.30\nMA20 338.91\n周期非短线 · 连接：来源快照 · 时效：来源过期 · 蜡烛：已完成\n本地时区\n自动价格轴\n加载更早K线\n区间测量\n价格提醒\n 模拟成交\n行情来源说明\n价格口径 \n来源口径 · 未声明\n前复权（Yahoo Adj Close 系数推导）\n后复权（不可用）\n2026/10/23 21:30:00 开 349.12 高 351.73 低 345.75 收 347.73 -0",
+          "jsBytes": 109076,
+          "klineResponseMetadata": [
+            {
+              "status": 200,
+              "dataStatus": "live",
+              "source": "yahoo-finance-history",
+              "reason": null,
+              "updatedAt": "2026-10-25T13:36:09.41Z",
+              "recordCount": 300
+            }
+          ],
+          "prefetchStartedBeforeCore": true
+        },
+        {
+          "viewport": 1440,
+          "run": 0,
+          "temperature": "warm",
+          "shellReadyMs": 558.2000000476837,
+          "paintedShellReadyMs": 874.8999999761581,
+          "chartReadyMs": 911.7000000476837,
+          "chartState": "ready",
+          "chartMessage": "Apple · usAAPL\n▤ 双图\n⛶ 全屏\n周期\n1分\n5分\n15分\n1小时\n1日\n3日\n5日\n60日\n120日\n1年\n5年\n缓存数据 · K线时间 2026-10-23 · yahoo-finance-history · 抓取 2026/10/25 21:36 · 上次源站耗时 364ms · cache · 显示受限范围内的缓存快照；来源时间单独标示 AAPL · 1d · 普通行情 · K线：缓存 · 300 根 · 显示受限范围内的缓存快照；来源时间单独标示\n历史时点 / 日期定位 / 日内下钻\n图层与策略 · 保留当前选择\n事件时间轴\n刷新\n正在读取该标的事件与证据…\n正在加载当前标的事件…\nMA5 344.48\nMA10 343.30\nMA20 338.91\n周期非短线 · 连接：来源快照 · 时效：来源过期 · 蜡烛：已完成\n本地时区\n自动价格轴\n加载更早K线\n区间测量\n价格提醒\n 模拟成交\n行情来源说明\n价格口径 \n来源口径 · 未声明\n前复权（Yahoo Adj Close 系数推导）\n后复权（不可用）\n2026/10/23 21:30:00 开 349.12 ",
+          "jsBytes": 0,
+          "klineResponseMetadata": [
+            {
+              "status": 200,
+              "dataStatus": "cached",
+              "source": "yahoo-finance-history",
+              "reason": "显示受限范围内的缓存快照；来源时间单独标示",
+              "updatedAt": "2026-10-25T13:36:09.41Z",
+              "recordCount": 300
+            }
+          ],
+          "prefetchStartedBeforeCore": true
+        },
+        {
+          "viewport": 1440,
+          "run": 1,
+          "temperature": "cold",
+          "shellReadyMs": 2333.2000000476837,
+          "paintedShellReadyMs": 3286.600000023842,
+          "chartReadyMs": 3288.3000000715256,
+          "chartState": "ready",
+          "chartMessage": "Apple · usAAPL\n▤ 双图\n⛶ 全屏\n周期\n1分\n5分\n15分\n1小时\n1日\n3日\n5日\n60日\n120日\n1年\n5年\n缓存数据 · K线时间 2026-10-23 · yahoo-finance-history · 抓取 2026/10/25 21:36 · 上次源站耗时 364ms · cache · 显示受限范围内的缓存快照；来源时间单独标示 AAPL · 1d · 普通行情 · K线：缓存 · 300 根 · 显示受限范围内的缓存快照；来源时间单独标示\n历史时点 / 日期定位 / 日内下钻\n图层与策略 · 保留当前选择\n事件时间轴\n刷新\n正在读取该标的事件与证据…\n正在加载当前标的事件…\nMA5 344.48\nMA10 343.30\nMA20 338.91\n周期非短线 · 连接：来源快照 · 时效：来源过期 · 蜡烛：已完成\n本地时区\n自动价格轴\n加载更早K线\n区间测量\n价格提醒\n 模拟成交\n行情来源说明\n价格口径 \n来源口径 · 未声明\n前复权（Yahoo Adj Close 系数推导）\n后复权（不可用）\n2026/10/23 21:30:00 开 349.12 ",
+          "jsBytes": 109076,
+          "klineResponseMetadata": [
+            {
+              "status": 200,
+              "dataStatus": "cached",
+              "source": "yahoo-finance-history",
+              "reason": "显示受限范围内的缓存快照；来源时间单独标示",
+              "updatedAt": "2026-10-25T13:36:09.41Z",
+              "recordCount": 300
+            }
+          ],
+          "prefetchStartedBeforeCore": true
+        },
+        {
+          "viewport": 1440,
+          "run": 1,
+          "temperature": "warm",
+          "shellReadyMs": 447.89999997615814,
+          "paintedShellReadyMs": 752.1999999284744,
+          "chartReadyMs": 780.2999999523163,
+          "chartState": "ready",
+          "chartMessage": "Apple · usAAPL\n▤ 双图\n⛶ 全屏\n周期\n1分\n5分\n15分\n1小时\n1日\n3日\n5日\n60日\n120日\n1年\n5年\n缓存数据 · K线时间 2026-10-23 · yahoo-finance-history · 抓取 2026/10/25 21:36 · 上次源站耗时 364ms · cache · 显示受限范围内的缓存快照；来源时间单独标示 AAPL · 1d · 普通行情 · K线：缓存 · 300 根 · 显示受限范围内的缓存快照；来源时间单独标示\n历史时点 / 日期定位 / 日内下钻\n图层与策略 · 保留当前选择\n事件时间轴\n刷新\n正在读取该标的事件与证据…\n正在加载当前标的事件…\nMA5 344.48\nMA10 343.30\nMA20 338.91\n周期非短线 · 连接：来源快照 · 时效：来源过期 · 蜡烛：已完成\n本地时区\n自动价格轴\n加载更早K线\n区间测量\n价格提醒\n 模拟成交\n行情来源说明\n价格口径 \n来源口径 · 未声明\n前复权（Yahoo Adj Close 系数推导）\n后复权（不可用）\n2026/10/23 21:30:00 开 349.12 ",
+          "jsBytes": 0,
+          "klineResponseMetadata": [
+            {
+              "status": 200,
+              "dataStatus": "cached",
+              "source": "yahoo-finance-history",
+              "reason": "显示受限范围内的缓存快照；来源时间单独标示",
+              "updatedAt": "2026-10-25T13:36:09.41Z",
+              "recordCount": 300
+            }
+          ],
+          "prefetchStartedBeforeCore": true
+        },
+        {
+          "viewport": 1440,
+          "run": 2,
+          "temperature": "cold",
+          "shellReadyMs": 2454.2999999523163,
+          "paintedShellReadyMs": 3448.0999999046326,
+          "chartReadyMs": 3453.7999999523163,
+          "chartState": "ready",
+          "chartMessage": "Apple · usAAPL\n▤ 双图\n⛶ 全屏\n周期\n1分\n5分\n15分\n1小时\n1日\n3日\n5日\n60日\n120日\n1年\n5年\n缓存数据 · K线时间 2026-10-23 · yahoo-finance-history · 抓取 2026/10/25 21:36 · 上次源站耗时 364ms · cache · 显示受限范围内的缓存快照；来源时间单独标示 AAPL · 1d · 普通行情 · K线：缓存 · 300 根 · 显示受限范围内的缓存快照；来源时间单独标示\n历史时点 / 日期定位 / 日内下钻\n图层与策略 · 保留当前选择\n事件时间轴\n刷新\npartial · events ok · news stale · filings unavailable · secForm4 partial · sec13f unavailable\nIn 1985, He Was Forced Out of the Company He Founded. Months Later He Bet $10 Million On A Graphics Unit He Bought From Geo",
+          "jsBytes": 109076,
+          "klineResponseMetadata": [
+            {
+              "status": 200,
+              "dataStatus": "cached",
+              "source": "yahoo-finance-history",
+              "reason": "显示受限范围内的缓存快照；来源时间单独标示",
+              "updatedAt": "2026-10-25T13:36:09.41Z",
+              "recordCount": 300
+            }
+          ],
+          "prefetchStartedBeforeCore": true
+        },
+        {
+          "viewport": 1440,
+          "run": 2,
+          "temperature": "warm",
+          "shellReadyMs": 568.3999999761581,
+          "paintedShellReadyMs": 803.5,
+          "chartReadyMs": 813.8999999761581,
+          "chartState": "ready",
+          "chartMessage": "Apple · usAAPL\n▤ 双图\n⛶ 全屏\n周期\n1分\n5分\n15分\n1小时\n1日\n3日\n5日\n60日\n120日\n1年\n5年\n缓存数据 · K线时间 2026-10-23 · yahoo-finance-history · 抓取 2026/10/25 21:36 · 上次源站耗时 364ms · cache · 显示受限范围内的缓存快照；来源时间单独标示 AAPL · 1d · 普通行情 · K线：缓存 · 300 根 · 显示受限范围内的缓存快照；来源时间单独标示\n历史时点 / 日期定位 / 日内下钻\n图层与策略 · 保留当前选择\n事件时间轴\n刷新\npartial · events ok · news stale · filings unavailable · secForm4 partial · sec13f unavailable\nIn 1985, He Was Forced Out of the Company He Founded. Months Later He Bet $10 Million On A Graphics Unit He Bought From Geo",
+          "jsBytes": 0,
+          "klineResponseMetadata": [
+            {
+              "status": 200,
+              "dataStatus": "cached",
+              "source": "yahoo-finance-history",
+              "reason": "显示受限范围内的缓存快照；来源时间单独标示",
+              "updatedAt": "2026-10-25T13:36:09.41Z",
+              "recordCount": 300
+            }
+          ],
+          "prefetchStartedBeforeCore": true
+        },
+        {
+          "viewport": 390,
+          "run": 0,
+          "temperature": "cold",
+          "shellReadyMs": 1701,
+          "paintedShellReadyMs": 1726.9000000953674,
+          "chartReadyMs": 3312.3000000715256,
+          "chartState": "ready",
+          "chartMessage": "Apple · usAAPL\n▤ 双图\n⛶ 全屏\n周期\n1分\n5分\n15分\n1小时\n1日\n3日\n5日\n60日\n120日\n1年\n5年\n缓存数据 · K线时间 2026-10-23 · yahoo-finance-history · 抓取 2026/10/25 21:36 · 上次源站耗时 364ms · stale · 显示受限范围内的缓存快照；正在后台刷新来源 AAPL · 1d · 普通行情 · K线：缓存 · 300 根 · 显示受限范围内的缓存快照；正在后台刷新来源\n历史时点 / 日期定位 / 日内下钻\n图层与策略 · 保留当前选择\n事件时间轴\n刷新\npartial · events ok · news stale · filings unavailable · secForm4 partial · sec13f unavailable\nIn 1985, He Was Forced Out of the Company He Founded. Months Later He Bet $10 Million On A Graphics Unit He Bought From Geo",
+          "jsBytes": 125234,
+          "klineResponseMetadata": [
+            {
+              "status": 200,
+              "dataStatus": "cached",
+              "source": "yahoo-finance-history",
+              "reason": "显示受限范围内的缓存快照；正在后台刷新来源",
+              "updatedAt": "2026-10-25T13:36:09.41Z",
+              "recordCount": 300
+            }
+          ],
+          "prefetchStartedBeforeCore": true
+        },
+        {
+          "viewport": 390,
+          "run": 0,
+          "temperature": "warm",
+          "shellReadyMs": 549.3999999761581,
+          "paintedShellReadyMs": 918,
+          "chartReadyMs": 963.2000000476837,
+          "chartState": "ready",
+          "chartMessage": "Apple · usAAPL\n▤ 双图\n⛶ 全屏\n周期\n1分\n5分\n15分\n1小时\n1日\n3日\n5日\n60日\n120日\n1年\n5年\n缓存数据 · K线时间 2026-10-23 · yahoo-finance-history · 抓取 2026/10/25 21:36 · 上次源站耗时 2ms · cache · 显示受限范围内的缓存快照；来源时间单独标示 AAPL · 1d · 普通行情 · K线：缓存 · 300 根 · 显示受限范围内的缓存快照；来源时间单独标示\n历史时点 / 日期定位 / 日内下钻\n图层与策略 · 保留当前选择\n事件时间轴\n刷新\npartial · events ok · news stale · filings unavailable · secForm4 partial · sec13f unavailable\nIn 1985, He Was Forced Out of the Company He Founded. Months Later He Bet $10 Million On A Graphics Unit He Bought From Georg",
+          "jsBytes": 0,
+          "klineResponseMetadata": [
+            {
+              "status": 200,
+              "dataStatus": "cached",
+              "source": "yahoo-finance-history",
+              "reason": "显示受限范围内的缓存快照；来源时间单独标示",
+              "updatedAt": "2026-10-25T13:36:09.41Z",
+              "recordCount": 300
+            }
+          ],
+          "prefetchStartedBeforeCore": true
+        },
+        {
+          "viewport": 390,
+          "run": 1,
+          "temperature": "cold",
+          "shellReadyMs": 1754,
+          "paintedShellReadyMs": 1777,
+          "chartReadyMs": 3121.2000000476837,
+          "chartState": "ready",
+          "chartMessage": "Apple · usAAPL\n▤ 双图\n⛶ 全屏\n周期\n1分\n5分\n15分\n1小时\n1日\n3日\n5日\n60日\n120日\n1年\n5年\n缓存数据 · K线时间 2026-10-23 · yahoo-finance-history · 抓取 2026/10/25 21:36 · 上次源站耗时 2ms · cache · 显示受限范围内的缓存快照；来源时间单独标示 AAPL · 1d · 普通行情 · K线：缓存 · 300 根 · 显示受限范围内的缓存快照；来源时间单独标示\n历史时点 / 日期定位 / 日内下钻\n图层与策略 · 保留当前选择\n事件时间轴\n刷新\npartial · events ok · news stale · filings unavailable · secForm4 partial · sec13f unavailable\nIn 1985, He Was Forced Out of the Company He Founded. Months Later He Bet $10 Million On A Graphics Unit He Bought From Georg",
+          "jsBytes": 109076,
+          "klineResponseMetadata": [
+            {
+              "status": 200,
+              "dataStatus": "cached",
+              "source": "yahoo-finance-history",
+              "reason": "显示受限范围内的缓存快照；来源时间单独标示",
+              "updatedAt": "2026-10-25T13:36:09.41Z",
+              "recordCount": 300
+            }
+          ],
+          "prefetchStartedBeforeCore": true
+        },
+        {
+          "viewport": 390,
+          "run": 1,
+          "temperature": "warm",
+          "shellReadyMs": 434.60000002384186,
+          "paintedShellReadyMs": 590.1000000238419,
+          "chartReadyMs": 716.1000000238419,
+          "chartState": "ready",
+          "chartMessage": "Apple · usAAPL\n▤ 双图\n⛶ 全屏\n周期\n1分\n5分\n15分\n1小时\n1日\n3日\n5日\n60日\n120日\n1年\n5年\n缓存数据 · K线时间 2026-10-23 · yahoo-finance-history · 抓取 2026/10/25 21:36 · 上次源站耗时 2ms · cache · 显示受限范围内的缓存快照；来源时间单独标示 AAPL · 1d · 普通行情 · K线：缓存 · 300 根 · 显示受限范围内的缓存快照；来源时间单独标示\n历史时点 / 日期定位 / 日内下钻\n图层与策略 · 保留当前选择\n事件时间轴\n刷新\npartial · events ok · news stale · filings unavailable · secForm4 partial · sec13f unavailable\nIn 1985, He Was Forced Out of the Company He Founded. Months Later He Bet $10 Million On A Graphics Unit He Bought From Georg",
+          "jsBytes": 0,
+          "klineResponseMetadata": [
+            {
+              "status": 200,
+              "dataStatus": "cached",
+              "source": "yahoo-finance-history",
+              "reason": "显示受限范围内的缓存快照；来源时间单独标示",
+              "updatedAt": "2026-10-25T13:36:09.41Z",
+              "recordCount": 300
+            }
+          ],
+          "prefetchStartedBeforeCore": true
+        },
+        {
+          "viewport": 390,
+          "run": 2,
+          "temperature": "cold",
+          "shellReadyMs": 1930.6000000238419,
+          "paintedShellReadyMs": 3205.600000023842,
+          "chartReadyMs": 3239.899999976158,
+          "chartState": "ready",
+          "chartMessage": "Apple · usAAPL\n▤ 双图\n⛶ 全屏\n周期\n1分\n5分\n15分\n1小时\n1日\n3日\n5日\n60日\n120日\n1年\n5年\n缓存数据 · K线时间 2026-10-23 · yahoo-finance-history · 抓取 2026/10/25 21:36 · 上次源站耗时 2ms · cache · 显示受限范围内的缓存快照；来源时间单独标示 AAPL · 1d · 普通行情 · K线：缓存 · 300 根 · 显示受限范围内的缓存快照；来源时间单独标示\n历史时点 / 日期定位 / 日内下钻\n图层与策略 · 保留当前选择\n事件时间轴\n刷新\npartial · events ok · news stale · filings unavailable · secForm4 partial · sec13f unavailable\nIn 1985, He Was Forced Out of the Company He Founded. Months Later He Bet $10 Million On A Graphics Unit He Bought From Georg",
+          "jsBytes": 109076,
+          "klineResponseMetadata": [
+            {
+              "status": 200,
+              "dataStatus": "cached",
+              "source": "yahoo-finance-history",
+              "reason": "显示受限范围内的缓存快照；来源时间单独标示",
+              "updatedAt": "2026-10-25T13:36:09.41Z",
+              "recordCount": 300
+            }
+          ],
+          "prefetchStartedBeforeCore": true
+        },
+        {
+          "viewport": 390,
+          "run": 2,
+          "temperature": "warm",
+          "shellReadyMs": 437.7000000476837,
+          "paintedShellReadyMs": 539.8000000715256,
+          "chartReadyMs": 739.2000000476837,
+          "chartState": "ready",
+          "chartMessage": "Apple · usAAPL\n▤ 双图\n⛶ 全屏\n周期\n1分\n5分\n15分\n1小时\n1日\n3日\n5日\n60日\n120日\n1年\n5年\n缓存数据 · K线时间 2026-10-23 · yahoo-finance-history · 抓取 2026/10/25 21:36 · 上次源站耗时 2ms · cache · 显示受限范围内的缓存快照；来源时间单独标示 AAPL · 1d · 普通行情 · K线：缓存 · 300 根 · 显示受限范围内的缓存快照；来源时间单独标示\n历史时点 / 日期定位 / 日内下钻\n图层与策略 · 保留当前选择\n事件时间轴\n刷新\npartial · events ok · news stale · filings unavailable · secForm4 partial · sec13f unavailable\nIn 1985, He Was Forced Out of the Company He Founded. Months Later He Bet $10 Million On A Graphics Unit He Bought From Georg",
+          "jsBytes": 4306,
+          "klineResponseMetadata": [
+            {
+              "status": 200,
+              "dataStatus": "cached",
+              "source": "yahoo-finance-history",
+              "reason": "显示受限范围内的缓存快照；来源时间单独标示",
+              "updatedAt": "2026-10-25T13:36:09.41Z",
+              "recordCount": 300
+            }
+          ],
+          "prefetchStartedBeforeCore": true
+        }
+      ],
+      "firstColdPhaseMarks": [
+        {
+          "name": "moneymoney:chart-preload-start",
+          "atMs": 392.6
+        },
+        {
+          "name": "moneymoney:auth-ready",
+          "atMs": 1481.1
+        },
+        {
+          "name": "moneymoney:stock-kline-prefetch-start",
+          "atMs": 1482.9
+        },
+        {
+          "name": "moneymoney:dashboard-start",
+          "atMs": 1629.3
+        },
+        {
+          "name": "moneymoney:dashboard-auth-ready",
+          "atMs": 1630.3
+        },
+        {
+          "name": "moneymoney:dashboard-context-ready",
+          "atMs": 1670.1
+        },
+        {
+          "name": "moneymoney:dashboard-core-ready",
+          "atMs": 2258.2
+        },
+        {
+          "name": "moneymoney:chart-module-start",
+          "atMs": 2262.1
+        },
+        {
+          "name": "moneymoney:chart-module-ready",
+          "atMs": 2303
+        },
+        {
+          "name": "moneymoney:stock-kline-request-start",
+          "atMs": 2345.1
+        },
+        {
+          "name": "moneymoney:stock-kline-response-parsed",
+          "atMs": 2858.9
+        },
+        {
+          "name": "moneymoney:stock-kline-first-render",
+          "atMs": 3219.7
+        }
+      ]
+    },
+    {
+      "experiment": "preload",
+      "phase": "after",
+      "logSha256": "d8ce1dd6d52fc4d069c2aae0a0b8526bd4ed3fabbb92f43aa2eddfd6c633388f",
+      "medians": [
+        {
+          "viewport": 1440,
+          "temperature": "cold",
+          "shellReadyMs": 2733.7000000476837,
+          "chartReadyMs": 4201.900000095367,
+          "jsBytes": 106749,
+          "compatibilityRequestStartSpreadMs": 2.600000023841858,
+          "compatibilityDownloadSpanMs": 155.5
+        },
+        {
+          "viewport": 1440,
+          "temperature": "warm",
+          "shellReadyMs": 767.2999999523163,
+          "chartReadyMs": 1061.2999999523163,
+          "jsBytes": 0,
+          "compatibilityRequestStartSpreadMs": 2.600000023841858,
+          "compatibilityDownloadSpanMs": 2.600000023841858
+        },
+        {
+          "viewport": 390,
+          "temperature": "cold",
+          "shellReadyMs": 2123.100000023842,
+          "chartReadyMs": 4304.200000047684,
+          "jsBytes": 122907,
+          "compatibilityRequestStartSpreadMs": 198.39999997615814,
+          "compatibilityDownloadSpanMs": 553.1999999284744
+        },
+        {
+          "viewport": 390,
+          "temperature": "warm",
+          "shellReadyMs": 688.7000000476837,
+          "chartReadyMs": 1108.4000000953674,
+          "jsBytes": 0,
+          "compatibilityRequestStartSpreadMs": 1.6999999284744263,
+          "compatibilityDownloadSpanMs": 1.6999999284744263
+        }
+      ],
+      "samples": [
+        {
+          "viewport": 1440,
+          "run": 0,
+          "temperature": "cold",
+          "shellReadyMs": 2176,
+          "paintedShellReadyMs": 2867,
+          "chartReadyMs": 3394.7000000476837,
+          "chartState": "ready",
+          "chartMessage": "Apple · usAAPL\n▤ 双图\n⛶ 全屏\n周期\n1分\n5分\n15分\n1小时\n1日\n3日\n5日\n60日\n120日\n1年\n5年\n最新可用行情（实时性未声明） · K线时间 2026-10-23 · yahoo-finance-history · 抓取 2026/10/25 21:36 · 源站耗时 1755ms · origin AAPL · 1d · 普通行情 · K线：最新可用（实时性未声明） · 300 根\n历史时点 / 日期定位 / 日内下钻\n图层与策略 · 保留当前选择\n事件时间轴\n刷新\n正在读取该标的事件与证据…\n正在加载当前标的事件…\nMA5 344.48\nMA10 343.30\nMA20 338.91\n周期非短线 · 连接：来源快照 · 时效：来源过期 · 蜡烛：已完成\n本地时区\n自动价格轴\n加载更早K线\n区间测量\n价格提醒\n 模拟成交\n价格口径 \n来源口径 · 未声明\n前复权（Yahoo Adj Close 系数推导）\n后复权（不可用）\n2026/10/23 21:30:00 开 349.12 高 351.73 低 345.75 收 347.73 -0.40% 成",
+          "jsBytes": 122907,
+          "klineResponseMetadata": [
+            {
+              "status": 200,
+              "dataStatus": "live",
+              "source": "yahoo-finance-history",
+              "reason": null,
+              "updatedAt": "2026-10-25T13:36:45.476Z",
+              "recordCount": 300
+            }
+          ],
+          "prefetchStartedBeforeCore": true
+        },
+        {
+          "viewport": 1440,
+          "run": 0,
+          "temperature": "warm",
+          "shellReadyMs": 767.2999999523163,
+          "paintedShellReadyMs": 961.3999999761581,
+          "chartReadyMs": 980.5,
+          "chartState": "ready",
+          "chartMessage": "Apple · usAAPL\n▤ 双图\n⛶ 全屏\n周期\n1分\n5分\n15分\n1小时\n1日\n3日\n5日\n60日\n120日\n1年\n5年\n缓存数据 · K线时间 2026-10-23 · yahoo-finance-history · 抓取 2026/10/25 21:36 · 上次源站耗时 1755ms · cache · 显示受限范围内的缓存快照；来源时间单独标示 AAPL · 1d · 普通行情 · K线：缓存 · 300 根 · 显示受限范围内的缓存快照；来源时间单独标示\n历史时点 / 日期定位 / 日内下钻\n图层与策略 · 保留当前选择\n事件时间轴\n刷新\n正在读取该标的事件与证据…\n正在加载当前标的事件…\nMA5 344.48\nMA10 343.30\nMA20 338.91\n周期非短线 · 连接：来源快照 · 时效：来源过期 · 蜡烛：已完成\n本地时区\n自动价格轴\n加载更早K线\n区间测量\n价格提醒\n 模拟成交\n价格口径 \n来源口径 · 未声明\n前复权（Yahoo Adj Close 系数推导）\n后复权（不可用）\n2026/10/23 21:30:00 开 349.12 高 351.",
+          "jsBytes": 0,
+          "klineResponseMetadata": [
+            {
+              "status": 200,
+              "dataStatus": "cached",
+              "source": "yahoo-finance-history",
+              "reason": "显示受限范围内的缓存快照；来源时间单独标示",
+              "updatedAt": "2026-10-25T13:36:45.476Z",
+              "recordCount": 300
+            }
+          ],
+          "prefetchStartedBeforeCore": true
+        },
+        {
+          "viewport": 1440,
+          "run": 1,
+          "temperature": "cold",
+          "shellReadyMs": 2733.7000000476837,
+          "paintedShellReadyMs": 4192.900000095367,
+          "chartReadyMs": 4201.900000095367,
+          "chartState": "ready",
+          "chartMessage": "Apple · usAAPL\n▤ 双图\n⛶ 全屏\n周期\n1分\n5分\n15分\n1小时\n1日\n3日\n5日\n60日\n120日\n1年\n5年\n缓存数据 · K线时间 2026-10-23 · yahoo-finance-history · 抓取 2026/10/25 21:36 · 上次源站耗时 1755ms · cache · 显示受限范围内的缓存快照；来源时间单独标示 AAPL · 1d · 普通行情 · K线：缓存 · 300 根 · 显示受限范围内的缓存快照；来源时间单独标示\n历史时点 / 日期定位 / 日内下钻\n图层与策略 · 保留当前选择\n事件时间轴\n刷新\n正在读取该标的事件与证据…\n正在加载当前标的事件…\nMA5 344.48\nMA10 343.30\nMA20 338.91\n周期非短线 · 连接：来源快照 · 时效：来源过期 · 蜡烛：已完成\n本地时区\n自动价格轴\n加载更早K线\n区间测量\n价格提醒\n 模拟成交\n价格口径 \n来源口径 · 未声明\n前复权（Yahoo Adj Close 系数推导）\n后复权（不可用）\n2026/10/23 21:30:00 开 349.12 高 351.",
+          "jsBytes": 106749,
+          "klineResponseMetadata": [
+            {
+              "status": 200,
+              "dataStatus": "cached",
+              "source": "yahoo-finance-history",
+              "reason": "显示受限范围内的缓存快照；来源时间单独标示",
+              "updatedAt": "2026-10-25T13:36:45.476Z",
+              "recordCount": 300
+            }
+          ],
+          "prefetchStartedBeforeCore": true
+        },
+        {
+          "viewport": 1440,
+          "run": 1,
+          "temperature": "warm",
+          "shellReadyMs": 663.2000000476837,
+          "paintedShellReadyMs": 1032.3999999761581,
+          "chartReadyMs": 1061.2999999523163,
+          "chartState": "ready",
+          "chartMessage": "Apple · usAAPL\n▤ 双图\n⛶ 全屏\n周期\n1分\n5分\n15分\n1小时\n1日\n3日\n5日\n60日\n120日\n1年\n5年\n缓存数据 · K线时间 2026-10-23 · yahoo-finance-history · 抓取 2026/10/25 21:36 · 上次源站耗时 1755ms · cache · 显示受限范围内的缓存快照；来源时间单独标示 AAPL · 1d · 普通行情 · K线：缓存 · 300 根 · 显示受限范围内的缓存快照；来源时间单独标示\n历史时点 / 日期定位 / 日内下钻\n图层与策略 · 保留当前选择\n事件时间轴\n刷新\n正在读取该标的事件与证据…\n正在加载当前标的事件…\nMA5 344.48\nMA10 343.30\nMA20 338.91\n周期非短线 · 连接：来源快照 · 时效：来源过期 · 蜡烛：已完成\n本地时区\n自动价格轴\n加载更早K线\n区间测量\n价格提醒\n 模拟成交\n价格口径 \n来源口径 · 未声明\n前复权（Yahoo Adj Close 系数推导）\n后复权（不可用）\n2026/10/23 21:30:00 开 349.12 高 351.",
+          "jsBytes": 0,
+          "klineResponseMetadata": [
+            {
+              "status": 200,
+              "dataStatus": "cached",
+              "source": "yahoo-finance-history",
+              "reason": "显示受限范围内的缓存快照；来源时间单独标示",
+              "updatedAt": "2026-10-25T13:36:45.476Z",
+              "recordCount": 300
+            }
+          ],
+          "prefetchStartedBeforeCore": true
+        },
+        {
+          "viewport": 1440,
+          "run": 2,
+          "temperature": "cold",
+          "shellReadyMs": 2958,
+          "paintedShellReadyMs": 4418.099999904633,
+          "chartReadyMs": 4428.899999976158,
+          "chartState": "ready",
+          "chartMessage": "Apple · usAAPL\n▤ 双图\n⛶ 全屏\n周期\n1分\n5分\n15分\n1小时\n1日\n3日\n5日\n60日\n120日\n1年\n5年\n缓存数据 · K线时间 2026-10-23 · yahoo-finance-history · 抓取 2026/10/25 21:36 · 上次源站耗时 1755ms · cache · 显示受限范围内的缓存快照；来源时间单独标示 AAPL · 1d · 普通行情 · K线：缓存 · 300 根 · 显示受限范围内的缓存快照；来源时间单独标示\n历史时点 / 日期定位 / 日内下钻\n图层与策略 · 保留当前选择\n事件时间轴\n刷新\npartial · events ok · news ok · filings unavailable · secForm4 partial · sec13f unavailable\nSEC 4 · 0001140361-26-040540\nevent · 发生 2026/10/23 06:32 · SEC EDGAR\n查看来源 ↗\n内部人卖出 · Newstead Jennifer · 交易日 2026-10-20 · 2,39",
+          "jsBytes": 106749,
+          "klineResponseMetadata": [
+            {
+              "status": 200,
+              "dataStatus": "cached",
+              "source": "yahoo-finance-history",
+              "reason": "显示受限范围内的缓存快照；来源时间单独标示",
+              "updatedAt": "2026-10-25T13:36:45.476Z",
+              "recordCount": 300
+            }
+          ],
+          "prefetchStartedBeforeCore": true
+        },
+        {
+          "viewport": 1440,
+          "run": 2,
+          "temperature": "warm",
+          "shellReadyMs": 923,
+          "paintedShellReadyMs": 984.7000000476837,
+          "chartReadyMs": 2337.7000000476837,
+          "chartState": "ready",
+          "chartMessage": "Apple · usAAPL\n▤ 双图\n⛶ 全屏\n周期\n1分\n5分\n15分\n1小时\n1日\n3日\n5日\n60日\n120日\n1年\n5年\n最新可用行情（实时性未声明） · K线时间 2026-10-23 · yahoo-finance-history · 抓取 2026/10/25 21:37 · 源站耗时 1617ms · origin AAPL · 1d · 普通行情 · K线：最新可用（实时性未声明） · 300 根\n历史时点 / 日期定位 / 日内下钻\n图层与策略 · 保留当前选择\n事件时间轴\n刷新\npartial · events ok · news ok · filings unavailable · secForm4 partial · sec13f unavailable\nSEC 4 · 0001140361-26-040540\nevent · 发生 2026/10/23 06:32 · SEC EDGAR\n查看来源 ↗\n内部人卖出 · Newstead Jennifer · 交易日 2026-10-20 · 2,399 股 · 约 $339.62 · 高管·SVP, GC ",
+          "jsBytes": 16158,
+          "klineResponseMetadata": [
+            {
+              "status": 200,
+              "dataStatus": "live",
+              "source": "yahoo-finance-history",
+              "reason": null,
+              "updatedAt": "2026-10-25T13:37:02.104Z",
+              "recordCount": 300
+            }
+          ],
+          "prefetchStartedBeforeCore": true
+        },
+        {
+          "viewport": 390,
+          "run": 0,
+          "temperature": "cold",
+          "shellReadyMs": 2034.8999999761581,
+          "paintedShellReadyMs": 2065.7999999523163,
+          "chartReadyMs": 4465,
+          "chartState": "ready",
+          "chartMessage": "Apple · usAAPL\n▤ 双图\n⛶ 全屏\n周期\n1分\n5分\n15分\n1小时\n1日\n3日\n5日\n60日\n120日\n1年\n5年\n缓存数据 · K线时间 2026-10-23 · yahoo-finance-history · 抓取 2026/10/25 21:37 · 上次源站耗时 1617ms · cache · 显示受限范围内的缓存快照；来源时间单独标示 AAPL · 1d · 普通行情 · K线：缓存 · 300 根 · 显示受限范围内的缓存快照；来源时间单独标示\n历史时点 / 日期定位 / 日内下钻\n图层与策略 · 保留当前选择\n事件时间轴\n刷新\npartial · events ok · news ok · filings unavailable · secForm4 partial · sec13f unavailable\nSEC 4 · 0001140361-26-040540\nevent · 发生 2026/10/23 06:32 · SEC EDGAR\n查看来源 ↗\n内部人卖出 · Newstead Jennifer · 交易日 2026-10-20 · 2,39",
+          "jsBytes": 122907,
+          "klineResponseMetadata": [
+            {
+              "status": 200,
+              "dataStatus": "cached",
+              "source": "yahoo-finance-history",
+              "reason": "显示受限范围内的缓存快照；来源时间单独标示",
+              "updatedAt": "2026-10-25T13:37:02.104Z",
+              "recordCount": 300
+            }
+          ],
+          "prefetchStartedBeforeCore": true
+        },
+        {
+          "viewport": 390,
+          "run": 0,
+          "temperature": "warm",
+          "shellReadyMs": 871.6000000238419,
+          "paintedShellReadyMs": 1135.3999999761581,
+          "chartReadyMs": 1214.3999999761581,
+          "chartState": "ready",
+          "chartMessage": "Apple · usAAPL\n▤ 双图\n⛶ 全屏\n周期\n1分\n5分\n15分\n1小时\n1日\n3日\n5日\n60日\n120日\n1年\n5年\n缓存数据 · K线时间 2026-10-23 · yahoo-finance-history · 抓取 2026/10/25 21:37 · 上次源站耗时 1617ms · cache · 显示受限范围内的缓存快照；来源时间单独标示 AAPL · 1d · 普通行情 · K线：缓存 · 300 根 · 显示受限范围内的缓存快照；来源时间单独标示\n历史时点 / 日期定位 / 日内下钻\n图层与策略 · 保留当前选择\n事件时间轴\n刷新\npartial · events ok · news ok · filings unavailable · secForm4 partial · sec13f unavailable\nSEC 4 · 0001140361-26-040540\nevent · 发生 2026/10/23 06:32 · SEC EDGAR\n查看来源 ↗\n内部人卖出 · Newstead Jennifer · 交易日 2026-10-20 · 2,39",
+          "jsBytes": 0,
+          "klineResponseMetadata": [
+            {
+              "status": 200,
+              "dataStatus": "cached",
+              "source": "yahoo-finance-history",
+              "reason": "显示受限范围内的缓存快照；来源时间单独标示",
+              "updatedAt": "2026-10-25T13:37:02.104Z",
+              "recordCount": 300
+            }
+          ],
+          "prefetchStartedBeforeCore": true
+        },
+        {
+          "viewport": 390,
+          "run": 1,
+          "temperature": "cold",
+          "shellReadyMs": 2123.100000023842,
+          "paintedShellReadyMs": 2156.100000023842,
+          "chartReadyMs": 4304.200000047684,
+          "chartState": "ready",
+          "chartMessage": "Apple · usAAPL\n▤ 双图\n⛶ 全屏\n周期\n1分\n5分\n15分\n1小时\n1日\n3日\n5日\n60日\n120日\n1年\n5年\n缓存数据 · K线时间 2026-10-23 · yahoo-finance-history · 抓取 2026/10/25 21:37 · 上次源站耗时 1617ms · cache · 显示受限范围内的缓存快照；来源时间单独标示 AAPL · 1d · 普通行情 · K线：缓存 · 300 根 · 显示受限范围内的缓存快照；来源时间单独标示\n历史时点 / 日期定位 / 日内下钻\n图层与策略 · 保留当前选择\n事件时间轴\n刷新\npartial · events ok · news ok · filings unavailable · secForm4 partial · sec13f unavailable\nSEC 4 · 0001140361-26-040540\nevent · 发生 2026/10/23 06:32 · SEC EDGAR\n查看来源 ↗\n内部人卖出 · Newstead Jennifer · 交易日 2026-10-20 · 2,39",
+          "jsBytes": 122907,
+          "klineResponseMetadata": [
+            {
+              "status": 200,
+              "dataStatus": "cached",
+              "source": "yahoo-finance-history",
+              "reason": "显示受限范围内的缓存快照；来源时间单独标示",
+              "updatedAt": "2026-10-25T13:37:02.104Z",
+              "recordCount": 300
+            }
+          ],
+          "prefetchStartedBeforeCore": true
+        },
+        {
+          "viewport": 390,
+          "run": 1,
+          "temperature": "warm",
+          "shellReadyMs": 609.6000000238419,
+          "paintedShellReadyMs": 1079.8000000715256,
+          "chartReadyMs": 1108.4000000953674,
+          "chartState": "ready",
+          "chartMessage": "Apple · usAAPL\n▤ 双图\n⛶ 全屏\n周期\n1分\n5分\n15分\n1小时\n1日\n3日\n5日\n60日\n120日\n1年\n5年\n缓存数据 · K线时间 2026-10-23 · yahoo-finance-history · 抓取 2026/10/25 21:37 · 上次源站耗时 1617ms · cache · 显示受限范围内的缓存快照；来源时间单独标示 AAPL · 1d · 普通行情 · K线：缓存 · 300 根 · 显示受限范围内的缓存快照；来源时间单独标示\n历史时点 / 日期定位 / 日内下钻\n图层与策略 · 保留当前选择\n事件时间轴\n刷新\npartial · events ok · news ok · filings unavailable · secForm4 partial · sec13f unavailable\nSEC 4 · 0001140361-26-040540\nevent · 发生 2026/10/23 06:32 · SEC EDGAR\n查看来源 ↗\n内部人卖出 · Newstead Jennifer · 交易日 2026-10-20 · 2,39",
+          "jsBytes": 0,
+          "klineResponseMetadata": [
+            {
+              "status": 200,
+              "dataStatus": "cached",
+              "source": "yahoo-finance-history",
+              "reason": "显示受限范围内的缓存快照；来源时间单独标示",
+              "updatedAt": "2026-10-25T13:37:02.104Z",
+              "recordCount": 300
+            }
+          ],
+          "prefetchStartedBeforeCore": true
+        },
+        {
+          "viewport": 390,
+          "run": 2,
+          "temperature": "cold",
+          "shellReadyMs": 2158.9000000953674,
+          "paintedShellReadyMs": 2187.7000000476837,
+          "chartReadyMs": 4066.9000000953674,
+          "chartState": "ready",
+          "chartMessage": "Apple · usAAPL\n▤ 双图\n⛶ 全屏\n周期\n1分\n5分\n15分\n1小时\n1日\n3日\n5日\n60日\n120日\n1年\n5年\n缓存数据 · K线时间 2026-10-23 · yahoo-finance-history · 抓取 2026/10/25 21:37 · 上次源站耗时 1617ms · stale · 显示受限范围内的缓存快照；正在后台刷新来源 AAPL · 1d · 普通行情 · K线：缓存 · 300 根 · 显示受限范围内的缓存快照；正在后台刷新来源\n历史时点 / 日期定位 / 日内下钻\n图层与策略 · 保留当前选择\n事件时间轴\n刷新\npartial · events ok · news ok · filings unavailable · secForm4 partial · sec13f unavailable\nSEC 4 · 0001140361-26-040540\nevent · 发生 2026/10/23 06:32 · SEC EDGAR\n查看来源 ↗\n内部人卖出 · Newstead Jennifer · 交易日 2026-10-20 · 2,39",
+          "jsBytes": 122907,
+          "klineResponseMetadata": [
+            {
+              "status": 200,
+              "dataStatus": "cached",
+              "source": "yahoo-finance-history",
+              "reason": "显示受限范围内的缓存快照；正在后台刷新来源",
+              "updatedAt": "2026-10-25T13:37:02.104Z",
+              "recordCount": 300
+            }
+          ],
+          "prefetchStartedBeforeCore": true
+        },
+        {
+          "viewport": 390,
+          "run": 2,
+          "temperature": "warm",
+          "shellReadyMs": 688.7000000476837,
+          "paintedShellReadyMs": 1067.9000000953674,
+          "chartReadyMs": 1096.7000000476837,
+          "chartState": "ready",
+          "chartMessage": "Apple · usAAPL\n▤ 双图\n⛶ 全屏\n周期\n1分\n5分\n15分\n1小时\n1日\n3日\n5日\n60日\n120日\n1年\n5年\n缓存数据 · K线时间 2026-10-23 · yahoo-finance-history · 抓取 2026/10/25 21:37 · 上次源站耗时 3ms · cache · 显示受限范围内的缓存快照；来源时间单独标示 AAPL · 1d · 普通行情 · K线：缓存 · 300 根 · 显示受限范围内的缓存快照；来源时间单独标示\n历史时点 / 日期定位 / 日内下钻\n图层与策略 · 保留当前选择\n事件时间轴\n刷新\npartial · events ok · news ok · filings unavailable · secForm4 partial · sec13f unavailable\nSEC 4 · 0001140361-26-040540\nevent · 发生 2026/10/23 06:32 · SEC EDGAR\n查看来源 ↗\n内部人卖出 · Newstead Jennifer · 交易日 2026-10-20 · 2,399 股",
+          "jsBytes": 0,
+          "klineResponseMetadata": [
+            {
+              "status": 200,
+              "dataStatus": "cached",
+              "source": "yahoo-finance-history",
+              "reason": "显示受限范围内的缓存快照；来源时间单独标示",
+              "updatedAt": "2026-10-25T13:37:02.104Z",
+              "recordCount": 300
+            }
+          ],
+          "prefetchStartedBeforeCore": true
+        }
+      ],
+      "firstColdPhaseMarks": [
+        {
+          "name": "moneymoney:auth-ready",
+          "atMs": 1092.3
+        },
+        {
+          "name": "moneymoney:chart-preload-start",
+          "atMs": 1093.9
+        },
+        {
+          "name": "moneymoney:stock-kline-prefetch-start",
+          "atMs": 1099.2
+        },
+        {
+          "name": "moneymoney:dashboard-start",
+          "atMs": 1472.1
+        },
+        {
+          "name": "moneymoney:dashboard-auth-ready",
+          "atMs": 1474
+        },
+        {
+          "name": "moneymoney:dashboard-context-ready",
+          "atMs": 1531
+        },
+        {
+          "name": "moneymoney:dashboard-core-ready",
+          "atMs": 2133.6
+        },
+        {
+          "name": "moneymoney:chart-module-start",
+          "atMs": 2138.7
+        },
+        {
+          "name": "moneymoney:chart-preload-ready",
+          "atMs": 2181.5
+        },
+        {
+          "name": "moneymoney:chart-module-ready",
+          "atMs": 2196.4
+        },
+        {
+          "name": "moneymoney:stock-kline-request-start",
+          "atMs": 2259.4
+        },
+        {
+          "name": "moneymoney:stock-kline-response-parsed",
+          "atMs": 2983.8
+        },
+        {
+          "name": "moneymoney:stock-kline-first-render",
+          "atMs": 3303.9
+        }
+      ]
+    },
+    {
+      "experiment": "stock",
+      "phase": "before",
+      "logSha256": "73e6e616c153848ae742de10b909bcef90bfa09398869efe2052ae68b3ead3f4",
+      "medians": [
+        {
+          "viewport": 1440,
+          "temperature": "cold",
+          "shellReadyMs": 2386.600000023842,
+          "chartReadyMs": 3735.899999976158,
+          "jsBytes": 106749,
+          "compatibilityRequestStartSpreadMs": 1.600000023841858,
+          "compatibilityDownloadSpanMs": 185.10000002384186
+        },
+        {
+          "viewport": 1440,
+          "temperature": "warm",
+          "shellReadyMs": 410.39999997615814,
+          "chartReadyMs": 796.2999999523163,
+          "jsBytes": 0,
+          "compatibilityRequestStartSpreadMs": 0.7000000476837158,
+          "compatibilityDownloadSpanMs": 0.7000000476837158
+        },
+        {
+          "viewport": 390,
+          "temperature": "cold",
+          "shellReadyMs": 1736.6000000238419,
+          "chartReadyMs": 3227.5,
+          "jsBytes": 122907,
+          "compatibilityRequestStartSpreadMs": 187.29999995231628,
+          "compatibilityDownloadSpanMs": 499.8000000715256
+        },
+        {
+          "viewport": 390,
+          "temperature": "warm",
+          "shellReadyMs": 688.2000000476837,
+          "chartReadyMs": 1187.8999999761581,
+          "jsBytes": 0,
+          "compatibilityRequestStartSpreadMs": 2.4000000953674316,
+          "compatibilityDownloadSpanMs": 2.4000000953674316
+        }
+      ],
+      "samples": [
+        {
+          "viewport": 1440,
+          "run": 0,
+          "temperature": "cold",
+          "shellReadyMs": 2446,
+          "paintedShellReadyMs": 3261.899999976158,
+          "chartReadyMs": 3735.899999976158,
+          "chartState": "ready",
+          "chartMessage": "Apple · usAAPL\n▤ 双图\n⛶ 全屏\n周期\n1分\n5分\n15分\n1小时\n1日\n3日\n5日\n60日\n120日\n1年\n5年\n最新可用行情（实时性未声明） · K线时间 2026-10-23 · yahoo-finance-history · 抓取 2026/10/25 21:43 · 源站耗时 988ms · origin AAPL · 1d · 普通行情 · K线：最新可用（实时性未声明） · 300 根\n历史时点 / 日期定位 / 日内下钻\n图层与策略 · 保留当前选择\n事件时间轴\n刷新\n正在读取该标的事件与证据…\n正在加载当前标的事件…\nMA5 344.48\nMA10 343.30\nMA20 338.91\n周期非短线 · 连接：来源快照 · 时效：来源过期 · 蜡烛：已完成\n本地时区\n自动价格轴\n加载更早K线\n区间测量\n价格提醒\n 模拟成交\n价格口径 \n来源口径 · 未声明\n前复权（Yahoo Adj Close 系数推导）\n后复权（不可用）\n2026/10/23 21:30:00 开 349.12 高 351.73 低 345.75 收 347.73 -0.40% 成交",
+          "jsBytes": 106749,
+          "klineResponseMetadata": [
+            {
+              "status": 200,
+              "dataStatus": "live",
+              "source": "yahoo-finance-history",
+              "reason": null,
+              "updatedAt": "2026-10-25T13:43:29.777Z",
+              "recordCount": 300
+            }
+          ],
+          "prefetchStartedBeforeCore": true
+        },
+        {
+          "viewport": 1440,
+          "run": 0,
+          "temperature": "warm",
+          "shellReadyMs": 566.3000000715256,
+          "paintedShellReadyMs": 860.6000000238419,
+          "chartReadyMs": 884.8000000715256,
+          "chartState": "ready",
+          "chartMessage": "Apple · usAAPL\n▤ 双图\n⛶ 全屏\n周期\n1分\n5分\n15分\n1小时\n1日\n3日\n5日\n60日\n120日\n1年\n5年\n缓存数据 · K线时间 2026-10-23 · yahoo-finance-history · 抓取 2026/10/25 21:43 · 上次源站耗时 988ms · cache · 显示受限范围内的缓存快照；来源时间单独标示 AAPL · 1d · 普通行情 · K线：缓存 · 300 根 · 显示受限范围内的缓存快照；来源时间单独标示\n历史时点 / 日期定位 / 日内下钻\n图层与策略 · 保留当前选择\n事件时间轴\n刷新\n正在读取该标的事件与证据…\n正在加载当前标的事件…\nMA5 344.48\nMA10 343.30\nMA20 338.91\n周期非短线 · 连接：来源快照 · 时效：来源过期 · 蜡烛：已完成\n本地时区\n自动价格轴\n加载更早K线\n区间测量\n价格提醒\n 模拟成交\n价格口径 \n来源口径 · 未声明\n前复权（Yahoo Adj Close 系数推导）\n后复权（不可用）\n2026/10/23 21:30:00 开 349.12 高 351.7",
+          "jsBytes": 0,
+          "klineResponseMetadata": [
+            {
+              "status": 200,
+              "dataStatus": "cached",
+              "source": "yahoo-finance-history",
+              "reason": "显示受限范围内的缓存快照；来源时间单独标示",
+              "updatedAt": "2026-10-25T13:43:29.777Z",
+              "recordCount": 300
+            }
+          ],
+          "prefetchStartedBeforeCore": true
+        },
+        {
+          "viewport": 1440,
+          "run": 1,
+          "temperature": "cold",
+          "shellReadyMs": 2160.3000000715256,
+          "paintedShellReadyMs": 2198.8000000715256,
+          "chartReadyMs": 3723.7000000476837,
+          "chartState": "ready",
+          "chartMessage": "Apple · usAAPL\n▤ 双图\n⛶ 全屏\n周期\n1分\n5分\n15分\n1小时\n1日\n3日\n5日\n60日\n120日\n1年\n5年\n缓存数据 · K线时间 2026-10-23 · yahoo-finance-history · 抓取 2026/10/25 21:43 · 上次源站耗时 988ms · cache · 显示受限范围内的缓存快照；来源时间单独标示 AAPL · 1d · 普通行情 · K线：缓存 · 300 根 · 显示受限范围内的缓存快照；来源时间单独标示\n历史时点 / 日期定位 / 日内下钻\n图层与策略 · 保留当前选择\n事件时间轴\n刷新\n正在读取该标的事件与证据…\n正在加载当前标的事件…\nMA5 344.48\nMA10 343.30\nMA20 338.91\n周期非短线 · 连接：来源快照 · 时效：来源过期 · 蜡烛：已完成\n本地时区\n自动价格轴\n加载更早K线\n区间测量\n价格提醒\n 模拟成交\n价格口径 \n来源口径 · 未声明\n前复权（Yahoo Adj Close 系数推导）\n后复权（不可用）\n2026/10/23 21:30:00 开 349.12 高 351.7",
+          "jsBytes": 122907,
+          "klineResponseMetadata": [
+            {
+              "status": 200,
+              "dataStatus": "cached",
+              "source": "yahoo-finance-history",
+              "reason": "显示受限范围内的缓存快照；来源时间单独标示",
+              "updatedAt": "2026-10-25T13:43:29.777Z",
+              "recordCount": 300
+            }
+          ],
+          "prefetchStartedBeforeCore": true
+        },
+        {
+          "viewport": 1440,
+          "run": 1,
+          "temperature": "warm",
+          "shellReadyMs": 410.39999997615814,
+          "paintedShellReadyMs": 767.8999999761581,
+          "chartReadyMs": 796.2999999523163,
+          "chartState": "ready",
+          "chartMessage": "Apple · usAAPL\n▤ 双图\n⛶ 全屏\n周期\n1分\n5分\n15分\n1小时\n1日\n3日\n5日\n60日\n120日\n1年\n5年\n缓存数据 · K线时间 2026-10-23 · yahoo-finance-history · 抓取 2026/10/25 21:43 · 上次源站耗时 988ms · cache · 显示受限范围内的缓存快照；来源时间单独标示 AAPL · 1d · 普通行情 · K线：缓存 · 300 根 · 显示受限范围内的缓存快照；来源时间单独标示\n历史时点 / 日期定位 / 日内下钻\n图层与策略 · 保留当前选择\n事件时间轴\n刷新\n正在读取该标的事件与证据…\n正在加载当前标的事件…\nMA5 344.48\nMA10 343.30\nMA20 338.91\n周期非短线 · 连接：来源快照 · 时效：来源过期 · 蜡烛：已完成\n本地时区\n自动价格轴\n加载更早K线\n区间测量\n价格提醒\n 模拟成交\n价格口径 \n来源口径 · 未声明\n前复权（Yahoo Adj Close 系数推导）\n后复权（不可用）\n2026/10/23 21:30:00 开 349.12 高 351.7",
+          "jsBytes": 0,
+          "klineResponseMetadata": [
+            {
+              "status": 200,
+              "dataStatus": "cached",
+              "source": "yahoo-finance-history",
+              "reason": "显示受限范围内的缓存快照；来源时间单独标示",
+              "updatedAt": "2026-10-25T13:43:29.777Z",
+              "recordCount": 300
+            }
+          ],
+          "prefetchStartedBeforeCore": true
+        },
+        {
+          "viewport": 1440,
+          "run": 2,
+          "temperature": "cold",
+          "shellReadyMs": 2386.600000023842,
+          "paintedShellReadyMs": 3759.899999976158,
+          "chartReadyMs": 3771.1999999284744,
+          "chartState": "ready",
+          "chartMessage": "Apple · usAAPL\n▤ 双图\n⛶ 全屏\n周期\n1分\n5分\n15分\n1小时\n1日\n3日\n5日\n60日\n120日\n1年\n5年\n缓存数据 · K线时间 2026-10-23 · yahoo-finance-history · 抓取 2026/10/25 21:43 · 上次源站耗时 988ms · cache · 显示受限范围内的缓存快照；来源时间单独标示 AAPL · 1d · 普通行情 · K线：缓存 · 300 根 · 显示受限范围内的缓存快照；来源时间单独标示\n历史时点 / 日期定位 / 日内下钻\n图层与策略 · 保留当前选择\n事件时间轴\n刷新\n正在读取该标的事件与证据…\n正在加载当前标的事件…\nMA5 344.48\nMA10 343.30\nMA20 338.91\n周期非短线 · 连接：来源快照 · 时效：来源过期 · 蜡烛：已完成\n本地时区\n自动价格轴\n加载更早K线\n区间测量\n价格提醒\n 模拟成交\n价格口径 \n来源口径 · 未声明\n前复权（Yahoo Adj Close 系数推导）\n后复权（不可用）\n2026/10/23 21:30:00 开 349.12 高 351.7",
+          "jsBytes": 106749,
+          "klineResponseMetadata": [
+            {
+              "status": 200,
+              "dataStatus": "cached",
+              "source": "yahoo-finance-history",
+              "reason": "显示受限范围内的缓存快照；来源时间单独标示",
+              "updatedAt": "2026-10-25T13:43:29.777Z",
+              "recordCount": 300
+            }
+          ],
+          "prefetchStartedBeforeCore": true
+        },
+        {
+          "viewport": 1440,
+          "run": 2,
+          "temperature": "warm",
+          "shellReadyMs": 396.7000000476837,
+          "paintedShellReadyMs": 541.8000000715256,
+          "chartReadyMs": 641,
+          "chartState": "ready",
+          "chartMessage": "Apple · usAAPL\n▤ 双图\n⛶ 全屏\n周期\n1分\n5分\n15分\n1小时\n1日\n3日\n5日\n60日\n120日\n1年\n5年\n缓存数据 · K线时间 2026-10-23 · yahoo-finance-history · 抓取 2026/10/25 21:43 · 上次源站耗时 988ms · cache · 显示受限范围内的缓存快照；来源时间单独标示 AAPL · 1d · 普通行情 · K线：缓存 · 300 根 · 显示受限范围内的缓存快照；来源时间单独标示\n历史时点 / 日期定位 / 日内下钻\n图层与策略 · 保留当前选择\n事件时间轴\n刷新\n正在读取该标的事件与证据…\n正在加载当前标的事件…\nMA5 344.48\nMA10 343.30\nMA20 338.91\n周期非短线 · 连接：来源快照 · 时效：来源过期 · 蜡烛：已完成\n本地时区\n自动价格轴\n加载更早K线\n区间测量\n价格提醒\n 模拟成交\n价格口径 \n来源口径 · 未声明\n前复权（Yahoo Adj Close 系数推导）\n后复权（不可用）\n2026/10/23 21:30:00 开 349.12 高 351.7",
+          "jsBytes": 0,
+          "klineResponseMetadata": [
+            {
+              "status": 200,
+              "dataStatus": "cached",
+              "source": "yahoo-finance-history",
+              "reason": "显示受限范围内的缓存快照；来源时间单独标示",
+              "updatedAt": "2026-10-25T13:43:29.777Z",
+              "recordCount": 300
+            }
+          ],
+          "prefetchStartedBeforeCore": true
+        },
+        {
+          "viewport": 390,
+          "run": 0,
+          "temperature": "cold",
+          "shellReadyMs": 1736.6000000238419,
+          "paintedShellReadyMs": 1763.5,
+          "chartReadyMs": 3630,
+          "chartState": "ready",
+          "chartMessage": "Apple · usAAPL\n▤ 双图\n⛶ 全屏\n周期\n1分\n5分\n15分\n1小时\n1日\n3日\n5日\n60日\n120日\n1年\n5年\n缓存数据 · K线时间 2026-10-23 · yahoo-finance-history · 抓取 2026/10/25 21:43 · 上次源站耗时 988ms · stale · 显示受限范围内的缓存快照；正在后台刷新来源 AAPL · 1d · 普通行情 · K线：缓存 · 300 根 · 显示受限范围内的缓存快照；正在后台刷新来源\n历史时点 / 日期定位 / 日内下钻\n图层与策略 · 保留当前选择\n事件时间轴\n刷新\npartial · events ok · news stale · filings unavailable · secForm4 partial · sec13f unavailable\nIn 1985, He Was Forced Out of the Company He Founded. Months Later He Bet $10 Million On A Graphics Unit He Bought From Geo",
+          "jsBytes": 122907,
+          "klineResponseMetadata": [
+            {
+              "status": 200,
+              "dataStatus": "cached",
+              "source": "yahoo-finance-history",
+              "reason": "显示受限范围内的缓存快照；正在后台刷新来源",
+              "updatedAt": "2026-10-25T13:43:29.777Z",
+              "recordCount": 300
+            }
+          ],
+          "prefetchStartedBeforeCore": true
+        },
+        {
+          "viewport": 390,
+          "run": 0,
+          "temperature": "warm",
+          "shellReadyMs": 688.2000000476837,
+          "paintedShellReadyMs": 1087.3000000715256,
+          "chartReadyMs": 1047.6000000238419,
+          "chartState": "ready",
+          "chartMessage": "Apple · usAAPL\n▤ 双图\n⛶ 全屏\n周期\n1分\n5分\n15分\n1小时\n1日\n3日\n5日\n60日\n120日\n1年\n5年\n缓存数据 · K线时间 2026-10-23 · yahoo-finance-history · 抓取 2026/10/25 21:43 · 上次源站耗时 3ms · cache · 显示受限范围内的缓存快照；来源时间单独标示 AAPL · 1d · 普通行情 · K线：缓存 · 300 根 · 显示受限范围内的缓存快照；来源时间单独标示\n历史时点 / 日期定位 / 日内下钻\n图层与策略 · 保留当前选择\n事件时间轴\n刷新\npartial · events ok · news stale · filings unavailable · secForm4 partial · sec13f unavailable\nIn 1985, He Was Forced Out of the Company He Founded. Months Later He Bet $10 Million On A Graphics Unit He Bought From Georg",
+          "jsBytes": 0,
+          "klineResponseMetadata": [
+            {
+              "status": 200,
+              "dataStatus": "cached",
+              "source": "yahoo-finance-history",
+              "reason": "显示受限范围内的缓存快照；来源时间单独标示",
+              "updatedAt": "2026-10-25T13:43:29.777Z",
+              "recordCount": 300
+            }
+          ],
+          "prefetchStartedBeforeCore": true
+        },
+        {
+          "viewport": 390,
+          "run": 1,
+          "temperature": "cold",
+          "shellReadyMs": 1404.6999999284744,
+          "paintedShellReadyMs": 1425.5999999046326,
+          "chartReadyMs": 3227.5,
+          "chartState": "ready",
+          "chartMessage": "Apple · usAAPL\n▤ 双图\n⛶ 全屏\n周期\n1分\n5分\n15分\n1小时\n1日\n3日\n5日\n60日\n120日\n1年\n5年\n缓存数据 · K线时间 2026-10-23 · yahoo-finance-history · 抓取 2026/10/25 21:43 · 上次源站耗时 3ms · cache · 显示受限范围内的缓存快照；来源时间单独标示 AAPL · 1d · 普通行情 · K线：缓存 · 300 根 · 显示受限范围内的缓存快照；来源时间单独标示\n历史时点 / 日期定位 / 日内下钻\n图层与策略 · 保留当前选择\n事件时间轴\n刷新\npartial · events ok · news stale · filings unavailable · secForm4 partial · sec13f unavailable\nIn 1985, He Was Forced Out of the Company He Founded. Months Later He Bet $10 Million On A Graphics Unit He Bought From Georg",
+          "jsBytes": 122907,
+          "klineResponseMetadata": [
+            {
+              "status": 200,
+              "dataStatus": "cached",
+              "source": "yahoo-finance-history",
+              "reason": "显示受限范围内的缓存快照；来源时间单独标示",
+              "updatedAt": "2026-10-25T13:43:29.777Z",
+              "recordCount": 300
+            }
+          ],
+          "prefetchStartedBeforeCore": true
+        },
+        {
+          "viewport": 390,
+          "run": 1,
+          "temperature": "warm",
+          "shellReadyMs": 880.2999999523163,
+          "paintedShellReadyMs": 1109.0999999046326,
+          "chartReadyMs": 1187.8999999761581,
+          "chartState": "ready",
+          "chartMessage": "Apple · usAAPL\n▤ 双图\n⛶ 全屏\n周期\n1分\n5分\n15分\n1小时\n1日\n3日\n5日\n60日\n120日\n1年\n5年\n缓存数据 · K线时间 2026-10-23 · yahoo-finance-history · 抓取 2026/10/25 21:43 · 上次源站耗时 3ms · cache · 显示受限范围内的缓存快照；来源时间单独标示 AAPL · 1d · 普通行情 · K线：缓存 · 300 根 · 显示受限范围内的缓存快照；来源时间单独标示\n历史时点 / 日期定位 / 日内下钻\n图层与策略 · 保留当前选择\n事件时间轴\n刷新\npartial · events ok · news stale · filings unavailable · secForm4 partial · sec13f unavailable\nIn 1985, He Was Forced Out of the Company He Founded. Months Later He Bet $10 Million On A Graphics Unit He Bought From Georg",
+          "jsBytes": 0,
+          "klineResponseMetadata": [
+            {
+              "status": 200,
+              "dataStatus": "cached",
+              "source": "yahoo-finance-history",
+              "reason": "显示受限范围内的缓存快照；来源时间单独标示",
+              "updatedAt": "2026-10-25T13:43:29.777Z",
+              "recordCount": 300
+            }
+          ],
+          "prefetchStartedBeforeCore": true
+        },
+        {
+          "viewport": 390,
+          "run": 2,
+          "temperature": "cold",
+          "shellReadyMs": 1893.2000000476837,
+          "paintedShellReadyMs": 1917.8000000715256,
+          "chartReadyMs": 3169.4000000953674,
+          "chartState": "ready",
+          "chartMessage": "Apple · usAAPL\n▤ 双图\n⛶ 全屏\n周期\n1分\n5分\n15分\n1小时\n1日\n3日\n5日\n60日\n120日\n1年\n5年\n缓存数据 · K线时间 2026-10-23 · yahoo-finance-history · 抓取 2026/10/25 21:43 · 上次源站耗时 3ms · cache · 显示受限范围内的缓存快照；来源时间单独标示 AAPL · 1d · 普通行情 · K线：缓存 · 300 根 · 显示受限范围内的缓存快照；来源时间单独标示\n历史时点 / 日期定位 / 日内下钻\n图层与策略 · 保留当前选择\n事件时间轴\n刷新\npartial · events ok · news stale · filings unavailable · secForm4 partial · sec13f unavailable\nIn 1985, He Was Forced Out of the Company He Founded. Months Later He Bet $10 Million On A Graphics Unit He Bought From Georg",
+          "jsBytes": 122907,
+          "klineResponseMetadata": [
+            {
+              "status": 200,
+              "dataStatus": "cached",
+              "source": "yahoo-finance-history",
+              "reason": "显示受限范围内的缓存快照；来源时间单独标示",
+              "updatedAt": "2026-10-25T13:43:29.777Z",
+              "recordCount": 300
+            }
+          ],
+          "prefetchStartedBeforeCore": true
+        },
+        {
+          "viewport": 390,
+          "run": 2,
+          "temperature": "warm",
+          "shellReadyMs": 595.3999999761581,
+          "paintedShellReadyMs": 776.5,
+          "chartReadyMs": 2214,
+          "chartState": "ready",
+          "chartMessage": "Apple · usAAPL\n▤ 双图\n⛶ 全屏\n周期\n1分\n5分\n15分\n1小时\n1日\n3日\n5日\n60日\n120日\n1年\n5年\n最新可用行情（实时性未声明） · K线时间 2026-10-23 · yahoo-finance-history · 抓取 2026/10/25 21:44 · 源站耗时 1585ms · origin AAPL · 1d · 普通行情 · K线：最新可用（实时性未声明） · 300 根\n历史时点 / 日期定位 / 日内下钻\n图层与策略 · 保留当前选择\n事件时间轴\n刷新\npartial · events ok · news stale · filings unavailable · secForm4 partial · sec13f unavailable\nIn 1985, He Was Forced Out of the Company He Founded. Months Later He Bet $10 Million On A Graphics Unit He Bought From George Lucas. By 2006, That Bet",
+          "jsBytes": 0,
+          "klineResponseMetadata": [
+            {
+              "status": 200,
+              "dataStatus": "live",
+              "source": "yahoo-finance-history",
+              "reason": null,
+              "updatedAt": "2026-10-25T13:44:02.242Z",
+              "recordCount": 300
+            }
+          ],
+          "prefetchStartedBeforeCore": true
+        }
+      ],
+      "firstColdPhaseMarks": [
+        {
+          "name": "moneymoney:auth-ready",
+          "atMs": 1491.9
+        },
+        {
+          "name": "moneymoney:chart-preload-start",
+          "atMs": 1494.3
+        },
+        {
+          "name": "moneymoney:stock-kline-prefetch-start",
+          "atMs": 1499.1
+        },
+        {
+          "name": "moneymoney:dashboard-start",
+          "atMs": 1692.2
+        },
+        {
+          "name": "moneymoney:dashboard-auth-ready",
+          "atMs": 1693.2
+        },
+        {
+          "name": "moneymoney:dashboard-context-ready",
+          "atMs": 1756.7
+        },
+        {
+          "name": "moneymoney:dashboard-core-ready",
+          "atMs": 2413.4
+        },
+        {
+          "name": "moneymoney:chart-module-start",
+          "atMs": 2417.9
+        },
+        {
+          "name": "moneymoney:chart-preload-ready",
+          "atMs": 2450.4
+        },
+        {
+          "name": "moneymoney:chart-module-ready",
+          "atMs": 2459.3
+        },
+        {
+          "name": "moneymoney:stock-kline-request-start",
+          "atMs": 2531.2
+        },
+        {
+          "name": "moneymoney:stock-kline-response-parsed",
+          "atMs": 3281.6
+        },
+        {
+          "name": "moneymoney:stock-kline-first-render",
+          "atMs": 3624.4
+        }
+      ]
+    },
+    {
+      "experiment": "stock",
+      "phase": "candidate",
+      "logSha256": "f70730c52480a53f9f070c55f841153f128101137b8abfb1a4b5161124e6eb9c",
+      "medians": [
+        {
+          "viewport": 1440,
+          "temperature": "cold",
+          "shellReadyMs": 3821.5999999046326,
+          "chartReadyMs": 4097.299999952316,
+          "jsBytes": 109072,
+          "compatibilityRequestStartSpreadMs": 1.2999999523162842,
+          "compatibilityDownloadSpanMs": 164.09999990463257
+        },
+        {
+          "viewport": 1440,
+          "temperature": "warm",
+          "shellReadyMs": 844.8999999761581,
+          "chartReadyMs": 1107.3999999761581,
+          "jsBytes": 0,
+          "compatibilityRequestStartSpreadMs": 2.100000023841858,
+          "compatibilityDownloadSpanMs": 2.100000023841858
+        },
+        {
+          "viewport": 390,
+          "temperature": "cold",
+          "shellReadyMs": 2182.5,
+          "chartReadyMs": 3732.7000000476837,
+          "jsBytes": 109072,
+          "compatibilityRequestStartSpreadMs": 1.100000023841858,
+          "compatibilityDownloadSpanMs": 160.10000002384186
+        },
+        {
+          "viewport": 390,
+          "temperature": "warm",
+          "shellReadyMs": 633.3000000715256,
+          "chartReadyMs": 1037.8000000715256,
+          "jsBytes": 0,
+          "compatibilityRequestStartSpreadMs": 1.7999999523162842,
+          "compatibilityDownloadSpanMs": 1.7999999523162842
+        }
+      ],
+      "samples": [
+        {
+          "viewport": 1440,
+          "run": 0,
+          "temperature": "cold",
+          "shellReadyMs": 3821.5999999046326,
+          "paintedShellReadyMs": 3901.899999976158,
+          "chartReadyMs": 3911.899999976158,
+          "chartState": "ready",
+          "chartMessage": "Apple · usAAPL\n▤ 双图\n⛶ 全屏\n周期\n1分\n5分\n15分\n1小时\n1日\n3日\n5日\n60日\n120日\n1年\n5年\n最新可用行情（实时性未声明） · K线时间 2026-10-23 · yahoo-finance-history · 抓取 2026/10/25 21:44 · 源站耗时 1090ms · origin AAPL · 1d · 普通行情 · K线：最新可用（实时性未声明） · 300 根\n历史时点 / 日期定位 / 日内下钻\n图层与策略 · 保留当前选择\n事件时间轴\n刷新\n正在读取该标的事件与证据…\n正在加载当前标的事件…\nMA5 344.48\nMA10 343.30\nMA20 338.91\n周期非短线 · 连接：来源快照 · 时效：来源过期 · 蜡烛：已完成\n本地时区\n自动价格轴\n加载更早K线\n区间测量\n价格提醒\n 模拟成交\n行情来源说明\n价格口径 \n来源口径 · 未声明\n前复权（Yahoo Adj Close 系数推导）\n后复权（不可用）\n2026/10/23 21:30:00 开 349.12 高 351.73 低 345.75 收 347.73 -",
+          "jsBytes": 109072,
+          "klineResponseMetadata": [
+            {
+              "status": 200,
+              "dataStatus": "live",
+              "source": "yahoo-finance-history",
+              "reason": null,
+              "updatedAt": "2026-10-25T13:44:06.934Z",
+              "recordCount": 300
+            }
+          ],
+          "prefetchStartedBeforeCore": true
+        },
+        {
+          "viewport": 1440,
+          "run": 0,
+          "temperature": "warm",
+          "shellReadyMs": 824.1000000238419,
+          "paintedShellReadyMs": 1021.6000000238419,
+          "chartReadyMs": 1053.2000000476837,
+          "chartState": "ready",
+          "chartMessage": "Apple · usAAPL\n▤ 双图\n⛶ 全屏\n周期\n1分\n5分\n15分\n1小时\n1日\n3日\n5日\n60日\n120日\n1年\n5年\n缓存数据 · K线时间 2026-10-23 · yahoo-finance-history · 抓取 2026/10/25 21:44 · 上次源站耗时 1090ms · cache · 显示受限范围内的缓存快照；来源时间单独标示 AAPL · 1d · 普通行情 · K线：缓存 · 300 根 · 显示受限范围内的缓存快照；来源时间单独标示\n历史时点 / 日期定位 / 日内下钻\n图层与策略 · 保留当前选择\n事件时间轴\n刷新\n正在读取该标的事件与证据…\n正在加载当前标的事件…\nMA5 344.48\nMA10 343.30\nMA20 338.91\n周期非短线 · 连接：来源快照 · 时效：来源过期 · 蜡烛：已完成\n本地时区\n自动价格轴\n加载更早K线\n区间测量\n价格提醒\n 模拟成交\n行情来源说明\n价格口径 \n来源口径 · 未声明\n前复权（Yahoo Adj Close 系数推导）\n后复权（不可用）\n2026/10/23 21:30:00 开 349.12",
+          "jsBytes": 0,
+          "klineResponseMetadata": [
+            {
+              "status": 200,
+              "dataStatus": "cached",
+              "source": "yahoo-finance-history",
+              "reason": "显示受限范围内的缓存快照；来源时间单独标示",
+              "updatedAt": "2026-10-25T13:44:06.934Z",
+              "recordCount": 300
+            }
+          ],
+          "prefetchStartedBeforeCore": true
+        },
+        {
+          "viewport": 1440,
+          "run": 1,
+          "temperature": "cold",
+          "shellReadyMs": 4021.6999999284744,
+          "paintedShellReadyMs": 4086.7999999523163,
+          "chartReadyMs": 4097.299999952316,
+          "chartState": "ready",
+          "chartMessage": "Apple · usAAPL\n▤ 双图\n⛶ 全屏\n周期\n1分\n5分\n15分\n1小时\n1日\n3日\n5日\n60日\n120日\n1年\n5年\n缓存数据 · K线时间 2026-10-23 · yahoo-finance-history · 抓取 2026/10/25 21:44 · 上次源站耗时 1090ms · cache · 显示受限范围内的缓存快照；来源时间单独标示 AAPL · 1d · 普通行情 · K线：缓存 · 300 根 · 显示受限范围内的缓存快照；来源时间单独标示\n历史时点 / 日期定位 / 日内下钻\n图层与策略 · 保留当前选择\n事件时间轴\n刷新\n正在读取该标的事件与证据…\n正在加载当前标的事件…\nMA5 344.48\nMA10 343.30\nMA20 338.91\n周期非短线 · 连接：来源快照 · 时效：来源过期 · 蜡烛：已完成\n本地时区\n自动价格轴\n加载更早K线\n区间测量\n价格提醒\n 模拟成交\n行情来源说明\n价格口径 \n来源口径 · 未声明\n前复权（Yahoo Adj Close 系数推导）\n后复权（不可用）\n2026/10/23 21:30:00 开 349.12",
+          "jsBytes": 109072,
+          "klineResponseMetadata": [
+            {
+              "status": 200,
+              "dataStatus": "cached",
+              "source": "yahoo-finance-history",
+              "reason": "显示受限范围内的缓存快照；来源时间单独标示",
+              "updatedAt": "2026-10-25T13:44:06.934Z",
+              "recordCount": 300
+            }
+          ],
+          "prefetchStartedBeforeCore": true
+        },
+        {
+          "viewport": 1440,
+          "run": 1,
+          "temperature": "warm",
+          "shellReadyMs": 844.8999999761581,
+          "paintedShellReadyMs": 1091.7999999523163,
+          "chartReadyMs": 1107.3999999761581,
+          "chartState": "ready",
+          "chartMessage": "Apple · usAAPL\n▤ 双图\n⛶ 全屏\n周期\n1分\n5分\n15分\n1小时\n1日\n3日\n5日\n60日\n120日\n1年\n5年\n缓存数据 · K线时间 2026-10-23 · yahoo-finance-history · 抓取 2026/10/25 21:44 · 上次源站耗时 1090ms · cache · 显示受限范围内的缓存快照；来源时间单独标示 AAPL · 1d · 普通行情 · K线：缓存 · 300 根 · 显示受限范围内的缓存快照；来源时间单独标示\n历史时点 / 日期定位 / 日内下钻\n图层与策略 · 保留当前选择\n事件时间轴\n刷新\n正在读取该标的事件与证据…\n正在加载当前标的事件…\nMA5 344.48\nMA10 343.30\nMA20 338.91\n周期非短线 · 连接：来源快照 · 时效：来源过期 · 蜡烛：已完成\n本地时区\n自动价格轴\n加载更早K线\n区间测量\n价格提醒\n 模拟成交\n行情来源说明\n价格口径 \n来源口径 · 未声明\n前复权（Yahoo Adj Close 系数推导）\n后复权（不可用）\n2026/10/23 21:30:00 开 349.12",
+          "jsBytes": 0,
+          "klineResponseMetadata": [
+            {
+              "status": 200,
+              "dataStatus": "cached",
+              "source": "yahoo-finance-history",
+              "reason": "显示受限范围内的缓存快照；来源时间单独标示",
+              "updatedAt": "2026-10-25T13:44:06.934Z",
+              "recordCount": 300
+            }
+          ],
+          "prefetchStartedBeforeCore": true
+        },
+        {
+          "viewport": 1440,
+          "run": 2,
+          "temperature": "cold",
+          "shellReadyMs": 2614.399999976158,
+          "paintedShellReadyMs": 4106.5,
+          "chartReadyMs": 4115.5,
+          "chartState": "ready",
+          "chartMessage": "Apple · usAAPL\n▤ 双图\n⛶ 全屏\n周期\n1分\n5分\n15分\n1小时\n1日\n3日\n5日\n60日\n120日\n1年\n5年\n缓存数据 · K线时间 2026-10-23 · yahoo-finance-history · 抓取 2026/10/25 21:44 · 上次源站耗时 1090ms · cache · 显示受限范围内的缓存快照；来源时间单独标示 AAPL · 1d · 普通行情 · K线：缓存 · 300 根 · 显示受限范围内的缓存快照；来源时间单独标示\n历史时点 / 日期定位 / 日内下钻\n图层与策略 · 保留当前选择\n事件时间轴\n刷新\n正在读取该标的事件与证据…\n正在加载当前标的事件…\nMA5 344.48\nMA10 343.30\nMA20 338.91\n周期非短线 · 连接：来源快照 · 时效：来源过期 · 蜡烛：已完成\n本地时区\n自动价格轴\n加载更早K线\n区间测量\n价格提醒\n 模拟成交\n行情来源说明\n价格口径 \n来源口径 · 未声明\n前复权（Yahoo Adj Close 系数推导）\n后复权（不可用）\n2026/10/23 21:30:00 开 349.12",
+          "jsBytes": 109072,
+          "klineResponseMetadata": [
+            {
+              "status": 200,
+              "dataStatus": "cached",
+              "source": "yahoo-finance-history",
+              "reason": "显示受限范围内的缓存快照；来源时间单独标示",
+              "updatedAt": "2026-10-25T13:44:06.934Z",
+              "recordCount": 300
+            }
+          ],
+          "prefetchStartedBeforeCore": true
+        },
+        {
+          "viewport": 1440,
+          "run": 2,
+          "temperature": "warm",
+          "shellReadyMs": 891,
+          "paintedShellReadyMs": 1104.8999999761581,
+          "chartReadyMs": 1139.2000000476837,
+          "chartState": "ready",
+          "chartMessage": "Apple · usAAPL\n▤ 双图\n⛶ 全屏\n周期\n1分\n5分\n15分\n1小时\n1日\n3日\n5日\n60日\n120日\n1年\n5年\n缓存数据 · K线时间 2026-10-23 · yahoo-finance-history · 抓取 2026/10/25 21:44 · 上次源站耗时 1090ms · stale · 显示受限范围内的缓存快照；正在后台刷新来源 AAPL · 1d · 普通行情 · K线：缓存 · 300 根 · 显示受限范围内的缓存快照；正在后台刷新来源\n历史时点 / 日期定位 / 日内下钻\n图层与策略 · 保留当前选择\n事件时间轴\n刷新\n正在读取该标的事件与证据…\n正在加载当前标的事件…\nMA5 344.48\nMA10 343.30\nMA20 338.91\n周期非短线 · 连接：来源快照 · 时效：来源过期 · 蜡烛：已完成\n本地时区\n自动价格轴\n加载更早K线\n区间测量\n价格提醒\n 模拟成交\n行情来源说明\n价格口径 \n来源口径 · 未声明\n前复权（Yahoo Adj Close 系数推导）\n后复权（不可用）\n2026/10/23 21:30:00 开 349.12",
+          "jsBytes": 0,
+          "klineResponseMetadata": [
+            {
+              "status": 200,
+              "dataStatus": "cached",
+              "source": "yahoo-finance-history",
+              "reason": "显示受限范围内的缓存快照；正在后台刷新来源",
+              "updatedAt": "2026-10-25T13:44:06.934Z",
+              "recordCount": 300
+            }
+          ],
+          "prefetchStartedBeforeCore": true
+        },
+        {
+          "viewport": 390,
+          "run": 0,
+          "temperature": "cold",
+          "shellReadyMs": 2182.5,
+          "paintedShellReadyMs": 3723.600000023842,
+          "chartReadyMs": 3732.7000000476837,
+          "chartState": "ready",
+          "chartMessage": "Apple · usAAPL\n▤ 双图\n⛶ 全屏\n周期\n1分\n5分\n15分\n1小时\n1日\n3日\n5日\n60日\n120日\n1年\n5年\n缓存数据 · K线时间 2026-10-23 · yahoo-finance-history · 抓取 2026/10/25 21:44 · 上次源站耗时 3ms · cache · 显示受限范围内的缓存快照；来源时间单独标示 AAPL · 1d · 普通行情 · K线：缓存 · 300 根 · 显示受限范围内的缓存快照；来源时间单独标示\n历史时点 / 日期定位 / 日内下钻\n图层与策略 · 保留当前选择\n事件时间轴\n刷新\npartial · events ok · news stale · filings unavailable · secForm4 partial · sec13f unavailable\nIn 1985, He Was Forced Out of the Company He Founded. Months Later He Bet $10 Million On A Graphics Unit He Bought From Georg",
+          "jsBytes": 109072,
+          "klineResponseMetadata": [
+            {
+              "status": 200,
+              "dataStatus": "cached",
+              "source": "yahoo-finance-history",
+              "reason": "显示受限范围内的缓存快照；来源时间单独标示",
+              "updatedAt": "2026-10-25T13:44:06.934Z",
+              "recordCount": 300
+            }
+          ],
+          "prefetchStartedBeforeCore": true
+        },
+        {
+          "viewport": 390,
+          "run": 0,
+          "temperature": "warm",
+          "shellReadyMs": 662.6999999284744,
+          "paintedShellReadyMs": 1114,
+          "chartReadyMs": 1152.3999999761581,
+          "chartState": "ready",
+          "chartMessage": "Apple · usAAPL\n▤ 双图\n⛶ 全屏\n周期\n1分\n5分\n15分\n1小时\n1日\n3日\n5日\n60日\n120日\n1年\n5年\n缓存数据 · K线时间 2026-10-23 · yahoo-finance-history · 抓取 2026/10/25 21:44 · 上次源站耗时 3ms · cache · 显示受限范围内的缓存快照；来源时间单独标示 AAPL · 1d · 普通行情 · K线：缓存 · 300 根 · 显示受限范围内的缓存快照；来源时间单独标示\n历史时点 / 日期定位 / 日内下钻\n图层与策略 · 保留当前选择\n事件时间轴\n刷新\npartial · events ok · news stale · filings unavailable · secForm4 partial · sec13f unavailable\nIn 1985, He Was Forced Out of the Company He Founded. Months Later He Bet $10 Million On A Graphics Unit He Bought From Georg",
+          "jsBytes": 0,
+          "klineResponseMetadata": [
+            {
+              "status": 200,
+              "dataStatus": "cached",
+              "source": "yahoo-finance-history",
+              "reason": "显示受限范围内的缓存快照；来源时间单独标示",
+              "updatedAt": "2026-10-25T13:44:06.934Z",
+              "recordCount": 300
+            }
+          ],
+          "prefetchStartedBeforeCore": true
+        },
+        {
+          "viewport": 390,
+          "run": 1,
+          "temperature": "cold",
+          "shellReadyMs": 3516.6999999284744,
+          "paintedShellReadyMs": 3763.899999976158,
+          "chartReadyMs": 3785.6999999284744,
+          "chartState": "ready",
+          "chartMessage": "Apple · usAAPL\n▤ 双图\n⛶ 全屏\n周期\n1分\n5分\n15分\n1小时\n1日\n3日\n5日\n60日\n120日\n1年\n5年\n缓存数据 · K线时间 2026-10-23 · yahoo-finance-history · 抓取 2026/10/25 21:44 · 上次源站耗时 3ms · cache · 显示受限范围内的缓存快照；来源时间单独标示 AAPL · 1d · 普通行情 · K线：缓存 · 300 根 · 显示受限范围内的缓存快照；来源时间单独标示\n历史时点 / 日期定位 / 日内下钻\n图层与策略 · 保留当前选择\n事件时间轴\n刷新\npartial · events ok · news stale · filings unavailable · secForm4 partial · sec13f unavailable\nIn 1985, He Was Forced Out of the Company He Founded. Months Later He Bet $10 Million On A Graphics Unit He Bought From Georg",
+          "jsBytes": 109072,
+          "klineResponseMetadata": [
+            {
+              "status": 200,
+              "dataStatus": "cached",
+              "source": "yahoo-finance-history",
+              "reason": "显示受限范围内的缓存快照；来源时间单独标示",
+              "updatedAt": "2026-10-25T13:44:06.934Z",
+              "recordCount": 300
+            }
+          ],
+          "prefetchStartedBeforeCore": true
+        },
+        {
+          "viewport": 390,
+          "run": 1,
+          "temperature": "warm",
+          "shellReadyMs": 633.3000000715256,
+          "paintedShellReadyMs": 999.8000000715256,
+          "chartReadyMs": 1037.8000000715256,
+          "chartState": "ready",
+          "chartMessage": "Apple · usAAPL\n▤ 双图\n⛶ 全屏\n周期\n1分\n5分\n15分\n1小时\n1日\n3日\n5日\n60日\n120日\n1年\n5年\n缓存数据 · K线时间 2026-10-23 · yahoo-finance-history · 抓取 2026/10/25 21:44 · 上次源站耗时 3ms · cache · 显示受限范围内的缓存快照；来源时间单独标示 AAPL · 1d · 普通行情 · K线：缓存 · 300 根 · 显示受限范围内的缓存快照；来源时间单独标示\n历史时点 / 日期定位 / 日内下钻\n图层与策略 · 保留当前选择\n事件时间轴\n刷新\npartial · events ok · news stale · filings unavailable · secForm4 partial · sec13f unavailable\nIn 1985, He Was Forced Out of the Company He Founded. Months Later He Bet $10 Million On A Graphics Unit He Bought From Georg",
+          "jsBytes": 0,
+          "klineResponseMetadata": [
+            {
+              "status": 200,
+              "dataStatus": "cached",
+              "source": "yahoo-finance-history",
+              "reason": "显示受限范围内的缓存快照；来源时间单独标示",
+              "updatedAt": "2026-10-25T13:44:06.934Z",
+              "recordCount": 300
+            }
+          ],
+          "prefetchStartedBeforeCore": true
+        },
+        {
+          "viewport": 390,
+          "run": 2,
+          "temperature": "cold",
+          "shellReadyMs": 2052.3000000715256,
+          "paintedShellReadyMs": 3491.9000000953674,
+          "chartReadyMs": 3502.4000000953674,
+          "chartState": "ready",
+          "chartMessage": "Apple · usAAPL\n▤ 双图\n⛶ 全屏\n周期\n1分\n5分\n15分\n1小时\n1日\n3日\n5日\n60日\n120日\n1年\n5年\n缓存数据 · K线时间 2026-10-23 · yahoo-finance-history · 抓取 2026/10/25 21:44 · 上次源站耗时 3ms · cache · 显示受限范围内的缓存快照；来源时间单独标示 AAPL · 1d · 普通行情 · K线：缓存 · 300 根 · 显示受限范围内的缓存快照；来源时间单独标示\n历史时点 / 日期定位 / 日内下钻\n图层与策略 · 保留当前选择\n事件时间轴\n刷新\npartial · events ok · news stale · filings unavailable · secForm4 partial · sec13f unavailable\nIn 1985, He Was Forced Out of the Company He Founded. Months Later He Bet $10 Million On A Graphics Unit He Bought From Georg",
+          "jsBytes": 109072,
+          "klineResponseMetadata": [
+            {
+              "status": 200,
+              "dataStatus": "cached",
+              "source": "yahoo-finance-history",
+              "reason": "显示受限范围内的缓存快照；来源时间单独标示",
+              "updatedAt": "2026-10-25T13:44:06.934Z",
+              "recordCount": 300
+            }
+          ],
+          "prefetchStartedBeforeCore": true
+        },
+        {
+          "viewport": 390,
+          "run": 2,
+          "temperature": "warm",
+          "shellReadyMs": 521.1000000238419,
+          "paintedShellReadyMs": 816.3000000715256,
+          "chartReadyMs": 823.1000000238419,
+          "chartState": "ready",
+          "chartMessage": "Apple · usAAPL\n▤ 双图\n⛶ 全屏\n周期\n1分\n5分\n15分\n1小时\n1日\n3日\n5日\n60日\n120日\n1年\n5年\n缓存数据 · K线时间 2026-10-23 · yahoo-finance-history · 抓取 2026/10/25 21:44 · 上次源站耗时 3ms · stale · 显示受限范围内的缓存快照；正在后台刷新来源 AAPL · 1d · 普通行情 · K线：缓存 · 300 根 · 显示受限范围内的缓存快照；正在后台刷新来源\n历史时点 / 日期定位 / 日内下钻\n图层与策略 · 保留当前选择\n事件时间轴\n刷新\npartial · events ok · news stale · filings unavailable · secForm4 partial · sec13f unavailable\nIn 1985, He Was Forced Out of the Company He Founded. Months Later He Bet $10 Million On A Graphics Unit He Bought From Georg",
+          "jsBytes": 0,
+          "klineResponseMetadata": [
+            {
+              "status": 200,
+              "dataStatus": "cached",
+              "source": "yahoo-finance-history",
+              "reason": "显示受限范围内的缓存快照；正在后台刷新来源",
+              "updatedAt": "2026-10-25T13:44:06.934Z",
+              "recordCount": 300
+            }
+          ],
+          "prefetchStartedBeforeCore": true
+        }
+      ],
+      "firstColdPhaseMarks": [
+        {
+          "name": "moneymoney:chart-preload-start",
+          "atMs": 360.7
+        },
+        {
+          "name": "moneymoney:stock-kline-prefetch-start",
+          "atMs": 363.6
+        },
+        {
+          "name": "moneymoney:auth-ready",
+          "atMs": 1717.7
+        },
+        {
+          "name": "moneymoney:stock-kline-prefetch-start",
+          "atMs": 1722.1
+        },
+        {
+          "name": "moneymoney:chart-preload-ready",
+          "atMs": 1936.7
+        },
+        {
+          "name": "moneymoney:dashboard-start",
+          "atMs": 1988.5
+        },
+        {
+          "name": "moneymoney:dashboard-auth-ready",
+          "atMs": 1990
+        },
+        {
+          "name": "moneymoney:dashboard-context-ready",
+          "atMs": 2063
+        },
+        {
+          "name": "moneymoney:dashboard-core-ready",
+          "atMs": 2729.3
+        },
+        {
+          "name": "moneymoney:chart-module-start",
+          "atMs": 2735.9
+        },
+        {
+          "name": "moneymoney:chart-module-ready",
+          "atMs": 2775.3
+        },
+        {
+          "name": "moneymoney:stock-kline-request-start",
+          "atMs": 2856.5
+        },
+        {
+          "name": "moneymoney:stock-kline-response-parsed",
+          "atMs": 2857
+        },
+        {
+          "name": "moneymoney:stock-kline-first-render",
+          "atMs": 3510.8
+        }
+      ]
+    },
+    {
+      "experiment": "stock",
+      "phase": "after",
+      "logSha256": "960058578bee4d52cf2ef01a87ca771a43e77ce8158dc9e91c3ebf854dc56599",
+      "medians": [
+        {
+          "viewport": 1440,
+          "temperature": "cold",
+          "shellReadyMs": 2409.5999999046326,
+          "chartReadyMs": 3892.0999999046326,
+          "jsBytes": 106749,
+          "compatibilityRequestStartSpreadMs": 1.2000000476837158,
+          "compatibilityDownloadSpanMs": 172.29999995231628
+        },
+        {
+          "viewport": 1440,
+          "temperature": "warm",
+          "shellReadyMs": 599.1000000238419,
+          "chartReadyMs": 943.2999999523163,
+          "jsBytes": 0,
+          "compatibilityRequestStartSpreadMs": 1.7000000476837158,
+          "compatibilityDownloadSpanMs": 1.7000000476837158
+        },
+        {
+          "viewport": 390,
+          "temperature": "cold",
+          "shellReadyMs": 1873.6000000238419,
+          "chartReadyMs": 3399.100000023842,
+          "jsBytes": 122907,
+          "compatibilityRequestStartSpreadMs": 198.70000004768372,
+          "compatibilityDownloadSpanMs": 556.1000000238419
+        },
+        {
+          "viewport": 390,
+          "temperature": "warm",
+          "shellReadyMs": 519.6000000238419,
+          "chartReadyMs": 821.3000000715256,
+          "jsBytes": 0,
+          "compatibilityRequestStartSpreadMs": 0.8999999761581421,
+          "compatibilityDownloadSpanMs": 0.8999999761581421
+        }
+      ],
+      "samples": [
+        {
+          "viewport": 1440,
+          "run": 0,
+          "temperature": "cold",
+          "shellReadyMs": 2437.100000023842,
+          "paintedShellReadyMs": 3206.100000023842,
+          "chartReadyMs": 4557.800000071526,
+          "chartState": "ready",
+          "chartMessage": "Apple · usAAPL\n▤ 双图\n⛶ 全屏\n周期\n1分\n5分\n15分\n1小时\n1日\n3日\n5日\n60日\n120日\n1年\n5年\n最新可用行情（实时性未声明） · K线时间 2026-10-23 · yahoo-finance-history · 抓取 2026/10/25 21:44 · 源站耗时 2482ms · origin AAPL · 1d · 普通行情 · K线：最新可用（实时性未声明） · 300 根\n历史时点 / 日期定位 / 日内下钻\n图层与策略 · 保留当前选择\n事件时间轴\n刷新\n正在读取该标的事件与证据…\n正在加载当前标的事件…\nMA5 344.48\nMA10 343.30\nMA20 338.91\n周期非短线 · 连接：来源快照 · 时效：来源过期 · 蜡烛：已完成\n本地时区\n自动价格轴\n加载更早K线\n区间测量\n价格提醒\n 模拟成交\n价格口径 \n来源口径 · 未声明\n前复权（Yahoo Adj Close 系数推导）\n后复权（不可用）\n2026/10/23 21:30:00 开 349.12 高 351.73 低 345.75 收 347.73 -0.40% 成",
+          "jsBytes": 122907,
+          "klineResponseMetadata": [
+            {
+              "status": 200,
+              "dataStatus": "live",
+              "source": "yahoo-finance-history",
+              "reason": null,
+              "updatedAt": "2026-10-25T13:44:49.447Z",
+              "recordCount": 300
+            }
+          ],
+          "prefetchStartedBeforeCore": true
+        },
+        {
+          "viewport": 1440,
+          "run": 0,
+          "temperature": "warm",
+          "shellReadyMs": 537.7999999523163,
+          "paintedShellReadyMs": 899.5,
+          "chartReadyMs": 943.2999999523163,
+          "chartState": "ready",
+          "chartMessage": "Apple · usAAPL\n▤ 双图\n⛶ 全屏\n周期\n1分\n5分\n15分\n1小时\n1日\n3日\n5日\n60日\n120日\n1年\n5年\n缓存数据 · K线时间 2026-10-23 · yahoo-finance-history · 抓取 2026/10/25 21:44 · 上次源站耗时 2482ms · cache · 显示受限范围内的缓存快照；来源时间单独标示 AAPL · 1d · 普通行情 · K线：缓存 · 300 根 · 显示受限范围内的缓存快照；来源时间单独标示\n历史时点 / 日期定位 / 日内下钻\n图层与策略 · 保留当前选择\n事件时间轴\n刷新\n正在读取该标的事件与证据…\n正在加载当前标的事件…\nMA5 344.48\nMA10 343.30\nMA20 338.91\n周期非短线 · 连接：来源快照 · 时效：来源过期 · 蜡烛：已完成\n本地时区\n自动价格轴\n加载更早K线\n区间测量\n价格提醒\n 模拟成交\n价格口径 \n来源口径 · 未声明\n前复权（Yahoo Adj Close 系数推导）\n后复权（不可用）\n2026/10/23 21:30:00 开 349.12 高 351.",
+          "jsBytes": 0,
+          "klineResponseMetadata": [
+            {
+              "status": 200,
+              "dataStatus": "cached",
+              "source": "yahoo-finance-history",
+              "reason": "显示受限范围内的缓存快照；来源时间单独标示",
+              "updatedAt": "2026-10-25T13:44:49.447Z",
+              "recordCount": 300
+            }
+          ],
+          "prefetchStartedBeforeCore": true
+        },
+        {
+          "viewport": 1440,
+          "run": 1,
+          "temperature": "cold",
+          "shellReadyMs": 2328.899999976158,
+          "paintedShellReadyMs": 3511.0999999046326,
+          "chartReadyMs": 3518.2999999523163,
+          "chartState": "ready",
+          "chartMessage": "Apple · usAAPL\n▤ 双图\n⛶ 全屏\n周期\n1分\n5分\n15分\n1小时\n1日\n3日\n5日\n60日\n120日\n1年\n5年\n缓存数据 · K线时间 2026-10-23 · yahoo-finance-history · 抓取 2026/10/25 21:44 · 上次源站耗时 2482ms · cache · 显示受限范围内的缓存快照；来源时间单独标示 AAPL · 1d · 普通行情 · K线：缓存 · 300 根 · 显示受限范围内的缓存快照；来源时间单独标示\n历史时点 / 日期定位 / 日内下钻\n图层与策略 · 保留当前选择\n事件时间轴\n刷新\n正在读取该标的事件与证据…\n正在加载当前标的事件…\nMA5 344.48\nMA10 343.30\nMA20 338.91\n周期非短线 · 连接：来源快照 · 时效：来源过期 · 蜡烛：已完成\n本地时区\n自动价格轴\n加载更早K线\n区间测量\n价格提醒\n 模拟成交\n价格口径 \n来源口径 · 未声明\n前复权（Yahoo Adj Close 系数推导）\n后复权（不可用）\n2026/10/23 21:30:00 开 349.12 高 351.",
+          "jsBytes": 106749,
+          "klineResponseMetadata": [
+            {
+              "status": 200,
+              "dataStatus": "cached",
+              "source": "yahoo-finance-history",
+              "reason": "显示受限范围内的缓存快照；来源时间单独标示",
+              "updatedAt": "2026-10-25T13:44:49.447Z",
+              "recordCount": 300
+            }
+          ],
+          "prefetchStartedBeforeCore": true
+        },
+        {
+          "viewport": 1440,
+          "run": 1,
+          "temperature": "warm",
+          "shellReadyMs": 648.1999999284744,
+          "paintedShellReadyMs": 881.6999999284744,
+          "chartReadyMs": 886.0999999046326,
+          "chartState": "ready",
+          "chartMessage": "Apple · usAAPL\n▤ 双图\n⛶ 全屏\n周期\n1分\n5分\n15分\n1小时\n1日\n3日\n5日\n60日\n120日\n1年\n5年\n缓存数据 · K线时间 2026-10-23 · yahoo-finance-history · 抓取 2026/10/25 21:44 · 上次源站耗时 2482ms · cache · 显示受限范围内的缓存快照；来源时间单独标示 AAPL · 1d · 普通行情 · K线：缓存 · 300 根 · 显示受限范围内的缓存快照；来源时间单独标示\n历史时点 / 日期定位 / 日内下钻\n图层与策略 · 保留当前选择\n事件时间轴\n刷新\n正在读取该标的事件与证据…\n正在加载当前标的事件…\nMA5 344.48\nMA10 343.30\nMA20 338.91\n周期非短线 · 连接：来源快照 · 时效：来源过期 · 蜡烛：已完成\n本地时区\n自动价格轴\n加载更早K线\n区间测量\n价格提醒\n 模拟成交\n价格口径 \n来源口径 · 未声明\n前复权（Yahoo Adj Close 系数推导）\n后复权（不可用）\n2026/10/23 21:30:00 开 349.12 高 351.",
+          "jsBytes": 0,
+          "klineResponseMetadata": [
+            {
+              "status": 200,
+              "dataStatus": "cached",
+              "source": "yahoo-finance-history",
+              "reason": "显示受限范围内的缓存快照；来源时间单独标示",
+              "updatedAt": "2026-10-25T13:44:49.447Z",
+              "recordCount": 300
+            }
+          ],
+          "prefetchStartedBeforeCore": true
+        },
+        {
+          "viewport": 1440,
+          "run": 2,
+          "temperature": "cold",
+          "shellReadyMs": 2409.5999999046326,
+          "paintedShellReadyMs": 3882.7999999523163,
+          "chartReadyMs": 3892.0999999046326,
+          "chartState": "ready",
+          "chartMessage": "Apple · usAAPL\n▤ 双图\n⛶ 全屏\n周期\n1分\n5分\n15分\n1小时\n1日\n3日\n5日\n60日\n120日\n1年\n5年\n缓存数据 · K线时间 2026-10-23 · yahoo-finance-history · 抓取 2026/10/25 21:44 · 上次源站耗时 2482ms · cache · 显示受限范围内的缓存快照；来源时间单独标示 AAPL · 1d · 普通行情 · K线：缓存 · 300 根 · 显示受限范围内的缓存快照；来源时间单独标示\n历史时点 / 日期定位 / 日内下钻\n图层与策略 · 保留当前选择\n事件时间轴\n刷新\n正在读取该标的事件与证据…\n正在加载当前标的事件…\nMA5 344.48\nMA10 343.30\nMA20 338.91\n周期非短线 · 连接：来源快照 · 时效：来源过期 · 蜡烛：已完成\n本地时区\n自动价格轴\n加载更早K线\n区间测量\n价格提醒\n 模拟成交\n价格口径 \n来源口径 · 未声明\n前复权（Yahoo Adj Close 系数推导）\n后复权（不可用）\n2026/10/23 21:30:00 开 349.12 高 351.",
+          "jsBytes": 106749,
+          "klineResponseMetadata": [
+            {
+              "status": 200,
+              "dataStatus": "cached",
+              "source": "yahoo-finance-history",
+              "reason": "显示受限范围内的缓存快照；来源时间单独标示",
+              "updatedAt": "2026-10-25T13:44:49.447Z",
+              "recordCount": 300
+            }
+          ],
+          "prefetchStartedBeforeCore": true
+        },
+        {
+          "viewport": 1440,
+          "run": 2,
+          "temperature": "warm",
+          "shellReadyMs": 599.1000000238419,
+          "paintedShellReadyMs": 747.5,
+          "chartReadyMs": 1519.3999999761581,
+          "chartState": "ready",
+          "chartMessage": "Apple · usAAPL\n▤ 双图\n⛶ 全屏\n周期\n1分\n5分\n15分\n1小时\n1日\n3日\n5日\n60日\n120日\n1年\n5年\n最新可用行情（实时性未声明） · K线时间 2026-10-23 · yahoo-finance-history · 抓取 2026/10/25 21:45 · 源站耗时 865ms · origin AAPL · 1d · 普通行情 · K线：最新可用（实时性未声明） · 300 根\n历史时点 / 日期定位 / 日内下钻\n图层与策略 · 保留当前选择\n事件时间轴\n刷新\n正在读取该标的事件与证据…\n正在加载当前标的事件…\nMA5 344.48\nMA10 343.30\nMA20 338.91\n周期非短线 · 连接：来源快照 · 时效：来源过期 · 蜡烛：已完成\n本地时区\n自动价格轴\n加载更早K线\n区间测量\n价格提醒\n 模拟成交\n价格口径 \n来源口径 · 未声明\n前复权（Yahoo Adj Close 系数推导）\n后复权（不可用）\n2026/10/23 21:30:00 开 349.12 高 351.73 低 345.75 收 347.73 -0.40% 成交",
+          "jsBytes": 16158,
+          "klineResponseMetadata": [
+            {
+              "status": 200,
+              "dataStatus": "live",
+              "source": "yahoo-finance-history",
+              "reason": null,
+              "updatedAt": "2026-10-25T13:45:03.109Z",
+              "recordCount": 300
+            }
+          ],
+          "prefetchStartedBeforeCore": true
+        },
+        {
+          "viewport": 390,
+          "run": 0,
+          "temperature": "cold",
+          "shellReadyMs": 2025.8999999761581,
+          "paintedShellReadyMs": 2052.399999976158,
+          "chartReadyMs": 3801.600000023842,
+          "chartState": "ready",
+          "chartMessage": "Apple · usAAPL\n▤ 双图\n⛶ 全屏\n周期\n1分\n5分\n15分\n1小时\n1日\n3日\n5日\n60日\n120日\n1年\n5年\n缓存数据 · K线时间 2026-10-23 · yahoo-finance-history · 抓取 2026/10/25 21:45 · 上次源站耗时 865ms · cache · 显示受限范围内的缓存快照；来源时间单独标示 AAPL · 1d · 普通行情 · K线：缓存 · 300 根 · 显示受限范围内的缓存快照；来源时间单独标示\n历史时点 / 日期定位 / 日内下钻\n图层与策略 · 保留当前选择\n事件时间轴\n刷新\npartial · events ok · news stale · filings unavailable · secForm4 partial · sec13f unavailable\nSEC 4 · 0001140361-26-040540\nevent · 发生 2026/10/23 06:32 · SEC EDGAR\n查看来源 ↗\n内部人卖出 · Newstead Jennifer · 交易日 2026-10-20 · 2,",
+          "jsBytes": 122907,
+          "klineResponseMetadata": [
+            {
+              "status": 200,
+              "dataStatus": "cached",
+              "source": "yahoo-finance-history",
+              "reason": "显示受限范围内的缓存快照；来源时间单独标示",
+              "updatedAt": "2026-10-25T13:45:03.109Z",
+              "recordCount": 300
+            }
+          ],
+          "prefetchStartedBeforeCore": true
+        },
+        {
+          "viewport": 390,
+          "run": 0,
+          "temperature": "warm",
+          "shellReadyMs": 554.7999999523163,
+          "paintedShellReadyMs": 889.7000000476837,
+          "chartReadyMs": 924,
+          "chartState": "ready",
+          "chartMessage": "Apple · usAAPL\n▤ 双图\n⛶ 全屏\n周期\n1分\n5分\n15分\n1小时\n1日\n3日\n5日\n60日\n120日\n1年\n5年\n缓存数据 · K线时间 2026-10-23 · yahoo-finance-history · 抓取 2026/10/25 21:45 · 上次源站耗时 865ms · cache · 显示受限范围内的缓存快照；来源时间单独标示 AAPL · 1d · 普通行情 · K线：缓存 · 300 根 · 显示受限范围内的缓存快照；来源时间单独标示\n历史时点 / 日期定位 / 日内下钻\n图层与策略 · 保留当前选择\n事件时间轴\n刷新\npartial · events ok · news stale · filings unavailable · secForm4 partial · sec13f unavailable\nSEC 4 · 0001140361-26-040540\nevent · 发生 2026/10/23 06:32 · SEC EDGAR\n查看来源 ↗\n内部人卖出 · Newstead Jennifer · 交易日 2026-10-20 · 2,",
+          "jsBytes": 0,
+          "klineResponseMetadata": [
+            {
+              "status": 200,
+              "dataStatus": "cached",
+              "source": "yahoo-finance-history",
+              "reason": "显示受限范围内的缓存快照；来源时间单独标示",
+              "updatedAt": "2026-10-25T13:45:03.109Z",
+              "recordCount": 300
+            }
+          ],
+          "prefetchStartedBeforeCore": true
+        },
+        {
+          "viewport": 390,
+          "run": 1,
+          "temperature": "cold",
+          "shellReadyMs": 1873.6000000238419,
+          "paintedShellReadyMs": 1900.2999999523163,
+          "chartReadyMs": 3399.100000023842,
+          "chartState": "ready",
+          "chartMessage": "Apple · usAAPL\n▤ 双图\n⛶ 全屏\n周期\n1分\n5分\n15分\n1小时\n1日\n3日\n5日\n60日\n120日\n1年\n5年\n缓存数据 · K线时间 2026-10-23 · yahoo-finance-history · 抓取 2026/10/25 21:45 · 上次源站耗时 865ms · cache · 显示受限范围内的缓存快照；来源时间单独标示 AAPL · 1d · 普通行情 · K线：缓存 · 300 根 · 显示受限范围内的缓存快照；来源时间单独标示\n历史时点 / 日期定位 / 日内下钻\n图层与策略 · 保留当前选择\n事件时间轴\n刷新\npartial · events ok · news stale · filings unavailable · secForm4 partial · sec13f unavailable\nSEC 4 · 0001140361-26-040540\nevent · 发生 2026/10/23 06:32 · SEC EDGAR\n查看来源 ↗\n内部人卖出 · Newstead Jennifer · 交易日 2026-10-20 · 2,",
+          "jsBytes": 122907,
+          "klineResponseMetadata": [
+            {
+              "status": 200,
+              "dataStatus": "cached",
+              "source": "yahoo-finance-history",
+              "reason": "显示受限范围内的缓存快照；来源时间单独标示",
+              "updatedAt": "2026-10-25T13:45:03.109Z",
+              "recordCount": 300
+            }
+          ],
+          "prefetchStartedBeforeCore": true
+        },
+        {
+          "viewport": 390,
+          "run": 1,
+          "temperature": "warm",
+          "shellReadyMs": 519.6000000238419,
+          "paintedShellReadyMs": 713.7000000476837,
+          "chartReadyMs": 732.6000000238419,
+          "chartState": "ready",
+          "chartMessage": "Apple · usAAPL\n▤ 双图\n⛶ 全屏\n周期\n1分\n5分\n15分\n1小时\n1日\n3日\n5日\n60日\n120日\n1年\n5年\n缓存数据 · K线时间 2026-10-23 · yahoo-finance-history · 抓取 2026/10/25 21:45 · 上次源站耗时 865ms · cache · 显示受限范围内的缓存快照；来源时间单独标示 AAPL · 1d · 普通行情 · K线：缓存 · 300 根 · 显示受限范围内的缓存快照；来源时间单独标示\n历史时点 / 日期定位 / 日内下钻\n图层与策略 · 保留当前选择\n事件时间轴\n刷新\npartial · events ok · news stale · filings unavailable · secForm4 partial · sec13f unavailable\nSEC 4 · 0001140361-26-040540\nevent · 发生 2026/10/23 06:32 · SEC EDGAR\n查看来源 ↗\n内部人卖出 · Newstead Jennifer · 交易日 2026-10-20 · 2,",
+          "jsBytes": 0,
+          "klineResponseMetadata": [
+            {
+              "status": 200,
+              "dataStatus": "cached",
+              "source": "yahoo-finance-history",
+              "reason": "显示受限范围内的缓存快照；来源时间单独标示",
+              "updatedAt": "2026-10-25T13:45:03.109Z",
+              "recordCount": 300
+            }
+          ],
+          "prefetchStartedBeforeCore": true
+        },
+        {
+          "viewport": 390,
+          "run": 2,
+          "temperature": "cold",
+          "shellReadyMs": 1433.1000000238419,
+          "paintedShellReadyMs": 1452.3999999761581,
+          "chartReadyMs": 3263.600000023842,
+          "chartState": "ready",
+          "chartMessage": "Apple · usAAPL\n▤ 双图\n⛶ 全屏\n周期\n1分\n5分\n15分\n1小时\n1日\n3日\n5日\n60日\n120日\n1年\n5年\n缓存数据 · K线时间 2026-10-23 · yahoo-finance-history · 抓取 2026/10/25 21:45 · 上次源站耗时 865ms · cache · 显示受限范围内的缓存快照；来源时间单独标示 AAPL · 1d · 普通行情 · K线：缓存 · 300 根 · 显示受限范围内的缓存快照；来源时间单独标示\n历史时点 / 日期定位 / 日内下钻\n图层与策略 · 保留当前选择\n事件时间轴\n刷新\npartial · events ok · news stale · filings unavailable · secForm4 partial · sec13f unavailable\nSEC 4 · 0001140361-26-040540\nevent · 发生 2026/10/23 06:32 · SEC EDGAR\n查看来源 ↗\n内部人卖出 · Newstead Jennifer · 交易日 2026-10-20 · 2,",
+          "jsBytes": 122907,
+          "klineResponseMetadata": [
+            {
+              "status": 200,
+              "dataStatus": "cached",
+              "source": "yahoo-finance-history",
+              "reason": "显示受限范围内的缓存快照；来源时间单独标示",
+              "updatedAt": "2026-10-25T13:45:03.109Z",
+              "recordCount": 300
+            }
+          ],
+          "prefetchStartedBeforeCore": true
+        },
+        {
+          "viewport": 390,
+          "run": 2,
+          "temperature": "warm",
+          "shellReadyMs": 504.3000000715256,
+          "paintedShellReadyMs": 783.4000000953674,
+          "chartReadyMs": 821.3000000715256,
+          "chartState": "ready",
+          "chartMessage": "Apple · usAAPL\n▤ 双图\n⛶ 全屏\n周期\n1分\n5分\n15分\n1小时\n1日\n3日\n5日\n60日\n120日\n1年\n5年\n缓存数据 · K线时间 2026-10-23 · yahoo-finance-history · 抓取 2026/10/25 21:45 · 上次源站耗时 865ms · stale · 显示受限范围内的缓存快照；正在后台刷新来源 AAPL · 1d · 普通行情 · K线：缓存 · 300 根 · 显示受限范围内的缓存快照；正在后台刷新来源\n历史时点 / 日期定位 / 日内下钻\n图层与策略 · 保留当前选择\n事件时间轴\n刷新\npartial · events ok · news stale · filings unavailable · secForm4 partial · sec13f unavailable\nSEC 4 · 0001140361-26-040540\nevent · 发生 2026/10/23 06:32 · SEC EDGAR\n查看来源 ↗\n内部人卖出 · Newstead Jennifer · 交易日 2026-10-20 · 2,",
+          "jsBytes": 0,
+          "klineResponseMetadata": [
+            {
+              "status": 200,
+              "dataStatus": "cached",
+              "source": "yahoo-finance-history",
+              "reason": "显示受限范围内的缓存快照；正在后台刷新来源",
+              "updatedAt": "2026-10-25T13:45:03.109Z",
+              "recordCount": 300
+            }
+          ],
+          "prefetchStartedBeforeCore": true
+        }
+      ],
+      "firstColdPhaseMarks": [
+        {
+          "name": "moneymoney:auth-ready",
+          "atMs": 1488
+        },
+        {
+          "name": "moneymoney:chart-preload-start",
+          "atMs": 1489.6
+        },
+        {
+          "name": "moneymoney:stock-kline-prefetch-start",
+          "atMs": 1494.3
+        },
+        {
+          "name": "moneymoney:dashboard-start",
+          "atMs": 1704.4
+        },
+        {
+          "name": "moneymoney:dashboard-auth-ready",
+          "atMs": 1705.7
+        },
+        {
+          "name": "moneymoney:dashboard-context-ready",
+          "atMs": 1758.2
+        },
+        {
+          "name": "moneymoney:dashboard-core-ready",
+          "atMs": 2385.6
+        },
+        {
+          "name": "moneymoney:chart-module-start",
+          "atMs": 2393.3
+        },
+        {
+          "name": "moneymoney:chart-preload-ready",
+          "atMs": 2444.9
+        },
+        {
+          "name": "moneymoney:chart-module-ready",
+          "atMs": 2461.9
+        },
+        {
+          "name": "moneymoney:stock-kline-request-start",
+          "atMs": 2537.9
+        },
+        {
+          "name": "moneymoney:stock-kline-response-parsed",
+          "atMs": 4103
+        },
+        {
+          "name": "moneymoney:stock-kline-first-render",
+          "atMs": 4471.7
+        }
+      ]
+    }
+  ],
+  "runtimeChanged": false,
+  "performanceTargetAchieved": false,
+  "reason": "Earlier download was observed but did not improve full chart readiness by 20 percent in both widths and did not satisfy all warm budgets. Baseline drift is retained, never used to select a slower favorable baseline.",
+  "restoredVerification": {
+    "build": "passed",
+    "targetedTests": 54,
+    "failures": 0,
+    "runtimeSourceDiff": "none",
+    "hashedAssetsMatchingRelease": 29,
+    "serverSha256": "8fa0b51360364c3e54fb39db035d39ff2eb7f7912cea931b6f9dd7bdc1a616e5",
+    "productionCommit": "0ced177846c3f13403cb41a5c26d7109b88f325a",
+    "productionVersionStatus": 200,
+    "researchDbSha256": "27fd475e523568daa4cdcabf3146917023335a62affe00429babd721b3b79fd1",
+    "newDeployment": false
+  }
+}
