@@ -1,7 +1,17 @@
 'use strict';
 const fs=require('node:fs');
+const publicMarketDomains=[
+ 'yahoo.com','sina.com.cn','sinajs.cn','nasdaq.com','eastmoney.com',
+ 'binance.com','binance.us','binance.vision','gateio.ws','gateio.io','gate.io',
+ 'coinbase.com','deribit.com','cboe.com','kalshi.com','kalshi.co','polymarket.com',
+ 'manifold.markets','metaculus.com','goodjudgment.com','gjopen.com','predict.fun','sec.gov'
+];
+const exactMarketHosts=new Set(['qt.gtimg.cn','smartbox.gtimg.cn']);
+const privatePath=/(?:^|\/)(?:order|orders|openorders|allorders|mytrades|userdatastream|account|accounts|private|wallet|wallets|balance|balances|positionrisk|trade|trades|withdraw|transfer|completions|messages)(?:\/|$)/i;
+function isLoopback(host){return host==='localhost'||host==='[::1]'||/^127(?:\.\d{1,3}){3}$/.test(host);}
+function isPublicMarketHost(host){return exactMarketHosts.has(host)||publicMarketDomains.some(domain=>host===domain||host.endsWith('.'+domain));}
 function allowedRead(value,method='GET'){
- try{const u=new URL(value);return ['http:','https:'].includes(u.protocol)&&['GET','HEAD'].includes(String(method).toUpperCase())&&!/openrouter|openai|anthropic|groq|telegram|discord|slack/i.test(u.hostname)&&!/(?:^|\/)(?:order|orders|account|private|trade|withdraw|transfer|completions|messages)(?:\/|$)/i.test(u.pathname);}catch{return false;}
+ try{const u=new URL(value),verb=String(method).toUpperCase();if(!['http:','https:'].includes(u.protocol)||!['GET','HEAD'].includes(verb)||privatePath.test(decodeURIComponent(u.pathname)))return false;return isLoopback(u.hostname)||(u.protocol==='https:'&&isPublicMarketHost(u.hostname));}catch{return false;}
 }
 function check(value,method){
  const allowed=allowedRead(value,method);

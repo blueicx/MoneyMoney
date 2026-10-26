@@ -90,3 +90,13 @@
 期权补丁定向与浏览器：31项定向通过，压力情景单文件13/13；新增延迟回归验证刷新禁用/清空旧选项、相同ID/Hash保留两条实际腿、Hash变化或任何已加入合约消失时清空实际数组/UI并拒绝一腿保存（POST=0），workspace切换不恢复旧选择。服务端原本就拒绝不属于快照的腿，没有证据表明错误记录落库。构建及安全扫描通过，新旧隔离浏览器02AiiD（12组合）与LDecyh（24组合）通过；smoke等待和断言保持原样。冻结后全量日志mm-eight-options-final-regression.log另记。
 
 期权最终冻结全量回归：450文件、2206测试通过、0失败（mm-eight-options-final-regression.log），进程退出0。
+
+742dbbe 补丁CI40369119335全绿（含新旧浏览器工件），干净导出浏览器ef6oEc/yePO2j通过，12组恢复演练fc80Qw通过。尚未部署，等隔离来源门控收紧后统一发布最终构建。
+
+监督短测额外证据：bb51325b（未设逐市场预热，initialLoads为空、预热1.871s）在options首次切换5秒稳定门控失败，raw report failed、0轮；外部每秒WMI inspect之后监督状态为interrupted，具体CIM失败原因未证实。配置差异是事实，不能称其为稳定失败的唯一原因。保留原报告。按正式启动既定的每市场120s首载预算（未更改每轮5s/500ms稳定门槛）以独立WMI启动554f154e，四市场首载分别4.228/2.592/0.931/2.373秒、均无pending，监督3轮测量70.745秒、连续与公共来源短测passed。没有据此宣称旧失败已修复或24h通过。
+
+两轮network原始日志发现隔离服务还在读取Sogou/Youdao/MyMemory翻译公共GET，超出“仅公共行情来源读取”的本轮范围；现有guard只黑名单拒绝模型/通知/非GET还不足。正在将隔离helper改为明确市场数据来源域白名单，并保留私有/变更/模型/通知拒绝；生产配置不变。须在新固定构建验证并重新计时。
+
+隔离来源门控定向通过：15项（含guard/source/progress），guard自身3项先红后绿；HTTPS明确数据域/边界、精准Tencent行情host、loopback GET/HEAD保留，未知/翻译host、变更请求及私有GET拒绝。两文件语法和安全扫描通过；未改生产网络配置。冻结后全量日志mm-eight-public-only-regression.log。
+
+来源门控最终全量回归：450文件、2208测试通过、0失败，退出0（mm-eight-public-only-regression.log）。
