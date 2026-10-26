@@ -1,7 +1,7 @@
 const assert=require('node:assert/strict'),fs=require('node:fs'),os=require('node:os'),path=require('node:path'),{spawn}=require('node:child_process'),{chromium}=require('playwright');
 const {performance}=require('node:perf_hooks'),{createHash}=require('node:crypto'),{evaluateContinuousSoak}=require('./lib/continuous-soak.cjs');
 const {sourceObservation,evaluatePublicSourceEvidence}=require('./lib/soak-source-evidence.cjs');
-const {waitForStableProgress,evaluateRollingAcceptance,evaluateSourceProgress}=require('./lib/soak-progress.cjs');
+const {waitForStableProgress,evaluateRollingAcceptance,evaluateSourceProgress,needsAnotherObservation}=require('./lib/soak-progress.cjs');
 const cycles=Number(process.env.MONEYMONEY_SOAK_CYCLES||3),minutes=Number(process.env.MONEYMONEY_SOAK_MINUTES||0);if(!Number.isInteger(cycles)||cycles<3||cycles>10000||!Number.isFinite(minutes)||minutes<0||minutes>1440)throw Error('Invalid soak cycles/minutes');
 const data=process.env.MONEYMONEY_SOAK_DATA_DIR||fs.mkdtempSync(path.join(os.tmpdir(),'mm-long-session-')),runId=process.env.MONEYMONEY_SOAK_RUN_ID||null,port=3207,base='http://127.0.0.1:'+port,root=path.resolve(__dirname,'..'),started=Date.now(),username='soak-owner',password='isolated-soak-only-92!';
 const offline=process.env.MONEYMONEY_SOAK_OFFLINE==='1';
@@ -56,8 +56,8 @@ async function main(){let browser;const report={status:'running',runId,requested
   assert.equal(fingerprint(),buildFingerprint,'fixed build changed during observation');assert.equal(child.exitCode,null,'isolated service terminated');checkpoint();const progressFailure=[report.rollingAcceptance,report.sourceProgressAcceptance].find(result=>result?.status==='failed');if(progressFailure)throw Object.assign(new Error(progressFailure.reasons.join('; ')),{name:'SoakAcceptanceFailure'});
   if(pending.size>report.peakPending.count)report.peakPending={count:pending.size,round,paths:Object.fromEntries([...new Set([...pending].map(r=>new URL(r.url()).pathname))].map(p=>[p,[...pending].filter(r=>new URL(r.url()).pathname===p).length]))};
   if(round%3===0)console.log('soak progress: '+round+' cycles');
-  if(intervalMs&&performance.now()-monotonicStarted<minutes*60000)await page.waitForTimeout(Math.min(intervalMs,Math.max(0,minutes*60000-(performance.now()-monotonicStarted))));
- }while(round<cycles||performance.now()-monotonicStarted<minutes*60000);
+  if(intervalMs&&needsAnotherObservation(report,cycles,minutes*60000))await page.waitForTimeout(Math.min(intervalMs,Math.max(0,minutes*60000-(performance.now()-monotonicStarted))));
+ }while(needsAnotherObservation(report,cycles,minutes*60000));
  report.measuredElapsedMs=performance.now()-monotonicStarted;report.continuousAcceptance=evaluateContinuousSoak(report,minutes*60000);assert.equal(report.continuousAcceptance.status,'passed',report.continuousAcceptance.reasons.join('; '));
  if(offline)report.publicSourceAcceptance={status:'not_run',reason:'offline fixture does not prove real-provider acceptance'};
  else{const network=fs.existsSync(path.join(data,'network.ndjson'))?fs.readFileSync(path.join(data,'network.ndjson'),'utf8').trim().split('\n').filter(Boolean).map(line=>JSON.parse(line)):[];report.publicSourceAcceptance=evaluatePublicSourceEvidence(report.sourceProbes,network,report.measuredElapsedMs);assert.equal(report.publicSourceAcceptance.status,'passed',report.publicSourceAcceptance.reasons.join('; '));report.externalNetwork='confirmed public responses and validated market records; see per-market coverage';}

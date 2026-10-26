@@ -43,4 +43,10 @@ function evaluateSourceProgress(report,network,evaluator){
  if(!Number.isFinite(report?.measuredElapsedMs)||report.measuredElapsedMs<300000)return null;
  return {...evaluator(report.sourceProbes||[],network,report.measuredElapsedMs),progressOnly:true};
 }
-module.exports={waitForStableProgress,evaluateRollingAcceptance,evaluateSourceProgress};
+function needsAnotherObservation(report,requiredCycles,requiredMs){
+ if(!Number.isInteger(requiredCycles)||requiredCycles<0)throw new RangeError('requiredCycles must be a non-negative integer');
+ if(!Number.isFinite(requiredMs)||requiredMs<0)throw new RangeError('requiredMs must be a non-negative finite number');
+ const rows=report?.measurements||[],last=rows.at(-1);
+ return rows.length<requiredCycles||!Number.isFinite(last?.measuredMs)||last.measuredMs<requiredMs;
+}
+module.exports={waitForStableProgress,evaluateRollingAcceptance,evaluateSourceProgress,needsAnotherObservation};

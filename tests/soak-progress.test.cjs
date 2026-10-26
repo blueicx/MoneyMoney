@@ -1,7 +1,7 @@
 'use strict';
 const test=require('node:test');
 const assert=require('node:assert/strict');
-const {waitForStableProgress,evaluateRollingAcceptance}=require('../scripts/lib/soak-progress.cjs');
+const {waitForStableProgress,evaluateRollingAcceptance,needsAnotherObservation}=require('../scripts/lib/soak-progress.cjs');
 const {evaluateContinuousSoak}=require('../scripts/lib/continuous-soak.cjs');
 const {evaluateSourceProgress}=require('../scripts/lib/soak-progress.cjs');
 const {evaluatePublicSourceEvidence}=require('../scripts/lib/soak-source-evidence.cjs');
@@ -88,4 +88,18 @@ test('rolling acceptance keeps the round 29 valley and rejects round 31 recovery
 
 test('rolling acceptance waits until three observations exist',()=>{
  assert.equal(evaluateRollingAcceptance({measurements:[{},{}]},()=>{throw new Error('must wait');}),null);
+});
+
+test('requires an observation spanning the duration even when the sleep clock has reached it',()=>{
+ const report={measurements:[{measuredMs:0},{measuredMs:120000},{measuredMs:333585.6}]};
+ assert.equal(needsAnotherObservation(report,3,360000),true,'wall-clock sleep cannot substitute for an observation at the required duration');
+ report.measurements.push({measuredMs:360017.9});
+ assert.equal(needsAnotherObservation(report,3,360000),false);
+});
+
+test('requires enough observations for cycle-only runs, including zero-minute runs',()=>{
+ const report={measurements:[{measuredMs:0},{measuredMs:10}]};
+ assert.equal(needsAnotherObservation(report,3,0),true);
+ report.measurements.push({measuredMs:20});
+ assert.equal(needsAnotherObservation(report,3,0),false);
 });
