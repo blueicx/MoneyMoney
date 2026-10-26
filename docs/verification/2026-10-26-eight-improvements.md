@@ -110,3 +110,11 @@
 监测终点修复：needsAnotherObservation同时要求样本数与最后measuredMs达到门槛，睡眠时间不替代观测；0分钟短轮仍须3轮，满时长后完成最后一轮完整市场/来源/资源采样。30项定向测试通过、语法/安全/diff检查通过；源码冻结后的全量日志mm-eight-terminal-observation-regression.log。
 
 监测终点补丁最终全量：450文件、2210测试通过、0失败，退出0；没有产品代码改动。
+
+### 最终监督预检与新24小时轮次（2026-10-27 上海）
+
+- 监测器39370b0 CI40379546714全部通过；全量450文件/2210测试通过。应用5873400的原始dist共1386文件复制到独立监测导出目录后逐一SHA256核对一致；应用运行构建和监测器源版本分别冻结，7个脚本/guard Hash在mm-eight-soak-harness.json及新轮描述符中保存。
+- 监督预检0ea4f334-3067-40b5-8142-e9ffa68a900c：7轮、测量364989.024ms，最后资源观测364854.88ms，超过360000ms。raw报告、监督器和独立validateAcceptance均passed；来源证据原始network重算passed，180个允许的上游响应，翻译外部响应0。sourceProgress与rolling均passed，阈值未变。该轮证明6分钟预检，不代表24h。
+- 新独立轮次e32db7c3-7a44-4f65-b724-a78a7ef18e4c已启动；应用commit58734003c501becff3b55c5fd126f26ad944ebf6，监测commit39370b011479f2129bd971f29c42a43743ee4c70，dist指纹646caae7c03d3975b05f2ddd22a8fee65798e635f68a77a8fa352b42f4ffb3a1。首次加载后计时开始于2026-10-27 02:46:19.919上海，最早2026-10-28 02:46:19.919满24h。描述符E:/MYC/mm-eight-24h-run.json，原始报告/source-probes/network在E:/MYC/mm-eight-24h-supervised/runs/<runId>/。
+- 当前只记running-not-accepted，最后24h检查框保持未勾选；旧a83acbb3及e430c623等失败/中断原始证据保留，不能接续时长。不自动无限重启。原自动跟进moneymoney-24已不存在，未擅自恢复，不能承诺自动消息提醒；监督进程会自行保存终态。
+- 功能修复已发布并完成线上验收；20%冷启动性能目标仍未通过、候选已撤回；真实来源24h仍待本轮完整连续证据。现有生产数据、runner配置、交易配置和本地未登记db保留，无真实交易、付费模型或外部通知。
