@@ -80,3 +80,13 @@
 - 早先全量日志mm-eight-monitor-regression.log在测试已加入但产品修复尚未写入时捕获同一竞态红例；失败保留。最终源码冻结后重新运行mm-eight-followup-regression.log，结果另记。
 
 最终冻结全量回归：450文件、2204测试通过、0失败（mm-eight-followup-regression.log）；安全扫描1156已登记文件通过。
+
+### CI 40365815221 继续发现期权刷新竞态
+
+- 6f8b55c 的CI全量测试、构建、安全、web/navigation和七项浏览器均通过；八项浏览器在data-leg选择超时失败，未部署该候选，生产仍0cd0184。
+- 完整失败日志mm-eight-followup-ci-failure.log与下载原工件mm-eight-ci-40365815221-artifacts保留。服务器证明初始快照读取在17:13:18.223–18.231Z完成，手动刷新在17:13:19.266–19.269Z完成；期权旧选项在pending期间没有像组合选项一样失效，刷新完成renderOptions会重置所选快照/腿。不能以本地两轮通过替代CI失败。
+- 下一补丁为期权刷新增加同类明确状态保护及延迟回归，不增加smoke超时，不放宽断言。
+
+期权补丁定向与浏览器：31项定向通过，压力情景单文件13/13；新增延迟回归验证刷新禁用/清空旧选项、相同ID/Hash保留两条实际腿、Hash变化或任何已加入合约消失时清空实际数组/UI并拒绝一腿保存（POST=0），workspace切换不恢复旧选择。服务端原本就拒绝不属于快照的腿，没有证据表明错误记录落库。构建及安全扫描通过，新旧隔离浏览器02AiiD（12组合）与LDecyh（24组合）通过；smoke等待和断言保持原样。冻结后全量日志mm-eight-options-final-regression.log另记。
+
+期权最终冻结全量回归：450文件、2206测试通过、0失败（mm-eight-options-final-regression.log），进程退出0。
