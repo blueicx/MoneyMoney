@@ -6,6 +6,8 @@ const os = require('node:os');
 const path = require('node:path');
 const { chromium } = require('playwright');
 const { summarizeCpuProfile, summarizeTimeline } = require('./benchmark-profile.cjs');
+const {summarizeLoadingPhases}=require('./lib/loading-phases.cjs');
+const {installLongTaskDiagnostics}=require('./lib/loading-long-tasks.cjs');
 const profileCpu = process.env.MONEYMONEY_BENCHMARK_PROFILE === '1';
 const traceLayout = process.env.MONEYMONEY_BENCHMARK_LAYOUT === '1';
 const assert = require('node:assert/strict');
@@ -102,7 +104,8 @@ const median = values => [...values].sort((a, b) => a - b)[Math.floor(values.len
         const klineResponseMetadata = [];
         const klineResponseTasks = [];
         const failedRequests = [];
-        await page.addInitScript(() => { window.__MM_PERFORMANCE_TRACE__ = true; });
+        await page.addInitScript(() => { window.__MM_PERFORMANCE_TRACE__=true; });
+        if(profileCpu)await page.addInitScript(installLongTaskDiagnostics);
         if (gateAuxiliaryRequests) {
           for (const pathname of auxiliaryPaths) {
             await page.route(`**${pathname}*`, route => new Promise(resolve => {
@@ -269,8 +272,10 @@ const median = values => [...values].sort((a, b) => a - b)[Math.floor(values.len
               };
           }, { shellReadyMs, paintedShellReadyMs, chartReadyMs });
           result.phaseMarks = chartResult.phaseMarks;
+          const taskObservations=await page.evaluate(()=>({longTaskSupported:window.__MM_LOADING_LONG_TASK_SUPPORTED__===true,longTasks:window.__MM_LOADING_LONG_TASKS__||null}));Object.assign(result,taskObservations);
           if (cpuDiagnostics) result.cpuDiagnostics = cpuDiagnostics;
           if (layoutDiagnostics) result.layoutDiagnostics = layoutDiagnostics;
+          result.loadingPhases=summarizeLoadingPhases(result);
           result.chartBundleResources = chartResult.chartBundleResources;
           result.klineResponseMetadata = [...klineResponseMetadata];
           result.auxiliaryPendingAtChart = auxiliaryPendingAtChart;

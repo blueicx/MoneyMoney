@@ -195,6 +195,8 @@ modules.research.push(
   fs.readFileSync(path.join(source, 'data-assets-workspace.js'), 'utf8'),
   fs.readFileSync(path.join(source, 'research-projects-workspace.js'), 'utf8'),
   fs.readFileSync(path.join(source, 'snapshot-comparison-workspace.js'), 'utf8'),
+  fs.readFileSync(path.join(source, 'research-evidence-governance-workspace.js'), 'utf8'),
+  fs.readFileSync(path.join(source, 'research-preregistration-workspace.js'), 'utf8'),
   fs.readFileSync(path.join(source, 'review-queue-workspace.js'), 'utf8'),
   fs.readFileSync(path.join(source, 'ai-evaluation-cohort-workspace.js'), 'utf8'),
   fs.readFileSync(path.join(source, 'stress-scenarios-workspace.js'), 'utf8'),

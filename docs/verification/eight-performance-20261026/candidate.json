@@ -1,0 +1,6439 @@
+{
+  "data": "real application providers; source status and reason captured per sample",
+  "loadingBudget": {
+    "status": "exceeded",
+    "groups": [
+      {
+        "viewport": 1440,
+        "temperature": "cold",
+        "samples": 3,
+        "shellMedianMs": 3075.7000000476837,
+        "chartMedianMs": 4891.600000023842,
+        "jsMedianBytes": 109206,
+        "limits": {
+          "shellMs": 3000,
+          "chartMs": 6500,
+          "jsBytes": 180000
+        },
+        "status": "exceeded",
+        "exceeded": [
+          "shell"
+        ]
+      },
+      {
+        "viewport": 1440,
+        "temperature": "warm",
+        "samples": 3,
+        "shellMedianMs": 1007.8999999761581,
+        "chartMedianMs": 1398.7999999523163,
+        "jsMedianBytes": 0,
+        "limits": {
+          "shellMs": 1200,
+          "chartMs": 2500,
+          "jsBytes": 10000
+        },
+        "status": "passed",
+        "exceeded": []
+      },
+      {
+        "viewport": 390,
+        "temperature": "cold",
+        "samples": 3,
+        "shellMedianMs": 2155.100000023842,
+        "chartMedianMs": 4284.5,
+        "jsMedianBytes": 125364,
+        "limits": {
+          "shellMs": 3000,
+          "chartMs": 6500,
+          "jsBytes": 180000
+        },
+        "status": "passed",
+        "exceeded": []
+      },
+      {
+        "viewport": 390,
+        "temperature": "warm",
+        "samples": 3,
+        "shellMedianMs": 870.3000000715256,
+        "chartMedianMs": 1214.8999999761581,
+        "jsMedianBytes": 0,
+        "limits": {
+          "shellMs": 1200,
+          "chartMs": 2500,
+          "jsBytes": 10000
+        },
+        "status": "passed",
+        "exceeded": []
+      }
+    ],
+    "improvementPct": null,
+    "reason": "绝对预算要求桌面1440与手机390各有至少3组有效、唯一且配对的冷热样本，含Provider等待；局部诊断不算完整验收，没有同环境配对基线，不宣称提速百分比。"
+  },
+  "gateAuxiliaryRequests": false,
+  "cpuRate": 4,
+  "networkProfile": "weak",
+  "latencyMs": 80,
+  "downloadKbps": 750,
+  "samples": [
+    {
+      "viewport": 1440,
+      "run": 0,
+      "temperature": "cold",
+      "shellReadyMs": 3075.7000000476837,
+      "paintedShellReadyMs": 4751.100000023842,
+      "chartReadyMs": 4929.100000023842,
+      "chartState": "ready",
+      "chartMessage": "Apple · usAAPL\n▤ 双图\n⛶ 全屏\n周期\n1分\n5分\n15分\n1小时\n1日\n3日\n5日\n60日\n120日\n1年\n5年\n最新可用行情（实时性未声明） · K线时间 2026-10-23 · yahoo-finance-history · 抓取 2026/10/26 20:02 · 源站耗时 1086ms · origin AAPL · 1d · 普通行情 · K线：最新可用（实时性未声明） · 300 根\n历史时点 / 日期定位 / 日内下钻\n图层与策略 · 保留当前选择\n事件时间轴\n刷新\n正在读取该标的事件与证据…\n正在加载当前标的事件…\nMA5 344.48\nMA10 343.30\nMA20 338.91\n周期非短线 · 连接：来源快照 · 时效：来源过期 · 蜡烛：已完成\n本地时区\n自动价格轴\n加载更早K线\n区间测量\n价格提醒\n 模拟成交\n行情来源说明\n价格口径 \n来源口径 · 未声明\n前复权（Yahoo Adj Close 系数推导）\n后复权（不可用）\n2026/10/23 21:30:00 开 349.12 高 351.73 低 345.75 收 347.73 -",
+      "bytes": 138562,
+      "jsBytes": 109206,
+      "jsResources": [
+        {
+          "path": "/assets/dashboard-startup-runtime.c07d8bfe646cec72.js",
+          "startTime": 129.29999995231628,
+          "duration": 890.7000000476837,
+          "transferSize": 38738
+        },
+        {
+          "path": "/assets/auth-client.b8f1a72cc1cf25d0.js",
+          "startTime": 129.89999997615814,
+          "duration": 231.10000002384186,
+          "transferSize": 1415
+        },
+        {
+          "path": "/assets/workspace-loader.ff089f638295ab27.js",
+          "startTime": 130.60000002384186,
+          "duration": 782.1999999284744,
+          "transferSize": 3955
+        },
+        {
+          "path": "/assets/dashboard-startup-bootstrap.dab3b2fed28a9e02.js",
+          "startTime": 547.2999999523163,
+          "duration": 319.10000002384186,
+          "transferSize": 1184
+        },
+        {
+          "path": "/assets/workspace-charts.4a69ad0d5e4ca81e.js",
+          "startTime": 1700.2999999523163,
+          "duration": 769.2000000476837,
+          "transferSize": 60429
+        },
+        {
+          "path": "/assets/dashboard-startup-inline-1.80185250dcd58b75.js",
+          "startTime": 3006.7000000476837,
+          "duration": 122.09999990463257,
+          "transferSize": 1237
+        },
+        {
+          "path": "/assets/dashboard-startup-inline-2.5f9e1d4c96ac3a14.js",
+          "startTime": 3008.899999976158,
+          "duration": 157.39999997615814,
+          "transferSize": 2248
+        }
+      ],
+      "dashboardStartupCompatibility": {
+        "resourceCount": 2,
+        "transferBytes": 3485,
+        "requestStartSpreadMs": 2.1999999284744263,
+        "downloadSpanMs": 159.59999990463257
+      },
+      "domContentLoadedMs": 1931.5,
+      "navigationTiming": {
+        "responseStart": 7.100000023841858,
+        "responseEnd": 545.1000000238419,
+        "domInteractive": 1929.7000000476837,
+        "domContentLoadedEventEnd": 1931.5
+      },
+      "startupResources": [
+        {
+          "path": "/api/auth/status",
+          "startTime": 127.39999997615814,
+          "responseStart": 135.29999995231628,
+          "responseEnd": 252.79999995231628,
+          "transferSize": 572
+        },
+        {
+          "path": "/assets/dashboard-startup-runtime.c07d8bfe646cec72.js",
+          "startTime": 129.29999995231628,
+          "responseStart": 141.70000004768372,
+          "responseEnd": 1020,
+          "transferSize": 38738
+        },
+        {
+          "path": "/assets/auth-client.b8f1a72cc1cf25d0.js",
+          "startTime": 129.89999997615814,
+          "responseStart": 142.29999995231628,
+          "responseEnd": 361,
+          "transferSize": 1415
+        },
+        {
+          "path": "/assets/workspace-loader.ff089f638295ab27.js",
+          "startTime": 130.60000002384186,
+          "responseStart": 736.1000000238419,
+          "responseEnd": 912.7999999523163,
+          "transferSize": 3955
+        },
+        {
+          "path": "/assets/dashboard-base.74cc41e0347efcf3.css",
+          "startTime": 131.29999995231628,
+          "responseStart": 142.89999997615814,
+          "responseEnd": 729.3999999761581,
+          "transferSize": 14972
+        },
+        {
+          "path": "/assets/experience-enhancements.5e73551578eca805.css",
+          "startTime": 131.89999997615814,
+          "responseStart": 143.5,
+          "responseEnd": 391.7999999523163,
+          "transferSize": 2306
+        },
+        {
+          "path": "/assets/dashboard-startup-bootstrap.dab3b2fed28a9e02.js",
+          "startTime": 547.2999999523163,
+          "responseStart": 749.3999999761581,
+          "responseEnd": 866.3999999761581,
+          "transferSize": 1184
+        },
+        {
+          "path": "/assets/workspace-charts.4a69ad0d5e4ca81e.js",
+          "startTime": 1700.2999999523163,
+          "responseStart": 1703.5,
+          "responseEnd": 2469.5,
+          "transferSize": 60429
+        },
+        {
+          "path": "/api/stock/kline",
+          "startTime": 1707.8999999761581,
+          "responseStart": 2807.600000023842,
+          "responseEnd": 2912.7000000476837,
+          "transferSize": 9163
+        },
+        {
+          "path": "/api/workspace/navigation",
+          "startTime": 2002.8999999761581,
+          "responseStart": 2011.6000000238419,
+          "responseEnd": 2146.399999976158,
+          "transferSize": 1571
+        },
+        {
+          "path": "/api/watchlist",
+          "startTime": 2999.7000000476837,
+          "responseStart": 3009.100000023842,
+          "responseEnd": 3098,
+          "transferSize": 395
+        },
+        {
+          "path": "/api/paper/positions",
+          "startTime": 3001.2999999523163,
+          "responseStart": 3013.2000000476837,
+          "responseEnd": 3114,
+          "transferSize": 377
+        },
+        {
+          "path": "/assets/dashboard-startup-inline-1.80185250dcd58b75.js",
+          "startTime": 3006.7000000476837,
+          "responseStart": 3019.899999976158,
+          "responseEnd": 3128.7999999523163,
+          "transferSize": 1237
+        },
+        {
+          "path": "/assets/dashboard-startup-inline-2.5f9e1d4c96ac3a14.js",
+          "startTime": 3008.899999976158,
+          "responseStart": 3020.7999999523163,
+          "responseEnd": 3166.2999999523163,
+          "transferSize": 2248
+        }
+      ],
+      "phaseMarks": [
+        {
+          "name": "moneymoney:auth-ready",
+          "atMs": 1695.4
+        },
+        {
+          "name": "moneymoney:chart-preload-start",
+          "atMs": 1697.6
+        },
+        {
+          "name": "moneymoney:stock-kline-prefetch-start",
+          "atMs": 1704.5
+        },
+        {
+          "name": "moneymoney:dashboard-start",
+          "atMs": 1975.2
+        },
+        {
+          "name": "moneymoney:dashboard-auth-ready",
+          "atMs": 1977.1
+        },
+        {
+          "name": "moneymoney:theme-start",
+          "atMs": 1977.3
+        },
+        {
+          "name": "moneymoney:theme-end",
+          "atMs": 1984.5
+        },
+        {
+          "name": "moneymoney:navigation-start",
+          "atMs": 1986.8
+        },
+        {
+          "name": "moneymoney:navigation-end",
+          "atMs": 2023.3
+        },
+        {
+          "name": "moneymoney:collapses-start",
+          "atMs": 2023.5
+        },
+        {
+          "name": "moneymoney:collapses-end",
+          "atMs": 2034.5
+        },
+        {
+          "name": "moneymoney:workspace-restore-start",
+          "atMs": 2034.9
+        },
+        {
+          "name": "moneymoney:workspace-restore-end",
+          "atMs": 2066
+        },
+        {
+          "name": "moneymoney:dashboard-context-ready",
+          "atMs": 2074.2
+        },
+        {
+          "name": "moneymoney:history-install-start",
+          "atMs": 2077.1
+        },
+        {
+          "name": "moneymoney:history-install-end",
+          "atMs": 2996.5
+        },
+        {
+          "name": "moneymoney:dashboard-core-ready",
+          "atMs": 3002.4
+        },
+        {
+          "name": "moneymoney:chart-module-start",
+          "atMs": 3011.1
+        },
+        {
+          "name": "moneymoney:chart-preload-ready",
+          "atMs": 3085.3
+        },
+        {
+          "name": "moneymoney:chart-module-ready",
+          "atMs": 3103.6
+        },
+        {
+          "name": "moneymoney:stock-kline-request-start",
+          "atMs": 3190.3
+        },
+        {
+          "name": "moneymoney:stock-kline-response-parsed",
+          "atMs": 4146
+        },
+        {
+          "name": "moneymoney:stock-kline-first-render",
+          "atMs": 4726.4
+        }
+      ],
+      "longTaskSupported": true,
+      "longTasks": [
+        {
+          "startTime": 755.6000000238419,
+          "duration": 464
+        },
+        {
+          "startTime": 1818.1000000238419,
+          "duration": 99
+        },
+        {
+          "startTime": 1968.7000000476837,
+          "duration": 1044
+        },
+        {
+          "startTime": 3085.600000023842,
+          "duration": 105
+        },
+        {
+          "startTime": 3629.7999999523163,
+          "duration": 491
+        },
+        {
+          "startTime": 4145.700000047684,
+          "duration": 583
+        },
+        {
+          "startTime": 4781.200000047684,
+          "duration": 79
+        }
+      ],
+      "loadingPhases": {
+        "version": 1,
+        "additive": false,
+        "note": "阶段可能重叠；脚本下载跨度不是执行耗时。缺失计时为null，不按零处理。",
+        "phases": {
+          "authentication": {
+            "startMs": 127.39999997615814,
+            "endMs": 252.79999995231628,
+            "durationMs": 125.39999997615814
+          },
+          "coreInitialization": {
+            "startMs": 1975.2,
+            "endMs": 3002.4,
+            "durationMs": 1027.2
+          },
+          "quoteWait": {
+            "startMs": 1707.8999999761581,
+            "endMs": 2912.7000000476837,
+            "durationMs": 1204.8000000715256
+          },
+          "quoteToRender": {
+            "startMs": 2912.7000000476837,
+            "endMs": 4726.4,
+            "durationMs": 1813.699999952316
+          },
+          "renderToSettled": {
+            "startMs": 4726.4,
+            "endMs": 4929.100000023842,
+            "durationMs": 202.70000002384222
+          },
+          "theme": {
+            "startMs": 1977.3,
+            "endMs": 1984.5,
+            "durationMs": 7.2000000000000455
+          },
+          "navigation": {
+            "startMs": 1986.8,
+            "endMs": 2023.3,
+            "durationMs": 36.5
+          },
+          "collapses": {
+            "startMs": 2023.5,
+            "endMs": 2034.5,
+            "durationMs": 11
+          },
+          "workspaceRestore": {
+            "startMs": 2034.9,
+            "endMs": 2066,
+            "durationMs": 31.09999999999991
+          },
+          "historyInstall": {
+            "startMs": 2077.1,
+            "endMs": 2996.5,
+            "durationMs": 919.4000000000001
+          }
+        },
+        "scriptDownloads": {
+          "startMs": 129.29999995231628,
+          "endMs": 3166.2999999523163,
+          "durationMs": 3037,
+          "requests": 7,
+          "transferBytes": 109206
+        },
+        "scriptExecutionMs": null,
+        "layoutMs": null,
+        "longTasks": {
+          "count": 7,
+          "totalDurationMs": 2865,
+          "totalBlockingMs": 2515,
+          "largestMs": 1044,
+          "boundedAt": 500
+        }
+      },
+      "chartBundleResources": [
+        {
+          "startTime": 1700.2999999523163,
+          "responseEnd": 2469.5,
+          "duration": 769.2000000476837,
+          "transferSize": 60429
+        }
+      ],
+      "klineResponseMetadata": [
+        {
+          "status": 200,
+          "dataStatus": "live",
+          "source": "yahoo-finance-history",
+          "reason": null,
+          "updatedAt": "2026-10-26T12:02:40.839Z",
+          "recordCount": 300
+        }
+      ],
+      "auxiliaryPendingAtChart": [
+        {
+          "pathname": "/api/stock/indices",
+          "requestStarted": false,
+          "responsePending": false
+        },
+        {
+          "pathname": "/api/watchlist",
+          "requestStarted": true,
+          "responsePending": false
+        },
+        {
+          "pathname": "/api/paper/positions",
+          "requestStarted": true,
+          "responsePending": false
+        }
+      ],
+      "apiRequestDetails": [
+        {
+          "pathname": "/api/auth/status",
+          "method": "GET",
+          "url": "/api/auth/status"
+        },
+        {
+          "pathname": "/api/stock/kline",
+          "method": "GET",
+          "url": "/api/stock/kline?symbol=usAAPL&period=1d&interval=1d&adjustment=source&chartWindow=1"
+        },
+        {
+          "pathname": "/api/workspace/navigation",
+          "method": "GET",
+          "url": "/api/workspace/navigation?scope=stocks"
+        },
+        {
+          "pathname": "/api/watchlist",
+          "method": "GET",
+          "url": "/api/watchlist"
+        },
+        {
+          "pathname": "/api/paper/positions",
+          "method": "GET",
+          "url": "/api/paper/positions?scope=stocks"
+        },
+        {
+          "pathname": "/api/events/entities",
+          "method": "GET",
+          "url": "/api/events/entities?market=stocks&instrument=stock%3Aus%3AAAPL"
+        }
+      ],
+      "assetResponses": [
+        {
+          "path": "/assets/dashboard-base.74cc41e0347efcf3.css",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/experience-enhancements.5e73551578eca805.css",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/auth-client.b8f1a72cc1cf25d0.js",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/dashboard-startup-bootstrap.dab3b2fed28a9e02.js",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/workspace-loader.ff089f638295ab27.js",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/dashboard-startup-runtime.c07d8bfe646cec72.js",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/workspace-charts.4a69ad0d5e4ca81e.js",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/dashboard-startup-inline-1.80185250dcd58b75.js",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/dashboard-startup-inline-2.5f9e1d4c96ac3a14.js",
+          "encoding": "br"
+        }
+      ],
+      "apiTimings": [
+        {
+          "pathname": "/api/auth/status",
+          "status": 200,
+          "durationMs": 107
+        },
+        {
+          "pathname": "/api/workspace/navigation",
+          "status": 200,
+          "durationMs": 71
+        },
+        {
+          "pathname": "/api/stock/kline",
+          "status": 200,
+          "durationMs": 1901
+        },
+        {
+          "pathname": "/api/watchlist",
+          "status": 200,
+          "durationMs": 1847
+        },
+        {
+          "pathname": "/api/paper/positions",
+          "status": 200,
+          "durationMs": 1848
+        }
+      ],
+      "apiRequests": [
+        "/api/auth/status",
+        "/api/stock/kline",
+        "/api/workspace/navigation",
+        "/api/watchlist",
+        "/api/paper/positions",
+        "/api/events/entities"
+      ],
+      "apiRequestCounts": {
+        "/api/auth/status": 1,
+        "/api/stock/kline": 1,
+        "/api/workspace/navigation": 1,
+        "/api/watchlist": 1,
+        "/api/paper/positions": 1,
+        "/api/events/entities": 1
+      },
+      "prefetchStartedBeforeCore": true
+    },
+    {
+      "viewport": 1440,
+      "run": 0,
+      "temperature": "warm",
+      "shellReadyMs": 913.7999999523163,
+      "paintedShellReadyMs": 1180.6000000238419,
+      "chartReadyMs": 1218.1000000238419,
+      "chartState": "ready",
+      "chartMessage": "Apple · usAAPL\n▤ 双图\n⛶ 全屏\n周期\n1分\n5分\n15分\n1小时\n1日\n3日\n5日\n60日\n120日\n1年\n5年\n缓存数据 · K线时间 2026-10-23 · yahoo-finance-history · 抓取 2026/10/26 20:02 · 上次源站耗时 1086ms · cache · 显示受限范围内的缓存快照；来源时间单独标示 AAPL · 1d · 普通行情 · K线：缓存 · 300 根 · 显示受限范围内的缓存快照；来源时间单独标示\n历史时点 / 日期定位 / 日内下钻\n图层与策略 · 保留当前选择\n事件时间轴\n刷新\n正在读取该标的事件与证据…\n正在加载当前标的事件…\nMA5 344.48\nMA10 343.30\nMA20 338.91\n周期非短线 · 连接：来源快照 · 时效：来源过期 · 蜡烛：已完成\n本地时区\n自动价格轴\n加载更早K线\n区间测量\n价格提醒\n 模拟成交\n行情来源说明\n价格口径 \n来源口径 · 未声明\n前复权（Yahoo Adj Close 系数推导）\n后复权（不可用）\n2026/10/23 21:30:00 开 349.12",
+      "bytes": 12206,
+      "jsBytes": 0,
+      "jsResources": [
+        {
+          "path": "/assets/dashboard-startup-runtime.c07d8bfe646cec72.js",
+          "startTime": 195.89999997615814,
+          "duration": 0,
+          "transferSize": 0
+        },
+        {
+          "path": "/assets/auth-client.b8f1a72cc1cf25d0.js",
+          "startTime": 197.19999992847443,
+          "duration": 0,
+          "transferSize": 0
+        },
+        {
+          "path": "/assets/workspace-loader.ff089f638295ab27.js",
+          "startTime": 198.39999997615814,
+          "duration": 0,
+          "transferSize": 0
+        },
+        {
+          "path": "/assets/dashboard-startup-bootstrap.dab3b2fed28a9e02.js",
+          "startTime": 201.5,
+          "duration": 0,
+          "transferSize": 0
+        },
+        {
+          "path": "/assets/workspace-charts.4a69ad0d5e4ca81e.js",
+          "startTime": 400.7999999523163,
+          "duration": 0,
+          "transferSize": 0
+        },
+        {
+          "path": "/assets/dashboard-startup-inline-1.80185250dcd58b75.js",
+          "startTime": 641.8999999761581,
+          "duration": 0,
+          "transferSize": 0
+        },
+        {
+          "path": "/assets/dashboard-startup-inline-2.5f9e1d4c96ac3a14.js",
+          "startTime": 644.5,
+          "duration": 0,
+          "transferSize": 0
+        }
+      ],
+      "dashboardStartupCompatibility": {
+        "resourceCount": 2,
+        "transferBytes": 0,
+        "requestStartSpreadMs": 2.600000023841858,
+        "downloadSpanMs": 2.600000023841858
+      },
+      "domContentLoadedMs": 491.7999999523163,
+      "navigationTiming": {
+        "responseStart": 4.199999928474426,
+        "responseEnd": 141.19999992847443,
+        "domInteractive": 488.10000002384186,
+        "domContentLoadedEventEnd": 491.7999999523163
+      },
+      "startupResources": [
+        {
+          "path": "/api/auth/status",
+          "startTime": 192.60000002384186,
+          "responseStart": 196.5,
+          "responseEnd": 294.89999997615814,
+          "transferSize": 572
+        },
+        {
+          "path": "/assets/dashboard-startup-runtime.c07d8bfe646cec72.js",
+          "startTime": 195.89999997615814,
+          "responseStart": 195.89999997615814,
+          "responseEnd": 195.89999997615814,
+          "transferSize": 0
+        },
+        {
+          "path": "/assets/auth-client.b8f1a72cc1cf25d0.js",
+          "startTime": 197.19999992847443,
+          "responseStart": 197.19999992847443,
+          "responseEnd": 197.19999992847443,
+          "transferSize": 0
+        },
+        {
+          "path": "/assets/workspace-loader.ff089f638295ab27.js",
+          "startTime": 198.39999997615814,
+          "responseStart": 198.39999997615814,
+          "responseEnd": 198.39999997615814,
+          "transferSize": 0
+        },
+        {
+          "path": "/assets/dashboard-base.74cc41e0347efcf3.css",
+          "startTime": 199.60000002384186,
+          "responseStart": 199.60000002384186,
+          "responseEnd": 199.60000002384186,
+          "transferSize": 0
+        },
+        {
+          "path": "/assets/experience-enhancements.5e73551578eca805.css",
+          "startTime": 200.39999997615814,
+          "responseStart": 200.39999997615814,
+          "responseEnd": 200.39999997615814,
+          "transferSize": 0
+        },
+        {
+          "path": "/assets/dashboard-startup-bootstrap.dab3b2fed28a9e02.js",
+          "startTime": 201.5,
+          "responseStart": 201.5,
+          "responseEnd": 201.5,
+          "transferSize": 0
+        },
+        {
+          "path": "/assets/workspace-charts.4a69ad0d5e4ca81e.js",
+          "startTime": 400.7999999523163,
+          "responseStart": 400.7999999523163,
+          "responseEnd": 400.7999999523163,
+          "transferSize": 0
+        },
+        {
+          "path": "/api/stock/kline",
+          "startTime": 403,
+          "responseStart": 408.7999999523163,
+          "responseEnd": 602.6999999284744,
+          "transferSize": 9290
+        },
+        {
+          "path": "/api/workspace/navigation",
+          "startTime": 542.2999999523163,
+          "responseStart": 545.1000000238419,
+          "responseEnd": 644.1999999284744,
+          "transferSize": 1572
+        },
+        {
+          "path": "/api/watchlist",
+          "startTime": 623.3999999761581,
+          "responseStart": 626.8999999761581,
+          "responseEnd": 726.1999999284744,
+          "transferSize": 395
+        },
+        {
+          "path": "/api/paper/positions",
+          "startTime": 624.6999999284744,
+          "responseStart": 628.6000000238419,
+          "responseEnd": 740.8999999761581,
+          "transferSize": 377
+        },
+        {
+          "path": "/assets/dashboard-startup-inline-1.80185250dcd58b75.js",
+          "startTime": 641.8999999761581,
+          "responseStart": 641.8999999761581,
+          "responseEnd": 641.8999999761581,
+          "transferSize": 0
+        },
+        {
+          "path": "/assets/dashboard-startup-inline-2.5f9e1d4c96ac3a14.js",
+          "startTime": 644.5,
+          "responseStart": 644.5,
+          "responseEnd": 644.5,
+          "transferSize": 0
+        }
+      ],
+      "phaseMarks": [
+        {
+          "name": "moneymoney:auth-ready",
+          "atMs": 396.4
+        },
+        {
+          "name": "moneymoney:chart-preload-start",
+          "atMs": 397.6
+        },
+        {
+          "name": "moneymoney:stock-kline-prefetch-start",
+          "atMs": 401.6
+        },
+        {
+          "name": "moneymoney:chart-preload-ready",
+          "atMs": 424
+        },
+        {
+          "name": "moneymoney:dashboard-start",
+          "atMs": 528.4
+        },
+        {
+          "name": "moneymoney:dashboard-auth-ready",
+          "atMs": 528.8
+        },
+        {
+          "name": "moneymoney:theme-start",
+          "atMs": 529
+        },
+        {
+          "name": "moneymoney:theme-end",
+          "atMs": 530
+        },
+        {
+          "name": "moneymoney:navigation-start",
+          "atMs": 531.7
+        },
+        {
+          "name": "moneymoney:navigation-end",
+          "atMs": 551.3
+        },
+        {
+          "name": "moneymoney:collapses-start",
+          "atMs": 551.5
+        },
+        {
+          "name": "moneymoney:collapses-end",
+          "atMs": 552.3
+        },
+        {
+          "name": "moneymoney:workspace-restore-start",
+          "atMs": 552.5
+        },
+        {
+          "name": "moneymoney:workspace-restore-end",
+          "atMs": 563.3
+        },
+        {
+          "name": "moneymoney:dashboard-context-ready",
+          "atMs": 564.5
+        },
+        {
+          "name": "moneymoney:history-install-start",
+          "atMs": 564.7
+        },
+        {
+          "name": "moneymoney:history-install-end",
+          "atMs": 621.3
+        },
+        {
+          "name": "moneymoney:dashboard-core-ready",
+          "atMs": 637.8
+        },
+        {
+          "name": "moneymoney:chart-module-start",
+          "atMs": 645
+        },
+        {
+          "name": "moneymoney:chart-module-ready",
+          "atMs": 701.9
+        },
+        {
+          "name": "moneymoney:stock-kline-request-start",
+          "atMs": 749.8
+        },
+        {
+          "name": "moneymoney:stock-kline-response-parsed",
+          "atMs": 952.3
+        },
+        {
+          "name": "moneymoney:stock-kline-first-render",
+          "atMs": 1097.7
+        }
+      ],
+      "longTaskSupported": true,
+      "longTasks": [
+        {
+          "startTime": 520.6999999284744,
+          "duration": 125
+        },
+        {
+          "startTime": 680.3999999761581,
+          "duration": 70
+        },
+        {
+          "startTime": 952.1999999284744,
+          "duration": 147
+        }
+      ],
+      "loadingPhases": {
+        "version": 1,
+        "additive": false,
+        "note": "阶段可能重叠；脚本下载跨度不是执行耗时。缺失计时为null，不按零处理。",
+        "phases": {
+          "authentication": {
+            "startMs": 192.60000002384186,
+            "endMs": 294.89999997615814,
+            "durationMs": 102.29999995231628
+          },
+          "coreInitialization": {
+            "startMs": 528.4,
+            "endMs": 637.8,
+            "durationMs": 109.39999999999998
+          },
+          "quoteWait": {
+            "startMs": 403,
+            "endMs": 602.6999999284744,
+            "durationMs": 199.69999992847443
+          },
+          "quoteToRender": {
+            "startMs": 602.6999999284744,
+            "endMs": 1097.7,
+            "durationMs": 495.0000000715256
+          },
+          "renderToSettled": {
+            "startMs": 1097.7,
+            "endMs": 1218.1000000238419,
+            "durationMs": 120.40000002384181
+          },
+          "theme": {
+            "startMs": 529,
+            "endMs": 530,
+            "durationMs": 1
+          },
+          "navigation": {
+            "startMs": 531.7,
+            "endMs": 551.3,
+            "durationMs": 19.59999999999991
+          },
+          "collapses": {
+            "startMs": 551.5,
+            "endMs": 552.3,
+            "durationMs": 0.7999999999999545
+          },
+          "workspaceRestore": {
+            "startMs": 552.5,
+            "endMs": 563.3,
+            "durationMs": 10.799999999999955
+          },
+          "historyInstall": {
+            "startMs": 564.7,
+            "endMs": 621.3,
+            "durationMs": 56.59999999999991
+          }
+        },
+        "scriptDownloads": {
+          "startMs": 195.89999997615814,
+          "endMs": 644.5,
+          "durationMs": 448.60000002384186,
+          "requests": 7,
+          "transferBytes": 0
+        },
+        "scriptExecutionMs": null,
+        "layoutMs": null,
+        "longTasks": {
+          "count": 3,
+          "totalDurationMs": 342,
+          "totalBlockingMs": 192,
+          "largestMs": 147,
+          "boundedAt": 500
+        }
+      },
+      "chartBundleResources": [
+        {
+          "startTime": 400.7999999523163,
+          "responseEnd": 400.7999999523163,
+          "duration": 0,
+          "transferSize": 0
+        }
+      ],
+      "klineResponseMetadata": [
+        {
+          "status": 200,
+          "dataStatus": "cached",
+          "source": "yahoo-finance-history",
+          "reason": "显示受限范围内的缓存快照；来源时间单独标示",
+          "updatedAt": "2026-10-26T12:02:40.839Z",
+          "recordCount": 300
+        }
+      ],
+      "auxiliaryPendingAtChart": [
+        {
+          "pathname": "/api/stock/indices",
+          "requestStarted": false,
+          "responsePending": false
+        },
+        {
+          "pathname": "/api/watchlist",
+          "requestStarted": true,
+          "responsePending": false
+        },
+        {
+          "pathname": "/api/paper/positions",
+          "requestStarted": true,
+          "responsePending": false
+        }
+      ],
+      "apiRequestDetails": [
+        {
+          "pathname": "/api/auth/status",
+          "method": "GET",
+          "url": "/api/auth/status"
+        },
+        {
+          "pathname": "/api/stock/kline",
+          "method": "GET",
+          "url": "/api/stock/kline?symbol=usAAPL&period=1d&interval=1d&adjustment=source&chartWindow=1"
+        },
+        {
+          "pathname": "/api/workspace/navigation",
+          "method": "GET",
+          "url": "/api/workspace/navigation?scope=stocks"
+        },
+        {
+          "pathname": "/api/watchlist",
+          "method": "GET",
+          "url": "/api/watchlist"
+        },
+        {
+          "pathname": "/api/paper/positions",
+          "method": "GET",
+          "url": "/api/paper/positions?scope=stocks"
+        },
+        {
+          "pathname": "/api/events/entities",
+          "method": "GET",
+          "url": "/api/events/entities?market=stocks&instrument=stock%3Aus%3AAAPL"
+        }
+      ],
+      "assetResponses": [
+        {
+          "path": "/assets/dashboard-startup-runtime.c07d8bfe646cec72.js",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/auth-client.b8f1a72cc1cf25d0.js",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/workspace-loader.ff089f638295ab27.js",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/dashboard-base.74cc41e0347efcf3.css",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/experience-enhancements.5e73551578eca805.css",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/dashboard-startup-bootstrap.dab3b2fed28a9e02.js",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/workspace-charts.4a69ad0d5e4ca81e.js",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/dashboard-startup-inline-1.80185250dcd58b75.js",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/dashboard-startup-inline-2.5f9e1d4c96ac3a14.js",
+          "encoding": "br"
+        }
+      ],
+      "apiTimings": [
+        {
+          "pathname": "/api/auth/status",
+          "status": 200,
+          "durationMs": 154
+        },
+        {
+          "pathname": "/api/stock/kline",
+          "status": 200,
+          "durationMs": 514
+        },
+        {
+          "pathname": "/api/workspace/navigation",
+          "status": 200,
+          "durationMs": 276
+        },
+        {
+          "pathname": "/api/watchlist",
+          "status": 200,
+          "durationMs": 518
+        },
+        {
+          "pathname": "/api/paper/positions",
+          "status": 200,
+          "durationMs": 519
+        }
+      ],
+      "apiRequests": [
+        "/api/auth/status",
+        "/api/stock/kline",
+        "/api/workspace/navigation",
+        "/api/watchlist",
+        "/api/paper/positions",
+        "/api/events/entities"
+      ],
+      "apiRequestCounts": {
+        "/api/auth/status": 1,
+        "/api/stock/kline": 1,
+        "/api/workspace/navigation": 1,
+        "/api/watchlist": 1,
+        "/api/paper/positions": 1,
+        "/api/events/entities": 1
+      },
+      "prefetchStartedBeforeCore": true
+    },
+    {
+      "viewport": 1440,
+      "run": 1,
+      "temperature": "cold",
+      "shellReadyMs": 2835.600000023842,
+      "paintedShellReadyMs": 4280.100000023842,
+      "chartReadyMs": 4292.899999976158,
+      "chartState": "ready",
+      "chartMessage": "Apple · usAAPL\n▤ 双图\n⛶ 全屏\n周期\n1分\n5分\n15分\n1小时\n1日\n3日\n5日\n60日\n120日\n1年\n5年\n缓存数据 · K线时间 2026-10-23 · yahoo-finance-history · 抓取 2026/10/26 20:02 · 上次源站耗时 1086ms · cache · 显示受限范围内的缓存快照；来源时间单独标示 AAPL · 1d · 普通行情 · K线：缓存 · 300 根 · 显示受限范围内的缓存快照；来源时间单独标示\n历史时点 / 日期定位 / 日内下钻\n图层与策略 · 保留当前选择\n事件时间轴\n刷新\n正在读取该标的事件与证据…\n正在加载当前标的事件…\nMA5 344.48\nMA10 343.30\nMA20 338.91\n周期非短线 · 连接：来源快照 · 时效：来源过期 · 蜡烛：已完成\n本地时区\n自动价格轴\n加载更早K线\n区间测量\n价格提醒\n 模拟成交\n行情来源说明\n价格口径 \n来源口径 · 未声明\n前复权（Yahoo Adj Close 系数推导）\n后复权（不可用）\n2026/10/23 21:30:00 开 349.12",
+      "bytes": 138691,
+      "jsBytes": 109206,
+      "jsResources": [
+        {
+          "path": "/assets/dashboard-startup-runtime.c07d8bfe646cec72.js",
+          "startTime": 134.60000002384186,
+          "duration": 886.7999999523163,
+          "transferSize": 38738
+        },
+        {
+          "path": "/assets/auth-client.b8f1a72cc1cf25d0.js",
+          "startTime": 136.20000004768372,
+          "duration": 256.10000002384186,
+          "transferSize": 1415
+        },
+        {
+          "path": "/assets/workspace-loader.ff089f638295ab27.js",
+          "startTime": 137.20000004768372,
+          "duration": 761.6000000238419,
+          "transferSize": 3955
+        },
+        {
+          "path": "/assets/dashboard-startup-bootstrap.dab3b2fed28a9e02.js",
+          "startTime": 517.8000000715256,
+          "duration": 335.2999999523163,
+          "transferSize": 1184
+        },
+        {
+          "path": "/assets/workspace-charts.4a69ad0d5e4ca81e.js",
+          "startTime": 1660.8999999761581,
+          "duration": 871.4000000953674,
+          "transferSize": 60429
+        },
+        {
+          "path": "/assets/dashboard-startup-inline-1.80185250dcd58b75.js",
+          "startTime": 2763.600000023842,
+          "duration": 121.60000002384186,
+          "transferSize": 1237
+        },
+        {
+          "path": "/assets/dashboard-startup-inline-2.5f9e1d4c96ac3a14.js",
+          "startTime": 2765.3000000715256,
+          "duration": 150,
+          "transferSize": 2248
+        }
+      ],
+      "dashboardStartupCompatibility": {
+        "resourceCount": 2,
+        "transferBytes": 3485,
+        "requestStartSpreadMs": 1.7000000476837158,
+        "downloadSpanMs": 151.70000004768372
+      },
+      "domContentLoadedMs": 1856.8000000715256,
+      "navigationTiming": {
+        "responseStart": 3.5,
+        "responseEnd": 515.8999999761581,
+        "domInteractive": 1849.5,
+        "domContentLoadedEventEnd": 1856.8000000715256
+      },
+      "startupResources": [
+        {
+          "path": "/api/auth/status",
+          "startTime": 131.89999997615814,
+          "responseStart": 141.70000004768372,
+          "responseEnd": 238.5,
+          "transferSize": 572
+        },
+        {
+          "path": "/assets/dashboard-startup-runtime.c07d8bfe646cec72.js",
+          "startTime": 134.60000002384186,
+          "responseStart": 144.10000002384186,
+          "responseEnd": 1021.3999999761581,
+          "transferSize": 38738
+        },
+        {
+          "path": "/assets/auth-client.b8f1a72cc1cf25d0.js",
+          "startTime": 136.20000004768372,
+          "responseStart": 150.10000002384186,
+          "responseEnd": 392.3000000715256,
+          "transferSize": 1415
+        },
+        {
+          "path": "/assets/workspace-loader.ff089f638295ab27.js",
+          "startTime": 137.20000004768372,
+          "responseStart": 724.7000000476837,
+          "responseEnd": 898.8000000715256,
+          "transferSize": 3955
+        },
+        {
+          "path": "/assets/dashboard-base.74cc41e0347efcf3.css",
+          "startTime": 137.89999997615814,
+          "responseStart": 149.80000007152557,
+          "responseEnd": 715.3999999761581,
+          "transferSize": 14972
+        },
+        {
+          "path": "/assets/experience-enhancements.5e73551578eca805.css",
+          "startTime": 138.89999997615814,
+          "responseStart": 149.20000004768372,
+          "responseEnd": 362.10000002384186,
+          "transferSize": 2306
+        },
+        {
+          "path": "/assets/dashboard-startup-bootstrap.dab3b2fed28a9e02.js",
+          "startTime": 517.8000000715256,
+          "responseStart": 736.6000000238419,
+          "responseEnd": 853.1000000238419,
+          "transferSize": 1184
+        },
+        {
+          "path": "/assets/workspace-charts.4a69ad0d5e4ca81e.js",
+          "startTime": 1660.8999999761581,
+          "responseStart": 1665,
+          "responseEnd": 2532.3000000715256,
+          "transferSize": 60429
+        },
+        {
+          "path": "/api/stock/kline",
+          "startTime": 1666,
+          "responseStart": 1674.2000000476837,
+          "responseEnd": 1968.7000000476837,
+          "transferSize": 9292
+        },
+        {
+          "path": "/api/workspace/navigation",
+          "startTime": 1934.8999999761581,
+          "responseStart": 1938.6000000238419,
+          "responseEnd": 2075.600000023842,
+          "transferSize": 1571
+        },
+        {
+          "path": "/api/watchlist",
+          "startTime": 2756.600000023842,
+          "responseStart": 2759.3000000715256,
+          "responseEnd": 2854.2000000476837,
+          "transferSize": 395
+        },
+        {
+          "path": "/api/paper/positions",
+          "startTime": 2758.2000000476837,
+          "responseStart": 2760.600000023842,
+          "responseEnd": 2869.399999976158,
+          "transferSize": 377
+        },
+        {
+          "path": "/assets/dashboard-startup-inline-1.80185250dcd58b75.js",
+          "startTime": 2763.600000023842,
+          "responseStart": 2766.3000000715256,
+          "responseEnd": 2885.2000000476837,
+          "transferSize": 1237
+        },
+        {
+          "path": "/assets/dashboard-startup-inline-2.5f9e1d4c96ac3a14.js",
+          "startTime": 2765.3000000715256,
+          "responseStart": 2767.899999976158,
+          "responseEnd": 2915.3000000715256,
+          "transferSize": 2248
+        }
+      ],
+      "phaseMarks": [
+        {
+          "name": "moneymoney:auth-ready",
+          "atMs": 1657.4
+        },
+        {
+          "name": "moneymoney:chart-preload-start",
+          "atMs": 1659.5
+        },
+        {
+          "name": "moneymoney:stock-kline-prefetch-start",
+          "atMs": 1664
+        },
+        {
+          "name": "moneymoney:dashboard-start",
+          "atMs": 1901.1
+        },
+        {
+          "name": "moneymoney:dashboard-auth-ready",
+          "atMs": 1902.5
+        },
+        {
+          "name": "moneymoney:theme-start",
+          "atMs": 1902.5
+        },
+        {
+          "name": "moneymoney:theme-end",
+          "atMs": 1905
+        },
+        {
+          "name": "moneymoney:navigation-start",
+          "atMs": 1910.5
+        },
+        {
+          "name": "moneymoney:navigation-end",
+          "atMs": 1962
+        },
+        {
+          "name": "moneymoney:collapses-start",
+          "atMs": 1962.2
+        },
+        {
+          "name": "moneymoney:collapses-end",
+          "atMs": 1964.7
+        },
+        {
+          "name": "moneymoney:workspace-restore-start",
+          "atMs": 1964.9
+        },
+        {
+          "name": "moneymoney:workspace-restore-end",
+          "atMs": 1986.1
+        },
+        {
+          "name": "moneymoney:dashboard-context-ready",
+          "atMs": 1990.9
+        },
+        {
+          "name": "moneymoney:history-install-start",
+          "atMs": 1993.9
+        },
+        {
+          "name": "moneymoney:history-install-end",
+          "atMs": 2753.3
+        },
+        {
+          "name": "moneymoney:dashboard-core-ready",
+          "atMs": 2759.4
+        },
+        {
+          "name": "moneymoney:chart-module-start",
+          "atMs": 2766.5
+        },
+        {
+          "name": "moneymoney:chart-preload-ready",
+          "atMs": 2850.4
+        },
+        {
+          "name": "moneymoney:chart-module-ready",
+          "atMs": 2871.9
+        },
+        {
+          "name": "moneymoney:stock-kline-request-start",
+          "atMs": 2962.8
+        },
+        {
+          "name": "moneymoney:stock-kline-response-parsed",
+          "atMs": 2963.4
+        },
+        {
+          "name": "moneymoney:stock-kline-first-render",
+          "atMs": 3735.6
+        }
+      ],
+      "longTaskSupported": true,
+      "longTasks": [
+        {
+          "startTime": 745.8000000715256,
+          "duration": 428
+        },
+        {
+          "startTime": 1690.6000000238419,
+          "duration": 56
+        },
+        {
+          "startTime": 1765.7000000476837,
+          "duration": 69
+        },
+        {
+          "startTime": 1889.5,
+          "duration": 878
+        },
+        {
+          "startTime": 2850.600000023842,
+          "duration": 887
+        },
+        {
+          "startTime": 3792.5,
+          "duration": 438
+        }
+      ],
+      "loadingPhases": {
+        "version": 1,
+        "additive": false,
+        "note": "阶段可能重叠；脚本下载跨度不是执行耗时。缺失计时为null，不按零处理。",
+        "phases": {
+          "authentication": {
+            "startMs": 131.89999997615814,
+            "endMs": 238.5,
+            "durationMs": 106.60000002384186
+          },
+          "coreInitialization": {
+            "startMs": 1901.1,
+            "endMs": 2759.4,
+            "durationMs": 858.3000000000002
+          },
+          "quoteWait": {
+            "startMs": 1666,
+            "endMs": 1968.7000000476837,
+            "durationMs": 302.7000000476837
+          },
+          "quoteToRender": {
+            "startMs": 1968.7000000476837,
+            "endMs": 3735.6,
+            "durationMs": 1766.8999999523162
+          },
+          "renderToSettled": {
+            "startMs": 3735.6,
+            "endMs": 4292.899999976158,
+            "durationMs": 557.2999999761582
+          },
+          "theme": {
+            "startMs": 1902.5,
+            "endMs": 1905,
+            "durationMs": 2.5
+          },
+          "navigation": {
+            "startMs": 1910.5,
+            "endMs": 1962,
+            "durationMs": 51.5
+          },
+          "collapses": {
+            "startMs": 1962.2,
+            "endMs": 1964.7,
+            "durationMs": 2.5
+          },
+          "workspaceRestore": {
+            "startMs": 1964.9,
+            "endMs": 1986.1,
+            "durationMs": 21.199999999999818
+          },
+          "historyInstall": {
+            "startMs": 1993.9,
+            "endMs": 2753.3,
+            "durationMs": 759.4000000000001
+          }
+        },
+        "scriptDownloads": {
+          "startMs": 134.60000002384186,
+          "endMs": 2915.3000000715256,
+          "durationMs": 2780.7000000476837,
+          "requests": 7,
+          "transferBytes": 109206
+        },
+        "scriptExecutionMs": null,
+        "layoutMs": null,
+        "longTasks": {
+          "count": 6,
+          "totalDurationMs": 2756,
+          "totalBlockingMs": 2456,
+          "largestMs": 887,
+          "boundedAt": 500
+        }
+      },
+      "chartBundleResources": [
+        {
+          "startTime": 1660.8999999761581,
+          "responseEnd": 2532.3000000715256,
+          "duration": 871.4000000953674,
+          "transferSize": 60429
+        }
+      ],
+      "klineResponseMetadata": [
+        {
+          "status": 200,
+          "dataStatus": "cached",
+          "source": "yahoo-finance-history",
+          "reason": "显示受限范围内的缓存快照；来源时间单独标示",
+          "updatedAt": "2026-10-26T12:02:40.839Z",
+          "recordCount": 300
+        }
+      ],
+      "auxiliaryPendingAtChart": [
+        {
+          "pathname": "/api/stock/indices",
+          "requestStarted": false,
+          "responsePending": false
+        },
+        {
+          "pathname": "/api/watchlist",
+          "requestStarted": true,
+          "responsePending": false
+        },
+        {
+          "pathname": "/api/paper/positions",
+          "requestStarted": true,
+          "responsePending": false
+        }
+      ],
+      "apiRequestDetails": [
+        {
+          "pathname": "/api/auth/status",
+          "method": "GET",
+          "url": "/api/auth/status"
+        },
+        {
+          "pathname": "/api/stock/kline",
+          "method": "GET",
+          "url": "/api/stock/kline?symbol=usAAPL&period=1d&interval=1d&adjustment=source&chartWindow=1"
+        },
+        {
+          "pathname": "/api/workspace/navigation",
+          "method": "GET",
+          "url": "/api/workspace/navigation?scope=stocks"
+        },
+        {
+          "pathname": "/api/watchlist",
+          "method": "GET",
+          "url": "/api/watchlist"
+        },
+        {
+          "pathname": "/api/paper/positions",
+          "method": "GET",
+          "url": "/api/paper/positions?scope=stocks"
+        },
+        {
+          "pathname": "/api/events/entities",
+          "method": "GET",
+          "url": "/api/events/entities?market=stocks&instrument=stock%3Aus%3AAAPL"
+        }
+      ],
+      "assetResponses": [
+        {
+          "path": "/assets/experience-enhancements.5e73551578eca805.css",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/dashboard-base.74cc41e0347efcf3.css",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/auth-client.b8f1a72cc1cf25d0.js",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/dashboard-startup-bootstrap.dab3b2fed28a9e02.js",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/workspace-loader.ff089f638295ab27.js",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/dashboard-startup-runtime.c07d8bfe646cec72.js",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/workspace-charts.4a69ad0d5e4ca81e.js",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/dashboard-startup-inline-1.80185250dcd58b75.js",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/dashboard-startup-inline-2.5f9e1d4c96ac3a14.js",
+          "encoding": "br"
+        }
+      ],
+      "apiTimings": [
+        {
+          "pathname": "/api/auth/status",
+          "status": 200,
+          "durationMs": 113
+        },
+        {
+          "pathname": "/api/stock/kline",
+          "status": 200,
+          "durationMs": 1134
+        },
+        {
+          "pathname": "/api/workspace/navigation",
+          "status": 200,
+          "durationMs": 81
+        },
+        {
+          "pathname": "/api/watchlist",
+          "status": 200,
+          "durationMs": 1493
+        },
+        {
+          "pathname": "/api/paper/positions",
+          "status": 200,
+          "durationMs": 1493
+        }
+      ],
+      "apiRequests": [
+        "/api/auth/status",
+        "/api/stock/kline",
+        "/api/workspace/navigation",
+        "/api/watchlist",
+        "/api/paper/positions",
+        "/api/events/entities"
+      ],
+      "apiRequestCounts": {
+        "/api/auth/status": 1,
+        "/api/stock/kline": 1,
+        "/api/workspace/navigation": 1,
+        "/api/watchlist": 1,
+        "/api/paper/positions": 1,
+        "/api/events/entities": 1
+      },
+      "prefetchStartedBeforeCore": true
+    },
+    {
+      "viewport": 1440,
+      "run": 1,
+      "temperature": "warm",
+      "shellReadyMs": 1007.8999999761581,
+      "paintedShellReadyMs": 1352.2999999523163,
+      "chartReadyMs": 1398.7999999523163,
+      "chartState": "ready",
+      "chartMessage": "Apple · usAAPL\n▤ 双图\n⛶ 全屏\n周期\n1分\n5分\n15分\n1小时\n1日\n3日\n5日\n60日\n120日\n1年\n5年\n缓存数据 · K线时间 2026-10-23 · yahoo-finance-history · 抓取 2026/10/26 20:02 · 上次源站耗时 1086ms · cache · 显示受限范围内的缓存快照；来源时间单独标示 AAPL · 1d · 普通行情 · K线：缓存 · 300 根 · 显示受限范围内的缓存快照；来源时间单独标示\n历史时点 / 日期定位 / 日内下钻\n图层与策略 · 保留当前选择\n事件时间轴\n刷新\n正在读取该标的事件与证据…\n正在加载当前标的事件…\nMA5 344.48\nMA10 343.30\nMA20 338.91\n周期非短线 · 连接：来源快照 · 时效：来源过期 · 蜡烛：已完成\n本地时区\n自动价格轴\n加载更早K线\n区间测量\n价格提醒\n 模拟成交\n行情来源说明\n价格口径 \n来源口径 · 未声明\n前复权（Yahoo Adj Close 系数推导）\n后复权（不可用）\n2026/10/23 21:30:00 开 349.12",
+      "bytes": 12205,
+      "jsBytes": 0,
+      "jsResources": [
+        {
+          "path": "/assets/dashboard-startup-runtime.c07d8bfe646cec72.js",
+          "startTime": 171.89999997615814,
+          "duration": 0,
+          "transferSize": 0
+        },
+        {
+          "path": "/assets/auth-client.b8f1a72cc1cf25d0.js",
+          "startTime": 173.79999995231628,
+          "duration": 0,
+          "transferSize": 0
+        },
+        {
+          "path": "/assets/workspace-loader.ff089f638295ab27.js",
+          "startTime": 175,
+          "duration": 0,
+          "transferSize": 0
+        },
+        {
+          "path": "/assets/dashboard-startup-bootstrap.dab3b2fed28a9e02.js",
+          "startTime": 178.5,
+          "duration": 0,
+          "transferSize": 0
+        },
+        {
+          "path": "/assets/workspace-charts.4a69ad0d5e4ca81e.js",
+          "startTime": 389.39999997615814,
+          "duration": 0,
+          "transferSize": 0
+        },
+        {
+          "path": "/assets/dashboard-startup-inline-1.80185250dcd58b75.js",
+          "startTime": 650.1999999284744,
+          "duration": 0,
+          "transferSize": 0
+        },
+        {
+          "path": "/assets/dashboard-startup-inline-2.5f9e1d4c96ac3a14.js",
+          "startTime": 652.2999999523163,
+          "duration": 0,
+          "transferSize": 0
+        }
+      ],
+      "dashboardStartupCompatibility": {
+        "resourceCount": 2,
+        "transferBytes": 0,
+        "requestStartSpreadMs": 2.100000023841858,
+        "downloadSpanMs": 2.100000023841858
+      },
+      "domContentLoadedMs": 477.2999999523163,
+      "navigationTiming": {
+        "responseStart": 4.399999976158142,
+        "responseEnd": 115.39999997615814,
+        "domInteractive": 473,
+        "domContentLoadedEventEnd": 477.2999999523163
+      },
+      "startupResources": [
+        {
+          "path": "/api/auth/status",
+          "startTime": 169.39999997615814,
+          "responseStart": 173.29999995231628,
+          "responseEnd": 270.5,
+          "transferSize": 572
+        },
+        {
+          "path": "/assets/dashboard-startup-runtime.c07d8bfe646cec72.js",
+          "startTime": 171.89999997615814,
+          "responseStart": 171.89999997615814,
+          "responseEnd": 171.89999997615814,
+          "transferSize": 0
+        },
+        {
+          "path": "/assets/auth-client.b8f1a72cc1cf25d0.js",
+          "startTime": 173.79999995231628,
+          "responseStart": 173.79999995231628,
+          "responseEnd": 173.79999995231628,
+          "transferSize": 0
+        },
+        {
+          "path": "/assets/workspace-loader.ff089f638295ab27.js",
+          "startTime": 175,
+          "responseStart": 175,
+          "responseEnd": 175,
+          "transferSize": 0
+        },
+        {
+          "path": "/assets/dashboard-base.74cc41e0347efcf3.css",
+          "startTime": 176.09999990463257,
+          "responseStart": 176.09999990463257,
+          "responseEnd": 176.09999990463257,
+          "transferSize": 0
+        },
+        {
+          "path": "/assets/experience-enhancements.5e73551578eca805.css",
+          "startTime": 177.19999992847443,
+          "responseStart": 177.19999992847443,
+          "responseEnd": 177.19999992847443,
+          "transferSize": 0
+        },
+        {
+          "path": "/assets/dashboard-startup-bootstrap.dab3b2fed28a9e02.js",
+          "startTime": 178.5,
+          "responseStart": 178.5,
+          "responseEnd": 178.5,
+          "transferSize": 0
+        },
+        {
+          "path": "/assets/workspace-charts.4a69ad0d5e4ca81e.js",
+          "startTime": 389.39999997615814,
+          "responseStart": 389.39999997615814,
+          "responseEnd": 389.39999997615814,
+          "transferSize": 0
+        },
+        {
+          "path": "/api/stock/kline",
+          "startTime": 392.1999999284744,
+          "responseStart": 397.59999990463257,
+          "responseEnd": 591.0999999046326,
+          "transferSize": 9290
+        },
+        {
+          "path": "/api/workspace/navigation",
+          "startTime": 539.5,
+          "responseStart": 544.5999999046326,
+          "responseEnd": 666.7999999523163,
+          "transferSize": 1571
+        },
+        {
+          "path": "/api/watchlist",
+          "startTime": 629.7999999523163,
+          "responseStart": 632.5999999046326,
+          "responseEnd": 728.0999999046326,
+          "transferSize": 395
+        },
+        {
+          "path": "/api/paper/positions",
+          "startTime": 631.5,
+          "responseStart": 634.2999999523163,
+          "responseEnd": 743.3999999761581,
+          "transferSize": 377
+        },
+        {
+          "path": "/assets/dashboard-startup-inline-1.80185250dcd58b75.js",
+          "startTime": 650.1999999284744,
+          "responseStart": 650.1999999284744,
+          "responseEnd": 650.1999999284744,
+          "transferSize": 0
+        },
+        {
+          "path": "/assets/dashboard-startup-inline-2.5f9e1d4c96ac3a14.js",
+          "startTime": 652.2999999523163,
+          "responseStart": 652.2999999523163,
+          "responseEnd": 652.2999999523163,
+          "transferSize": 0
+        }
+      ],
+      "phaseMarks": [
+        {
+          "name": "moneymoney:auth-ready",
+          "atMs": 385.7
+        },
+        {
+          "name": "moneymoney:chart-preload-start",
+          "atMs": 387.2
+        },
+        {
+          "name": "moneymoney:stock-kline-prefetch-start",
+          "atMs": 390.3
+        },
+        {
+          "name": "moneymoney:chart-preload-ready",
+          "atMs": 409.1
+        },
+        {
+          "name": "moneymoney:dashboard-start",
+          "atMs": 523.2
+        },
+        {
+          "name": "moneymoney:dashboard-auth-ready",
+          "atMs": 523.6
+        },
+        {
+          "name": "moneymoney:theme-start",
+          "atMs": 523.8
+        },
+        {
+          "name": "moneymoney:theme-end",
+          "atMs": 524.7
+        },
+        {
+          "name": "moneymoney:navigation-start",
+          "atMs": 525.7
+        },
+        {
+          "name": "moneymoney:navigation-end",
+          "atMs": 553.1
+        },
+        {
+          "name": "moneymoney:collapses-start",
+          "atMs": 553.1
+        },
+        {
+          "name": "moneymoney:collapses-end",
+          "atMs": 554.1
+        },
+        {
+          "name": "moneymoney:workspace-restore-start",
+          "atMs": 554.1
+        },
+        {
+          "name": "moneymoney:workspace-restore-end",
+          "atMs": 565.6
+        },
+        {
+          "name": "moneymoney:dashboard-context-ready",
+          "atMs": 566.8
+        },
+        {
+          "name": "moneymoney:history-install-start",
+          "atMs": 567.2
+        },
+        {
+          "name": "moneymoney:history-install-end",
+          "atMs": 627.6
+        },
+        {
+          "name": "moneymoney:dashboard-core-ready",
+          "atMs": 647.1
+        },
+        {
+          "name": "moneymoney:chart-module-start",
+          "atMs": 652.9
+        },
+        {
+          "name": "moneymoney:chart-module-ready",
+          "atMs": 721.9
+        },
+        {
+          "name": "moneymoney:stock-kline-request-start",
+          "atMs": 782.1
+        },
+        {
+          "name": "moneymoney:stock-kline-response-parsed",
+          "atMs": 1054
+        },
+        {
+          "name": "moneymoney:stock-kline-first-render",
+          "atMs": 1205.2
+        }
+      ],
+      "longTaskSupported": true,
+      "longTasks": [
+        {
+          "startTime": 515,
+          "duration": 139
+        },
+        {
+          "startTime": 696.3999999761581,
+          "duration": 86
+        },
+        {
+          "startTime": 1053.7999999523163,
+          "duration": 153
+        }
+      ],
+      "loadingPhases": {
+        "version": 1,
+        "additive": false,
+        "note": "阶段可能重叠；脚本下载跨度不是执行耗时。缺失计时为null，不按零处理。",
+        "phases": {
+          "authentication": {
+            "startMs": 169.39999997615814,
+            "endMs": 270.5,
+            "durationMs": 101.10000002384186
+          },
+          "coreInitialization": {
+            "startMs": 523.2,
+            "endMs": 647.1,
+            "durationMs": 123.89999999999998
+          },
+          "quoteWait": {
+            "startMs": 392.1999999284744,
+            "endMs": 591.0999999046326,
+            "durationMs": 198.89999997615814
+          },
+          "quoteToRender": {
+            "startMs": 591.0999999046326,
+            "endMs": 1205.2,
+            "durationMs": 614.1000000953675
+          },
+          "renderToSettled": {
+            "startMs": 1205.2,
+            "endMs": 1398.7999999523163,
+            "durationMs": 193.59999995231624
+          },
+          "theme": {
+            "startMs": 523.8,
+            "endMs": 524.7,
+            "durationMs": 0.900000000000091
+          },
+          "navigation": {
+            "startMs": 525.7,
+            "endMs": 553.1,
+            "durationMs": 27.399999999999977
+          },
+          "collapses": {
+            "startMs": 553.1,
+            "endMs": 554.1,
+            "durationMs": 1
+          },
+          "workspaceRestore": {
+            "startMs": 554.1,
+            "endMs": 565.6,
+            "durationMs": 11.5
+          },
+          "historyInstall": {
+            "startMs": 567.2,
+            "endMs": 627.6,
+            "durationMs": 60.39999999999998
+          }
+        },
+        "scriptDownloads": {
+          "startMs": 171.89999997615814,
+          "endMs": 652.2999999523163,
+          "durationMs": 480.39999997615814,
+          "requests": 7,
+          "transferBytes": 0
+        },
+        "scriptExecutionMs": null,
+        "layoutMs": null,
+        "longTasks": {
+          "count": 3,
+          "totalDurationMs": 378,
+          "totalBlockingMs": 228,
+          "largestMs": 153,
+          "boundedAt": 500
+        }
+      },
+      "chartBundleResources": [
+        {
+          "startTime": 389.39999997615814,
+          "responseEnd": 389.39999997615814,
+          "duration": 0,
+          "transferSize": 0
+        }
+      ],
+      "klineResponseMetadata": [
+        {
+          "status": 200,
+          "dataStatus": "cached",
+          "source": "yahoo-finance-history",
+          "reason": "显示受限范围内的缓存快照；来源时间单独标示",
+          "updatedAt": "2026-10-26T12:02:40.839Z",
+          "recordCount": 300
+        }
+      ],
+      "auxiliaryPendingAtChart": [
+        {
+          "pathname": "/api/stock/indices",
+          "requestStarted": false,
+          "responsePending": false
+        },
+        {
+          "pathname": "/api/watchlist",
+          "requestStarted": true,
+          "responsePending": false
+        },
+        {
+          "pathname": "/api/paper/positions",
+          "requestStarted": true,
+          "responsePending": false
+        }
+      ],
+      "apiRequestDetails": [
+        {
+          "pathname": "/api/auth/status",
+          "method": "GET",
+          "url": "/api/auth/status"
+        },
+        {
+          "pathname": "/api/stock/kline",
+          "method": "GET",
+          "url": "/api/stock/kline?symbol=usAAPL&period=1d&interval=1d&adjustment=source&chartWindow=1"
+        },
+        {
+          "pathname": "/api/workspace/navigation",
+          "method": "GET",
+          "url": "/api/workspace/navigation?scope=stocks"
+        },
+        {
+          "pathname": "/api/watchlist",
+          "method": "GET",
+          "url": "/api/watchlist"
+        },
+        {
+          "pathname": "/api/paper/positions",
+          "method": "GET",
+          "url": "/api/paper/positions?scope=stocks"
+        },
+        {
+          "pathname": "/api/events/entities",
+          "method": "GET",
+          "url": "/api/events/entities?market=stocks&instrument=stock%3Aus%3AAAPL"
+        }
+      ],
+      "assetResponses": [
+        {
+          "path": "/assets/dashboard-startup-runtime.c07d8bfe646cec72.js",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/auth-client.b8f1a72cc1cf25d0.js",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/workspace-loader.ff089f638295ab27.js",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/dashboard-base.74cc41e0347efcf3.css",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/experience-enhancements.5e73551578eca805.css",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/dashboard-startup-bootstrap.dab3b2fed28a9e02.js",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/workspace-charts.4a69ad0d5e4ca81e.js",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/dashboard-startup-inline-1.80185250dcd58b75.js",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/dashboard-startup-inline-2.5f9e1d4c96ac3a14.js",
+          "encoding": "br"
+        }
+      ],
+      "apiTimings": [
+        {
+          "pathname": "/api/auth/status",
+          "status": 200,
+          "durationMs": 170
+        },
+        {
+          "pathname": "/api/stock/kline",
+          "status": 200,
+          "durationMs": 621
+        },
+        {
+          "pathname": "/api/workspace/navigation",
+          "status": 200,
+          "durationMs": 363
+        },
+        {
+          "pathname": "/api/watchlist",
+          "status": 200,
+          "durationMs": 620
+        },
+        {
+          "pathname": "/api/paper/positions",
+          "status": 200,
+          "durationMs": 620
+        }
+      ],
+      "apiRequests": [
+        "/api/auth/status",
+        "/api/stock/kline",
+        "/api/workspace/navigation",
+        "/api/watchlist",
+        "/api/paper/positions",
+        "/api/events/entities"
+      ],
+      "apiRequestCounts": {
+        "/api/auth/status": 1,
+        "/api/stock/kline": 1,
+        "/api/workspace/navigation": 1,
+        "/api/watchlist": 1,
+        "/api/paper/positions": 1,
+        "/api/events/entities": 1
+      },
+      "prefetchStartedBeforeCore": true
+    },
+    {
+      "viewport": 1440,
+      "run": 2,
+      "temperature": "cold",
+      "shellReadyMs": 3251,
+      "paintedShellReadyMs": 4848.700000047684,
+      "chartReadyMs": 4891.600000023842,
+      "chartState": "ready",
+      "chartMessage": "Apple · usAAPL\n▤ 双图\n⛶ 全屏\n周期\n1分\n5分\n15分\n1小时\n1日\n3日\n5日\n60日\n120日\n1年\n5年\n缓存数据 · K线时间 2026-10-23 · yahoo-finance-history · 抓取 2026/10/26 20:02 · 上次源站耗时 1086ms · cache · 显示受限范围内的缓存快照；来源时间单独标示 AAPL · 1d · 普通行情 · K线：缓存 · 300 根 · 显示受限范围内的缓存快照；来源时间单独标示\n历史时点 / 日期定位 / 日内下钻\n图层与策略 · 保留当前选择\n事件时间轴\n刷新\npartial · events ok · news ok · filings unavailable · secForm4 partial · sec13f unavailable\nWarren Buffett said 'nobody gets paid' to give this easy investing advice — how it’s still helping your portfolio today\nnews ",
+      "bytes": 144308,
+      "jsBytes": 109206,
+      "jsResources": [
+        {
+          "path": "/assets/dashboard-startup-runtime.c07d8bfe646cec72.js",
+          "startTime": 170.60000002384186,
+          "duration": 851.2000000476837,
+          "transferSize": 38738
+        },
+        {
+          "path": "/assets/auth-client.b8f1a72cc1cf25d0.js",
+          "startTime": 173.60000002384186,
+          "duration": 251.79999995231628,
+          "transferSize": 1415
+        },
+        {
+          "path": "/assets/workspace-loader.ff089f638295ab27.js",
+          "startTime": 176.20000004768372,
+          "duration": 732.5,
+          "transferSize": 3955
+        },
+        {
+          "path": "/assets/dashboard-startup-bootstrap.dab3b2fed28a9e02.js",
+          "startTime": 445.60000002384186,
+          "duration": 425.60000002384186,
+          "transferSize": 1184
+        },
+        {
+          "path": "/assets/workspace-charts.4a69ad0d5e4ca81e.js",
+          "startTime": 1829.8999999761581,
+          "duration": 957.4000000953674,
+          "transferSize": 60429
+        },
+        {
+          "path": "/assets/dashboard-startup-inline-1.80185250dcd58b75.js",
+          "startTime": 2324.5,
+          "duration": 143.70000004768372,
+          "transferSize": 1237
+        },
+        {
+          "path": "/assets/dashboard-startup-inline-2.5f9e1d4c96ac3a14.js",
+          "startTime": 2327.2000000476837,
+          "duration": 185.29999995231628,
+          "transferSize": 2248
+        }
+      ],
+      "dashboardStartupCompatibility": {
+        "resourceCount": 2,
+        "transferBytes": 3485,
+        "requestStartSpreadMs": 2.700000047683716,
+        "downloadSpanMs": 188
+      },
+      "domContentLoadedMs": 2140.399999976158,
+      "navigationTiming": {
+        "responseStart": 5.5,
+        "responseEnd": 440.3000000715256,
+        "domInteractive": 2136.399999976158,
+        "domContentLoadedEventEnd": 2140.399999976158
+      },
+      "startupResources": [
+        {
+          "path": "/api/auth/status",
+          "startTime": 164.80000007152557,
+          "responseStart": 169.70000004768372,
+          "responseEnd": 273.39999997615814,
+          "transferSize": 572
+        },
+        {
+          "path": "/assets/dashboard-startup-runtime.c07d8bfe646cec72.js",
+          "startTime": 170.60000002384186,
+          "responseStart": 189.30000007152557,
+          "responseEnd": 1021.8000000715256,
+          "transferSize": 38738
+        },
+        {
+          "path": "/assets/auth-client.b8f1a72cc1cf25d0.js",
+          "startTime": 173.60000002384186,
+          "responseStart": 192,
+          "responseEnd": 425.39999997615814,
+          "transferSize": 1415
+        },
+        {
+          "path": "/assets/workspace-loader.ff089f638295ab27.js",
+          "startTime": 176.20000004768372,
+          "responseStart": 738.8000000715256,
+          "responseEnd": 908.7000000476837,
+          "transferSize": 3955
+        },
+        {
+          "path": "/assets/dashboard-base.74cc41e0347efcf3.css",
+          "startTime": 177.10000002384186,
+          "responseStart": 190.20000004768372,
+          "responseEnd": 732,
+          "transferSize": 14972
+        },
+        {
+          "path": "/assets/experience-enhancements.5e73551578eca805.css",
+          "startTime": 178.20000004768372,
+          "responseStart": 192,
+          "responseEnd": 410.3000000715256,
+          "transferSize": 2306
+        },
+        {
+          "path": "/assets/dashboard-startup-bootstrap.dab3b2fed28a9e02.js",
+          "startTime": 445.60000002384186,
+          "responseStart": 762.3000000715256,
+          "responseEnd": 871.2000000476837,
+          "transferSize": 1184
+        },
+        {
+          "path": "/assets/workspace-charts.4a69ad0d5e4ca81e.js",
+          "startTime": 1829.8999999761581,
+          "responseStart": 1833,
+          "responseEnd": 2787.3000000715256,
+          "transferSize": 60429
+        },
+        {
+          "path": "/api/stock/kline",
+          "startTime": 1838.2000000476837,
+          "responseStart": 1844.3000000715256,
+          "responseEnd": 2127.5,
+          "transferSize": 9295
+        },
+        {
+          "path": "/api/workspace/navigation",
+          "startTime": 2240.3000000715256,
+          "responseStart": 2243.600000023842,
+          "responseEnd": 2375.5,
+          "transferSize": 1572
+        },
+        {
+          "path": "/api/watchlist",
+          "startTime": 2313.600000023842,
+          "responseStart": 2317.899999976158,
+          "responseEnd": 2420.8000000715256,
+          "transferSize": 395
+        },
+        {
+          "path": "/api/paper/positions",
+          "startTime": 2317.7000000476837,
+          "responseStart": 2320.7000000476837,
+          "responseEnd": 2435.7000000476837,
+          "transferSize": 377
+        },
+        {
+          "path": "/assets/dashboard-startup-inline-1.80185250dcd58b75.js",
+          "startTime": 2324.5,
+          "responseStart": 2328.399999976158,
+          "responseEnd": 2468.2000000476837,
+          "transferSize": 1237
+        },
+        {
+          "path": "/assets/dashboard-startup-inline-2.5f9e1d4c96ac3a14.js",
+          "startTime": 2327.2000000476837,
+          "responseStart": 2331.2000000476837,
+          "responseEnd": 2512.5,
+          "transferSize": 2248
+        },
+        {
+          "path": "/api/events/entities",
+          "startTime": 3375,
+          "responseStart": 3382.100000023842,
+          "responseEnd": 3523.8000000715256,
+          "transferSize": 5613
+        }
+      ],
+      "phaseMarks": [
+        {
+          "name": "moneymoney:auth-ready",
+          "atMs": 1822.7
+        },
+        {
+          "name": "moneymoney:chart-preload-start",
+          "atMs": 1825.6
+        },
+        {
+          "name": "moneymoney:stock-kline-prefetch-start",
+          "atMs": 1834.4
+        },
+        {
+          "name": "moneymoney:dashboard-start",
+          "atMs": 2198.2
+        },
+        {
+          "name": "moneymoney:dashboard-auth-ready",
+          "atMs": 2200.1
+        },
+        {
+          "name": "moneymoney:theme-start",
+          "atMs": 2200.3
+        },
+        {
+          "name": "moneymoney:theme-end",
+          "atMs": 2202.8
+        },
+        {
+          "name": "moneymoney:navigation-start",
+          "atMs": 2207
+        },
+        {
+          "name": "moneymoney:navigation-end",
+          "atMs": 2268.9
+        },
+        {
+          "name": "moneymoney:collapses-start",
+          "atMs": 2268.9
+        },
+        {
+          "name": "moneymoney:collapses-end",
+          "atMs": 2271.6
+        },
+        {
+          "name": "moneymoney:workspace-restore-start",
+          "atMs": 2271.8
+        },
+        {
+          "name": "moneymoney:workspace-restore-end",
+          "atMs": 2289.8
+        },
+        {
+          "name": "moneymoney:dashboard-context-ready",
+          "atMs": 2295.7
+        },
+        {
+          "name": "moneymoney:history-install-start",
+          "atMs": 2299.5
+        },
+        {
+          "name": "moneymoney:history-install-end",
+          "atMs": 2308.7
+        },
+        {
+          "name": "moneymoney:dashboard-core-ready",
+          "atMs": 2319.4
+        },
+        {
+          "name": "moneymoney:chart-module-start",
+          "atMs": 2328.6
+        },
+        {
+          "name": "moneymoney:chart-preload-ready",
+          "atMs": 3294.3
+        },
+        {
+          "name": "moneymoney:chart-module-ready",
+          "atMs": 3313.5
+        },
+        {
+          "name": "moneymoney:stock-kline-request-start",
+          "atMs": 3399
+        },
+        {
+          "name": "moneymoney:stock-kline-response-parsed",
+          "atMs": 3399.4
+        },
+        {
+          "name": "moneymoney:stock-kline-first-render",
+          "atMs": 4345.9
+        }
+      ],
+      "longTaskSupported": true,
+      "longTasks": [
+        {
+          "startTime": 768.3000000715256,
+          "duration": 544
+        },
+        {
+          "startTime": 1958,
+          "duration": 163
+        },
+        {
+          "startTime": 2191.600000023842,
+          "duration": 139
+        },
+        {
+          "startTime": 2335.7000000476837,
+          "duration": 889
+        },
+        {
+          "startTime": 3294.600000023842,
+          "duration": 1054
+        },
+        {
+          "startTime": 4397.200000047684,
+          "duration": 449
+        },
+        {
+          "startTime": 4933.200000047684,
+          "duration": 209
+        }
+      ],
+      "loadingPhases": {
+        "version": 1,
+        "additive": false,
+        "note": "阶段可能重叠；脚本下载跨度不是执行耗时。缺失计时为null，不按零处理。",
+        "phases": {
+          "authentication": {
+            "startMs": 164.80000007152557,
+            "endMs": 273.39999997615814,
+            "durationMs": 108.59999990463257
+          },
+          "coreInitialization": {
+            "startMs": 2198.2,
+            "endMs": 2319.4,
+            "durationMs": 121.20000000000027
+          },
+          "quoteWait": {
+            "startMs": 1838.2000000476837,
+            "endMs": 2127.5,
+            "durationMs": 289.2999999523163
+          },
+          "quoteToRender": {
+            "startMs": 2127.5,
+            "endMs": 4345.9,
+            "durationMs": 2218.3999999999996
+          },
+          "renderToSettled": {
+            "startMs": 4345.9,
+            "endMs": 4891.600000023842,
+            "durationMs": 545.7000000238422
+          },
+          "theme": {
+            "startMs": 2200.3,
+            "endMs": 2202.8,
+            "durationMs": 2.5
+          },
+          "navigation": {
+            "startMs": 2207,
+            "endMs": 2268.9,
+            "durationMs": 61.90000000000009
+          },
+          "collapses": {
+            "startMs": 2268.9,
+            "endMs": 2271.6,
+            "durationMs": 2.699999999999818
+          },
+          "workspaceRestore": {
+            "startMs": 2271.8,
+            "endMs": 2289.8,
+            "durationMs": 18
+          },
+          "historyInstall": {
+            "startMs": 2299.5,
+            "endMs": 2308.7,
+            "durationMs": 9.199999999999818
+          }
+        },
+        "scriptDownloads": {
+          "startMs": 170.60000002384186,
+          "endMs": 2787.3000000715256,
+          "durationMs": 2616.7000000476837,
+          "requests": 7,
+          "transferBytes": 109206
+        },
+        "scriptExecutionMs": null,
+        "layoutMs": null,
+        "longTasks": {
+          "count": 7,
+          "totalDurationMs": 3447,
+          "totalBlockingMs": 3097,
+          "largestMs": 1054,
+          "boundedAt": 500
+        }
+      },
+      "chartBundleResources": [
+        {
+          "startTime": 1829.8999999761581,
+          "responseEnd": 2787.3000000715256,
+          "duration": 957.4000000953674,
+          "transferSize": 60429
+        }
+      ],
+      "klineResponseMetadata": [
+        {
+          "status": 200,
+          "dataStatus": "cached",
+          "source": "yahoo-finance-history",
+          "reason": "显示受限范围内的缓存快照；来源时间单独标示",
+          "updatedAt": "2026-10-26T12:02:40.839Z",
+          "recordCount": 300
+        }
+      ],
+      "auxiliaryPendingAtChart": [
+        {
+          "pathname": "/api/stock/indices",
+          "requestStarted": false,
+          "responsePending": false
+        },
+        {
+          "pathname": "/api/watchlist",
+          "requestStarted": true,
+          "responsePending": false
+        },
+        {
+          "pathname": "/api/paper/positions",
+          "requestStarted": true,
+          "responsePending": false
+        }
+      ],
+      "apiRequestDetails": [
+        {
+          "pathname": "/api/auth/status",
+          "method": "GET",
+          "url": "/api/auth/status"
+        },
+        {
+          "pathname": "/api/stock/kline",
+          "method": "GET",
+          "url": "/api/stock/kline?symbol=usAAPL&period=1d&interval=1d&adjustment=source&chartWindow=1"
+        },
+        {
+          "pathname": "/api/workspace/navigation",
+          "method": "GET",
+          "url": "/api/workspace/navigation?scope=stocks"
+        },
+        {
+          "pathname": "/api/watchlist",
+          "method": "GET",
+          "url": "/api/watchlist"
+        },
+        {
+          "pathname": "/api/paper/positions",
+          "method": "GET",
+          "url": "/api/paper/positions?scope=stocks"
+        },
+        {
+          "pathname": "/api/events/entities",
+          "method": "GET",
+          "url": "/api/events/entities?market=stocks&instrument=stock%3Aus%3AAAPL"
+        }
+      ],
+      "assetResponses": [
+        {
+          "path": "/assets/dashboard-base.74cc41e0347efcf3.css",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/experience-enhancements.5e73551578eca805.css",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/auth-client.b8f1a72cc1cf25d0.js",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/dashboard-startup-bootstrap.dab3b2fed28a9e02.js",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/workspace-loader.ff089f638295ab27.js",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/dashboard-startup-runtime.c07d8bfe646cec72.js",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/dashboard-startup-inline-1.80185250dcd58b75.js",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/dashboard-startup-inline-2.5f9e1d4c96ac3a14.js",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/workspace-charts.4a69ad0d5e4ca81e.js",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/dashboard-startup-practical-experience.9385fb13bd245e2e.js",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/dashboard-startup-experience-enhancements.107e07cbf2626094.js",
+          "encoding": "br"
+        }
+      ],
+      "apiTimings": [
+        {
+          "pathname": "/api/auth/status",
+          "status": 200,
+          "durationMs": 110
+        },
+        {
+          "pathname": "/api/stock/kline",
+          "status": 200,
+          "durationMs": 352
+        },
+        {
+          "pathname": "/api/workspace/navigation",
+          "status": 200,
+          "durationMs": 945
+        },
+        {
+          "pathname": "/api/watchlist",
+          "status": 200,
+          "durationMs": 951
+        },
+        {
+          "pathname": "/api/paper/positions",
+          "status": 200,
+          "durationMs": 952
+        },
+        {
+          "pathname": "/api/events/entities",
+          "status": 200,
+          "durationMs": 553
+        }
+      ],
+      "apiRequests": [
+        "/api/auth/status",
+        "/api/stock/kline",
+        "/api/workspace/navigation",
+        "/api/watchlist",
+        "/api/paper/positions",
+        "/api/events/entities"
+      ],
+      "apiRequestCounts": {
+        "/api/auth/status": 1,
+        "/api/stock/kline": 1,
+        "/api/workspace/navigation": 1,
+        "/api/watchlist": 1,
+        "/api/paper/positions": 1,
+        "/api/events/entities": 1
+      },
+      "prefetchStartedBeforeCore": true
+    },
+    {
+      "viewport": 1440,
+      "run": 2,
+      "temperature": "warm",
+      "shellReadyMs": 1065.7999999523163,
+      "paintedShellReadyMs": 1368.3999999761581,
+      "chartReadyMs": 1519.0999999046326,
+      "chartState": "ready",
+      "chartMessage": "Apple · usAAPL\n▤ 双图\n⛶ 全屏\n周期\n1分\n5分\n15分\n1小时\n1日\n3日\n5日\n60日\n120日\n1年\n5年\n缓存数据 · K线时间 2026-10-23 · yahoo-finance-history · 抓取 2026/10/26 20:02 · 上次源站耗时 1086ms · stale · 显示受限范围内的缓存快照；正在后台刷新来源 AAPL · 1d · 普通行情 · K线：缓存 · 300 根 · 显示受限范围内的缓存快照；正在后台刷新来源\n历史时点 / 日期定位 / 日内下钻\n图层与策略 · 保留当前选择\n事件时间轴\n刷新\npartial · events ok · news ok · filings unavailable · secForm4 partial · sec13f unavailable\nWarren Buffett said 'nobody gets paid' to give this easy investing advice — how it’s still helping your portfolio today\nnews ",
+      "bytes": 17828,
+      "jsBytes": 0,
+      "jsResources": [
+        {
+          "path": "/assets/dashboard-startup-runtime.c07d8bfe646cec72.js",
+          "startTime": 267.5,
+          "duration": 0,
+          "transferSize": 0
+        },
+        {
+          "path": "/assets/auth-client.b8f1a72cc1cf25d0.js",
+          "startTime": 268.6999999284744,
+          "duration": 0,
+          "transferSize": 0
+        },
+        {
+          "path": "/assets/workspace-loader.ff089f638295ab27.js",
+          "startTime": 270.1999999284744,
+          "duration": 0,
+          "transferSize": 0
+        },
+        {
+          "path": "/assets/dashboard-startup-bootstrap.dab3b2fed28a9e02.js",
+          "startTime": 274.6999999284744,
+          "duration": 0,
+          "transferSize": 0
+        },
+        {
+          "path": "/assets/workspace-charts.4a69ad0d5e4ca81e.js",
+          "startTime": 508.89999997615814,
+          "duration": 0,
+          "transferSize": 0
+        },
+        {
+          "path": "/assets/dashboard-startup-inline-1.80185250dcd58b75.js",
+          "startTime": 773.5,
+          "duration": 0,
+          "transferSize": 0
+        },
+        {
+          "path": "/assets/dashboard-startup-inline-2.5f9e1d4c96ac3a14.js",
+          "startTime": 775.5,
+          "duration": 0,
+          "transferSize": 0
+        }
+      ],
+      "dashboardStartupCompatibility": {
+        "resourceCount": 2,
+        "transferBytes": 0,
+        "requestStartSpreadMs": 2,
+        "downloadSpanMs": 2
+      },
+      "domContentLoadedMs": 594.5999999046326,
+      "navigationTiming": {
+        "responseStart": 3.5999999046325684,
+        "responseEnd": 108,
+        "domInteractive": 590.5999999046326,
+        "domContentLoadedEventEnd": 594.5999999046326
+      },
+      "startupResources": [
+        {
+          "path": "/api/auth/status",
+          "startTime": 264.7999999523163,
+          "responseStart": 268.09999990463257,
+          "responseEnd": 369,
+          "transferSize": 572
+        },
+        {
+          "path": "/assets/dashboard-startup-runtime.c07d8bfe646cec72.js",
+          "startTime": 267.5,
+          "responseStart": 267.5,
+          "responseEnd": 267.5,
+          "transferSize": 0
+        },
+        {
+          "path": "/assets/auth-client.b8f1a72cc1cf25d0.js",
+          "startTime": 268.6999999284744,
+          "responseStart": 268.6999999284744,
+          "responseEnd": 268.6999999284744,
+          "transferSize": 0
+        },
+        {
+          "path": "/assets/workspace-loader.ff089f638295ab27.js",
+          "startTime": 270.1999999284744,
+          "responseStart": 270.1999999284744,
+          "responseEnd": 270.1999999284744,
+          "transferSize": 0
+        },
+        {
+          "path": "/assets/dashboard-base.74cc41e0347efcf3.css",
+          "startTime": 271.89999997615814,
+          "responseStart": 271.89999997615814,
+          "responseEnd": 271.89999997615814,
+          "transferSize": 0
+        },
+        {
+          "path": "/assets/experience-enhancements.5e73551578eca805.css",
+          "startTime": 273.5,
+          "responseStart": 273.5,
+          "responseEnd": 273.5,
+          "transferSize": 0
+        },
+        {
+          "path": "/assets/dashboard-startup-bootstrap.dab3b2fed28a9e02.js",
+          "startTime": 274.6999999284744,
+          "responseStart": 274.6999999284744,
+          "responseEnd": 274.6999999284744,
+          "transferSize": 0
+        },
+        {
+          "path": "/assets/workspace-charts.4a69ad0d5e4ca81e.js",
+          "startTime": 508.89999997615814,
+          "responseStart": 508.89999997615814,
+          "responseEnd": 508.89999997615814,
+          "transferSize": 0
+        },
+        {
+          "path": "/api/stock/kline",
+          "startTime": 511.6999999284744,
+          "responseStart": 517.2999999523163,
+          "responseEnd": 697.2999999523163,
+          "transferSize": 9301
+        },
+        {
+          "path": "/api/workspace/navigation",
+          "startTime": 666.5999999046326,
+          "responseStart": 669.3999999761581,
+          "responseEnd": 773.2999999523163,
+          "transferSize": 1571
+        },
+        {
+          "path": "/api/watchlist",
+          "startTime": 755.6999999284744,
+          "responseStart": 758.3999999761581,
+          "responseEnd": 857.1999999284744,
+          "transferSize": 395
+        },
+        {
+          "path": "/api/paper/positions",
+          "startTime": 757.5,
+          "responseStart": 759.6999999284744,
+          "responseEnd": 872.3999999761581,
+          "transferSize": 377
+        },
+        {
+          "path": "/assets/dashboard-startup-inline-1.80185250dcd58b75.js",
+          "startTime": 773.5,
+          "responseStart": 773.5,
+          "responseEnd": 773.5,
+          "transferSize": 0
+        },
+        {
+          "path": "/assets/dashboard-startup-inline-2.5f9e1d4c96ac3a14.js",
+          "startTime": 775.5,
+          "responseStart": 775.5,
+          "responseEnd": 775.5,
+          "transferSize": 0
+        },
+        {
+          "path": "/api/events/entities",
+          "startTime": 875.1999999284744,
+          "responseStart": 881.2999999523163,
+          "responseEnd": 1028,
+          "transferSize": 5612
+        }
+      ],
+      "phaseMarks": [
+        {
+          "name": "moneymoney:auth-ready",
+          "atMs": 505.5
+        },
+        {
+          "name": "moneymoney:chart-preload-start",
+          "atMs": 506.8
+        },
+        {
+          "name": "moneymoney:stock-kline-prefetch-start",
+          "atMs": 509.5
+        },
+        {
+          "name": "moneymoney:chart-preload-ready",
+          "atMs": 530
+        },
+        {
+          "name": "moneymoney:dashboard-start",
+          "atMs": 650.2
+        },
+        {
+          "name": "moneymoney:dashboard-auth-ready",
+          "atMs": 650.6
+        },
+        {
+          "name": "moneymoney:theme-start",
+          "atMs": 650.9
+        },
+        {
+          "name": "moneymoney:theme-end",
+          "atMs": 651.5
+        },
+        {
+          "name": "moneymoney:navigation-start",
+          "atMs": 652.7
+        },
+        {
+          "name": "moneymoney:navigation-end",
+          "atMs": 676.8
+        },
+        {
+          "name": "moneymoney:collapses-start",
+          "atMs": 677
+        },
+        {
+          "name": "moneymoney:collapses-end",
+          "atMs": 678
+        },
+        {
+          "name": "moneymoney:workspace-restore-start",
+          "atMs": 678
+        },
+        {
+          "name": "moneymoney:workspace-restore-end",
+          "atMs": 688.1
+        },
+        {
+          "name": "moneymoney:dashboard-context-ready",
+          "atMs": 689.4
+        },
+        {
+          "name": "moneymoney:history-install-start",
+          "atMs": 689.8
+        },
+        {
+          "name": "moneymoney:history-install-end",
+          "atMs": 752
+        },
+        {
+          "name": "moneymoney:dashboard-core-ready",
+          "atMs": 770.8
+        },
+        {
+          "name": "moneymoney:chart-module-start",
+          "atMs": 776.1
+        },
+        {
+          "name": "moneymoney:chart-module-ready",
+          "atMs": 838.9
+        },
+        {
+          "name": "moneymoney:stock-kline-request-start",
+          "atMs": 887.7
+        },
+        {
+          "name": "moneymoney:stock-kline-response-parsed",
+          "atMs": 1113.1
+        },
+        {
+          "name": "moneymoney:stock-kline-first-render",
+          "atMs": 1246.3
+        }
+      ],
+      "longTaskSupported": true,
+      "longTasks": [
+        {
+          "startTime": 574.2999999523163,
+          "duration": 52
+        },
+        {
+          "startTime": 643.7999999523163,
+          "duration": 133
+        },
+        {
+          "startTime": 817.0999999046326,
+          "duration": 71
+        },
+        {
+          "startTime": 1112.7999999523163,
+          "duration": 134
+        },
+        {
+          "startTime": 1399.3999999761581,
+          "duration": 92
+        }
+      ],
+      "loadingPhases": {
+        "version": 1,
+        "additive": false,
+        "note": "阶段可能重叠；脚本下载跨度不是执行耗时。缺失计时为null，不按零处理。",
+        "phases": {
+          "authentication": {
+            "startMs": 264.7999999523163,
+            "endMs": 369,
+            "durationMs": 104.20000004768372
+          },
+          "coreInitialization": {
+            "startMs": 650.2,
+            "endMs": 770.8,
+            "durationMs": 120.59999999999991
+          },
+          "quoteWait": {
+            "startMs": 511.6999999284744,
+            "endMs": 697.2999999523163,
+            "durationMs": 185.60000002384186
+          },
+          "quoteToRender": {
+            "startMs": 697.2999999523163,
+            "endMs": 1246.3,
+            "durationMs": 549.0000000476837
+          },
+          "renderToSettled": {
+            "startMs": 1246.3,
+            "endMs": 1519.0999999046326,
+            "durationMs": 272.7999999046326
+          },
+          "theme": {
+            "startMs": 650.9,
+            "endMs": 651.5,
+            "durationMs": 0.6000000000000227
+          },
+          "navigation": {
+            "startMs": 652.7,
+            "endMs": 676.8,
+            "durationMs": 24.09999999999991
+          },
+          "collapses": {
+            "startMs": 677,
+            "endMs": 678,
+            "durationMs": 1
+          },
+          "workspaceRestore": {
+            "startMs": 678,
+            "endMs": 688.1,
+            "durationMs": 10.100000000000023
+          },
+          "historyInstall": {
+            "startMs": 689.8,
+            "endMs": 752,
+            "durationMs": 62.200000000000045
+          }
+        },
+        "scriptDownloads": {
+          "startMs": 267.5,
+          "endMs": 775.5,
+          "durationMs": 508,
+          "requests": 7,
+          "transferBytes": 0
+        },
+        "scriptExecutionMs": null,
+        "layoutMs": null,
+        "longTasks": {
+          "count": 5,
+          "totalDurationMs": 482,
+          "totalBlockingMs": 232,
+          "largestMs": 134,
+          "boundedAt": 500
+        }
+      },
+      "chartBundleResources": [
+        {
+          "startTime": 508.89999997615814,
+          "responseEnd": 508.89999997615814,
+          "duration": 0,
+          "transferSize": 0
+        }
+      ],
+      "klineResponseMetadata": [
+        {
+          "status": 200,
+          "dataStatus": "cached",
+          "source": "yahoo-finance-history",
+          "reason": "显示受限范围内的缓存快照；正在后台刷新来源",
+          "updatedAt": "2026-10-26T12:02:40.839Z",
+          "recordCount": 300
+        }
+      ],
+      "auxiliaryPendingAtChart": [
+        {
+          "pathname": "/api/stock/indices",
+          "requestStarted": false,
+          "responsePending": false
+        },
+        {
+          "pathname": "/api/watchlist",
+          "requestStarted": true,
+          "responsePending": false
+        },
+        {
+          "pathname": "/api/paper/positions",
+          "requestStarted": true,
+          "responsePending": false
+        }
+      ],
+      "apiRequestDetails": [
+        {
+          "pathname": "/api/auth/status",
+          "method": "GET",
+          "url": "/api/auth/status"
+        },
+        {
+          "pathname": "/api/stock/kline",
+          "method": "GET",
+          "url": "/api/stock/kline?symbol=usAAPL&period=1d&interval=1d&adjustment=source&chartWindow=1"
+        },
+        {
+          "pathname": "/api/workspace/navigation",
+          "method": "GET",
+          "url": "/api/workspace/navigation?scope=stocks"
+        },
+        {
+          "pathname": "/api/watchlist",
+          "method": "GET",
+          "url": "/api/watchlist"
+        },
+        {
+          "pathname": "/api/paper/positions",
+          "method": "GET",
+          "url": "/api/paper/positions?scope=stocks"
+        },
+        {
+          "pathname": "/api/events/entities",
+          "method": "GET",
+          "url": "/api/events/entities?market=stocks&instrument=stock%3Aus%3AAAPL"
+        }
+      ],
+      "assetResponses": [
+        {
+          "path": "/assets/dashboard-startup-runtime.c07d8bfe646cec72.js",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/auth-client.b8f1a72cc1cf25d0.js",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/workspace-loader.ff089f638295ab27.js",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/dashboard-base.74cc41e0347efcf3.css",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/experience-enhancements.5e73551578eca805.css",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/dashboard-startup-bootstrap.dab3b2fed28a9e02.js",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/workspace-charts.4a69ad0d5e4ca81e.js",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/dashboard-startup-inline-1.80185250dcd58b75.js",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/dashboard-startup-inline-2.5f9e1d4c96ac3a14.js",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/dashboard-startup-experience-enhancements.107e07cbf2626094.js",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/dashboard-startup-practical-experience.9385fb13bd245e2e.js",
+          "encoding": "br"
+        }
+      ],
+      "apiTimings": [
+        {
+          "pathname": "/api/auth/status",
+          "status": 200,
+          "durationMs": 180
+        },
+        {
+          "pathname": "/api/stock/kline",
+          "status": 200,
+          "durationMs": 559
+        },
+        {
+          "pathname": "/api/workspace/navigation",
+          "status": 200,
+          "durationMs": 298
+        },
+        {
+          "pathname": "/api/watchlist",
+          "status": 200,
+          "durationMs": 531
+        },
+        {
+          "pathname": "/api/paper/positions",
+          "status": 200,
+          "durationMs": 532
+        },
+        {
+          "pathname": "/api/events/entities",
+          "status": 200,
+          "durationMs": 429
+        }
+      ],
+      "apiRequests": [
+        "/api/auth/status",
+        "/api/stock/kline",
+        "/api/workspace/navigation",
+        "/api/watchlist",
+        "/api/paper/positions",
+        "/api/events/entities"
+      ],
+      "apiRequestCounts": {
+        "/api/auth/status": 1,
+        "/api/stock/kline": 1,
+        "/api/workspace/navigation": 1,
+        "/api/watchlist": 1,
+        "/api/paper/positions": 1,
+        "/api/events/entities": 1
+      },
+      "prefetchStartedBeforeCore": true
+    },
+    {
+      "viewport": 390,
+      "run": 0,
+      "temperature": "cold",
+      "shellReadyMs": 1919.7000000476837,
+      "paintedShellReadyMs": 1941.2000000476837,
+      "chartReadyMs": 4108.5,
+      "chartState": "ready",
+      "chartMessage": "Apple · usAAPL\n▤ 双图\n⛶ 全屏\n周期\n1分\n5分\n15分\n1小时\n1日\n3日\n5日\n60日\n120日\n1年\n5年\n最新可用行情（实时性未声明） · K线时间 2026-10-23 · yahoo-finance-history · 抓取 2026/10/26 20:03 · 源站耗时 684ms · origin AAPL · 1d · 普通行情 · K线：最新可用（实时性未声明） · 300 根\n历史时点 / 日期定位 / 日内下钻\n图层与策略 · 保留当前选择\n事件时间轴\n刷新\npartial · events ok · news ok · filings unavailable · secForm4 partial · sec13f unavailable\nWarren Buffett said 'nobody gets paid' to give this easy investing advice — how it’s still helping your portfolio today\nnews · 发布 2026/10/26 19:15 · Moneyw",
+      "bytes": 160326,
+      "jsBytes": 125364,
+      "jsResources": [
+        {
+          "path": "/assets/dashboard-startup-runtime.c07d8bfe646cec72.js",
+          "startTime": 138.80000007152557,
+          "duration": 887.7999999523163,
+          "transferSize": 38738
+        },
+        {
+          "path": "/assets/auth-client.b8f1a72cc1cf25d0.js",
+          "startTime": 139.90000009536743,
+          "duration": 270.59999990463257,
+          "transferSize": 1415
+        },
+        {
+          "path": "/assets/workspace-loader.ff089f638295ab27.js",
+          "startTime": 140.60000002384186,
+          "duration": 774.7000000476837,
+          "transferSize": 3955
+        },
+        {
+          "path": "/assets/dashboard-startup-bootstrap.dab3b2fed28a9e02.js",
+          "startTime": 538.5,
+          "duration": 332,
+          "transferSize": 1184
+        },
+        {
+          "path": "/assets/workspace-charts.4a69ad0d5e4ca81e.js",
+          "startTime": 1403.4000000953674,
+          "duration": 1107.0999999046326,
+          "transferSize": 60429
+        },
+        {
+          "path": "/assets/dashboard-startup-inline-1.80185250dcd58b75.js",
+          "startTime": 1891.3000000715256,
+          "duration": 133.10000002384186,
+          "transferSize": 1237
+        },
+        {
+          "path": "/assets/dashboard-startup-inline-2.5f9e1d4c96ac3a14.js",
+          "startTime": 1892.3000000715256,
+          "duration": 185.79999995231628,
+          "transferSize": 2248
+        },
+        {
+          "path": "/assets/dashboard-startup-experience-enhancements.107e07cbf2626094.js",
+          "startTime": 2087,
+          "duration": 439.5,
+          "transferSize": 11852
+        },
+        {
+          "path": "/assets/dashboard-startup-practical-experience.9385fb13bd245e2e.js",
+          "startTime": 2088.2000000476837,
+          "duration": 252.39999997615814,
+          "transferSize": 4306
+        }
+      ],
+      "dashboardStartupCompatibility": {
+        "resourceCount": 4,
+        "transferBytes": 19643,
+        "requestStartSpreadMs": 196.89999997615814,
+        "downloadSpanMs": 635.1999999284744
+      },
+      "domContentLoadedMs": 1460.9000000953674,
+      "navigationTiming": {
+        "responseStart": 4.200000047683716,
+        "responseEnd": 534.1000000238419,
+        "domInteractive": 1452.2000000476837,
+        "domContentLoadedEventEnd": 1460.9000000953674
+      },
+      "startupResources": [
+        {
+          "path": "/api/auth/status",
+          "startTime": 136.30000007152557,
+          "responseStart": 146,
+          "responseEnd": 244.40000009536743,
+          "transferSize": 572
+        },
+        {
+          "path": "/assets/dashboard-startup-runtime.c07d8bfe646cec72.js",
+          "startTime": 138.80000007152557,
+          "responseStart": 148.30000007152557,
+          "responseEnd": 1026.6000000238419,
+          "transferSize": 38738
+        },
+        {
+          "path": "/assets/auth-client.b8f1a72cc1cf25d0.js",
+          "startTime": 139.90000009536743,
+          "responseStart": 151.60000002384186,
+          "responseEnd": 410.5,
+          "transferSize": 1415
+        },
+        {
+          "path": "/assets/workspace-loader.ff089f638295ab27.js",
+          "startTime": 140.60000002384186,
+          "responseStart": 739,
+          "responseEnd": 915.3000000715256,
+          "transferSize": 3955
+        },
+        {
+          "path": "/assets/dashboard-base.74cc41e0347efcf3.css",
+          "startTime": 141.30000007152557,
+          "responseStart": 151.20000004768372,
+          "responseEnd": 734.2000000476837,
+          "transferSize": 14972
+        },
+        {
+          "path": "/assets/experience-enhancements.5e73551578eca805.css",
+          "startTime": 142.10000002384186,
+          "responseStart": 151.40000009536743,
+          "responseEnd": 395.60000002384186,
+          "transferSize": 2306
+        },
+        {
+          "path": "/assets/dashboard-startup-bootstrap.dab3b2fed28a9e02.js",
+          "startTime": 538.5,
+          "responseStart": 749.5,
+          "responseEnd": 870.5,
+          "transferSize": 1184
+        },
+        {
+          "path": "/assets/workspace-charts.4a69ad0d5e4ca81e.js",
+          "startTime": 1403.4000000953674,
+          "responseStart": 1414.7000000476837,
+          "responseEnd": 2510.5,
+          "transferSize": 60429
+        },
+        {
+          "path": "/api/stock/kline",
+          "startTime": 1404.2000000476837,
+          "responseStart": 2100.8000000715256,
+          "responseEnd": 2418,
+          "transferSize": 9155
+        },
+        {
+          "path": "/api/workspace/navigation",
+          "startTime": 1531.7000000476837,
+          "responseStart": 1535,
+          "responseEnd": 1663.6000000238419,
+          "transferSize": 1570
+        },
+        {
+          "path": "/api/watchlist",
+          "startTime": 1884.7000000476837,
+          "responseStart": 1886.8000000715256,
+          "responseEnd": 1985,
+          "transferSize": 395
+        },
+        {
+          "path": "/api/paper/positions",
+          "startTime": 1886.3000000715256,
+          "responseStart": 1888,
+          "responseEnd": 2000.9000000953674,
+          "transferSize": 377
+        },
+        {
+          "path": "/assets/dashboard-startup-inline-1.80185250dcd58b75.js",
+          "startTime": 1891.3000000715256,
+          "responseStart": 1893.3000000715256,
+          "responseEnd": 2024.4000000953674,
+          "transferSize": 1237
+        },
+        {
+          "path": "/assets/dashboard-startup-inline-2.5f9e1d4c96ac3a14.js",
+          "startTime": 1892.3000000715256,
+          "responseStart": 1894.6000000238419,
+          "responseEnd": 2078.100000023842,
+          "transferSize": 2248
+        },
+        {
+          "path": "/assets/dashboard-startup-experience-enhancements.107e07cbf2626094.js",
+          "startTime": 2087,
+          "responseStart": 2092.600000023842,
+          "responseEnd": 2526.5,
+          "transferSize": 11852
+        },
+        {
+          "path": "/assets/dashboard-startup-practical-experience.9385fb13bd245e2e.js",
+          "startTime": 2088.2000000476837,
+          "responseStart": 2092.9000000953674,
+          "responseEnd": 2340.600000023842,
+          "transferSize": 4306
+        },
+        {
+          "path": "/api/events/entities",
+          "startTime": 2590.4000000953674,
+          "responseStart": 2596.4000000953674,
+          "responseEnd": 2734.2000000476837,
+          "transferSize": 5615
+        }
+      ],
+      "phaseMarks": [
+        {
+          "name": "moneymoney:auth-ready",
+          "atMs": 1402.6
+        },
+        {
+          "name": "moneymoney:chart-preload-start",
+          "atMs": 1403.1
+        },
+        {
+          "name": "moneymoney:stock-kline-prefetch-start",
+          "atMs": 1403.8
+        },
+        {
+          "name": "moneymoney:dashboard-start",
+          "atMs": 1502
+        },
+        {
+          "name": "moneymoney:dashboard-auth-ready",
+          "atMs": 1502.9
+        },
+        {
+          "name": "moneymoney:theme-start",
+          "atMs": 1502.9
+        },
+        {
+          "name": "moneymoney:theme-end",
+          "atMs": 1504.2
+        },
+        {
+          "name": "moneymoney:navigation-start",
+          "atMs": 1508
+        },
+        {
+          "name": "moneymoney:navigation-end",
+          "atMs": 1554.6
+        },
+        {
+          "name": "moneymoney:collapses-start",
+          "atMs": 1555
+        },
+        {
+          "name": "moneymoney:collapses-end",
+          "atMs": 1557.3
+        },
+        {
+          "name": "moneymoney:workspace-restore-start",
+          "atMs": 1557.5
+        },
+        {
+          "name": "moneymoney:workspace-restore-end",
+          "atMs": 1575.6
+        },
+        {
+          "name": "moneymoney:dashboard-context-ready",
+          "atMs": 1577.6
+        },
+        {
+          "name": "moneymoney:history-install-start",
+          "atMs": 1579.3
+        },
+        {
+          "name": "moneymoney:history-install-end",
+          "atMs": 1881.7
+        },
+        {
+          "name": "moneymoney:dashboard-core-ready",
+          "atMs": 1887
+        },
+        {
+          "name": "moneymoney:chart-module-start",
+          "atMs": 1892.9
+        },
+        {
+          "name": "moneymoney:chart-preload-ready",
+          "atMs": 2520.4
+        },
+        {
+          "name": "moneymoney:chart-module-ready",
+          "atMs": 2533.2
+        },
+        {
+          "name": "moneymoney:stock-kline-request-start",
+          "atMs": 2617.6
+        },
+        {
+          "name": "moneymoney:stock-kline-response-parsed",
+          "atMs": 2618.2
+        },
+        {
+          "name": "moneymoney:stock-kline-first-render",
+          "atMs": 3648.1
+        }
+      ],
+      "longTaskSupported": true,
+      "longTasks": [
+        {
+          "startTime": 758.3000000715256,
+          "duration": 394
+        },
+        {
+          "startTime": 1171.2000000476837,
+          "duration": 65
+        },
+        {
+          "startTime": 1491.6000000238419,
+          "duration": 402
+        },
+        {
+          "startTime": 2520.5,
+          "duration": 1129
+        },
+        {
+          "startTime": 3695.8000000715256,
+          "duration": 385
+        },
+        {
+          "startTime": 4154.400000095367,
+          "duration": 76
+        },
+        {
+          "startTime": 4268.800000071526,
+          "duration": 180
+        }
+      ],
+      "loadingPhases": {
+        "version": 1,
+        "additive": false,
+        "note": "阶段可能重叠；脚本下载跨度不是执行耗时。缺失计时为null，不按零处理。",
+        "phases": {
+          "authentication": {
+            "startMs": 136.30000007152557,
+            "endMs": 244.40000009536743,
+            "durationMs": 108.10000002384186
+          },
+          "coreInitialization": {
+            "startMs": 1502,
+            "endMs": 1887,
+            "durationMs": 385
+          },
+          "quoteWait": {
+            "startMs": 1404.2000000476837,
+            "endMs": 2418,
+            "durationMs": 1013.7999999523163
+          },
+          "quoteToRender": {
+            "startMs": 2418,
+            "endMs": 3648.1,
+            "durationMs": 1230.1
+          },
+          "renderToSettled": {
+            "startMs": 3648.1,
+            "endMs": 4108.5,
+            "durationMs": 460.4000000000001
+          },
+          "theme": {
+            "startMs": 1502.9,
+            "endMs": 1504.2,
+            "durationMs": 1.2999999999999545
+          },
+          "navigation": {
+            "startMs": 1508,
+            "endMs": 1554.6,
+            "durationMs": 46.59999999999991
+          },
+          "collapses": {
+            "startMs": 1555,
+            "endMs": 1557.3,
+            "durationMs": 2.2999999999999545
+          },
+          "workspaceRestore": {
+            "startMs": 1557.5,
+            "endMs": 1575.6,
+            "durationMs": 18.09999999999991
+          },
+          "historyInstall": {
+            "startMs": 1579.3,
+            "endMs": 1881.7,
+            "durationMs": 302.4000000000001
+          }
+        },
+        "scriptDownloads": {
+          "startMs": 138.80000007152557,
+          "endMs": 2526.5,
+          "durationMs": 2387.6999999284744,
+          "requests": 9,
+          "transferBytes": 125364
+        },
+        "scriptExecutionMs": null,
+        "layoutMs": null,
+        "longTasks": {
+          "count": 7,
+          "totalDurationMs": 2631,
+          "totalBlockingMs": 2281,
+          "largestMs": 1129,
+          "boundedAt": 500
+        }
+      },
+      "chartBundleResources": [
+        {
+          "startTime": 1403.4000000953674,
+          "responseEnd": 2510.5,
+          "duration": 1107.0999999046326,
+          "transferSize": 60429
+        }
+      ],
+      "klineResponseMetadata": [
+        {
+          "status": 200,
+          "dataStatus": "live",
+          "source": "yahoo-finance-history",
+          "reason": null,
+          "updatedAt": "2026-10-26T12:03:03.804Z",
+          "recordCount": 300
+        }
+      ],
+      "auxiliaryPendingAtChart": [
+        {
+          "pathname": "/api/stock/indices",
+          "requestStarted": false,
+          "responsePending": false
+        },
+        {
+          "pathname": "/api/watchlist",
+          "requestStarted": true,
+          "responsePending": false
+        },
+        {
+          "pathname": "/api/paper/positions",
+          "requestStarted": true,
+          "responsePending": false
+        }
+      ],
+      "apiRequestDetails": [
+        {
+          "pathname": "/api/auth/status",
+          "method": "GET",
+          "url": "/api/auth/status"
+        },
+        {
+          "pathname": "/api/stock/kline",
+          "method": "GET",
+          "url": "/api/stock/kline?symbol=usAAPL&period=1d&interval=1d&adjustment=source&chartWindow=1"
+        },
+        {
+          "pathname": "/api/workspace/navigation",
+          "method": "GET",
+          "url": "/api/workspace/navigation?scope=stocks"
+        },
+        {
+          "pathname": "/api/watchlist",
+          "method": "GET",
+          "url": "/api/watchlist"
+        },
+        {
+          "pathname": "/api/paper/positions",
+          "method": "GET",
+          "url": "/api/paper/positions?scope=stocks"
+        },
+        {
+          "pathname": "/api/events/entities",
+          "method": "GET",
+          "url": "/api/events/entities?market=stocks&instrument=stock%3Aus%3AAAPL"
+        }
+      ],
+      "assetResponses": [
+        {
+          "path": "/assets/dashboard-base.74cc41e0347efcf3.css",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/experience-enhancements.5e73551578eca805.css",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/auth-client.b8f1a72cc1cf25d0.js",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/dashboard-startup-bootstrap.dab3b2fed28a9e02.js",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/workspace-loader.ff089f638295ab27.js",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/dashboard-startup-runtime.c07d8bfe646cec72.js",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/dashboard-startup-inline-1.80185250dcd58b75.js",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/dashboard-startup-inline-2.5f9e1d4c96ac3a14.js",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/dashboard-startup-practical-experience.9385fb13bd245e2e.js",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/workspace-charts.4a69ad0d5e4ca81e.js",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/dashboard-startup-experience-enhancements.107e07cbf2626094.js",
+          "encoding": "br"
+        }
+      ],
+      "apiTimings": [
+        {
+          "pathname": "/api/auth/status",
+          "status": 200,
+          "durationMs": 101
+        },
+        {
+          "pathname": "/api/workspace/navigation",
+          "status": 200,
+          "durationMs": 34
+        },
+        {
+          "pathname": "/api/watchlist",
+          "status": 200,
+          "durationMs": 94
+        },
+        {
+          "pathname": "/api/paper/positions",
+          "status": 200,
+          "durationMs": 110
+        },
+        {
+          "pathname": "/api/stock/kline",
+          "status": 200,
+          "durationMs": 1018
+        },
+        {
+          "pathname": "/api/events/entities",
+          "status": 200,
+          "durationMs": 549
+        }
+      ],
+      "apiRequests": [
+        "/api/auth/status",
+        "/api/stock/kline",
+        "/api/workspace/navigation",
+        "/api/watchlist",
+        "/api/paper/positions",
+        "/api/events/entities"
+      ],
+      "apiRequestCounts": {
+        "/api/auth/status": 1,
+        "/api/stock/kline": 1,
+        "/api/workspace/navigation": 1,
+        "/api/watchlist": 1,
+        "/api/paper/positions": 1,
+        "/api/events/entities": 1
+      },
+      "prefetchStartedBeforeCore": true
+    },
+    {
+      "viewport": 390,
+      "run": 0,
+      "temperature": "warm",
+      "shellReadyMs": 619,
+      "paintedShellReadyMs": 986.8000000715256,
+      "chartReadyMs": 1001.6000000238419,
+      "chartState": "ready",
+      "chartMessage": "Apple · usAAPL\n▤ 双图\n⛶ 全屏\n周期\n1分\n5分\n15分\n1小时\n1日\n3日\n5日\n60日\n120日\n1年\n5年\n缓存数据 · K线时间 2026-10-23 · yahoo-finance-history · 抓取 2026/10/26 20:03 · 上次源站耗时 684ms · cache · 显示受限范围内的缓存快照；来源时间单独标示 AAPL · 1d · 普通行情 · K线：缓存 · 300 根 · 显示受限范围内的缓存快照；来源时间单独标示\n历史时点 / 日期定位 / 日内下钻\n图层与策略 · 保留当前选择\n事件时间轴\n刷新\npartial · events ok · news ok · filings unavailable · secForm4 partial · sec13f unavailable\nWarren Buffett said 'nobody gets paid' to give this easy investing advice — how it’s still helping your portfolio today\nnews ·",
+      "bytes": 17821,
+      "jsBytes": 0,
+      "jsResources": [
+        {
+          "path": "/assets/dashboard-startup-runtime.c07d8bfe646cec72.js",
+          "startTime": 151,
+          "duration": 0,
+          "transferSize": 0
+        },
+        {
+          "path": "/assets/auth-client.b8f1a72cc1cf25d0.js",
+          "startTime": 153.10000002384186,
+          "duration": 0,
+          "transferSize": 0
+        },
+        {
+          "path": "/assets/workspace-loader.ff089f638295ab27.js",
+          "startTime": 154.70000004768372,
+          "duration": 0,
+          "transferSize": 0
+        },
+        {
+          "path": "/assets/dashboard-startup-bootstrap.dab3b2fed28a9e02.js",
+          "startTime": 158.20000004768372,
+          "duration": 0,
+          "transferSize": 0
+        },
+        {
+          "path": "/assets/workspace-charts.4a69ad0d5e4ca81e.js",
+          "startTime": 362.8000000715256,
+          "duration": 0,
+          "transferSize": 0
+        },
+        {
+          "path": "/assets/dashboard-startup-inline-1.80185250dcd58b75.js",
+          "startTime": 524.6000000238419,
+          "duration": 0,
+          "transferSize": 0
+        },
+        {
+          "path": "/assets/dashboard-startup-inline-2.5f9e1d4c96ac3a14.js",
+          "startTime": 526,
+          "duration": 0,
+          "transferSize": 0
+        }
+      ],
+      "dashboardStartupCompatibility": {
+        "resourceCount": 2,
+        "transferBytes": 0,
+        "requestStartSpreadMs": 1.399999976158142,
+        "downloadSpanMs": 1.399999976158142
+      },
+      "domContentLoadedMs": 399.90000009536743,
+      "navigationTiming": {
+        "responseStart": 2.8000000715255737,
+        "responseEnd": 102.60000002384186,
+        "domInteractive": 396.5,
+        "domContentLoadedEventEnd": 399.90000009536743
+      },
+      "startupResources": [
+        {
+          "path": "/api/auth/status",
+          "startTime": 148.70000004768372,
+          "responseStart": 151.10000002384186,
+          "responseEnd": 257.90000009536743,
+          "transferSize": 572
+        },
+        {
+          "path": "/assets/dashboard-startup-runtime.c07d8bfe646cec72.js",
+          "startTime": 151,
+          "responseStart": 151,
+          "responseEnd": 151,
+          "transferSize": 0
+        },
+        {
+          "path": "/assets/auth-client.b8f1a72cc1cf25d0.js",
+          "startTime": 153.10000002384186,
+          "responseStart": 153.10000002384186,
+          "responseEnd": 153.10000002384186,
+          "transferSize": 0
+        },
+        {
+          "path": "/assets/workspace-loader.ff089f638295ab27.js",
+          "startTime": 154.70000004768372,
+          "responseStart": 154.70000004768372,
+          "responseEnd": 154.70000004768372,
+          "transferSize": 0
+        },
+        {
+          "path": "/assets/dashboard-base.74cc41e0347efcf3.css",
+          "startTime": 155.5,
+          "responseStart": 155.5,
+          "responseEnd": 155.5,
+          "transferSize": 0
+        },
+        {
+          "path": "/assets/experience-enhancements.5e73551578eca805.css",
+          "startTime": 157.40000009536743,
+          "responseStart": 157.40000009536743,
+          "responseEnd": 157.40000009536743,
+          "transferSize": 0
+        },
+        {
+          "path": "/assets/dashboard-startup-bootstrap.dab3b2fed28a9e02.js",
+          "startTime": 158.20000004768372,
+          "responseStart": 158.20000004768372,
+          "responseEnd": 158.20000004768372,
+          "transferSize": 0
+        },
+        {
+          "path": "/assets/workspace-charts.4a69ad0d5e4ca81e.js",
+          "startTime": 362.8000000715256,
+          "responseStart": 362.8000000715256,
+          "responseEnd": 362.8000000715256,
+          "transferSize": 0
+        },
+        {
+          "path": "/api/stock/kline",
+          "startTime": 365.8000000715256,
+          "responseStart": 370,
+          "responseEnd": 595.4000000953674,
+          "transferSize": 9291
+        },
+        {
+          "path": "/api/workspace/navigation",
+          "startTime": 443,
+          "responseStart": 445.7000000476837,
+          "responseEnd": 580.1000000238419,
+          "transferSize": 1572
+        },
+        {
+          "path": "/api/watchlist",
+          "startTime": 505.10000002384186,
+          "responseStart": 507.90000009536743,
+          "responseEnd": 610.8000000715256,
+          "transferSize": 395
+        },
+        {
+          "path": "/api/paper/positions",
+          "startTime": 507.2000000476837,
+          "responseStart": 509.40000009536743,
+          "responseEnd": 626,
+          "transferSize": 377
+        },
+        {
+          "path": "/assets/dashboard-startup-inline-1.80185250dcd58b75.js",
+          "startTime": 524.6000000238419,
+          "responseStart": 524.6000000238419,
+          "responseEnd": 524.6000000238419,
+          "transferSize": 0
+        },
+        {
+          "path": "/assets/dashboard-startup-inline-2.5f9e1d4c96ac3a14.js",
+          "startTime": 526,
+          "responseStart": 526,
+          "responseEnd": 526,
+          "transferSize": 0
+        },
+        {
+          "path": "/api/events/entities",
+          "startTime": 605.4000000953674,
+          "responseStart": 611.7000000476837,
+          "responseEnd": 778.7000000476837,
+          "transferSize": 5614
+        }
+      ],
+      "phaseMarks": [
+        {
+          "name": "moneymoney:auth-ready",
+          "atMs": 359.9
+        },
+        {
+          "name": "moneymoney:chart-preload-start",
+          "atMs": 360.8
+        },
+        {
+          "name": "moneymoney:stock-kline-prefetch-start",
+          "atMs": 363.7
+        },
+        {
+          "name": "moneymoney:chart-preload-ready",
+          "atMs": 383.4
+        },
+        {
+          "name": "moneymoney:dashboard-start",
+          "atMs": 433.3
+        },
+        {
+          "name": "moneymoney:dashboard-auth-ready",
+          "atMs": 433.6
+        },
+        {
+          "name": "moneymoney:theme-start",
+          "atMs": 433.6
+        },
+        {
+          "name": "moneymoney:theme-end",
+          "atMs": 433.9
+        },
+        {
+          "name": "moneymoney:navigation-start",
+          "atMs": 435.4
+        },
+        {
+          "name": "moneymoney:navigation-end",
+          "atMs": 453.3
+        },
+        {
+          "name": "moneymoney:collapses-start",
+          "atMs": 453.5
+        },
+        {
+          "name": "moneymoney:collapses-end",
+          "atMs": 454.4
+        },
+        {
+          "name": "moneymoney:workspace-restore-start",
+          "atMs": 454.6
+        },
+        {
+          "name": "moneymoney:workspace-restore-end",
+          "atMs": 464.7
+        },
+        {
+          "name": "moneymoney:dashboard-context-ready",
+          "atMs": 465.5
+        },
+        {
+          "name": "moneymoney:history-install-start",
+          "atMs": 466
+        },
+        {
+          "name": "moneymoney:history-install-end",
+          "atMs": 503.5
+        },
+        {
+          "name": "moneymoney:dashboard-core-ready",
+          "atMs": 521.7
+        },
+        {
+          "name": "moneymoney:chart-module-start",
+          "atMs": 526.5
+        },
+        {
+          "name": "moneymoney:chart-module-ready",
+          "atMs": 569.9
+        },
+        {
+          "name": "moneymoney:stock-kline-request-start",
+          "atMs": 615.5
+        },
+        {
+          "name": "moneymoney:stock-kline-response-parsed",
+          "atMs": 825.5
+        },
+        {
+          "name": "moneymoney:stock-kline-first-render",
+          "atMs": 929.3
+        }
+      ],
+      "longTaskSupported": true,
+      "longTasks": [
+        {
+          "startTime": 429.5,
+          "duration": 97
+        },
+        {
+          "startTime": 548.9000000953674,
+          "duration": 67
+        },
+        {
+          "startTime": 825.3000000715256,
+          "duration": 104
+        }
+      ],
+      "loadingPhases": {
+        "version": 1,
+        "additive": false,
+        "note": "阶段可能重叠；脚本下载跨度不是执行耗时。缺失计时为null，不按零处理。",
+        "phases": {
+          "authentication": {
+            "startMs": 148.70000004768372,
+            "endMs": 257.90000009536743,
+            "durationMs": 109.20000004768372
+          },
+          "coreInitialization": {
+            "startMs": 433.3,
+            "endMs": 521.7,
+            "durationMs": 88.40000000000003
+          },
+          "quoteWait": {
+            "startMs": 365.8000000715256,
+            "endMs": 595.4000000953674,
+            "durationMs": 229.60000002384186
+          },
+          "quoteToRender": {
+            "startMs": 595.4000000953674,
+            "endMs": 929.3,
+            "durationMs": 333.8999999046325
+          },
+          "renderToSettled": {
+            "startMs": 929.3,
+            "endMs": 1001.6000000238419,
+            "durationMs": 72.3000000238419
+          },
+          "theme": {
+            "startMs": 433.6,
+            "endMs": 433.9,
+            "durationMs": 0.2999999999999545
+          },
+          "navigation": {
+            "startMs": 435.4,
+            "endMs": 453.3,
+            "durationMs": 17.900000000000034
+          },
+          "collapses": {
+            "startMs": 453.5,
+            "endMs": 454.4,
+            "durationMs": 0.8999999999999773
+          },
+          "workspaceRestore": {
+            "startMs": 454.6,
+            "endMs": 464.7,
+            "durationMs": 10.099999999999966
+          },
+          "historyInstall": {
+            "startMs": 466,
+            "endMs": 503.5,
+            "durationMs": 37.5
+          }
+        },
+        "scriptDownloads": {
+          "startMs": 151,
+          "endMs": 526,
+          "durationMs": 375,
+          "requests": 7,
+          "transferBytes": 0
+        },
+        "scriptExecutionMs": null,
+        "layoutMs": null,
+        "longTasks": {
+          "count": 3,
+          "totalDurationMs": 268,
+          "totalBlockingMs": 118,
+          "largestMs": 104,
+          "boundedAt": 500
+        }
+      },
+      "chartBundleResources": [
+        {
+          "startTime": 362.8000000715256,
+          "responseEnd": 362.8000000715256,
+          "duration": 0,
+          "transferSize": 0
+        }
+      ],
+      "klineResponseMetadata": [
+        {
+          "status": 200,
+          "dataStatus": "cached",
+          "source": "yahoo-finance-history",
+          "reason": "显示受限范围内的缓存快照；来源时间单独标示",
+          "updatedAt": "2026-10-26T12:03:03.804Z",
+          "recordCount": 300
+        }
+      ],
+      "auxiliaryPendingAtChart": [
+        {
+          "pathname": "/api/stock/indices",
+          "requestStarted": false,
+          "responsePending": false
+        },
+        {
+          "pathname": "/api/watchlist",
+          "requestStarted": true,
+          "responsePending": false
+        },
+        {
+          "pathname": "/api/paper/positions",
+          "requestStarted": true,
+          "responsePending": false
+        }
+      ],
+      "apiRequestDetails": [
+        {
+          "pathname": "/api/auth/status",
+          "method": "GET",
+          "url": "/api/auth/status"
+        },
+        {
+          "pathname": "/api/stock/kline",
+          "method": "GET",
+          "url": "/api/stock/kline?symbol=usAAPL&period=1d&interval=1d&adjustment=source&chartWindow=1"
+        },
+        {
+          "pathname": "/api/workspace/navigation",
+          "method": "GET",
+          "url": "/api/workspace/navigation?scope=stocks"
+        },
+        {
+          "pathname": "/api/watchlist",
+          "method": "GET",
+          "url": "/api/watchlist"
+        },
+        {
+          "pathname": "/api/paper/positions",
+          "method": "GET",
+          "url": "/api/paper/positions?scope=stocks"
+        },
+        {
+          "pathname": "/api/events/entities",
+          "method": "GET",
+          "url": "/api/events/entities?market=stocks&instrument=stock%3Aus%3AAAPL"
+        }
+      ],
+      "assetResponses": [
+        {
+          "path": "/assets/dashboard-startup-runtime.c07d8bfe646cec72.js",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/auth-client.b8f1a72cc1cf25d0.js",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/workspace-loader.ff089f638295ab27.js",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/dashboard-base.74cc41e0347efcf3.css",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/experience-enhancements.5e73551578eca805.css",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/dashboard-startup-bootstrap.dab3b2fed28a9e02.js",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/workspace-charts.4a69ad0d5e4ca81e.js",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/dashboard-startup-inline-1.80185250dcd58b75.js",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/dashboard-startup-inline-2.5f9e1d4c96ac3a14.js",
+          "encoding": "br"
+        }
+      ],
+      "apiTimings": [
+        {
+          "pathname": "/api/auth/status",
+          "status": 200,
+          "durationMs": 169
+        },
+        {
+          "pathname": "/api/stock/kline",
+          "status": 200,
+          "durationMs": 419
+        },
+        {
+          "pathname": "/api/workspace/navigation",
+          "status": 200,
+          "durationMs": 443
+        },
+        {
+          "pathname": "/api/watchlist",
+          "status": 200,
+          "durationMs": 446
+        },
+        {
+          "pathname": "/api/paper/positions",
+          "status": 200,
+          "durationMs": 446
+        },
+        {
+          "pathname": "/api/events/entities",
+          "status": 200,
+          "durationMs": 363
+        }
+      ],
+      "apiRequests": [
+        "/api/auth/status",
+        "/api/stock/kline",
+        "/api/workspace/navigation",
+        "/api/watchlist",
+        "/api/paper/positions",
+        "/api/events/entities"
+      ],
+      "apiRequestCounts": {
+        "/api/auth/status": 1,
+        "/api/stock/kline": 1,
+        "/api/workspace/navigation": 1,
+        "/api/watchlist": 1,
+        "/api/paper/positions": 1,
+        "/api/events/entities": 1
+      },
+      "prefetchStartedBeforeCore": true
+    },
+    {
+      "viewport": 390,
+      "run": 1,
+      "temperature": "cold",
+      "shellReadyMs": 2155.100000023842,
+      "paintedShellReadyMs": 2191.7000000476837,
+      "chartReadyMs": 4284.5,
+      "chartState": "ready",
+      "chartMessage": "Apple · usAAPL\n▤ 双图\n⛶ 全屏\n周期\n1分\n5分\n15分\n1小时\n1日\n3日\n5日\n60日\n120日\n1年\n5年\n缓存数据 · K线时间 2026-10-23 · yahoo-finance-history · 抓取 2026/10/26 20:03 · 上次源站耗时 684ms · cache · 显示受限范围内的缓存快照；来源时间单独标示 AAPL · 1d · 普通行情 · K线：缓存 · 300 根 · 显示受限范围内的缓存快照；来源时间单独标示\n历史时点 / 日期定位 / 日内下钻\n图层与策略 · 保留当前选择\n事件时间轴\n刷新\npartial · events ok · news ok · filings unavailable · secForm4 partial · sec13f unavailable\nWarren Buffett said 'nobody gets paid' to give this easy investing advice — how it’s still helping your portfolio today\nnews ·",
+      "bytes": 160459,
+      "jsBytes": 125364,
+      "jsResources": [
+        {
+          "path": "/assets/dashboard-startup-runtime.c07d8bfe646cec72.js",
+          "startTime": 137.20000004768372,
+          "duration": 884.3999999761581,
+          "transferSize": 38738
+        },
+        {
+          "path": "/assets/auth-client.b8f1a72cc1cf25d0.js",
+          "startTime": 138.60000002384186,
+          "duration": 251.10000002384186,
+          "transferSize": 1415
+        },
+        {
+          "path": "/assets/workspace-loader.ff089f638295ab27.js",
+          "startTime": 139.5,
+          "duration": 760.5,
+          "transferSize": 3955
+        },
+        {
+          "path": "/assets/dashboard-startup-bootstrap.dab3b2fed28a9e02.js",
+          "startTime": 499.8000000715256,
+          "duration": 354.39999997615814,
+          "transferSize": 1184
+        },
+        {
+          "path": "/assets/workspace-charts.4a69ad0d5e4ca81e.js",
+          "startTime": 1498.8000000715256,
+          "duration": 1059.2999999523163,
+          "transferSize": 60429
+        },
+        {
+          "path": "/assets/dashboard-startup-inline-1.80185250dcd58b75.js",
+          "startTime": 2111.100000023842,
+          "duration": 139.70000004768372,
+          "transferSize": 1237
+        },
+        {
+          "path": "/assets/dashboard-startup-inline-2.5f9e1d4c96ac3a14.js",
+          "startTime": 2113.100000023842,
+          "duration": 182.60000002384186,
+          "transferSize": 2248
+        },
+        {
+          "path": "/assets/dashboard-startup-experience-enhancements.107e07cbf2626094.js",
+          "startTime": 2305.5,
+          "duration": 314.10000002384186,
+          "transferSize": 11852
+        },
+        {
+          "path": "/assets/dashboard-startup-practical-experience.9385fb13bd245e2e.js",
+          "startTime": 2306.7000000476837,
+          "duration": 204.79999995231628,
+          "transferSize": 4306
+        }
+      ],
+      "dashboardStartupCompatibility": {
+        "resourceCount": 4,
+        "transferBytes": 19643,
+        "requestStartSpreadMs": 195.60000002384186,
+        "downloadSpanMs": 508.5
+      },
+      "domContentLoadedMs": 1621.2000000476837,
+      "navigationTiming": {
+        "responseStart": 4.100000023841858,
+        "responseEnd": 497.60000002384186,
+        "domInteractive": 1612.7000000476837,
+        "domContentLoadedEventEnd": 1621.2000000476837
+      },
+      "startupResources": [
+        {
+          "path": "/api/auth/status",
+          "startTime": 134.60000002384186,
+          "responseStart": 144.40000009536743,
+          "responseEnd": 237.5,
+          "transferSize": 572
+        },
+        {
+          "path": "/assets/dashboard-startup-runtime.c07d8bfe646cec72.js",
+          "startTime": 137.20000004768372,
+          "responseStart": 147,
+          "responseEnd": 1021.6000000238419,
+          "transferSize": 38738
+        },
+        {
+          "path": "/assets/auth-client.b8f1a72cc1cf25d0.js",
+          "startTime": 138.60000002384186,
+          "responseStart": 150.60000002384186,
+          "responseEnd": 389.7000000476837,
+          "transferSize": 1415
+        },
+        {
+          "path": "/assets/workspace-loader.ff089f638295ab27.js",
+          "startTime": 139.5,
+          "responseStart": 720.1000000238419,
+          "responseEnd": 900,
+          "transferSize": 3955
+        },
+        {
+          "path": "/assets/dashboard-base.74cc41e0347efcf3.css",
+          "startTime": 140.5,
+          "responseStart": 150.10000002384186,
+          "responseEnd": 715.8000000715256,
+          "transferSize": 14972
+        },
+        {
+          "path": "/assets/experience-enhancements.5e73551578eca805.css",
+          "startTime": 141.80000007152557,
+          "responseStart": 150.40000009536743,
+          "responseEnd": 375,
+          "transferSize": 2306
+        },
+        {
+          "path": "/assets/dashboard-startup-bootstrap.dab3b2fed28a9e02.js",
+          "startTime": 499.8000000715256,
+          "responseStart": 734.2000000476837,
+          "responseEnd": 854.2000000476837,
+          "transferSize": 1184
+        },
+        {
+          "path": "/assets/workspace-charts.4a69ad0d5e4ca81e.js",
+          "startTime": 1498.8000000715256,
+          "responseStart": 1501.5,
+          "responseEnd": 2558.100000023842,
+          "transferSize": 60429
+        },
+        {
+          "path": "/api/stock/kline",
+          "startTime": 1506,
+          "responseStart": 1511.3000000715256,
+          "responseEnd": 1819.9000000953674,
+          "transferSize": 9289
+        },
+        {
+          "path": "/api/workspace/navigation",
+          "startTime": 1696.3000000715256,
+          "responseStart": 1699.2000000476837,
+          "responseEnd": 1867.2000000476837,
+          "transferSize": 1570
+        },
+        {
+          "path": "/api/watchlist",
+          "startTime": 2102.600000023842,
+          "responseStart": 2104.7000000476837,
+          "responseEnd": 2204,
+          "transferSize": 395
+        },
+        {
+          "path": "/api/paper/positions",
+          "startTime": 2104,
+          "responseStart": 2105.9000000953674,
+          "responseEnd": 2219.8000000715256,
+          "transferSize": 377
+        },
+        {
+          "path": "/assets/dashboard-startup-inline-1.80185250dcd58b75.js",
+          "startTime": 2111.100000023842,
+          "responseStart": 2114.100000023842,
+          "responseEnd": 2250.8000000715256,
+          "transferSize": 1237
+        },
+        {
+          "path": "/assets/dashboard-startup-inline-2.5f9e1d4c96ac3a14.js",
+          "startTime": 2113.100000023842,
+          "responseStart": 2115.5,
+          "responseEnd": 2295.7000000476837,
+          "transferSize": 2248
+        },
+        {
+          "path": "/assets/dashboard-startup-experience-enhancements.107e07cbf2626094.js",
+          "startTime": 2305.5,
+          "responseStart": 2308.4000000953674,
+          "responseEnd": 2619.600000023842,
+          "transferSize": 11852
+        },
+        {
+          "path": "/assets/dashboard-startup-practical-experience.9385fb13bd245e2e.js",
+          "startTime": 2306.7000000476837,
+          "responseStart": 2308.600000023842,
+          "responseEnd": 2511.5,
+          "transferSize": 4306
+        },
+        {
+          "path": "/api/events/entities",
+          "startTime": 2659.100000023842,
+          "responseStart": 2673.3000000715256,
+          "responseEnd": 2804.3000000715256,
+          "transferSize": 5614
+        }
+      ],
+      "phaseMarks": [
+        {
+          "name": "moneymoney:auth-ready",
+          "atMs": 1491.9
+        },
+        {
+          "name": "moneymoney:chart-preload-start",
+          "atMs": 1494.4
+        },
+        {
+          "name": "moneymoney:stock-kline-prefetch-start",
+          "atMs": 1502.5
+        },
+        {
+          "name": "moneymoney:dashboard-start",
+          "atMs": 1663.3
+        },
+        {
+          "name": "moneymoney:dashboard-auth-ready",
+          "atMs": 1664.5
+        },
+        {
+          "name": "moneymoney:theme-start",
+          "atMs": 1664.7
+        },
+        {
+          "name": "moneymoney:theme-end",
+          "atMs": 1667.1
+        },
+        {
+          "name": "moneymoney:navigation-start",
+          "atMs": 1672.6
+        },
+        {
+          "name": "moneymoney:navigation-end",
+          "atMs": 1718.2
+        },
+        {
+          "name": "moneymoney:collapses-start",
+          "atMs": 1718.5
+        },
+        {
+          "name": "moneymoney:collapses-end",
+          "atMs": 1719.9
+        },
+        {
+          "name": "moneymoney:workspace-restore-start",
+          "atMs": 1720
+        },
+        {
+          "name": "moneymoney:workspace-restore-end",
+          "atMs": 1738.5
+        },
+        {
+          "name": "moneymoney:dashboard-context-ready",
+          "atMs": 1742
+        },
+        {
+          "name": "moneymoney:history-install-start",
+          "atMs": 1744.4
+        },
+        {
+          "name": "moneymoney:history-install-end",
+          "atMs": 2099.9
+        },
+        {
+          "name": "moneymoney:dashboard-core-ready",
+          "atMs": 2105.4
+        },
+        {
+          "name": "moneymoney:chart-module-start",
+          "atMs": 2114.6
+        },
+        {
+          "name": "moneymoney:chart-preload-ready",
+          "atMs": 2565.4
+        },
+        {
+          "name": "moneymoney:chart-module-ready",
+          "atMs": 2589.2
+        },
+        {
+          "name": "moneymoney:stock-kline-request-start",
+          "atMs": 2672.5
+        },
+        {
+          "name": "moneymoney:stock-kline-response-parsed",
+          "atMs": 2673.4
+        },
+        {
+          "name": "moneymoney:stock-kline-first-render",
+          "atMs": 3781.8
+        }
+      ],
+      "longTaskSupported": true,
+      "longTasks": [
+        {
+          "startTime": 740.8000000715256,
+          "duration": 408
+        },
+        {
+          "startTime": 1651.5,
+          "duration": 464
+        },
+        {
+          "startTime": 2565.4000000953674,
+          "duration": 1218
+        },
+        {
+          "startTime": 3830.3000000715256,
+          "duration": 422
+        },
+        {
+          "startTime": 4327.200000047684,
+          "duration": 80
+        },
+        {
+          "startTime": 4450,
+          "duration": 201
+        }
+      ],
+      "loadingPhases": {
+        "version": 1,
+        "additive": false,
+        "note": "阶段可能重叠；脚本下载跨度不是执行耗时。缺失计时为null，不按零处理。",
+        "phases": {
+          "authentication": {
+            "startMs": 134.60000002384186,
+            "endMs": 237.5,
+            "durationMs": 102.89999997615814
+          },
+          "coreInitialization": {
+            "startMs": 1663.3,
+            "endMs": 2105.4,
+            "durationMs": 442.10000000000014
+          },
+          "quoteWait": {
+            "startMs": 1506,
+            "endMs": 1819.9000000953674,
+            "durationMs": 313.90000009536743
+          },
+          "quoteToRender": {
+            "startMs": 1819.9000000953674,
+            "endMs": 3781.8,
+            "durationMs": 1961.8999999046328
+          },
+          "renderToSettled": {
+            "startMs": 3781.8,
+            "endMs": 4284.5,
+            "durationMs": 502.6999999999998
+          },
+          "theme": {
+            "startMs": 1664.7,
+            "endMs": 1667.1,
+            "durationMs": 2.3999999999998636
+          },
+          "navigation": {
+            "startMs": 1672.6,
+            "endMs": 1718.2,
+            "durationMs": 45.600000000000136
+          },
+          "collapses": {
+            "startMs": 1718.5,
+            "endMs": 1719.9,
+            "durationMs": 1.400000000000091
+          },
+          "workspaceRestore": {
+            "startMs": 1720,
+            "endMs": 1738.5,
+            "durationMs": 18.5
+          },
+          "historyInstall": {
+            "startMs": 1744.4,
+            "endMs": 2099.9,
+            "durationMs": 355.5
+          }
+        },
+        "scriptDownloads": {
+          "startMs": 137.20000004768372,
+          "endMs": 2619.600000023842,
+          "durationMs": 2482.399999976158,
+          "requests": 9,
+          "transferBytes": 125364
+        },
+        "scriptExecutionMs": null,
+        "layoutMs": null,
+        "longTasks": {
+          "count": 6,
+          "totalDurationMs": 2793,
+          "totalBlockingMs": 2493,
+          "largestMs": 1218,
+          "boundedAt": 500
+        }
+      },
+      "chartBundleResources": [
+        {
+          "startTime": 1498.8000000715256,
+          "responseEnd": 2558.100000023842,
+          "duration": 1059.2999999523163,
+          "transferSize": 60429
+        }
+      ],
+      "klineResponseMetadata": [
+        {
+          "status": 200,
+          "dataStatus": "cached",
+          "source": "yahoo-finance-history",
+          "reason": "显示受限范围内的缓存快照；来源时间单独标示",
+          "updatedAt": "2026-10-26T12:03:03.804Z",
+          "recordCount": 300
+        }
+      ],
+      "auxiliaryPendingAtChart": [
+        {
+          "pathname": "/api/stock/indices",
+          "requestStarted": false,
+          "responsePending": false
+        },
+        {
+          "pathname": "/api/watchlist",
+          "requestStarted": true,
+          "responsePending": false
+        },
+        {
+          "pathname": "/api/paper/positions",
+          "requestStarted": true,
+          "responsePending": false
+        }
+      ],
+      "apiRequestDetails": [
+        {
+          "pathname": "/api/auth/status",
+          "method": "GET",
+          "url": "/api/auth/status"
+        },
+        {
+          "pathname": "/api/stock/kline",
+          "method": "GET",
+          "url": "/api/stock/kline?symbol=usAAPL&period=1d&interval=1d&adjustment=source&chartWindow=1"
+        },
+        {
+          "pathname": "/api/workspace/navigation",
+          "method": "GET",
+          "url": "/api/workspace/navigation?scope=stocks"
+        },
+        {
+          "pathname": "/api/watchlist",
+          "method": "GET",
+          "url": "/api/watchlist"
+        },
+        {
+          "pathname": "/api/paper/positions",
+          "method": "GET",
+          "url": "/api/paper/positions?scope=stocks"
+        },
+        {
+          "pathname": "/api/events/entities",
+          "method": "GET",
+          "url": "/api/events/entities?market=stocks&instrument=stock%3Aus%3AAAPL"
+        }
+      ],
+      "assetResponses": [
+        {
+          "path": "/assets/dashboard-base.74cc41e0347efcf3.css",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/experience-enhancements.5e73551578eca805.css",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/auth-client.b8f1a72cc1cf25d0.js",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/dashboard-startup-bootstrap.dab3b2fed28a9e02.js",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/workspace-loader.ff089f638295ab27.js",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/dashboard-startup-runtime.c07d8bfe646cec72.js",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/dashboard-startup-inline-1.80185250dcd58b75.js",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/dashboard-startup-inline-2.5f9e1d4c96ac3a14.js",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/dashboard-startup-practical-experience.9385fb13bd245e2e.js",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/workspace-charts.4a69ad0d5e4ca81e.js",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/dashboard-startup-experience-enhancements.107e07cbf2626094.js",
+          "encoding": "br"
+        }
+      ],
+      "apiTimings": [
+        {
+          "pathname": "/api/auth/status",
+          "status": 200,
+          "durationMs": 105
+        },
+        {
+          "pathname": "/api/stock/kline",
+          "status": 200,
+          "durationMs": 657
+        },
+        {
+          "pathname": "/api/workspace/navigation",
+          "status": 200,
+          "durationMs": 53
+        },
+        {
+          "pathname": "/api/watchlist",
+          "status": 200,
+          "durationMs": 91
+        },
+        {
+          "pathname": "/api/paper/positions",
+          "status": 200,
+          "durationMs": 109
+        },
+        {
+          "pathname": "/api/events/entities",
+          "status": 200,
+          "durationMs": 585
+        }
+      ],
+      "apiRequests": [
+        "/api/auth/status",
+        "/api/stock/kline",
+        "/api/workspace/navigation",
+        "/api/watchlist",
+        "/api/paper/positions",
+        "/api/events/entities"
+      ],
+      "apiRequestCounts": {
+        "/api/auth/status": 1,
+        "/api/stock/kline": 1,
+        "/api/workspace/navigation": 1,
+        "/api/watchlist": 1,
+        "/api/paper/positions": 1,
+        "/api/events/entities": 1
+      },
+      "prefetchStartedBeforeCore": true
+    },
+    {
+      "viewport": 390,
+      "run": 1,
+      "temperature": "warm",
+      "shellReadyMs": 914.7999999523163,
+      "paintedShellReadyMs": 1217.7999999523163,
+      "chartReadyMs": 1284.2999999523163,
+      "chartState": "ready",
+      "chartMessage": "Apple · usAAPL\n▤ 双图\n⛶ 全屏\n周期\n1分\n5分\n15分\n1小时\n1日\n3日\n5日\n60日\n120日\n1年\n5年\n缓存数据 · K线时间 2026-10-23 · yahoo-finance-history · 抓取 2026/10/26 20:03 · 上次源站耗时 684ms · cache · 显示受限范围内的缓存快照；来源时间单独标示 AAPL · 1d · 普通行情 · K线：缓存 · 300 根 · 显示受限范围内的缓存快照；来源时间单独标示\n历史时点 / 日期定位 / 日内下钻\n图层与策略 · 保留当前选择\n事件时间轴\n刷新\npartial · events ok · news ok · filings unavailable · secForm4 partial · sec13f unavailable\nWarren Buffett said 'nobody gets paid' to give this easy investing advice — how it’s still helping your portfolio today\nnews ·",
+      "bytes": 17820,
+      "jsBytes": 0,
+      "jsResources": [
+        {
+          "path": "/assets/dashboard-startup-runtime.c07d8bfe646cec72.js",
+          "startTime": 139.29999995231628,
+          "duration": 0,
+          "transferSize": 0
+        },
+        {
+          "path": "/assets/auth-client.b8f1a72cc1cf25d0.js",
+          "startTime": 140,
+          "duration": 0,
+          "transferSize": 0
+        },
+        {
+          "path": "/assets/workspace-loader.ff089f638295ab27.js",
+          "startTime": 140.39999997615814,
+          "duration": 0,
+          "transferSize": 0
+        },
+        {
+          "path": "/assets/dashboard-startup-bootstrap.dab3b2fed28a9e02.js",
+          "startTime": 143,
+          "duration": 0,
+          "transferSize": 0
+        },
+        {
+          "path": "/assets/workspace-charts.4a69ad0d5e4ca81e.js",
+          "startTime": 388.2999999523163,
+          "duration": 0,
+          "transferSize": 0
+        },
+        {
+          "path": "/assets/dashboard-startup-inline-1.80185250dcd58b75.js",
+          "startTime": 632.7999999523163,
+          "duration": 0,
+          "transferSize": 0
+        },
+        {
+          "path": "/assets/dashboard-startup-inline-2.5f9e1d4c96ac3a14.js",
+          "startTime": 634.7999999523163,
+          "duration": 0,
+          "transferSize": 0
+        }
+      ],
+      "dashboardStartupCompatibility": {
+        "resourceCount": 2,
+        "transferBytes": 0,
+        "requestStartSpreadMs": 2,
+        "downloadSpanMs": 2
+      },
+      "domContentLoadedMs": 476.7999999523163,
+      "navigationTiming": {
+        "responseStart": 2.5,
+        "responseEnd": 106.29999995231628,
+        "domInteractive": 471.39999997615814,
+        "domContentLoadedEventEnd": 476.7999999523163
+      },
+      "startupResources": [
+        {
+          "path": "/api/auth/status",
+          "startTime": 137.79999995231628,
+          "responseStart": 139.5,
+          "responseEnd": 243.19999992847443,
+          "transferSize": 572
+        },
+        {
+          "path": "/assets/dashboard-startup-runtime.c07d8bfe646cec72.js",
+          "startTime": 139.29999995231628,
+          "responseStart": 139.29999995231628,
+          "responseEnd": 139.29999995231628,
+          "transferSize": 0
+        },
+        {
+          "path": "/assets/auth-client.b8f1a72cc1cf25d0.js",
+          "startTime": 140,
+          "responseStart": 140,
+          "responseEnd": 140,
+          "transferSize": 0
+        },
+        {
+          "path": "/assets/workspace-loader.ff089f638295ab27.js",
+          "startTime": 140.39999997615814,
+          "responseStart": 140.39999997615814,
+          "responseEnd": 140.39999997615814,
+          "transferSize": 0
+        },
+        {
+          "path": "/assets/dashboard-base.74cc41e0347efcf3.css",
+          "startTime": 141.19999992847443,
+          "responseStart": 141.19999992847443,
+          "responseEnd": 141.19999992847443,
+          "transferSize": 0
+        },
+        {
+          "path": "/assets/experience-enhancements.5e73551578eca805.css",
+          "startTime": 141.79999995231628,
+          "responseStart": 141.79999995231628,
+          "responseEnd": 141.79999995231628,
+          "transferSize": 0
+        },
+        {
+          "path": "/assets/dashboard-startup-bootstrap.dab3b2fed28a9e02.js",
+          "startTime": 143,
+          "responseStart": 143,
+          "responseEnd": 143,
+          "transferSize": 0
+        },
+        {
+          "path": "/assets/workspace-charts.4a69ad0d5e4ca81e.js",
+          "startTime": 388.2999999523163,
+          "responseStart": 388.2999999523163,
+          "responseEnd": 388.2999999523163,
+          "transferSize": 0
+        },
+        {
+          "path": "/api/stock/kline",
+          "startTime": 392.5,
+          "responseStart": 400.10000002384186,
+          "responseEnd": 598.7999999523163,
+          "transferSize": 9291
+        },
+        {
+          "path": "/api/workspace/navigation",
+          "startTime": 544.8999999761581,
+          "responseStart": 547.7999999523163,
+          "responseEnd": 660.1999999284744,
+          "transferSize": 1570
+        },
+        {
+          "path": "/api/watchlist",
+          "startTime": 612.5,
+          "responseStart": 614.7999999523163,
+          "responseEnd": 721.6999999284744,
+          "transferSize": 395
+        },
+        {
+          "path": "/api/paper/positions",
+          "startTime": 614.5,
+          "responseStart": 616.8999999761581,
+          "responseEnd": 734.1000000238419,
+          "transferSize": 377
+        },
+        {
+          "path": "/assets/dashboard-startup-inline-1.80185250dcd58b75.js",
+          "startTime": 632.7999999523163,
+          "responseStart": 632.7999999523163,
+          "responseEnd": 632.7999999523163,
+          "transferSize": 0
+        },
+        {
+          "path": "/assets/dashboard-startup-inline-2.5f9e1d4c96ac3a14.js",
+          "startTime": 634.7999999523163,
+          "responseStart": 634.7999999523163,
+          "responseEnd": 634.7999999523163,
+          "transferSize": 0
+        },
+        {
+          "path": "/api/events/entities",
+          "startTime": 732.2999999523163,
+          "responseStart": 739.2999999523163,
+          "responseEnd": 876.5,
+          "transferSize": 5615
+        }
+      ],
+      "phaseMarks": [
+        {
+          "name": "moneymoney:auth-ready",
+          "atMs": 383.9
+        },
+        {
+          "name": "moneymoney:chart-preload-start",
+          "atMs": 384.8
+        },
+        {
+          "name": "moneymoney:stock-kline-prefetch-start",
+          "atMs": 389.8
+        },
+        {
+          "name": "moneymoney:chart-preload-ready",
+          "atMs": 415
+        },
+        {
+          "name": "moneymoney:dashboard-start",
+          "atMs": 525.6
+        },
+        {
+          "name": "moneymoney:dashboard-auth-ready",
+          "atMs": 526.1
+        },
+        {
+          "name": "moneymoney:theme-start",
+          "atMs": 526.4
+        },
+        {
+          "name": "moneymoney:theme-end",
+          "atMs": 527.7
+        },
+        {
+          "name": "moneymoney:navigation-start",
+          "atMs": 529.2
+        },
+        {
+          "name": "moneymoney:navigation-end",
+          "atMs": 558.4
+        },
+        {
+          "name": "moneymoney:collapses-start",
+          "atMs": 558.7
+        },
+        {
+          "name": "moneymoney:collapses-end",
+          "atMs": 559.6
+        },
+        {
+          "name": "moneymoney:workspace-restore-start",
+          "atMs": 559.6
+        },
+        {
+          "name": "moneymoney:workspace-restore-end",
+          "atMs": 571.7
+        },
+        {
+          "name": "moneymoney:dashboard-context-ready",
+          "atMs": 572.8
+        },
+        {
+          "name": "moneymoney:history-install-start",
+          "atMs": 573.5
+        },
+        {
+          "name": "moneymoney:history-install-end",
+          "atMs": 610.6
+        },
+        {
+          "name": "moneymoney:dashboard-core-ready",
+          "atMs": 630.5
+        },
+        {
+          "name": "moneymoney:chart-module-start",
+          "atMs": 635
+        },
+        {
+          "name": "moneymoney:chart-module-ready",
+          "atMs": 689.9
+        },
+        {
+          "name": "moneymoney:stock-kline-request-start",
+          "atMs": 746.1
+        },
+        {
+          "name": "moneymoney:stock-kline-response-parsed",
+          "atMs": 955.8
+        },
+        {
+          "name": "moneymoney:stock-kline-first-render",
+          "atMs": 1082
+        }
+      ],
+      "longTaskSupported": true,
+      "longTasks": [
+        {
+          "startTime": 516.7999999523163,
+          "duration": 119
+        },
+        {
+          "startTime": 664.2999999523163,
+          "duration": 82
+        },
+        {
+          "startTime": 955.5,
+          "duration": 163
+        }
+      ],
+      "loadingPhases": {
+        "version": 1,
+        "additive": false,
+        "note": "阶段可能重叠；脚本下载跨度不是执行耗时。缺失计时为null，不按零处理。",
+        "phases": {
+          "authentication": {
+            "startMs": 137.79999995231628,
+            "endMs": 243.19999992847443,
+            "durationMs": 105.39999997615814
+          },
+          "coreInitialization": {
+            "startMs": 525.6,
+            "endMs": 630.5,
+            "durationMs": 104.89999999999998
+          },
+          "quoteWait": {
+            "startMs": 392.5,
+            "endMs": 598.7999999523163,
+            "durationMs": 206.29999995231628
+          },
+          "quoteToRender": {
+            "startMs": 598.7999999523163,
+            "endMs": 1082,
+            "durationMs": 483.2000000476837
+          },
+          "renderToSettled": {
+            "startMs": 1082,
+            "endMs": 1284.2999999523163,
+            "durationMs": 202.29999995231628
+          },
+          "theme": {
+            "startMs": 526.4,
+            "endMs": 527.7,
+            "durationMs": 1.3000000000000682
+          },
+          "navigation": {
+            "startMs": 529.2,
+            "endMs": 558.4,
+            "durationMs": 29.199999999999932
+          },
+          "collapses": {
+            "startMs": 558.7,
+            "endMs": 559.6,
+            "durationMs": 0.8999999999999773
+          },
+          "workspaceRestore": {
+            "startMs": 559.6,
+            "endMs": 571.7,
+            "durationMs": 12.100000000000023
+          },
+          "historyInstall": {
+            "startMs": 573.5,
+            "endMs": 610.6,
+            "durationMs": 37.10000000000002
+          }
+        },
+        "scriptDownloads": {
+          "startMs": 139.29999995231628,
+          "endMs": 634.7999999523163,
+          "durationMs": 495.5,
+          "requests": 7,
+          "transferBytes": 0
+        },
+        "scriptExecutionMs": null,
+        "layoutMs": null,
+        "longTasks": {
+          "count": 3,
+          "totalDurationMs": 364,
+          "totalBlockingMs": 214,
+          "largestMs": 163,
+          "boundedAt": 500
+        }
+      },
+      "chartBundleResources": [
+        {
+          "startTime": 388.2999999523163,
+          "responseEnd": 388.2999999523163,
+          "duration": 0,
+          "transferSize": 0
+        }
+      ],
+      "klineResponseMetadata": [
+        {
+          "status": 200,
+          "dataStatus": "cached",
+          "source": "yahoo-finance-history",
+          "reason": "显示受限范围内的缓存快照；来源时间单独标示",
+          "updatedAt": "2026-10-26T12:03:03.804Z",
+          "recordCount": 300
+        }
+      ],
+      "auxiliaryPendingAtChart": [
+        {
+          "pathname": "/api/stock/indices",
+          "requestStarted": false,
+          "responsePending": false
+        },
+        {
+          "pathname": "/api/watchlist",
+          "requestStarted": true,
+          "responsePending": false
+        },
+        {
+          "pathname": "/api/paper/positions",
+          "requestStarted": true,
+          "responsePending": false
+        }
+      ],
+      "apiRequestDetails": [
+        {
+          "pathname": "/api/auth/status",
+          "method": "GET",
+          "url": "/api/auth/status"
+        },
+        {
+          "pathname": "/api/stock/kline",
+          "method": "GET",
+          "url": "/api/stock/kline?symbol=usAAPL&period=1d&interval=1d&adjustment=source&chartWindow=1"
+        },
+        {
+          "pathname": "/api/workspace/navigation",
+          "method": "GET",
+          "url": "/api/workspace/navigation?scope=stocks"
+        },
+        {
+          "pathname": "/api/watchlist",
+          "method": "GET",
+          "url": "/api/watchlist"
+        },
+        {
+          "pathname": "/api/paper/positions",
+          "method": "GET",
+          "url": "/api/paper/positions?scope=stocks"
+        },
+        {
+          "pathname": "/api/events/entities",
+          "method": "GET",
+          "url": "/api/events/entities?market=stocks&instrument=stock%3Aus%3AAAPL"
+        }
+      ],
+      "assetResponses": [
+        {
+          "path": "/assets/dashboard-startup-runtime.c07d8bfe646cec72.js",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/auth-client.b8f1a72cc1cf25d0.js",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/workspace-loader.ff089f638295ab27.js",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/dashboard-base.74cc41e0347efcf3.css",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/experience-enhancements.5e73551578eca805.css",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/dashboard-startup-bootstrap.dab3b2fed28a9e02.js",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/workspace-charts.4a69ad0d5e4ca81e.js",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/dashboard-startup-inline-1.80185250dcd58b75.js",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/dashboard-startup-inline-2.5f9e1d4c96ac3a14.js",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/dashboard-startup-experience-enhancements.107e07cbf2626094.js",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/dashboard-startup-practical-experience.9385fb13bd245e2e.js",
+          "encoding": "br"
+        }
+      ],
+      "apiTimings": [
+        {
+          "pathname": "/api/auth/status",
+          "status": 200,
+          "durationMs": 208
+        },
+        {
+          "pathname": "/api/stock/kline",
+          "status": 200,
+          "durationMs": 531
+        },
+        {
+          "pathname": "/api/workspace/navigation",
+          "status": 200,
+          "durationMs": 317
+        },
+        {
+          "pathname": "/api/watchlist",
+          "status": 200,
+          "durationMs": 510
+        },
+        {
+          "pathname": "/api/paper/positions",
+          "status": 200,
+          "durationMs": 512
+        },
+        {
+          "pathname": "/api/events/entities",
+          "status": 200,
+          "durationMs": 409
+        }
+      ],
+      "apiRequests": [
+        "/api/auth/status",
+        "/api/stock/kline",
+        "/api/workspace/navigation",
+        "/api/watchlist",
+        "/api/paper/positions",
+        "/api/events/entities"
+      ],
+      "apiRequestCounts": {
+        "/api/auth/status": 1,
+        "/api/stock/kline": 1,
+        "/api/workspace/navigation": 1,
+        "/api/watchlist": 1,
+        "/api/paper/positions": 1,
+        "/api/events/entities": 1
+      },
+      "prefetchStartedBeforeCore": true
+    },
+    {
+      "viewport": 390,
+      "run": 2,
+      "temperature": "cold",
+      "shellReadyMs": 2240.899999976158,
+      "paintedShellReadyMs": 2287.2999999523163,
+      "chartReadyMs": 4421.599999904633,
+      "chartState": "ready",
+      "chartMessage": "Apple · usAAPL\n▤ 双图\n⛶ 全屏\n周期\n1分\n5分\n15分\n1小时\n1日\n3日\n5日\n60日\n120日\n1年\n5年\n缓存数据 · K线时间 2026-10-23 · yahoo-finance-history · 抓取 2026/10/26 20:03 · 上次源站耗时 684ms · cache · 显示受限范围内的缓存快照；来源时间单独标示 AAPL · 1d · 普通行情 · K线：缓存 · 300 根 · 显示受限范围内的缓存快照；来源时间单独标示\n历史时点 / 日期定位 / 日内下钻\n图层与策略 · 保留当前选择\n事件时间轴\n刷新\npartial · events ok · news ok · filings unavailable · secForm4 partial · sec13f unavailable\nWarren Buffett said 'nobody gets paid' to give this easy investing advice — how it’s still helping your portfolio today\nnews ·",
+      "bytes": 160459,
+      "jsBytes": 125364,
+      "jsResources": [
+        {
+          "path": "/assets/dashboard-startup-runtime.c07d8bfe646cec72.js",
+          "startTime": 133.29999995231628,
+          "duration": 890.2000000476837,
+          "transferSize": 38738
+        },
+        {
+          "path": "/assets/auth-client.b8f1a72cc1cf25d0.js",
+          "startTime": 134.09999990463257,
+          "duration": 239.10000002384186,
+          "transferSize": 1415
+        },
+        {
+          "path": "/assets/workspace-loader.ff089f638295ab27.js",
+          "startTime": 134.29999995231628,
+          "duration": 766.7999999523163,
+          "transferSize": 3955
+        },
+        {
+          "path": "/assets/dashboard-startup-bootstrap.dab3b2fed28a9e02.js",
+          "startTime": 496.5,
+          "duration": 373.59999990463257,
+          "transferSize": 1184
+        },
+        {
+          "path": "/assets/workspace-charts.4a69ad0d5e4ca81e.js",
+          "startTime": 1559.8999999761581,
+          "duration": 1020.6999999284744,
+          "transferSize": 60429
+        },
+        {
+          "path": "/assets/dashboard-startup-inline-1.80185250dcd58b75.js",
+          "startTime": 2188.899999976158,
+          "duration": 129.10000002384186,
+          "transferSize": 1237
+        },
+        {
+          "path": "/assets/dashboard-startup-inline-2.5f9e1d4c96ac3a14.js",
+          "startTime": 2191.1999999284744,
+          "duration": 186.39999997615814,
+          "transferSize": 2248
+        },
+        {
+          "path": "/assets/dashboard-startup-experience-enhancements.107e07cbf2626094.js",
+          "startTime": 2399.6999999284744,
+          "duration": 287.7000000476837,
+          "transferSize": 11852
+        },
+        {
+          "path": "/assets/dashboard-startup-practical-experience.9385fb13bd245e2e.js",
+          "startTime": 2401.5,
+          "duration": 210.09999990463257,
+          "transferSize": 4306
+        }
+      ],
+      "dashboardStartupCompatibility": {
+        "resourceCount": 4,
+        "transferBytes": 19643,
+        "requestStartSpreadMs": 212.60000002384186,
+        "downloadSpanMs": 498.5
+      },
+      "domContentLoadedMs": 1699.7999999523163,
+      "navigationTiming": {
+        "responseStart": 4.199999928474426,
+        "responseEnd": 493.89999997615814,
+        "domInteractive": 1691.1999999284744,
+        "domContentLoadedEventEnd": 1699.7999999523163
+      },
+      "startupResources": [
+        {
+          "path": "/api/auth/status",
+          "startTime": 131.89999997615814,
+          "responseStart": 139.09999990463257,
+          "responseEnd": 233.29999995231628,
+          "transferSize": 572
+        },
+        {
+          "path": "/assets/dashboard-startup-runtime.c07d8bfe646cec72.js",
+          "startTime": 133.29999995231628,
+          "responseStart": 141.19999992847443,
+          "responseEnd": 1023.5,
+          "transferSize": 38738
+        },
+        {
+          "path": "/assets/auth-client.b8f1a72cc1cf25d0.js",
+          "startTime": 134.09999990463257,
+          "responseStart": 143,
+          "responseEnd": 373.1999999284744,
+          "transferSize": 1415
+        },
+        {
+          "path": "/assets/workspace-loader.ff089f638295ab27.js",
+          "startTime": 134.29999995231628,
+          "responseStart": 721.1999999284744,
+          "responseEnd": 901.0999999046326,
+          "transferSize": 3955
+        },
+        {
+          "path": "/assets/dashboard-base.74cc41e0347efcf3.css",
+          "startTime": 134.89999997615814,
+          "responseStart": 143.09999990463257,
+          "responseEnd": 716.3999999761581,
+          "transferSize": 14972
+        },
+        {
+          "path": "/assets/experience-enhancements.5e73551578eca805.css",
+          "startTime": 135.5,
+          "responseStart": 142.69999992847443,
+          "responseEnd": 357.7999999523163,
+          "transferSize": 2306
+        },
+        {
+          "path": "/assets/dashboard-startup-bootstrap.dab3b2fed28a9e02.js",
+          "startTime": 496.5,
+          "responseStart": 740.1999999284744,
+          "responseEnd": 870.0999999046326,
+          "transferSize": 1184
+        },
+        {
+          "path": "/assets/workspace-charts.4a69ad0d5e4ca81e.js",
+          "startTime": 1559.8999999761581,
+          "responseStart": 1564,
+          "responseEnd": 2580.5999999046326,
+          "transferSize": 60429
+        },
+        {
+          "path": "/api/stock/kline",
+          "startTime": 1569.0999999046326,
+          "responseStart": 1575.3999999761581,
+          "responseEnd": 1873.1999999284744,
+          "transferSize": 9291
+        },
+        {
+          "path": "/api/workspace/navigation",
+          "startTime": 1783.5,
+          "responseStart": 1786.8999999761581,
+          "responseEnd": 1934.5,
+          "transferSize": 1569
+        },
+        {
+          "path": "/api/watchlist",
+          "startTime": 2182.399999976158,
+          "responseStart": 2184.7999999523163,
+          "responseEnd": 2287.5999999046326,
+          "transferSize": 395
+        },
+        {
+          "path": "/api/paper/positions",
+          "startTime": 2183.7999999523163,
+          "responseStart": 2186.1999999284744,
+          "responseEnd": 2302.899999976158,
+          "transferSize": 377
+        },
+        {
+          "path": "/assets/dashboard-startup-inline-1.80185250dcd58b75.js",
+          "startTime": 2188.899999976158,
+          "responseStart": 2194.1999999284744,
+          "responseEnd": 2318,
+          "transferSize": 1237
+        },
+        {
+          "path": "/assets/dashboard-startup-inline-2.5f9e1d4c96ac3a14.js",
+          "startTime": 2191.1999999284744,
+          "responseStart": 2194.5999999046326,
+          "responseEnd": 2377.5999999046326,
+          "transferSize": 2248
+        },
+        {
+          "path": "/assets/dashboard-startup-experience-enhancements.107e07cbf2626094.js",
+          "startTime": 2399.6999999284744,
+          "responseStart": 2402.399999976158,
+          "responseEnd": 2687.399999976158,
+          "transferSize": 11852
+        },
+        {
+          "path": "/assets/dashboard-startup-practical-experience.9385fb13bd245e2e.js",
+          "startTime": 2401.5,
+          "responseStart": 2404,
+          "responseEnd": 2611.5999999046326,
+          "transferSize": 4306
+        },
+        {
+          "path": "/api/events/entities",
+          "startTime": 2671.1999999284744,
+          "responseStart": 2676.399999976158,
+          "responseEnd": 2826.399999976158,
+          "transferSize": 5613
+        }
+      ],
+      "phaseMarks": [
+        {
+          "name": "moneymoney:auth-ready",
+          "atMs": 1555.8
+        },
+        {
+          "name": "moneymoney:chart-preload-start",
+          "atMs": 1557.6
+        },
+        {
+          "name": "moneymoney:stock-kline-prefetch-start",
+          "atMs": 1564.4
+        },
+        {
+          "name": "moneymoney:dashboard-start",
+          "atMs": 1748.9
+        },
+        {
+          "name": "moneymoney:dashboard-auth-ready",
+          "atMs": 1750.5
+        },
+        {
+          "name": "moneymoney:theme-start",
+          "atMs": 1750.6
+        },
+        {
+          "name": "moneymoney:theme-end",
+          "atMs": 1754.1
+        },
+        {
+          "name": "moneymoney:navigation-start",
+          "atMs": 1758.4
+        },
+        {
+          "name": "moneymoney:navigation-end",
+          "atMs": 1809
+        },
+        {
+          "name": "moneymoney:collapses-start",
+          "atMs": 1809.1
+        },
+        {
+          "name": "moneymoney:collapses-end",
+          "atMs": 1811.4
+        },
+        {
+          "name": "moneymoney:workspace-restore-start",
+          "atMs": 1811.4
+        },
+        {
+          "name": "moneymoney:workspace-restore-end",
+          "atMs": 1833.1
+        },
+        {
+          "name": "moneymoney:dashboard-context-ready",
+          "atMs": 1836.9
+        },
+        {
+          "name": "moneymoney:history-install-start",
+          "atMs": 1839.5
+        },
+        {
+          "name": "moneymoney:history-install-end",
+          "atMs": 2179
+        },
+        {
+          "name": "moneymoney:dashboard-core-ready",
+          "atMs": 2184.8
+        },
+        {
+          "name": "moneymoney:chart-module-start",
+          "atMs": 2192.6
+        },
+        {
+          "name": "moneymoney:chart-preload-ready",
+          "atMs": 2588.3
+        },
+        {
+          "name": "moneymoney:chart-module-ready",
+          "atMs": 2605.3
+        },
+        {
+          "name": "moneymoney:stock-kline-request-start",
+          "atMs": 2704.7
+        },
+        {
+          "name": "moneymoney:stock-kline-response-parsed",
+          "atMs": 2705.6
+        },
+        {
+          "name": "moneymoney:stock-kline-first-render",
+          "atMs": 3870.1
+        }
+      ],
+      "longTaskSupported": true,
+      "longTasks": [
+        {
+          "startTime": 745.5999999046326,
+          "duration": 437
+        },
+        {
+          "startTime": 1736.7999999523163,
+          "duration": 457
+        },
+        {
+          "startTime": 2588.5,
+          "duration": 1283
+        },
+        {
+          "startTime": 3918.6999999284744,
+          "duration": 468
+        },
+        {
+          "startTime": 4470.799999952316,
+          "duration": 92
+        },
+        {
+          "startTime": 4609.199999928474,
+          "duration": 224
+        }
+      ],
+      "loadingPhases": {
+        "version": 1,
+        "additive": false,
+        "note": "阶段可能重叠；脚本下载跨度不是执行耗时。缺失计时为null，不按零处理。",
+        "phases": {
+          "authentication": {
+            "startMs": 131.89999997615814,
+            "endMs": 233.29999995231628,
+            "durationMs": 101.39999997615814
+          },
+          "coreInitialization": {
+            "startMs": 1748.9,
+            "endMs": 2184.8,
+            "durationMs": 435.9000000000001
+          },
+          "quoteWait": {
+            "startMs": 1569.0999999046326,
+            "endMs": 1873.1999999284744,
+            "durationMs": 304.10000002384186
+          },
+          "quoteToRender": {
+            "startMs": 1873.1999999284744,
+            "endMs": 3870.1,
+            "durationMs": 1996.9000000715255
+          },
+          "renderToSettled": {
+            "startMs": 3870.1,
+            "endMs": 4421.599999904633,
+            "durationMs": 551.4999999046327
+          },
+          "theme": {
+            "startMs": 1750.6,
+            "endMs": 1754.1,
+            "durationMs": 3.5
+          },
+          "navigation": {
+            "startMs": 1758.4,
+            "endMs": 1809,
+            "durationMs": 50.59999999999991
+          },
+          "collapses": {
+            "startMs": 1809.1,
+            "endMs": 1811.4,
+            "durationMs": 2.300000000000182
+          },
+          "workspaceRestore": {
+            "startMs": 1811.4,
+            "endMs": 1833.1,
+            "durationMs": 21.699999999999818
+          },
+          "historyInstall": {
+            "startMs": 1839.5,
+            "endMs": 2179,
+            "durationMs": 339.5
+          }
+        },
+        "scriptDownloads": {
+          "startMs": 133.29999995231628,
+          "endMs": 2687.399999976158,
+          "durationMs": 2554.100000023842,
+          "requests": 9,
+          "transferBytes": 125364
+        },
+        "scriptExecutionMs": null,
+        "layoutMs": null,
+        "longTasks": {
+          "count": 6,
+          "totalDurationMs": 2961,
+          "totalBlockingMs": 2661,
+          "largestMs": 1283,
+          "boundedAt": 500
+        }
+      },
+      "chartBundleResources": [
+        {
+          "startTime": 1559.8999999761581,
+          "responseEnd": 2580.5999999046326,
+          "duration": 1020.6999999284744,
+          "transferSize": 60429
+        }
+      ],
+      "klineResponseMetadata": [
+        {
+          "status": 200,
+          "dataStatus": "cached",
+          "source": "yahoo-finance-history",
+          "reason": "显示受限范围内的缓存快照；来源时间单独标示",
+          "updatedAt": "2026-10-26T12:03:03.804Z",
+          "recordCount": 300
+        }
+      ],
+      "auxiliaryPendingAtChart": [
+        {
+          "pathname": "/api/stock/indices",
+          "requestStarted": false,
+          "responsePending": false
+        },
+        {
+          "pathname": "/api/watchlist",
+          "requestStarted": true,
+          "responsePending": false
+        },
+        {
+          "pathname": "/api/paper/positions",
+          "requestStarted": true,
+          "responsePending": false
+        }
+      ],
+      "apiRequestDetails": [
+        {
+          "pathname": "/api/auth/status",
+          "method": "GET",
+          "url": "/api/auth/status"
+        },
+        {
+          "pathname": "/api/stock/kline",
+          "method": "GET",
+          "url": "/api/stock/kline?symbol=usAAPL&period=1d&interval=1d&adjustment=source&chartWindow=1"
+        },
+        {
+          "pathname": "/api/workspace/navigation",
+          "method": "GET",
+          "url": "/api/workspace/navigation?scope=stocks"
+        },
+        {
+          "pathname": "/api/watchlist",
+          "method": "GET",
+          "url": "/api/watchlist"
+        },
+        {
+          "pathname": "/api/paper/positions",
+          "method": "GET",
+          "url": "/api/paper/positions?scope=stocks"
+        },
+        {
+          "pathname": "/api/events/entities",
+          "method": "GET",
+          "url": "/api/events/entities?market=stocks&instrument=stock%3Aus%3AAAPL"
+        }
+      ],
+      "assetResponses": [
+        {
+          "path": "/assets/experience-enhancements.5e73551578eca805.css",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/dashboard-base.74cc41e0347efcf3.css",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/auth-client.b8f1a72cc1cf25d0.js",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/dashboard-startup-bootstrap.dab3b2fed28a9e02.js",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/workspace-loader.ff089f638295ab27.js",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/dashboard-startup-runtime.c07d8bfe646cec72.js",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/dashboard-startup-inline-1.80185250dcd58b75.js",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/dashboard-startup-inline-2.5f9e1d4c96ac3a14.js",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/workspace-charts.4a69ad0d5e4ca81e.js",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/dashboard-startup-practical-experience.9385fb13bd245e2e.js",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/dashboard-startup-experience-enhancements.107e07cbf2626094.js",
+          "encoding": "br"
+        }
+      ],
+      "apiTimings": [
+        {
+          "pathname": "/api/auth/status",
+          "status": 200,
+          "durationMs": 118
+        },
+        {
+          "pathname": "/api/stock/kline",
+          "status": 200,
+          "durationMs": 644
+        },
+        {
+          "pathname": "/api/workspace/navigation",
+          "status": 200,
+          "durationMs": 59
+        },
+        {
+          "pathname": "/api/watchlist",
+          "status": 200,
+          "durationMs": 98
+        },
+        {
+          "pathname": "/api/paper/positions",
+          "status": 200,
+          "durationMs": 111
+        },
+        {
+          "pathname": "/api/events/entities",
+          "status": 200,
+          "durationMs": 653
+        }
+      ],
+      "apiRequests": [
+        "/api/auth/status",
+        "/api/stock/kline",
+        "/api/workspace/navigation",
+        "/api/watchlist",
+        "/api/paper/positions",
+        "/api/events/entities"
+      ],
+      "apiRequestCounts": {
+        "/api/auth/status": 1,
+        "/api/stock/kline": 1,
+        "/api/workspace/navigation": 1,
+        "/api/watchlist": 1,
+        "/api/paper/positions": 1,
+        "/api/events/entities": 1
+      },
+      "prefetchStartedBeforeCore": true
+    },
+    {
+      "viewport": 390,
+      "run": 2,
+      "temperature": "warm",
+      "shellReadyMs": 870.3000000715256,
+      "paintedShellReadyMs": 1131.1000000238419,
+      "chartReadyMs": 1214.8999999761581,
+      "chartState": "ready",
+      "chartMessage": "Apple · usAAPL\n▤ 双图\n⛶ 全屏\n周期\n1分\n5分\n15分\n1小时\n1日\n3日\n5日\n60日\n120日\n1年\n5年\n缓存数据 · K线时间 2026-10-23 · yahoo-finance-history · 抓取 2026/10/26 20:03 · 上次源站耗时 684ms · stale · 显示受限范围内的缓存快照；正在后台刷新来源 AAPL · 1d · 普通行情 · K线：缓存 · 300 根 · 显示受限范围内的缓存快照；正在后台刷新来源\n历史时点 / 日期定位 / 日内下钻\n图层与策略 · 保留当前选择\n事件时间轴\n刷新\npartial · events ok · news ok · filings unavailable · secForm4 partial · sec13f unavailable\nWarren Buffett said 'nobody gets paid' to give this easy investing advice — how it’s still helping your portfolio today\nnews ·",
+      "bytes": 17825,
+      "jsBytes": 0,
+      "jsResources": [
+        {
+          "path": "/assets/dashboard-startup-runtime.c07d8bfe646cec72.js",
+          "startTime": 169.20000004768372,
+          "duration": 0,
+          "transferSize": 0
+        },
+        {
+          "path": "/assets/auth-client.b8f1a72cc1cf25d0.js",
+          "startTime": 169.39999997615814,
+          "duration": 0,
+          "transferSize": 0
+        },
+        {
+          "path": "/assets/workspace-loader.ff089f638295ab27.js",
+          "startTime": 169.60000002384186,
+          "duration": 0,
+          "transferSize": 0
+        },
+        {
+          "path": "/assets/dashboard-startup-bootstrap.dab3b2fed28a9e02.js",
+          "startTime": 170,
+          "duration": 0,
+          "transferSize": 0
+        },
+        {
+          "path": "/assets/workspace-charts.4a69ad0d5e4ca81e.js",
+          "startTime": 384,
+          "duration": 0,
+          "transferSize": 0
+        },
+        {
+          "path": "/assets/dashboard-startup-inline-1.80185250dcd58b75.js",
+          "startTime": 597.1000000238419,
+          "duration": 0,
+          "transferSize": 0
+        },
+        {
+          "path": "/assets/dashboard-startup-inline-2.5f9e1d4c96ac3a14.js",
+          "startTime": 598.8000000715256,
+          "duration": 0,
+          "transferSize": 0
+        }
+      ],
+      "dashboardStartupCompatibility": {
+        "resourceCount": 2,
+        "transferBytes": 0,
+        "requestStartSpreadMs": 1.7000000476837158,
+        "downloadSpanMs": 1.7000000476837158
+      },
+      "domContentLoadedMs": 460.5,
+      "navigationTiming": {
+        "responseStart": 4,
+        "responseEnd": 98.89999997615814,
+        "domInteractive": 456.5,
+        "domContentLoadedEventEnd": 460.5
+      },
+      "startupResources": [
+        {
+          "path": "/api/auth/status",
+          "startTime": 167.5,
+          "responseStart": 172.89999997615814,
+          "responseEnd": 268.60000002384186,
+          "transferSize": 572
+        },
+        {
+          "path": "/assets/dashboard-startup-runtime.c07d8bfe646cec72.js",
+          "startTime": 169.20000004768372,
+          "responseStart": 169.20000004768372,
+          "responseEnd": 169.20000004768372,
+          "transferSize": 0
+        },
+        {
+          "path": "/assets/auth-client.b8f1a72cc1cf25d0.js",
+          "startTime": 169.39999997615814,
+          "responseStart": 169.39999997615814,
+          "responseEnd": 169.39999997615814,
+          "transferSize": 0
+        },
+        {
+          "path": "/assets/workspace-loader.ff089f638295ab27.js",
+          "startTime": 169.60000002384186,
+          "responseStart": 169.60000002384186,
+          "responseEnd": 169.60000002384186,
+          "transferSize": 0
+        },
+        {
+          "path": "/assets/dashboard-base.74cc41e0347efcf3.css",
+          "startTime": 169.60000002384186,
+          "responseStart": 169.60000002384186,
+          "responseEnd": 169.60000002384186,
+          "transferSize": 0
+        },
+        {
+          "path": "/assets/experience-enhancements.5e73551578eca805.css",
+          "startTime": 169.89999997615814,
+          "responseStart": 169.89999997615814,
+          "responseEnd": 169.89999997615814,
+          "transferSize": 0
+        },
+        {
+          "path": "/assets/dashboard-startup-bootstrap.dab3b2fed28a9e02.js",
+          "startTime": 170,
+          "responseStart": 170,
+          "responseEnd": 170,
+          "transferSize": 0
+        },
+        {
+          "path": "/assets/workspace-charts.4a69ad0d5e4ca81e.js",
+          "startTime": 384,
+          "responseStart": 384,
+          "responseEnd": 384,
+          "transferSize": 0
+        },
+        {
+          "path": "/api/stock/kline",
+          "startTime": 387,
+          "responseStart": 393.10000002384186,
+          "responseEnd": 583.3999999761581,
+          "transferSize": 9297
+        },
+        {
+          "path": "/api/workspace/navigation",
+          "startTime": 515.2000000476837,
+          "responseStart": 519,
+          "responseEnd": 621.3000000715256,
+          "transferSize": 1570
+        },
+        {
+          "path": "/api/watchlist",
+          "startTime": 579.8000000715256,
+          "responseStart": 583.3000000715256,
+          "responseEnd": 682.8999999761581,
+          "transferSize": 395
+        },
+        {
+          "path": "/api/paper/positions",
+          "startTime": 581.6000000238419,
+          "responseStart": 584.8999999761581,
+          "responseEnd": 698.1000000238419,
+          "transferSize": 377
+        },
+        {
+          "path": "/assets/dashboard-startup-inline-1.80185250dcd58b75.js",
+          "startTime": 597.1000000238419,
+          "responseStart": 597.1000000238419,
+          "responseEnd": 597.1000000238419,
+          "transferSize": 0
+        },
+        {
+          "path": "/assets/dashboard-startup-inline-2.5f9e1d4c96ac3a14.js",
+          "startTime": 598.8000000715256,
+          "responseStart": 598.8000000715256,
+          "responseEnd": 598.8000000715256,
+          "transferSize": 0
+        },
+        {
+          "path": "/api/events/entities",
+          "startTime": 682.8000000715256,
+          "responseStart": 691.5,
+          "responseEnd": 835.8000000715256,
+          "transferSize": 5614
+        }
+      ],
+      "phaseMarks": [
+        {
+          "name": "moneymoney:auth-ready",
+          "atMs": 380.7
+        },
+        {
+          "name": "moneymoney:chart-preload-start",
+          "atMs": 382.5
+        },
+        {
+          "name": "moneymoney:stock-kline-prefetch-start",
+          "atMs": 384.7
+        },
+        {
+          "name": "moneymoney:chart-preload-ready",
+          "atMs": 406.6
+        },
+        {
+          "name": "moneymoney:dashboard-start",
+          "atMs": 498.6
+        },
+        {
+          "name": "moneymoney:dashboard-auth-ready",
+          "atMs": 498.7
+        },
+        {
+          "name": "moneymoney:theme-start",
+          "atMs": 498.7
+        },
+        {
+          "name": "moneymoney:theme-end",
+          "atMs": 499.3
+        },
+        {
+          "name": "moneymoney:navigation-start",
+          "atMs": 500.7
+        },
+        {
+          "name": "moneymoney:navigation-end",
+          "atMs": 528.1
+        },
+        {
+          "name": "moneymoney:collapses-start",
+          "atMs": 528.3
+        },
+        {
+          "name": "moneymoney:collapses-end",
+          "atMs": 529.3
+        },
+        {
+          "name": "moneymoney:workspace-restore-start",
+          "atMs": 529.6
+        },
+        {
+          "name": "moneymoney:workspace-restore-end",
+          "atMs": 541.2
+        },
+        {
+          "name": "moneymoney:dashboard-context-ready",
+          "atMs": 542
+        },
+        {
+          "name": "moneymoney:history-install-start",
+          "atMs": 542.4
+        },
+        {
+          "name": "moneymoney:history-install-end",
+          "atMs": 577.9
+        },
+        {
+          "name": "moneymoney:dashboard-core-ready",
+          "atMs": 594.9
+        },
+        {
+          "name": "moneymoney:chart-module-start",
+          "atMs": 599.6
+        },
+        {
+          "name": "moneymoney:chart-module-ready",
+          "atMs": 644.2
+        },
+        {
+          "name": "moneymoney:stock-kline-request-start",
+          "atMs": 692.8
+        },
+        {
+          "name": "moneymoney:stock-kline-response-parsed",
+          "atMs": 929.2
+        },
+        {
+          "name": "moneymoney:stock-kline-first-render",
+          "atMs": 1059.4
+        }
+      ],
+      "longTaskSupported": true,
+      "longTasks": [
+        {
+          "startTime": 494.3000000715256,
+          "duration": 106
+        },
+        {
+          "startTime": 620.8000000715256,
+          "duration": 73
+        },
+        {
+          "startTime": 928.3000000715256,
+          "duration": 133
+        }
+      ],
+      "loadingPhases": {
+        "version": 1,
+        "additive": false,
+        "note": "阶段可能重叠；脚本下载跨度不是执行耗时。缺失计时为null，不按零处理。",
+        "phases": {
+          "authentication": {
+            "startMs": 167.5,
+            "endMs": 268.60000002384186,
+            "durationMs": 101.10000002384186
+          },
+          "coreInitialization": {
+            "startMs": 498.6,
+            "endMs": 594.9,
+            "durationMs": 96.29999999999995
+          },
+          "quoteWait": {
+            "startMs": 387,
+            "endMs": 583.3999999761581,
+            "durationMs": 196.39999997615814
+          },
+          "quoteToRender": {
+            "startMs": 583.3999999761581,
+            "endMs": 1059.4,
+            "durationMs": 476.00000002384195
+          },
+          "renderToSettled": {
+            "startMs": 1059.4,
+            "endMs": 1214.8999999761581,
+            "durationMs": 155.49999997615805
+          },
+          "theme": {
+            "startMs": 498.7,
+            "endMs": 499.3,
+            "durationMs": 0.6000000000000227
+          },
+          "navigation": {
+            "startMs": 500.7,
+            "endMs": 528.1,
+            "durationMs": 27.400000000000034
+          },
+          "collapses": {
+            "startMs": 528.3,
+            "endMs": 529.3,
+            "durationMs": 1
+          },
+          "workspaceRestore": {
+            "startMs": 529.6,
+            "endMs": 541.2,
+            "durationMs": 11.600000000000023
+          },
+          "historyInstall": {
+            "startMs": 542.4,
+            "endMs": 577.9,
+            "durationMs": 35.5
+          }
+        },
+        "scriptDownloads": {
+          "startMs": 169.20000004768372,
+          "endMs": 598.8000000715256,
+          "durationMs": 429.60000002384186,
+          "requests": 7,
+          "transferBytes": 0
+        },
+        "scriptExecutionMs": null,
+        "layoutMs": null,
+        "longTasks": {
+          "count": 3,
+          "totalDurationMs": 312,
+          "totalBlockingMs": 162,
+          "largestMs": 133,
+          "boundedAt": 500
+        }
+      },
+      "chartBundleResources": [
+        {
+          "startTime": 384,
+          "responseEnd": 384,
+          "duration": 0,
+          "transferSize": 0
+        }
+      ],
+      "klineResponseMetadata": [
+        {
+          "status": 200,
+          "dataStatus": "cached",
+          "source": "yahoo-finance-history",
+          "reason": "显示受限范围内的缓存快照；正在后台刷新来源",
+          "updatedAt": "2026-10-26T12:03:03.804Z",
+          "recordCount": 300
+        }
+      ],
+      "auxiliaryPendingAtChart": [
+        {
+          "pathname": "/api/stock/indices",
+          "requestStarted": false,
+          "responsePending": false
+        },
+        {
+          "pathname": "/api/watchlist",
+          "requestStarted": true,
+          "responsePending": false
+        },
+        {
+          "pathname": "/api/paper/positions",
+          "requestStarted": true,
+          "responsePending": false
+        }
+      ],
+      "apiRequestDetails": [
+        {
+          "pathname": "/api/auth/status",
+          "method": "GET",
+          "url": "/api/auth/status"
+        },
+        {
+          "pathname": "/api/stock/kline",
+          "method": "GET",
+          "url": "/api/stock/kline?symbol=usAAPL&period=1d&interval=1d&adjustment=source&chartWindow=1"
+        },
+        {
+          "pathname": "/api/workspace/navigation",
+          "method": "GET",
+          "url": "/api/workspace/navigation?scope=stocks"
+        },
+        {
+          "pathname": "/api/watchlist",
+          "method": "GET",
+          "url": "/api/watchlist"
+        },
+        {
+          "pathname": "/api/paper/positions",
+          "method": "GET",
+          "url": "/api/paper/positions?scope=stocks"
+        },
+        {
+          "pathname": "/api/events/entities",
+          "method": "GET",
+          "url": "/api/events/entities?market=stocks&instrument=stock%3Aus%3AAAPL"
+        }
+      ],
+      "assetResponses": [
+        {
+          "path": "/assets/dashboard-startup-runtime.c07d8bfe646cec72.js",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/auth-client.b8f1a72cc1cf25d0.js",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/workspace-loader.ff089f638295ab27.js",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/dashboard-base.74cc41e0347efcf3.css",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/experience-enhancements.5e73551578eca805.css",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/dashboard-startup-bootstrap.dab3b2fed28a9e02.js",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/workspace-charts.4a69ad0d5e4ca81e.js",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/dashboard-startup-inline-1.80185250dcd58b75.js",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/dashboard-startup-inline-2.5f9e1d4c96ac3a14.js",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/dashboard-startup-experience-enhancements.107e07cbf2626094.js",
+          "encoding": "br"
+        },
+        {
+          "path": "/assets/dashboard-startup-practical-experience.9385fb13bd245e2e.js",
+          "encoding": "br"
+        }
+      ],
+      "apiTimings": [
+        {
+          "pathname": "/api/auth/status",
+          "status": 200,
+          "durationMs": 178
+        },
+        {
+          "pathname": "/api/stock/kline",
+          "status": 200,
+          "durationMs": 489
+        },
+        {
+          "pathname": "/api/workspace/navigation",
+          "status": 200,
+          "durationMs": 285
+        },
+        {
+          "pathname": "/api/watchlist",
+          "status": 200,
+          "durationMs": 511
+        },
+        {
+          "pathname": "/api/paper/positions",
+          "status": 200,
+          "durationMs": 513
+        },
+        {
+          "pathname": "/api/events/entities",
+          "status": 200,
+          "durationMs": 427
+        }
+      ],
+      "apiRequests": [
+        "/api/auth/status",
+        "/api/stock/kline",
+        "/api/workspace/navigation",
+        "/api/watchlist",
+        "/api/paper/positions",
+        "/api/events/entities"
+      ],
+      "apiRequestCounts": {
+        "/api/auth/status": 1,
+        "/api/stock/kline": 1,
+        "/api/workspace/navigation": 1,
+        "/api/watchlist": 1,
+        "/api/paper/positions": 1,
+        "/api/events/entities": 1
+      },
+      "prefetchStartedBeforeCore": true
+    }
+  ],
+  "medians": [
+    {
+      "viewport": 1440,
+      "temperature": "cold",
+      "shellReadyMs": 3075.7000000476837,
+      "chartReadyMs": 4891.600000023842,
+      "jsBytes": 109206,
+      "compatibilityRequestStartSpreadMs": 2.1999999284744263,
+      "compatibilityDownloadSpanMs": 159.59999990463257
+    },
+    {
+      "viewport": 1440,
+      "temperature": "warm",
+      "shellReadyMs": 1007.8999999761581,
+      "chartReadyMs": 1398.7999999523163,
+      "jsBytes": 0,
+      "compatibilityRequestStartSpreadMs": 2.100000023841858,
+      "compatibilityDownloadSpanMs": 2.100000023841858
+    },
+    {
+      "viewport": 390,
+      "temperature": "cold",
+      "shellReadyMs": 2155.100000023842,
+      "chartReadyMs": 4284.5,
+      "jsBytes": 125364,
+      "compatibilityRequestStartSpreadMs": 196.89999997615814,
+      "compatibilityDownloadSpanMs": 508.5
+    },
+    {
+      "viewport": 390,
+      "temperature": "warm",
+      "shellReadyMs": 870.3000000715256,
+      "chartReadyMs": 1214.8999999761581,
+      "jsBytes": 0,
+      "compatibilityRequestStartSpreadMs": 1.7000000476837158,
+      "compatibilityDownloadSpanMs": 1.7000000476837158
+    }
+  ]
+}

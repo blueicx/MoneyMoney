@@ -58,8 +58,16 @@ import { LiveKlineHub, liveKlineScope } from '../features/live-kline-stream';
 import { createLiveKlineRouter } from './live-kline-routes';
 import { createSnapshotComparisonStore } from '../features/snapshot-comparison';
 import { createSnapshotComparisonRouter } from './snapshot-comparison-routes';
+import { ReviewLifecycleStore } from '../features/review-lifecycle';
+import { createSavedEvidenceProofService } from '../features/research-evidence-governance';
+import { createResearchPreregistrationStore } from '../features/research-preregistration';
+import { createResearchEvidenceGovernanceRouter } from './research-evidence-governance-routes';
+import { createResearchEvidenceGraphRouter } from './research-evidence-graph-routes';
+import { createResearchPreregistrationRouter } from './research-preregistration-routes';
 import { ReviewQueueStore, reviewQueueActionItems, reviewCoverage } from '../features/review-queue';
 import { AiEvaluationCohorts } from '../features/ai-evaluation-cohorts';
+import { AiCommonCases } from '../features/ai-common-cases';
+import { createAiCommonCasesRouter } from './ai-common-case-routes';
 import { createSavedReviewAdapters, createSavedCohortCaseLoader } from '../features/saved-review-adapters';
 import { createReviewQueueRouter } from './review-queue-routes';
 import { createAiEvaluationCohortRouter } from './ai-evaluation-cohort-routes';
@@ -495,7 +503,13 @@ const restrictedPaperExecutionStore:RestrictedPaperExecutionStore=new Restricted
 app.use('/api/research/forward-observations',createRestrictedForwardRouter(restrictedForwardStore,input=>dataLakeCatalog.queryBarsAsOf(input),{store:restrictedPaperExecutionStore,quote:async instrument=>{const ref=dataLakeCatalog.resolveInstrument('stocks',instrument);if(!ref||ref.id!==instrument)throw Error('股票身份未核验');const result=await restrictedPaperQuotes.quote.fetch({symbol:ref.symbol});return {status:result.status,source:'Nasdaq 公共双边报价',quote:result.data};}}));
 const restrictedValidationStore=new RestrictedValidationStore(stateStore,{observation:id=>restrictedForwardStore.read(id),definition:(id,hash)=>strategyDefinitionStore.read(id,hash),resolve:(market,instrument)=>dataLakeCatalog.resolveInstrument(market as MarketId,instrument),experiments:{get:id=>researchRepository.getExperiment(id),save:(id,result)=>researchRepository.saveExperimentOnce(id,result)}});
 app.use('/api/research/validation',createRestrictedValidationRouter(restrictedValidationStore,input=>dataLakeCatalog.queryBarsAsOf(input)));
+const savedEvidenceProofs=createSavedEvidenceProofService({catalog:dataLakeCatalog,projects:researchProjects,state:stateStore});
+const researchPreregistrations=createResearchPreregistrationStore({state:stateStore,projects:researchProjects,getSavedExperiment:id=>researchRepository.getExperiment(id)});
+app.use('/api/research/evidence-governance',createResearchEvidenceGovernanceRouter({service:savedEvidenceProofs,adminOnly,csrfValid:verifyCsrfRequest}));
+app.use('/api/research/projects',createResearchEvidenceGraphRouter({projects:researchProjects,adminOnly,getSavedExperiment:id=>researchRepository.getExperiment(id)}));
+app.use('/api/research/preregistrations',createResearchPreregistrationRouter({service:researchPreregistrations,adminOnly,csrfValid:verifyCsrfRequest}));
 const reviewQueue=new ReviewQueueStore(stateStore);
+const reviewLifecycle=new ReviewLifecycleStore(stateStore,reviewQueue);
 const savedReviewAdapters=createSavedReviewAdapters(reviewQueue,{
   researchProjects:market=>researchProjects.list(market).map(row=>researchProjects.read(row.id)),
   projectReferenceStates:id=>researchProjects.referenceStates(id),
@@ -504,8 +518,10 @@ const savedReviewAdapters=createSavedReviewAdapters(reviewQueue,{
   forecasts:market=>aiForecastLab.list(market),
   savedSourceReport:market=>researchRepository.getSourceHealth(market),
 });
-app.use('/api/research/review-queue',createReviewQueueRouter(reviewQueue,market=>savedReviewAdapters.candidates(market as MarketId)));
+app.use('/api/research/review-queue',createReviewQueueRouter(reviewQueue,market=>savedReviewAdapters.candidates(market as MarketId),reviewLifecycle));
 const frozenAiCohorts=new AiEvaluationCohorts(stateStore,{load:createSavedCohortCaseLoader({intent:aiEvaluationLab,forecast:aiForecastLab})});
+const commonAiCases=new AiCommonCases(stateStore,{load:createSavedCohortCaseLoader({intent:aiEvaluationLab,forecast:aiForecastLab})});
+app.use('/api/research/ai-common-cases',createAiCommonCasesRouter(commonAiCases,market=>aiForecastLab.list(market).map(row=>({reference:'forecast/'+row.id,title:row.manifest.instrument+' · '+row.manifest.timeframe,status:row.status,model:row.actualModel||row.manifest.model,updatedAt:new Date(row.updatedAt).toISOString()}))));
 app.use('/api/research/ai-evaluation-cohorts',createAiEvaluationCohortRouter(frozenAiCohorts,market=>[
   ...aiEvaluationLab.list(market).map(row=>({reference:'intent/'+row.id,title:'决策实验 '+row.id,status:row.status,model:row.manifest.models.join(', '),updatedAt:new Date(row.updatedAt).toISOString()})),
   ...aiForecastLab.list(market).map(row=>({reference:'forecast/'+row.id,title:row.manifest.instrument+' · '+row.manifest.timeframe,status:row.status,model:row.actualModel||row.manifest.model,updatedAt:new Date(row.updatedAt).toISOString()})),
@@ -970,8 +986,10 @@ app.get('/api/watchlist/action-center', async (req, res) => {
     const scopedWatchlist=canonicalDigestWatchlist(unifiedAlertStore.listWatchlist()).filter(row=>!market||row.market===market);
     const reviewCandidateWarnings:string[]=[];
     const reviewCandidates=MARKET_IDS.filter(scope=>!market||scope===market).flatMap(scope=>{try{return savedReviewAdapters.candidates(scope);}catch(error){reviewCandidateWarnings.push(`${scope}: ${error instanceof Error?error.message:'复查候选读取失败'}`);return [];}});
-    const reviewItems=MARKET_IDS.filter(scope=>!market||scope===market).flatMap(scope=>reviewCandidates.filter(row=>row.market===scope).slice(0,500));
-    const completedReviews=new Set(reviewQueue.completionForIds('admin',reviewItems.map(row=>row.id)).map(row=>row.id));
+    const reviewStates=reviewLifecycle.states('admin',reviewCandidates);
+    const activeReviewCandidates=reviewCandidates.filter(row=>!reviewStates[row.id].archived);
+    const reviewItems=MARKET_IDS.filter(scope=>!market||scope===market).flatMap(scope=>activeReviewCandidates.filter(row=>row.market===scope).slice(0,500));
+    const completedReviews=new Set(reviewLifecycle.effectiveCompletions('admin',reviewQueue.completionForIds('admin',reviewItems.map(row=>row.id))).map(row=>row.id));
     const savedReviews=reviewQueueActionItems(reviewItems).map(row=>({...row,observedAt:row.observedAt!,reviewCompleted:completedReviews.has(row.id)}));
     const records = [...await collectWatchlistActions(scopedWatchlist.map(row=>row.instrument)),...savedReviews];
     const result = buildActionCenter(records, { market, states: actionCenterStore.states('admin') });
@@ -983,7 +1001,7 @@ app.get('/api/watchlist/action-center', async (req, res) => {
     });
     const failures = result.items.some(row => ['failed', 'unavailable', 'partial'].includes(row.dataStatus));
     const operations=MARKET_IDS.filter(scope=>!market||market===scope).map(scope=>({...buildWatchlistOperations(result.items,scopedWatchlist,scope),sessions:scope==='stocks'?(['us','cn','hk'] as const).map(venue=>exchangeSessionContext(venue)):[]}));
-    const coverage=reviewCoverage(reviewCandidates.length,savedReviews.length,market,reviewRetentionWarning);
+    const coverage=reviewCoverage(activeReviewCandidates.length,savedReviews.length,market,reviewRetentionWarning);
     return res.json({ success: true, ...result, operations, market: market || 'overview', source: '自选、提醒、筛选、13F与决策记录', reviewRetentionWarning:reviewRetentionWarning||null,reviewCoverage:coverage,
       dataStatus: failures||coverage.hasMore ? 'partial' : result.dataStatus, evidenceRefs: [...new Set(result.items.flatMap(row => row.evidenceRefs))] });
   } catch (error) { return res.status(500).json({ success: false, dataStatus: 'failed', reason: error instanceof Error ? error.message : '行动中心加载失败' }); }

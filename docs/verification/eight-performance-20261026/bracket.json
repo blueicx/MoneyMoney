@@ -1,0 +1,73 @@
+{
+  "baseline": "1987bd7",
+  "candidate": "defer initial workspace-history geometry capture to requestAnimationFrame",
+  "sampleCount": 36,
+  "cpuRate": 4,
+  "latencyMs": 80,
+  "downloadKbps": 750,
+  "status": "failed",
+  "groups": [
+    {
+      "viewport": 1440,
+      "temperature": "cold",
+      "beforeMs": 4345.600000023842,
+      "afterMs": 4619.600000023842,
+      "fasterBaselineMs": 4345.600000023842,
+      "candidateMs": 4891.600000023842,
+      "improvementPct": -12.564432989621787,
+      "limitMs": 3476.4800000190735,
+      "status": "failed"
+    },
+    {
+      "viewport": 1440,
+      "temperature": "warm",
+      "beforeMs": 1551.6999999284744,
+      "afterMs": 1234.7999999523163,
+      "fasterBaselineMs": 1234.7999999523163,
+      "candidateMs": 1398.7999999523163,
+      "improvementPct": -13.281503077934332,
+      "limitMs": 1296.539999949932,
+      "status": "failed"
+    },
+    {
+      "viewport": 390,
+      "temperature": "cold",
+      "beforeMs": 3726.100000023842,
+      "afterMs": 4451.100000023842,
+      "fasterBaselineMs": 3726.100000023842,
+      "candidateMs": 4284.5,
+      "improvementPct": -14.986178577402248,
+      "limitMs": 2980.8800000190736,
+      "status": "failed"
+    },
+    {
+      "viewport": 390,
+      "temperature": "warm",
+      "beforeMs": 1084.2000000476837,
+      "afterMs": 1287.1000000238419,
+      "fasterBaselineMs": 1084.2000000476837,
+      "candidateMs": 1214.8999999761581,
+      "improvementPct": -12.054971400362126,
+      "limitMs": 1138.410000050068,
+      "status": "failed"
+    }
+  ],
+  "raw": [
+    {
+      "stage": "before",
+      "path": "E:/MYC/mm-eight-loading-before.log",
+      "sha256": "7f15642961f2f25d9507c6c4e3918e8637e9e82eda5993d3e08c96d0ca062c78"
+    },
+    {
+      "stage": "candidate",
+      "path": "E:/MYC/mm-eight-loading-candidate.log",
+      "sha256": "7c072a9b51735159f47fdcaf29075817b71f54bd5cf4cb60ef5c9e02c014521a"
+    },
+    {
+      "stage": "after",
+      "path": "E:/MYC/mm-eight-loading-after.log",
+      "sha256": "3790e58995849da9c7bb767a1290b198e2ef92a1900ee88b11ec2034baf08796"
+    }
+  ],
+  "candidateDisposition": "withdrawn"
+}

@@ -449,6 +449,24 @@ export class DataLakeCatalog {
     } finally {connection.closeSync();instance.closeSync();}
   }
 
+  /** Verify an exact saved snapshot and expose only its persisted partition file hashes and proof metadata. */
+  async readSnapshotProofExact(snapshot:PointInTimeSnapshot):Promise<{snapshot:PointInTimeSnapshot;dataStatus:'historical'|'unavailable';fileHashes:Array<{partitionId:string;fileHash:string}>;source:string|null;publishedAt:string|null;serverFetchedAt:string|null;adjustment:string;currency:string|null;session:string|null;coverage:{start:string|null;end:string|null;rows:number};reason?:string}> {
+    const verified=await this.readSnapshotBarsExact(snapshot),ids=snapshot.partitionId.split(',');
+    const fileHashes=ids.map(partitionId=>{const row=this.db.prepare('SELECT file_hash AS fileHash FROM dataset_partition_files WHERE partition_id=?').get(partitionId) as {fileHash?:string}|undefined;return row?.fileHash?{partitionId,fileHash:String(row.fileHash)}:null;}).filter((row):row is {partitionId:string;fileHash:string}=>row!==null);
+    return {snapshot:verified.snapshot,dataStatus:verified.dataStatus,fileHashes,source:verified.source,publishedAt:verified.publishedAt,serverFetchedAt:verified.serverFetchedAt,adjustment:verified.adjustment,currency:verified.currency,session:verified.session,coverage:verified.coverage,...(verified.reason?{reason:verified.reason}:{})};
+  }
+
+  /** Confirm that a fixed snapshot tuple and its committed manifest lineage are still present, even if a legacy file hash is absent. */
+  verifySavedSnapshotTuple(snapshot:PointInTimeSnapshot):{snapshot:PointInTimeSnapshot;partitions:Array<{id:string;contentHash:string;fileHash:string|null}>;verified:boolean;reason?:string}{
+    const saved=this.getSnapshot(snapshot.id);if(!saved||JSON.stringify(saved)!==JSON.stringify(snapshot))return {snapshot,partitions:[],verified:false,reason:'固定快照元组与目录中的保存记录不一致'};
+    const ids=snapshot.partitionId.split(',');if(!ids.length||ids.length>200||ids.some(id=>!id))return {snapshot,partitions:[],verified:false,reason:'固定快照分区引用无效'};
+    const rows=ids.map(id=>this.db.prepare('SELECT p.id,p.content_hash AS contentHash,p.status,p.market,p.instrument,p.dataset,p.timeframe,m.content_hash AS manifestHash,f.file_hash AS fileHash FROM dataset_partitions p JOIN dataset_manifests m ON m.id=p.manifest_id LEFT JOIN dataset_partition_files f ON f.partition_id=p.id WHERE p.id=?').get(id) as Record<string,any>|undefined);
+    if(rows.some(row=>!row))return {snapshot,partitions:[],verified:false,reason:'固定快照分区或清单不存在'};
+    const selected=rows as Array<Record<string,any>>,expected=crypto.createHash('sha256').update(selected.map(row=>String(row.contentHash)).join('|')).digest('hex');
+    if(expected!==snapshot.contentHash||selected.some(row=>row.status!=='committed'||row.market!==snapshot.market||row.instrument!==snapshot.instrument||row.dataset!==snapshot.dataset||row.timeframe!==snapshot.timeframe||row.manifestHash!==row.contentHash))return {snapshot,partitions:[],verified:false,reason:'固定快照与已提交分区或清单 Hash 不一致'};
+    return {snapshot,partitions:selected.map(row=>({id:String(row.id),contentHash:String(row.contentHash),fileHash:row.fileHash?String(row.fileHash):null})),verified:true,...(selected.some(row=>!row.fileHash)?{reason:'固定快照及分区清单存在，但旧记录缺少原始文件 Hash；不补造文件证明'}:{})};
+  }
+
   listRevisions(market?: MarketId): DataRevision[] {
     const rows = (market
       ? this.db.prepare('SELECT id,dataset,market,instrument,timeframe,partition_id AS partitionId,published_at AS publishedAt,content_hash AS contentHash,supersedes,reason FROM data_revisions WHERE market = ? ORDER BY published_at, id').all(market)

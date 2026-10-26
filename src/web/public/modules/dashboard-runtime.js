@@ -13574,13 +13574,21 @@ async function startDashboard() {
   await waitForDashboardAuthState();
   try{if(window.mm_isLoggedIn===true&&window.mm_isGuest!==true)window.mmPreferenceJournal=window.MoneyWorkspaceHistory?.createPreferenceJournal(localStorage);}catch{}
   markMmPerformanceStage('dashboard-auth-ready');
+  markMmPerformanceStage('theme-start');
   initTheme();
+  markMmPerformanceStage('theme-end');
   activeMarketScope = readInitialMarketScope();
   restoreWorkspaceContextFromUrl();
+  markMmPerformanceStage('navigation-start');
   renderNavigationState();
+  markMmPerformanceStage('navigation-end');
+  markMmPerformanceStage('collapses-start');
   initializeDashboardCollapses();
+  markMmPerformanceStage('collapses-end');
+  markMmPerformanceStage('workspace-restore-start');
   await restoreSharedWorkspaceFromUrl();
   restoreLastDashboardTab();
+  markMmPerformanceStage('workspace-restore-end');
   syncWorkspaceContextUrl();
   markMmPerformanceStage('dashboard-context-ready');
   if (activeWorkspaceId === 'events') loadEventTimelineWorkspace();
@@ -13589,12 +13597,14 @@ async function startDashboard() {
     loadNewsTicker();
     if (activeMarketScope === 'overview') { loadMarketOverview(); loadResearchBriefing(); }
   }
+  markMmPerformanceStage('history-install-start');
   window.MoneyWorkspaceHistory?.install({window,
     current:()=>({market:activeMarketScope,workspace:activeWorkspaceId,instrument:currentInstrumentId}),
     canRestore:entry=>(workspaceNavigationState.get(entry.market)?.groups||workspaceFallbackNavigation(entry.market)).some(group=>group.items.some(item=>item.id===entry.workspace&&(!item.requiresAdmin||window.mm_isLoggedIn===true&&!window.mm_isGuest)))&&(!window.mm_isGuest||!['paper','orders','positions','action-center','research-lab'].includes(entry.workspace)),
     restore:entry=>{setMarketScope(entry.market,{openTab:false});history.replaceState({mmWorkspace:entry},'',entry.url);restoreWorkspaceContextFromUrl();renderNavigationState();window.openWorkspace(activeWorkspaceId,{fromHistory:true});},
     onError:reason=>window.showToast?.(reason,'info'),
   });
+  markMmPerformanceStage('history-install-end');
 }
 for (const [name, original] of [['drawCandles', drawCandles], ['drawStockKline', drawStockKline]]) {
   const measured = function (...args) {
