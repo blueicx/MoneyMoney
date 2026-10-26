@@ -21,9 +21,9 @@
 
 ## 每项执行步骤与门槛
 
-- [ ] 为每项先写 node:test 失败用例并实际记录 red，再实现和定向 green；变更源码后检查 tsc。
-- [ ] 运行用例：进程被杀/时间间断/陈旧PID；性能阶段缺失不置零；旧快照不可验证；跨市场图拒绝；部分覆盖和未对齐版本；IV/到期/溢出；不同AI输入拒绝/失败保留/少样本；后验登记标记/试验记录去重；复查批量冲突/重复请求/归档不丢历史。
-- [ ] 主线程接线 src/web/server.ts、scripts/copy-web-assets.js；新增功能继续 research 延迟加载。agent 不修改这两个共享文件，不提交、不全构建、不部署。
-- [ ] 定向 node --test tests/<new>.test.cjs、npm run build、npm test、安全扫描、git diff --check、研究浏览器CRUD与权限、三主题375/390/1003/1440和离线HTML打印。
-- [ ] 独立审查修复后提交推送，CI通过，再备份恢复校验、干净导出构建、dist部署、资源Hash/四市场/私有权限/runner指纹验收。
+- [x] 为每项先写 node:test 失败用例并实际记录 red，再实现和定向 green；变更源码后检查 tsc。
+- [x] 运行用例：进程被杀/时间间断/陈旧PID；性能阶段缺失不置零；旧快照不可验证；跨市场图拒绝；部分覆盖和未对齐版本；IV/到期/溢出；不同AI输入拒绝/失败保留/少样本；后验登记标记/试验记录去重；复查批量冲突/重复请求/归档不丢历史。
+- [x] 主线程接线 src/web/server.ts、scripts/copy-web-assets.js；新增功能继续 research 延迟加载。agent 不修改这两个共享文件，不提交、不全构建、不部署。
+- [x] 定向 node --test tests/<new>.test.cjs、npm run build、npm test、安全扫描、git diff --check、研究浏览器CRUD与权限、三主题375/390/1003/1440和离线HTML打印。
+- [x] 独立审查修复后提交推送，CI通过，再备份恢复校验、干净导出构建、dist部署、资源Hash/四市场/私有权限/runner指纹验收。
 - [ ] 最终固定构建监督运行24h，原轮次记录interrupted；功能发布、性能20%和24h分开判定。后台跟进在中断、失败、完成时报告，不篡改时长。
