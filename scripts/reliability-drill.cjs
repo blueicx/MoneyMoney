@@ -1,7 +1,7 @@
 'use strict';
 const fs=require('node:fs'),os=require('node:os'),path=require('node:path'),crypto=require('node:crypto'),{spawnSync}=require('node:child_process');
 const root=path.resolve(__dirname,'..'),temporary=fs.mkdtempSync(path.join(os.tmpdir(),'moneymoney-isolated-reliability-'));
-const files=['ai-runner-contract.test.cjs','ai-runner-model.test.cjs','ai-runner-coordinator.test.cjs','ai-runner-state.test.cjs','backup-disk-preflight.test.cjs','state-backup.test.cjs'];
+const files=['ai-runner-contract.test.cjs','ai-runner-model.test.cjs','ai-runner-coordinator.test.cjs','ai-runner-state.test.cjs','backup-disk-preflight.test.cjs','state-backup.test.cjs','option-recovery-operations.test.cjs','data-source-router.test.cjs','long-session-acceptance.test.cjs','read-only-soak-guard.test.cjs','source-outage-recovery.test.cjs','soak-source-evidence.test.cjs'];
 const git=args=>spawnSync('git',args,{cwd:root,encoding:'utf8'}),commit=git(['rev-parse','HEAD']).stdout.trim();
 const release=process.argv.includes('--release'),clean=git(['diff','--quiet','HEAD','--','src','scripts','tests']).status===0;
 if(release&&!clean)throw Error('Release drill requires committed source/tests; preview report stays isolated');

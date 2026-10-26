@@ -56,6 +56,16 @@ import {createBlindSessionRouter} from './blind-session-routes';
 import { createProjectReferenceResolver } from '../features/research-project-references';
 import { LiveKlineHub, liveKlineScope } from '../features/live-kline-stream';
 import { createLiveKlineRouter } from './live-kline-routes';
+import { createSnapshotComparisonStore } from '../features/snapshot-comparison';
+import { createSnapshotComparisonRouter } from './snapshot-comparison-routes';
+import { ReviewQueueStore, reviewQueueActionItems, reviewCoverage } from '../features/review-queue';
+import { AiEvaluationCohorts } from '../features/ai-evaluation-cohorts';
+import { createSavedReviewAdapters, createSavedCohortCaseLoader } from '../features/saved-review-adapters';
+import { createReviewQueueRouter } from './review-queue-routes';
+import { createAiEvaluationCohortRouter } from './ai-evaluation-cohort-routes';
+import { createStressScenarioStore } from '../features/saved-stress-scenarios';
+import { createSavedStressSourceAdapters } from '../features/saved-stress-source-adapters';
+import { createStressScenarioRouter } from './stress-scenario-routes';
 
 import { getRuntimeTelegramConfig, parseChatIds, runtimeSecrets } from '../config/runtime-secrets';
 import { api } from '../api';
@@ -233,7 +243,7 @@ import { createCandidateHandlers } from './candidate-routes';
 import { globalStrategyRegistry } from '../features/strategy-registry';
 import { riskPatrol } from '../features/risk-patrol';
 import { createAccessMiddleware, validateAccessConfiguration } from './access-control';
-import { verifyLoginToken, extractAuthToken } from './auth';
+import { verifyLoginToken, extractAuthToken, verifyCsrfRequest } from './auth';
 import { registerApiAuthProtection, registerAuthRoutes } from './auth-routes';
 import { registerBuiltAssets, sendBuiltPage } from './static-assets';
 import { stateStore, getStorageHealth } from '../storage/sqlite-state';
@@ -446,6 +456,12 @@ app.get('/login', (req, res) => {
 registerAuthRoutes(app);
 registerApiAuthProtection(app);
 app.use('/api/data',createDataAssetRouter(new DataAssetService(dataLakeCatalog,stateStore,dataLakeWorker),new OptionSnapshotRecovery(DATA_ROOT,dataLakeCatalog,stateStore)));
+const snapshotComparisonChoices=createSnapshotComparisonStore({
+  state:stateStore,
+  resolveSnapshot:id=>dataLakeCatalog.getSnapshot(id),
+  resolveIdentity:(market,instrument)=>{const ref=dataLakeCatalog.resolveInstrument(market as MarketId,instrument);return ref?{market,instrument:ref.id}:null;},
+});
+app.use('/api/research/snapshot-comparisons',createSnapshotComparisonRouter({catalog:dataLakeCatalog,choices:snapshotComparisonChoices,adminOnly,csrfValid:verifyCsrfRequest}));
 const researchProjects=new ResearchProjectStore(stateStore,createProjectReferenceResolver({
   study:id=>{if(/^psim_[a-f0-9]{64}$/.test(id))return portfolioSimulationStore.reference(id);if(/^blind_[a-f0-9]{64}$/.test(id))return blindSessionStore.reference(id);if(/^aif_[a-f0-9]{64}$/.test(id))return aiForecastLab.reference(id);return null;},
   evidence:id=>decisionIntelligenceStore.getEvidence(id),verifyEvidence:verifyEvidenceSnapshotHash,
@@ -479,6 +495,24 @@ const restrictedPaperExecutionStore:RestrictedPaperExecutionStore=new Restricted
 app.use('/api/research/forward-observations',createRestrictedForwardRouter(restrictedForwardStore,input=>dataLakeCatalog.queryBarsAsOf(input),{store:restrictedPaperExecutionStore,quote:async instrument=>{const ref=dataLakeCatalog.resolveInstrument('stocks',instrument);if(!ref||ref.id!==instrument)throw Error('股票身份未核验');const result=await restrictedPaperQuotes.quote.fetch({symbol:ref.symbol});return {status:result.status,source:'Nasdaq 公共双边报价',quote:result.data};}}));
 const restrictedValidationStore=new RestrictedValidationStore(stateStore,{observation:id=>restrictedForwardStore.read(id),definition:(id,hash)=>strategyDefinitionStore.read(id,hash),resolve:(market,instrument)=>dataLakeCatalog.resolveInstrument(market as MarketId,instrument),experiments:{get:id=>researchRepository.getExperiment(id),save:(id,result)=>researchRepository.saveExperimentOnce(id,result)}});
 app.use('/api/research/validation',createRestrictedValidationRouter(restrictedValidationStore,input=>dataLakeCatalog.queryBarsAsOf(input)));
+const reviewQueue=new ReviewQueueStore(stateStore);
+const savedReviewAdapters=createSavedReviewAdapters(reviewQueue,{
+  researchProjects:market=>researchProjects.list(market).map(row=>researchProjects.read(row.id)),
+  projectReferenceStates:id=>researchProjects.referenceStates(id),
+  forwardSessions:market=>restrictedForwardStore.list(market),
+  forwardSignals:id=>restrictedForwardStore.signals(id),
+  forecasts:market=>aiForecastLab.list(market),
+  savedSourceReport:market=>researchRepository.getSourceHealth(market),
+});
+app.use('/api/research/review-queue',createReviewQueueRouter(reviewQueue,market=>savedReviewAdapters.candidates(market as MarketId)));
+const frozenAiCohorts=new AiEvaluationCohorts(stateStore,{load:createSavedCohortCaseLoader({intent:aiEvaluationLab,forecast:aiForecastLab})});
+app.use('/api/research/ai-evaluation-cohorts',createAiEvaluationCohortRouter(frozenAiCohorts,market=>[
+  ...aiEvaluationLab.list(market).map(row=>({reference:'intent/'+row.id,title:'决策实验 '+row.id,status:row.status,model:row.manifest.models.join(', '),updatedAt:new Date(row.updatedAt).toISOString()})),
+  ...aiForecastLab.list(market).map(row=>({reference:'forecast/'+row.id,title:row.manifest.instrument+' · '+row.manifest.timeframe,status:row.status,model:row.actualModel||row.manifest.model,updatedAt:new Date(row.updatedAt).toISOString()})),
+]));
+const savedStressSources=createSavedStressSourceAdapters({catalog:dataLakeCatalog,ledger:unifiedPaperLedgerStore});
+const savedStressScenarios=createStressScenarioStore({...savedStressSources,state:stateStore});
+app.use('/api/research/stress-scenarios',createStressScenarioRouter({store:savedStressScenarios,...savedStressSources}));
 app.use('/api/chart/bookmarks',createChartBookmarkRouter({list:market=>decisionIntelligenceStore.listWorkspaces(market as MarketId|undefined),get:id=>decisionIntelligenceStore.getWorkspace(id),save:row=>stateStore.transaction(()=>{if(decisionIntelligenceStore.listWorkspaces().length>=200)throw Error('工作区容量已达上限，未删除旧记录');return decisionIntelligenceStore.saveWorkspace(row);}),base:()=>process.env.PUBLIC_WEB_BASE_URL||telegramPublicBaseUrl()}));
 const researchBasisStore=new ResearchBasisStore(stateStore,scope=>{
   const market=scope.market as MarketId,ref=dataLakeCatalog.resolveInstrument(market,scope.instrument);
@@ -934,16 +968,24 @@ app.get('/api/watchlist/action-center', async (req, res) => {
   try {
     const market = req.query.market ? decisionMarket(req.query.market) : undefined;
     const scopedWatchlist=canonicalDigestWatchlist(unifiedAlertStore.listWatchlist()).filter(row=>!market||row.market===market);
-    const records = await collectWatchlistActions(scopedWatchlist.map(row=>row.instrument));
+    const reviewCandidateWarnings:string[]=[];
+    const reviewCandidates=MARKET_IDS.filter(scope=>!market||scope===market).flatMap(scope=>{try{return savedReviewAdapters.candidates(scope);}catch(error){reviewCandidateWarnings.push(`${scope}: ${error instanceof Error?error.message:'复查候选读取失败'}`);return [];}});
+    const reviewItems=MARKET_IDS.filter(scope=>!market||scope===market).flatMap(scope=>reviewCandidates.filter(row=>row.market===scope).slice(0,500));
+    const completedReviews=new Set(reviewQueue.completionForIds('admin',reviewItems.map(row=>row.id)).map(row=>row.id));
+    const savedReviews=reviewQueueActionItems(reviewItems).map(row=>({...row,observedAt:row.observedAt!,reviewCompleted:completedReviews.has(row.id)}));
+    const records = [...await collectWatchlistActions(scopedWatchlist.map(row=>row.instrument)),...savedReviews];
     const result = buildActionCenter(records, { market, states: actionCenterStore.states('admin') });
+    let reviewRetentionWarning:string|undefined=reviewCandidateWarnings.length?reviewCandidateWarnings.join('；').slice(0,1000):undefined;
     stateStore.transaction(()=>{
+      try{reviewQueue.retain('admin',reviewCandidates);}catch(error){reviewRetentionWarning=error instanceof Error?error.message:'复查历史未能保留';}
       const previous=stateStore.get<ActionCenterItem[]>('action-center:items:admin')||[];
       stateStore.set('action-center:items:admin',market?[...previous.filter(row=>row.market!==market),...records]:records);
     });
     const failures = result.items.some(row => ['failed', 'unavailable', 'partial'].includes(row.dataStatus));
     const operations=MARKET_IDS.filter(scope=>!market||market===scope).map(scope=>({...buildWatchlistOperations(result.items,scopedWatchlist,scope),sessions:scope==='stocks'?(['us','cn','hk'] as const).map(venue=>exchangeSessionContext(venue)):[]}));
-    return res.json({ success: true, ...result, operations, market: market || 'overview', source: '自选、提醒、筛选、13F与决策记录',
-      dataStatus: failures ? 'partial' : result.dataStatus, evidenceRefs: [...new Set(result.items.flatMap(row => row.evidenceRefs))] });
+    const coverage=reviewCoverage(reviewCandidates.length,savedReviews.length,market,reviewRetentionWarning);
+    return res.json({ success: true, ...result, operations, market: market || 'overview', source: '自选、提醒、筛选、13F与决策记录', reviewRetentionWarning:reviewRetentionWarning||null,reviewCoverage:coverage,
+      dataStatus: failures||coverage.hasMore ? 'partial' : result.dataStatus, evidenceRefs: [...new Set(result.items.flatMap(row => row.evidenceRefs))] });
   } catch (error) { return res.status(500).json({ success: false, dataStatus: 'failed', reason: error instanceof Error ? error.message : '行动中心加载失败' }); }
 });
 app.get('/api/watchlist/action-center/history', (req, res) => {

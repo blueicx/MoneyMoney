@@ -7,6 +7,7 @@ export interface ActionCenterItem {
   title: string; summary?: string; scheduledAt?: string; occurredAt?: string; publishedAt?: string; observedAt: string;
   source: string; sourceUrl?: string; dataStatus: string; reason?: string; evidenceRefs: string[];
   eventId?: string; decisionId?: string; signalId?: string; experimentId?: string;
+  reviewKind?: string; reviewReferenceId?: string; reviewVersion?: string; reviewCompleted?: boolean;
 }
 export interface ActionCenterState { read: boolean; pinned: boolean; snoozedUntil: string | null; updatedAt: string }
 export interface ActionCenterHistoryEntry {

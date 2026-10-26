@@ -10,7 +10,7 @@ import { normalizeInstrumentRef, type InstrumentRef } from '../features/unified-
 import { assertStorageCapacity, inspectStorageCapacity } from './capacity-budget';
 
 export type DatasetStatus = 'staged' | 'committed' | 'rejected';
-export interface DatasetManifest { id: string; dataset: string; market: MarketId; source: string; fieldVersion: string; timezone: string; adjustment: string; createdAt: string; contentHash: string; }
+export interface DatasetManifest { id: string; dataset: string; market: MarketId; source: string; fieldVersion: string; timezone: string; adjustment: string; createdAt: string; contentHash: string; units?: Record<string,string>; }
 export interface DatasetPartition { id: string; manifestId: string; path: string; dataset: string; market: MarketId; instrument: string; timeframe: string; periodStart: string; periodEnd: string; publishedAt: string; fetchedAt: string; rowCount: number; status: DatasetStatus; contentHash: string; }
 export interface PointInTimeSnapshot { id: string; market: MarketId; instrument: string; dataset: string; timeframe: string; asOf: string; partitionId: string; contentHash: string; source: string | null; createdAt: string; }
 export interface DataRevision { id: string; dataset: string; market: MarketId; instrument: string; timeframe: string; partitionId: string; publishedAt: string; contentHash: string; supersedes?: string; reason?: string; }
@@ -168,9 +168,10 @@ export class DataLakeCatalog {
     this.db = new Database(databasePath);
     this.db.pragma('journal_mode = WAL');
     this.db.exec(`
-      CREATE TABLE IF NOT EXISTS dataset_manifests (id TEXT PRIMARY KEY, dataset TEXT NOT NULL, market TEXT NOT NULL, source TEXT NOT NULL, field_version TEXT NOT NULL, timezone TEXT NOT NULL, adjustment TEXT NOT NULL, created_at TEXT NOT NULL, content_hash TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS dataset_manifests (id TEXT PRIMARY KEY, dataset TEXT NOT NULL, market TEXT NOT NULL, source TEXT NOT NULL, field_version TEXT NOT NULL, timezone TEXT NOT NULL, adjustment TEXT NOT NULL, created_at TEXT NOT NULL, content_hash TEXT NOT NULL, units_json TEXT);
       CREATE TABLE IF NOT EXISTS dataset_partitions (id TEXT PRIMARY KEY, manifest_id TEXT NOT NULL, path TEXT NOT NULL UNIQUE, dataset TEXT NOT NULL, market TEXT NOT NULL, instrument TEXT NOT NULL, timeframe TEXT NOT NULL, period_start TEXT NOT NULL, period_end TEXT NOT NULL, published_at TEXT NOT NULL, fetched_at TEXT NOT NULL, row_count INTEGER NOT NULL, status TEXT NOT NULL, content_hash TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS data_quality_reports (partition_id TEXT PRIMARY KEY, report TEXT NOT NULL, checked_at TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS dataset_partition_files (partition_id TEXT PRIMARY KEY, file_hash TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS data_revisions (id TEXT PRIMARY KEY, dataset TEXT NOT NULL, market TEXT NOT NULL, instrument TEXT NOT NULL, timeframe TEXT NOT NULL, partition_id TEXT NOT NULL, published_at TEXT NOT NULL, content_hash TEXT NOT NULL, supersedes TEXT, reason TEXT);
       CREATE TABLE IF NOT EXISTS point_in_time_snapshots (id TEXT PRIMARY KEY, market TEXT NOT NULL, instrument TEXT NOT NULL, dataset TEXT NOT NULL, timeframe TEXT NOT NULL, as_of TEXT NOT NULL, partition_id TEXT NOT NULL, content_hash TEXT NOT NULL, source TEXT, created_at TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS corporate_actions (id TEXT PRIMARY KEY, market TEXT NOT NULL, instrument TEXT NOT NULL, kind TEXT NOT NULL, effective_at TEXT NOT NULL, factor REAL, old_symbol TEXT, new_symbol TEXT, source TEXT NOT NULL, observed_at TEXT, currency TEXT);
@@ -188,6 +189,7 @@ export class DataLakeCatalog {
       CREATE INDEX IF NOT EXISTS idx_snapshots_lookup ON point_in_time_snapshots (market, instrument, dataset, timeframe, as_of);
     `);
     this.ensureBackfillColumns();
+    if (!(this.db.prepare('PRAGMA table_info(dataset_manifests)').all() as Array<{name:string}>).some(row=>row.name==='units_json')) this.db.exec('ALTER TABLE dataset_manifests ADD COLUMN units_json TEXT');
     if (!(this.db.prepare('PRAGMA table_info(corporate_actions)').all() as Array<{name:string}>).some(row=>row.name==='published_at')) this.db.exec('ALTER TABLE corporate_actions ADD COLUMN published_at TEXT');
     if (!(this.db.prepare('PRAGMA table_info(corporate_actions)').all() as Array<{name:string}>).some(row=>row.name==='observed_at')) this.db.exec('ALTER TABLE corporate_actions ADD COLUMN observed_at TEXT');
     if (!(this.db.prepare('PRAGMA table_info(corporate_actions)').all() as Array<{name:string}>).some(row=>row.name==='currency')) this.db.exec('ALTER TABLE corporate_actions ADD COLUMN currency TEXT');
@@ -342,15 +344,16 @@ export class DataLakeCatalog {
       appender.closeSync();
       await connection.run(`COPY bars TO '${sqlPath(stagePath)}' (FORMAT PARQUET, COMPRESSION ZSTD)`);
     } finally { connection.closeSync(); instance.closeSync(); }
-    const manifest: DatasetManifest = { id: manifestId, dataset: input.dataset, market: input.market, source: input.source, fieldVersion: input.fieldVersion || 'bars-v1', timezone: input.timezone || 'UTC', adjustment, createdAt: new Date().toISOString(), contentHash };
+    const manifest: DatasetManifest = { id: manifestId, dataset: input.dataset, market: input.market, source: input.source, fieldVersion: input.fieldVersion || 'bars-v1', timezone: input.timezone || 'UTC', adjustment, createdAt: new Date().toISOString(), contentHash, units: input.units ? { ...input.units } : {} };
     const partition: DatasetPartition = { id: partitionId, manifestId, path: finalPath, dataset: input.dataset, market: input.market, instrument: input.instrument, timeframe: input.timeframe, periodStart: new Date(first).toISOString(), periodEnd: new Date(last).toISOString(), publishedAt: new Date(publishedAt).toISOString(), fetchedAt: manifest.createdAt, rowCount: input.rows.length, status: 'committed', contentHash };
     const previous = this.db.prepare('SELECT id FROM data_revisions WHERE market = ? AND dataset = ? AND instrument = ? AND timeframe = ? ORDER BY published_at DESC, id DESC LIMIT 1').get(input.market, input.dataset, input.instrument, input.timeframe) as { id?: string } | undefined;
     const revision: DataRevision = { id: `revision_${partitionId}`, dataset: input.dataset, market: input.market, instrument: input.instrument, timeframe: input.timeframe, partitionId, publishedAt: partition.publishedAt, contentHash, ...(previous?.id ? { supersedes: String(previous.id) } : {}) };
     this.db.transaction(() => {
       if (canPublish && !canPublish()) throw new Error('任务已暂停、取消或租约失效，禁止发布');
       fs.renameSync(stagePath, finalPath);
-      this.db.prepare('INSERT OR REPLACE INTO dataset_manifests (id,dataset,market,source,field_version,timezone,adjustment,created_at,content_hash) VALUES (?,?,?,?,?,?,?,?,?)').run(manifest.id, manifest.dataset, manifest.market, manifest.source, manifest.fieldVersion, manifest.timezone, manifest.adjustment, manifest.createdAt, manifest.contentHash);
+      this.db.prepare('INSERT OR REPLACE INTO dataset_manifests (id,dataset,market,source,field_version,timezone,adjustment,created_at,content_hash,units_json) VALUES (?,?,?,?,?,?,?,?,?,?)').run(manifest.id, manifest.dataset, manifest.market, manifest.source, manifest.fieldVersion, manifest.timezone, manifest.adjustment, manifest.createdAt, manifest.contentHash, JSON.stringify(manifest.units));
       this.db.prepare('INSERT OR REPLACE INTO dataset_partitions (id,manifest_id,path,dataset,market,instrument,timeframe,period_start,period_end,published_at,fetched_at,row_count,status,content_hash) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run(partition.id, partition.manifestId, partition.path, partition.dataset, partition.market, partition.instrument, partition.timeframe, partition.periodStart, partition.periodEnd, partition.publishedAt, partition.fetchedAt, partition.rowCount, partition.status, partition.contentHash);
+      this.db.prepare('INSERT OR REPLACE INTO dataset_partition_files (partition_id,file_hash) VALUES (?,?)').run(partition.id,crypto.createHash('sha256').update(fs.readFileSync(finalPath)).digest('hex'));
       this.db.prepare('INSERT OR REPLACE INTO data_quality_reports (partition_id, report, checked_at) VALUES (?, ?, ?)').run(partition.id, JSON.stringify(quality), quality.checkedAt);
       this.db.prepare('INSERT OR REPLACE INTO data_revisions (id,dataset,market,instrument,timeframe,partition_id,published_at,content_hash,supersedes,reason) VALUES (?,?,?,?,?,?,?,?,?,?)').run(revision.id, revision.dataset, revision.market, revision.instrument, revision.timeframe, revision.partitionId, revision.publishedAt, revision.contentHash, revision.supersedes || null, revision.reason || null);
       onPublished?.();
@@ -408,6 +411,42 @@ export class DataLakeCatalog {
     const row = this.db.prepare('SELECT id,market,instrument,dataset,timeframe,as_of AS asOf,partition_id AS partitionId,content_hash AS contentHash,source,created_at AS createdAt FROM point_in_time_snapshots WHERE id = ?').get(id) as Record<string, unknown> | undefined;
     if (!row) return null;
     return { id: String(row.id), market: row.market as MarketId, instrument: String(row.instrument), dataset: String(row.dataset), timeframe: String(row.timeframe), asOf: String(row.asOf), partitionId: String(row.partitionId), contentHash: String(row.contentHash), source: row.source == null ? null : String(row.source), createdAt: String(row.createdAt) };
+  }
+
+  listSnapshots(input: { market?: MarketId; instrument?: string; timeframe?: string; limit?: number } = {}): PointInTimeSnapshot[] {
+    const limit = Math.max(1, Math.min(200, Math.trunc(input.limit || 100)));
+    const clauses=['dataset=?'],values:unknown[]=['bars'];
+    if(input.market){clauses.push('market=?');values.push(input.market);}if(input.instrument){clauses.push('instrument=?');values.push(input.instrument);}if(input.timeframe){clauses.push('timeframe=?');values.push(input.timeframe);}
+    return (this.db.prepare(`SELECT id,market,instrument,dataset,timeframe,as_of AS asOf,partition_id AS partitionId,content_hash AS contentHash,source,created_at AS createdAt FROM point_in_time_snapshots WHERE ${clauses.join(' AND ')} ORDER BY as_of DESC,id LIMIT ?`).all(...values,limit) as Array<Record<string,unknown>>).map(row=>({id:String(row.id),market:row.market as MarketId,instrument:String(row.instrument),dataset:String(row.dataset),timeframe:String(row.timeframe),asOf:String(row.asOf),partitionId:String(row.partitionId),contentHash:String(row.contentHash),source:row.source==null?null:String(row.source),createdAt:String(row.createdAt)}));
+  }
+
+  async readSnapshotBarsExact(snapshot: PointInTimeSnapshot): Promise<{snapshot:PointInTimeSnapshot;rows:Array<Record<string,unknown>>;dataStatus:'historical'|'unavailable';source:string|null;updatedAt:null;publishedAt:string|null;sourceCapturedAt:null;serverFetchedAt:string|null;adjustment:string;currency:string|null;session:string|null;coverage:{start:string|null;end:string|null;rows:number};reason?:string}> {
+    const saved=this.getSnapshot(snapshot.id);
+    if(!saved||JSON.stringify(saved)!==JSON.stringify(snapshot))throw Error('point-in-time snapshot reference does not match catalog record');
+    const ids=snapshot.partitionId.split(',');
+    if(!ids.length||ids.length>200||ids.some(id=>!id))throw Error('snapshot partition reference is invalid');
+    const selected=ids.map(id=>this.db.prepare('SELECT p.*,m.source,m.adjustment,m.timezone,m.units_json FROM dataset_partitions p JOIN dataset_manifests m ON m.id=p.manifest_id WHERE p.id=?').get(id) as Record<string,any>|undefined);
+    if(selected.some(row=>!row))throw Error('snapshot partition is no longer available');
+    const parts=selected as Array<Record<string,any>>;
+    if(parts.some(row=>row.market!==snapshot.market||row.instrument!==snapshot.instrument||row.dataset!==snapshot.dataset||row.timeframe!==snapshot.timeframe||row.status!=='committed'))throw Error('snapshot partition scope or status does not match');
+    if(parts.reduce((sum,row)=>sum+Number(row.row_count||0),0)>100_000)throw Error('saved snapshot exceeds the 100000-row read limit');
+    if(!Number.isFinite(Date.parse(snapshot.asOf))||parts.some(row=>!Number.isFinite(Date.parse(String(row.published_at)))||Date.parse(String(row.published_at))>Date.parse(snapshot.asOf)))throw Error('snapshot includes a partition published after its saved asOf or has invalid time');
+    const expected=crypto.createHash('sha256').update(parts.map(row=>String(row.content_hash)).join('|')).digest('hex');
+    if(expected!==snapshot.contentHash)throw Error('snapshot partition content hash mismatch');
+    const instance=await DuckDBInstance.create(':memory:',{memory_limit:'512MB',threads:'1'}),connection=await instance.connect();
+    try {
+      const rows:Array<Record<string,unknown>>=[];
+      let totalFileBytes=0;
+      for(const part of parts){const absolute=path.resolve(String(part.path)),root=fs.realpathSync(this.lakeRoot)+path.sep;const real=fs.realpathSync(absolute),stat=fs.statSync(real);totalFileBytes+=stat.size;if(!real.startsWith(root)||!stat.isFile()||totalFileBytes>128*1024*1024)throw Error('snapshot partition path is missing, oversized or outside the data lake');const expectedFile=this.db.prepare('SELECT file_hash FROM dataset_partition_files WHERE partition_id=?').get(part.id) as {file_hash?:string}|undefined;if(!expectedFile?.file_hash)throw Error('snapshot partition has no verified file hash');const actualFile=crypto.createHash('sha256').update(fs.readFileSync(real)).digest('hex');if(actualFile!==expectedFile.file_hash)throw Error('snapshot partition file hash mismatch');const result=await connection.runAndReadAll(`SELECT observation_ts AS timestamp,open,high,low,close,volume,published_at,market,instrument,timeframe,source FROM read_parquet('${sqlPath(real)}') ORDER BY observation_ts LIMIT 100001`);const found=result.getRowObjectsJS() as Array<Record<string,unknown>>;if(found.length>100_000||found.length!==Number(part.row_count))throw Error('snapshot partition row count does not match catalog or exceeds read limit');rows.push(...found);}
+      const cutoff=Date.parse(snapshot.asOf),clipped=rows.filter(row=>{const at=row.timestamp instanceof Date?row.timestamp.getTime():Date.parse(String(row.timestamp)),published=Date.parse(String(row.published_at));return Number.isFinite(at)&&at<=cutoff&&Number.isFinite(published)&&published<=cutoff;}).sort((a,b)=>Date.parse(a.timestamp instanceof Date?a.timestamp.toISOString():String(a.timestamp))-Date.parse(b.timestamp instanceof Date?b.timestamp.toISOString():String(b.timestamp)));
+      const sources=[...new Set(parts.map(row=>String(row.source||'')).filter(Boolean))],adjustments=[...new Set(parts.map(row=>/^yahoo-finance-history(?::|$)/i.test(String(row.source))&&row.adjustment==='unadjusted'?'unknown':String(row.adjustment)))];
+      const frozenPriceUnits=parts.map(row=>{try{const units=JSON.parse(String(row.units_json||'null'));return typeof units?.price==='string'?units.price:null;}catch{return null;}});
+      const currency=frozenPriceUnits.length&&frozenPriceUnits.every(unit=>unit===frozenPriceUnits[0])&&/^[A-Z]{3,5}$/.test(frozenPriceUnits[0]||'')?frozenPriceUnits[0]:null;
+      const publishedAt=parts.map(row=>String(row.published_at)).sort().at(-1)||null;
+      const serverFetchedAt=parts.map(row=>String(row.fetched_at)).sort().at(-1)||null;
+      const iso=(value:unknown)=>{const date=value instanceof Date?value:new Date(String(value));return Number.isFinite(date.getTime())?date.toISOString():null;};
+      return {snapshot,rows:clipped,dataStatus:clipped.length?'historical':'unavailable',source:sources.join(', ')||null,updatedAt:null,publishedAt,sourceCapturedAt:null,serverFetchedAt,adjustment:adjustments.length===1?adjustments[0]:'mixed',currency,session:null,coverage:{start:clipped.length?iso(clipped[0].timestamp):null,end:clipped.length?iso(clipped.at(-1)!.timestamp):null,rows:clipped.length},...(!clipped.length?{reason:'saved snapshot partitions contain no observations at its asOf'}:{})};
+    } finally {connection.closeSync();instance.closeSync();}
   }
 
   listRevisions(market?: MarketId): DataRevision[] {
