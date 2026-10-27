@@ -6056,7 +6056,7 @@ export function getTelegramCommandHandlers(): Record<string, TelegramCommandHand
       if (!id || !['stock', 'option', 'crypto', 'prediction'].includes(type) || !venue || !symbolParts.join(':').trim()) {
         return '用法：/detail <InstrumentRef>\n支持 stock:us:AAPL、option:cboe:SPY、crypto:binance:BTCUSDT、prediction:predictfun:<marketId>';
       }
-      const detailInfo = await unifiedInstrumentService.overview({ id, type: type as any, venue, symbol: symbolParts.join(':'), title: '', aliases: [] }).catch(() => null);
+      const detailInfo = await unifiedInstrumentService.overview({ id, type: type as any, venue, symbol: symbolParts.join(':'), title: '', aliases: [] }, { includeAnalysis: true }).catch(() => null);
       if (!detailInfo) return '标的详情暂不可用';
       const q = detailInfo.quote || detailInfo.marketData || {};
       const scope = telegramInstrumentScope(detailInfo.instrument.type);
@@ -7471,7 +7471,7 @@ ${escapeTelegramHtml(position.marketTitle)} · ${escapeTelegramHtml(position.out
         if (!['stock', 'option', 'crypto', 'prediction'].includes(type) || !symbolParts.length) return telegramReply('统一标的 ID 无效');
         const itemScope = type === 'stock' ? 'stocks' : type === 'option' ? 'options' : type === 'crypto' ? 'crypto' : 'prediction';
         if (currentScope !== 'overview' && currentScope !== 'watchlist' && itemScope !== currentScope) return telegramReply(`当前为${TELEGRAM_SCOPE_LABELS[currentScope]}市场，不能查看${TELEGRAM_SCOPE_LABELS[itemScope]}标的。`);
-        const detail = await unifiedInstrumentService.overview({ id, type: type as any, venue, symbol: symbolParts.join(':'), title: '', aliases: [] }).catch(() => null);
+        const detail = await unifiedInstrumentService.overview({ id, type: type as any, venue, symbol: symbolParts.join(':'), title: '', aliases: [] }, { includeAnalysis: true }).catch(() => null);
         if (!detail) return telegramReply('标的详情暂不可用');
         const q = detail.quote || detail.marketData || {};
         return telegramReply(`<b>标的详情</b>\n${escapeTelegramHtml(detail.instrument.title)}\n${escapeTelegramHtml(detail.instrument.id)}\n价格/概率：${escapeTelegramHtml(String((q as any).price ?? (q as any).yesPrice ?? '暂无'))}\nAI：${escapeTelegramHtml(detail.analysis.text.slice(0, 500))}`);
@@ -10737,7 +10737,7 @@ app.get('/api/instruments/:type/:venue/:symbol/overview', async (req, res) => {
     if (!['stock', 'option', 'crypto', 'prediction'].includes(type)) return res.status(400).json({ success: false, error: '不支持的标的类型' });
     if (!validateInstrumentScope(type, scope)) return res.status(400).json({ success: false, error: '标的与市场范围不匹配', code: 'INSTRUMENT_SCOPE_MISMATCH' });
     const instrument = normalizeInstrumentRef({ type, venue: String(req.params.venue), symbol: decodeURIComponent(String(req.params.symbol)), title: String(req.query.title || ''), aliases: [] });
-    const data = await unifiedInstrumentService.overview(instrument);
+    const data = await unifiedInstrumentService.overview(instrument, { includeAnalysis: true });
     res.json({ success: true, data, sections: data.sections, timeline: data.timeline, status: data.status });
   } catch (error: any) {
     res.status(502).json({ success: false, error: error?.message || '标的详情暂不可用' });

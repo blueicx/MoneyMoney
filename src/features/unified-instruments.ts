@@ -362,11 +362,13 @@ export class UnifiedInstrumentService {
     return filterInstrumentResults(deduped, scope).slice(0, 20);
   }
 
-  async overview(ref: InstrumentRef): Promise<UnifiedInstrumentOverview> {
+  async overview(ref: InstrumentRef, options: { includeAnalysis?: boolean } = {}): Promise<UnifiedInstrumentOverview> {
     const normalized = normalizeInstrumentRef(ref as InstrumentInput);
-    const cached = overviewCache.get(normalized.id);
+    const includeAnalysis = options.includeAnalysis === true;
+    const cacheKey = `${normalized.id}|${includeAnalysis ? 'analysis' : 'data-only'}`;
+    const cached = overviewCache.get(cacheKey);
     if (cached && Date.now() - cached.at <= OVERVIEW_CACHE_TTL_MS) return cached.value;
-    const emptyAnalysis = { status: 'unavailable' as const, text: 'AI 分析暂不可用，其他行情数据不受影响。', updatedAt: new Date().toISOString(), cached: false };
+    const emptyAnalysis = { status: 'unavailable' as const, text: includeAnalysis ? 'AI 分析暂不可用，其他行情数据不受影响。' : '仅加载行情与事件，未请求 AI 分析。', updatedAt: new Date().toISOString(), cached: false };
     let quote: Record<string, unknown> | null = null;
     let marketData: Record<string, unknown> | null = null;
     let klines: unknown[] = [];
@@ -463,18 +465,18 @@ export class UnifiedInstrumentService {
       freshness: freshnessStatus(fetchedAt, normalized.type === 'crypto' ? 30_000 : 5 * 60_000), sourceStatus,
       sections: [], timeline: [], status: overviewDataStatus(sourceStatus),
     };
-    base.analysis = await getInstrumentAnalysis(normalized, base);
+    if (includeAnalysis) base.analysis = await getInstrumentAnalysis(normalized, base);
     base.timeline = buildInstrumentTimeline(events, news, filings, {
       newsRetrievedAt: newsSnapshot?.retrievedAt || null,
       filingsRetrievedAt,
     });
     base.sections = buildInstrumentOverviewSections(base);
-    overviewCache.set(normalized.id, { at: Date.now(), value: base });
+    overviewCache.set(cacheKey, { at: Date.now(), value: base });
     return base;
   }
 
   async timeline(ref: InstrumentRef): Promise<{ instrument: InstrumentRef; items: Array<Record<string, unknown>>; generatedAt: string; sourceStatus: UnifiedInstrumentOverview['sourceStatus']; sectionReasons?: UnifiedInstrumentOverview['sectionReasons'] }> {
-    const overview = await this.overview(ref);
+    const overview = await this.overview(ref, { includeAnalysis: false });
     return { instrument: overview.instrument, items: overview.timeline, generatedAt: new Date().toISOString(), sourceStatus: { ...overview.sourceStatus }, sectionReasons: { ...overview.sectionReasons } };
   }
 }
