@@ -57,6 +57,18 @@
   function actionPriority(row) {
     return (row.pinned?100:0)+(['failed','unavailable','stale'].includes(row.dataStatus)?20:row.dataStatus==='partial'?10:0)+(!row.read?1:0);
   }
+  function renderReviewCoverage(coverage) {
+    const host=document.getElementById('mm-review-coverage');if(!host)return;
+    host.replaceChildren();host.hidden=true;
+    if(!coverage||!Number.isSafeInteger(coverage.total)||coverage.total<0||!Number.isSafeInteger(coverage.shown)||coverage.shown<0||coverage.shown>coverage.total||typeof coverage.hasMore!=='boolean')return;
+    const summary=document.createElement('span');summary.textContent=`行动卡片候选：${coverage.shown} / ${coverage.total} 项`;
+    host.append(summary);host.hidden=false;
+    if(!coverage.hasMore)return;
+    const detail=document.createElement('span');detail.textContent=' · 覆盖不完整或存在读取警告，请到版本复查队列核对。';host.append(detail);
+    const button=document.createElement('button');button.type='button';button.textContent='打开版本复查队列';
+    button.onclick=()=>{const queue=document.querySelector('[data-review-lifecycle]');if(!queue){button.textContent='版本复查队列暂不可用，请刷新工作区';button.disabled=true;return;}queue.open=true;queue.scrollIntoView?.({behavior:'smooth',block:'start'});queue.querySelector('[data-load]')?.click();};
+    host.append(button);
+  }
   function render() {
     const host = document.getElementById('mm-action-list'); if (!host) return;
     const meta = {};
@@ -95,8 +107,8 @@
   async function loadActions() {
     controller?.abort(); controller = new AbortController(); const signal = controller.signal;
     const status = document.getElementById('mm-action-status'); status.textContent = '正在读取自选来源与处理记录…';
-    try { const market=context().market;const result = await api('/api/watchlist/action-center'+(markets[market] ? '?market='+market:''), { signal }); if (signal.aborted) return; records = result.items; operations=result.operations||[]; status.textContent = `${result.counts.unread} 项待处理 · ${window.MoneyMoneyWorkflow?.status(result.dataStatus) || result.dataStatus} · ${result.updatedAt}${result.reason ? ' · ' + result.reason : ''}`; render(); renderOperations(); }
-    catch (error) { if (error.name !== 'AbortError') status.textContent = error.message; }
+    try { const market=context().market;const result = await api('/api/watchlist/action-center'+(markets[market] ? '?market='+market:''), { signal }); if (signal.aborted) return; records = result.items; operations=result.operations||[]; renderReviewCoverage(result.reviewCoverage); status.textContent = `${result.counts.unread} 项待处理 · ${window.MoneyMoneyWorkflow?.status(result.dataStatus) || result.dataStatus} · ${result.updatedAt}${result.reason ? ' · ' + result.reason : ''}`; render(); renderOperations(); }
+    catch (error) { if (error.name !== 'AbortError') { renderReviewCoverage(null);status.textContent = error.message; } }
   }
   function renderOperations(){
     const host=document.getElementById('mm-watchlist-operations');if(!host)return;
@@ -116,7 +128,7 @@
     document.querySelectorAll('#research-tab > :not([data-workspace-id]):not([data-workspace-ids])').forEach(node=>{node.dataset.workspaceId='decision-intelligence';});
     const section = document.createElement('section'); section.id = 'mm-action-center'; section.className = 'mm-action-center';
     section.dataset.workspaceIds='watchlist action-center';section.hidden=true;
-    section.innerHTML = `<h3>自选行动与研究中心</h3><p>私人处理状态与证据 · 不执行真实交易</p><div class="mm-action-tools"><button id="mm-action-refresh">加载 / 刷新行动</button><select id="mm-action-market" aria-label="行动市场"><option value="">全部市场</option>${Object.entries(markets).map(([id,name]) => `<option value="${id}">${name}</option>`).join('')}</select><select id="mm-action-section" aria-label="行动类别"><option value="">全部类别</option>${Object.entries(kinds).map(([id,name]) => `<option value="${id}">${name}</option>`).join('')}</select><label><input type="checkbox" id="mm-action-snoozed">显示稍后处理</label></div><p id="mm-action-status" role="status">点击加载，读取真实自选记录。</p><div id="mm-action-list" aria-live="polite"></div><details><summary>研究实验并排比较</summary><label>市场 <select id="mm-experiment-market">${Object.entries(markets).map(([id,name]) => `<option value="${id}">${name}</option>`).join('')}</select></label><button id="mm-experiment-load">读取实验</button><div id="mm-experiment-options"></div><button id="mm-experiment-compare">比较选中实验（2–6个）</button><div id="mm-experiment-result" role="status"></div></details><details><summary>真实历史与快照比较</summary><label>市场 <select id="mm-history-market"><option value="options">期权</option><option value="crypto">虚拟币</option><option value="prediction">预测市场</option></select></label><label>规范标的 ID <input id="mm-history-id" placeholder="option:cboe:AAPL"></label><p>Binance 现货与 Gate.io 永续分开归档；预测市场用当前官方事件 ID，不猜测。</p><button id="mm-history-load">读取历史</button><button id="mm-history-capture">保存当前真实快照</button><div id="mm-history-result" role="status"></div></details>`;
+    section.innerHTML = `<h3>自选行动与研究中心</h3><p>私人处理状态与证据 · 不执行真实交易</p><div class="mm-action-tools"><button id="mm-action-refresh">加载 / 刷新行动</button><select id="mm-action-market" aria-label="行动市场"><option value="">全部市场</option>${Object.entries(markets).map(([id,name]) => `<option value="${id}">${name}</option>`).join('')}</select><select id="mm-action-section" aria-label="行动类别"><option value="">全部类别</option>${Object.entries(kinds).map(([id,name]) => `<option value="${id}">${name}</option>`).join('')}</select><label><input type="checkbox" id="mm-action-snoozed">显示稍后处理</label></div><p id="mm-action-status" role="status">点击加载，读取真实自选记录。</p><div id="mm-review-coverage" class="mm-action-tools" data-review-coverage role="status" hidden></div><div id="mm-action-list" aria-live="polite"></div><details><summary>研究实验并排比较</summary><label>市场 <select id="mm-experiment-market">${Object.entries(markets).map(([id,name]) => `<option value="${id}">${name}</option>`).join('')}</select></label><button id="mm-experiment-load">读取实验</button><div id="mm-experiment-options"></div><button id="mm-experiment-compare">比较选中实验（2–6个）</button><div id="mm-experiment-result" role="status"></div></details><details><summary>真实历史与快照比较</summary><label>市场 <select id="mm-history-market"><option value="options">期权</option><option value="crypto">虚拟币</option><option value="prediction">预测市场</option></select></label><label>规范标的 ID <input id="mm-history-id" placeholder="option:cboe:AAPL"></label><p>Binance 现货与 Gate.io 永续分开归档；预测市场用当前官方事件 ID，不猜测。</p><button id="mm-history-load">读取历史</button><button id="mm-history-capture">保存当前真实快照</button><div id="mm-history-result" role="status"></div></details>`;
     parent.append(section);
     section.querySelector('h3').textContent='自选行动';
     section.querySelector('.mm-action-tools').insertAdjacentHTML('beforeend','<select id="mm-action-state" aria-label="处理状态"><option value="all">全部状态</option><option value="unread">待处理</option><option value="pinned">已置顶</option></select>');
@@ -231,7 +243,7 @@
     install(); const shell = document.getElementById('market-workspace-shell');
     const sync=()=>{
       const current=context(),key=JSON.stringify(current),privateAccess=window.mm_isGuest!==true && window.mm_isLoggedIn===true;
-      if(key!==lastContext){controller?.abort();lifecycleController.abort();lifecycleController=new AbortController();lastContext=key;
+      if(key!==lastContext){controller?.abort();lifecycleController.abort();lifecycleController=new AbortController();lastContext=key;renderReviewCoverage(null);
         if(current.market!==lastScope){records=[];operations=[];lastScope=current.market;for(const id of ['mm-action-list','mm-watchlist-operations','mm-experiment-options','mm-experiment-result','mm-history-result'])document.getElementById(id)?.replaceChildren();document.querySelector('[data-comparison-options]')?.replaceChildren();document.querySelector('[data-comparison-result]')?.replaceChildren();}
         const lab=document.getElementById('mm-research-lab');lab.querySelector('[data-research-context]').textContent=(markets[current.market] || '请选择独立市场')+' / '+(current.instrument || '尚未选择标的');
         for(const id of ['mm-history-market','mm-experiment-market'])if(markets[current.market])document.getElementById(id).value=current.market;

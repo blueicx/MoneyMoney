@@ -5,6 +5,7 @@ const {waitForStableProgress,evaluateRollingAcceptance,needsAnotherObservation}=
 const {evaluateContinuousSoak}=require('../scripts/lib/continuous-soak.cjs');
 const {evaluateSourceProgress}=require('../scripts/lib/soak-progress.cjs');
 const {evaluatePublicSourceEvidence}=require('../scripts/lib/soak-source-evidence.cjs');
+const fs=require('node:fs');
 
 test('source progress uses the original five-minute evidence gate and fails missing coverage promptly',()=>{
  const report={sourceProbes:[],measuredElapsedMs:299999};
@@ -54,6 +55,139 @@ test('fails at the fixed stability budget and reports the last context and pendi
   return true;
  });
  // Scheduler load can consume the whole budget after one read; the timeout and last evidence are the contract.
+});
+
+test('timeout retains bounded, local-only request and context samples',async()=>{
+ const pending=Array.from({length:40},(_,index)=>({url:`http://127.0.0.1:3207/api/options/account-${index}?token=private#fragment`,resourceType:index===0?'fetch':'xhr'}));
+ pending.push({url:'https://outside.example/api/secret?token=private',resourceType:'fetch'});
+ await assert.rejects(waitForStableProgress({
+  readSnapshot:async()=>({market:'stocks',workspace:'stock-quotes',readyState:'complete',domElementCount:321,topLevelWorkspaceNodes:Array.from({length:20},(_,index)=>({id:`node-${index}`,nodeCount:index+1}))}),
+  getFinitePendingCount:()=>pending.filter(request=>new URL(request.url).origin==='http://127.0.0.1:3207').length,
+  getPendingRequests:()=>pending,
+  localOrigin:'http://127.0.0.1:3207',
+  expectedMarket:'stocks',timeoutMs:24,stableMs:8,pollMs:1
+ }),error=>{
+  assert.equal(error.details.pendingRequests,40);
+  assert.ok(Array.isArray(error.details.recentSamples));
+  assert.ok(error.details.recentSamples.length<=12);
+  const sample=error.details.recentSamples.at(-1);
+  assert.ok(Number.isFinite(sample.elapsedMs));
+  assert.equal(sample.market,'stocks');
+  assert.equal(sample.workspace,'stock-quotes');
+  assert.equal(sample.dom.domElementCount,321);
+  assert.ok(sample.dom.topLevelWorkspaceNodes.length<=8);
+  assert.ok(sample.pending.length<=20);
+  assert.equal(sample.pending.length,20);
+  assert.ok(sample.pending.every(item=>item.path.startsWith('/api/')));
+  assert.ok(sample.pending.every(item=>!/[?#]|token|account-\d+/.test(item.path)));
+  assert.equal(sample.pending[0].path,'/api/options/:redacted');
+  assert.equal(sample.pending[0].resourceType,'fetch');
+  assert.ok(sample.pending.every(item=>item.path.length<=160&&item.resourceType.length<=24));
+  assert.equal(error.details.timeoutMs,24);
+  return true;
+ });
+});
+
+test('redacts unknown first API segments, encoded segments, and non-API paths',async()=>{
+ const paths=[
+  '/api/supersecret?token=private',
+  '/api/%73upersecret?token=private',
+  '/profile/private-email?token=private',
+  '/api/stock/kline?symbol=usAAPL',
+  '/api/binance/klines?symbol=BTCUSDT'
+ ];
+ await assert.rejects(waitForStableProgress({
+  readSnapshot:async()=>({market:'stocks',workspace:'stock-quotes'}),
+  getFinitePendingCount:()=>paths.length,
+  getPendingRequests:()=>paths.map(url=>({url:`http://127.0.0.1:3207${url}`,resourceType:'fetch'})),
+  localOrigin:'http://127.0.0.1:3207',expectedMarket:'stocks',timeoutMs:12,stableMs:4,pollMs:1
+ }),error=>{
+  const requests=error.details.recentSamples.at(-1).pending;
+  assert.equal(requests[0].path,'/api/:redacted');
+  assert.equal(requests[1].path,'/api/:redacted');
+  assert.equal(requests[2].path,'/:redacted/:redacted');
+  assert.equal(requests[3].path,'/api/stock/kline');
+  assert.equal(requests[4].path,'/api/binance/klines');
+  return true;
+ });
+});
+
+test('diagnostic DOM summary prioritizes the active workspace root at the end of a long list',async()=>{
+ const nodes=Array.from({length:35},(_,index)=>({id:`root-${index}`,workspaceId:`other-${index}`,nodeCount:index+1}));
+ nodes[34]={id:'active-root',workspaceId:'stock-quotes',nodeCount:345};
+ await assert.rejects(waitForStableProgress({
+  readSnapshot:async()=>({market:'stocks',workspace:'stock-quotes',readyState:'complete',domElementCount:500,topLevelWorkspaceNodes:nodes}),
+  getFinitePendingCount:()=>1,getPendingRequests:()=>[],localOrigin:'http://127.0.0.1:3207',
+  expectedMarket:'stocks',timeoutMs:12,stableMs:4,pollMs:1
+ }),error=>{
+  const summary=error.details.recentSamples.at(-1).dom.topLevelWorkspaceNodes;
+  assert.equal(summary.length,8);
+  assert.equal(summary[0].workspaceId,'stock-quotes');
+  assert.equal(summary[0].id,'active-root');
+  return true;
+ });
+});
+
+test('timeout samples retain both early and late states across the entire wait window',async()=>{
+ let fakeNow=0;
+ const errorPromise=assert.rejects(waitForStableProgress({
+  readSnapshot:async()=>({market:'stocks',workspace:'stock-quotes'}),
+  getFinitePendingCount:()=>1,
+  getPendingRequests:()=>{
+   if(fakeNow<300)return [{url:'http://127.0.0.1:3207/api/stock/kline',resourceType:'fetch'}];
+   if(fakeNow>1000)return [{url:'http://127.0.0.1:3207/api/binance/klines',resourceType:'xhr'}];
+   return [];
+  },
+  localOrigin:'http://127.0.0.1:3207',expectedMarket:'stocks',timeoutMs:1400,stableMs:500,pollMs:100,
+  now:()=>fakeNow,sleepFor:async ms=>{fakeNow+=ms;}
+ }),error=>{
+  assert.equal(error.details.timeoutMs,1400);
+  const samples=error.details.recentSamples;
+  assert.ok(samples.length<=12);
+  const early=samples.find(sample=>sample.pending.some(item=>item.path==='/api/stock/kline'));
+  const late=samples.find(sample=>sample.pending.some(item=>item.path==='/api/binance/klines'));
+  assert.ok(early,'early request evidence remains available');
+  assert.ok(late,'late request evidence remains available');
+  assert.ok(early.elapsedMs<300);
+  assert.ok(late.elapsedMs>1000);
+  return true;
+ });
+ await errorPromise;
+});
+
+test('stability continues to use the complete DOM context beyond the diagnostic summary limit',async()=>{
+ let reads=0;
+ const snapshot=await waitForStableProgress({
+  readSnapshot:async()=>{
+   reads++;
+   const nodes=Array.from({length:10},(_,index)=>({id:`root-${index}`,workspaceId:`other-${index}`,nodeCount:index+1}));
+   nodes[9]={id:'active-root',workspaceId:'stock-quotes',nodeCount:reads===1?10:20};
+   return {market:'stocks',workspace:'stock-quotes',readyState:'complete',topLevelWorkspaceNodes:nodes};
+  },
+  getFinitePendingCount:()=>0,expectedMarket:'stocks',timeoutMs:500,stableMs:60,pollMs:1
+ });
+ assert.equal(snapshot.topLevelWorkspaceNodes.at(-1).nodeCount,20);
+ assert.ok(reads>5);
+});
+
+test('timeout diagnostics handle empty and absent snapshots and retain fixed production budgets',async()=>{
+ for(const readSnapshot of [async()=>null,async()=>({})]){
+  await assert.rejects(waitForStableProgress({readSnapshot,getFinitePendingCount:()=>0,getPendingRequests:()=>[],localOrigin:'http://127.0.0.1:3207',expectedMarket:'stocks',timeoutMs:12,stableMs:4,pollMs:1}),error=>{
+   assert.equal(error.name,'SoakProgressTimeout');
+   assert.ok(error.details.recentSamples.length>0);
+   assert.ok(error.details.recentSamples.length<=12);
+   assert.equal(error.details.recentSamples.at(-1).market,null);
+   assert.deepEqual(error.details.recentSamples.at(-1).pending,[]);
+   return true;
+  });
+ }
+ await assert.rejects(waitForStableProgress({readSnapshot:()=>new Promise(()=>{}),getFinitePendingCount:()=>0,getPendingRequests:()=>[],localOrigin:'http://127.0.0.1:3207',expectedMarket:'stocks',timeoutMs:12,stableMs:4,pollMs:1}),error=>{
+  assert.equal(error.details.snapshot,null);
+  assert.deepEqual(error.details.recentSamples,[]);
+  return true;
+ });
+ const source=fs.readFileSync(require.resolve('../scripts/long-session-smoke.cjs'),'utf8');
+ assert.match(source,/timeoutMs:5000,stableMs:500,pollMs:50/);
 });
 
 test('bounds a stalled context read by the same monotonic deadline',async()=>{
