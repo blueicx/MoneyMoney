@@ -86,7 +86,8 @@ export const FOMC_MEETING_DATES = [
 ];
 
 let memoryCache: { ts: number; value: UpcomingEventCalendar } | null = null;
-let loading: Promise<UpcomingEventCalendar> | null = null;
+let loading: { key: string; promise: Promise<UpcomingEventCalendar> } | null = null;
+const backgroundRefresh = new Map<string, Promise<void>>();
 let translationRefresh: Promise<void> | null = null;
 let earningsCompanyLookup: Map<string, string> | null = null;
 
@@ -560,6 +561,11 @@ function startTranslationRefresh(value: UpcomingEventCalendar): void {
     });
 }
 
+function cachedCalendarSourceStatus(status: CalendarSourceStatus | undefined): CalendarSourceStatus {
+  if (status === 'live' || status === 'cached') return 'cached';
+  return status === 'partial' ? 'partial' : 'unavailable';
+}
+
 async function fetchUpcomingEventCalendar(days: number): Promise<UpcomingEventCalendar> {
   const reference = new Date();
   const dates = Array.from({ length: days }, (_, index) => isoDate(addDays(reference, index)));
@@ -607,12 +613,42 @@ async function fetchUpcomingEventCalendar(days: number): Promise<UpcomingEventCa
 
 export async function getUpcomingEventCalendar(requestedDays?: number, force = false): Promise<UpcomingEventCalendar> {
   const days = Math.min(30, Math.max(1, Number(requestedDays) || 7));
-  if (!force && memoryCache && Date.now() - memoryCache.ts < MEMORY_TTL_MS && memoryCache.value.endDate === isoDate(new Date())) {
-    return memoryCache.value;
+  const startDate = isoDate(new Date());
+  const endDate = isoDate(addDays(new Date(`${startDate}T00:00:00Z`), days));
+  const key = `${startDate}|${endDate}`;
+  const cached = memoryCache;
+  const age = cached ? Date.now() - cached.ts : -1;
+  const sourceAge = cached ? Date.now() - Date.parse(cached.value.fetchedAt) : NaN;
+  const matching = cached && cached.value.startDate === startDate && cached.value.endDate === endDate;
+  const withinStaleLimit = Number.isFinite(sourceAge) && sourceAge >= 0 && sourceAge <= MAX_STALE_MS;
+  if (!force && cached && matching && age >= 0 && age < MEMORY_TTL_MS && (!cached.value.stale || withinStaleLimit)) return cached.value;
+  if (!force && cached && matching && age >= MEMORY_TTL_MS && withinStaleLimit) {
+    if (!backgroundRefresh.has(key)) {
+      const refresh = getUpcomingEventCalendar(days, true).then(() => undefined, () => undefined)
+        .finally(() => { if (backgroundRefresh.get(key) === refresh) backgroundRefresh.delete(key); });
+      backgroundRefresh.set(key, refresh);
+    }
+    const value = cached.value;
+    const reason = '缓存已过期，正在后台刷新';
+    return {
+      ...value,
+      stale: true,
+      sourceStatus: value.sourceStatus ? { macro: cachedCalendarSourceStatus(value.sourceStatus.macro), earnings: cachedCalendarSourceStatus(value.sourceStatus.earnings) } : undefined,
+      sourceReasons: {
+        macro: [value.sourceReasons?.macro, reason].filter(Boolean).join('；'),
+        earnings: [value.sourceReasons?.earnings, reason].filter(Boolean).join('；'),
+      },
+      warnings: [...value.warnings, reason],
+    };
   }
-  if (loading) return loading;
+  if (loading) {
+    if (loading.key === key) return loading.promise;
+    await loading.promise.catch(() => undefined);
+    return getUpcomingEventCalendar(days, force);
+  }
 
-  loading = fetchUpcomingEventCalendar(days).then(async value => {
+  const active = { key, promise: null as unknown as Promise<UpcomingEventCalendar> };
+  active.promise = fetchUpcomingEventCalendar(days).then(async value => {
     try {
       ensureDir(DATA_ROOT);
       await fs.promises.writeFile(DISK_CACHE, JSON.stringify(value), 'utf8');
@@ -624,17 +660,20 @@ export async function getUpcomingEventCalendar(requestedDays?: number, force = f
     try {
       const parsed = JSON.parse(await fs.promises.readFile(DISK_CACHE, 'utf8')) as UpcomingEventCalendar;
       const age = Date.now() - new Date(parsed.fetchedAt).getTime();
-      if (Array.isArray(parsed.events) && age >= 0 && age <= MAX_STALE_MS) {
+      const parsedStart = Date.parse(`${parsed.startDate}T00:00:00Z`), parsedEnd = Date.parse(`${parsed.endDate}T00:00:00Z`);
+      const requestedSpan = Date.parse(`${endDate}T00:00:00Z`) - Date.parse(`${startDate}T00:00:00Z`);
+      const sameHorizon = Number.isFinite(parsedStart) && Number.isFinite(parsedEnd) && parsedEnd - parsedStart === requestedSpan;
+      if (Array.isArray(parsed.events) && sameHorizon && age >= 0 && age <= MAX_STALE_MS) {
         const value = normalizeCachedFomcSchedule({
           ...parsed,
           stale: true,
           sourceStatus: {
-            macro: 'cached',
-            earnings: 'cached',
+            macro: cachedCalendarSourceStatus(parsed.sourceStatus?.macro),
+            earnings: cachedCalendarSourceStatus(parsed.sourceStatus?.earnings),
           },
           sourceReasons: {
-            macro: '宏观日历请求失败，使用本地近期缓存',
-            earnings: '财报日历请求失败，使用本地近期缓存',
+            macro: [parsed.sourceReasons?.macro, '宏观日历请求失败，使用本地近期缓存'].filter(Boolean).join('；'),
+            earnings: [parsed.sourceReasons?.earnings, '财报日历请求失败，使用本地近期缓存'].filter(Boolean).join('；'),
           },
         });
         memoryCache = { ts: Date.now(), value };
@@ -643,7 +682,8 @@ export async function getUpcomingEventCalendar(requestedDays?: number, force = f
     } catch {}
     throw error;
   }).finally(() => {
-    loading = null;
+    if (loading === active) loading = null;
   });
-  return loading;
+  loading = active;
+  return active.promise;
 }
