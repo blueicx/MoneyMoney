@@ -280,31 +280,31 @@
         <p id="ai-runner-desc" style="font-size:11.5px;color:var(--text-secondary);margin-bottom:10px;">规则跑单、AI 只读评审、受风控约束的 AI 模拟单均使用独立账本。股票仅有日K而无实时盘口时只记录研究决策；期权仅开放经核验的 Deribit BTC/ETH 完整合约、双边报价和可见深度，并且只允许有限损失的买入模拟。AI 跑单默认开启模拟能力，不自动创建或恢复跑单；真实交易关闭。</p>
         <div id="ai-runner-feature-state" class="empty-tip" hidden aria-live="polite" style="margin-bottom:10px;">AI 模拟跑单功能当前由服务端安全开关关闭；此处仅查看历史记录，不会启动或执行跑单。</div>
         <div id="ai-runners-summary" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;margin-bottom:12px;"></div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px;">
-          <select id="ai-runner-venue" onchange="syncAiRunnerVenueHint()" style="padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);font-size:12px;">
+        <div class="mm-runner-create-form">
+          <label class="mm-runner-field" for="ai-runner-venue"><span>市场</span><select id="ai-runner-venue" onchange="syncAiRunnerVenueHint()" style="padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);font-size:12px;">
             <option value="Binance">🏦 币安</option>
             <option value="Predict.fun">🎯 Predict.fun</option>
             <option value="Stocks">📈 美股</option>
             <option value="Options" title="仅支持经核验的 Deribit BTC/ETH 完整到期合约；历史不足时不提供规则回测">🧾 Deribit 期权（模拟买入）</option>
-          </select>
-          <select id="ai-runner-universe-kind" onchange="syncAiRunnerUniverseHint()" style="padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);font-size:12px;">
+          </select></label>
+          <label class="mm-runner-field" for="ai-runner-universe-kind"><span>标的范围</span><select id="ai-runner-universe-kind" onchange="syncAiRunnerUniverseHint()" style="padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);font-size:12px;">
             <option value="single">单标的</option><option value="watchlist">冻结自选组（最多5个）</option>
-          </select>
-          <input id="ai-runner-symbol" placeholder="如 BTCUSDT / 市场ID" aria-label="跑单标的；自选组以逗号分隔" style="width:160px;padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);font-size:12px;text-transform:uppercase;">
-          <select id="ai-runner-mode" onchange="syncAiRunnerModeHint()" aria-label="跑单模式" style="padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);font-size:12px;">
+          </select></label>
+          <label class="mm-runner-field" for="ai-runner-symbol"><span>标的</span><input id="ai-runner-symbol" placeholder="如 BTCUSDT / 市场ID" aria-label="跑单标的；自选组以逗号分隔" style="width:160px;padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);font-size:12px;text-transform:uppercase;"></label>
+          <label class="mm-runner-field" for="ai-runner-mode"><span>跑单模式</span><select id="ai-runner-mode" onchange="syncAiRunnerModeHint()" aria-label="跑单模式" style="padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);font-size:12px;">
             <option value="rules">规则策略</option><option value="ai-review">AI 只读评审</option><option value="ai-autonomous-paper">AI 自主模拟单</option>
-          </select>
-          <select id="ai-runner-trigger" aria-label="AI 触发方式" disabled style="padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);font-size:12px;">
+          </select></label>
+          <label class="mm-runner-field" for="ai-runner-trigger"><span>触发方式</span><select id="ai-runner-trigger" aria-label="AI 触发方式" disabled style="padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);font-size:12px;">
             <option value="scheduled">定时（每小时）</option><option value="signal">候选信号（至少15分钟）</option>
-          </select>
-          <input id="ai-runner-budget" type="number" placeholder="预算 $" min="1" step="1" style="width:90px;padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);font-size:12px;">
-          <input id="ai-runner-max-trade" type="number" placeholder="单笔上限 $" min="1" step="1" style="width:92px;padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);font-size:12px;">
-          <input id="ai-runner-max-positions" type="number" placeholder="最大持仓" min="1" step="1" value="1" style="width:82px;padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);font-size:12px;">
-          <input id="ai-runner-daily-loss" type="number" placeholder="日损上限 $" min="1" step="1" style="width:92px;padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);font-size:12px;">
-          <input id="ai-runner-max-dd" type="number" placeholder="回撤上限 %" min="1" max="100" step="1" value="20" style="width:88px;padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);font-size:12px;">
-          <input id="ai-runner-cooldown" type="number" placeholder="冷却分钟" min="0" step="1" value="15" style="width:82px;padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);font-size:12px;">
+          </select></label>
+          <label class="mm-runner-field" for="ai-runner-budget"><span>预算 ($)</span><input id="ai-runner-budget" type="number" placeholder="预算 $" min="1" step="1" style="width:90px;padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);font-size:12px;"></label>
+          <label class="mm-runner-field" for="ai-runner-max-trade"><span>单笔上限 ($)</span><input id="ai-runner-max-trade" type="number" placeholder="单笔上限 $" min="1" step="1" style="width:92px;padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);font-size:12px;"></label>
+          <label class="mm-runner-field" for="ai-runner-max-positions"><span>最大持仓</span><input id="ai-runner-max-positions" type="number" placeholder="最大持仓" min="1" step="1" value="1" style="width:82px;padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);font-size:12px;"></label>
+          <label class="mm-runner-field" for="ai-runner-daily-loss"><span>日损上限 ($)</span><input id="ai-runner-daily-loss" type="number" placeholder="日损上限 $" min="1" step="1" style="width:92px;padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);font-size:12px;"></label>
+          <label class="mm-runner-field" for="ai-runner-max-dd"><span>回撤上限 (%)</span><input id="ai-runner-max-dd" type="number" placeholder="回撤上限 %" min="1" max="100" step="1" value="20" style="width:88px;padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);font-size:12px;"></label>
+          <label class="mm-runner-field" for="ai-runner-cooldown"><span>冷却分钟</span><input id="ai-runner-cooldown" type="number" placeholder="冷却分钟" min="0" step="1" value="15" style="width:82px;padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);font-size:12px;"></label>
           <button id="ai-runner-create-btn" class="tab active" onclick="createAiRunner()" style="padding:7px 16px;font-size:12.5px;">▶ 启动</button>
-          <input id="ai-runner-comparison-seed" type="number" min="0" max="2147483647" value="42" aria-label="对照随机种子" style="width:90px;">
+          <label class="mm-runner-field" for="ai-runner-comparison-seed"><span>对照随机种子</span><input id="ai-runner-comparison-seed" type="number" min="0" max="2147483647" value="42" aria-label="对照随机种子" style="width:90px;"></label>
           <button id="ai-runner-comparison-create" class="tab" type="button" onclick="createAiRunner(true)">建立三模式对照（默认暂停）</button>
           <button id="ai-runner-tick-btn" class="tab" onclick="tickAiRunners()" style="padding:7px 14px;font-size:12.5px;">⚡ 执行一轮</button>
         </div>

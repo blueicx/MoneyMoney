@@ -699,7 +699,7 @@ async function loadAiRunners() {
         : '固定来源';
       const benchmarkText = s.benchmarkPnlUsd == null ? (s.benchmarkReason || `持有基准积累中 ${s.benchmarkCount || 0}/${s.benchmarkExpectedCount || 1}`) : `首次有效报价以来持有基准 ${s.benchmarkPnlUsd >= 0 ? '+' : ''}$${s.benchmarkPnlUsd.toFixed(2)} (${s.benchmarkReturnPct >= 0 ? '+' : ''}${s.benchmarkReturnPct}%)`;
       return `
-      <div style="background:var(--bg-card);border-radius:12px;padding:14px;margin-bottom:10px;box-shadow:var(--shadow);font-size:12.5px;">
+      <div class="mm-runner-card" style="background:var(--bg-card);border-radius:12px;padding:14px;margin-bottom:10px;box-shadow:var(--shadow);font-size:12.5px;">
         <div style="display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap;">
           <span style="font-weight:700;">${!enabled ? '🔒' : r.status === 'RUNNING' ? '🟢' : '⏹'} ${safeNewsText(r.title)} <span style="color:var(--text-secondary);font-size:10.5px;">${modeName} · ${r.universe?.kind === 'watchlist' ? '冻结自选组' : '单标的'}${!enabled ? ' · 服务端已停用' : ''}</span></span>
           <span style="color:${pnlColor};font-weight:700;">${(s.totalPnlUsd ?? 0) >= 0 ? '+' : ''}$${s.totalPnlUsd?.toFixed(2) ?? '0.00'}</span>

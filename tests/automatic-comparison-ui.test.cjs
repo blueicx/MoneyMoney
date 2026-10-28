@@ -43,3 +43,26 @@ test('rebuild can randomly select one listed free model and freeze it for the gr
  w.document.querySelector('[data-rebuild]').click();await new Promise(resolve=>setImmediate(resolve));
  assert.equal(sent.modelSelection,'random-free');assert.equal(sent.market,'stocks');assert.equal(sent.model,undefined);dom.window.close();
 });
+test('recent rounds are readable and older saved rounds are available on demand',async()=>{
+ const dom=new JSDOM('<div id="paper-tab" class="active"><div id="ai-runners-list"></div></div>',{url:'https://example.com',runScripts:'outside-only',pretendToBeVisual:true}),w=dom.window;
+ const history=Array.from({length:15},(_,i)=>({market:'stocks',at:`2026-10-28T${String(i).padStart(2,'0')}:00:00Z`,instrument:`SYM${i}`,status:'waiting',reason:`原因 ${i}`}));
+ w.mm_isGuest=false;w.fetch=async()=>({ok:true,json:async()=>({success:true,featureEnabled:true,budget:{remaining:0},data:{enabled:true,groups:[],history}})});
+ w.eval(fs.readFileSync(path.join(__dirname,'../src/web/public/automatic-comparison.js'),'utf8'));await w.MoneyMoneyAutomaticComparison.refresh('stocks');
+ const panel=w.document.getElementById('mm-automatic-comparison'),details=panel.querySelector('[data-history-details]');
+ assert.ok(details,'older records should be in an expandable section');assert.equal(details.open,false);assert.match(details.textContent,/SYM14/);
+ assert.match(panel.textContent,/原因 0/);assert.ok(panel.querySelector('[data-auto-status][role="status"]'));dom.window.close();
+});
+test('runner creation controls have accessible names even when values replace placeholders',()=>{
+ const html=fs.readFileSync(path.join(__dirname,'../src/web/public/index.html'),'utf8');
+ const dom=new JSDOM(html);const doc=dom.window.document;
+ for(const id of ['ai-runner-venue','ai-runner-universe-kind','ai-runner-budget','ai-runner-max-trade','ai-runner-max-positions','ai-runner-daily-loss','ai-runner-max-dd','ai-runner-cooldown']){
+  const control=doc.getElementById(id);assert.ok(control?.getAttribute('aria-label') || doc.querySelector(`label[for="${id}"]`),`${id} requires a persistent accessible name`);
+ }
+ dom.window.close();
+});
+test('a failed comparison read exposes the reason and a manual retry',async()=>{
+ const dom=new JSDOM('<div id="paper-tab" class="active"><div id="ai-runners-list"></div></div>',{url:'https://example.com',runScripts:'outside-only',pretendToBeVisual:true}),w=dom.window;
+ let calls=0;w.mm_isGuest=false;w.fetch=async()=>{calls++;if(calls===1)throw new Error('连接失败');return {ok:true,json:async()=>({success:true,featureEnabled:true,budget:{remaining:24},data:{enabled:false,groups:[],history:[]}})};};
+ w.eval(fs.readFileSync(path.join(__dirname,'../src/web/public/automatic-comparison.js'),'utf8'));await w.MoneyMoneyAutomaticComparison.refresh('stocks');
+ const panel=w.document.getElementById('mm-automatic-comparison');assert.match(panel.textContent,/连接失败/);const retry=panel.querySelector('button');assert.ok(retry,'failure should offer a retry');retry.click();await new Promise(resolve=>setImmediate(resolve));assert.equal(calls,2);assert.match(panel.textContent,/最近轮次/);dom.window.close();
+});

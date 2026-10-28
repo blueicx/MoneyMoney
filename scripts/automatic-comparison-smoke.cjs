@@ -70,6 +70,16 @@ async function main(){let browser;try{
    await page.evaluate(theme=>{if(theme==='light')document.documentElement.removeAttribute('data-theme');else document.documentElement.setAttribute('data-theme',theme);},theme);
    await page.waitForTimeout(250);
    themes.push(await panel.locator('button[data-rebuild]').evaluate(b=>({background:getComputedStyle(b).backgroundColor,color:getComputedStyle(b).color})));
+   for(const width of [375,390,1003,1440]){
+     await page.setViewportSize({width,height:900});
+     assert.ok(await panel.evaluate(el=>el.scrollWidth<=el.clientWidth+2),`${theme}/${width}: panel must not clip horizontally`);
+     const form=page.locator('.mm-runner-create-form');
+     assert.ok(await form.evaluate(el=>el.scrollWidth<=el.clientWidth+2),`${theme}/${width}: runner form must not clip horizontally`);
+     if(width===390 || width===1440) {
+       await panel.screenshot({path:path.join(dir,`automatic-${theme}-${width}.png`)});
+       await form.screenshot({path:path.join(dir,`runner-form-${theme}-${width}.png`)});
+     }
+   }
  }
  assert.equal(new Set(themes.map(t=>t.background+'|'+t.color)).size,3,'all theme controls change: '+JSON.stringify(themes));
  await page.setViewportSize({width:390,height:844});assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+2),'mobile no horizontal overflow');
