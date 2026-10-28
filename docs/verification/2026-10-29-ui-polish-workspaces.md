@@ -5,3 +5,11 @@
 - 隔离浏览器矩阵对总览、股票行情、期权链、虚拟币行情、预测雷达、事件、筛选、风险、决策、研究实验室、行动中心、模拟盘和设置分别检查三主题与 375/390/1003/1440px 的整页横向溢出；并验证研究标签对比色和设置表格可滚动。截图与尺寸数据保留于 `C:\Users\blueice\AppData\Local\Temp\moneymoney-browser-matrix-bC6QPr`。最初对比色断言及未标注滚动区域的失败均已复现后修复；一次断言在主题动画中读取颜色，等待动画完成后复验。
 - 构建、串行全量回归（484 文件、2350 项通过、0 失败，日志 `E:\MYC\mm-ui-polish-second-regression.log`）、live-kline 图表冒烟、安全扫描（1246 文件）和 `git diff --check` 通过。
 - 该矩阵验证入口和整页几何，并非所有折叠面板、所有数据状态及所有控件的逐项视觉审查；后续仍应按使用反馈持续整理。20% 性能和 24 小时可靠性保持独立未通过。
+
+## 发布和线上核验
+
+- 第一批 `f649812` 的 CI 运行 40737749132 通过；最终代码 `d19d35ba8b4bc552c583847f88cbf7a8e0a0fa37` 的 CI 运行 40741659237 通过。干净导出独立构建，自动对照和扩展工作区浏览器检查再次通过。
+- 发布前备份 `/opt/moneymoney/data/backups/2026-10-28T18-06-40-394Z`，77 文件、2 个 SQLite，隔离恢复演练通过；15 份既有损坏原件作为隔离证据保留，数据覆盖为 partial。备份脚本最后因传输行尾产生非零退出；备份、隔离演练成功输出及清单存在已单独核对。
+- 发布包 SHA-256 `f865e0a3187b310ff8f4da2518a9c1367acb341cd36de553eb604051acbea488`。部署仅替换 `dist` 并重启 `moneymoney.service`，保留 `/opt/moneymoney/backups/dist-pre-ui-d19d35b-20261029` 和 `/opt/moneymoney/dist.rollback-ui-d19d35b-20261029`。部署脚本末尾健康命令因传输行尾返回错误，独立复核服务 active、版本为 `d19d35b`，当前与回滚目录的 server/index Hash 均符合预期。
+- 本地干净构建和线上 `dist/web` 396 文件逐项 SHA-256 相同；匿名对自动对照、跑单、证据缺口和定时报告接口均返回 401，访客均返回 403。四市场、SNDK 正式域名只读浏览器验收通过，报告 `E:\MYC\mm-ui-d19d35b-production-canary\production-canary-report.json`。
+- 发布前后 10 个 runner 配置指纹均为 `5125162b35c9893e4a9ac7d11c40eeaca7297bd95d7434d6bec70712aa144181`。本地未跟踪数据库未进入提交。UI 上线不代表性能或 24 小时可靠性验收通过。
