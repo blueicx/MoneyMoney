@@ -45,7 +45,11 @@ async function main(){let browser;const report={status:'running',runId,requested
    report.sourceProbes.push(sample);fs.appendFileSync(path.join(data,'source-probes.ndjson'),JSON.stringify(sample)+'\n');
   }));}
   const readWorkspaceContext=()=>page.evaluate(()=>{const shell=document.getElementById('market-workspace-shell'),selector='[data-workspace-id], [data-workspace-ids]',nodes=Array.from(shell?.querySelectorAll(selector)||[]),roots=nodes.filter(node=>{let parent=node.parentElement;while(parent&&parent!==shell){if(parent.matches(selector))return false;parent=parent.parentElement;}return true;});return {market:shell?.dataset.marketScope||null,workspace:shell?.dataset.workspace||null,readyState:document.readyState,domElementCount:document.getElementsByTagName('*').length,topLevelWorkspaceNodes:roots.map(node=>({id:node.id||null,workspaceId:node.dataset.workspaceId||null,workspaceIds:node.dataset.workspaceIds||null,nodeCount:node.getElementsByTagName('*').length+1}))};});
-  const waitForMarket=market=>waitForStableProgress({readSnapshot:readWorkspaceContext,getFinitePendingCount:()=>[...pending].filter(request=>request.resourceType()!=='eventsource').length,getPendingRequests:()=>[...pending].filter(request=>request.resourceType()!=='eventsource').map(request=>({url:request.url(),resourceType:request.resourceType()})),localOrigin:base,expectedMarket:market,timeoutMs:5000,stableMs:500,pollMs:50});
+  // 真实来源分支下，单个市场切换会触发该市场自己的真实外部请求链（例如期权链需并行调用
+  // Deribit 指数价、合约列表与全量 book summary，单次调用允许至多 15000ms；现货/加密货币
+  // 单次外部调用允许至多 8000-15000ms）。20000ms/750ms 的窗口为已知最慢来源调用上限预留
+  // 冗余，同时仍能捕获真正卡死（远超所有来源既定超时）的情形；不覆盖创建/销毁等纯本地合成压测。
+  const waitForMarket=market=>waitForStableProgress({readSnapshot:readWorkspaceContext,getFinitePendingCount:()=>[...pending].filter(request=>request.resourceType()!=='eventsource').length,getPendingRequests:()=>[...pending].filter(request=>request.resourceType()!=='eventsource').map(request=>({url:request.url(),resourceType:request.resourceType()})),localOrigin:base,expectedMarket:market,timeoutMs:20000,stableMs:750,pollMs:50});
   for(const market of ['stocks','options','crypto','prediction']){await page.evaluate(m=>window.setMarketScope(m),market);await waitForMarket(market);}
   const domCountersBefore=await cdp.send('Memory.getDOMCounters');
   await page.setViewportSize(round%2?{width:844,height:390}:{width:390,height:844});

@@ -187,7 +187,13 @@ test('timeout diagnostics handle empty and absent snapshots and retain fixed pro
   return true;
  });
  const source=fs.readFileSync(require.resolve('../scripts/long-session-smoke.cjs'),'utf8');
- assert.match(source,/timeoutMs:5000,stableMs:500,pollMs:50/);
+ // 2026-10-28: 连续三轮固定构建 24 小时隔离运行均在真实来源分支下，于期权链(Deribit 全量
+ // book summary，单次调用上限 15000ms)或加密货币(3 路并行 Binance 调用，单次上限 8000ms)
+ // 首次冷加载时在原 5000ms/500ms 窗口内失败；rollingAcceptance/sourceProgressAcceptance
+ // 均通过，且无一次触发任何单来源自身的超时，证明是真实外部往返耗时合理但超出原窗口，而
+ // 非来源挂起或应用卡死。将预算放宽到已知最慢来源超时之上(20000ms)并保留 750ms 稳定窗口，
+ // 继续能捕获远超所有来源既定超时的真正卡死；此断言继续钉住该固定值防止未来静默改动。
+ assert.match(source,/timeoutMs:20000,stableMs:750,pollMs:50/);
 });
 
 test('bounds a stalled context read by the same monotonic deadline',async()=>{
