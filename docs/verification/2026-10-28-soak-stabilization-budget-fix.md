@@ -25,4 +25,14 @@
 
 - 以 `git archive 8eaad1b74eae58d6d5a71cd3cd30e67b0df05b5b` 导出独立构建目录 `E:\\MYC\\mm-soak-r4-release`，`npm ci`（批准 `better-sqlite3`、`esbuild` 的安装脚本）、`MONEYMONEY_BUILD_ID=8eaad1b74eae58d6d5a71cd3cd30e67b0df05b5b npm run build`，构建身份确认为 `8eaad1b74eae58d6d5a71cd3cd30e67b0df05b5b`，`buildFingerprint=3fdc5ebbbe812f770d189139f55647df661a168a7ab1592b12bae2f4e8f60fa8`。
 - 启动独立隔离轮次：`E:\\MYC\\mm-soak-r4-24h-run.json`，runId `38a5cb94-ade9-4f52-a55e-e7670f62de23`，于 2026-10-28T13:50:02.513Z 开始计时；启动后约 3 分钟已完成 3 轮测量，`rollingAcceptance` 持续 `passed`，未再复现前三轮的失败模式。
-- 本轮仍需独立运行满 1440 分钟且 `continuousAcceptance`/`publicSourceAcceptance` 均 `passed` 才计为通过；`moneymoney-24` 心跳自动化已更新为跟踪本轮。此前三轮失败证据保留在原目录，不接续其计时。
+- `scripts/soak-supervisor.cjs inspect` 最终返回 `status=interrupted`、`heartbeatAgeMs=11410992`，原因固定为 `legacy run descriptor has no signed run id, OS process start identity, or supervisor heartbeat`。该轮描述符没有正式的签名运行身份、操作系统进程启动身份或 supervisor 心跳，因此官方监督器无法证明被测进程持续运行的是同一固定构建。
+- 该轮实际进程树随后由 PID、命令行和隔离服务器 guard 交叉确认，并在停止后复核 PID `57236`、`34860`、`61376` 均已退出。未改动生产进程、数据或 runner。
+- 保留的原始 `soak-report.json` 仍为未完成状态 `running`，`measuredElapsedMs=11310418.7334`（约 188.5 分钟，3 小时 8 分），远低于验收要求的 1440 分钟。报告中的 runId、固定构建 `8eaad1b`、`buildFingerprint=3fdc5ebbbe812f770d189139f55647df661a168a7ab1592b12bae2f4e8f60fa8`、`restarts=0`、空 `failedChecks` 与空 `pageErrors` 均一致；`rollingAcceptance` 和 `sourceProgressAcceptance` 虽为 `passed`，但均带 `progressOnly=true`，`continuousAcceptance` 与 `publicSourceAcceptance` 尚不存在。
+- 644 次公开来源探针中 643 次成功：股票、虚拟币和预测市场均为 161/161，期权为 160/161；最大来源探针间隔低于五分钟。该结果只支持运行期间的外部读取进度，不构成 24 小时连续验收。
+- 结论：**未通过且不可续算**。不能把 `progressOnly` 结果、未完成原始报告或中断前时长推定为 24 小时通过；不调整稳定窗口阈值，不重启或接续本轮，后续验收必须使用具备签名 runId、操作系统启动身份与 supervisor 心跳的全新固定构建轮次，并从头计满 1440 分钟。
+- 原始证据保留在 `E:\\MYC\\mm-soak-r4-24h-supervised\\runs\\38a5cb94-ade9-4f52-a55e-e7670f62de23`：
+  - `soak-report.json`：`4ca2b4a0f32b5d9af9f1daa2666f5d9bee80e5129403ffa770bef62724150f57`
+  - `source-probes.ndjson`：`c117bd46d0580c762d809bf1aa004f80a17d3cc63ae8067c687fa1e0dfcee1b8`
+  - `network.ndjson`：`140534d293bfbad134b78186d40e1c288671d4903da565772e0a90d8591e0dca`
+  - `supervisor.log`：`efb5c10dca20a98ac52343c23dc7424f63b9999bc20c735ea8a449d476b63e10`
+- `moneymoney-24` 自动化已停止跟踪这条不可验证且已结束的轮次；新的正式轮次需要先由用户决定是否启动。
