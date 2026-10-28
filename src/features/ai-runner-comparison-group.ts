@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { stateStore } from '../storage/sqlite-state';
 import { createAiRunner, freezeAiRunnerUniverse, getAiRunners, type AiRunner, type AiRunnerPolicy, type AiRunnerInstrumentRef, type AiRunnerVenue } from './ai-paper-runner';
+import { runnerSnapshotHash } from './runner-execution-evidence';
 
 export interface AiRunnerComparisonGroup {
   id: string; market: string; createdAt: string; runnerIds: string[]; universeHash: string;
@@ -96,13 +97,13 @@ export function buildAiRunnerComparisonSample(group: AiRunnerComparisonGroup, id
   if (inputs.some(row => row.market !== group.market || !allowed.has(row.instrument)) || new Set(inputs.map(row => row.instrument)).size !== inputs.length) throw new Error('采样市场或标的与冻结范围不一致');
   const snapshots = inputs.map(input => {
     const clean = Object.fromEntries(Object.entries(input).filter(([key]) => !['snapshotHash', 'openPosition', 'requestedAction', 'requestedSide', 'requestReason'].includes(key))) as SampleInput;
-    return { ...clean, snapshotHash: hash(clean) };
+    return { ...clean, snapshotHash: runnerSnapshotHash(clean) };
   });
   return { id, groupId: group.id, at, snapshots, hash: hash({ groupId: group.id, id, at, snapshots }) };
 }
 export function saveAiRunnerComparisonSample(groupId: string, sample: AiRunnerComparisonSample) {
   if (sample.groupId !== groupId || sample.hash !== hash({ groupId, id: sample.id, at: sample.at, snapshots: sample.snapshots })
-    || sample.snapshots.some(row => { const { snapshotHash, ...input } = row; return snapshotHash !== hash(input); })) throw new Error('采样Hash不匹配');
+    || sample.snapshots.some(row => { const { snapshotHash, ...input } = row; return snapshotHash !== runnerSnapshotHash(input); })) throw new Error('采样Hash不匹配');
   const normalized = { ...sample, ...(sample.results ? { resultsHash: hash(sample.results) } : {}) };
   stateStore.transaction(() => {
     const prior = stateStore.get<AiRunnerComparisonSample[]>(sampleKey(groupId)) || [];

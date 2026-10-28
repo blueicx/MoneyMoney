@@ -26,10 +26,17 @@ test('controlled comparison creates three paused independent accounts with the s
 });
 test('comparison samples freeze real inputs and a hash-verified replay has no execution side effects', () => {
   const { createAiRunnerComparison, buildAiRunnerComparisonSample, saveAiRunnerComparisonSample, replayAiRunnerComparisonSample } = require('../dist/features/ai-runner-comparison-group');
+  const { RunnerExecutionEvidenceStore, runnerSnapshotHash } = require('../dist/features/runner-execution-evidence');
   const group = createAiRunnerComparison('Stocks', 'AAPL', 'Apple', 100, {}, { seed: 23 });
   const at = '2026-10-06T14:00:00Z';
   const inputs = [{ market: 'stocks', instrument: 'AAPL', dataStatus: 'historical', source: 'test source', dataAt: at, price: 100, ref: { venue: 'Stocks', symbolOrMarketId: 'AAPL' } }];
   const sample = buildAiRunnerComparisonSample(group, 'round-1', at, inputs);
+  assert.equal(sample.snapshots[0].snapshotHash, runnerSnapshotHash(sample.snapshots[0]),
+    'shared snapshots must use the same hash contract consumed by execution evidence');
+  new RunnerExecutionEvidenceStore(stateStore).observe(sample.snapshots[0], {
+    id: 'comparison-observation', runnerId: 'comparison-observer', market: 'stocks', instrument: 'AAPL', at,
+    snapshotHash: sample.snapshots[0].snapshotHash, action: 'NONE', riskChecks: [], signals: [], reason: 'isolated fixture',
+  }, 'stock:us:AAPL', 'ai-runner:comparison-observer');
   const replayRecords = group.runnerIds.map(runnerId => ({ runnerId, action: 'NONE', reason: '历史无盘口', instrument: 'AAPL', market: 'stocks', snapshotHash: sample.snapshots[0].snapshotHash }));
   saveAiRunnerComparisonSample(group.id, { ...sample, results: replayRecords });
   const before = JSON.stringify(runners.getAiRunners());
