@@ -225,6 +225,14 @@ import { ResearchBasisStore } from '../features/research-basis';
 import { createChartBookmarkRouter } from './chart-bookmark-routes';
 import { chartBookmarkLink, readChartBookmark } from '../features/chart-bookmarks';
 import { ResearchContextLedger, executeRecordedTrial } from '../features/research-context-ledger';
+import { HistoricalUniverseStore } from '../features/historical-universe';
+import { createHistoricalUniverseRouter } from './historical-universe-routes';
+import { createInsightRouter } from './insight-routes';
+import { createAnalysisPreviewRouter } from './analysis-preview-routes';
+import { createResearchTemplateRouter } from './research-template-routes';
+import { ReportScheduleStore } from '../features/report-schedules';
+import { createReportScheduleRouter } from './report-schedule-routes';
+import { OptionRecoveryJournal } from '../features/option-recovery-journal';
 import { createSharedCapitalRouter } from './shared-capital-routes';
 import { createResearchContextRouter } from './research-context-routes';
 import type { RevisionImpactRecord } from '../features/research-revision-impact';
@@ -591,6 +599,53 @@ app.use('/api/workspace/records/search',createWorkspaceRecordSearchRouter({
 const watchlistMetadataStore = new WatchlistMetadataStore(stateStore, () => unifiedAlertStore.listWatchlist());
 const researchContextLedger=new ResearchContextLedger(stateStore);
 app.use('/api/research/context-ledger',createResearchContextRouter(researchContextLedger,()=>unifiedAlertStore.listWatchlist()));
+const historicalUniverseStore=new HistoricalUniverseStore(stateStore,id=>decisionIntelligenceStore.getEvidence(id));
+app.use('/api/research/historical-universes',createHistoricalUniverseRouter(historicalUniverseStore,verifyCsrfRequest));
+const recoveryJournalRoot=path.resolve(DATA_ROOT);
+const recoveryJournal=new OptionRecoveryJournal(relative=>{const target=path.resolve(recoveryJournalRoot,relative);if(target!==recoveryJournalRoot&&!target.startsWith(recoveryJournalRoot+path.sep))throw Error('恢复日志路径越界');return target;});
+app.use('/api',createInsightRouter({
+  adminOnly,
+  gapRows:()=>{
+    const gaps:Array<Record<string,unknown>>=[];
+    for(const row of dataLakeCatalog.listCoverage()){
+      if(gaps.length>=400)break;
+      const base={market:row.market,instrument:row.instrument,source:'MoneyMoney 本地数据湖',kind:'data-lake-coverage',observedAt:row.availableLatestPublishedAt??null};
+      const id=`coverage:${row.market}:${row.instrument}:${row.dataset}:${row.timeframe}`;
+      if(row.dataStatus==='unavailable')gaps.push({...base,id:id+':unavailable',coverage:'unavailable',reason:row.reason||'数据湖分区不可读'});
+      else if((row.unavailablePartitionCount??0)>0)gaps.push({...base,id:id+':partial',coverage:'partial',reason:`不可读分区 ${row.unavailablePartitionCount} 个`});
+      else if(!row.availableLatestPublishedAt)gaps.push({...base,id:id+':unknown',coverage:'unknown',reason:'目录存在但没有可读的最新分区'});
+    }
+    try{for(const universe of historicalUniverseStore.list(new Date().toISOString())){const missing=universe.members.filter(member=>!member.industry).length;if(missing&&gaps.length<500)gaps.push({id:`universe:${universe.id}:industry`,market:'stocks',instrument:null,source:universe.source.name||'点时成员存档',kind:'universe-industry',coverage:'unknown',reason:`${missing} 个成员缺少行业证据`,observedAt:universe.observedAt});}}catch{}
+    return gaps;
+  },
+  searchDocuments:()=>{
+    const docs:Array<Record<string,unknown>>=[];
+    for(const market of ['stocks','options','crypto','prediction']){
+      try{for(const project of researchProjects.list(market)){if(docs.length>=800)break;docs.push({id:project.id,type:'project',market,title:project.title,text:`${project.question||''}`.trim()||project.title,updatedAt:project.updatedAt,projectId:project.id,ownerAdmin:true});}}catch{}
+      try{for(const workspace of decisionIntelligenceStore.listWorkspaces(market as MarketId)){if(docs.length>=1200)break;docs.push({id:workspace.id,type:'workspace',market,title:workspace.name,text:`${workspace.workspace||''} ${(workspace.layers||[]).join(' ')}`.trim()||workspace.name,updatedAt:workspace.updatedAt,ownerAdmin:true});}}catch{}
+      try{for(const evidence of decisionIntelligenceStore.listEvidence(market as MarketId).slice(0,50)){if(docs.length>=1400)break;docs.push({id:evidence.id,type:'evidence',market,title:`${evidence.instrument??''} ${evidence.source.name}`.trim(),text:JSON.stringify(evidence.fields).slice(0,20000),updatedAt:evidence.fetchedAt,ownerAdmin:true});}}catch{}
+    }
+    return docs as never;
+  },
+  auditEntries:()=>{
+    const entries=stateStore.listAudits(1000).map(row=>({id:row.id,at:row.at,action:row.action,detail:row.detail,actor:null as string|null}));
+    try{for(const op of recoveryJournal.readAll().operations)entries.push({id:'option-recovery:'+op.id,at:op.updatedAt,action:'option-recovery-'+op.state,detail:JSON.stringify({instrument:op.instrument,snapshotId:op.snapshotId,market:'options'}),actor:null});}catch{}
+    return entries;
+  },
+  sourceObservations:()=>{
+    const to=new Date(),from=new Date(to.getTime()-30*86_400_000),rows:Array<{sourceId:string;sourceName:string;market:string;at:string;ok:boolean;latencyMs:number|null;reason:string|null}>=[];
+    for(const market of ['stocks','options','crypto','prediction']){
+      try{for(const sample of researchRepository.listSourceHealthSamples(market,from.toISOString(),to.toISOString())){if(sample.outcome==='unconfigured')continue;rows.push({sourceId:sample.sourceId,sourceName:sample.sourceName,market:sample.market,at:sample.checkedAt,ok:sample.outcome!=='failed',latencyMs:sample.latencyMs,reason:sample.outcome==='failed'?sample.detail:null});}}catch{}
+    }
+    return rows.slice(-20000);
+  },
+}));
+app.use('/api/analysis',createAnalysisPreviewRouter({adminOnly,csrfValid:verifyCsrfRequest,listSignals:(market,instrument)=>decisionIntelligenceStore.listSignalOutcomes(market as MarketId,instrument)}));
+app.use('/api/research/templates',createResearchTemplateRouter({adminOnly,csrfValid:verifyCsrfRequest}));
+const reportScheduleStore=new ReportScheduleStore(stateStore,path.join(DATA_ROOT,'reports','schedules'),(projectId,linkIds)=>({html:researchProjects.exportReport(projectId,linkIds,'html'),json:researchProjects.exportReport(projectId,linkIds,'json')}));
+app.use('/api/report-schedules',createReportScheduleRouter(reportScheduleStore,{adminOnly,csrfValid:verifyCsrfRequest}));
+const reportScheduleTimer=setInterval(()=>{try{reportScheduleStore.runDue();}catch{}},60_000);
+reportScheduleTimer.unref();
 app.use('/api/operations/history',createOperationHistoryRouter({actionHistory:()=>actionCenterStore.history('admin',{limit:500}),metadata:()=>watchlistMetadataStore.read(),undoAction:(id,version)=>actionCenterStore.undo('admin',id,version),undoMetadata:(id,revision)=>watchlistMetadataStore.undo(id,revision)}));
 app.use('/api/operations/diagnostics',createRuntimeDiagnosticsRouter(runtimeObservability,()=>{try{const info=JSON.parse(fs.readFileSync(path.resolve(__dirname,'..','build-info.json'),'utf8'));return {commit:/^[a-f0-9]{40}$/.test(info.commit)?info.commit:'unknown',version:String(info.version||'unknown'),builtAt:String(info.builtAt||'')};}catch{return {commit:'unknown'};}}));
 const instrumentSilences = new InstrumentSilenceStore(stateStore);

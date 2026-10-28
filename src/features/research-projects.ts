@@ -4,6 +4,7 @@ import type {MarketId} from './research-contracts';
 import {buildProjectRetrospective} from './research-assistance';
 import {preserveResearchSummary} from './research-summary';
 import {buildProjectReport,renderProjectReport} from './project-retrospective-report';
+import {getResearchTemplate} from './research-templates';
 
 const markets=['stocks','options','crypto','prediction'];
 const kinds=['evidence','partition','experiment','decision','signal','strategy','account','event','task','study','project-conclusion'];
@@ -15,6 +16,7 @@ export interface Conclusion {id:string;text:string;at:string;references:ProjectL
 export interface Review {id:string;conclusionId:string;linkId:string;reason:string;previousHash:string;currentHash:string|null;at:string;status:'open'|'resolved';resolution?:string;resolvedAt?:string}
 export interface ResearchProject {
  id:string;market:MarketId;title:string;question:string;hypothesis:string;counterEvidence:string;acceptance:string;
+ templateRef?:string;
  version:number;createdAt:string;updatedAt:string;links:ProjectLink[];conclusions:Conclusion[];reviews:Review[];
  timeline:Array<{id:string;at:string;action:string;referenceId?:string}>;
 }
@@ -39,9 +41,17 @@ export class ResearchProjectStore {
   const q=query.trim().toLowerCase();
   return this.index(m as MarketId).map(row=>this.read(row)).filter(p=>!q||[p.title,p.question,p.hypothesis,p.id,...p.links.map(r=>r.id)].join(' ').toLowerCase().includes(q)).reverse().map(p=>({id:p.id,market:p.market,title:p.title,question:p.question,version:p.version,updatedAt:p.updatedAt,conclusions:p.conclusions.length,openReviews:p.reviews.filter(r=>r.status==='open').length}));
  }
- create(input:{market:string;title:string;question:string;hypothesis:string;counterEvidence:string;acceptance:string}) {
-  if(!input||Object.keys(input).some(k=>!['market','title','question','hypothesis','counterEvidence','acceptance'].includes(k)))throw Error('项目不接受额外业务配置');
-  const m=market(input.market),at=this.clock(),p:ResearchProject={id:'project_'+randomUUID(),market:m,title:text(input.title,'标题',160),question:text(input.question,'研究问题'),hypothesis:text(input.hypothesis,'假设'),counterEvidence:text(input.counterEvidence,'反证'),acceptance:text(input.acceptance,'验收条件'),version:1,createdAt:at,updatedAt:at,links:[],conclusions:[],reviews:[],timeline:[{id:randomUUID(),at,action:'created'}]};
+ create(input:{market:string;title:string;question:string;hypothesis:string;counterEvidence:string;acceptance:string;templateRef?:string}) {
+  if(!input||Object.keys(input).some(k=>!['market','title','question','hypothesis','counterEvidence','acceptance','templateRef'].includes(k)))throw Error('项目不接受额外业务配置');
+  const m=market(input.market),at=this.clock();
+  let templateRef:string|undefined;
+  if(input.templateRef!==undefined){
+   if(typeof input.templateRef!=='string'||input.templateRef.length>120)throw Error('研究模板引用无效');
+   const template=getResearchTemplate(input.templateRef);
+   if(!template||template.market!==m)throw Error('研究模板不存在、市场不一致或版本不受支持');
+   templateRef=`${template.id}@${template.version}`;
+  }
+  const p:ResearchProject={id:'project_'+randomUUID(),market:m,title:text(input.title,'标题',160),question:text(input.question,'研究问题'),hypothesis:text(input.hypothesis,'假设'),counterEvidence:text(input.counterEvidence,'反证'),acceptance:text(input.acceptance,'验收条件'),...(templateRef?{templateRef}:{}),version:1,createdAt:at,updatedAt:at,links:[],conclusions:[],reviews:[],timeline:[{id:randomUUID(),at,action:'created'}]};
   return this.store.transaction(()=>{const ids=this.index(m);if(ids.length>=100)throw Error('本市场研究项目已达100个，未删除旧项目');this.store.set('research-project:'+p.id,p);this.store.set('research-project-index:v1:'+m,[...ids,p.id]);this.audit(p,'created');return p;});
  }
  private audit(p:ResearchProject,action:string){this.store.appendAudit({id:randomUUID(),action:'research-project-'+action,detail:JSON.stringify({projectId:p.id,market:p.market,version:p.version}),at:p.updatedAt});}
