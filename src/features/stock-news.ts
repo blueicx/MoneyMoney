@@ -1,4 +1,5 @@
 import type { NewsItem } from './news-settings';
+import crypto from 'node:crypto';
 
 interface YahooNewsEntry {
   title?: unknown;
@@ -13,7 +14,15 @@ interface YahooSearchResponse {
 }
 
 const NEWS_TTL_MS = 5 * 60_000;
-const cache = new Map<string, { at: number; value: NewsItem[] }>();
+const cache = new Map<string, {
+  at: number;
+  value: NewsItem[];
+  rawResponseHash: string;
+  rawResponseBytes: number;
+  rawResponseBase64: string;
+}>();
+
+const MAX_NEWS_RESPONSE_BYTES = 512 * 1024;
 
 export interface StockNewsSnapshot {
   items: NewsItem[];
@@ -21,6 +30,10 @@ export interface StockNewsSnapshot {
   updatedAt: string | null;
   retrievedAt: string;
   source: 'Yahoo Finance';
+  contentHash: string;
+  rawResponseHash: string;
+  rawResponseBytes: number;
+  rawResponseBase64: string;
 }
 
 function clean(value: unknown): string {
@@ -30,6 +43,21 @@ function clean(value: unknown): string {
 function validUrl(value: unknown): string {
   const url = clean(value);
   return /^https?:\/\//i.test(url) ? url : '';
+}
+
+function stable(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stable).join(',')}]`;
+  if (value && typeof value === 'object') {
+    return `{${Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, item]) => `${JSON.stringify(key)}:${stable(item)}`)
+      .join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function digest(value: unknown): string {
+  return crypto.createHash('sha256').update(stable(value)).digest('hex');
 }
 
 export function parseYahooNewsResponse(payload: YahooSearchResponse, symbolInput: string): NewsItem[] {
@@ -58,22 +86,46 @@ export async function getStockNewsSnapshot(symbolInput: string): Promise<StockNe
   const symbol = clean(symbolInput).toUpperCase();
   if (!/^[A-Z][A-Z0-9.-]{0,9}$/.test(symbol)) throw new Error('股票代码无效');
   const cached = cache.get(symbol);
-  if (cached && Date.now() - cached.at < NEWS_TTL_MS) return {
-    items: cached.value, status: 'cached', updatedAt: cached.value.map(item => item.publishedAt).filter(Boolean).sort().at(-1) || null,
-    retrievedAt: new Date(cached.at).toISOString(), source: 'Yahoo Finance',
-  };
+  if (cached && Date.now() - cached.at < NEWS_TTL_MS) {
+    const retrievedAt = new Date(cached.at).toISOString();
+    return {
+      items: cached.value, status: 'cached', updatedAt: cached.value.map(item => item.publishedAt).filter(Boolean).sort().at(-1) || null,
+      retrievedAt, source: 'Yahoo Finance', contentHash: digest({ version: 1, symbol, retrievedAt, items: cached.value }),
+      rawResponseHash: cached.rawResponseHash, rawResponseBytes: cached.rawResponseBytes,
+      rawResponseBase64: cached.rawResponseBase64,
+    };
+  }
   const url = `https://query1.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(symbol)}&newsCount=15&quotesCount=0`;
   const response = await fetch(url, {
     headers: { Accept: 'application/json', 'User-Agent': 'MoneyMoney/1.0 (stock research; contact@moneymoney.app)' },
     signal: AbortSignal.timeout(12_000),
   });
   if (!response.ok) throw new Error(`Yahoo Finance news HTTP ${response.status}`);
-  const result = parseYahooNewsResponse(await response.json() as YahooSearchResponse, symbol);
+  const contentLength = Number(response.headers.get('content-length') || 0);
+  if (Number.isFinite(contentLength) && contentLength > MAX_NEWS_RESPONSE_BYTES) {
+    await response.body?.cancel();
+    throw new Error('Yahoo Finance 新闻响应超过 512KB 冻结上限');
+  }
+  const bytes = Buffer.from(await response.arrayBuffer());
+  if (bytes.byteLength > MAX_NEWS_RESPONSE_BYTES) throw new Error('Yahoo Finance 新闻响应超过 512KB 冻结上限');
+  let payload: YahooSearchResponse;
+  try {
+    payload = JSON.parse(bytes.toString('utf8')) as YahooSearchResponse;
+  } catch {
+    throw new Error('Yahoo Finance 新闻响应不是有效 JSON，不能冻结');
+  }
+  const result = parseYahooNewsResponse(payload, symbol);
   const freshRetrievedAt = new Date().toISOString();
-  cache.set(symbol, { at: Date.parse(freshRetrievedAt), value: result });
+  const rawResponseHash = crypto.createHash('sha256').update(bytes).digest('hex');
+  const rawResponseBase64 = bytes.toString('base64');
+  cache.set(symbol, {
+    at: Date.parse(freshRetrievedAt), value: result, rawResponseHash,
+    rawResponseBytes: bytes.byteLength, rawResponseBase64,
+  });
   return {
     items: result, status: 'live', updatedAt: result.map(item => item.publishedAt).filter(Boolean).sort().at(-1) || null,
-    retrievedAt: freshRetrievedAt, source: 'Yahoo Finance',
+    retrievedAt: freshRetrievedAt, source: 'Yahoo Finance', contentHash: digest({ version: 1, symbol, retrievedAt: freshRetrievedAt, items: result }),
+    rawResponseHash, rawResponseBytes: bytes.byteLength, rawResponseBase64,
   };
 }
 

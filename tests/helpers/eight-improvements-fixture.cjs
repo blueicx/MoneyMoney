@@ -7,6 +7,7 @@ const {stateStore}=require('../../dist/storage/sqlite-state');
 (async()=>{
  c.registerInstrument({type:'stock',venue:'us',symbol:'AAPL',title:'ISOLATED FIXTURE',aliases:[]});
  c.registerProviderContract({id:'seven-fixture',provider:'seven-fixture',market:'stocks',datasets:['bars'],timezone:'UTC',units:{price:'USD',volume:'shares'},revisionPolicy:'point-in-time'});
+ c.saveCorporateAction({id:'isolated-action',market:'stocks',instrument:'AAPL',kind:'split',effectiveAt:'2026-10-21T00:00:00Z',factor:2,source:'isolated-fixture'});
  const references=[];
  for(let i=0;i<2;i++){
   const day=20+i,stamp=`2026-10-${day}T00:00:00.000Z`;

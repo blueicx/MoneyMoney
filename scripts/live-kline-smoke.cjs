@@ -54,8 +54,62 @@ async function main() {
     assert.equal(await page.evaluate(()=>currentStockKlinePeriod),'5m');
     assert.match(await page.locator('#stock-chart-card .mm-trading-readout').innerText(),/开 .*高 .*低 .*收 .*MA5/);
     await checkRestrictedChart(page,'stock');
-    for(const width of [1440,390])for(const theme of ['light','dark','money']){
+    for(const width of [375,390,1003,1440])for(const theme of ['light','dark','money']){
       await page.setViewportSize({width,height:900});await page.evaluate(theme=>theme==='light'?document.documentElement.removeAttribute('data-theme'):document.documentElement.setAttribute('data-theme',theme),theme);
+      await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+      const chartLayout=await page.evaluate(()=>{
+        const card=document.getElementById('stock-chart-card'),workspace=document.getElementById('stock-chart-workspace-b'),center=card.querySelector('.mm-stock-chart-center'),shell=document.getElementById('market-workspace-shell'),rightLibrary=document.getElementById('right-instrument-library'),layoutElement=document.querySelector('.layout'),stocksTab=document.getElementById('stocks-tab'),collapse=card.closest('.dash-collapse'),collapseBody=card.closest('.collapse-body'),main=document.getElementById('center-workspace'),header=card.querySelector('.compact-chart-header'),stage=card.querySelector('.stock-chart-stage'),canvas=document.getElementById('stock-kline'),layer=canvas.parentElement.querySelector('.mm-trading-crosshair'),nav=[...document.querySelectorAll('#mm-mobile-actions,#mobile-nav')].find(node=>{
+          const style=getComputedStyle(node),box=node.getBoundingClientRect();
+          return style.display!=='none'&&style.visibility!=='hidden'&&box.width>0&&box.height>0&&style.position==='fixed'&&box.bottom>=innerHeight-2;
+        })||null;
+        canvas.scrollIntoView({block:'center',inline:'nearest'});
+        const cardRect=card.getBoundingClientRect(),headerRect=header.getBoundingClientRect(),stageRect=stage.getBoundingClientRect(),canvasRect=canvas.getBoundingClientRect(),layerRect=layer.getBoundingClientRect(),navRect=nav?.getBoundingClientRect()||null;
+        const dpr=Math.max(1,devicePixelRatio||1),ctx=canvas.getContext('2d'),axisPixels=ctx.getImageData(0,Math.max(0,canvas.height-Math.round(30*dpr)),canvas.width,Math.min(canvas.height,Math.round(30*dpr))).data;
+        let axisOpaque=0;
+        for(let index=3;index<axisPixels.length;index+=4)if(axisPixels[index]>0)axisOpaque++;
+        return {
+          width:innerWidth,height:innerHeight,scrollWidth:document.documentElement.scrollWidth,
+          cardRight:cardRect.right,headerRight:headerRect.right,stageBottom:stageRect.bottom,canvasBottom:canvasRect.bottom,
+          layerTop:layerRect.top,layerBottom:layerRect.bottom,layerWidth:layerRect.width,canvasTop:canvasRect.top,canvasWidth:canvasRect.width,
+          cardWidth:cardRect.width,workspaceWidth:workspace.getBoundingClientRect().width,centerWidth:center.getBoundingClientRect().width,
+          chartParentWidth:canvas.parentElement.clientWidth,gridTemplateColumns:getComputedStyle(workspace).gridTemplateColumns,
+          layoutTemplateColumns:getComputedStyle(document.querySelector('.layout')).gridTemplateColumns,
+          shellTemplateColumns:getComputedStyle(shell).gridTemplateColumns,
+          shellWidth:shell.getBoundingClientRect().width,rightLibraryWidth:rightLibrary.getBoundingClientRect().width,
+          layoutClass:layoutElement.className,layoutDisplay:getComputedStyle(layoutElement).display,
+          shellDisplay:getComputedStyle(shell).display,mainWidth:main.getBoundingClientRect().width,
+          mainDisplay:getComputedStyle(main).display,mainGridColumn:getComputedStyle(main).gridColumn,mainGridRow:getComputedStyle(main).gridRow,
+          shellChildren:[...shell.children].map(node=>({id:node.id,className:node.className,tag:node.tagName,width:node.getBoundingClientRect().width,gridColumn:getComputedStyle(node).gridColumn,gridRow:getComputedStyle(node).gridRow})),
+          stocksTabWidth:stocksTab.getBoundingClientRect().width,
+          stocksTabDisplay:getComputedStyle(stocksTab).display,collapseWidth:collapse.getBoundingClientRect().width,
+          collapseBodyWidth:collapseBody.getBoundingClientRect().width,bodyClass:document.body.className,
+          navTop:navRect?.top??null,contentPaddingBottom:parseFloat(getComputedStyle(document.querySelector('.layout')||document.body).paddingBottom)||0,
+          visibleNav:!!nav,axisOpaque,
+        };
+      });
+      assert.ok(chartLayout.scrollWidth<=width+2,`chart page must not overflow horizontally at ${width}/${theme}: ${JSON.stringify(chartLayout)}`);
+      assert.ok(chartLayout.cardRight<=width+2&&chartLayout.headerRight<=width+2,`chart card and wrapped toolbar must stay inside the viewport at ${width}/${theme}: ${JSON.stringify(chartLayout)}`);
+      assert.ok(Math.abs(chartLayout.layerTop-chartLayout.canvasTop)<1&&Math.abs(chartLayout.layerWidth-chartLayout.canvasWidth)<1,`crosshair and click geometry must align after toolbar wrapping at ${width}/${theme}: ${JSON.stringify(chartLayout)}`);
+      assert.ok(chartLayout.axisOpaque>0,`time axis must remain painted at ${width}/${theme}: ${JSON.stringify(chartLayout)}`);
+      if(width<769){
+        assert.equal(chartLayout.visibleNav,true,`mobile bottom navigation must be visible at ${width}/${theme}`);
+        assert.ok(chartLayout.contentPaddingBottom>=chartLayout.height-chartLayout.navTop,`layout reserve must clear the fixed navigation at ${width}/${theme}: ${JSON.stringify(chartLayout)}`);
+        assert.ok(chartLayout.layerBottom<=chartLayout.navTop+1,`a centered chart must not be covered by bottom navigation at ${width}/${theme}: ${JSON.stringify(chartLayout)}`);
+      }
+      await page.screenshot({path:path.join(data,`chart-layout-${theme}-${width}.png`)});
+      await page.locator('[data-chart-fullscreen="stocks"]').click();
+      await page.waitForFunction(()=>document.body.dataset.chartFullscreen==='stocks'&&document.getElementById('stock-chart-card')?.classList.contains('chart-card-fullscreen'));
+      await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+      const fullscreenLayout=await page.evaluate(()=>{
+        const card=document.getElementById('stock-chart-card'),canvas=document.getElementById('stock-kline'),layer=canvas.parentElement.querySelector('.mm-trading-crosshair'),cardRect=card.getBoundingClientRect(),canvasRect=canvas.getBoundingClientRect(),layerRect=layer.getBoundingClientRect();
+        return{innerWidth,innerHeight,scrollWidth:document.documentElement.scrollWidth,cardLeft:cardRect.left,cardRight:cardRect.right,canvasWidth:canvasRect.width,canvasHeight:canvasRect.height,layerWidth:layerRect.width,layerTop:layerRect.top,canvasTop:canvasRect.top};
+      });
+      assert.ok(fullscreenLayout.scrollWidth<=fullscreenLayout.innerWidth+2&&fullscreenLayout.cardLeft>=-1&&fullscreenLayout.cardRight<=fullscreenLayout.innerWidth+1,`fullscreen chart must fit ${width}/${theme}: ${JSON.stringify(fullscreenLayout)}`);
+      assert.ok(fullscreenLayout.canvasHeight>=420,`fullscreen chart must retain readable height at ${width}/${theme}: ${JSON.stringify(fullscreenLayout)}`);
+      assert.ok(Math.abs(fullscreenLayout.layerTop-fullscreenLayout.canvasTop)<1&&Math.abs(fullscreenLayout.layerWidth-fullscreenLayout.canvasWidth)<1,`fullscreen overlay must align at ${width}/${theme}: ${JSON.stringify(fullscreenLayout)}`);
+      await page.screenshot({path:path.join(data,`chart-fullscreen-${theme}-${width}.png`)});
+      await page.evaluate(()=>toggleChartFullscreen('stocks'));
+      await page.waitForFunction(()=>!document.body.dataset.chartFullscreen);
       const menu=page.locator('[data-compact-tools]'), summary=menu.locator(':scope > summary');
       await summary.focus();await page.keyboard.press('Enter');
       assert.equal(await menu.getAttribute('open'),'');

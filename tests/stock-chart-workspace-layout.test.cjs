@@ -25,6 +25,12 @@ test('stock chart workspace B puts events, chart, and evidence into one themed r
   assert.match(css, /@container\s+stock-chart-card\s*\(max-width:\s*\d+px\)[\s\S]*?#stock-chart-workspace-b[\s\S]*?grid-template-columns/);
   assert.match(css, /@container\s+stock-chart-card\s*\(max-width:\s*680px\)[\s\S]*?#stock-chart-workspace-b\s*\{\s*grid-template-columns:\s*minmax\(0,1fr\)/);
   assert.match(css, /@media\s*\(max-width:\s*(?:900|768)px\)[\s\S]*?#stock-chart-workspace-b[\s\S]*?grid-template-columns/);
+  const enhancementCss = fs.readFileSync('src/web/public/experience-enhancements.css', 'utf8');
+  assert.match(enhancementCss, /@media\s*\(max-width:\s*1100px\)[\s\S]*?\.layout:not\(\.sidebar-collapsed\):not\(\.instrument-library-hidden\)\s*\{\s*display:\s*block/);
+  assert.match(enhancementCss, /@media\s*\(max-width:\s*1100px\)[\s\S]*?\.market-workspace-shell\s*\{\s*grid-template-columns:\s*var\(--mm-left-width,224px\)\s+minmax\(0,1fr\)/);
+  assert.match(enhancementCss, /@media\s*\(max-width:\s*1100px\)[\s\S]*?\.layout > #right-instrument-library\s*\{\s*display:\s*none/);
+  assert.match(enhancementCss, /@media\s*\(max-width:\s*1100px\)[\s\S]*?body\.mm-library-drawer-open #right-instrument-library\s*\{[^}]*position:\s*fixed/);
+  assert.match(enhancementCss, /@media\s*\(max-width:\s*1100px\)[\s\S]*?#mm-mobile-library-toggle\s*\{\s*display:\s*inline-flex/);
   assert.match(css, /#stock-chart-workspace-b[\s\S]*?var\(--bg-card\)/);
   assert.match(css, /#stock-chart-workspace-b[\s\S]*?var\(--border\)/);
   assert.match(css, /\.chart-signal-hit-layer\s*\{[^}]*pointer-events:none/);

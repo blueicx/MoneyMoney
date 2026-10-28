@@ -383,7 +383,7 @@
     if(document.hidden)return;
     if(!full.length){clear(canvas);return;}
     if(canvas.previousElementSibling?.matches('[data-chart-source-state]'))canvas.previousElementSibling.remove();
-    const selected=select(canvas,full,options.identity),rows=selected.rows,W=Math.max(280,canvas.parentElement.clientWidth),H=canvas.closest('.mm-contract-chart')?.matches(':fullscreen,.mm-trading-fullscreen')?Math.max(440,window.innerHeight-200):Number.isFinite(options.height)?Math.max(180,Math.min(800,options.height)):440,padL=52,padR=88,padT=20,priceH=(H-60)*.74,dpr=window.devicePixelRatio||1;
+    const selected=select(canvas,full,options.identity),rows=selected.rows,measuredWidth=Number(canvas.parentElement?.clientWidth)||0,W=measuredWidth>0?Math.max(1,Math.floor(measuredWidth)):280,H=canvas.closest('.mm-contract-chart')?.matches(':fullscreen,.mm-trading-fullscreen')?Math.max(440,window.innerHeight-200):Number.isFinite(options.height)?Math.max(180,Math.min(800,options.height)):440,padL=52,padR=88,padT=20,priceH=(H-60)*.74,dpr=window.devicePixelRatio||1;
     canvas.width=W*dpr;canvas.height=H*dpr;canvas.style.width='100%';canvas.style.height=H+'px';const c=canvas.getContext('2d');c.scale(dpr,dpr);
     let minP=Math.min(...rows.map(r=>r.low)),maxP=Math.max(...rows.map(r=>r.high));const gap=(maxP-minP||maxP*.01)*.08;minP-=gap;maxP+=gap;
     ({minP,maxP}=priceRange(selected.state,minP,maxP));

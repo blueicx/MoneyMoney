@@ -268,6 +268,20 @@ test('frame scheduling coalesces pointer updates and never paints hidden pages',
   schedule();schedule();schedule();assert.equal(queue.length,1);queue.shift()();assert.equal(paints,1);
   schedule();hidden=true;queue.shift()();assert.equal(paints,1);schedule();assert.equal(queue.length,0);
 });
+test('chart geometry follows a host narrower than the legacy minimum and keeps the pointer layer aligned',()=>{
+  const {JSDOM}=require('jsdom'),dom=new JSDOM('<div><canvas></canvas></div>',{runScripts:'outside-only',pretendToBeVisual:true}),w=dom.window;let viewport;
+  w.HTMLCanvasElement.prototype.getContext=()=>new Proxy({measureText:()=>({width:50})},{get:(target,key)=>target[key]||(()=>{})});
+  w.HTMLElement.prototype.getClientRects=()=>[{width:211,height:440}];
+  Object.defineProperty(w.document.querySelector('div'),'clientWidth',{value:211,configurable:true});
+  try{
+    w.eval(fs.readFileSync('src/web/public/trading-chart.js','utf8'));
+    const canvas=w.document.querySelector('canvas');
+    w.MoneyTradingChart.render(canvas,rows,{identity:'narrow|5m',interval:'5m',paperLayer:false,onViewport:value=>viewport=value});
+    const layer=canvas.parentElement.querySelector('.mm-trading-crosshair');
+    assert.equal(viewport.geometry.W,211);
+    assert.equal(layer.style.width,'211px');
+  }finally{w.close();}
+});
 test('price scaling is bounded, centred and can return to automatic range',()=>{
   const c=load(),s=c.createView();c.scalePrice(s,200);const range=c.priceRange(s,90,110);
   assert.equal((range.minP+range.maxP)/2,100);assert.ok(range.maxP-range.minP>20);

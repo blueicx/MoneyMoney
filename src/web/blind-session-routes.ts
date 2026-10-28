@@ -7,7 +7,7 @@ export function createBlindSessionRouter(store:BlindSessionStore){
  const envelope=(market:string,data:any)=>({success:true,market,instrument:data?.instrument||null,dataStatus:'historical',source:data?.source||'私人历史盲测目录',updatedAt:data?.updatedAt?new Date(data.updatedAt).toISOString():null,reason:data?.reason||'手动训练，不创建订单',evidenceRefs:data?.snapshotId?[data.snapshotId]:[],data});
  const scoped=(req:express.Request,market:string)=>{const row=store.view(String(req.params.id));if(row.market!==market)throw Error('盲测市场上下文不匹配');return row;};
  router.get('/',(req,res)=>{try{const m=check(req,['market']);res.json(envelope(m,store.list(m)));}catch(e){fail(res,e);}});
- router.post('/preview',async(req,res)=>{try{const m=check(req,['market','instrument','timeframe','asOf','from','count','requestId','evidenceRefs']);res.json(envelope(m,await store.preview(req.body)));}catch(e){fail(res,e);}});
+ router.post('/preview',async(req,res)=>{try{const m=check(req,['market','instrument','timeframe','asOf','from','count','requestId','evidenceRefs','includeCorporateActions','availability']);res.json(envelope(m,await store.preview(req.body)));}catch(e){fail(res,e);}});
  router.get('/:id',(req,res)=>{try{const m=check(req,['market']);res.json(envelope(m,scoped(req,m)));}catch(e){fail(res,e);}});
  for(const action of ['confirm','judge','correct','respond','advance','stop'])router.post('/:id/'+action,(req,res)=>{try{
   const fields=action==='confirm'?['hash','acknowledge']:action==='judge'?['direction','hypothesis','invalidation','rule']:action==='correct'?['decisionId','note']:action==='respond'?['decisionId','note','action']:[],m=check(req,['market','revision',...fields]),r=scoped(req,m),b=req.body,revision=b.revision;

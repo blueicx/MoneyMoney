@@ -25,7 +25,9 @@ test('stock news reports live versus cached retrieval separately from publicatio
   let calls = 0;
   global.fetch = async () => {
     calls += 1;
-    return { ok: true, json: async () => ({ news: [{ title: 'Probe event', publisher: 'Yahoo', link: 'https://example.com/probe', providerPublishTime: 1770000000, relatedTickers: ['ZZNEWS'] }] }) };
+    return new Response(JSON.stringify({
+      news: [{ title: 'Probe event', publisher: 'Yahoo', link: 'https://example.com/probe', providerPublishTime: 1770000000, relatedTickers: ['ZZNEWS'] }],
+    }), {status: 200, headers: {'content-type': 'application/json'}});
   };
   try {
     const fresh = await getStockNewsSnapshot('ZZNEWS');

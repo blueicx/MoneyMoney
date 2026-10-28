@@ -13,6 +13,21 @@ export type DatasetStatus = 'staged' | 'committed' | 'rejected';
 export interface DatasetManifest { id: string; dataset: string; market: MarketId; source: string; fieldVersion: string; timezone: string; adjustment: string; createdAt: string; contentHash: string; units?: Record<string,string>; }
 export interface DatasetPartition { id: string; manifestId: string; path: string; dataset: string; market: MarketId; instrument: string; timeframe: string; periodStart: string; periodEnd: string; publishedAt: string; fetchedAt: string; rowCount: number; status: DatasetStatus; contentHash: string; }
 export interface PointInTimeSnapshot { id: string; market: MarketId; instrument: string; dataset: string; timeframe: string; asOf: string; partitionId: string; contentHash: string; source: string | null; createdAt: string; }
+export interface SnapshotAvailabilityProof {
+  version: 1 | 2;
+  availability: 'observed';
+  snapshotId: string;
+  asOf: string;
+  partitions: Array<{partitionId:string;publishedAt:string;fetchedAt:string;fileHash:string}>;
+  rowEvidence?: {
+    rule: 'max(row-published-at,partition-fetched-at)';
+    count: number;
+    firstObservedAt: string | null;
+    lastObservedAt: string | null;
+    rowsHash: string;
+  };
+  contentHash: string;
+}
 export interface DataRevision { id: string; dataset: string; market: MarketId; instrument: string; timeframe: string; partitionId: string; publishedAt: string; contentHash: string; supersedes?: string; reason?: string; }
 export interface CorporateAction { id: string; market: 'stocks'; instrument: string; kind: 'split' | 'dividend' | 'symbol-change' | 'delisting'; effectiveAt: string; paymentAt?: string; publishedAt?: string; observedAt?: string; factor?: number; currency?: string; oldSymbol?: string; newSymbol?: string; source: string; }
 export interface ProviderContract { id: string; provider: string; market: MarketId; datasets: string[]; timezone: string; units: Record<string, string>; revisionPolicy: 'point-in-time' | 'latest'; }
@@ -63,6 +78,28 @@ function stableJson(value: unknown): string {
 }
 function hash(value: unknown): string { return crypto.createHash('sha256').update(stableJson(value)).digest('hex'); }
 function sqlPath(value: string): string { return value.replace(/'/g, "''"); }
+function observedRowProjection(row: Record<string, unknown>): { partitionId: string; timestamp: string; publishedAt: string; observedAt: string } {
+  const partitionId = String(row.__snapshotPartitionId || '');
+  const timestamp = row.timestamp instanceof Date ? row.timestamp.toISOString() : new Date(String(row.timestamp || '')).toISOString();
+  const publishedAt = new Date(String(row.published_at || '')).toISOString();
+  const observedAt = new Date(String(row.availabilityObservedAt || '')).toISOString();
+  if (!partitionId || !Number.isFinite(Date.parse(timestamp)) || !Number.isFinite(Date.parse(publishedAt))
+    || !Number.isFinite(Date.parse(observedAt)) || Date.parse(observedAt) < Date.parse(publishedAt)) {
+    throw new Error('observed row evidence is incomplete');
+  }
+  return { partitionId, timestamp, publishedAt, observedAt };
+}
+function observedRowsEvidence(rows: Array<Record<string, unknown>>): NonNullable<SnapshotAvailabilityProof['rowEvidence']> {
+  const projections = rows.map(observedRowProjection).sort((left, right) =>
+    left.timestamp.localeCompare(right.timestamp) || left.partitionId.localeCompare(right.partitionId));
+  return {
+    rule: 'max(row-published-at,partition-fetched-at)',
+    count: projections.length,
+    firstObservedAt: projections[0]?.observedAt || null,
+    lastObservedAt: projections.at(-1)?.observedAt || null,
+    rowsHash: hash({ version: 1, rows: projections }),
+  };
+}
 function parseCheckpoint(value: unknown): BackfillCheckpoint {
   try {
     const parsed = typeof value === 'string' ? JSON.parse(value) : value;
@@ -174,7 +211,11 @@ export class DataLakeCatalog {
       CREATE TABLE IF NOT EXISTS dataset_partition_files (partition_id TEXT PRIMARY KEY, file_hash TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS data_revisions (id TEXT PRIMARY KEY, dataset TEXT NOT NULL, market TEXT NOT NULL, instrument TEXT NOT NULL, timeframe TEXT NOT NULL, partition_id TEXT NOT NULL, published_at TEXT NOT NULL, content_hash TEXT NOT NULL, supersedes TEXT, reason TEXT);
       CREATE TABLE IF NOT EXISTS point_in_time_snapshots (id TEXT PRIMARY KEY, market TEXT NOT NULL, instrument TEXT NOT NULL, dataset TEXT NOT NULL, timeframe TEXT NOT NULL, as_of TEXT NOT NULL, partition_id TEXT NOT NULL, content_hash TEXT NOT NULL, source TEXT, created_at TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS snapshot_availability_proofs (snapshot_id TEXT PRIMARY KEY, proof_json TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS corporate_actions (id TEXT PRIMARY KEY, market TEXT NOT NULL, instrument TEXT NOT NULL, kind TEXT NOT NULL, effective_at TEXT NOT NULL, factor REAL, old_symbol TEXT, new_symbol TEXT, source TEXT NOT NULL, observed_at TEXT, currency TEXT);
+      CREATE TABLE IF NOT EXISTS corporate_action_versions (sequence INTEGER PRIMARY KEY AUTOINCREMENT, action_id TEXT NOT NULL, recorded_at TEXT NOT NULL, action_json TEXT NOT NULL, content_hash TEXT NOT NULL);
+      CREATE INDEX IF NOT EXISTS corporate_action_versions_cutoff ON corporate_action_versions(recorded_at, action_id);
+      CREATE INDEX IF NOT EXISTS corporate_action_versions_by_action ON corporate_action_versions(action_id, sequence DESC);
       CREATE TABLE IF NOT EXISTS provider_contracts (id TEXT PRIMARY KEY, provider TEXT NOT NULL, market TEXT NOT NULL, datasets TEXT NOT NULL, timezone TEXT NOT NULL, units TEXT NOT NULL, revision_policy TEXT NOT NULL, updated_at TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS instrument_registry (id TEXT PRIMARY KEY, market TEXT NOT NULL, venue TEXT NOT NULL, symbol TEXT NOT NULL, title TEXT NOT NULL, aliases TEXT NOT NULL, registered_at TEXT NOT NULL);
       CREATE INDEX IF NOT EXISTS idx_instrument_registry_symbol ON instrument_registry (market, symbol);
@@ -367,23 +408,36 @@ export class DataLakeCatalog {
     return { ...partition, quality };
   }
 
-  async queryBarsAsOf(input: { market: MarketId; instrument: string; timeframe: string; asOf: string }): Promise<{ rows: Array<Record<string, unknown>>; dataStatus: 'historical' | 'unavailable'; source: string | null; adjustment?: string; updatedAt: string | null; reason?: string; snapshot?: PointInTimeSnapshot }> {
+  async queryBarsAsOf(input: { market: MarketId; instrument: string; timeframe: string; asOf: string; availability?: 'published' | 'observed' }): Promise<{ rows: Array<Record<string, unknown>>; dataStatus: 'historical' | 'unavailable'; source: string | null; adjustment?: string; updatedAt: string | null; reason?: string; snapshot?: PointInTimeSnapshot }> {
     const registered = this.resolveInstrument(input.market, input.instrument);
     input = { ...input, instrument: registered?.symbol || input.instrument };
     validateInstrument(input.market, input.instrument);
     if (this.listInstrumentQuarantine(input.market).some(item => item.instrument === input.instrument)) return { rows: [], dataStatus: 'unavailable', source: null, updatedAt: null, reason: '标的身份未确认，旧分区已隔离' };
     const asOf = Date.parse(input.asOf);
     if (!Number.isFinite(asOf)) throw new Error('invalid asOf');
+    if (input.availability !== undefined && !['published','observed'].includes(input.availability)) throw new Error('invalid availability');
     const candidates = this.db.prepare('SELECT p.*, m.source AS source, m.adjustment AS adjustment FROM dataset_partitions p JOIN dataset_manifests m ON m.id = p.manifest_id WHERE p.market = ? AND p.dataset = ? AND p.instrument = ? AND p.timeframe = ? AND p.published_at <= ? AND p.status = ? ORDER BY p.period_start ASC, p.period_end ASC, p.published_at DESC, p.id DESC').all(input.market, 'bars', input.instrument, input.timeframe, new Date(asOf).toISOString(), 'committed') as Array<Record<string, any>>;
     const selected: Array<Record<string, any>> = [];
     const periods = new Set<string>();
     for (const candidate of candidates) {
+      const fetchedAt = Date.parse(String(candidate.fetched_at));
+      if (input.availability === 'observed' && (!Number.isFinite(fetchedAt) || fetchedAt > asOf)) continue;
       const periodKey = `${candidate.period_start}|${candidate.period_end}`;
       if (periods.has(periodKey)) continue;
       periods.add(periodKey);
       selected.push(candidate);
     }
-    if (!selected.length) return { rows: [], dataStatus: 'unavailable', source: null, updatedAt: null, reason: '没有在 asOf 时点之前发布的数据分区' };
+    if (!selected.length) return { rows: [], dataStatus: 'unavailable', source: null, updatedAt: null, reason: input.availability === 'observed' ? '没有在 asOf 时点之前发布且已抓取的数据分区' : '没有在 asOf 时点之前发布的数据分区' };
+    if(input.availability==='observed'){
+      if(selected.length>200||selected.reduce((sum,row)=>sum+Number(row.row_count||0),0)>100_000)throw Error('observed snapshot exceeds partition or row limit');
+      const root=fs.realpathSync(this.lakeRoot)+path.sep;let bytes=0;
+      for(const part of selected){
+        const real=fs.realpathSync(path.resolve(String(part.path))),stat=fs.statSync(real);bytes+=stat.size;
+        if(!real.startsWith(root)||!stat.isFile()||bytes>128*1024*1024)throw Error('observed snapshot path is missing, oversized or outside the data lake');
+        const file=this.db.prepare('SELECT file_hash AS fileHash FROM dataset_partition_files WHERE partition_id=?').get(part.id) as {fileHash?:string}|undefined;
+        if(!file?.fileHash||!/^[a-f0-9]{64}$/.test(file.fileHash)||crypto.createHash('sha256').update(fs.readFileSync(real)).digest('hex')!==file.fileHash)throw Error('observed snapshot file hash evidence is missing or mismatched');
+      }
+    }
     const instance = await DuckDBInstance.create(':memory:', { memory_limit: '512MB', threads: '1' });
     const connection = await instance.connect();
     try {
@@ -392,7 +446,19 @@ export class DataLakeCatalog {
         const reader = await connection.runAndReadAll(`SELECT observation_ts AS timestamp, open, high, low, close, volume, published_at, market, instrument, timeframe, source FROM read_parquet('${sqlPath(String(partition.path))}') ORDER BY observation_ts`);
         rows.push(...(reader.getRowObjectsJS() as Array<Record<string, unknown>>).filter(row => {
           const timestamp = row.timestamp instanceof Date ? row.timestamp.getTime() : Date.parse(String(row.timestamp));
-          return Number.isFinite(timestamp) && timestamp <= asOf;
+          const publishedAt = Date.parse(String(row.published_at || ''));
+          if (!Number.isFinite(timestamp) || timestamp > asOf) return false;
+          return input.availability !== 'observed' || (Number.isFinite(publishedAt) && publishedAt <= asOf);
+        }).map(row => {
+          if (input.availability !== 'observed') return row;
+          const publishedAt = Date.parse(String(row.published_at || ''));
+          const fetchedAt = Date.parse(String(partition.fetched_at || ''));
+          if (!Number.isFinite(publishedAt) || !Number.isFinite(fetchedAt) || fetchedAt > asOf) throw new Error('observed row lacks valid publication or server fetch evidence');
+          return {
+            ...row,
+            __snapshotPartitionId: String(partition.id),
+            availabilityObservedAt: new Date(Math.max(publishedAt, fetchedAt)).toISOString(),
+          };
         }));
       }
       rows.sort((left, right) => Date.parse(String(left.timestamp)) - Date.parse(String(right.timestamp)));
@@ -400,10 +466,22 @@ export class DataLakeCatalog {
       const source = [...new Set(selected.map(item => String(item.source || '')).filter(Boolean))].join(', ');
       if (!rows.length) return { rows: [], dataStatus: 'unavailable', source: source || null, updatedAt: String(latest.published_at || ''), reason: '已发布分区中没有早于该 asOf 时点的 K 线观测' };
       const contentHash = crypto.createHash('sha256').update(selected.map(item => String(item.content_hash)).join('|')).digest('hex');
-      const snapshot: PointInTimeSnapshot = { id: `snapshot_${contentHash.slice(0, 24)}_${asOf}`, market: input.market, instrument: input.instrument, dataset: 'bars', timeframe: input.timeframe, asOf: new Date(asOf).toISOString(), partitionId: selected.map(item => String(item.id)).join(','), contentHash, source: source || null, createdAt: new Date().toISOString() };
-      this.db.prepare('INSERT OR IGNORE INTO point_in_time_snapshots (id,market,instrument,dataset,timeframe,as_of,partition_id,content_hash,source,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)').run(snapshot.id, snapshot.market, snapshot.instrument, snapshot.dataset, snapshot.timeframe, snapshot.asOf, snapshot.partitionId, snapshot.contentHash, snapshot.source, snapshot.createdAt);
+      const snapshot: PointInTimeSnapshot = { id: `snapshot_${input.availability === 'observed' ? 'observed_' : ''}${contentHash.slice(0, 24)}_${asOf}`, market: input.market, instrument: input.instrument, dataset: 'bars', timeframe: input.timeframe, asOf: new Date(asOf).toISOString(), partitionId: selected.map(item => String(item.id)).join(','), contentHash, source: source || null, createdAt: new Date().toISOString() };
+      const proofBase = input.availability === 'observed' ? {version:2 as const,availability:'observed' as const,snapshotId:snapshot.id,asOf:snapshot.asOf,partitions:selected.map(item=>{
+        const file=this.db.prepare('SELECT file_hash AS fileHash FROM dataset_partition_files WHERE partition_id=?').get(item.id) as {fileHash?:string}|undefined;
+        if(!file?.fileHash || !/^[a-f0-9]{64}$/.test(file.fileHash))throw Error('observed snapshot lacks file hash evidence');
+        return {partitionId:String(item.id),publishedAt:String(item.published_at),fetchedAt:String(item.fetched_at),fileHash:file.fileHash};
+      }),rowEvidence:observedRowsEvidence(rows)} : null;
+      const proof=proofBase?{...proofBase,contentHash:hash(proofBase)}:null;
+      const verified=proof?await this.readSnapshotBarsVerified(snapshot,proof):null;
+      this.db.transaction(()=>{
+        const existingSnapshot=this.getSnapshot(snapshot.id);
+        if(proof&&existingSnapshot&&(['market','instrument','dataset','timeframe','asOf','partitionId','contentHash','source'] as const).some(key=>existingSnapshot[key]!==snapshot[key]))throw Error('observed snapshot identity conflicts with saved snapshot');
+        this.db.prepare('INSERT OR IGNORE INTO point_in_time_snapshots (id,market,instrument,dataset,timeframe,as_of,partition_id,content_hash,source,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)').run(snapshot.id, snapshot.market, snapshot.instrument, snapshot.dataset, snapshot.timeframe, snapshot.asOf, snapshot.partitionId, snapshot.contentHash, snapshot.source, snapshot.createdAt);
+        if(proof){const existing=this.db.prepare('SELECT proof_json FROM snapshot_availability_proofs WHERE snapshot_id=?').get(snapshot.id) as {proof_json:string}|undefined;if(existing && existing.proof_json!==stableJson(proof))throw Error('snapshot availability proof evidence changed');this.db.prepare('INSERT OR IGNORE INTO snapshot_availability_proofs (snapshot_id,proof_json) VALUES (?,?)').run(snapshot.id,stableJson(proof));}
+      })();
       const adjustments=[...new Set(selected.map(row=>/^yahoo-finance-history(?::|$)/i.test(String(row.source)) && row.adjustment === 'unadjusted' ? 'unknown' : String(row.adjustment)))];
-      return { rows, dataStatus: 'historical', source, adjustment:adjustments.length===1?adjustments[0]:'mixed', updatedAt: String(latest.published_at || ''), snapshot: this.getSnapshot(snapshot.id) || snapshot };
+      return { rows:verified?verified.rows:rows.map(({ __snapshotPartitionId: _partitionId, ...row }) => row), dataStatus:verified?verified.dataStatus:'historical', source, adjustment:adjustments.length===1?adjustments[0]:'mixed', updatedAt: String(latest.published_at || ''), snapshot: this.getSnapshot(snapshot.id) || snapshot, ...(verified?.reason?{reason:verified.reason}:{}) };
     } finally { connection.closeSync(); instance.closeSync(); }
   }
 
@@ -421,13 +499,18 @@ export class DataLakeCatalog {
   }
 
   async readSnapshotBarsExact(snapshot: PointInTimeSnapshot): Promise<{snapshot:PointInTimeSnapshot;rows:Array<Record<string,unknown>>;dataStatus:'historical'|'unavailable';source:string|null;updatedAt:null;publishedAt:string|null;sourceCapturedAt:null;serverFetchedAt:string|null;adjustment:string;currency:string|null;session:string|null;coverage:{start:string|null;end:string|null;rows:number};reason?:string}> {
+    return this.readSnapshotBarsVerified(snapshot);
+  }
+
+  private async readSnapshotBarsVerified(snapshot: PointInTimeSnapshot, candidateProof?:SnapshotAvailabilityProof): Promise<{snapshot:PointInTimeSnapshot;rows:Array<Record<string,unknown>>;dataStatus:'historical'|'unavailable';source:string|null;updatedAt:null;publishedAt:string|null;sourceCapturedAt:null;serverFetchedAt:string|null;adjustment:string;currency:string|null;session:string|null;coverage:{start:string|null;end:string|null;rows:number};reason?:string}> {
     const saved=this.getSnapshot(snapshot.id);
-    if(!saved||JSON.stringify(saved)!==JSON.stringify(snapshot))throw Error('point-in-time snapshot reference does not match catalog record');
+    if(!candidateProof&&(!saved||JSON.stringify(saved)!==JSON.stringify(snapshot)))throw Error('point-in-time snapshot reference does not match catalog record');
     const ids=snapshot.partitionId.split(',');
     if(!ids.length||ids.length>200||ids.some(id=>!id))throw Error('snapshot partition reference is invalid');
     const selected=ids.map(id=>this.db.prepare('SELECT p.*,m.source,m.adjustment,m.timezone,m.units_json FROM dataset_partitions p JOIN dataset_manifests m ON m.id=p.manifest_id WHERE p.id=?').get(id) as Record<string,any>|undefined);
     if(selected.some(row=>!row))throw Error('snapshot partition is no longer available');
     const parts=selected as Array<Record<string,any>>;
+    const availabilityProof=snapshot.id.startsWith('snapshot_observed_')?this.readAvailabilityProof(snapshot,parts,candidateProof):null;
     if(parts.some(row=>row.market!==snapshot.market||row.instrument!==snapshot.instrument||row.dataset!==snapshot.dataset||row.timeframe!==snapshot.timeframe||row.status!=='committed'))throw Error('snapshot partition scope or status does not match');
     if(parts.reduce((sum,row)=>sum+Number(row.row_count||0),0)>100_000)throw Error('saved snapshot exceeds the 100000-row read limit');
     if(!Number.isFinite(Date.parse(snapshot.asOf))||parts.some(row=>!Number.isFinite(Date.parse(String(row.published_at)))||Date.parse(String(row.published_at))>Date.parse(snapshot.asOf)))throw Error('snapshot includes a partition published after its saved asOf or has invalid time');
@@ -437,23 +520,54 @@ export class DataLakeCatalog {
     try {
       const rows:Array<Record<string,unknown>>=[];
       let totalFileBytes=0;
-      for(const part of parts){const absolute=path.resolve(String(part.path)),root=fs.realpathSync(this.lakeRoot)+path.sep;const real=fs.realpathSync(absolute),stat=fs.statSync(real);totalFileBytes+=stat.size;if(!real.startsWith(root)||!stat.isFile()||totalFileBytes>128*1024*1024)throw Error('snapshot partition path is missing, oversized or outside the data lake');const expectedFile=this.db.prepare('SELECT file_hash FROM dataset_partition_files WHERE partition_id=?').get(part.id) as {file_hash?:string}|undefined;if(!expectedFile?.file_hash)throw Error('snapshot partition has no verified file hash');const actualFile=crypto.createHash('sha256').update(fs.readFileSync(real)).digest('hex');if(actualFile!==expectedFile.file_hash)throw Error('snapshot partition file hash mismatch');const result=await connection.runAndReadAll(`SELECT observation_ts AS timestamp,open,high,low,close,volume,published_at,market,instrument,timeframe,source FROM read_parquet('${sqlPath(real)}') ORDER BY observation_ts LIMIT 100001`);const found=result.getRowObjectsJS() as Array<Record<string,unknown>>;if(found.length>100_000||found.length!==Number(part.row_count))throw Error('snapshot partition row count does not match catalog or exceeds read limit');rows.push(...found);}
+      for(const part of parts){const absolute=path.resolve(String(part.path)),root=fs.realpathSync(this.lakeRoot)+path.sep;const real=fs.realpathSync(absolute),stat=fs.statSync(real);totalFileBytes+=stat.size;if(!real.startsWith(root)||!stat.isFile()||totalFileBytes>128*1024*1024)throw Error('snapshot partition path is missing, oversized or outside the data lake');const expectedFile=this.db.prepare('SELECT file_hash FROM dataset_partition_files WHERE partition_id=?').get(part.id) as {file_hash?:string}|undefined;if(!expectedFile?.file_hash)throw Error('snapshot partition has no verified file hash');const actualFile=crypto.createHash('sha256').update(fs.readFileSync(real)).digest('hex');if(actualFile!==expectedFile.file_hash)throw Error('snapshot partition file hash mismatch');const result=await connection.runAndReadAll(`SELECT observation_ts AS timestamp,open,high,low,close,volume,published_at,market,instrument,timeframe,source FROM read_parquet('${sqlPath(real)}') ORDER BY observation_ts LIMIT 100001`);const found=result.getRowObjectsJS() as Array<Record<string,unknown>>;if(found.length>100_000||found.length!==Number(part.row_count))throw Error('snapshot partition row count does not match catalog or exceeds read limit');rows.push(...found.map(row=>{const fetchedAt=Date.parse(String(part.fetched_at||''));if(availabilityProof&&(!Number.isFinite(fetchedAt)||fetchedAt>Date.parse(snapshot.asOf)))return row;const publishedAt=Date.parse(String(row.published_at||''));return {...row,__snapshotPartitionId:String(part.id),...(availabilityProof?{availabilityObservedAt:new Date(Math.max(publishedAt,fetchedAt)).toISOString()}:{})};}));}
       const cutoff=Date.parse(snapshot.asOf),clipped=rows.filter(row=>{const at=row.timestamp instanceof Date?row.timestamp.getTime():Date.parse(String(row.timestamp)),published=Date.parse(String(row.published_at));return Number.isFinite(at)&&at<=cutoff&&Number.isFinite(published)&&published<=cutoff;}).sort((a,b)=>Date.parse(a.timestamp instanceof Date?a.timestamp.toISOString():String(a.timestamp))-Date.parse(b.timestamp instanceof Date?b.timestamp.toISOString():String(b.timestamp)));
+      if(availabilityProof?.version===2){
+        if(!availabilityProof.rowEvidence)throw Error('snapshot row availability proof is missing');
+        const actual=observedRowsEvidence(clipped);
+        if(actual.count!==availabilityProof.rowEvidence.count||actual.rowsHash!==availabilityProof.rowEvidence.rowsHash
+          ||actual.firstObservedAt!==availabilityProof.rowEvidence.firstObservedAt||actual.lastObservedAt!==availabilityProof.rowEvidence.lastObservedAt){
+          throw Error('snapshot row availability proof evidence changed');
+        }
+      }
+      const publicRows=clipped.map(({__snapshotPartitionId:_partitionId,...row})=>row);
       const sources=[...new Set(parts.map(row=>String(row.source||'')).filter(Boolean))],adjustments=[...new Set(parts.map(row=>/^yahoo-finance-history(?::|$)/i.test(String(row.source))&&row.adjustment==='unadjusted'?'unknown':String(row.adjustment)))];
       const frozenPriceUnits=parts.map(row=>{try{const units=JSON.parse(String(row.units_json||'null'));return typeof units?.price==='string'?units.price:null;}catch{return null;}});
       const currency=frozenPriceUnits.length&&frozenPriceUnits.every(unit=>unit===frozenPriceUnits[0])&&/^[A-Z]{3,5}$/.test(frozenPriceUnits[0]||'')?frozenPriceUnits[0]:null;
       const publishedAt=parts.map(row=>String(row.published_at)).sort().at(-1)||null;
       const serverFetchedAt=parts.map(row=>String(row.fetched_at)).sort().at(-1)||null;
       const iso=(value:unknown)=>{const date=value instanceof Date?value:new Date(String(value));return Number.isFinite(date.getTime())?date.toISOString():null;};
-      return {snapshot,rows:clipped,dataStatus:clipped.length?'historical':'unavailable',source:sources.join(', ')||null,updatedAt:null,publishedAt,sourceCapturedAt:null,serverFetchedAt,adjustment:adjustments.length===1?adjustments[0]:'mixed',currency,session:null,coverage:{start:clipped.length?iso(clipped[0].timestamp):null,end:clipped.length?iso(clipped.at(-1)!.timestamp):null,rows:clipped.length},...(!clipped.length?{reason:'saved snapshot partitions contain no observations at its asOf'}:{})};
+      return {snapshot,rows:publicRows,dataStatus:publicRows.length?'historical':'unavailable',source:sources.join(', ')||null,updatedAt:null,publishedAt,sourceCapturedAt:null,serverFetchedAt,adjustment:adjustments.length===1?adjustments[0]:'mixed',currency,session:null,coverage:{start:publicRows.length?iso(publicRows[0].timestamp):null,end:publicRows.length?iso(publicRows.at(-1)!.timestamp):null,rows:publicRows.length},...(!publicRows.length?{reason:'saved snapshot partitions contain no observations at its asOf'}:{})};
     } finally {connection.closeSync();instance.closeSync();}
   }
 
+  private readAvailabilityProof(snapshot:PointInTimeSnapshot,parts:Array<Record<string,any>>,candidateProof?:SnapshotAvailabilityProof):SnapshotAvailabilityProof {
+    const stored=this.db.prepare('SELECT proof_json FROM snapshot_availability_proofs WHERE snapshot_id=?').get(snapshot.id) as {proof_json:string}|undefined;
+    let proof:SnapshotAvailabilityProof;try{proof=candidateProof||JSON.parse(stored?.proof_json||'');}catch{throw Error('snapshot availability proof evidence is missing or invalid');}
+    const {contentHash,...base}=proof;
+    if(![1,2].includes(proof.version)||proof.availability!=='observed'||proof.snapshotId!==snapshot.id||proof.asOf!==snapshot.asOf||!Array.isArray(proof.partitions)||proof.partitions.length!==parts.length||contentHash!==hash(base))throw Error('snapshot availability proof evidence is invalid');
+    if(proof.version===2){
+      const rows=proof.rowEvidence;
+      if(!rows||rows.rule!=='max(row-published-at,partition-fetched-at)'||!Number.isInteger(rows.count)||rows.count<0
+        ||!/^[a-f0-9]{64}$/.test(rows.rowsHash)
+        ||(rows.count===0&&(rows.firstObservedAt!==null||rows.lastObservedAt!==null))
+        ||(rows.count>0&&(!rows.firstObservedAt||!rows.lastObservedAt||!Number.isFinite(Date.parse(rows.firstObservedAt))||!Number.isFinite(Date.parse(rows.lastObservedAt))))){
+        throw Error('snapshot row availability proof evidence is invalid');
+      }
+    }else if(proof.rowEvidence!==undefined)throw Error('legacy snapshot availability proof contains unexpected row evidence');
+    for(let i=0;i<parts.length;i++){
+      const p=parts[i],e=proof.partitions[i],file=this.db.prepare('SELECT file_hash AS fileHash FROM dataset_partition_files WHERE partition_id=?').get(p.id) as {fileHash?:string}|undefined;
+      if(!e||e.partitionId!==p.id||e.publishedAt!==p.published_at||e.fetchedAt!==p.fetched_at||e.fileHash!==file?.fileHash||!Number.isFinite(Date.parse(e.fetchedAt))||Date.parse(e.fetchedAt)>Date.parse(snapshot.asOf))throw Error('snapshot availability proof evidence changed');
+    }
+    return proof;
+  }
+
   /** Verify an exact saved snapshot and expose only its persisted partition file hashes and proof metadata. */
-  async readSnapshotProofExact(snapshot:PointInTimeSnapshot):Promise<{snapshot:PointInTimeSnapshot;dataStatus:'historical'|'unavailable';fileHashes:Array<{partitionId:string;fileHash:string}>;source:string|null;publishedAt:string|null;serverFetchedAt:string|null;adjustment:string;currency:string|null;session:string|null;coverage:{start:string|null;end:string|null;rows:number};reason?:string}> {
+  async readSnapshotProofExact(snapshot:PointInTimeSnapshot):Promise<{snapshot:PointInTimeSnapshot;dataStatus:'historical'|'unavailable';fileHashes:Array<{partitionId:string;fileHash:string}>;source:string|null;publishedAt:string|null;serverFetchedAt:string|null;adjustment:string;currency:string|null;session:string|null;coverage:{start:string|null;end:string|null;rows:number};availabilityProof:SnapshotAvailabilityProof|null;reason?:string}> {
     const verified=await this.readSnapshotBarsExact(snapshot),ids=snapshot.partitionId.split(',');
     const fileHashes=ids.map(partitionId=>{const row=this.db.prepare('SELECT file_hash AS fileHash FROM dataset_partition_files WHERE partition_id=?').get(partitionId) as {fileHash?:string}|undefined;return row?.fileHash?{partitionId,fileHash:String(row.fileHash)}:null;}).filter((row):row is {partitionId:string;fileHash:string}=>row!==null);
-    return {snapshot:verified.snapshot,dataStatus:verified.dataStatus,fileHashes,source:verified.source,publishedAt:verified.publishedAt,serverFetchedAt:verified.serverFetchedAt,adjustment:verified.adjustment,currency:verified.currency,session:verified.session,coverage:verified.coverage,...(verified.reason?{reason:verified.reason}:{})};
+    const parts=ids.map(id=>this.db.prepare('SELECT * FROM dataset_partitions WHERE id=?').get(id) as Record<string,any>);
+    return {snapshot:verified.snapshot,dataStatus:verified.dataStatus,fileHashes,source:verified.source,publishedAt:verified.publishedAt,serverFetchedAt:verified.serverFetchedAt,adjustment:verified.adjustment,currency:verified.currency,session:verified.session,coverage:verified.coverage,availabilityProof:snapshot.id.startsWith('snapshot_observed_')?this.readAvailabilityProof(snapshot,parts):null,...(verified.reason?{reason:verified.reason}:{})};
   }
 
   /** Confirm that a fixed snapshot tuple and its committed manifest lineage are still present, even if a legacy file hash is absent. */
@@ -501,7 +615,17 @@ export class DataLakeCatalog {
       observed_at=CASE WHEN corporate_actions.observed_at IS NULL THEN excluded.observed_at WHEN excluded.observed_at IS NULL THEN corporate_actions.observed_at ELSE MIN(corporate_actions.observed_at,excluded.observed_at) END,
       currency=COALESCE(corporate_actions.currency,excluded.currency),
       payment_at=COALESCE(corporate_actions.payment_at,excluded.payment_at)`).run(input.id,input.market,input.instrument,input.kind,effectiveAt,input.factor ?? null,input.oldSymbol || null,input.newSymbol || null,input.source.trim(),publishedAt,observedAt,input.currency?.trim().toUpperCase() || null,paymentAt);
-    return this.listCorporateActions('stocks', input.instrument).find(action => action.id === input.id)!;
+    const saved=this.listCorporateActions('stocks', input.instrument).find(action => action.id === input.id)!;
+    const previous=this.db.prepare('SELECT recorded_at,action_json,content_hash FROM corporate_action_versions WHERE action_id=? ORDER BY sequence DESC LIMIT 1').get(saved.id) as {recorded_at:string;action_json:string;content_hash:string}|undefined;
+    if(previous){let priorAction:CorporateAction;try{priorAction=JSON.parse(previous.action_json);}catch{throw Error('corporate action version evidence is invalid');}if(previous.content_hash!==hash({version:1,recordedAt:previous.recorded_at,action:priorAction}))throw Error('corporate action version evidence hash mismatch');}
+    const actionJson=stableJson(saved);
+    if(!previous||previous.action_json!==actionJson){
+      const last=this.db.prepare('SELECT recorded_at FROM corporate_action_versions ORDER BY recorded_at DESC LIMIT 1').get() as {recorded_at:string}|undefined;
+      const lastMs=last?Date.parse(last.recorded_at):0;if(last&&!Number.isFinite(lastMs))throw Error('corporate action archive timestamp invalid');
+      const recordedAt=new Date(Math.max(Date.now(),lastMs+1)).toISOString(),payload={version:1,recordedAt,action:saved};
+      this.db.prepare('INSERT INTO corporate_action_versions (action_id,recorded_at,action_json,content_hash) VALUES (?,?,?,?)').run(saved.id,recordedAt,actionJson,hash(payload));
+    }
+    return saved;
     }).immediate();
   }
 
@@ -512,6 +636,33 @@ export class DataLakeCatalog {
         ? this.db.prepare('SELECT id,market,instrument,kind,effective_at AS effectiveAt,payment_at AS paymentAt,factor,currency,old_symbol AS oldSymbol,new_symbol AS newSymbol,source,published_at AS publishedAt,observed_at AS observedAt FROM corporate_actions WHERE market = ? ORDER BY effective_at').all(market)
         : this.db.prepare('SELECT id,market,instrument,kind,effective_at AS effectiveAt,payment_at AS paymentAt,factor,currency,old_symbol AS oldSymbol,new_symbol AS newSymbol,source,published_at AS publishedAt,observed_at AS observedAt FROM corporate_actions ORDER BY effective_at').all()) as Array<Record<string, unknown>>;
     return rows.map(row => ({ id: String(row.id), market: row.market as MarketId as 'stocks', instrument: String(row.instrument), kind: row.kind as CorporateAction['kind'], effectiveAt: String(row.effectiveAt), ...(row.paymentAt == null ? {} : { paymentAt: String(row.paymentAt) }), ...(row.publishedAt == null ? {} : { publishedAt: String(row.publishedAt) }), ...(row.observedAt == null ? {} : { observedAt: String(row.observedAt) }), ...(row.factor == null ? {} : { factor: Number(row.factor) }), ...(row.currency ? { currency: String(row.currency) } : {}), ...(row.oldSymbol ? { oldSymbol: String(row.oldSymbol) } : {}), ...(row.newSymbol ? { newSymbol: String(row.newSymbol) } : {}), source: String(row.source) }));
+  }
+
+  listCorporateActionsAsOf(input:{market:'stocks';instrument:string;asOf:string}):{records:Array<{action:CorporateAction;recordedAt:string;contentHash:string}>;coverage:'partial';reason:string} {
+    return this.readCorporateActionVersionsAsOf(input,false);
+  }
+  listCorporateActionVersionsAsOf(input:{market:'stocks';instrument:string;asOf:string}):{records:Array<{action:CorporateAction;recordedAt:string;contentHash:string}>;coverage:'partial';reason:string} {
+    return this.readCorporateActionVersionsAsOf(input,true);
+  }
+  private readCorporateActionVersionsAsOf(input:{market:'stocks';instrument:string;asOf:string},allVersions:boolean):{records:Array<{action:CorporateAction;recordedAt:string;contentHash:string}>;coverage:'partial';reason:string} {
+    if(input.market!=='stocks')throw Error('Corporate actions are only supported for stocks');
+    const resolved=this.resolveInstrument(input.market,input.instrument),symbol=resolved?.symbol||input.instrument;
+    validateInstrument('stocks',symbol);
+    const cutoff=Date.parse(input.asOf);if(!Number.isFinite(cutoff))throw Error('invalid asOf');if(cutoff>Date.now())throw Error('future asOf is not permitted for corporate action history');
+    const rows=this.db.prepare('SELECT sequence,action_id,recorded_at,action_json,content_hash FROM corporate_action_versions WHERE recorded_at<=? ORDER BY recorded_at DESC,sequence DESC LIMIT 20001').all(new Date(cutoff).toISOString()) as Array<{sequence:number;action_id:string;recorded_at:string;action_json:string;content_hash:string}>;
+    if(rows.length>20000)throw Error('corporate action history exceeds read limit');
+    const seen=new Set<string>(),records:Array<{action:CorporateAction;recordedAt:string;contentHash:string}>=[],identities=new Map<string,Set<string>>();
+    for(const row of rows){
+      let action:CorporateAction;try{action=JSON.parse(row.action_json);}catch{throw Error('corporate action version evidence is invalid');}
+      if(!action||action.id!==row.action_id||row.content_hash!==hash({version:1,recordedAt:row.recorded_at,action}))throw Error('corporate action version evidence hash mismatch');
+      if(allVersions){const scope=`${action.market}:${action.instrument}`,scopes=identities.get(action.id)||new Set<string>();scopes.add(scope);identities.set(action.id,scopes);}
+      if(!allVersions&&seen.has(action.id))continue;
+      if([action.publishedAt,action.observedAt].some(value=>value!==undefined&&(!Number.isFinite(Date.parse(value))||Date.parse(value)>cutoff)))continue;
+      seen.add(action.id);
+      if(action.market==='stocks'&&action.instrument===symbol)records.push({action,recordedAt:row.recorded_at,contentHash:row.content_hash});
+    }
+    if(allVersions&&[...identities.values()].some(scopes=>scopes.has(`stocks:${symbol}`)&&scopes.size>1))throw Error('corporate action identity changed across archived versions; review evidence');
+    return {records,coverage:'partial',reason:'仅包含本地保存且可核验的版本；旧记录和未采集来源可能缺失，不能据此认定无公司行动'};
   }
 
   registerProviderContract(input: ProviderContract): ProviderContract {

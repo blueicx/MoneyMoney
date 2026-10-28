@@ -49,15 +49,27 @@ import {RestrictedPaperExecutionStore} from '../features/restricted-paper-execut
 import {createRestrictedForwardRouter} from './restricted-forward-routes';
 import {RestrictedValidationStore} from '../features/restricted-validation';
 import {createRestrictedValidationRouter} from './restricted-validation-routes';
+import {StrategyPipelineStore} from '../features/strategy-pipeline';
+import {createStrategyPipelineRouter} from './strategy-pipeline-routes';
 import {AiEvaluationLab} from '../features/ai-evaluation-lab';
 import {createAiEvaluationRouter} from './ai-evaluation-routes';
 import {BlindSessionStore} from '../features/blind-sessions';
 import {createBlindSessionRouter} from './blind-session-routes';
+import {MarketReplayStore} from '../features/market-replay';
+import {createMarketReplayRouter} from './market-replay-routes';
 import { createProjectReferenceResolver } from '../features/research-project-references';
 import { LiveKlineHub, liveKlineScope } from '../features/live-kline-stream';
 import { createLiveKlineRouter } from './live-kline-routes';
 import { createSnapshotComparisonStore } from '../features/snapshot-comparison';
 import { createSnapshotComparisonRouter } from './snapshot-comparison-routes';
+import { createOptionsSurfaceRouter } from './options-surface-routes';
+import { PortfolioImportLedgerStore } from '../features/portfolio-import-ledger';
+import { createPortfolioImportLedgerRouter } from './portfolio-import-ledger-routes';
+import { CompanyMacroResearchStore } from '../features/company-macro-research';
+import { EvidenceResearchAssistant } from '../features/evidence-research-assistant';
+import { createAdvancedResearchRouter } from './advanced-research-routes';
+import { PortfolioConfigurationStore } from '../features/portfolio-configurations';
+import { createPortfolioConfigurationRouter } from './portfolio-configuration-routes';
 import { ReviewLifecycleStore } from '../features/review-lifecycle';
 import { createSavedEvidenceProofService } from '../features/research-evidence-governance';
 import { createResearchPreregistrationStore } from '../features/research-preregistration';
@@ -109,6 +121,7 @@ import { kellySizer, backtester, ASSET_BACKTEST_STRATEGY_VERSION } from '../feat
 import { pushNotification } from '../features/notifications';
 import { newsFeed, settingsManager } from '../features/news-settings';
 import { getStockNews, getStockNewsSnapshot } from '../features/stock-news';
+import { captureStockNewsEvidence } from '../features/stock-news-evidence';
 import { reportScheduler } from '../features/report-scheduler';
 import { binanceFeed, alertManager, anomalyDetector } from '../features/binance';
 import { fetchRunnerBinanceKlines } from '../features/runner-binance-kline';
@@ -464,6 +477,13 @@ app.get('/login', (req, res) => {
 registerAuthRoutes(app);
 registerApiAuthProtection(app);
 app.use('/api/data',createDataAssetRouter(new DataAssetService(dataLakeCatalog,stateStore,dataLakeWorker),new OptionSnapshotRecovery(DATA_ROOT,dataLakeCatalog,stateStore)));
+app.use('/api/research/options-surface',createOptionsSurfaceRouter({list:input=>dataLakeCatalog.listOptionSnapshots(input).flatMap(row=>{
+  const underlyingMarket=row.underlyingMarket;
+  if(underlyingMarket!=='stocks'&&underlyingMarket!=='crypto')return [];
+  const source=row.source==='CBOE Delayed Quotes'||row.source==='Deribit Public API'?row.source:null;
+  if(!source)return [];
+  return [{...row,market:'options' as const,underlyingMarket,source}];
+})}));
 const snapshotComparisonChoices=createSnapshotComparisonStore({
   state:stateStore,
   resolveSnapshot:id=>dataLakeCatalog.getSnapshot(id),
@@ -485,8 +505,17 @@ app.use('/api/research/projects',createResearchProjectRouter(researchProjects,()
 const strategyDefinitionStore=new StrategyDefinitionStore(stateStore);
 const portfolioSimulationStore=new PortfolioSimulationStore(stateStore,unifiedPaperLedgerStore,{definition:(id,hash)=>strategyDefinitionStore.read(id,hash),resolve:(market,instrument)=>dataLakeCatalog.resolveInstrument(market as MarketId,instrument),load:input=>dataLakeCatalog.queryBarsAsOf(input as any)});
 app.use('/api/research/portfolio-simulations',createPortfolioSimulationRouter(portfolioSimulationStore,market=>strategyDefinitionStore.list(market)));
-const blindSessionStore=new BlindSessionStore(stateStore,{resolve:(market,instrument)=>dataLakeCatalog.resolveInstrument(market as MarketId,instrument),evidence:id=>decisionIntelligenceStore.getEvidence(id),load:input=>dataLakeCatalog.queryBarsAsOf(input)});
+const portfolioConfigurationStore=new PortfolioConfigurationStore(stateStore,{simulation:id=>portfolioSimulationStore.view(id)});
+app.use('/api/research/portfolio-configurations',createPortfolioConfigurationRouter(portfolioConfigurationStore,verifyCsrfRequest));
+const blindSessionStore=new BlindSessionStore(stateStore,{resolve:(market,instrument)=>dataLakeCatalog.resolveInstrument(market as MarketId,instrument),evidence:id=>decisionIntelligenceStore.getEvidence(id),corporateActions:input=>dataLakeCatalog.listCorporateActionVersionsAsOf(input),load:input=>dataLakeCatalog.queryBarsAsOf(input)});
 app.use('/api/research/blind-sessions',createBlindSessionRouter(blindSessionStore));
+const marketReplayStore=new MarketReplayStore(stateStore,{
+ resolve:(market,instrument)=>dataLakeCatalog.resolveInstrument(market as MarketId,instrument),
+ evidence:id=>decisionIntelligenceStore.getEvidence(id),
+ decision:id=>decisionIntelligenceStore.getDecision(id),
+ loadBars:input=>dataLakeCatalog.queryBarsAsOf({...input,timeframe:'1d'}),
+});
+app.use('/api/research/market-replays',createMarketReplayRouter(marketReplayStore,verifyCsrfRequest));
 const aiEvaluationRunners=()=>{const rows=stateStore.get<AiRunner[]>('ai-paper-runners')||[];if(!stateStore.health.ok||!Array.isArray(rows))throw Error('跑单只读目录不可用');return rows;};
 const aiEvaluationLab=new AiEvaluationLab(stateStore,{
  load:ref=>{const runner=aiEvaluationRunners().find(r=>r.id===ref.runnerId),rows=stateStore.get<AiRunnerDecisionRecord[]>('ai-paper-runner-history:'+ref.runnerId)||[];if(!runner||!Array.isArray(rows))throw Error('原跑单或决策记录不可用');const decision=rows.find(d=>d.id===ref.decisionId);if(!decision)throw Error('未找到明确决策引用');return {runner,decision};},
@@ -501,6 +530,21 @@ app.use('/api/strategies/definitions',createStrategyDefinitionRouter(strategyDef
 const restrictedForwardStore:RestrictedForwardStore=new RestrictedForwardStore(stateStore,{definition:(id,hash)=>strategyDefinitionStore.read(id,hash),experiment:id=>researchRepository.getExperiment(id),resolve:(market,instrument)=>dataLakeCatalog.resolveInstrument(market as MarketId,instrument),signals:{get:id=>decisionIntelligenceStore.getSignalOutcome(id),list:()=>decisionIntelligenceStore.listSignalOutcomes(),save:signal=>decisionIntelligenceStore.saveSignalOutcome(signal)},catalog:{snapshot:id=>dataLakeCatalog.getSnapshot(id),partitions:()=>dataLakeCatalog.listPartitions(),revisions:()=>dataLakeCatalog.listRevisions('stocks')},validation:{plan:id=>restrictedValidationStore.read(id),result:id=>restrictedValidationStore.resultFor(id)},execution:id=>restrictedPaperExecutionStore.evidence(id)});
 const restrictedPaperExecutionStore:RestrictedPaperExecutionStore=new RestrictedPaperExecutionStore(stateStore,{observation:id=>restrictedForwardStore.read(id),signals:id=>restrictedForwardStore.signals(id),definition:(id,hash)=>strategyDefinitionStore.read(id,hash),snapshot:id=>dataLakeCatalog.getSnapshot(id),actions:()=>dataLakeCatalog.listCorporateActions('stocks'),ledger:unifiedPaperLedgerStore});
 app.use('/api/research/forward-observations',createRestrictedForwardRouter(restrictedForwardStore,input=>dataLakeCatalog.queryBarsAsOf(input),{store:restrictedPaperExecutionStore,quote:async instrument=>{const ref=dataLakeCatalog.resolveInstrument('stocks',instrument);if(!ref||ref.id!==instrument)throw Error('股票身份未核验');const result=await restrictedPaperQuotes.quote.fetch({symbol:ref.symbol});return {status:result.status,source:'Nasdaq 公共双边报价',quote:result.data};}}));
+const strategyPipelineStore=new StrategyPipelineStore(stateStore,{
+ resolve:(market,instrument)=>dataLakeCatalog.resolveInstrument(market as MarketId,instrument),
+ definition:(id,hash)=>strategyDefinitionStore.read(id,hash),
+ load:input=>dataLakeCatalog.queryBarsAsOf(input),
+ forwardObservation:id=>restrictedForwardStore.read(id),
+});
+app.use('/api/research/strategy-pipelines',createStrategyPipelineRouter(strategyPipelineStore,verifyCsrfRequest));
+const portfolioImportLedgerStore=new PortfolioImportLedgerStore(stateStore,{
+ resolve:(market,instrument)=>dataLakeCatalog.resolveInstrument(market as MarketId,instrument),
+ companyActions:input=>dataLakeCatalog.listCorporateActionVersionsAsOf(input),
+});
+app.use('/api/research/portfolio-import-ledger',createPortfolioImportLedgerRouter(portfolioImportLedgerStore,verifyCsrfRequest));
+const companyMacroResearchStore=new CompanyMacroResearchStore(stateStore,{evidence:id=>decisionIntelligenceStore.getEvidence(id)});
+const evidenceResearchAssistant=new EvidenceResearchAssistant(stateStore,{evidence:id=>decisionIntelligenceStore.getEvidence(id)});
+app.use('/api/research/advanced',createAdvancedResearchRouter({company:companyMacroResearchStore,assistant:evidenceResearchAssistant,csrfValid:verifyCsrfRequest}));
 const restrictedValidationStore=new RestrictedValidationStore(stateStore,{observation:id=>restrictedForwardStore.read(id),definition:(id,hash)=>strategyDefinitionStore.read(id,hash),resolve:(market,instrument)=>dataLakeCatalog.resolveInstrument(market as MarketId,instrument),experiments:{get:id=>researchRepository.getExperiment(id),save:(id,result)=>researchRepository.saveExperimentOnce(id,result)}});
 app.use('/api/research/validation',createRestrictedValidationRouter(restrictedValidationStore,input=>dataLakeCatalog.queryBarsAsOf(input)));
 const savedEvidenceProofs=createSavedEvidenceProofService({catalog:dataLakeCatalog,projects:researchProjects,state:stateStore});
@@ -1320,13 +1364,18 @@ async function readHistoricalBars(req: express.Request, res: express.Response): 
   const instrument = String(req.query.instrument || '').trim();
   const timeframe = String(req.query.timeframe || '').trim();
   const asOf = String(req.query.asOf || '').trim();
+  const availability = req.query.availability === undefined ? 'published' : req.query.availability;
   if (!MARKET_IDS.includes(market) || !instrument || !timeframe || !asOf) {
     res.status(400).json({ success: false, error: 'market、instrument、timeframe、asOf 均为必填项' });
     return;
   }
+  if (availability !== 'published' && availability !== 'observed') {
+    res.status(400).json({ success: false, error: 'availability 必须是 published 或 observed' });
+    return;
+  }
   try {
-    const result = await dataLakeCatalog.queryBarsAsOf({ market, instrument, timeframe, asOf });
-    res.json({ success: true, market, instrument, timeframe, asOf, ...result, reason: result.reason || null });
+    const result = await dataLakeCatalog.queryBarsAsOf({ market, instrument, timeframe, asOf, availability });
+    res.json({ success: true, market, instrument, timeframe, asOf, availability, ...result, reason: result.reason || null });
   } catch (error: any) { res.status(400).json({ success: false, market, instrument, dataStatus: 'unavailable', source: 'MoneyMoney local Parquet catalog', updatedAt: null, reason: error.message }); }
 }
 
@@ -1368,6 +1417,11 @@ app.get('/api/data/corporate-actions', (req, res) => {
   const rawMarket = typeof req.query.market === 'string' ? req.query.market : undefined;
   const instrument = typeof req.query.instrument === 'string' ? req.query.instrument.trim() : undefined;
   if (rawMarket && rawMarket !== 'stocks') return res.status(400).json({ success: false, market: rawMarket, dataStatus: 'unsupported', reason: '公司行动仅支持股票市场' });
+  if(req.query.asOf!==undefined){
+    if(typeof req.query.asOf!=='string'||!instrument||!Number.isFinite(Date.parse(req.query.asOf)))return res.status(400).json({success:false,dataStatus:'unavailable',reason:'历史查询需要有效标的和 asOf 时点'});
+    try{const result=dataLakeCatalog.listCorporateActionsAsOf({market:'stocks',instrument,asOf:req.query.asOf});return res.json({success:true,data:result.records.map(row=>row.action),versions:result.records,market:'stocks',instrument,asOf:new Date(req.query.asOf).toISOString(),dataStatus:result.coverage,source:'MoneyMoney corporate action version archive',updatedAt:new Date().toISOString(),reason:result.reason});}
+    catch(error:any){return res.status(400).json({success:false,dataStatus:'unavailable',reason:error.message});}
+  }
   const data = dataLakeCatalog.listCorporateActions('stocks', instrument);
   res.json({ success: true, data, market: 'stocks', instrument: instrument || null, dataStatus: data.length ? 'historical' : 'empty', source: 'MoneyMoney corporate action catalog', updatedAt: new Date().toISOString(), reason: data.length ? null : '当前股票暂无公司行动记录' });
 });
@@ -1851,6 +1905,36 @@ app.post('/api/evidence', express.json(), (req, res) => {
     res.status(201).json(decisionEnvelope({ market: item.market, instrument: item.instrument, data: item, dataStatus: item.dataStatus, source: item.source.name, updatedAt: item.fetchedAt }));
   } catch (error: any) {
     res.status(400).json({ success: false, error: error.message, dataStatus: 'unavailable', reason: error.message });
+  }
+});
+
+app.post('/api/evidence/stock-news', express.json(), async (req, res) => {
+  if (!adminOnly(req, res)) return;
+  if (!verifyCsrfRequest(req)) return res.status(403).json({ success: false, reason: 'CSRF 校验失败' });
+  try {
+    if (Object.keys(req.body || {}).some(key => !['instrument', 'symbol'].includes(key))) {
+      throw new Error('股票新闻证据只接受明确标的和代码，其他字段由服务端生成');
+    }
+    const instrument = String(req.body?.instrument || '').trim();
+    const symbol = String(req.body?.symbol || '').trim().toUpperCase();
+    const identity = instrument.match(/^stock:(us|nasdaq|nyse):([A-Z][A-Z0-9.-]{0,14})$/i);
+    if (!identity || identity[2].toUpperCase() !== symbol) throw new Error('股票新闻证据需要一致的规范标的和代码');
+    const snapshot = await getStockNewsSnapshot(symbol);
+    const captured = captureStockNewsEvidence({ instrument, symbol, snapshot });
+    decisionIntelligenceStore.saveEvidence(captured.responseEvidence);
+    captured.evidence.forEach(item => decisionIntelligenceStore.saveEvidence(item));
+    return res.status(201).json(decisionEnvelope({
+      market: 'stocks',
+      instrument,
+      data: captured,
+      dataStatus: snapshot.status,
+      source: 'Yahoo Finance news + saved evidence snapshots',
+      updatedAt: snapshot.retrievedAt,
+      evidenceRefs: captured.evidenceRefs,
+      reason: captured.reason,
+    }));
+  } catch (error: any) {
+    return res.status(400).json({ success: false, error: error.message, dataStatus: 'unavailable', reason: error.message });
   }
 });
 

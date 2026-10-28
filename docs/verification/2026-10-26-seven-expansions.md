@@ -24,3 +24,16 @@
 ## 尚未通过
 
 20% 冷启动性能目标失败；24 小时连续真实来源运行尚未通过。真实来源的可用性与保存研究的未来样本成熟度不由 fixture 或发布成功推断。发布只在本地最终回归与 CI 通过、备份验证、可回滚构建准备后执行。
+
+## 发布与长期观测（2026-10-26）
+
+- 运行代码：`5912d71aa7b54172328e2f52b618d91fb1c80810`，已推送 `codex/research-closure-all`。GitHub CI [40283096686](https://github.com/blueicx/MoneyMoney/actions/runs/40283096686) 所有步骤通过，包括新增浏览器检查及工件上传。
+- 干净 Git 导出构建验证身份，12 组发布恢复演练通过（0i0aGk），原工作区与导出测试仅 CRLF 差异，已逐文件规范化核验。干净构建浏览器 12 组合再次通过（zE0maH）。
+- 生产备份 `/opt/moneymoney/data/backups/2026-10-26T06-56-07-711Z`：两份 SQLite、74 文件、55 数据湖文件，隔离恢复校验通过；保留已有 15 个隔离损坏文件，dataStatus=partial。
+- 发布包 SHA256：`d1504b17f28f9cd872404fbafc159aab4f18b80faa9f6171c8e00b822cb86cfb`。线上 dist 已更新至上述代码，服务 active；回滚目录 `/opt/moneymoney/dist.rollback-seven-5912d71-20261026`，原 dist 另备份 `/opt/moneymoney/backups/dist-pre-seven-5912d71-20261026`。
+- 线上只读 API 验收通过：版本一致，29 个本地与 HTTPS 资源 Hash 一致，4 组管理员私有读取通过、4 组访客与匿名读取分别拒绝，Cookie CSRF 拒绝。股票 300 根、币种 30 根、期权 920 行、预测 10 项；只记录真实来源状态，不推断其交易时段或完整性。`E:/MYC/mm-seven-online-verify.log`。
+- 发布前后 10 个 runner 配置指纹均为 `5125162b35c9893e4a9ac7d11c40eeaca7297bd95d7434d6bec70712aa144181`；未触发模型、通知或订单。原未跟踪 research.db Hash 未改变。
+- 24 小时运行使用独立固定导出构建和临时数据/工作目录；2026-10-26 15:04:15（上海时间）完成首次加载后开始计时，最早可于 2026-10-27 15:04:15 满时长。`E:/MYC/mm-seven-24h-run.json` 定位进程与原始工件，当前 `mm-long-session-chBMS2/soak-report.json` 为 running。首 3 轮 12 项来源观测有效、无浏览器错误，不能标记长期通过。
+- 已建立每小时的聊天跟进，仅重要变化/失败/完成提醒；未满时长、中断或超过五分钟缺口的轮次不接受。
+
+生产浏览器巡检已通过（E:/MYC/mm-seven-production-canary/production-canary-report.json）：四市场、SNDK、桌面/390px 同步双图、侧栏切换、访客权限，浏览器错误为零。阶段性发布证据暂保留在本地验证记录，待长期验收结束后一起补齐最终记录。
