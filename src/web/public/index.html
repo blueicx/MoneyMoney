@@ -457,10 +457,10 @@
               <label><input type="checkbox" data-crypto-strategy="rsiReversal" onchange="setCryptoChartStrategy('rsiReversal', this.checked)"> RSI反转</label>
               <label><input type="checkbox" data-crypto-strategy="bollinger" onchange="setCryptoChartStrategy('bollinger', this.checked)"> 布林反转</label>
               <label><input type="checkbox" data-crypto-strategy="volumeBreakout" onchange="setCryptoChartStrategy('volumeBreakout', this.checked)"> 放量涨跌（旧版）</label>
-              <label><input type="checkbox" data-crypto-overlay="patterns" onchange="setCryptoChartOverlay('patterns', this.checked)"> 蜡烛形态</label>
-              <label><input type="checkbox" data-crypto-overlay="supportResistance" onchange="setCryptoChartOverlay('supportResistance', this.checked)"> 支撑/阻力</label>
+              <label><input type="checkbox" data-crypto-overlay="patterns" checked="" onchange="setCryptoChartOverlay('patterns', this.checked)"> 蜡烛形态</label>
+              <label><input type="checkbox" data-crypto-overlay="supportResistance" checked="" onchange="setCryptoChartOverlay('supportResistance', this.checked)"> 支撑/阻力</label>
               <span id="crypto-sr-status" aria-live="polite" hidden style="align-items:center;gap:6px;color:var(--text-secondary);font-size:11px;"></span>
-              <div id="crypto-chart-pattern-controls" class="chart-pattern-controls" aria-label="逐项蜡烛形态开关"><span class="chart-pattern-controls-title">逐项形态</span><label><input type="checkbox" data-chart-pattern="doji" data-chart-pattern-scope="crypto"> 十字星</label></div>
+              <div id="crypto-chart-pattern-controls" class="chart-pattern-controls" aria-label="逐项蜡烛形态开关"><span class="chart-pattern-controls-title">逐项形态</span><label><input type="checkbox" data-chart-pattern="doji" data-chart-pattern-scope="crypto" checked=""> 十字星</label></div>
             </div>
             <details class="chart-strategy-library"><summary>更多策略与参数（9 类 + 严格放量 v2）</summary><div id="bn-advanced-strategies"></div></details>
             <div id="bn-chart-research"></div>
@@ -664,12 +664,12 @@
                 <label><input type="checkbox" data-chart-strategy="volumeBreakout" onchange="setStockChartStrategy('volumeBreakout', this.checked)"> 放量涨跌（旧版）</label>
                 <details class="chart-strategy-library"><summary>更多策略与参数（9 类 + 严格放量 v2）</summary><div id="stock-advanced-strategies"></div></details>
                 <div id="stock-chart-research"></div>
-                <label><input type="checkbox" data-chart-overlay="patterns" onchange="setStockChartOverlay('patterns', this.checked)"> 蜡烛形态</label>
+                <label><input type="checkbox" data-chart-overlay="patterns" checked="" onchange="setStockChartOverlay('patterns', this.checked)"> 蜡烛形态</label>
                 <div id="stock-chart-pattern-controls" class="chart-pattern-controls" aria-label="逐项蜡烛形态开关"><span class="chart-pattern-controls-title">逐项形态 · 等待图表加载</span></div>
-                <label><input type="checkbox" data-chart-overlay="structures" onchange="setStockChartOverlay('structures', this.checked)"> 结构标记</label>
+                <label><input type="checkbox" data-chart-overlay="structures" checked="" onchange="setStockChartOverlay('structures', this.checked)"> 结构标记</label>
                 <label><input type="checkbox" data-chart-overlay="ma" checked="" onchange="setStockChartOverlay('ma', this.checked)"> 均线</label>
-                <label><input type="checkbox" data-chart-overlay="boll" onchange="setStockChartOverlay('boll', this.checked)"> 布林带</label>
-                <label><input type="checkbox" data-chart-overlay="supportResistance" onchange="setStockChartOverlay('supportResistance', this.checked)"> 支撑/阻力</label>
+                <label><input type="checkbox" data-chart-overlay="boll" checked="" onchange="setStockChartOverlay('boll', this.checked)"> 布林带</label>
+                <label><input type="checkbox" data-chart-overlay="supportResistance" checked="" onchange="setStockChartOverlay('supportResistance', this.checked)"> 支撑/阻力</label>
                 <label><input type="checkbox" data-chart-overlay="volume" checked="" onchange="setStockChartOverlay('volume', this.checked)"> 成交量</label>
                 <span id="stock-sr-status" class="kline-data-status" aria-live="polite" hidden></span>
                 <span class="stock-chart-replay-label">回放</span>
@@ -1739,6 +1739,10 @@ window.MoneyMoneyChartBridge = {
 <script src="/action-research-workspace.js?v=20261002-contracts1" defer></script>
 <script src="/practical-experience.js?v=20261002-contracts1" defer></script>
 <script src="/professional-research.js?v=20261007" defer></script>
+<script src="/company-industry-graph.js?v=20261028" defer></script>
+<script src="/three-statement-workspace.js?v=20261028" defer></script>
+<script src="/statistical-audit-workspace.js?v=20261028" defer></script>
+<script src="/time-series-conditions.js?v=20261028" defer></script>
 <script src="/automatic-comparison.js" defer></script>
 <script src="/contracts-workspace.js?v=20261002-contracts1" defer></script>
 <link rel="stylesheet" href="/contracts-workspace.css?v=20261002-contracts1">

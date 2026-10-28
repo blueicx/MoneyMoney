@@ -66,10 +66,16 @@ import { createOptionsSurfaceRouter } from './options-surface-routes';
 import { PortfolioImportLedgerStore } from '../features/portfolio-import-ledger';
 import { createPortfolioImportLedgerRouter } from './portfolio-import-ledger-routes';
 import { CompanyMacroResearchStore } from '../features/company-macro-research';
+import { CompanyIndustryGraphStore } from '../features/company-industry-graph';
+import { ThreeStatementModelService } from '../features/three-statement-model';
+import { TimeSeriesConditionStore } from '../features/time-series-conditions';
 import { EvidenceResearchAssistant } from '../features/evidence-research-assistant';
 import { createAdvancedResearchRouter } from './advanced-research-routes';
 import { PortfolioConfigurationStore } from '../features/portfolio-configurations';
 import { createPortfolioConfigurationRouter } from './portfolio-configuration-routes';
+import { createCompanyIndustryGraphRouter } from './company-industry-graph-routes';
+import { createThreeStatementRouter } from './three-statement-routes';
+import { createTimeSeriesConditionRouter } from './time-series-condition-routes';
 import { ReviewLifecycleStore } from '../features/review-lifecycle';
 import { createSavedEvidenceProofService } from '../features/research-evidence-governance';
 import { createResearchPreregistrationStore } from '../features/research-preregistration';
@@ -235,6 +241,7 @@ import { createReportScheduleRouter } from './report-schedule-routes';
 import { OptionRecoveryJournal } from '../features/option-recovery-journal';
 import { createSharedCapitalRouter } from './shared-capital-routes';
 import { createResearchContextRouter } from './research-context-routes';
+import { createResearchStatisticsRouter } from './research-statistics-routes';
 import type { RevisionImpactRecord } from '../features/research-revision-impact';
 import { compareExperiments } from '../features/experiment-comparison';
 import { compareOptionEventSnapshots, compareOptionSnapshotPair, compareOptionSnapshots, summarizeMarketHistory } from '../features/market-history-comparison';
@@ -498,6 +505,7 @@ const snapshotComparisonChoices=createSnapshotComparisonStore({
   resolveIdentity:(market,instrument)=>{const ref=dataLakeCatalog.resolveInstrument(market as MarketId,instrument);return ref?{market,instrument:ref.id}:null;},
 });
 app.use('/api/research/snapshot-comparisons',createSnapshotComparisonRouter({catalog:dataLakeCatalog,choices:snapshotComparisonChoices,adminOnly,csrfValid:verifyCsrfRequest}));
+const timeSeriesConditionStore=new TimeSeriesConditionStore(stateStore,id=>decisionIntelligenceStore.getEvidence(id));
 const researchProjects=new ResearchProjectStore(stateStore,createProjectReferenceResolver({
   study:id=>{if(/^psim_[a-f0-9]{64}$/.test(id))return portfolioSimulationStore.reference(id);if(/^blind_[a-f0-9]{64}$/.test(id))return blindSessionStore.reference(id);if(/^aif_[a-f0-9]{64}$/.test(id))return aiForecastLab.reference(id);return null;},
   evidence:id=>decisionIntelligenceStore.getEvidence(id),verifyEvidence:verifyEvidenceSnapshotHash,
@@ -506,10 +514,18 @@ const researchProjects=new ResearchProjectStore(stateStore,createProjectReferenc
   revisions:market=>dataLakeCatalog.listRevisions(market),partitions:()=>dataLakeCatalog.listPartitions(),
   strategy:id=>{try{return strategyCandidateRegistry.get(id);}catch{return null;}},task:id=>researchRepository.getJob(id),
   account:id=>{const account=unifiedPaperLedgerStore.getAccount(id);const runners=stateStore.get<import('../features/ai-paper-runner').AiRunner[]>('ai-paper-runners');if(!account||!('runnerId' in account)||!Array.isArray(runners))return null;const runner=runners.find(r=>r.id===account.runnerId&&r.accountId===id);return runner?{account,runner}:null;},
+  conditionHit:id=>timeSeriesConditionStore.reference(id),
 }));
 const projectReviewWorker=new ResearchProjectReviewWorker(stateStore,researchProjects,Date.now,error=>logger.warn('local project reference review failed',{reason:error instanceof Error?error.message:'本地复查失败'}));
 const telegramProjectSubscriptions=new TelegramProjectSubscriptions(stateStore,researchProjects,researchRepository,{isOwner:chat=>telegramAdminChatIds().has(chat),suppressed:chat=>!telegramInteractionBot||telegramAlertSuppressed(chat,'normal'),link:market=>buildTelegramDeepLink(process.env.PUBLIC_WEB_BASE_URL||telegramPublicBaseUrl(),{market,instrument:'',workspace:'research-lab'})});
 app.use('/api/research/projects',createResearchProjectRouter(researchProjects,()=>projectReviewWorker.status()));
+app.use('/api/research/time-series-conditions',createTimeSeriesConditionRouter(timeSeriesConditionStore,{
+  projects:researchProjects,
+  evidence:id=>decisionIntelligenceStore.getEvidence(id),
+  listEvidence:(market,instrument)=>decisionIntelligenceStore.listEvidence(market as MarketId,instrument),
+  adminOnly,
+  csrfValid:verifyCsrfRequest,
+}));
 const strategyDefinitionStore=new StrategyDefinitionStore(stateStore);
 const portfolioSimulationStore=new PortfolioSimulationStore(stateStore,unifiedPaperLedgerStore,{definition:(id,hash)=>strategyDefinitionStore.read(id,hash),resolve:(market,instrument)=>dataLakeCatalog.resolveInstrument(market as MarketId,instrument),load:input=>dataLakeCatalog.queryBarsAsOf(input as any)});
 app.use('/api/research/portfolio-simulations',createPortfolioSimulationRouter(portfolioSimulationStore,market=>strategyDefinitionStore.list(market)));
@@ -599,6 +615,17 @@ app.use('/api/workspace/records/search',createWorkspaceRecordSearchRouter({
 const watchlistMetadataStore = new WatchlistMetadataStore(stateStore, () => unifiedAlertStore.listWatchlist());
 const researchContextLedger=new ResearchContextLedger(stateStore);
 app.use('/api/research/context-ledger',createResearchContextRouter(researchContextLedger,()=>unifiedAlertStore.listWatchlist()));
+app.use('/api/research/statistics',createResearchStatisticsRouter({
+  adminOnly,
+  csrfValid:verifyCsrfRequest,
+  load:(market,id,asOf)=>{
+    const saved=researchRepository.getExperiment(id);
+    if(!saved?.experiment||saved.experiment.market!==market||saved.experiment.id!==id)return null;
+    const timestamp=Date.parse(asOf);
+    if(!Number.isFinite(timestamp))return null;
+    return {saved,ledger:researchContextLedger.list(market as MarketId,timestamp)};
+  },
+}));
 const historicalUniverseStore=new HistoricalUniverseStore(stateStore,id=>decisionIntelligenceStore.getEvidence(id));
 app.use('/api/research/historical-universes',createHistoricalUniverseRouter(historicalUniverseStore,verifyCsrfRequest));
 const recoveryJournalRoot=path.resolve(DATA_ROOT);
@@ -719,7 +746,12 @@ app.use('/api/research/committee', createResearchCommitteeRouter(new ResearchCom
 let financialTextIndex: FinancialTextIndex | null = null;
 app.use('/api/research/filings', createFinancialResearchRouter({
   index: () => financialTextIndex || (financialTextIndex = new FinancialTextIndex(stateStore.health.databasePath)),
+  csrfValid: verifyCsrfRequest,
 }));
+const companyIndustryGraphStore = new CompanyIndustryGraphStore(stateStore);
+app.use('/api/research/company-graph', createCompanyIndustryGraphRouter(companyIndustryGraphStore,{adminOnly,csrfValid:verifyCsrfRequest}));
+const threeStatementModelService = new ThreeStatementModelService({evidence:id=>decisionIntelligenceStore.getEvidence(id)});
+app.use('/api/research/three-statement', createThreeStatementRouter(threeStatementModelService,{adminOnly,csrfValid:verifyCsrfRequest}));
 
 registerBuiltAssets(app, path.join(__dirname, 'public'));
 app.use(express.static(path.join(__dirname, 'public'), {

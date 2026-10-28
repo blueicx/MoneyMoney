@@ -233,6 +233,30 @@ test('keeps strategy defaults when loading an older overlay preference', () => {
   assert.equal(config.strategies.volumeBreakout, false);
 });
 
+test('enables analysis overlays by default while preserving explicit opt-outs', () => {
+  const config = analysis.normalizeOverlayConfig();
+  assert.equal(config.patterns, true);
+  assert.equal(config.structures, true);
+  assert.equal(config.supportResistance, true);
+  assert.equal(config.volume, true);
+  assert.equal(config.indicators.ma, true);
+  assert.equal(config.indicators.boll, true);
+  assert.ok(Object.values(config.patternTypes).every(Boolean));
+
+  const optedOut = analysis.normalizeOverlayConfig({
+    patterns: false,
+    structures: false,
+    supportResistance: false,
+    indicators: { boll: false },
+    patternTypes: { doji: false },
+  });
+  assert.equal(optedOut.patterns, false);
+  assert.equal(optedOut.structures, false);
+  assert.equal(optedOut.supportResistance, false);
+  assert.equal(optedOut.indicators.boll, false);
+  assert.equal(optedOut.patternTypes.doji, false);
+});
+
 test('keeps candlestick patterns independently selectable', () => {
   const config = analysis.normalizeOverlayConfig({ patterns: true, patternTypes: { doji: false } });
   assert.equal(config.patternTypes.doji, false);

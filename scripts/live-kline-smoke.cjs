@@ -53,6 +53,32 @@ async function main() {
     });
     assert.equal(await page.evaluate(()=>currentStockKlinePeriod),'5m');
     assert.match(await page.locator('#stock-chart-card .mm-trading-readout').innerText(),/开 .*高 .*低 .*收 .*MA5/);
+    const defaultOverlays = await page.evaluate(() => ({
+      config: {
+        patterns: stockChartOverlayConfig.patterns,
+        structures: stockChartOverlayConfig.structures,
+        supportResistance: stockChartOverlayConfig.supportResistance,
+        boll: stockChartOverlayConfig.indicators?.boll,
+        ma: stockChartOverlayConfig.indicators?.ma,
+        volume: stockChartOverlayConfig.volume,
+      },
+      stockTypes: [...document.querySelectorAll('[data-chart-pattern-scope="stock"]')].map(input => input.checked),
+      stockLayers: [...document.querySelectorAll('#stock-chart-overlays [data-chart-overlay]')]
+        .filter(input => ['patterns','structures','ma','boll','supportResistance','volume'].includes(input.dataset.chartOverlay))
+        .map(input => [input.dataset.chartOverlay,input.checked]),
+      crypto: {
+        patterns: cryptoChartOverlayConfig.patterns,
+        supportResistance: cryptoChartOverlayConfig.supportResistance,
+      },
+    }));
+    assert.deepEqual(defaultOverlays.config, {
+      patterns:true, structures:true, supportResistance:true, boll:true, ma:true, volume:true,
+    });
+    assert.ok(defaultOverlays.stockTypes.length >= 20);
+    assert.ok(defaultOverlays.stockTypes.every(Boolean), 'all candle patterns should default on');
+    assert.deepEqual(defaultOverlays.stockLayers.map(row => row[0]), ['patterns','structures','ma','boll','supportResistance','volume']);
+    assert.ok(defaultOverlays.stockLayers.every(row => row[1]), 'all stock analysis layers should default on');
+    assert.deepEqual(defaultOverlays.crypto, { patterns:true, supportResistance:true });
     await checkRestrictedChart(page,'stock');
     for(const width of [375,390,1003,1440])for(const theme of ['light','dark','money']){
       await page.setViewportSize({width,height:900});await page.evaluate(theme=>theme==='light'?document.documentElement.removeAttribute('data-theme'):document.documentElement.setAttribute('data-theme',theme),theme);

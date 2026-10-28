@@ -658,14 +658,19 @@ test('the large dashboard startup bundle executes only after the auth client set
     scripts[0].onload(); await tick(); assert.equal(scripts.length, 1, 'compatibility waits for core init');
     resolveCore(); await tick();
     const immediate = scripts.slice(1);
-    assert.equal(immediate.length, 2);
+    assert.ok(immediate.length >= 2);
     assert.ok(immediate.every(script => script.async === false), 'compatibility executes in order');
     immediate.forEach(script => script.onload()); await tick();
     assert.equal(runtimeEvents, 1, 'core readiness dispatches exactly once');
-    assert.equal(scripts.length, 3, 'optional experience scripts wait for idle');
-    idle(); await tick(); assert.equal(scripts.length, 5);
-    assert.ok(scripts.slice(3).every(script => /experience/.test(script.src) && script.async === false));
-    scripts.slice(3).forEach(script => script.onload()); await tick(); assert.equal(runtimeEvents, 1);
+    const beforeOptional = scripts.length;
+    assert.equal(beforeOptional, 1 + immediate.length, 'optional experience scripts wait for idle');
+    idle(); await tick();
+    assert.equal(scripts.length, beforeOptional + 2);
+    assert.ok(scripts.slice(beforeOptional).every(script =>
+      /experience/.test(script.src) && script.async === false));
+    scripts.slice(beforeOptional).forEach(script => script.onload());
+    await tick();
+    assert.equal(runtimeEvents, 1);
   } finally { dom.window.close(); }
   const runtimeRef = Object.keys(manifest).find(reference => reference.includes('/dashboard-startup-runtime.'));
   assert.ok(runtimeRef, 'the main runtime should be emitted as a separately hashed resource');

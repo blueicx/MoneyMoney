@@ -5,10 +5,11 @@
 })(typeof window !== 'undefined' ? window : globalThis, function createChartAnalysis(strategyLibrary) {
   const DEFAULT_CONFIG = {
     signals: true,
-    patterns: false,
-    structures: false,
+    patterns: true,
+    structures: true,
+    supportResistance: true,
     volume: true,
-    indicators: { ma: true, boll: false, macd: false },
+    indicators: { ma: true, boll: true, macd: false },
     strategies: { maCross: true, rsiReversal: false, bollinger: false, volumeBreakout: false, ...Object.fromEntries((strategyLibrary?.STRATEGY_CATALOG||[]).map(row=>[row.id,false])) },
     patternTypes: {},
     maxLabels: 80,

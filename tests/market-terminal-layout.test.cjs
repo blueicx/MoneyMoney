@@ -33,10 +33,9 @@ test('market terminal has distinct left features, center workspace and right ins
 test('stock chart exposes user-selectable analysis overlays and replay controls', () => {
   assert.ok(document.querySelector('script[src="/chart-analysis.js"]'));
   assert.ok(document.querySelector('#stock-chart-overlays'));
-  assert.ok(document.querySelector('[data-chart-overlay="signals"]'));
-  assert.ok(document.querySelector('[data-chart-overlay="patterns"]'));
-  assert.ok(document.querySelector('[data-chart-overlay="boll"]'));
-  assert.ok(document.querySelector('[data-chart-overlay="supportResistance"]'));
+  for (const layer of ['signals', 'patterns', 'structures', 'ma', 'boll', 'supportResistance', 'volume']) {
+    assert.equal(document.querySelector(`[data-chart-overlay="${layer}"]`).checked, true, `${layer} should default on`);
+  }
   assert.ok(document.querySelector('#stock-sr-status'));
   assert.ok(document.querySelector('[data-chart-strategy="maCross"]'));
   assert.ok(document.querySelector('[data-chart-strategy="rsiReversal"]'));
@@ -44,8 +43,8 @@ test('stock chart exposes user-selectable analysis overlays and replay controls'
   assert.ok(document.querySelector('#stock-chart-pattern-list'));
   assert.ok(document.querySelector('#bn-chart-patterns'));
   assert.ok(document.querySelector('#bn-chart-pattern-list'));
-  assert.ok(document.querySelector('[data-crypto-overlay="patterns"]'));
-  assert.ok(document.querySelector('[data-crypto-overlay="supportResistance"]'));
+  assert.equal(document.querySelector('[data-crypto-overlay="patterns"]').checked, true);
+  assert.equal(document.querySelector('[data-crypto-overlay="supportResistance"]').checked, true);
   assert.ok(document.querySelector('#crypto-sr-status'));
   assert.ok(document.querySelector('#bn-chart-strategies'));
   assert.ok(document.querySelector('#bn-chart-signals'));

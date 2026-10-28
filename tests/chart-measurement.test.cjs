@@ -25,10 +25,12 @@ test('measurement interaction does not dispatch strategy clicks and clears on in
   const button=w.document.querySelector('[data-chart-measure]'),layer=w.document.querySelector('.mm-trading-crosshair');
   const width=canvas.width;layer.getBoundingClientRect=()=>({left:0,top:0,width,height:400});
   let clicks=0;canvas.addEventListener('click',()=>clicks++);button.click();
+  assert.equal(canvas.parentElement.classList.contains('mm-trading-measuring'),true);
   layer.dispatchEvent(new w.MouseEvent('click',{clientX:65,clientY:100}));
   layer.dispatchEvent(new w.MouseEvent('click',{clientX:width-100,clientY:100}));
   assert.equal(clicks,0);assert.match(w.document.querySelector('[data-chart-measurement]').textContent,/测量.*收盘涨跌/);
   w.MoneyTradingChart.render(canvas,bars,{identity:'MU|1m',interval:'1m'});
   assert.equal(button.getAttribute('aria-pressed'),'false');assert.equal(w.document.querySelector('[data-chart-measurement]').textContent,'');
+  assert.equal(canvas.parentElement.classList.contains('mm-trading-measuring'),false);
  }finally{w.close();}
 });

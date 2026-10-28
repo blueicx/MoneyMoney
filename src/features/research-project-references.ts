@@ -16,12 +16,17 @@ interface Sources {
  revisions?:(market:MarketId)=>DataRevision[];partitions?:()=>DatasetPartition[];
  strategy?:(id:string)=>StrategyCandidate|null;task?:(id:string)=>ResearchJob|null;
  study?:(id:string)=>ProjectReferenceState|null;
+ conditionHit?:(id:string)=>ProjectReferenceState|null;
  account?:(id:string)=>{account:UnifiedPaperRunnerAccount;runner:Pick<AiRunner,'id'|'accountId'|'universe'|'createdAt'>}|null;
 }
 /** Read-only adapters: no nearest-time matching, upstream fetch, task creation or account mutation. */
 export function createProjectReferenceResolver(sources:Sources,now=Date.now){
  return (ref:ProjectReference):ProjectReferenceState|null=>{
   if(ref.kind==='study')return sources.study?.(ref.id)||null;
+  if(ref.kind==='condition-hit'){
+   if(!/^tshit_[a-f0-9]{64}$/.test(ref.id)||!sources.conditionHit)return null;
+   return sources.conditionHit(ref.id);
+  }
   if(ref.kind==='account'){
    const source=sources.account?.(ref.id);if(!source)return null;
    const {account:a,runner:r}=source,m=r.universe?.market;

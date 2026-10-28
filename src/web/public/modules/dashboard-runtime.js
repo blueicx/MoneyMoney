@@ -2373,7 +2373,7 @@ if (!navigator.onLine) showOfflineBanner();
 let bnCurrentSymbol = 'BTCUSDT';
 let bnCurrentInterval = '5m';
 let bnKlineData = [];
-let cryptoChartOverlayConfig = { patterns: false, supportResistance: true, patternTypes: {} };
+let cryptoChartOverlayConfig = { patterns: true, supportResistance: true, patternTypes: {} };
 function bnSetSymbol(sym) {
     if (activeMarketScope !== "crypto") return;
   if (bnCurrentSymbol !== sym) {
@@ -6167,7 +6167,7 @@ try {
   if (['same-symbol', 'benchmark'].includes(savedCompanion.mode)) stockChartCompanionMode = savedCompanion.mode;
   if (['5m', '15m', '1h', '1d', '1y'].includes(savedCompanion.period)) stockChartCompanionPeriod = savedCompanion.period;
 } catch (e) {}
-let stockChartOverlayConfig = window.MoneyChartAnalysis?.normalizeOverlayConfig({ strategies:{ maCross:true, rsiReversal:false, bollinger:false, volumeBreakout:false } }) || { signals:true, patterns:false, structures:false, volume:true, indicators:{ ma:true, boll:false, macd:false }, strategies:{ maCross:true, rsiReversal:false, bollinger:false, volumeBreakout:false }, patternTypes:{}, maxLabels:80 };
+let stockChartOverlayConfig = window.MoneyChartAnalysis?.normalizeOverlayConfig({ strategies:{ maCross:true, rsiReversal:false, bollinger:false, volumeBreakout:false } }) || { signals:true, patterns:true, structures:true, supportResistance:true, volume:true, indicators:{ ma:true, boll:true, macd:false }, strategies:{ maCross:true, rsiReversal:false, bollinger:false, volumeBreakout:false }, patternTypes:{}, maxLabels:80 };
 let cryptoChartStrategyConfig = { maCross:true, rsiReversal:false, bollinger:false, volumeBreakout:false };
 var INLINE_CANDLE_PATTERN_CATALOG = [
   ['doji','十字星'], ['hammer','锤头线'], ['hanging-man','上吊线'], ['shooting-star','流星线'], ['long-shadow','长影线'],
@@ -6258,7 +6258,6 @@ function loadStockChartOverlayConfig() {
   try {
     const raw = JSON.parse(localStorage.getItem(stockChartStorageKey()) || 'null');
     stockChartOverlayConfig = window.MoneyChartAnalysis?.normalizeOverlayConfig(raw || {}) || stockChartOverlayConfig;
-    stockChartOverlayConfig.supportResistance = raw?.supportResistance === true;
   } catch (e) {}
   document.querySelectorAll('[data-chart-overlay]').forEach(input => {
     const name = input.dataset.chartOverlay;
