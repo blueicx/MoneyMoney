@@ -43,6 +43,9 @@
 .workspace-main :is(.glass-card, .tab-content) { min-width: 0; }
 .workspace-main :is(input, select, textarea) { max-width: 100%; box-sizing: border-box; }
 .workspace-main :is(button, input, select, textarea, summary):focus-visible { outline: 2px solid var(--purple); outline-offset: 2px; }
+.mm-slo-table-scroll { max-width: 100%; overflow-x: auto; overscroll-behavior-x: contain; }
+.mm-slo-table-scroll:focus-visible { outline: 2px solid var(--purple); outline-offset: 2px; }
+.mm-slo-scroll-hint { display: none; color: var(--text-secondary); font-size: 11px; margin-bottom: 6px; }
 @media (max-width: 640px) {
   .mm-auto-comparison { padding: 12px; }
   .mm-auto-head { flex-wrap: wrap; }
@@ -52,6 +55,7 @@
   .mm-runner-field { flex: 1 1 125px; }
   .mm-runner-field :is(input,select) { width: 100% !important; min-height: 44px; }
   .mm-runner-create-form > button { min-height: 44px; }
+  .mm-slo-scroll-hint { display: block; }
   .mm-auto-history li { grid-template-columns: minmax(0,1fr) auto; }
   .mm-auto-round-reason { grid-column: 1 / -1; }
 }

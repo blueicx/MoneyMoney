@@ -996,6 +996,32 @@ async function main() {
     try{await page.waitForFunction(()=>activeMarketScope==='stocks'&&activeWorkspaceId==='events'&&history.state?.mmWorkspace?.workspace==='events');}catch(error){const evidence=await page.evaluate(()=>({market:activeMarketScope,workspace:activeWorkspaceId,url:location.href,state:history.state,length:history.length}));fs.writeFileSync(path.join(isolatedDataDir,'navigation-diagnostic.json'),JSON.stringify(evidence,null,2));console.error(JSON.stringify(evidence));throw error;}
     }
     assert.equal(await page.evaluate(()=>!!window.mmPreferenceJournal),true,'owner preference history is installed after authentication');
+    const layoutAudit=[];
+    for (const [scope,workspace] of [['overview','overview'],['stocks','stock-quotes'],['options','option-chain'],['crypto','crypto-quotes'],['prediction','prediction-radar'],['stocks','events'],['stocks','screener'],['stocks','risk'],['stocks','decision-intelligence'],['stocks','research-lab'],['stocks','action-center'],['stocks','paper'],['stocks','settings']]) {
+      await page.evaluate(([scope,workspace])=>{setMarketScope(scope,{openTab:false});if(workspace==='settings')showTab('settings');else openWorkspace(workspace);},[scope,workspace]);
+      for(const theme of ['light','dark','money']) for(const width of [375,390,1003,1440]) {
+        await page.setViewportSize({width,height:900});
+        await page.evaluate(theme=>theme==='light'?document.documentElement.removeAttribute('data-theme'):document.documentElement.setAttribute('data-theme',theme),theme);
+        await page.waitForTimeout(220);
+        const dimensions=await page.evaluate(()=>({viewport:innerWidth,document:document.documentElement.scrollWidth,center:document.querySelector('#center-workspace')?.getBoundingClientRect().toJSON()}));
+        layoutAudit.push({scope,workspace,theme,width,...dimensions});
+        if(workspace==='research-lab') {
+          const colors=await page.locator('#mm-research-lab [data-research-tab].active').evaluate(el=>{const probe=document.createElement('span');probe.style.color='var(--accent-contrast)';el.append(probe);const result={actual:getComputedStyle(el).color,expected:getComputedStyle(probe).color};probe.remove();return result;});
+          assert.equal(colors.actual,colors.expected,`${theme}/${width}: selected research tab must use the theme contrast color`);
+        }
+        if(workspace==='settings' && width===390) {
+          const table=page.locator('#source-slo-panel table').first();
+          const overflowTable=await table.evaluate(el=>{const p=el.parentElement;return {table:el.scrollWidth,container:p.clientWidth,scrollWidth:p.scrollWidth};});
+          assert.ok(overflowTable.table>overflowTable.container && overflowTable.scrollWidth>=overflowTable.table,'narrow SLO table must remain horizontally scrollable');
+          assert.equal(await table.locator('th').last().innerText(),'最近数据');
+          assert.ok(await table.locator('..').getAttribute('aria-label'),'scrollable SLO table needs an accessible description');
+        }
+        if(width===390 || width===1440) await page.screenshot({path:path.join(isolatedDataDir,`layout-${workspace}-${theme}-${width}.png`)});
+      }
+    }
+    fs.writeFileSync(path.join(isolatedDataDir,'workspace-layout-audit.json'),JSON.stringify(layoutAudit,null,2));
+    const overflow=layoutAudit.filter(row=>row.document>row.viewport+2);
+    assert.deepEqual(overflow,[],`workspace viewport overflow: ${JSON.stringify(overflow)}`);
     await page.setViewportSize({ width: 390, height: 844 });
     assert.equal(await page.locator('#center-workspace').isVisible(), true);
     assert.deepEqual(pageErrors, []);
