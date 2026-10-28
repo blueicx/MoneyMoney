@@ -112,4 +112,14 @@
 
 ## 发布边界
 
-本地功能与离线验收、真实应用浏览器验收、性能门槛和长期运行验收已经分开记录。CI、干净构建、提交、推送、部署、备份回滚校验和线上只读验收仍以部署阶段的实际结果为准；任何未完成项不会由功能上线替代。
+本地功能与离线验收、真实应用浏览器验收、性能门槛和长期运行验收分开记录。发布阶段的实际结果见下方；任何未完成项不会由功能上线替代。
+
+## 发布结果（2026-10-28）
+
+- 运行提交 `f2bee1d7ff364a4e2e0e6da31e4551638d405f78` 已推送；[GitHub CI 40670097073](https://github.com/blueicx/MoneyMoney/actions/runs/40670097073) 的构建、全量测试、安全扫描及既有冒烟均通过。提交后 68 项定向测试通过。
+- 固定提交独立导出构建通过，八项扩展的隔离真实应用浏览器流程及 375/390/1003/1440px、三主题双图专项通过。构建身份与运行提交一致。
+- 生产备份 `/opt/moneymoney/data/backups/2026-10-28T11-56-46-187Z` 已验证并通过隔离恢复演练：两份 SQLite、76 个文件、57 个数据湖文件；15 个既有损坏文件保留，数据状态为 `partial`。
+- 发布包 SHA-256 `5bd532968e1630e0dafd58b9e69dae6ee33904796caeeabe96547735ee10621a`；服务 active。回滚 `/opt/moneymoney/dist.rollback-eight-f2bee1d-20261028` 与额外备份 `/opt/moneymoney/backups/dist-pre-eight-f2bee1d-20261028` 均保留 `869d2d3`，server Hash 均为 `7536109b3b192d10c717a12f84d71d1cdcd6a298685c44dfa4cda1170d0aacba`。启动时前两次健康连接尚未就绪，随后健康检查通过。
+- 线上版本一致，29 个公开资源 Hash 一致；10 个私人接口管理员可读、访客和匿名分别拒绝，Cookie CSRF 拒绝。四市场只读响应分别为股票 300 根、虚拟币 30 根、期权 878 行、预测 10 项；来源状态按响应记录，不推断完整性。生产浏览器巡检四市场和 SNDK 通过，报告 `E:/MYC/mm-eight-f2bee1d-production-canary/production-canary-report.json`，SHA-256 `58b61260a1d5f3d34f9872302b17f10768cd6d2ce7f73dd31e6ff2d7926e1e1b`。
+- 发布前后 10 个 runner 的只读配置指纹均为 `5125162b35c9893e4a9ac7d11c40eeaca7297bd95d7434d6bec70712aa144181`。单 runner 旧检查脚本期望 `random-valid`，实际为 `best-valid`，未改动该选择；采用全部 runner 的配置指纹核验。验收未主动发起模型、订单或通知请求；后台模型调用数未测量。
+- 本地未跟踪 `data/research.db` 的 SHA-256 仍为 `27fd475e523568daa4cdcabf3146917023335a62affe00429babd721b3b79fd1`。20% 性能目标与 24 小时连续运行仍未通过，发布结果不替代这两项验收。
