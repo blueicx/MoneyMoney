@@ -21,6 +21,11 @@
 - `npm run build` 通过；`npm run smoke:web` 通过（健康检查、访客登录门、AI 配置脱敏与真实交易关闭边界）。
 - `npm run security:scan` 通过（1187 个跟踪文件）；`git diff --check` 仅有既有行尾提示。
 - 修复：洞察路由最初挂在 `/api` 并对全部路径执行管理员校验，导致 `/api/health/live` 等公共端点被拦截；现改为仅接管自身路径，并新增两条穿透回归用例。
+- 提交：`70ce10ae91bfd53d8e42d06c3538c49a17a55eb0`，已推送 `codex/research-closure-all`；GitHub Actions `MoneyMoney CI` run `40706495716` 成功。
+- 发布：release `70ce10a-20261028`，发布包 SHA-256 `ce837f31f1090616b10780d280dff6a4e29a3486edbec80ea7a6157beb52af50`，`server.js` `3742fd921b8b8b2e8c2e80613eabbdba5874c8bd97985c1e7c3acb9fc64ca990`，`index.html` `5c3baa8ad7ff8622e8875524f15b5ebc5fd69630fb5b18fe66b60d3d3a14e4a5`。
+- 发布前备份 `/opt/moneymoney/backups/dist-pre-70ce10a-20261028`，回滚目录 `/opt/moneymoney/dist.rollback-70ce10a-20261028`；`moneymoney.service` 为 active。
+- 线上只读核对：`/api/health/version` 返回 commit `70ce10a...`；服务器端 `server.js` 与 `index.html` Hash 与本地一致；未认证访问 `/api/evidence-gaps`、`/api/report-schedules`、`/api/research/templates`、`/api/analysis/signals` 均返回 401；首页未登录返回 302。
+- 未完成：生产环境启用 LAN 访问令牌，因此 `/api/methodology` 未认证返回 401 属预期；四市场登录后只读冒烟因本地无生产凭据未执行。
 
 ## 尚未完成
 
@@ -28,4 +33,4 @@
 - 新增 12 项中的协作账号、离线加密工作包、自定义指标、可视化流程编排与回放书签界面（现有 `chart-bookmarks` 已支持 `asOf` 回放时点）。
 - 20% 冷启动性能目标仍为未通过（既有证据 `E:\MYC\mm-eight-loading-bracket.json`）。
 - 24 小时连续可靠性以独立轮次跟踪；本切片不改变其结论，也不以功能测试代替。
-- 未部署、未做线上只读验收。
+- 协作账号、离线工作包、自定义指标与流程编排尚未部署。
