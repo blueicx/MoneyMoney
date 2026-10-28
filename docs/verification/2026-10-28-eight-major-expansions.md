@@ -123,3 +123,5 @@
 - 线上版本一致，29 个公开资源 Hash 一致；10 个私人接口管理员可读、访客和匿名分别拒绝，Cookie CSRF 拒绝。四市场只读响应分别为股票 300 根、虚拟币 30 根、期权 878 行、预测 10 项；来源状态按响应记录，不推断完整性。生产浏览器巡检四市场和 SNDK 通过，报告 `E:/MYC/mm-eight-f2bee1d-production-canary/production-canary-report.json`，SHA-256 `58b61260a1d5f3d34f9872302b17f10768cd6d2ce7f73dd31e6ff2d7926e1e1b`。
 - 发布前后 10 个 runner 的只读配置指纹均为 `5125162b35c9893e4a9ac7d11c40eeaca7297bd95d7434d6bec70712aa144181`。单 runner 旧检查脚本期望 `random-valid`，实际为 `best-valid`，未改动该选择；采用全部 runner 的配置指纹核验。验收未主动发起模型、订单或通知请求；后台模型调用数未测量。
 - 本地未跟踪 `data/research.db` 的 SHA-256 仍为 `27fd475e523568daa4cdcabf3146917023335a62affe00429babd721b3b79fd1`。20% 性能目标与 24 小时连续运行仍未通过，发布结果不替代这两项验收。
+
+发布后启动独立新轮 `a48f7f09-399a-4faf-a434-672c396e8bbd`，固定构建 `f2bee1d7ff364a4e2e0e6da31e4551638d405f78`，构建指纹 `fd6b48c6b1ddcaca28d41cbb63c87e3129d5ac367893530c5d6a3b958c94aea8`。首次加载后的测量起点为 `2026-10-28T12:01:58.852Z`；描述符 `E:/MYC/mm-eight-f2bee1d-24h-run.json`。当前为运行中，须连续满 1440 分钟并通过来源与滚动阈值核验，不能提前标记通过。旧失败轮次保留且不接续计时；不自动重启。
