@@ -4206,7 +4206,6 @@ async function loadMarketBreadth() {
   try {
     const res = await fetch('/api/stock/market-breadth');
     const payload = await res.json();
-    let sourceHost=document.getElementById('options-source-explanation');if(!sourceHost){sourceHost=document.createElement('div');sourceHost.id='options-source-explanation';chainEl.before(sourceHost);}
     if (requestId !== marketBreadthRequestId) return;
     if (!payload.success || !payload.data) throw new Error(payload.error || 'no data');
     if (updatedEl) updatedEl.textContent = '更新于 ' + new Date(payload.data.generatedAt).toLocaleTimeString('zh-CN');
@@ -4323,7 +4322,6 @@ async function loadGlobalMacroSpot() {
   try {
     const res = await fetch('/api/macro/global-spot');
     const payload = await res.json();
-    let sourceHost=document.getElementById('options-source-explanation');if(!sourceHost){sourceHost=document.createElement('div');sourceHost.id='options-source-explanation';chainEl.before(sourceHost);}
     if (requestId !== globalSpotRequestId) return;
     if (!payload.success || !payload.data) throw new Error(payload.error || 'no data');
     if (updated) updated.textContent = '更新 ' + new Date().toLocaleTimeString();

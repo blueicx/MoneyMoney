@@ -22,6 +22,49 @@ window.ResizeObserver = class { observe() {} unobserve() {} disconnect() {} };
 
 const document = window.document;
 
+test('market breadth renders without an option-chain workspace', async () => {
+  const previousFetch = window.fetch;
+  window.fetch = async url => {
+    assert.equal(url, '/api/stock/market-breadth');
+    return {
+      ok: true,
+      json: async () => ({
+        success: true,
+        data: {
+          generatedAt: '2026-10-28T16:00:00.000Z',
+          source: 'Nasdaq Public Screener',
+          advancersPct: 56.1,
+          declinersPct: 36.8,
+          advanceDeclineRatio: 1.52,
+          medianChangePct: 0.21,
+          strongAdvancersPct: 8.2,
+          strongDeclinersPct: 3.1,
+          totalVolume: 123456789,
+          totalCount: 7010,
+          capGroups: [],
+          leadingSectors: [],
+          laggingSectors: [],
+          gainers: [],
+          losers: [],
+          signal: 'constructive',
+          signalZh: '广度温和转强',
+          adviceZh: '测试快照',
+          regimeBoost: 0.5,
+          confidence: 80,
+        },
+      }),
+    };
+  };
+  try {
+    await window.loadMarketBreadth();
+    const radar = document.querySelector('#market-breadth-radar');
+    assert.match(radar.textContent, /上涨占比/);
+    assert.doesNotMatch(radar.textContent, /暂时不可用/);
+  } finally {
+    window.fetch = previousFetch;
+  }
+});
+
 test('market terminal has distinct left features, center workspace and right instrument library', () => {
   assert.ok(document.querySelector('#market-workspace-shell'));
   assert.ok(document.querySelector('#market-workspace-sidebar[data-region="market-features"]'));
